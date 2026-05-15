@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   HealthResponse,
   ListGoalsResponse,
@@ -18,10 +18,6 @@ interface DaemonEndpoint {
 }
 
 let configPromise: Promise<Config> | null = null;
-
-function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
 
 function loadConfig(): Promise<Config> {
   if (configPromise) return configPromise;
