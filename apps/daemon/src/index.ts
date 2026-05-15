@@ -22,4 +22,4 @@ try {
   process.exit(1);
 }
 
-registerShutdown(server, db);
+registerShutdown(server);

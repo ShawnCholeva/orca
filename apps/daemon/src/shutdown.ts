@@ -1,12 +1,11 @@
 import type { FastifyInstance } from 'fastify';
-import type Database from 'better-sqlite3';
 import { closeDatabase } from './db.js';
 
 const SHUTDOWN_BUDGET_MS = 5000;
 
 // Registers SIGTERM/SIGINT handlers that drain in-flight requests, close WS
 // clients, and flush the DB before exiting. Must be called after server.listen.
-export function registerShutdown(server: FastifyInstance, _db: Database.Database): void {
+export function registerShutdown(server: FastifyInstance): void {
   let isShuttingDown = false;
 
   async function shutdown(signal: string): Promise<void> {

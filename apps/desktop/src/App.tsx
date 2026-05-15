@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { Goal } from "@orca/contracts";
 import {
   fetchHealth,
@@ -19,15 +19,12 @@ export default function App() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Stable ref so the health interval closure always reads current WS status
-  const wsStatusRef = useRef<ConnectionStatus>("connecting");
-
   async function loadGoals() {
     try {
       const res = await listGoals();
       setGoals(res.goals);
     } catch {
-      // silently ignore; connection status banner already communicates the problem
+      // connection status banner communicates the problem to the user
     }
   }
 
@@ -37,10 +34,8 @@ export default function App() {
       try {
         await fetchHealth();
         setConnectionStatus("open");
-        wsStatusRef.current = "open";
       } catch {
         setConnectionStatus("closed");
-        wsStatusRef.current = "closed";
       }
     }
 
@@ -62,10 +57,7 @@ export default function App() {
           loadGoals();
         }
       },
-      onStatus(status) {
-        setConnectionStatus(status);
-        wsStatusRef.current = status;
-      },
+      onStatus: setConnectionStatus,
     });
     return () => stream.close();
   }, []);
@@ -91,11 +83,11 @@ export default function App() {
 
   const connected = connectionStatus === "open";
 
-  const statusLabel: Record<ConnectionStatus, string> = {
+  const statusLabel = {
     open: "Connected",
     connecting: "Connecting…",
     closed: "Disconnected",
-  };
+  } satisfies Record<ConnectionStatus, string>;
 
   return (
     <div className="app">
