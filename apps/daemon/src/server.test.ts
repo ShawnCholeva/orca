@@ -8,6 +8,7 @@ import {
   CreateGoalResponse,
   DomainEvent,
   HealthResponse,
+  ListEventsResponse,
   ListGoalsResponse,
   UpdateGoalResponse
 } from '@orca/contracts';
@@ -288,5 +289,88 @@ describe('WebSocket /v1/events', () => {
     });
 
     expect(closeCode).toBe(1008);
+  });
+});
+
+describe('GET /v1/events (replay)', () => {
+  let server: FastifyInstance;
+  const dirs: string[] = [];
+
+  beforeEach(() => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-events-replay-test-'));
+    dirs.push(dir);
+    const config = createConfig(dir);
+    const db = openDatabase(config);
+    runMigrations(db, defaultMigrationsDir);
+    server = createServer(config);
+  });
+
+  afterEach(async () => {
+    await server.close();
+    closeDatabase();
+    for (const dir of dirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  async function createGoalForTest(title: string): Promise<void> {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/goals',
+      headers: { 'content-type': 'application/json' },
+      payload: { title }
+    });
+    expect(res.statusCode).toBe(201);
+  }
+
+  it('returns all events when sinceSeq=0 and paginates by seq', async () => {
+    await createGoalForTest('a');
+    await createGoalForTest('b');
+    await createGoalForTest('c');
+
+    const all = await server.inject({ method: 'GET', url: '/v1/events?sinceSeq=0' });
+    expect(all.statusCode).toBe(200);
+    const body = ListEventsResponse.parse(JSON.parse(all.body));
+    expect(body.events).toHaveLength(3);
+    expect(body.events.map((e) => e.type)).toEqual([
+      'goal.created',
+      'goal.created',
+      'goal.created'
+    ]);
+    expect(body.events[0]!.seq).toBeLessThan(body.events[1]!.seq);
+    expect(body.events[1]!.seq).toBeLessThan(body.events[2]!.seq);
+    expect(body.nextSinceSeq).toBe(body.events[2]!.seq);
+
+    const sinceOne = await server.inject({ method: 'GET', url: '/v1/events?sinceSeq=1' });
+    expect(sinceOne.statusCode).toBe(200);
+    const sinceOneBody = ListEventsResponse.parse(JSON.parse(sinceOne.body));
+    expect(sinceOneBody.events).toHaveLength(2);
+    expect(sinceOneBody.events.every((e) => e.seq > 1)).toBe(true);
+    expect(sinceOneBody.nextSinceSeq).toBe(sinceOneBody.events[1]!.seq);
+  });
+
+  it('defaults sinceSeq to 0 when omitted', async () => {
+    await createGoalForTest('only');
+    const res = await server.inject({ method: 'GET', url: '/v1/events' });
+    expect(res.statusCode).toBe(200);
+    const body = ListEventsResponse.parse(JSON.parse(res.body));
+    expect(body.events).toHaveLength(1);
+    expect(body.nextSinceSeq).toBe(body.events[0]!.seq);
+  });
+
+  it('returns empty events array and echoes sinceSeq when no new events', async () => {
+    await createGoalForTest('x');
+    const res = await server.inject({ method: 'GET', url: '/v1/events?sinceSeq=999' });
+    expect(res.statusCode).toBe(200);
+    const body = ListEventsResponse.parse(JSON.parse(res.body));
+    expect(body.events).toEqual([]);
+    expect(body.nextSinceSeq).toBe(999);
+  });
+
+  it('rejects invalid sinceSeq with 400', async () => {
+    const res = await server.inject({ method: 'GET', url: '/v1/events?sinceSeq=-1' });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body) as { error?: string };
+    expect(body.error).toBe('validation_failed');
   });
 });

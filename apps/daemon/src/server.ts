@@ -8,6 +8,9 @@ import {
   CreateGoalRequest,
   type CreateGoalResponse,
   HealthResponse,
+  LIST_EVENTS_MAX_LIMIT,
+  ListEventsQuery,
+  type ListEventsResponse,
   type ListGoalsResponse,
   UpdateGoalRequest,
   type UpdateGoalResponse,
@@ -22,7 +25,7 @@ import {
   updateGoal,
   ValidationError
 } from './goals.js';
-import { eventBus } from './events.js';
+import { eventBus, listEventsSince } from './events.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(
@@ -128,25 +131,44 @@ export function createServer(config: Config): FastifyInstance {
     }
   });
 
-  // WS route must be inside a register callback so @fastify/websocket's onRoute hook fires
+  // WS route must be inside a register callback so @fastify/websocket's onRoute hook fires.
+  // The same path serves an HTTP GET handler for event replay (sinceSeq pagination).
   server.register(async (fastify) => {
-    fastify.get('/v1/events', { websocket: true }, (socket, request) => {
-      const { token } = request.query as { token?: string };
+    fastify.route({
+      method: 'GET',
+      url: '/v1/events',
+      wsHandler: (socket, request) => {
+        const { token } = request.query as { token?: string };
 
-      if (token !== config.getAuthToken()) {
-        socket.close(1008, 'Unauthorized');
-        return;
-      }
-
-      const unsubscribe = eventBus.subscribe((event) => {
-        if (socket.readyState === WS_OPEN) {
-          socket.send(JSON.stringify(event));
+        if (token !== config.getAuthToken()) {
+          socket.close(1008, 'Unauthorized');
+          return;
         }
-      });
 
-      socket.on('close', () => {
-        unsubscribe();
-      });
+        const unsubscribe = eventBus.subscribe((event) => {
+          if (socket.readyState === WS_OPEN) {
+            socket.send(JSON.stringify(event));
+          }
+        });
+
+        socket.on('close', () => {
+          unsubscribe();
+        });
+      },
+      handler: async (request, reply): Promise<ListEventsResponse | { error: string; issues?: unknown }> => {
+        const parsed = ListEventsQuery.safeParse(request.query);
+        if (!parsed.success) {
+          reply.status(400);
+          return { error: 'validation_failed', issues: parsed.error.issues };
+        }
+
+        const { sinceSeq } = parsed.data;
+        const events = listEventsSince(sinceSeq, LIST_EVENTS_MAX_LIMIT);
+        const nextSinceSeq =
+          events.length > 0 ? events[events.length - 1]!.seq : sinceSeq;
+
+        return { events, nextSinceSeq };
+      }
     });
   });
 

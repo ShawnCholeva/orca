@@ -74,3 +74,16 @@ export const DomainEvent = z.object({
   createdAt: z.string().datetime()
 });
 export type DomainEvent = z.infer<typeof DomainEvent>;
+
+export const LIST_EVENTS_MAX_LIMIT = 500;
+
+export const ListEventsQuery = z.object({
+  sinceSeq: z.coerce.number().int().nonnegative().default(0)
+});
+export type ListEventsQuery = z.infer<typeof ListEventsQuery>;
+
+export const ListEventsResponse = z.object({
+  events: z.array(DomainEvent),
+  nextSinceSeq: z.number().int().nonnegative()
+});
+export type ListEventsResponse = z.infer<typeof ListEventsResponse>;
