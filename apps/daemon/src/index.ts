@@ -2,6 +2,7 @@ import { loadConfig } from './config.js';
 import { openDatabase } from './db.js';
 import { defaultMigrationsDir, runMigrations } from './migrations.js';
 import { createServer } from './server.js';
+import { registerShutdown } from './shutdown.js';
 
 const config = loadConfig();
 const db = openDatabase(config);
@@ -20,3 +21,5 @@ try {
   server.log.error(err);
   process.exit(1);
 }
+
+registerShutdown(server, db);
