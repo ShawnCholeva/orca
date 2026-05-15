@@ -50,15 +50,11 @@ function rowToGoal(row: GoalRow): Goal {
 // Tracks current DB instance to detect close/reopen cycles and re-prepare statements.
 let _db: Database.Database | null = null;
 let _stmts: {
-  insertCreatedEvent: Database.Statement;
-  insertUpdatedEvent: Database.Statement;
-  insertArchivedEvent: Database.Statement;
+  insertEvent: Database.Statement;
   insertGoal: Database.Statement;
   selectGoals: Database.Statement;
   selectGoalById: Database.Statement;
-  updateGoalTitle: Database.Statement;
-  updateGoalDescription: Database.Statement;
-  updateGoalTitleAndDescription: Database.Statement;
+  updateGoal: Database.Statement;
   archiveGoal: Database.Statement;
 } | null = null;
 
@@ -67,14 +63,8 @@ function ensureStmts(): { db: Database.Database; stmts: NonNullable<typeof _stmt
   if (db !== _db) {
     _db = db;
     _stmts = {
-      insertCreatedEvent: db.prepare(
-        "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, 'goal.created', ?, ?, ?)"
-      ),
-      insertUpdatedEvent: db.prepare(
-        "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, 'goal.updated', ?, ?, ?)"
-      ),
-      insertArchivedEvent: db.prepare(
-        "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, 'goal.archived', ?, ?, ?)"
+      insertEvent: db.prepare(
+        "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)"
       ),
       insertGoal: db.prepare(
         "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, ?, ?)"
@@ -83,14 +73,8 @@ function ensureStmts(): { db: Database.Database; stmts: NonNullable<typeof _stmt
         "SELECT * FROM goals WHERE archived_at IS NULL ORDER BY updated_at DESC"
       ),
       selectGoalById: db.prepare("SELECT * FROM goals WHERE id = ?"),
-      updateGoalTitle: db.prepare(
-        "UPDATE goals SET title = ?, updated_at = ? WHERE id = ?"
-      ),
-      updateGoalDescription: db.prepare(
-        "UPDATE goals SET description = ?, updated_at = ? WHERE id = ?"
-      ),
-      updateGoalTitleAndDescription: db.prepare(
-        "UPDATE goals SET title = ?, description = ?, updated_at = ? WHERE id = ?"
+      updateGoal: db.prepare(
+        "UPDATE goals SET title = COALESCE(?, title), description = COALESCE(?, description), updated_at = ? WHERE id = ?"
       ),
       archiveGoal: db.prepare(
         "UPDATE goals SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?"
@@ -117,7 +101,7 @@ export function createGoal(input: unknown): Goal {
   let seq = 0;
 
   db.transaction(() => {
-    const result = stmts.insertCreatedEvent.run(eventId, goalId, payload, now);
+    const result = stmts.insertEvent.run(eventId, "goal.created", goalId, payload, now);
     seq = Number(result.lastInsertRowid);
     stmts.insertGoal.run(goalId, title, description, now, now);
   })();
@@ -153,11 +137,6 @@ export function updateGoal(id: string, input: unknown): Goal {
   const patch = parsed.data;
 
   const { db, stmts } = ensureStmts();
-  const existing = stmts.selectGoalById.get(id) as GoalRow | undefined;
-  if (!existing) {
-    throw new NotFoundError(id);
-  }
-
   const eventId = randomUUID();
   const now = new Date().toISOString();
   const payload = JSON.stringify(patch);
@@ -166,41 +145,34 @@ export function updateGoal(id: string, input: unknown): Goal {
   let updatedRow: GoalRow | undefined;
 
   db.transaction(() => {
-    const result = stmts.insertUpdatedEvent.run(eventId, id, payload, now);
-    seq = Number(result.lastInsertRowid);
-
-    if (patch.title !== undefined && patch.description !== undefined) {
-      stmts.updateGoalTitleAndDescription.run(patch.title, patch.description, now, id);
-    } else if (patch.title !== undefined) {
-      stmts.updateGoalTitle.run(patch.title, now, id);
-    } else if (patch.description !== undefined) {
-      stmts.updateGoalDescription.run(patch.description, now, id);
+    const updateResult = stmts.updateGoal.run(
+      patch.title ?? null,
+      patch.description ?? null,
+      now,
+      id
+    );
+    if (updateResult.changes === 0) {
+      throw new NotFoundError(id);
     }
-
+    const result = stmts.insertEvent.run(eventId, "goal.updated", id, payload, now);
+    seq = Number(result.lastInsertRowid);
     updatedRow = stmts.selectGoalById.get(id) as GoalRow;
   })();
 
-  const event: DomainEvent = {
+  eventBus.publish({
     seq,
     id: eventId,
     type: "goal.updated",
     goalId: id,
     payload: patch as Record<string, unknown>,
     createdAt: now,
-  };
-
-  eventBus.publish(event);
+  });
 
   return rowToGoal(updatedRow!);
 }
 
 export function archiveGoal(id: string): Goal {
   const { db, stmts } = ensureStmts();
-  const existing = stmts.selectGoalById.get(id) as GoalRow | undefined;
-  if (!existing) {
-    throw new NotFoundError(id);
-  }
-
   const eventId = randomUUID();
   const now = new Date().toISOString();
 
@@ -208,22 +180,23 @@ export function archiveGoal(id: string): Goal {
   let updatedRow: GoalRow | undefined;
 
   db.transaction(() => {
-    const result = stmts.insertArchivedEvent.run(eventId, id, "{}", now);
+    const updateResult = stmts.archiveGoal.run(now, now, id);
+    if (updateResult.changes === 0) {
+      throw new NotFoundError(id);
+    }
+    const result = stmts.insertEvent.run(eventId, "goal.archived", id, "{}", now);
     seq = Number(result.lastInsertRowid);
-    stmts.archiveGoal.run(now, now, id);
     updatedRow = stmts.selectGoalById.get(id) as GoalRow;
   })();
 
-  const event: DomainEvent = {
+  eventBus.publish({
     seq,
     id: eventId,
     type: "goal.archived",
     goalId: id,
     payload: {},
     createdAt: now,
-  };
-
-  eventBus.publish(event);
+  });
 
   return rowToGoal(updatedRow!);
 }

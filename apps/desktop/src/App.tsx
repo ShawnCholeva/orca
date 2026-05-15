@@ -217,9 +217,9 @@ function GoalItem({ goal }: { goal: Goal }) {
     }
   }
 
-  if (editing) {
-    return (
-      <li className="goal-item">
+  return (
+    <li className="goal-item">
+      {editing ? (
         <form onSubmit={saveEdit} className="create-form">
           <div className="form-field">
             <label htmlFor={`edit-title-${goal.id}`}>Title</label>
@@ -259,47 +259,41 @@ function GoalItem({ goal }: { goal: Goal }) {
             </button>
           </div>
         </form>
-      </li>
-    );
-  }
-
-  return (
-    <li className="goal-item">
-      <div className="goal-header">
-        <span className="goal-title">{goal.title}</span>
-        <span className={`goal-status goal-status--${goal.status}`}>
-          {goal.status}
-        </span>
-      </div>
-      {truncated && <p className="goal-description">{truncated}</p>}
-      <div className="goal-meta">
-        <time dateTime={goal.createdAt}>
-          {new Date(goal.createdAt).toLocaleString()}
-        </time>
-      </div>
-      {error && <div className="form-error">{error}</div>}
-      <div className="goal-actions">
-        <button
-          type="button"
-          className="goal-action-button"
-          onClick={startEdit}
-          disabled={busy}
-          aria-label="Edit goal"
-          title="Edit"
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          className="goal-action-button goal-action-button--danger"
-          onClick={handleArchive}
-          disabled={busy}
-          aria-label="Archive goal"
-          title="Archive"
-        >
-          Archive
-        </button>
-      </div>
+      ) : (
+        <>
+          <div className="goal-header">
+            <span className="goal-title">{goal.title}</span>
+            <span className={`goal-status goal-status--${goal.status}`}>
+              {goal.status}
+            </span>
+          </div>
+          {truncated && <p className="goal-description">{truncated}</p>}
+          <div className="goal-meta">
+            <time dateTime={goal.createdAt}>
+              {new Date(goal.createdAt).toLocaleString()}
+            </time>
+          </div>
+          {error && <div className="form-error">{error}</div>}
+          <div className="goal-actions">
+            <button
+              type="button"
+              className="goal-action-button"
+              onClick={startEdit}
+              disabled={busy}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              className="goal-action-button goal-action-button--danger"
+              onClick={handleArchive}
+              disabled={busy}
+            >
+              Archive
+            </button>
+          </div>
+        </>
+      )}
     </li>
   );
 }
