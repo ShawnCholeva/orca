@@ -4,10 +4,12 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import {
+  ArchiveGoalResponse,
   CreateGoalResponse,
   DomainEvent,
   HealthResponse,
-  ListGoalsResponse
+  ListGoalsResponse,
+  UpdateGoalResponse
 } from '@orca/contracts';
 import type { Config } from './config.js';
 import { createServer } from './server.js';
@@ -85,6 +87,103 @@ describe('server routes', () => {
     expect(body.error).toBe('validation_failed');
     expect(Array.isArray(body.issues)).toBe(true);
     expect((body.issues ?? []).length).toBeGreaterThan(0);
+  });
+
+  it('PATCH /v1/goals/:id updates the goal and returns 200', async () => {
+    const created = CreateGoalResponse.parse(
+      JSON.parse(
+        (
+          await server.inject({
+            method: 'POST',
+            url: '/v1/goals',
+            headers: { 'content-type': 'application/json' },
+            payload: { title: 'orig' }
+          })
+        ).body
+      )
+    );
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: `/v1/goals/${created.goal.id}`,
+      headers: { 'content-type': 'application/json' },
+      payload: { title: 'renamed' }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = UpdateGoalResponse.parse(JSON.parse(response.body));
+    expect(body.goal.id).toBe(created.goal.id);
+    expect(body.goal.title).toBe('renamed');
+  });
+
+  it('PATCH /v1/goals/:id returns 404 for unknown id', async () => {
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/goals/missing',
+      headers: { 'content-type': 'application/json' },
+      payload: { title: 'x' }
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('PATCH /v1/goals/:id returns 400 for empty patch', async () => {
+    const created = CreateGoalResponse.parse(
+      JSON.parse(
+        (
+          await server.inject({
+            method: 'POST',
+            url: '/v1/goals',
+            headers: { 'content-type': 'application/json' },
+            payload: { title: 'orig' }
+          })
+        ).body
+      )
+    );
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: `/v1/goals/${created.goal.id}`,
+      headers: { 'content-type': 'application/json' },
+      payload: {}
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('POST /v1/goals/:id/archive archives and removes from default list', async () => {
+    const created = CreateGoalResponse.parse(
+      JSON.parse(
+        (
+          await server.inject({
+            method: 'POST',
+            url: '/v1/goals',
+            headers: { 'content-type': 'application/json' },
+            payload: { title: 'to-archive' }
+          })
+        ).body
+      )
+    );
+
+    const response = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${created.goal.id}/archive`
+    });
+    expect(response.statusCode).toBe(200);
+    const body = ArchiveGoalResponse.parse(JSON.parse(response.body));
+    expect(body.goal.status).toBe('archived');
+    expect(body.goal.archivedAt).not.toBeNull();
+
+    const list = ListGoalsResponse.parse(
+      JSON.parse((await server.inject({ method: 'GET', url: '/v1/goals' })).body)
+    );
+    expect(list.goals).toHaveLength(0);
+  });
+
+  it('POST /v1/goals/:id/archive returns 404 for unknown id', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/goals/missing/archive'
+    });
+    expect(response.statusCode).toBe(404);
   });
 
   it('GET /v1/goals returns a created Goal', async () => {

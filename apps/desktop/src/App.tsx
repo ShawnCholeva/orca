@@ -4,6 +4,8 @@ import {
   fetchHealth,
   listGoals,
   createGoal,
+  updateGoal,
+  archiveGoal,
   openEventStream,
   ApiError,
   type ConnectionStatus,
@@ -163,10 +165,103 @@ export default function App() {
 
 function GoalItem({ goal }: { goal: Goal }) {
   const MAX_DESC = 200;
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(goal.title);
+  const [editDescription, setEditDescription] = useState(goal.description);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const truncated =
     goal.description.length > MAX_DESC
       ? goal.description.slice(0, MAX_DESC) + "…"
       : goal.description;
+
+  function startEdit() {
+    setEditTitle(goal.title);
+    setEditDescription(goal.description);
+    setError(null);
+    setEditing(true);
+  }
+
+  async function saveEdit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const patch: { title?: string; description?: string } = {};
+      if (editTitle !== goal.title) patch.title = editTitle;
+      if (editDescription !== goal.description) patch.description = editDescription;
+      if (patch.title === undefined && patch.description === undefined) {
+        setEditing(false);
+        return;
+      }
+      await updateGoal(goal.id, patch);
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to update goal.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleArchive() {
+    if (!confirm(`Archive "${goal.title}"?`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await archiveGoal(goal.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to archive goal.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <li className="goal-item">
+        <form onSubmit={saveEdit} className="create-form">
+          <div className="form-field">
+            <label htmlFor={`edit-title-${goal.id}`}>Title</label>
+            <input
+              id={`edit-title-${goal.id}`}
+              type="text"
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              maxLength={200}
+              required
+              disabled={busy}
+            />
+          </div>
+          <div className="form-field">
+            <label htmlFor={`edit-desc-${goal.id}`}>Description</label>
+            <textarea
+              id={`edit-desc-${goal.id}`}
+              value={editDescription}
+              onChange={(e) => setEditDescription(e.target.value)}
+              maxLength={4000}
+              rows={3}
+              disabled={busy}
+            />
+          </div>
+          {error && <div className="form-error">{error}</div>}
+          <div className="goal-actions">
+            <button type="submit" className="submit-button" disabled={busy}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+            <button
+              type="button"
+              className="goal-action-button"
+              onClick={() => setEditing(false)}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </li>
+    );
+  }
 
   return (
     <li className="goal-item">
@@ -181,6 +276,29 @@ function GoalItem({ goal }: { goal: Goal }) {
         <time dateTime={goal.createdAt}>
           {new Date(goal.createdAt).toLocaleString()}
         </time>
+      </div>
+      {error && <div className="form-error">{error}</div>}
+      <div className="goal-actions">
+        <button
+          type="button"
+          className="goal-action-button"
+          onClick={startEdit}
+          disabled={busy}
+          aria-label="Edit goal"
+          title="Edit"
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          className="goal-action-button goal-action-button--danger"
+          onClick={handleArchive}
+          disabled={busy}
+          aria-label="Archive goal"
+          title="Archive"
+        >
+          Archive
+        </button>
       </div>
     </li>
   );

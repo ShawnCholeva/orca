@@ -8,7 +8,14 @@ import type { Config } from "./config.js";
 import { closeDatabase, openDatabase } from "./db.js";
 import { defaultMigrationsDir, runMigrations } from "./migrations.js";
 import { eventBus } from "./events.js";
-import { createGoal, listGoals, ValidationError } from "./goals.js";
+import {
+  archiveGoal,
+  createGoal,
+  listGoals,
+  NotFoundError,
+  updateGoal,
+  ValidationError,
+} from "./goals.js";
 
 const tempDirs: string[] = [];
 
@@ -131,5 +138,92 @@ describe("listGoals", () => {
     expect(goals[0]!.id).toBe(created.id);
     expect(goals[0]!.title).toBe("Beta");
     expect(goals[0]!.status).toBe("active");
+  });
+});
+
+describe("updateGoal", () => {
+  it("persists title/description and writes a goal.updated event with the patch payload", () => {
+    const db = setup();
+    const created = createGoal({ title: "Original", description: "old" });
+
+    const updated = updateGoal(created.id, { title: "New Title" });
+    expect(updated.title).toBe("New Title");
+    expect(updated.description).toBe("old");
+    expect(updated.updatedAt >= created.updatedAt).toBe(true);
+
+    const eventRow = db
+      .prepare(
+        "SELECT type, goal_id, payload FROM events WHERE goal_id = ? AND type = 'goal.updated'"
+      )
+      .get(created.id) as { type: string; goal_id: string; payload: string } | undefined;
+
+    expect(eventRow?.type).toBe("goal.updated");
+    expect(JSON.parse(eventRow!.payload)).toEqual({ title: "New Title" });
+  });
+
+  it("can update both title and description in one call", () => {
+    setup();
+    const created = createGoal({ title: "Orig" });
+    const updated = updateGoal(created.id, { title: "T", description: "D" });
+    expect(updated.title).toBe("T");
+    expect(updated.description).toBe("D");
+  });
+
+  it("throws NotFoundError for unknown id", () => {
+    setup();
+    expect(() => updateGoal("missing-id", { title: "x" })).toThrow(NotFoundError);
+  });
+
+  it("throws ValidationError when no fields provided", () => {
+    setup();
+    const created = createGoal({ title: "A" });
+    expect(() => updateGoal(created.id, {})).toThrow(ValidationError);
+  });
+
+  it("publishes goal.updated event with numeric seq", () => {
+    setup();
+    const created = createGoal({ title: "A" });
+    const publishSpy = vi.spyOn(eventBus, "publish");
+
+    updateGoal(created.id, { title: "B" });
+
+    expect(publishSpy).toHaveBeenCalledTimes(1);
+    const event = publishSpy.mock.calls[0]![0]!;
+    expect(event.type).toBe("goal.updated");
+    expect(event.goalId).toBe(created.id);
+    expect(typeof event.seq).toBe("number");
+    expect(event.seq).toBeGreaterThan(0);
+  });
+});
+
+describe("archiveGoal", () => {
+  it("sets archived_at, removes goal from listGoals, and emits goal.archived event", () => {
+    const db = setup();
+    const created = createGoal({ title: "ToArchive" });
+
+    const archived = archiveGoal(created.id);
+    expect(archived.status).toBe("archived");
+    expect(archived.archivedAt).not.toBeNull();
+
+    expect(listGoals()).toHaveLength(0);
+
+    const row = db
+      .prepare("SELECT status, archived_at FROM goals WHERE id = ?")
+      .get(created.id) as { status: string; archived_at: string | null };
+    expect(row.status).toBe("archived");
+    expect(row.archived_at).not.toBeNull();
+
+    const eventRow = db
+      .prepare(
+        "SELECT type, payload FROM events WHERE goal_id = ? AND type = 'goal.archived'"
+      )
+      .get(created.id) as { type: string; payload: string } | undefined;
+    expect(eventRow?.type).toBe("goal.archived");
+    expect(JSON.parse(eventRow!.payload)).toEqual({});
+  });
+
+  it("throws NotFoundError for unknown id", () => {
+    setup();
+    expect(() => archiveGoal("missing-id")).toThrow(NotFoundError);
   });
 });

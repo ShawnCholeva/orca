@@ -8,10 +8,20 @@ import {
   CreateGoalRequest,
   type CreateGoalResponse,
   HealthResponse,
-  type ListGoalsResponse
+  type ListGoalsResponse,
+  UpdateGoalRequest,
+  type UpdateGoalResponse,
+  type ArchiveGoalResponse
 } from '@orca/contracts';
 import type { Config } from './config.js';
-import { createGoal, listGoals, ValidationError } from './goals.js';
+import {
+  archiveGoal,
+  createGoal,
+  listGoals,
+  NotFoundError,
+  updateGoal,
+  ValidationError
+} from './goals.js';
 import { eventBus } from './events.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -77,6 +87,45 @@ export function createServer(config: Config): FastifyInstance {
   server.get('/v1/goals', async (): Promise<ListGoalsResponse> => {
     const goals = listGoals();
     return { goals };
+  });
+
+  server.patch('/v1/goals/:id', async (request, reply): Promise<UpdateGoalResponse | { error: string; issues?: unknown }> => {
+    const { id } = request.params as { id: string };
+    const parsed = UpdateGoalRequest.safeParse(request.body);
+
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'validation_failed', issues: parsed.error.issues };
+    }
+
+    try {
+      const goal = updateGoal(id, parsed.data);
+      return { goal };
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        reply.status(400);
+        return { error: 'validation_failed', issues: error.issues };
+      }
+      if (error instanceof NotFoundError) {
+        reply.status(404);
+        return { error: 'not_found' };
+      }
+      throw error;
+    }
+  });
+
+  server.post('/v1/goals/:id/archive', async (request, reply): Promise<ArchiveGoalResponse | { error: string }> => {
+    const { id } = request.params as { id: string };
+    try {
+      const goal = archiveGoal(id);
+      return { goal };
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        reply.status(404);
+        return { error: 'not_found' };
+      }
+      throw error;
+    }
   });
 
   // WS route must be inside a register callback so @fastify/websocket's onRoute hook fires

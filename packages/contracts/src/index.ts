@@ -26,6 +26,26 @@ export const CreateGoalResponse = z.object({
 });
 export type CreateGoalResponse = z.infer<typeof CreateGoalResponse>;
 
+export const UpdateGoalRequest = z
+  .object({
+    title: z.string().min(1).max(200).optional(),
+    description: z.string().max(4000).optional()
+  })
+  .refine((data) => data.title !== undefined || data.description !== undefined, {
+    message: "at least one of title or description must be provided"
+  });
+export type UpdateGoalRequest = z.infer<typeof UpdateGoalRequest>;
+
+export const UpdateGoalResponse = z.object({
+  goal: Goal
+});
+export type UpdateGoalResponse = z.infer<typeof UpdateGoalResponse>;
+
+export const ArchiveGoalResponse = z.object({
+  goal: Goal
+});
+export type ArchiveGoalResponse = z.infer<typeof ArchiveGoalResponse>;
+
 export const ListGoalsResponse = z.object({
   goals: z.array(Goal)
 });

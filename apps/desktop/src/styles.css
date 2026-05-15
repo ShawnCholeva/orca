@@ -275,3 +275,41 @@ h2 {
   font-size: 12px;
   color: #9ca3af;
 }
+
+.goal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.goal-action-button {
+  padding: 4px 10px;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.goal-action-button:hover:not(:disabled) {
+  background: #f9fafb;
+  border-color: #9ca3af;
+}
+
+.goal-action-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.goal-action-button--danger {
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.goal-action-button--danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #dc2626;
+}

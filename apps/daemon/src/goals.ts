@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import { CreateGoalRequest, type DomainEvent, type Goal } from "@orca/contracts";
+import {
+  CreateGoalRequest,
+  UpdateGoalRequest,
+  type DomainEvent,
+  type Goal,
+} from "@orca/contracts";
 import { getDatabase } from "./db.js";
 import { eventBus } from "./events.js";
 
@@ -8,6 +13,13 @@ export class ValidationError extends Error {
   constructor(public readonly issues: unknown) {
     super("Validation failed");
     this.name = "ValidationError";
+  }
+}
+
+export class NotFoundError extends Error {
+  constructor(public readonly id: string) {
+    super(`Goal not found: ${id}`);
+    this.name = "NotFoundError";
   }
 }
 
@@ -38,9 +50,16 @@ function rowToGoal(row: GoalRow): Goal {
 // Tracks current DB instance to detect close/reopen cycles and re-prepare statements.
 let _db: Database.Database | null = null;
 let _stmts: {
-  insertEvent: Database.Statement;
+  insertCreatedEvent: Database.Statement;
+  insertUpdatedEvent: Database.Statement;
+  insertArchivedEvent: Database.Statement;
   insertGoal: Database.Statement;
   selectGoals: Database.Statement;
+  selectGoalById: Database.Statement;
+  updateGoalTitle: Database.Statement;
+  updateGoalDescription: Database.Statement;
+  updateGoalTitleAndDescription: Database.Statement;
+  archiveGoal: Database.Statement;
 } | null = null;
 
 function ensureStmts(): { db: Database.Database; stmts: NonNullable<typeof _stmts> } {
@@ -48,14 +67,33 @@ function ensureStmts(): { db: Database.Database; stmts: NonNullable<typeof _stmt
   if (db !== _db) {
     _db = db;
     _stmts = {
-      insertEvent: db.prepare(
+      insertCreatedEvent: db.prepare(
         "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, 'goal.created', ?, ?, ?)"
+      ),
+      insertUpdatedEvent: db.prepare(
+        "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, 'goal.updated', ?, ?, ?)"
+      ),
+      insertArchivedEvent: db.prepare(
+        "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, 'goal.archived', ?, ?, ?)"
       ),
       insertGoal: db.prepare(
         "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, ?, ?)"
       ),
       selectGoals: db.prepare(
         "SELECT * FROM goals WHERE archived_at IS NULL ORDER BY updated_at DESC"
+      ),
+      selectGoalById: db.prepare("SELECT * FROM goals WHERE id = ?"),
+      updateGoalTitle: db.prepare(
+        "UPDATE goals SET title = ?, updated_at = ? WHERE id = ?"
+      ),
+      updateGoalDescription: db.prepare(
+        "UPDATE goals SET description = ?, updated_at = ? WHERE id = ?"
+      ),
+      updateGoalTitleAndDescription: db.prepare(
+        "UPDATE goals SET title = ?, description = ?, updated_at = ? WHERE id = ?"
+      ),
+      archiveGoal: db.prepare(
+        "UPDATE goals SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?"
       ),
     };
   }
@@ -79,7 +117,7 @@ export function createGoal(input: unknown): Goal {
   let seq = 0;
 
   db.transaction(() => {
-    const result = stmts.insertEvent.run(eventId, goalId, payload, now);
+    const result = stmts.insertCreatedEvent.run(eventId, goalId, payload, now);
     seq = Number(result.lastInsertRowid);
     stmts.insertGoal.run(goalId, title, description, now, now);
   })();
@@ -105,6 +143,89 @@ export function createGoal(input: unknown): Goal {
     updatedAt: now,
     archivedAt: null,
   };
+}
+
+export function updateGoal(id: string, input: unknown): Goal {
+  const parsed = UpdateGoalRequest.safeParse(input);
+  if (!parsed.success) {
+    throw new ValidationError(parsed.error.issues);
+  }
+  const patch = parsed.data;
+
+  const { db, stmts } = ensureStmts();
+  const existing = stmts.selectGoalById.get(id) as GoalRow | undefined;
+  if (!existing) {
+    throw new NotFoundError(id);
+  }
+
+  const eventId = randomUUID();
+  const now = new Date().toISOString();
+  const payload = JSON.stringify(patch);
+
+  let seq = 0;
+  let updatedRow: GoalRow | undefined;
+
+  db.transaction(() => {
+    const result = stmts.insertUpdatedEvent.run(eventId, id, payload, now);
+    seq = Number(result.lastInsertRowid);
+
+    if (patch.title !== undefined && patch.description !== undefined) {
+      stmts.updateGoalTitleAndDescription.run(patch.title, patch.description, now, id);
+    } else if (patch.title !== undefined) {
+      stmts.updateGoalTitle.run(patch.title, now, id);
+    } else if (patch.description !== undefined) {
+      stmts.updateGoalDescription.run(patch.description, now, id);
+    }
+
+    updatedRow = stmts.selectGoalById.get(id) as GoalRow;
+  })();
+
+  const event: DomainEvent = {
+    seq,
+    id: eventId,
+    type: "goal.updated",
+    goalId: id,
+    payload: patch as Record<string, unknown>,
+    createdAt: now,
+  };
+
+  eventBus.publish(event);
+
+  return rowToGoal(updatedRow!);
+}
+
+export function archiveGoal(id: string): Goal {
+  const { db, stmts } = ensureStmts();
+  const existing = stmts.selectGoalById.get(id) as GoalRow | undefined;
+  if (!existing) {
+    throw new NotFoundError(id);
+  }
+
+  const eventId = randomUUID();
+  const now = new Date().toISOString();
+
+  let seq = 0;
+  let updatedRow: GoalRow | undefined;
+
+  db.transaction(() => {
+    const result = stmts.insertArchivedEvent.run(eventId, id, "{}", now);
+    seq = Number(result.lastInsertRowid);
+    stmts.archiveGoal.run(now, now, id);
+    updatedRow = stmts.selectGoalById.get(id) as GoalRow;
+  })();
+
+  const event: DomainEvent = {
+    seq,
+    id: eventId,
+    type: "goal.archived",
+    goalId: id,
+    payload: {},
+    createdAt: now,
+  };
+
+  eventBus.publish(event);
+
+  return rowToGoal(updatedRow!);
 }
 
 export function listGoals(): Goal[] {

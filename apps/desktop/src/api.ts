@@ -4,6 +4,9 @@ import {
   ListGoalsResponse,
   CreateGoalRequest,
   CreateGoalResponse,
+  UpdateGoalRequest,
+  UpdateGoalResponse,
+  ArchiveGoalResponse,
   DomainEvent,
 } from "@orca/contracts";
 
@@ -94,6 +97,40 @@ export async function createGoal(
     body: JSON.stringify(CreateGoalRequest.parse(input)),
   });
   return parseResponse(res, CreateGoalResponse);
+}
+
+export async function updateGoal(
+  id: string,
+  patch: UpdateGoalRequest,
+): Promise<UpdateGoalResponse> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/goals/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(token),
+    },
+    body: JSON.stringify(UpdateGoalRequest.parse(patch)),
+  });
+  if (!res.ok) {
+    throw new ApiError(`Update failed (${res.status})`);
+  }
+  return parseResponse(res, UpdateGoalResponse);
+}
+
+export async function archiveGoal(id: string): Promise<ArchiveGoalResponse> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(
+    `${baseUrl}/v1/goals/${encodeURIComponent(id)}/archive`,
+    {
+      method: "POST",
+      headers: authHeaders(token),
+    },
+  );
+  if (!res.ok) {
+    throw new ApiError(`Archive failed (${res.status})`);
+  }
+  return parseResponse(res, ArchiveGoalResponse);
 }
 
 export type ConnectionStatus = "connecting" | "open" | "closed";
