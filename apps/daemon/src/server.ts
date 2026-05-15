@@ -131,8 +131,7 @@ export function createServer(config: Config): FastifyInstance {
     }
   });
 
-  // WS route must be inside a register callback so @fastify/websocket's onRoute hook fires.
-  // The same path serves an HTTP GET handler for event replay (sinceSeq pagination).
+  // WS route must be inside a register callback so @fastify/websocket's onRoute hook fires
   server.register(async (fastify) => {
     fastify.route({
       method: 'GET',

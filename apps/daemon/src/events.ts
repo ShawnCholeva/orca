@@ -1,5 +1,7 @@
 import { EventEmitter } from "node:events";
 
+import type Database from "better-sqlite3";
+
 import type { DomainEvent, DomainEventType } from "@orca/contracts";
 
 import { getDatabase } from "./db.js";
@@ -47,13 +49,23 @@ interface EventRow {
   created_at: string;
 }
 
-export function listEventsSince(sinceSeq: number, limit: number): DomainEvent[] {
+// Caches the prepared statement; re-prepares on DB swap (test reopen cycles).
+let _db: Database.Database | null = null;
+let _selectEventsSince: Database.Statement | null = null;
+
+function ensureSelectEventsSince(): Database.Statement {
   const db = getDatabase();
-  const rows = db
-    .prepare(
+  if (db !== _db) {
+    _db = db;
+    _selectEventsSince = db.prepare(
       "SELECT seq, id, type, goal_id, payload, created_at FROM events WHERE seq > ? ORDER BY seq ASC LIMIT ?"
-    )
-    .all(sinceSeq, limit) as EventRow[];
+    );
+  }
+  return _selectEventsSince!;
+}
+
+export function listEventsSince(sinceSeq: number, limit: number): DomainEvent[] {
+  const rows = ensureSelectEventsSince().all(sinceSeq, limit) as EventRow[];
 
   return rows.map((row) => ({
     seq: row.seq,
