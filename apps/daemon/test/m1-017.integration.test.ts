@@ -29,6 +29,8 @@ interface BootResult {
 
 const tempDirs: string[] = [];
 
+const AUTH_HEADERS = { authorization: 'Bearer m1-017-token' } as const;
+
 function createTempDir(): string {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-m1-017-'));
   tempDirs.push(dir);
@@ -127,7 +129,7 @@ describe.sequential('M1-017 daemon integration loop', () => {
     try {
       const response = await fetch(`${baseUrl}/v1/goals`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
         body: JSON.stringify({ title: 'M1-017 Goal', description: 'integration' })
       });
 
@@ -185,7 +187,7 @@ describe.sequential('M1-017 daemon integration loop', () => {
 
       const response = await fetch(`${baseUrl}/v1/goals`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
         body: JSON.stringify({ title: 'WS Delivery Goal' })
       });
 
@@ -212,7 +214,7 @@ describe.sequential('M1-017 daemon integration loop', () => {
     const firstBoot = await boot(dir);
     const createResponse = await fetch(`${firstBoot.baseUrl}/v1/goals`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       body: JSON.stringify({ title: 'Persisted Goal', description: 'survives reboot' })
     });
     expect(createResponse.status).toBe(201);
@@ -222,7 +224,9 @@ describe.sequential('M1-017 daemon integration loop', () => {
     const secondBoot = await boot(dir);
 
     try {
-      const listResponse = await fetch(`${secondBoot.baseUrl}/v1/goals`);
+      const listResponse = await fetch(`${secondBoot.baseUrl}/v1/goals`, {
+        headers: AUTH_HEADERS
+      });
       expect(listResponse.status).toBe(200);
 
       const listed = ListGoalsResponse.parse(await listResponse.json());
@@ -249,7 +253,7 @@ describe.sequential('M1-017 daemon integration loop', () => {
 
       const response = await fetch(`${baseUrl}/v1/goals`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
         body: JSON.stringify({ title: 'Should Roll Back' })
       });
 

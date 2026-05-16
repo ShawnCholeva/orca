@@ -19,6 +19,8 @@ import { defaultMigrationsDir, runMigrations } from './migrations.js';
 
 const tempDirs: string[] = [];
 
+const AUTH_HEADERS = { authorization: 'Bearer test-token' } as const;
+
 function createConfig(dataDir: string): Config {
   return {
     dataDir,
@@ -64,7 +66,7 @@ describe('server routes', () => {
     const response = await server.inject({
       method: 'POST',
       url: '/v1/goals',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: { title: 'first', description: 'desc' }
     });
 
@@ -79,7 +81,7 @@ describe('server routes', () => {
     const response = await server.inject({
       method: 'POST',
       url: '/v1/goals',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: { title: '' }
     });
 
@@ -97,7 +99,7 @@ describe('server routes', () => {
           await server.inject({
             method: 'POST',
             url: '/v1/goals',
-            headers: { 'content-type': 'application/json' },
+            headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
             payload: { title: 'orig' }
           })
         ).body
@@ -107,7 +109,7 @@ describe('server routes', () => {
     const response = await server.inject({
       method: 'PATCH',
       url: `/v1/goals/${created.goal.id}`,
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: { title: 'renamed' }
     });
 
@@ -121,7 +123,7 @@ describe('server routes', () => {
     const response = await server.inject({
       method: 'PATCH',
       url: '/v1/goals/missing',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: { title: 'x' }
     });
     expect(response.statusCode).toBe(404);
@@ -134,7 +136,7 @@ describe('server routes', () => {
           await server.inject({
             method: 'POST',
             url: '/v1/goals',
-            headers: { 'content-type': 'application/json' },
+            headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
             payload: { title: 'orig' }
           })
         ).body
@@ -144,7 +146,7 @@ describe('server routes', () => {
     const response = await server.inject({
       method: 'PATCH',
       url: `/v1/goals/${created.goal.id}`,
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: {}
     });
     expect(response.statusCode).toBe(400);
@@ -157,7 +159,7 @@ describe('server routes', () => {
           await server.inject({
             method: 'POST',
             url: '/v1/goals',
-            headers: { 'content-type': 'application/json' },
+            headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
             payload: { title: 'to-archive' }
           })
         ).body
@@ -166,7 +168,8 @@ describe('server routes', () => {
 
     const response = await server.inject({
       method: 'POST',
-      url: `/v1/goals/${created.goal.id}/archive`
+      url: `/v1/goals/${created.goal.id}/archive`,
+      headers: AUTH_HEADERS
     });
     expect(response.statusCode).toBe(200);
     const body = ArchiveGoalResponse.parse(JSON.parse(response.body));
@@ -174,7 +177,9 @@ describe('server routes', () => {
     expect(body.goal.archivedAt).not.toBeNull();
 
     const list = ListGoalsResponse.parse(
-      JSON.parse((await server.inject({ method: 'GET', url: '/v1/goals' })).body)
+      JSON.parse(
+        (await server.inject({ method: 'GET', url: '/v1/goals', headers: AUTH_HEADERS })).body
+      )
     );
     expect(list.goals).toHaveLength(0);
   });
@@ -182,7 +187,8 @@ describe('server routes', () => {
   it('POST /v1/goals/:id/archive returns 404 for unknown id', async () => {
     const response = await server.inject({
       method: 'POST',
-      url: '/v1/goals/missing/archive'
+      url: '/v1/goals/missing/archive',
+      headers: AUTH_HEADERS
     });
     expect(response.statusCode).toBe(404);
   });
@@ -191,19 +197,78 @@ describe('server routes', () => {
     const postResponse = await server.inject({
       method: 'POST',
       url: '/v1/goals',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: { title: 'second' }
     });
     expect(postResponse.statusCode).toBe(201);
     const created = CreateGoalResponse.parse(JSON.parse(postResponse.body));
 
-    const getResponse = await server.inject({ method: 'GET', url: '/v1/goals' });
+    const getResponse = await server.inject({
+      method: 'GET',
+      url: '/v1/goals',
+      headers: AUTH_HEADERS
+    });
     expect(getResponse.statusCode).toBe(200);
 
     const listed = ListGoalsResponse.parse(JSON.parse(getResponse.body));
     expect(listed.goals).toHaveLength(1);
     expect(listed.goals[0]?.id).toBe(created.goal.id);
     expect(listed.goals[0]?.title).toBe('second');
+  });
+
+  it('GET /v1/health is unauthenticated and returns 200', async () => {
+    const response = await server.inject({ method: 'GET', url: '/v1/health' });
+    expect(response.statusCode).toBe(200);
+  });
+
+  it('POST /v1/goals without Authorization returns 401', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/goals',
+      headers: { 'content-type': 'application/json' },
+      payload: { title: 'noauth' }
+    });
+    expect(response.statusCode).toBe(401);
+    const body = JSON.parse(response.body) as { error?: string };
+    expect(body.error).toBe('unauthorized');
+  });
+
+  it('POST /v1/goals with wrong bearer returns 401', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/goals',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer wrong' },
+      payload: { title: 'badauth' }
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('GET /v1/goals without Authorization returns 401', async () => {
+    const response = await server.inject({ method: 'GET', url: '/v1/goals' });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('PATCH /v1/goals/:id without Authorization returns 401', async () => {
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/goals/any-id',
+      headers: { 'content-type': 'application/json' },
+      payload: { title: 'x' }
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('POST /v1/goals/:id/archive without Authorization returns 401', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/goals/any-id/archive'
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('GET /v1/events (replay) without Authorization returns 401', async () => {
+    const response = await server.inject({ method: 'GET', url: '/v1/events?sinceSeq=0' });
+    expect(response.statusCode).toBe(401);
   });
 });
 
@@ -241,7 +306,7 @@ describe('WebSocket /v1/events', () => {
     await wsServer.inject({
       method: 'POST',
       url: '/v1/goals',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: { title: 'ws-goal' }
     });
 
@@ -268,7 +333,7 @@ describe('WebSocket /v1/events', () => {
     await wsServer.inject({
       method: 'POST',
       url: '/v1/goals',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: { title: 'after-close' }
     });
 
@@ -317,7 +382,7 @@ describe('GET /v1/events (replay)', () => {
     const res = await server.inject({
       method: 'POST',
       url: '/v1/goals',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: { title }
     });
     expect(res.statusCode).toBe(201);
@@ -328,7 +393,11 @@ describe('GET /v1/events (replay)', () => {
     await createGoalForTest('b');
     await createGoalForTest('c');
 
-    const all = await server.inject({ method: 'GET', url: '/v1/events?sinceSeq=0' });
+    const all = await server.inject({
+      method: 'GET',
+      url: '/v1/events?sinceSeq=0',
+      headers: AUTH_HEADERS
+    });
     expect(all.statusCode).toBe(200);
     const body = ListEventsResponse.parse(JSON.parse(all.body));
     expect(body.events).toHaveLength(3);
@@ -341,7 +410,11 @@ describe('GET /v1/events (replay)', () => {
     expect(body.events[1]!.seq).toBeLessThan(body.events[2]!.seq);
     expect(body.nextSinceSeq).toBe(body.events[2]!.seq);
 
-    const sinceOne = await server.inject({ method: 'GET', url: '/v1/events?sinceSeq=1' });
+    const sinceOne = await server.inject({
+      method: 'GET',
+      url: '/v1/events?sinceSeq=1',
+      headers: AUTH_HEADERS
+    });
     expect(sinceOne.statusCode).toBe(200);
     const sinceOneBody = ListEventsResponse.parse(JSON.parse(sinceOne.body));
     expect(sinceOneBody.events).toHaveLength(2);
@@ -351,7 +424,11 @@ describe('GET /v1/events (replay)', () => {
 
   it('defaults sinceSeq to 0 when omitted', async () => {
     await createGoalForTest('only');
-    const res = await server.inject({ method: 'GET', url: '/v1/events' });
+    const res = await server.inject({
+      method: 'GET',
+      url: '/v1/events',
+      headers: AUTH_HEADERS
+    });
     expect(res.statusCode).toBe(200);
     const body = ListEventsResponse.parse(JSON.parse(res.body));
     expect(body.events).toHaveLength(1);
@@ -360,7 +437,11 @@ describe('GET /v1/events (replay)', () => {
 
   it('returns empty events array and echoes sinceSeq when no new events', async () => {
     await createGoalForTest('x');
-    const res = await server.inject({ method: 'GET', url: '/v1/events?sinceSeq=999' });
+    const res = await server.inject({
+      method: 'GET',
+      url: '/v1/events?sinceSeq=999',
+      headers: AUTH_HEADERS
+    });
     expect(res.statusCode).toBe(200);
     const body = ListEventsResponse.parse(JSON.parse(res.body));
     expect(body.events).toEqual([]);
@@ -368,7 +449,11 @@ describe('GET /v1/events (replay)', () => {
   });
 
   it('rejects invalid sinceSeq with 400', async () => {
-    const res = await server.inject({ method: 'GET', url: '/v1/events?sinceSeq=-1' });
+    const res = await server.inject({
+      method: 'GET',
+      url: '/v1/events?sinceSeq=-1',
+      headers: AUTH_HEADERS
+    });
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body) as { error?: string };
     expect(body.error).toBe('validation_failed');

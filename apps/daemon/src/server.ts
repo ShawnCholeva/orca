@@ -62,6 +62,21 @@ export function createServer(config: Config): FastifyInstance {
   server.register(cors, { origin: CORS_ORIGINS });
   server.register(websocket);
 
+  server.addHook('onRequest', async (request, reply) => {
+    const pathname = request.url.split('?')[0];
+
+    // Health is the only unauthenticated HTTP route.
+    if (request.method === 'GET' && pathname === '/v1/health') return;
+
+    // WS upgrade keeps the existing ?token= path (validated inside wsHandler).
+    if (request.headers.upgrade?.toLowerCase() === 'websocket') return;
+
+    const expected = `Bearer ${config.getAuthToken()}`;
+    if (request.headers.authorization !== expected) {
+      reply.code(401).send({ error: 'unauthorized' });
+    }
+  });
+
   server.get('/v1/health', async (): Promise<HealthResponse> => ({
     status: 'ok',
     version: pkg.version,
