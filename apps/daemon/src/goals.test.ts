@@ -194,6 +194,29 @@ describe("updateGoal", () => {
     expect(typeof event.seq).toBe("number");
     expect(event.seq).toBeGreaterThan(0);
   });
+
+  it("appends goal.updated event before updating the goals projection", () => {
+    const db = setup();
+    const created = createGoal({ title: "OrderProof" });
+
+    db.exec(`
+      CREATE TRIGGER enforce_update_event_first
+      BEFORE UPDATE ON goals
+      FOR EACH ROW
+      WHEN OLD.archived_at IS NULL
+      BEGIN
+        SELECT RAISE(ABORT, 'projection_updated_before_event')
+        WHERE NOT EXISTS (
+          SELECT 1 FROM events
+          WHERE goal_id = NEW.id
+            AND type = 'goal.updated'
+            AND created_at = NEW.updated_at
+        );
+      END;
+    `);
+
+    expect(() => updateGoal(created.id, { title: "After" })).not.toThrow();
+  });
 });
 
 describe("archiveGoal", () => {
@@ -225,5 +248,28 @@ describe("archiveGoal", () => {
   it("throws NotFoundError for unknown id", () => {
     setup();
     expect(() => archiveGoal("missing-id")).toThrow(NotFoundError);
+  });
+
+  it("appends goal.archived event before updating the goals projection", () => {
+    const db = setup();
+    const created = createGoal({ title: "ArchiveOrderProof" });
+
+    db.exec(`
+      CREATE TRIGGER enforce_archive_event_first
+      BEFORE UPDATE ON goals
+      FOR EACH ROW
+      WHEN NEW.archived_at IS NOT NULL AND OLD.archived_at IS NULL
+      BEGIN
+        SELECT RAISE(ABORT, 'archive_projection_updated_before_event')
+        WHERE NOT EXISTS (
+          SELECT 1 FROM events
+          WHERE goal_id = NEW.id
+            AND type = 'goal.archived'
+            AND created_at = NEW.archived_at
+        );
+      END;
+    `);
+
+    expect(() => archiveGoal(created.id)).not.toThrow();
   });
 });

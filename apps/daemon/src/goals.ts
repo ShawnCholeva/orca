@@ -145,17 +145,20 @@ export function updateGoal(id: string, input: unknown): Goal {
   let updatedRow: GoalRow | undefined;
 
   db.transaction(() => {
-    const updateResult = stmts.updateGoal.run(
+    const existing = stmts.selectGoalById.get(id) as GoalRow | undefined;
+    if (!existing) {
+      throw new NotFoundError(id);
+    }
+
+    const result = stmts.insertEvent.run(eventId, "goal.updated", id, payload, now);
+    seq = Number(result.lastInsertRowid);
+
+    stmts.updateGoal.run(
       patch.title ?? null,
       patch.description ?? null,
       now,
       id
     );
-    if (updateResult.changes === 0) {
-      throw new NotFoundError(id);
-    }
-    const result = stmts.insertEvent.run(eventId, "goal.updated", id, payload, now);
-    seq = Number(result.lastInsertRowid);
     updatedRow = stmts.selectGoalById.get(id) as GoalRow;
   })();
 
@@ -180,12 +183,15 @@ export function archiveGoal(id: string): Goal {
   let updatedRow: GoalRow | undefined;
 
   db.transaction(() => {
-    const updateResult = stmts.archiveGoal.run(now, now, id);
-    if (updateResult.changes === 0) {
+    const existing = stmts.selectGoalById.get(id) as GoalRow | undefined;
+    if (!existing) {
       throw new NotFoundError(id);
     }
+
     const result = stmts.insertEvent.run(eventId, "goal.archived", id, "{}", now);
     seq = Number(result.lastInsertRowid);
+
+    stmts.archiveGoal.run(now, now, id);
     updatedRow = stmts.selectGoalById.get(id) as GoalRow;
   })();
 
