@@ -195,6 +195,31 @@ describe("updateGoal", () => {
     expect(event.seq).toBeGreaterThan(0);
   });
 
+  it("throws NotFoundError when updating an archived goal", () => {
+    setup();
+    const created = createGoal({ title: "X" });
+    archiveGoal(created.id);
+
+    expect(() => updateGoal(created.id, { title: "Y" })).toThrow(NotFoundError);
+  });
+
+  it("does not append a goal.updated event when target is archived", () => {
+    const db = setup();
+    const created = createGoal({ title: "X" });
+    archiveGoal(created.id);
+
+    expect(() => updateGoal(created.id, { title: "Y" })).toThrow(NotFoundError);
+
+    const updatedCount = (
+      db
+        .prepare(
+          "SELECT count(*) AS c FROM events WHERE goal_id = ? AND type = 'goal.updated'"
+        )
+        .get(created.id) as { c: number }
+    ).c;
+    expect(updatedCount).toBe(0);
+  });
+
   it("appends goal.updated event before updating the goals projection", () => {
     const db = setup();
     const created = createGoal({ title: "OrderProof" });
@@ -248,6 +273,30 @@ describe("archiveGoal", () => {
   it("throws NotFoundError for unknown id", () => {
     setup();
     expect(() => archiveGoal("missing-id")).toThrow(NotFoundError);
+  });
+
+  it("throws NotFoundError when archiving an already-archived goal", () => {
+    setup();
+    const created = createGoal({ title: "X" });
+    archiveGoal(created.id);
+
+    expect(() => archiveGoal(created.id)).toThrow(NotFoundError);
+  });
+
+  it("emits exactly one goal.archived event across two archive calls", () => {
+    const db = setup();
+    const created = createGoal({ title: "X" });
+    archiveGoal(created.id);
+    expect(() => archiveGoal(created.id)).toThrow(NotFoundError);
+
+    const count = (
+      db
+        .prepare(
+          "SELECT count(*) AS c FROM events WHERE goal_id = ? AND type = 'goal.archived'"
+        )
+        .get(created.id) as { c: number }
+    ).c;
+    expect(count).toBe(1);
   });
 
   it("appends goal.archived event before updating the goals projection", () => {

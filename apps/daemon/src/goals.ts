@@ -146,7 +146,7 @@ export function updateGoal(id: string, input: unknown): Goal {
 
   db.transaction(() => {
     const existing = stmts.selectGoalById.get(id) as GoalRow | undefined;
-    if (!existing) {
+    if (!existing || existing.archived_at !== null) {
       throw new NotFoundError(id);
     }
 
@@ -184,7 +184,7 @@ export function archiveGoal(id: string): Goal {
 
   db.transaction(() => {
     const existing = stmts.selectGoalById.get(id) as GoalRow | undefined;
-    if (!existing) {
+    if (!existing || existing.archived_at !== null) {
       throw new NotFoundError(id);
     }
 

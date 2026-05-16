@@ -216,6 +216,36 @@ describe('server routes', () => {
     expect(listed.goals[0]?.title).toBe('second');
   });
 
+  it('PATCH /v1/goals/:id returns 404 for an archived goal', async () => {
+    const created = CreateGoalResponse.parse(
+      JSON.parse(
+        (
+          await server.inject({
+            method: 'POST',
+            url: '/v1/goals',
+            headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+            payload: { title: 'will-archive' }
+          })
+        ).body
+      )
+    );
+
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${created.goal.id}/archive`,
+      headers: AUTH_HEADERS
+    });
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: `/v1/goals/${created.goal.id}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'late-edit' }
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
   it('GET /v1/health is unauthenticated and returns 200', async () => {
     const response = await server.inject({ method: 'GET', url: '/v1/health' });
     expect(response.statusCode).toBe(200);
