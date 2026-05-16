@@ -6,7 +6,8 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeBuildCommand": "pnpm build",
+    "beforeBundleCommand": "pnpm --filter @orca/daemon build:sidecar"
   },
   "app": {
     "windows": [
@@ -24,6 +25,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": []
+    "icon": [],
+    "externalBin": ["../../daemon/dist/sidecar/orca-daemon"],
+    "resources": {
+      "../../daemon/dist/sidecar/runtime": "runtime"
+    }
   }
 }

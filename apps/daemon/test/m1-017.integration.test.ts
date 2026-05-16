@@ -50,7 +50,7 @@ async function boot(dataDir: string): Promise<BootResult> {
 
   const config = loadConfig();
   const db = openDatabase(config);
-  runMigrations(db, defaultMigrationsDir);
+  runMigrations(db, defaultMigrationsDir());
 
   const migrationRows = db
     .prepare('SELECT name, applied_at FROM _migrations ORDER BY id ASC')

@@ -32,7 +32,7 @@ function setup() {
   const dir = mkdtempSync(path.join(os.tmpdir(), "orca-goals-test-"));
   tempDirs.push(dir);
   const db = openDatabase(createConfig(dir));
-  runMigrations(db, defaultMigrationsDir);
+  runMigrations(db, defaultMigrationsDir());
   return db;
 }
 

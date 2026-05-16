@@ -34,20 +34,20 @@ function freshDb() {
 describe("runMigrations", () => {
   it("applies 0001_init.sql on a fresh database", () => {
     const db = freshDb();
-    const result = runMigrations(db, defaultMigrationsDir);
+    const result = runMigrations(db, defaultMigrationsDir());
     expect(result.applied).toEqual(["0001_init.sql"]);
   });
 
   it("is idempotent — re-running on an already-migrated database applies nothing", () => {
     const db = freshDb();
-    runMigrations(db, defaultMigrationsDir);
-    const result = runMigrations(db, defaultMigrationsDir);
+    runMigrations(db, defaultMigrationsDir());
+    const result = runMigrations(db, defaultMigrationsDir());
     expect(result.applied).toEqual([]);
   });
 
   it("creates the events and goals tables", () => {
     const db = freshDb();
-    runMigrations(db, defaultMigrationsDir);
+    runMigrations(db, defaultMigrationsDir());
 
     const tables = (
       db
@@ -62,7 +62,7 @@ describe("runMigrations", () => {
 
   it("creates the expected named indices", () => {
     const db = freshDb();
-    runMigrations(db, defaultMigrationsDir);
+    runMigrations(db, defaultMigrationsDir());
 
     const indices = (
       db

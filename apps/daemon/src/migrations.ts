@@ -48,6 +48,8 @@ export function runMigrations(
   return { applied };
 }
 
-export const defaultMigrationsDir = fileURLToPath(
-  new URL("../migrations", import.meta.url)
-);
+// Lazy: in CJS bundles `import.meta.url` is empty, so evaluating this at
+// module load would crash. Sidecar callers use a different source.
+export function defaultMigrationsDir(): string {
+  return fileURLToPath(new URL("../migrations", import.meta.url));
+}

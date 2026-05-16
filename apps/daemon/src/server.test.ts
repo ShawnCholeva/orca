@@ -37,7 +37,7 @@ describe('server routes', () => {
 
     const config = createConfig(dir);
     const db = openDatabase(config);
-    runMigrations(db, defaultMigrationsDir);
+    runMigrations(db, defaultMigrationsDir());
     server = createServer(config);
   });
 
@@ -216,7 +216,7 @@ describe('WebSocket /v1/events', () => {
     wsDirs.push(dir);
     const config = createConfig(dir);
     const db = openDatabase(config);
-    runMigrations(db, defaultMigrationsDir);
+    runMigrations(db, defaultMigrationsDir());
     wsServer = createServer(config);
     await wsServer.ready();
   });
@@ -301,7 +301,7 @@ describe('GET /v1/events (replay)', () => {
     dirs.push(dir);
     const config = createConfig(dir);
     const db = openDatabase(config);
-    runMigrations(db, defaultMigrationsDir);
+    runMigrations(db, defaultMigrationsDir());
     server = createServer(config);
   });
 

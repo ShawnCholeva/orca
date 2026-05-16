@@ -27,10 +27,19 @@ import {
 } from './goals.js';
 import { eventBus, listEventsSince } from './events.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(
-  readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8')
-) as { version: string };
+// Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
+// to reading package.json at the source-tree path otherwise.
+function readPackageVersion(): string {
+  if (process.env.ORCA_DAEMON_VERSION) return process.env.ORCA_DAEMON_VERSION;
+  try {
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const raw = readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8');
+    return (JSON.parse(raw) as { version: string }).version;
+  } catch {
+    return '0.0.0';
+  }
+}
+const pkg = { version: readPackageVersion() };
 
 const CORS_ORIGINS = [
   'http://localhost:5173',

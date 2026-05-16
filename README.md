@@ -64,6 +64,21 @@ pnpm --filter @orca/daemon dev
 
 The daemon listens on `http://127.0.0.1:8787` by default. It prints its per-launch auth token to stdout.
 
+### Production bundle (sidecar)
+
+```sh
+pnpm --filter @orca/desktop tauri:build
+```
+
+This invokes `pnpm --filter @orca/daemon build:sidecar` automatically (via Tauri's `beforeBundleCommand`) to produce a self-contained daemon executable, then packages the Tauri shell. Outputs land in `apps/desktop/src-tauri/target/release/bundle/`.
+
+The sidecar is built using [Node SEA](https://nodejs.org/api/single-executable-applications.html): the daemon JS is embedded into a copy of the current `node` binary; SQL migrations are embedded as SEA assets. The `better-sqlite3` native binding (`.node` file) cannot live inside the SEA blob — Node's dynamic loader needs it on disk — so it ships as a Tauri resource (`runtime/node_modules/better-sqlite3/...`) alongside the binary, with `ORCA_RUNTIME_DIR` injected at spawn time.
+
+**Caveats:**
+- **Single-platform build.** The sidecar is produced for the developer's OS and architecture only. Cross-compilation is out of scope for M1.
+- **`better-sqlite3` binding compatibility.** The shipped `.node` is the binding compiled at `pnpm install` time. It must match the major Node version embedded in the sidecar (i.e. the `node` on `PATH` when `build:sidecar` runs). Mismatches surface at startup as `Error: Module did not self-register` or `NODE_MODULE_VERSION` errors. To rebuild against the active Node: `pnpm --filter @orca/daemon rebuild better-sqlite3 && pnpm --filter @orca/daemon build:sidecar`.
+- **AppImage requires a square icon.** The deb and rpm bundlers run cleanly; AppImage will abort on a missing icon until icons are added under `apps/desktop/src-tauri/icons/`.
+
 ## Data location
 
 The daemon writes its SQLite database and any future local state to a per-user data directory:
