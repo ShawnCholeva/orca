@@ -1,13 +1,6 @@
 #!/usr/bin/env node
-// Builds the daemon as a single-file Node SEA binary plus a runtime tree
-// (better-sqlite3 + native binding) shipped alongside as Tauri resources.
-//
-// Output:
-//   apps/daemon/dist/sidecar/orca-daemon-<target-triple>[.exe]
-//   apps/daemon/dist/sidecar/runtime/node_modules/{better-sqlite3,bindings,file-uri-to-path}
-//
-// Tauri picks up the binary via `bundle.externalBin` (auto-suffix triple)
-// and the runtime tree via `bundle.resources`.
+// Builds the daemon as a Node SEA binary + runtime tree. See README
+// "Production bundle (sidecar)" for layout and caveats.
 
 import { spawnSync } from "node:child_process";
 import {
@@ -16,7 +9,6 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
-  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -69,10 +61,8 @@ function listMigrations() {
     }));
 }
 
-// SEA's embedded require only resolves built-in modules. Any user-package
-// require must go through module.createRequire rooted at an on-disk path.
-// This plugin replaces `require("better-sqlite3")` (and friends) with a
-// shim that resolves from ORCA_RUNTIME_DIR at runtime.
+// SEA's embedded require only resolves built-in modules, so route external
+// packages through createRequire rooted at ORCA_RUNTIME_DIR.
 const nativeRuntimeShim = {
   name: "native-runtime-shim",
   setup(build) {
@@ -101,9 +91,6 @@ const nativeRuntimeShim = {
 };
 
 async function bundleDaemon() {
-  const daemonPkg = JSON.parse(
-    readFileSync(path.join(pkgRoot, "package.json"), "utf-8")
-  );
   await esbuild({
     entryPoints: [path.join(pkgRoot, "src", "index.ts")],
     outfile: bundlePath,
@@ -114,9 +101,9 @@ async function bundleDaemon() {
     sourcemap: false,
     legalComments: "none",
     plugins: [nativeRuntimeShim],
-    // import.meta.url is empty in CJS; route it through a banner-defined
-    // identifier so non-sidecar code paths (defaultMigrationsDir,
-    // package.json read) don't crash if ever evaluated.
+    // import.meta.url is empty in CJS; route it through __filename so any
+    // non-sidecar code path that evaluates it (e.g. defaultMigrationsDir)
+    // gets a syntactically valid file URL instead of crashing.
     define: {
       "import.meta.url": "__bundleFileUrl",
     },
@@ -125,7 +112,6 @@ async function bundleDaemon() {
     },
     logLevel: "info",
   });
-  return daemonPkg.version;
 }
 
 function copyRuntimeTree() {
@@ -133,33 +119,25 @@ function copyRuntimeTree() {
   mkdirSync(runtimeNodeModules, { recursive: true });
 
   const pnpmStore = path.join(repoRoot, "node_modules", ".pnpm");
+  const storeEntries = readdirSync(pnpmStore);
   const findPkg = (name) => {
-    const entries = readdirSync(pnpmStore).filter((d) =>
-      d.startsWith(`${name}@`)
-    );
-    if (entries.length === 0) {
+    const matches = storeEntries.filter((d) => d.startsWith(`${name}@`)).sort();
+    if (matches.length === 0) {
       throw new Error(`Could not locate ${name} in ${pnpmStore}`);
     }
-    // Pick the highest version directory we find.
-    entries.sort();
-    return path.join(pnpmStore, entries[entries.length - 1], "node_modules", name);
+    return path.join(pnpmStore, matches[matches.length - 1], "node_modules", name);
   };
 
+  const skipDirs = new Set(["node_modules", "src", "deps", "test", "obj", "obj.target"]);
   for (const name of ["better-sqlite3", "bindings", "file-uri-to-path"]) {
     const src = findPkg(name);
     const dst = path.join(runtimeNodeModules, name);
     cpSync(src, dst, {
       recursive: true,
       dereference: true,
-      filter: (s) => {
-        // Strip nested node_modules (we ship deps flat at the top).
-        const rel = path.relative(src, s);
-        if (rel.split(path.sep).includes("node_modules")) return false;
-        // Drop sources/build artifacts not needed at runtime.
-        const skipDirs = new Set(["src", "deps", "test", "obj", "obj.target"]);
-        const seg = rel.split(path.sep);
-        if (seg.some((s) => skipDirs.has(s))) return false;
-        return true;
+      filter: (entry) => {
+        const segments = path.relative(src, entry).split(path.sep);
+        return !segments.some((seg) => skipDirs.has(seg));
       },
     });
   }

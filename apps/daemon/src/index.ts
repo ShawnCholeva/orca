@@ -1,5 +1,3 @@
-// sidecar-bootstrap must be evaluated first; it auto-runs initSidecarRuntime
-// at module load, before db.ts pulls in better-sqlite3.
 import { sidecarMigrationsDir } from './sidecar-bootstrap.js';
 import { loadConfig } from './config.js';
 import { openDatabase } from './db.js';

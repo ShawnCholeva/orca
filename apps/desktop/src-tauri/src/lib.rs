@@ -38,23 +38,20 @@ fn workspace_root() -> PathBuf {
         .expect("resolve workspace root")
 }
 
-/// Path to the bundled sidecar binary, if one exists next to the app exe.
-/// Tauri's externalBin places `orca-daemon-<target-triple>` next to the main
-/// app exe in production bundles; on launch it's accessible at that location.
 fn bundled_sidecar_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
     let exe_suffix = std::env::consts::EXE_SUFFIX;
-    // Tauri preserves the triple suffix in the bundled name.
     let triple = env!("ORCA_TARGET_TRIPLE");
-    let with_triple = dir.join(format!("orca-daemon-{triple}{exe_suffix}"));
-    if with_triple.exists() {
-        return Some(with_triple);
-    }
-    // Fallback: some bundle formats strip the triple suffix.
-    let without_triple = dir.join(format!("orca-daemon{exe_suffix}"));
-    if without_triple.exists() {
-        return Some(without_triple);
+    // Some bundle formats (deb, rpm) strip Tauri's triple suffix; others keep it.
+    for name in [
+        format!("orca-daemon-{triple}{exe_suffix}"),
+        format!("orca-daemon{exe_suffix}"),
+    ] {
+        let candidate = dir.join(name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
     }
     None
 }
@@ -80,8 +77,7 @@ fn attach_log_pipes(child: &mut Child) {
 
 fn configure_command_lifecycle(cmd: &mut Command) {
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-    // Put the child in its own process group so we can kill the whole tree on
-    // shutdown without leaving orphans.
+    // Own process group so SIGTERM reaches the whole tree (pnpm + tsx + node).
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -89,8 +85,6 @@ fn configure_command_lifecycle(cmd: &mut Command) {
     }
 }
 
-/// Production path: invoke the sidecar binary directly with the runtime tree
-/// (better-sqlite3 + native binding) located in Tauri resources.
 fn spawn_sidecar(
     app: &AppHandle,
     sidecar: PathBuf,
@@ -113,9 +107,6 @@ fn spawn_sidecar(
     Ok(child)
 }
 
-/// Dev fallback: when no bundled sidecar is present (e.g. `cargo run`,
-/// `pnpm tauri:dev`), invoke `pnpm --filter @orca/daemon dev` from the
-/// workspace root. Matches the M1 baseline.
 fn spawn_dev(port: u16, token: &str) -> std::io::Result<Child> {
     let root = workspace_root();
     #[cfg(target_os = "windows")]

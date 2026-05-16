@@ -1,13 +1,5 @@
-// Bootstrap helpers for the SEA-bundled sidecar binary.
-//
-// In a normal `node dist/index.js` run, isSidecar is false and
-// sidecarMigrationsDir() returns null — callers fall back to the on-disk
-// migrations dir resolved from import.meta.url.
-//
-// In the SEA-bundled binary:
-//   - The native module (better-sqlite3) is loaded from ORCA_RUNTIME_DIR via
-//     an esbuild-time shim baked into the bundle (see scripts/build-sidecar.mjs).
-//   - Migrations live as SEA assets and are extracted to a temp dir at boot.
+// Helpers for the SEA-bundled sidecar binary. In a normal `node dist/index.js`
+// run, sidecarMigrationsDir() returns null and callers use the on-disk path.
 
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
