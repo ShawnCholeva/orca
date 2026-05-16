@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import {
   CreateGoalRequest,
+  Goal,
   UpdateGoalRequest,
   type DomainEvent,
-  type Goal,
 } from "@orca/contracts";
 import { getDatabase } from "./db.js";
 import { eventBus } from "./events.js";
@@ -35,16 +35,16 @@ interface GoalRow {
 }
 
 function rowToGoal(row: GoalRow): Goal {
-  return {
+  return Goal.parse({
     id: row.id,
     title: row.title,
     description: row.description,
-    status: row.status as Goal["status"],
+    status: row.status,
     autonomyLevel: row.autonomy_level,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     archivedAt: row.archived_at,
-  };
+  });
 }
 
 // Tracks current DB instance to detect close/reopen cycles and re-prepare statements.

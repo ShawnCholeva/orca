@@ -322,3 +322,14 @@ describe("archiveGoal", () => {
     expect(() => archiveGoal(created.id)).not.toThrow();
   });
 });
+
+describe("projection schema parsing", () => {
+  it("throws when a goal row in the projection has an invalid status", () => {
+    const db = setup();
+    const created = createGoal({ title: "X" });
+
+    db.prepare("UPDATE goals SET status = 'bogus' WHERE id = ?").run(created.id);
+
+    expect(() => listGoals()).toThrow();
+  });
+});
