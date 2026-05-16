@@ -12,7 +12,7 @@ Your task is NOT to immediately generate code.
 
 Your task is to produce:
 
-an implementation architecture and milestone execution plan for Milestone 1 of the MVP.
+an implementation architecture and milestone execution plan for Milestone 2 of the MVP.
 
 The system is:
 
@@ -41,16 +41,20 @@ The implementation plan should NOT overengineer the MVP.
 
 We are currently implementing:
 
-Milestone 1 — Runtime Foundation
+## Milestone 2 — Plugin and Skill Foundation
 
-Milestone 1 goals:
+Build:
 
-Tauri app boots
-Node daemon boots
-UI connects to daemon
-SQLite provider works
-event store works
-basic Goal CRUD works
+- internal plugin registry
+- internal skill registry
+- default skill provider
+- default storage plugin
+- shell/manual adapter plugin
+
+Exit criteria:
+
+- app can list available skills/adapters
+- Goal creation can invoke a skill
 
 The implementation document should include:
 
@@ -150,11 +154,11 @@ event subscriptions
 Goal dashboard structure
 runtime connection indicators
 
-Keep the UI minimal for Milestone 1.
+Keep the UI minimal for Milestone 2.
 
 10. Milestone Task Breakdown
 
-Break Milestone 1 into:
+Break Milestone 2 into:
 
 sequential implementation tasks
 dependencies
@@ -182,7 +186,7 @@ things intentionally deferred
 overengineering traps to avoid
 13. Definition of Done
 
-Provide a precise “Milestone 1 complete” definition.
+Provide a precise “Milestone 2 complete” definition.
 
 Very important constraints:
 

@@ -1,16 +1,16 @@
-You are acting as a principal engineer decomposing Milestone 1 of an AI orchestration platform into executable implementation tasks for an AI-assisted engineering workflow.
+You are acting as a principal engineer decomposing Milestone 2 of an AI orchestration platform into executable implementation tasks for an AI-assisted engineering workflow.
 
 I have attached:
 
 Technical Design Document
 MVP Specification
-Revised Milestone 1 implementation plan
+Revised Milestone 2 implementation plan
 
 Your task is to:
 
 generate bounded executable implementation tasks
 
-for Milestone 1.
+for Milestone 2.
 
 The system is:
 

@@ -4,13 +4,13 @@ I have attached:
 
 the Technical Design Document
 the MVP Specification
-the Milestone 1 implementation plan
+the Milestone 2 implementation plan
 
 Your task is NOT to redesign the system.
 
 Your task is to:
 
-tighten, simplify, and operationalize Milestone 1 execution.
+tighten, simplify, and operationalize Milestone 2 execution.
 
 The platform is:
 
@@ -25,7 +25,7 @@ Goal/memory/reasoning-centric
 
 The long-term vision is large, but:
 
-Milestone 1 must remain aggressively MVP-focused.
+Milestone 2 must remain aggressively MVP-focused.
 
 Your review should identify:
 
@@ -130,11 +130,11 @@ For every recommendation:
 
 explain why it improves MVP velocity
 explain why it does NOT damage future architecture
-10. Revised Milestone 1
+10. Revised Milestone 2
 
 At the end, produce:
 
-a revised, simplified Milestone 1 plan
+a revised, simplified Milestone 2 plan
 
 Include:
 

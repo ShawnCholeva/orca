@@ -19,7 +19,7 @@ preserving future extensibility
 
 Current task:
 
-M1-013
+M1-001
 
 Important architectural constraints:
 
@@ -54,7 +54,8 @@ explain any deviations
 explain any technical concerns
 
 After finishing:
-Run /simplify
+Commit changes
+Run /simplify, then commit again if any changes made
 Output changes from a product perspective
 
 Do not implement unrelated future milestone functionality.
