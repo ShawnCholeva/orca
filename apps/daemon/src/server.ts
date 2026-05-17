@@ -19,6 +19,7 @@ import {
   type ArchiveGoalResponse
 } from '@orca/contracts';
 import type { Config } from './config.js';
+import { getDatabase } from './db.js';
 import {
   archiveGoal,
   createGoal,
@@ -126,7 +127,7 @@ export function createServer(config: Config): FastifyInstance {
     }
 
     try {
-      const goal = createGoal(parsed.data);
+      const goal = createGoal(parsed.data, { db: getDatabase(), bus: eventBus, skills: skillRegistry });
       reply.status(201);
       return { goal };
     } catch (error) {

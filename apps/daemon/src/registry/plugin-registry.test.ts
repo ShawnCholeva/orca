@@ -64,7 +64,7 @@ describe("PluginRegistry", () => {
 
     registry.register(plugin);
 
-    expect(registry.byId("plugin.match")).toBe(plugin);
+    expect(registry.byId("plugin.match")).toEqual(plugin);
     expect(registry.byId("plugin.unknown")).toBeUndefined();
   });
 });

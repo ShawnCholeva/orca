@@ -13,7 +13,7 @@ export class SkillRegistry {
       throw new Error(`Duplicate skill id: ${skill.id}`);
     }
 
-    this.skills.set(skill.id, skill);
+    this.skills.set(skill.id, Object.freeze({ ...skill }) as SkillDescriptor);
   }
 
   freeze(): void {

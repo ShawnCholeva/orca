@@ -13,7 +13,9 @@ export class PluginRegistry {
       throw new Error(`Duplicate plugin id: ${descriptor.id}`);
     }
 
-    this.plugins.set(descriptor.id, descriptor);
+    const frozenCapabilities = Object.freeze([...descriptor.capabilities]);
+    const frozen = Object.freeze({ ...descriptor, capabilities: frozenCapabilities as PluginCapability[] });
+    this.plugins.set(descriptor.id, frozen as PluginDescriptor);
   }
 
   freeze(): void {

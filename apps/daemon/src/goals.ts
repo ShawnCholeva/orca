@@ -3,8 +3,14 @@ import { performance } from "node:perf_hooks";
 import type Database from "better-sqlite3";
 import { Goal, UpdateGoalRequest } from "@orca/contracts";
 import { getDatabase } from "./db.js";
-import { eventBus } from "./events.js";
-import { skillRegistry } from "./registry/skill-registry.js";
+import { eventBus, EventBus } from "./events.js";
+import type { SkillRegistry } from "./registry/skill-registry.js";
+
+export interface CreateGoalCtx {
+  db: Database.Database;
+  bus: EventBus;
+  skills: SkillRegistry;
+}
 
 export class ValidationError extends Error {
   constructor(public readonly issues: unknown) {
@@ -55,8 +61,7 @@ let _stmts: {
   archiveGoal: Database.Statement;
 } | null = null;
 
-function ensureStmts(): { db: Database.Database; stmts: NonNullable<typeof _stmts> } {
-  const db = getDatabase();
+function ensureStmts(db: Database.Database): { db: Database.Database; stmts: NonNullable<typeof _stmts> } {
   if (db !== _db) {
     _db = db;
     _stmts = {
@@ -81,8 +86,8 @@ function ensureStmts(): { db: Database.Database; stmts: NonNullable<typeof _stmt
   return { db, stmts: _stmts! };
 }
 
-export function createGoal(input: unknown): Goal {
-  const skill = skillRegistry.byId("quick-goal");
+export function createGoal(input: unknown, ctx: CreateGoalCtx): Goal {
+  const skill = ctx.skills.byId("quick-goal");
   if (!skill) {
     throw new Error("Boot misconfiguration: quick-goal skill not registered");
   }
@@ -100,7 +105,7 @@ export function createGoal(input: unknown): Goal {
   const goalEventId = randomUUID();
   const now = new Date().toISOString();
 
-  const { db, stmts } = ensureStmts();
+  const { db, stmts } = ensureStmts(ctx.db);
 
   let skillSeq = 0;
   let goalSeq = 0;
@@ -127,7 +132,7 @@ export function createGoal(input: unknown): Goal {
     stmts.insertGoal.run(goalId, normalized.title, normalized.description, now, now);
   })();
 
-  eventBus.publish({
+  ctx.bus.publish({
     seq: skillSeq,
     id: skillEventId,
     type: "skill.invoked",
@@ -136,7 +141,7 @@ export function createGoal(input: unknown): Goal {
     createdAt: now,
   });
 
-  eventBus.publish({
+  ctx.bus.publish({
     seq: goalSeq,
     id: goalEventId,
     type: "goal.created",
@@ -164,7 +169,7 @@ export function updateGoal(id: string, input: unknown): Goal {
   }
   const patch = parsed.data;
 
-  const { db, stmts } = ensureStmts();
+  const { db, stmts } = ensureStmts(getDatabase());
   const eventId = randomUUID();
   const now = new Date().toISOString();
   const payload = JSON.stringify(patch);
@@ -203,7 +208,7 @@ export function updateGoal(id: string, input: unknown): Goal {
 }
 
 export function archiveGoal(id: string): Goal {
-  const { db, stmts } = ensureStmts();
+  const { db, stmts } = ensureStmts(getDatabase());
   const eventId = randomUUID();
   const now = new Date().toISOString();
 
@@ -236,7 +241,7 @@ export function archiveGoal(id: string): Goal {
 }
 
 export function listGoals(): Goal[] {
-  const { stmts } = ensureStmts();
+  const { stmts } = ensureStmts(getDatabase());
   const rows = stmts.selectGoals.all() as GoalRow[];
   return rows.map(rowToGoal);
 }

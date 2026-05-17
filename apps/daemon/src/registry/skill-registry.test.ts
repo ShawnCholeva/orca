@@ -61,7 +61,7 @@ describe("SkillRegistry", () => {
 
     registry.register(skill);
 
-    expect(registry.byId("skill.match")).toBe(skill);
+    expect(registry.byId("skill.match")).toEqual(skill);
     expect(registry.byId("skill.unknown")).toBeUndefined();
   });
 });
