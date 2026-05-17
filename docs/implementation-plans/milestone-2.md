@@ -16,6 +16,16 @@ When M2 modifies `apps/daemon/src/goals.ts::createGoal` to invoke the Quick Goal
 
 Reason: M1 review flagged the hidden coupling on `_db`, `eventBus`, and the module-global prepared statements as acceptable for M1 but fragile for M2's atomic-transaction work. This constraint records the minimum-viable seam.
 
+### Inherited constraint from M1 review — Sidecar surface freeze
+
+For the duration of M2, treat the production sidecar as operational substrate, not a feature surface:
+
+- Do not modify `apps/daemon/scripts/build-sidecar.mjs`, `apps/daemon/src/sidecar-bootstrap.ts`, or the desktop spawn paths in `apps/desktop/src-tauri/src/lib.rs` unless a defect in M1-022 is found by M2 testing.
+- New plugin/skill work must be validated by running the daemon standalone (`pnpm --filter @orca/daemon dev`) and against the existing Tauri dev path; do not introduce M2 logic that depends on changes to the SEA bundle, runtime resource layout, or platform launcher behavior.
+- If M2 work uncovers a real sidecar defect, file it as a separate M1-follow-up task with its own review checkpoint before patching.
+
+Reason: M1 review flagged sidecar packaging as a magnet for architectural attention during M2, especially around native better-sqlite3 binding handling and platform-specific launch behavior. Freezing the surface preserves M2's focus on the plugin/skill foundation.
+
 This document decomposes Milestone 2 (Plugin and Skill Foundation) into bounded executable tasks. Each task is sized for a single AI session, has explicit acceptance criteria, and is reviewable in isolation.
 
 The single proof point for M2 is:
