@@ -14,6 +14,12 @@ import {
 } from "./api";
 import "./styles.css";
 
+function toErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
+}
+
+type Diagnostics = { plugins: PluginSummary[]; skills: SkillSummary[] };
+
 export default function App() {
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("connecting");
@@ -22,20 +28,19 @@ export default function App() {
   const [description, setDescription] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [plugins, setPlugins] = useState<PluginSummary[] | null>(null);
-  const [skills, setSkills] = useState<SkillSummary[] | null>(null);
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
 
   async function loadDiagnostics() {
+    if (diagnosticsLoading) return;
     setDiagnosticsLoading(true);
     setDiagnosticsError(null);
     try {
-      const [p, s] = await Promise.all([listPlugins(), listSkills()]);
-      setPlugins(p);
-      setSkills(s);
+      const [plugins, skills] = await Promise.all([listPlugins(), listSkills()]);
+      setDiagnostics({ plugins, skills });
     } catch (err) {
-      setDiagnosticsError(err instanceof ApiError ? err.message : "Failed to load diagnostics.");
+      setDiagnosticsError(toErrorMessage(err, "Failed to load diagnostics."));
     } finally {
       setDiagnosticsLoading(false);
     }
@@ -66,7 +71,6 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  // Initial goal load + diagnostics load
   useEffect(() => {
     loadGoals();
     loadDiagnostics();
@@ -94,11 +98,7 @@ export default function App() {
       setTitle("");
       setDescription("");
     } catch (err) {
-      if (err instanceof ApiError) {
-        setFormError(err.message);
-      } else {
-        setFormError("Failed to create goal. Please try again.");
-      }
+      setFormError(toErrorMessage(err, "Failed to create goal. Please try again."));
     } finally {
       setSubmitting(false);
     }
@@ -192,19 +192,18 @@ export default function App() {
               {diagnosticsLoading ? "Loading…" : "Refresh"}
             </button>
           </div>
-          {diagnosticsLoading && <p className="diagnostics-loading">Loading…</p>}
           {diagnosticsError && <p className="diagnostics-error">{diagnosticsError}</p>}
-          {!diagnosticsLoading && !diagnosticsError && plugins !== null && skills !== null && (
+          {!diagnosticsLoading && !diagnosticsError && diagnostics !== null && (
             <>
-              <h3 className="diagnostics-subheading">Plugins ({plugins.length})</h3>
+              <h3 className="diagnostics-subheading">Plugins ({diagnostics.plugins.length})</h3>
               <ul className="diagnostics-list">
-                {plugins.map((p) => (
+                {diagnostics.plugins.map((p) => (
                   <li key={p.id}>{p.id} — {p.capabilities.join(", ")}</li>
                 ))}
               </ul>
-              <h3 className="diagnostics-subheading">Skills ({skills.length})</h3>
+              <h3 className="diagnostics-subheading">Skills ({diagnostics.skills.length})</h3>
               <ul className="diagnostics-list">
-                {skills.map((s) => (
+                {diagnostics.skills.map((s) => (
                   <li key={s.id}>{s.id} — {s.extensionPoint} ({s.title})</li>
                 ))}
               </ul>
@@ -251,7 +250,7 @@ function GoalItem({ goal }: { goal: Goal }) {
       await updateGoal(goal.id, patch);
       setEditing(false);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to update goal.");
+      setError(toErrorMessage(err, "Failed to update goal."));
     } finally {
       setBusy(false);
     }
@@ -264,7 +263,7 @@ function GoalItem({ goal }: { goal: Goal }) {
     try {
       await archiveGoal(goal.id);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to archive goal.");
+      setError(toErrorMessage(err, "Failed to archive goal."));
     } finally {
       setBusy(false);
     }

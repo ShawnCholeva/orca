@@ -355,12 +355,7 @@ h2 {
   font-family: ui-monospace, monospace;
 }
 
-.diagnostics-loading,
 .diagnostics-error {
   font-size: 13px;
-  color: #6b7280;
-}
-
-.diagnostics-error {
   color: #dc2626;
 }
