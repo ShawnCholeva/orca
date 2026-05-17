@@ -2,12 +2,16 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   HealthResponse,
   ListGoalsResponse,
+  ListPluginsResponse,
+  ListSkillsResponse,
   CreateGoalRequest,
   CreateGoalResponse,
   UpdateGoalRequest,
   UpdateGoalResponse,
   ArchiveGoalResponse,
   DomainEvent,
+  type PluginSummary,
+  type SkillSummary,
 } from "@orca/contracts";
 
 interface Config {
@@ -82,6 +86,30 @@ export async function listGoals(): Promise<ListGoalsResponse> {
     headers: authHeaders(token),
   });
   return parseResponse(res, ListGoalsResponse);
+}
+
+export async function listPlugins(): Promise<PluginSummary[]> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/plugins`, {
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    throw new ApiError(`List plugins failed (${res.status})`);
+  }
+  const body = await parseResponse(res, ListPluginsResponse);
+  return body.plugins;
+}
+
+export async function listSkills(): Promise<SkillSummary[]> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/skills`, {
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    throw new ApiError(`List skills failed (${res.status})`);
+  }
+  const body = await parseResponse(res, ListSkillsResponse);
+  return body.skills;
 }
 
 export async function createGoal(
