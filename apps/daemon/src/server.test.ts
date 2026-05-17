@@ -69,6 +69,7 @@ describe('server routes', () => {
     expect(body.status).toBe('ok');
     expect(typeof body.version).toBe('string');
     expect(typeof body.startedAt).toBe('string');
+    expect(body.registries).toEqual({ plugins: 3, skills: 1 });
   });
 
   it('GET /v1/plugins returns built-in plugins in sorted order', async () => {

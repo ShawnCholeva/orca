@@ -84,7 +84,11 @@ export function createServer(config: Config): FastifyInstance {
   server.get('/v1/health', async (): Promise<HealthResponse> => ({
     status: 'ok',
     version: pkg.version,
-    startedAt
+    startedAt,
+    registries: {
+      plugins: pluginRegistry.list().length,
+      skills: skillRegistry.list().length
+    }
   }));
 
   server.get('/v1/plugins', async (): Promise<ListPluginsResponse> => {
