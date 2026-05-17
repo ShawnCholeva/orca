@@ -11,6 +11,7 @@ import {
   ListEventsResponse,
   ListGoalsResponse,
   ListPluginsResponse,
+  ListSkillsResponse,
   UpdateGoalResponse
 } from '@orca/contracts';
 import type { Config } from './config.js';
@@ -83,6 +84,26 @@ describe('server routes', () => {
       'orca.default-skills',
       'orca.shell-manual',
       'orca.sqlite'
+    ]);
+  });
+
+  it('GET /v1/skills returns the built-in quick-goal skill', async () => {
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/skills',
+      headers: AUTH_HEADERS
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = ListSkillsResponse.parse(JSON.parse(response.body));
+    expect(body.skills).toEqual([
+      {
+        id: 'quick-goal',
+        pluginId: 'orca.default-skills',
+        extensionPoint: 'goal.create',
+        title: 'Quick Goal',
+        description: 'Deterministic normalization of Goal creation input. No AI.'
+      }
     ]);
   });
 
@@ -304,6 +325,11 @@ describe('server routes', () => {
 
   it('GET /v1/plugins without Authorization returns 401', async () => {
     const response = await server.inject({ method: 'GET', url: '/v1/plugins' });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('GET /v1/skills without Authorization returns 401', async () => {
+    const response = await server.inject({ method: 'GET', url: '/v1/skills' });
     expect(response.statusCode).toBe(401);
   });
 
