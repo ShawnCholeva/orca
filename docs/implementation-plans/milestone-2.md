@@ -5,6 +5,17 @@
 **Status:** Ready for AI-assisted execution
 **Scope guard:** Tasks below MUST NOT introduce dynamic plugin loading, JSON manifests, permissions, sandboxing, storage-provider abstractions, generic skill invocation endpoints, PTY/session runtime, memory, recommendations, workflows, or AI reasoning. Any task that requires such code is out of scope for M2.
 
+### Inherited constraint from M1 review — DaemonContext seam
+
+When M2 modifies `apps/daemon/src/goals.ts::createGoal` to invoke the Quick Goal skill and emit `skill.invoked` + `goal.created` in one transaction:
+
+- Introduce a single explicit `DaemonContext` parameter type on the use-case (e.g. `{ db: Database.Database; bus: EventBus; now: () => string; invokeSkill: (...) => ... }`) so dependencies are visible at the call site.
+- Source it from a small factory in `apps/daemon/src/index.ts` / tests; do not add a DI framework, container, or decorator metadata.
+- Keep `eventBus` and `getDatabase()` module singletons as the production seam wiring; the test seam constructs an explicit context per case.
+- Apply the same parameter to `updateGoal` and `archiveGoal` only if M2 modifies them; otherwise leave them on the singletons until a later milestone gives them a real reason to move.
+
+Reason: M1 review flagged the hidden coupling on `_db`, `eventBus`, and the module-global prepared statements as acceptable for M1 but fragile for M2's atomic-transaction work. This constraint records the minimum-viable seam.
+
 This document decomposes Milestone 2 (Plugin and Skill Foundation) into bounded executable tasks. Each task is sized for a single AI session, has explicit acceptance criteria, and is reviewable in isolation.
 
 The single proof point for M2 is:
