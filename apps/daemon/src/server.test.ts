@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import {
   ArchiveGoalResponse,
@@ -16,6 +16,13 @@ import type { Config } from './config.js';
 import { createServer } from './server.js';
 import { closeDatabase, openDatabase } from './db.js';
 import { defaultMigrationsDir, runMigrations } from './migrations.js';
+import { bootstrapRegistries } from './registry/bootstrap.js';
+
+// Populate the skill registry once for the file — mirrors the daemon boot sequence.
+// createGoal resolves quick-goal from the registry (M2-008).
+beforeAll(() => {
+  bootstrapRegistries();
+});
 
 const tempDirs: string[] = [];
 
@@ -327,9 +334,11 @@ describe('WebSocket /v1/events', () => {
   it('delivers goal.created event to subscriber within 250ms', async () => {
     const ws = await wsServer.injectWS('/v1/events?token=test-token');
 
+    // M2-008: each createGoal emits skill.invoked then goal.created — wait for goal.created.
     const messagePromise = new Promise<DomainEvent>((resolve) => {
-      ws.once('message', (data: Buffer | ArrayBuffer | Buffer[]) => {
-        resolve(DomainEvent.parse(JSON.parse(data.toString())));
+      ws.on('message', (data: Buffer | ArrayBuffer | Buffer[]) => {
+        const event = DomainEvent.parse(JSON.parse(data.toString()));
+        if (event.type === 'goal.created') resolve(event);
       });
     });
 
@@ -430,15 +439,16 @@ describe('GET /v1/events (replay)', () => {
     });
     expect(all.statusCode).toBe(200);
     const body = ListEventsResponse.parse(JSON.parse(all.body));
-    expect(body.events).toHaveLength(3);
+    // M2-008: each goal create emits skill.invoked + goal.created → 3 goals = 6 events
+    expect(body.events).toHaveLength(6);
     expect(body.events.map((e) => e.type)).toEqual([
-      'goal.created',
-      'goal.created',
-      'goal.created'
+      'skill.invoked', 'goal.created',
+      'skill.invoked', 'goal.created',
+      'skill.invoked', 'goal.created',
     ]);
     expect(body.events[0]!.seq).toBeLessThan(body.events[1]!.seq);
     expect(body.events[1]!.seq).toBeLessThan(body.events[2]!.seq);
-    expect(body.nextSinceSeq).toBe(body.events[2]!.seq);
+    expect(body.nextSinceSeq).toBe(body.events[5]!.seq);
 
     const sinceOne = await server.inject({
       method: 'GET',
@@ -447,9 +457,10 @@ describe('GET /v1/events (replay)', () => {
     });
     expect(sinceOne.statusCode).toBe(200);
     const sinceOneBody = ListEventsResponse.parse(JSON.parse(sinceOne.body));
-    expect(sinceOneBody.events).toHaveLength(2);
+    // sinceSeq=1 → events with seq > 1; 5 of the 6 events remain
+    expect(sinceOneBody.events).toHaveLength(5);
     expect(sinceOneBody.events.every((e) => e.seq > 1)).toBe(true);
-    expect(sinceOneBody.nextSinceSeq).toBe(sinceOneBody.events[1]!.seq);
+    expect(sinceOneBody.nextSinceSeq).toBe(sinceOneBody.events[4]!.seq);
   });
 
   it('defaults sinceSeq to 0 when omitted', async () => {
@@ -461,8 +472,9 @@ describe('GET /v1/events (replay)', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = ListEventsResponse.parse(JSON.parse(res.body));
-    expect(body.events).toHaveLength(1);
-    expect(body.nextSinceSeq).toBe(body.events[0]!.seq);
+    // M2-008: one goal = 2 events (skill.invoked + goal.created)
+    expect(body.events).toHaveLength(2);
+    expect(body.nextSinceSeq).toBe(body.events[1]!.seq);
   });
 
   it('returns empty events array and echoes sinceSeq when no new events', async () => {

@@ -1,13 +1,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type Database from "better-sqlite3";
 import type { Config } from "./config.js";
 import { closeDatabase, openDatabase } from "./db.js";
 import { defaultMigrationsDir, runMigrations } from "./migrations.js";
 import { eventBus } from "./events.js";
+import { bootstrapRegistries } from "./registry/bootstrap.js";
 import {
   archiveGoal,
   createGoal,
@@ -16,6 +17,12 @@ import {
   updateGoal,
   ValidationError,
 } from "./goals.js";
+
+// Populate the module-singleton skill registry before any test runs.
+// createGoal now resolves quick-goal from the registry (M2-008).
+beforeAll(() => {
+  bootstrapRegistries();
+});
 
 const tempDirs: string[] = [];
 
@@ -52,7 +59,7 @@ afterEach(() => {
 });
 
 describe("createGoal", () => {
-  it("returns a Goal; events and goals each have exactly one row with matching id", () => {
+  it("returns a Goal; events table has two rows (skill.invoked + goal.created) and goals has one row", () => {
     const db = setup();
 
     const goal = createGoal({ title: "X" });
@@ -69,11 +76,11 @@ describe("createGoal", () => {
       db.prepare("SELECT count(*) as cnt FROM goals").get() as { cnt: number }
     ).cnt;
 
-    expect(eventCount).toBe(1);
+    expect(eventCount).toBe(2);
     expect(goalCount).toBe(1);
 
     const eventRow = db
-      .prepare("SELECT type, goal_id FROM events WHERE goal_id = ?")
+      .prepare("SELECT type, goal_id FROM events WHERE goal_id = ? AND type = 'goal.created'")
       .get(goal.id) as { type: string; goal_id: string } | undefined;
 
     expect(eventRow?.type).toBe("goal.created");
@@ -107,23 +114,121 @@ describe("createGoal", () => {
     expect(publishSpy).not.toHaveBeenCalled();
   });
 
-  it("calls bus.publish exactly once on success with a numeric seq", () => {
+  it("publishes skill.invoked then goal.created on success, both with numeric seqs", () => {
     setup();
     const publishSpy = vi.spyOn(eventBus, "publish");
 
     createGoal({ title: "Alpha" });
 
-    expect(publishSpy).toHaveBeenCalledTimes(1);
-    const event = publishSpy.mock.calls[0]![0]!;
-    expect(typeof event.seq).toBe("number");
-    expect(event.seq).toBeGreaterThan(0);
-    expect(event.type).toBe("goal.created");
+    expect(publishSpy).toHaveBeenCalledTimes(2);
+    const skillEvent = publishSpy.mock.calls[0]![0]!;
+    const goalEvent = publishSpy.mock.calls[1]![0]!;
+    expect(skillEvent.type).toBe("skill.invoked");
+    expect(typeof skillEvent.seq).toBe("number");
+    expect(skillEvent.seq).toBeGreaterThan(0);
+    expect(goalEvent.type).toBe("goal.created");
+    expect(typeof goalEvent.seq).toBe("number");
+    expect(goalEvent.seq).toBeGreaterThan(skillEvent.seq);
   });
 
   it("throws ValidationError for invalid input", () => {
     setup();
     expect(() => createGoal({ title: "" })).toThrow(ValidationError);
     expect(() => createGoal({})).toThrow(ValidationError);
+  });
+});
+
+describe("createGoal — M2-008 event ordering and payload invariants", () => {
+  it("skill.invoked has a strictly smaller seq than goal.created, both share the same goalId", () => {
+    const db = setup();
+    const goal = createGoal({ title: "M2 ordering" });
+
+    const rows = db
+      .prepare("SELECT seq, type, goal_id FROM events WHERE goal_id = ? ORDER BY seq ASC")
+      .all(goal.id) as { seq: number; type: string; goal_id: string }[];
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.type).toBe("skill.invoked");
+    expect(rows[1]!.type).toBe("goal.created");
+    expect(rows[0]!.seq).toBeLessThan(rows[1]!.seq);
+    expect(rows[0]!.goal_id).toBe(goal.id);
+    expect(rows[1]!.goal_id).toBe(goal.id);
+  });
+
+  it("skill.invoked payload has skillId, extensionPoint, and non-negative integer durationMs", () => {
+    const db = setup();
+    const goal = createGoal({ title: "Timing check" });
+
+    const row = db
+      .prepare("SELECT payload FROM events WHERE goal_id = ? AND type = 'skill.invoked'")
+      .get(goal.id) as { payload: string } | undefined;
+
+    expect(row).toBeDefined();
+    const payload = JSON.parse(row!.payload) as {
+      skillId: string;
+      extensionPoint: string;
+      durationMs: number;
+    };
+    expect(payload.skillId).toBe("quick-goal");
+    expect(payload.extensionPoint).toBe("goal.create");
+    expect(typeof payload.durationMs).toBe("number");
+    expect(Number.isInteger(payload.durationMs)).toBe(true);
+    expect(payload.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("goal.created payload is { title, description } — unchanged from M1", () => {
+    const db = setup();
+    const goal = createGoal({ title: "Payload invariant", description: "keep me" });
+
+    const row = db
+      .prepare("SELECT payload FROM events WHERE goal_id = ? AND type = 'goal.created'")
+      .get(goal.id) as { payload: string } | undefined;
+
+    expect(row).toBeDefined();
+    const payload = JSON.parse(row!.payload) as { title: string; description: string };
+    expect(payload).toEqual({ title: "Payload invariant", description: "keep me" });
+  });
+
+  it("goals projection has exactly one row matching the new Goal id", () => {
+    const db = setup();
+    const goal = createGoal({ title: "Projection check" });
+
+    const rows = db
+      .prepare("SELECT id FROM goals WHERE id = ?")
+      .all(goal.id) as { id: string }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe(goal.id);
+  });
+
+  it("rolls back both event rows when the goals projection insert fails; bus not called", () => {
+    const db = setup();
+    const publishSpy = vi.spyOn(eventBus, "publish");
+    forceGoalInsertFailure(db);
+
+    expect(() => createGoal({ title: "Rollback both" })).toThrow();
+
+    const count = (db.prepare("SELECT count(*) AS c FROM events").get() as { c: number }).c;
+    expect(count).toBe(0);
+    expect(publishSpy).not.toHaveBeenCalled();
+  });
+
+  it("blank title throws ValidationError; no event or goal rows written; bus not called", () => {
+    const db = setup();
+    const publishSpy = vi.spyOn(eventBus, "publish");
+
+    expect(() => createGoal({ title: "  " })).toThrow(ValidationError);
+
+    const eventCount = (db.prepare("SELECT count(*) AS c FROM events").get() as { c: number }).c;
+    const goalCount = (db.prepare("SELECT count(*) AS c FROM goals").get() as { c: number }).c;
+    expect(eventCount).toBe(0);
+    expect(goalCount).toBe(0);
+    expect(publishSpy).not.toHaveBeenCalled();
+  });
+
+  it("normalizes title whitespace — returned Goal.title is trimmed", () => {
+    setup();
+    const goal = createGoal({ title: "  trimmed  " });
+    expect(goal.title).toBe("trimmed");
   });
 });
 

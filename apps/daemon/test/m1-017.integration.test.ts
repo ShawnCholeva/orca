@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 
 import type { FastifyInstance } from 'fastify';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 
 import {
@@ -18,6 +18,12 @@ import { closeDatabase, getDatabase, openDatabase } from '../src/db.js';
 import { eventBus } from '../src/events.js';
 import { defaultMigrationsDir, runMigrations } from '../src/migrations.js';
 import { createServer } from '../src/server.js';
+import { bootstrapRegistries } from '../src/registry/bootstrap.js';
+
+// Boot the skill registry once per file — mirrors the daemon index.ts boot sequence (M2-008).
+beforeAll(() => {
+  bootstrapRegistries();
+});
 
 const ORCA_ENV_KEYS = ['ORCA_DATA_DIR', 'ORCA_PORT', 'ORCA_LOG_LEVEL', 'ORCA_TOKEN'] as const;
 
@@ -122,7 +128,7 @@ describe.sequential('M1-017 daemon integration loop', () => {
     }
   });
 
-  it('Create Goal: events/goals rows are 1/1 with matching IDs', async () => {
+  it('Create Goal: events table has 2 rows (skill.invoked + goal.created); goals has 1 row', async () => {
     const dir = createTempDir();
     const { server, baseUrl } = await boot(dir);
 
@@ -142,7 +148,8 @@ describe.sequential('M1-017 daemon integration loop', () => {
       const goalCount =
         (db.prepare('SELECT count(*) AS cnt FROM goals').get() as { cnt: number }).cnt;
 
-      expect(eventCount).toBe(1);
+      // M2-008: skill.invoked + goal.created = 2 events per createGoal
+      expect(eventCount).toBe(2);
       expect(goalCount).toBe(1);
 
       const eventGoalId = (
@@ -171,19 +178,20 @@ describe.sequential('M1-017 daemon integration loop', () => {
         ws.once('error', reject);
       });
 
+      // M2-008: first message is skill.invoked; listen on all messages until goal.created arrives.
       const eventPromise = new Promise<unknown>((resolve, reject) => {
-          ws.once('message', (data) => {
-            try {
-              const message = typeof data === 'string' ? data : data.toString();
-              resolve(JSON.parse(message));
-            } catch (error) {
-              reject(error);
-            }
-          });
+        ws.on('message', (data) => {
+          try {
+            const message = typeof data === 'string' ? data : data.toString();
+            const parsed = JSON.parse(message) as { type?: string };
+            if (parsed.type === 'goal.created') resolve(parsed);
+          } catch (error) {
+            reject(error);
+          }
+        });
 
-          ws.once('error', reject);
-        }
-      );
+        ws.once('error', reject);
+      });
 
       const response = await fetch(`${baseUrl}/v1/goals`, {
         method: 'POST',

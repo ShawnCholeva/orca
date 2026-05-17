@@ -1,13 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import type Database from "better-sqlite3";
-import {
-  CreateGoalRequest,
-  Goal,
-  UpdateGoalRequest,
-  type DomainEvent,
-} from "@orca/contracts";
+import { Goal, UpdateGoalRequest } from "@orca/contracts";
 import { getDatabase } from "./db.js";
 import { eventBus } from "./events.js";
+import { skillRegistry } from "./registry/skill-registry.js";
 
 export class ValidationError extends Error {
   constructor(public readonly issues: unknown) {
@@ -85,42 +82,73 @@ function ensureStmts(): { db: Database.Database; stmts: NonNullable<typeof _stmt
 }
 
 export function createGoal(input: unknown): Goal {
-  const parsed = CreateGoalRequest.safeParse(input);
-  if (!parsed.success) {
-    throw new ValidationError(parsed.error.issues);
+  const skill = skillRegistry.byId("quick-goal");
+  if (!skill) {
+    throw new Error("Boot misconfiguration: quick-goal skill not registered");
   }
-  const { title, description } = parsed.data;
+
+  const startedAt = performance.now();
+  // ValidationError from skill.invoke propagates as-is (→ HTTP 400); no DB writes occur.
+  const normalized = skill.invoke(input, { now: () => new Date().toISOString() }) as {
+    title: string;
+    description: string;
+  };
+  const durationMs = Math.round(performance.now() - startedAt);
 
   const goalId = randomUUID();
-  const eventId = randomUUID();
+  const skillEventId = randomUUID();
+  const goalEventId = randomUUID();
   const now = new Date().toISOString();
-  const payload = JSON.stringify({ title, description });
 
   const { db, stmts } = ensureStmts();
 
-  let seq = 0;
+  let skillSeq = 0;
+  let goalSeq = 0;
 
   db.transaction(() => {
-    const result = stmts.insertEvent.run(eventId, "goal.created", goalId, payload, now);
-    seq = Number(result.lastInsertRowid);
-    stmts.insertGoal.run(goalId, title, description, now, now);
+    const skillResult = stmts.insertEvent.run(
+      skillEventId,
+      "skill.invoked",
+      goalId,
+      JSON.stringify({ skillId: "quick-goal", extensionPoint: "goal.create", durationMs }),
+      now,
+    );
+    skillSeq = Number(skillResult.lastInsertRowid);
+
+    const goalResult = stmts.insertEvent.run(
+      goalEventId,
+      "goal.created",
+      goalId,
+      JSON.stringify({ title: normalized.title, description: normalized.description }),
+      now,
+    );
+    goalSeq = Number(goalResult.lastInsertRowid);
+
+    stmts.insertGoal.run(goalId, normalized.title, normalized.description, now, now);
   })();
 
-  const event: DomainEvent = {
-    seq,
-    id: eventId,
+  eventBus.publish({
+    seq: skillSeq,
+    id: skillEventId,
+    type: "skill.invoked",
+    goalId,
+    payload: { skillId: "quick-goal", extensionPoint: "goal.create", durationMs },
+    createdAt: now,
+  });
+
+  eventBus.publish({
+    seq: goalSeq,
+    id: goalEventId,
     type: "goal.created",
     goalId,
-    payload: { title, description },
+    payload: { title: normalized.title, description: normalized.description },
     createdAt: now,
-  };
-
-  eventBus.publish(event);
+  });
 
   return {
     id: goalId,
-    title,
-    description,
+    title: normalized.title,
+    description: normalized.description,
     status: "active",
     autonomyLevel: 1,
     createdAt: now,
