@@ -2,7 +2,7 @@
 
 Local-first desktop application for multi-agent AI orchestration.
 
-> **Status:** Milestone 1 (Local Runtime Foundation). The app boots, persists Goals through an event-sourced SQLite store, and streams updates to the UI over WebSocket. The orchestration features described in `docs/PRODUCT.md` are **not yet implemented**.
+> **Status:** Milestone 2 (Plugin and Skill Foundation). The daemon registers internal plugin descriptors and the Quick Goal skill at boot, routes Goal creation through Quick Goal, and persists `skill.invoked` + `goal.created` atomically. The desktop renders a read-only Runtime Diagnostics panel showing registered plugins and skills.
 
 ## What works today
 
@@ -10,21 +10,25 @@ Local-first desktop application for multi-agent AI orchestration.
 - Goal CRUD (create + list) backed by an append-only event log
 - Live UI refresh via `/v1/events` WebSocket
 - Per-launch auth token between desktop and daemon
+- Static internal plugin registry (`GET /v1/plugins`) with three built-in descriptors
+- Static internal skill registry (`GET /v1/skills`) with the Quick Goal skill
+- Atomic `skill.invoked` + `goal.created` event pair on every Goal creation
+- Runtime Diagnostics section in the UI listing registered plugins and skills
 
 ## Not yet implemented
 
-The following are specified in `docs/` but intentionally out of scope for M1:
+The following are specified in `docs/` but intentionally deferred past M2:
 
-- Plugin runtime
-- Skill system
 - PTY / agent sessions (Claude Code, opencode, Codex adapters)
 - Shared memory engine and context assembly
 - Orchestrator engine and recommendations
 - Workflow engine
 - Any AI reasoning
+- External plugin API package, dynamic plugin loading, JSON manifests, permissions/sandbox
 
-See [`docs/milestones/1.md`](docs/milestones/1.md) for the M1 scope and
-[`docs/implementation-plans/milestone-1.md`](docs/implementation-plans/milestone-1.md) for the task breakdown.
+See [`docs/milestones/2.md`](docs/milestones/2.md) for the M2 scope,
+[`docs/implementation-plans/milestone-2.md`](docs/implementation-plans/milestone-2.md) for the task breakdown,
+and [`docs/dev/internal-plugins-and-skills.md`](docs/dev/internal-plugins-and-skills.md) for how to add internal plugins and skills.
 
 ## Prerequisites
 
