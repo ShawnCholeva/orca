@@ -10,6 +10,7 @@ import {
   HealthResponse,
   ListEventsResponse,
   ListGoalsResponse,
+  ListPluginsResponse,
   UpdateGoalResponse
 } from '@orca/contracts';
 import type { Config } from './config.js';
@@ -67,6 +68,22 @@ describe('server routes', () => {
     expect(body.status).toBe('ok');
     expect(typeof body.version).toBe('string');
     expect(typeof body.startedAt).toBe('string');
+  });
+
+  it('GET /v1/plugins returns built-in plugins in sorted order', async () => {
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/plugins',
+      headers: AUTH_HEADERS
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = ListPluginsResponse.parse(JSON.parse(response.body));
+    expect(body.plugins.map((plugin) => plugin.id)).toEqual([
+      'orca.default-skills',
+      'orca.shell-manual',
+      'orca.sqlite'
+    ]);
   });
 
   it('POST /v1/goals returns 201 with a valid Goal payload', async () => {
@@ -282,6 +299,11 @@ describe('server routes', () => {
 
   it('GET /v1/goals without Authorization returns 401', async () => {
     const response = await server.inject({ method: 'GET', url: '/v1/goals' });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('GET /v1/plugins without Authorization returns 401', async () => {
+    const response = await server.inject({ method: 'GET', url: '/v1/plugins' });
     expect(response.statusCode).toBe(401);
   });
 

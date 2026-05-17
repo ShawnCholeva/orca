@@ -12,6 +12,7 @@ import {
   ListEventsQuery,
   type ListEventsResponse,
   type ListGoalsResponse,
+  type ListPluginsResponse,
   UpdateGoalRequest,
   type UpdateGoalResponse,
   type ArchiveGoalResponse
@@ -26,6 +27,7 @@ import {
   ValidationError
 } from './goals.js';
 import { eventBus, listEventsSince } from './events.js';
+import { pluginRegistry } from './registry/plugin-registry.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -82,6 +84,17 @@ export function createServer(config: Config): FastifyInstance {
     version: pkg.version,
     startedAt
   }));
+
+  server.get('/v1/plugins', async (): Promise<ListPluginsResponse> => {
+    const plugins = pluginRegistry.list().map((plugin) => ({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      capabilities: plugin.capabilities
+    }));
+
+    return { plugins };
+  });
 
   server.post('/v1/goals', async (request, reply): Promise<CreateGoalResponse | { error: 'validation_failed'; issues: unknown }> => {
     const parsed = CreateGoalRequest.safeParse(request.body);
