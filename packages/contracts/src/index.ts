@@ -54,16 +54,60 @@ export type ListGoalsResponse = z.infer<typeof ListGoalsResponse>;
 export const HealthResponse = z.object({
   status: z.literal("ok"),
   version: z.string(),
-  startedAt: z.string()
+  startedAt: z.string(),
+  registries: z
+    .object({
+      plugins: z.number().int().nonnegative(),
+      skills: z.number().int().nonnegative()
+    })
+    .optional()
 });
 export type HealthResponse = z.infer<typeof HealthResponse>;
 
 export const DomainEventType = z.enum([
   "goal.created",
   "goal.updated",
-  "goal.archived"
+  "goal.archived",
+  "skill.invoked"
 ]);
 export type DomainEventType = z.infer<typeof DomainEventType>;
+
+export const PluginCapability = z.enum([
+  "storage",
+  "skill.provider",
+  "agent.adapter"
+]);
+export type PluginCapability = z.infer<typeof PluginCapability>;
+
+export const PluginSummary = z.object({
+  id: z.string(),
+  name: z.string(),
+  version: z.string(),
+  capabilities: z.array(PluginCapability)
+});
+export type PluginSummary = z.infer<typeof PluginSummary>;
+
+export const SkillExtensionPoint = z.enum(["goal.create"]);
+export type SkillExtensionPoint = z.infer<typeof SkillExtensionPoint>;
+
+export const SkillSummary = z.object({
+  id: z.string(),
+  pluginId: z.string(),
+  extensionPoint: SkillExtensionPoint,
+  title: z.string(),
+  description: z.string()
+});
+export type SkillSummary = z.infer<typeof SkillSummary>;
+
+export const ListPluginsResponse = z.object({
+  plugins: z.array(PluginSummary)
+});
+export type ListPluginsResponse = z.infer<typeof ListPluginsResponse>;
+
+export const ListSkillsResponse = z.object({
+  skills: z.array(SkillSummary)
+});
+export type ListSkillsResponse = z.infer<typeof ListSkillsResponse>;
 
 export const DomainEvent = z.object({
   seq: z.number().int(),
