@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import type Database from 'better-sqlite3';
 import {
   CreateGoalResponse,
   DomainEvent,
@@ -28,13 +29,13 @@ import { closeDatabase, getDatabase, openDatabase } from './db.js';
 import { defaultMigrationsDir, runMigrations } from './migrations.js';
 import { bootstrapRegistries } from './registry/bootstrap.js';
 
-// Populate registries once per worker — mirrors daemon index.ts boot order.
+// Mirrors daemon index.ts boot order.
 beforeAll(() => {
   bootstrapRegistries();
 });
 
-const tempDirs: string[] = [];
 const AUTH_HEADERS = { authorization: 'Bearer test-token' } as const;
+const WS_TIMEOUT_MS = 500;
 
 function makeConfig(dataDir: string): Config {
   return {
@@ -52,13 +53,24 @@ function bootServer(dataDir: string): FastifyInstance {
   return createServer(config);
 }
 
-// Scenarios 1–6: shared server per test, fresh temp dir per test.
+function assertEventOrder(db: Database.Database, goalId: string): void {
+  const rows = db
+    .prepare('SELECT seq, type, goal_id FROM events WHERE goal_id = ? ORDER BY seq ASC')
+    .all(goalId) as { seq: number; type: string; goal_id: string }[];
+  expect(rows).toHaveLength(2);
+  expect(rows[0]!.type).toBe('skill.invoked');
+  expect(rows[1]!.type).toBe('goal.created');
+  expect(rows[0]!.seq).toBeLessThan(rows[1]!.seq);
+  expect(rows[0]!.goal_id).toBe(goalId);
+  expect(rows[1]!.goal_id).toBe(goalId);
+}
+
 describe.sequential('M2-014 — scenarios 1–6', () => {
   let server: FastifyInstance;
+  let dir: string;
 
   beforeEach(async () => {
-    const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-m2-loop-'));
-    tempDirs.push(dir);
+    dir = mkdtempSync(path.join(os.tmpdir(), 'orca-m2-loop-'));
     server = bootServer(dir);
     await server.ready();
   });
@@ -66,9 +78,7 @@ describe.sequential('M2-014 — scenarios 1–6', () => {
   afterEach(async () => {
     await server.close();
     closeDatabase();
-    for (const dir of tempDirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('S1 — boot: GET /v1/health returns registries: { plugins: 3, skills: 1 }', async () => {
@@ -121,24 +131,13 @@ describe.sequential('M2-014 — scenarios 1–6', () => {
 
     expect(res.statusCode).toBe(201);
     const { goal } = CreateGoalResponse.parse(JSON.parse(res.body));
-    const db = getDatabase();
-
-    const rows = db
-      .prepare('SELECT seq, type, goal_id FROM events WHERE goal_id = ? ORDER BY seq ASC')
-      .all(goal.id) as { seq: number; type: string; goal_id: string }[];
-
-    expect(rows).toHaveLength(2);
-    expect(rows[0]!.type).toBe('skill.invoked');
-    expect(rows[1]!.type).toBe('goal.created');
-    expect(rows[0]!.seq).toBeLessThan(rows[1]!.seq);
-    expect(rows[0]!.goal_id).toBe(goal.id);
-    expect(rows[1]!.goal_id).toBe(goal.id);
+    assertEventOrder(getDatabase(), goal.id);
   });
 
   it('S4 — rollback: projection failure → 5xx; both event rows absent from events table', async () => {
     const db = getDatabase();
-    // Inject a trigger that fires AFTER the two event inserts but BEFORE the goals projection
-    // insert, so the rollback must cover all three rows inside the same transaction.
+    // Trigger fires AFTER the two event inserts but BEFORE the goals projection insert,
+    // so the rollback must cover both event rows inside the same transaction.
     db.exec(`
       CREATE TRIGGER force_goal_insert_failure BEFORE INSERT ON goals
       BEGIN SELECT RAISE(ABORT, 'forced failure for rollback test'); END;
@@ -152,7 +151,6 @@ describe.sequential('M2-014 — scenarios 1–6', () => {
     });
 
     expect(res.statusCode).toBe(500);
-
     const eventCount = (db.prepare('SELECT count(*) AS c FROM events').get() as { c: number }).c;
     const goalCount = (db.prepare('SELECT count(*) AS c FROM goals').get() as { c: number }).c;
     expect(eventCount).toBe(0);
@@ -170,21 +168,26 @@ describe.sequential('M2-014 — scenarios 1–6', () => {
       });
     });
 
-    await server.inject({
-      method: 'POST',
-      url: '/v1/goals',
-      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'WS order' }
-    });
+    try {
+      await server.inject({
+        method: 'POST',
+        url: '/v1/goals',
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { title: 'WS order' }
+      });
 
-    await Promise.race([
-      twoEvents,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('WS: 2 events not received within 500ms')), 500)
-      )
-    ]);
-
-    ws.terminate();
+      await Promise.race([
+        twoEvents,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`WS: 2 events not received within ${WS_TIMEOUT_MS}ms`)),
+            WS_TIMEOUT_MS
+          )
+        )
+      ]);
+    } finally {
+      ws.terminate();
+    }
 
     expect(received).toHaveLength(2);
     const [first, second] = received as [DomainEvent, DomainEvent];
@@ -206,12 +209,10 @@ describe.sequential('M2-014 — scenarios 1–6', () => {
       payload: { title: '  ' }
     });
 
-    expect(res.statusCode).toBe(400);
-
-    // Allow any in-flight async to settle before asserting zero messages.
-    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    // Validation fails before any async work is queued, so no messages can be in-flight.
     ws.terminate();
 
+    expect(res.statusCode).toBe(400);
     const db = getDatabase();
     const eventCount = (db.prepare('SELECT count(*) AS c FROM events').get() as { c: number }).c;
     expect(eventCount).toBe(0);
@@ -219,15 +220,12 @@ describe.sequential('M2-014 — scenarios 1–6', () => {
   });
 });
 
-// Scenario 7: separate describe — manages its own server lifecycle for the restart.
 describe('M2-014 S7 — restart: event ordering survives DB close/reopen', () => {
   it('skill.invoked row immediately precedes goal.created after server restart', async () => {
     const dataDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m2-restart-'));
 
-    // First boot: create a goal.
     const server1 = bootServer(dataDir);
     await server1.ready();
-
     const res = await server1.inject({
       method: 'POST',
       url: '/v1/goals',
@@ -236,11 +234,9 @@ describe('M2-014 S7 — restart: event ordering survives DB close/reopen', () =>
     });
     expect(res.statusCode).toBe(201);
     const { goal } = CreateGoalResponse.parse(JSON.parse(res.body));
-
     await server1.close();
     closeDatabase();
 
-    // Second boot: verify the goal and event ordering persist across the restart.
     const server2 = bootServer(dataDir);
     await server2.ready();
 
@@ -254,16 +250,7 @@ describe('M2-014 S7 — restart: event ordering survives DB close/reopen', () =>
       const { goals } = ListGoalsResponse.parse(JSON.parse(listRes.body));
       expect(goals).toHaveLength(1);
       expect(goals[0]?.id).toBe(goal.id);
-
-      const db = getDatabase();
-      const rows = db
-        .prepare('SELECT seq, type FROM events WHERE goal_id = ? ORDER BY seq ASC')
-        .all(goal.id) as { seq: number; type: string }[];
-
-      expect(rows).toHaveLength(2);
-      expect(rows[0]!.type).toBe('skill.invoked');
-      expect(rows[1]!.type).toBe('goal.created');
-      expect(rows[0]!.seq).toBeLessThan(rows[1]!.seq);
+      assertEventOrder(getDatabase(), goal.id);
     } finally {
       await server2.close();
       closeDatabase();
