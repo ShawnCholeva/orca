@@ -336,10 +336,14 @@ describe('WebSocket /v1/events', () => {
 
     // M2-008: each createGoal emits skill.invoked then goal.created — wait for goal.created.
     const messagePromise = new Promise<DomainEvent>((resolve) => {
-      ws.on('message', (data: Buffer | ArrayBuffer | Buffer[]) => {
+      const handler = (data: Buffer | ArrayBuffer | Buffer[]) => {
         const event = DomainEvent.parse(JSON.parse(data.toString()));
-        if (event.type === 'goal.created') resolve(event);
-      });
+        if (event.type === 'goal.created') {
+          ws.off('message', handler);
+          resolve(event);
+        }
+      };
+      ws.on('message', handler);
     });
 
     await wsServer.inject({

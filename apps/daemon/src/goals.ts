@@ -110,7 +110,7 @@ export function createGoal(input: unknown): Goal {
       skillEventId,
       "skill.invoked",
       goalId,
-      JSON.stringify({ skillId: "quick-goal", extensionPoint: "goal.create", durationMs }),
+      JSON.stringify({ skillId: skill.id, extensionPoint: skill.extensionPoint, durationMs }),
       now,
     );
     skillSeq = Number(skillResult.lastInsertRowid);
@@ -132,7 +132,7 @@ export function createGoal(input: unknown): Goal {
     id: skillEventId,
     type: "skill.invoked",
     goalId,
-    payload: { skillId: "quick-goal", extensionPoint: "goal.create", durationMs },
+    payload: { skillId: skill.id, extensionPoint: skill.extensionPoint, durationMs },
     createdAt: now,
   });
 

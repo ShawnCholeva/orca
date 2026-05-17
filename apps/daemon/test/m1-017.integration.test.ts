@@ -180,16 +180,19 @@ describe.sequential('M1-017 daemon integration loop', () => {
 
       // M2-008: first message is skill.invoked; listen on all messages until goal.created arrives.
       const eventPromise = new Promise<unknown>((resolve, reject) => {
-        ws.on('message', (data) => {
+        const handler = (data: Buffer | string) => {
           try {
             const message = typeof data === 'string' ? data : data.toString();
             const parsed = JSON.parse(message) as { type?: string };
-            if (parsed.type === 'goal.created') resolve(parsed);
+            if (parsed.type === 'goal.created') {
+              ws.off('message', handler);
+              resolve(parsed);
+            }
           } catch (error) {
             reject(error);
           }
-        });
-
+        };
+        ws.on('message', handler);
         ws.once('error', reject);
       });
 
