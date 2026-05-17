@@ -2,22 +2,31 @@ import { sidecarMigrationsDir } from './sidecar-bootstrap.js';
 import { loadConfig } from './config.js';
 import { openDatabase } from './db.js';
 import { defaultMigrationsDir, runMigrations } from './migrations.js';
+import { bootstrapRegistries } from './registry/bootstrap.js';
 import { createServer } from './server.js';
 import { registerShutdown } from './shutdown.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const db = openDatabase(config);
-  const server = createServer(config);
 
   const migrationsDir = sidecarMigrationsDir() ?? defaultMigrationsDir();
 
   try {
     runMigrations(db, migrationsDir);
   } catch (err) {
-    server.log.error(err, 'Migration failed — aborting startup');
+    console.error('[orca-daemon] Migration failed — aborting startup:', err);
     process.exit(1);
   }
+
+  try {
+    bootstrapRegistries();
+  } catch (err) {
+    console.error('[orca-daemon] Registry bootstrap failed — aborting startup:', err);
+    process.exit(1);
+  }
+
+  const server = createServer(config);
 
   try {
     await server.listen({ host: '127.0.0.1', port: config.port });
