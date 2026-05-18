@@ -6,6 +6,7 @@ import {
   GuidedRefinementOutput,
   UpdateGoalRequest,
   type DomainEvent,
+  type DomainEventType,
   type InspectWorkspacePreview,
 } from "@orca/contracts";
 import { getDatabase } from "./db.js";
@@ -110,63 +111,72 @@ type CreateGoalInput = {
   workspaces?: Array<{ inputPath: string; name?: string }>;
 };
 
+type GoalOrigin = {
+  title: string;
+  description: string;
+  skillId: string;
+  extensionPoint: string;
+  durationMs: number;
+};
+
+function resolveGoalOrigin(
+  input: CreateGoalInput,
+  ctx: CreateGoalCtx,
+  validatedRefined: GuidedRefinementOutput | undefined,
+): GoalOrigin {
+  if (validatedRefined) {
+    return {
+      title: validatedRefined.title,
+      description: validatedRefined.description,
+      skillId: "guided-goal-refinement",
+      extensionPoint: "goal.refine",
+      durationMs: 0,
+    };
+  }
+  const skill = ctx.skills.byId("quick-goal");
+  if (!skill) throw new Error("Boot misconfiguration: quick-goal skill not registered");
+  const startedAt = performance.now();
+  // ValidationError from skill.invoke propagates as-is (→ HTTP 400); no DB writes occur.
+  const normalized = skill.invoke(input, { now: () => new Date().toISOString() }) as {
+    title: string;
+    description: string;
+  };
+  return {
+    title: normalized.title,
+    description: normalized.description,
+    skillId: skill.id,
+    extensionPoint: skill.extensionPoint,
+    durationMs: Math.round(performance.now() - startedAt),
+  };
+}
+
 export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Promise<Goal> {
   const { refined, workspaces } = input;
 
-  // Validate refined payload if present.
   let validatedRefined: GuidedRefinementOutput | undefined;
   if (refined !== undefined) {
     const r = GuidedRefinementOutput.safeParse(refined);
-    if (!r.success) {
-      throw new ValidationError(r.error.issues);
-    }
+    if (!r.success) throw new ValidationError(r.error.issues);
     validatedRefined = r.data;
   }
 
-  // Inspect workspaces asynchronously before entering the transaction.
-  // Any inspection failure propagates immediately with no DB writes.
-  const inspected: Array<{ preview: InspectWorkspacePreview; name?: string }> = [];
-  for (const ws of workspaces ?? []) {
-    const preview = await ctx.inspectWorkspace(ws.inputPath);
-    inspected.push({ preview, name: ws.name });
-  }
+  // Inspect all workspaces in parallel; any failure propagates before entering the transaction.
+  const inspected = await Promise.all(
+    (workspaces ?? []).map(async (ws) => ({
+      preview: await ctx.inspectWorkspace(ws.inputPath),
+      name: ws.name,
+    })),
+  );
   if (inspected.length > 1) {
     const paths = inspected.map((w) => w.preview.path);
-    if (new Set(paths).size !== paths.length) {
-      throw new DuplicateWorkspaceInRequestError();
-    }
+    if (new Set(paths).size !== paths.length) throw new DuplicateWorkspaceInRequestError();
   }
 
-  // Determine title/description and which skill was "invoked".
-  let title: string;
-  let description: string;
-  let skillId: string;
-  let extensionPoint: string;
-  let durationMs: number;
-
-  if (validatedRefined) {
-    title = validatedRefined.title;
-    description = validatedRefined.description;
-    skillId = "guided-goal-refinement";
-    extensionPoint = "goal.refine";
-    durationMs = 0;
-  } else {
-    const skill = ctx.skills.byId("quick-goal");
-    if (!skill) {
-      throw new Error("Boot misconfiguration: quick-goal skill not registered");
-    }
-    const startedAt = performance.now();
-    // ValidationError from skill.invoke propagates as-is (→ HTTP 400); no DB writes occur.
-    const normalized = skill.invoke(input, { now: () => new Date().toISOString() }) as {
-      title: string;
-      description: string;
-    };
-    durationMs = Math.round(performance.now() - startedAt);
-    title = normalized.title;
-    description = normalized.description;
-    skillId = skill.id;
-    extensionPoint = skill.extensionPoint;
-  }
+  const { title, description, skillId, extensionPoint, durationMs } = resolveGoalOrigin(
+    input,
+    ctx,
+    validatedRefined,
+  );
 
   const goalId = randomUUID();
   const now = new Date().toISOString();
@@ -174,69 +184,24 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
   const toPublish: DomainEvent[] = [];
 
   ctx.db.transaction(() => {
-    // Step 1: skill.invoked (quick-goal for minimal path, guided-goal-refinement for refined path).
-    const skillEventId = randomUUID();
-    const skillPayload = { skillId, extensionPoint, durationMs };
-    const skillR = stmts.insertEvent.run(
-      skillEventId,
-      "skill.invoked",
-      goalId,
-      JSON.stringify(skillPayload),
-      now,
-    );
-    toPublish.push({
-      seq: Number(skillR.lastInsertRowid),
-      id: skillEventId,
-      type: "skill.invoked",
-      goalId,
-      payload: skillPayload,
-      createdAt: now,
-    });
+    const emitEvent = (type: DomainEventType, payload: Record<string, unknown>): DomainEvent => {
+      const eventId = randomUUID();
+      const r = stmts.insertEvent.run(eventId, type, goalId, JSON.stringify(payload), now);
+      return { seq: Number(r.lastInsertRowid), id: eventId, type, goalId, payload, createdAt: now };
+    };
 
-    // Step 2: goal.created + goals projection row.
-    const goalEventId = randomUUID();
-    const goalPayload = { title, description };
-    const goalR = stmts.insertEvent.run(
-      goalEventId,
-      "goal.created",
-      goalId,
-      JSON.stringify(goalPayload),
-      now,
-    );
-    toPublish.push({
-      seq: Number(goalR.lastInsertRowid),
-      id: goalEventId,
-      type: "goal.created",
-      goalId,
-      payload: goalPayload,
-      createdAt: now,
-    });
+    toPublish.push(emitEvent("skill.invoked", { skillId, extensionPoint, durationMs }));
+    toPublish.push(emitEvent("goal.created", { title, description }));
     stmts.insertGoal.run(goalId, title, description, now, now);
 
-    // Step 3: goal.refined + goal_refinements row (only when refined payload provided).
     if (validatedRefined) {
-      const refinedEventId = randomUUID();
       const refinedPayload = {
         skillId: validatedRefined.skillId,
         successCriteria: validatedRefined.successCriteria,
         constraints: validatedRefined.constraints,
         assumptions: validatedRefined.assumptions,
       };
-      const refinedR = stmts.insertEvent.run(
-        refinedEventId,
-        "goal.refined",
-        goalId,
-        JSON.stringify(refinedPayload),
-        now,
-      );
-      toPublish.push({
-        seq: Number(refinedR.lastInsertRowid),
-        id: refinedEventId,
-        type: "goal.refined",
-        goalId,
-        payload: refinedPayload,
-        createdAt: now,
-      });
+      toPublish.push(emitEvent("goal.refined", refinedPayload));
       insertGoalRefinement(ctx.db, {
         goalId,
         skillId: validatedRefined.skillId,
@@ -247,10 +212,8 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
       });
     }
 
-    // Step 4: workspace.attached × N (in user-supplied order).
     for (const { preview, name } of inspected) {
       const wsId = randomUUID();
-      const wsEventId = randomUUID();
       const wsName = name ?? preview.name;
       const wsPayload = {
         workspaceId: wsId,
@@ -261,21 +224,7 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
         isDirty: preview.isDirty,
         gitProbe: preview.gitProbe,
       };
-      const wsR = stmts.insertEvent.run(
-        wsEventId,
-        "workspace.attached",
-        goalId,
-        JSON.stringify(wsPayload),
-        now,
-      );
-      toPublish.push({
-        seq: Number(wsR.lastInsertRowid),
-        id: wsEventId,
-        type: "workspace.attached",
-        goalId,
-        payload: wsPayload,
-        createdAt: now,
-      });
+      toPublish.push(emitEvent("workspace.attached", wsPayload));
       insertWorkspace(ctx.db, {
         id: wsId,
         goalId,
@@ -290,7 +239,6 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
     }
   })();
 
-  // Broadcast events only after COMMIT returns.
   for (const event of toPublish) {
     ctx.bus.publish(event);
   }
