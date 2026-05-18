@@ -29,6 +29,7 @@ import {
   ValidationError
 } from './goals.js';
 import { eventBus, listEventsSince } from './events.js';
+import { inspectWorkspace } from './workspaces/inspect.js';
 import { pluginRegistry } from './registry/plugin-registry.js';
 import { skillRegistry } from './registry/skill-registry.js';
 
@@ -127,7 +128,7 @@ export function createServer(config: Config): FastifyInstance {
     }
 
     try {
-      const goal = createGoal(parsed.data, { db: getDatabase(), bus: eventBus, skills: skillRegistry });
+      const goal = await createGoal(parsed.data, { db: getDatabase(), bus: eventBus, skills: skillRegistry, inspectWorkspace });
       reply.status(201);
       return { goal };
     } catch (error) {
