@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,11 +31,23 @@ function freshDb() {
   return openDatabase(createConfig(dir));
 }
 
+function createMigrationsDir(files: string[]): string {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "orca-migrations-dir-"));
+  tempDirs.push(dir);
+
+  const sourceDir = defaultMigrationsDir();
+  for (const file of files) {
+    copyFileSync(path.join(sourceDir, file), path.join(dir, file));
+  }
+
+  return dir;
+}
+
 describe("runMigrations", () => {
-  it("applies 0001_init.sql on a fresh database", () => {
+  it("applies 0001 and 0002 on a fresh database in order", () => {
     const db = freshDb();
     const result = runMigrations(db, defaultMigrationsDir());
-    expect(result.applied).toEqual(["0001_init.sql"]);
+    expect(result.applied).toEqual(["0001_init.sql", "0002_workspaces_refinements.sql"]);
   });
 
   it("is idempotent — re-running on an already-migrated database applies nothing", () => {
@@ -45,7 +57,7 @@ describe("runMigrations", () => {
     expect(result.applied).toEqual([]);
   });
 
-  it("creates the events and goals tables", () => {
+  it("creates expected tables including refinements and workspaces", () => {
     const db = freshDb();
     runMigrations(db, defaultMigrationsDir());
 
@@ -57,6 +69,8 @@ describe("runMigrations", () => {
 
     expect(tables).toContain("events");
     expect(tables).toContain("goals");
+    expect(tables).toContain("goal_refinements");
+    expect(tables).toContain("workspaces");
     expect(tables).toContain("_migrations");
   });
 
@@ -74,5 +88,82 @@ describe("runMigrations", () => {
     expect(indices).toContain("idx_events_type_seq");
     expect(indices).toContain("idx_goals_updated_at");
     expect(indices).toContain("idx_goals_status");
+    expect(indices).toContain("idx_workspaces_goal_path");
+    expect(indices).toContain("idx_workspaces_goal_attached");
+  });
+
+  it("upgrades an M1-only database to 0002 without losing rows", () => {
+    const db = freshDb();
+    const m1OnlyMigrations = createMigrationsDir(["0001_init.sql"]);
+
+    runMigrations(db, m1OnlyMigrations);
+
+    db.prepare(
+      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "goal-1",
+      "Legacy Goal",
+      "created before 0002",
+      "active",
+      1,
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z",
+      null
+    );
+
+    const upgradeResult = runMigrations(db, defaultMigrationsDir());
+
+    expect(upgradeResult.applied).toEqual(["0002_workspaces_refinements.sql"]);
+
+    const goalCount = (
+      db.prepare("SELECT count(*) AS cnt FROM goals WHERE id = ?").get("goal-1") as {
+        cnt: number;
+      }
+    ).cnt;
+
+    expect(goalCount).toBe(1);
+  });
+
+  it("creates workspaces table with the expected columns", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    const columns = db.prepare("PRAGMA table_info(workspaces)").all() as {
+      name: string;
+    }[];
+
+    expect(columns.map((column) => column.name)).toEqual([
+      "id",
+      "goal_id",
+      "path",
+      "name",
+      "workspace_type",
+      "branch",
+      "is_dirty",
+      "git_probe",
+      "attached_at"
+    ]);
+    expect(columns.some((column) => column.name === "input_path")).toBe(false);
+  });
+
+  it("enforces foreign keys for workspaces.goal_id", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    expect(() => {
+      db.prepare(
+        "INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(
+        "workspace-1",
+        "missing-goal",
+        "/tmp/example",
+        "example",
+        "folder",
+        null,
+        null,
+        "not_a_repo",
+        "2026-01-01T00:00:00.000Z"
+      );
+    }).toThrow(/FOREIGN KEY constraint failed/);
   });
 });

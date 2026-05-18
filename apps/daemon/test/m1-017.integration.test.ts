@@ -120,8 +120,9 @@ describe.sequential('M1-017 daemon integration loop', () => {
     const secondBoot = await boot(dir);
 
     try {
-      expect(firstRows).toHaveLength(1);
+      expect(firstRows).toHaveLength(2);
       expect(firstRows[0]?.name).toBe('0001_init.sql');
+      expect(firstRows[1]?.name).toBe('0002_workspaces_refinements.sql');
       expect(secondBoot.migrationRows).toEqual(firstRows);
     } finally {
       await stop(secondBoot.server);
