@@ -5,15 +5,23 @@ import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import {
+  AttachWorkspaceRequest,
+  type AttachWorkspaceResponse,
   CreateGoalRequest,
   type CreateGoalResponse,
+  type GoalDetailResponse,
+  type GuidedRefinementOutput,
   HealthResponse,
+  InspectWorkspaceRequest,
+  type InspectWorkspaceResponse,
   LIST_EVENTS_MAX_LIMIT,
   ListEventsQuery,
   type ListEventsResponse,
   type ListGoalsResponse,
   type ListPluginsResponse,
   type ListSkillsResponse,
+  RefineGoalRequest,
+  type RefineGoalResponse,
   UpdateGoalRequest,
   type UpdateGoalResponse,
   type ArchiveGoalResponse
@@ -23,13 +31,23 @@ import { getDatabase } from './db.js';
 import {
   archiveGoal,
   createGoal,
+  DuplicateWorkspaceInRequestError,
+  getGoalById,
   listGoals,
   NotFoundError,
   updateGoal,
   ValidationError
 } from './goals.js';
 import { eventBus, listEventsSince } from './events.js';
+import { getGoalRefinement } from './goal-refinements.js';
 import { inspectWorkspace } from './workspaces/inspect.js';
+import { WorkspaceInspectionError } from './workspaces/errors.js';
+import { listWorkspacesByGoal } from './workspaces/projection.js';
+import {
+  attachWorkspace,
+  detachWorkspace,
+  DuplicateWorkspaceError
+} from './workspaces/usecases.js';
 import { pluginRegistry } from './registry/plugin-registry.js';
 import { skillRegistry } from './registry/skill-registry.js';
 
@@ -116,7 +134,30 @@ export function createServer(config: Config): FastifyInstance {
     return { skills };
   });
 
-  server.post('/v1/goals', async (request, reply): Promise<CreateGoalResponse | { error: 'validation_failed'; issues: unknown }> => {
+  function m3Error(code: string, message: string): { error: { code: string; message: string } } {
+    return { error: { code, message } };
+  }
+
+  server.post('/v1/goals/refine', async (request, reply) => {
+    const parsed = RefineGoalRequest.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'validation_failed', issues: parsed.error.issues };
+    }
+
+    const skills = skillRegistry.byExtensionPoint('goal.refine');
+    if (skills.length === 0) {
+      reply.status(500);
+      return m3Error('runtime_misconfigured', 'No goal.refine skill registered');
+    }
+
+    const skill = skills[0]!;
+    const draft = skill.invoke(parsed.data, { now: () => new Date().toISOString() }) as GuidedRefinementOutput;
+    const response: RefineGoalResponse = { draft };
+    return response;
+  });
+
+  server.post('/v1/goals', async (request, reply) => {
     const parsed = CreateGoalRequest.safeParse(request.body);
 
     if (!parsed.success) {
@@ -134,12 +175,16 @@ export function createServer(config: Config): FastifyInstance {
     } catch (error) {
       if (error instanceof ValidationError) {
         reply.status(400);
-        return {
-          error: 'validation_failed',
-          issues: error.issues
-        };
+        return { error: 'validation_failed', issues: error.issues };
       }
-
+      if (error instanceof DuplicateWorkspaceInRequestError) {
+        reply.status(400);
+        return m3Error(error.code, error.message);
+      }
+      if (error instanceof WorkspaceInspectionError) {
+        reply.status(error.code === 'inspection_timeout' ? 504 : 400);
+        return m3Error(error.code, error.message);
+      }
       throw error;
     }
   });
@@ -147,6 +192,89 @@ export function createServer(config: Config): FastifyInstance {
   server.get('/v1/goals', async (): Promise<ListGoalsResponse> => {
     const goals = listGoals();
     return { goals };
+  });
+
+  server.get('/v1/goals/:id', async (request, reply): Promise<GoalDetailResponse | { error: unknown }> => {
+    const { id } = request.params as { id: string };
+    const goal = getGoalById(id);
+    if (!goal) {
+      reply.status(404);
+      return m3Error('not_found', `Goal not found: ${id}`);
+    }
+
+    const db = getDatabase();
+    const refinement = getGoalRefinement(db, id);
+    const workspaces = listWorkspacesByGoal(db, id);
+    return { goal, refinement, workspaces };
+  });
+
+  server.post('/v1/goals/:id/workspaces', async (request, reply): Promise<AttachWorkspaceResponse | { error: unknown }> => {
+    const { id: goalId } = request.params as { id: string };
+    const parsed = AttachWorkspaceRequest.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'validation_failed', issues: parsed.error.issues } as { error: unknown };
+    }
+
+    try {
+      const workspace = await attachWorkspace(
+        { db: getDatabase(), bus: eventBus, inspectWorkspace },
+        { goalId, inputPath: parsed.data.inputPath, name: parsed.data.name }
+      );
+      reply.status(201);
+      return { workspace };
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        reply.status(404);
+        return m3Error('not_found', `Goal not found: ${goalId}`);
+      }
+      if (error instanceof DuplicateWorkspaceError) {
+        reply.status(409);
+        return m3Error(error.code, error.message);
+      }
+      if (error instanceof WorkspaceInspectionError) {
+        reply.status(error.code === 'inspection_timeout' ? 504 : 400);
+        return m3Error(error.code, error.message);
+      }
+      throw error;
+    }
+  });
+
+  server.delete('/v1/goals/:id/workspaces/:workspaceId', async (request, reply): Promise<void | { error: unknown }> => {
+    const { id: goalId, workspaceId } = request.params as { id: string; workspaceId: string };
+
+    try {
+      await detachWorkspace(
+        { db: getDatabase(), bus: eventBus, inspectWorkspace },
+        { goalId, workspaceId }
+      );
+      reply.code(204).send();
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        reply.status(404);
+        return m3Error('not_found', `Workspace not found: ${workspaceId}`);
+      }
+      throw error;
+    }
+  });
+
+  server.post('/v1/workspaces/inspect', async (request, reply): Promise<InspectWorkspaceResponse | { error: unknown }> => {
+    const parsed = InspectWorkspaceRequest.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'validation_failed', issues: parsed.error.issues } as { error: unknown };
+    }
+
+    try {
+      const preview = await inspectWorkspace(parsed.data.inputPath);
+      return { preview };
+    } catch (error) {
+      if (error instanceof WorkspaceInspectionError) {
+        reply.status(error.code === 'inspection_timeout' ? 504 : 400);
+        return m3Error(error.code, error.message);
+      }
+      throw error;
+    }
   });
 
   server.patch('/v1/goals/:id', async (request, reply): Promise<UpdateGoalResponse | { error: string; issues?: unknown }> => {

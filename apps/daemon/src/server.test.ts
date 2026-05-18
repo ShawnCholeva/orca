@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -19,6 +19,7 @@ import { createServer } from './server.js';
 import { closeDatabase, openDatabase } from './db.js';
 import { defaultMigrationsDir, runMigrations } from './migrations.js';
 import { bootstrapRegistries } from './registry/bootstrap.js';
+import { eventBus } from './events.js';
 
 // Populate the skill registry once for the file — mirrors the daemon boot sequence.
 // createGoal resolves quick-goal from the registry (M2-008).
@@ -559,5 +560,394 @@ describe('GET /v1/events (replay)', () => {
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body) as { error?: string };
     expect(body.error).toBe('validation_failed');
+  });
+});
+
+describe('M3 routes', () => {
+  let server: FastifyInstance;
+  let wsDir!: string;
+  let wsDir2!: string;
+  const m3Dirs: string[] = [];
+
+  const DRAFT = {
+    skillId: 'guided-goal-refinement' as const,
+    title: 'My Goal',
+    description: 'A description',
+    successCriteria: ['Success 1'],
+    constraints: ['Constraint 1'],
+    assumptions: ['Assumption 1']
+  };
+
+  beforeEach(() => {
+    const dbDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m3-srv-'));
+    m3Dirs.push(dbDir);
+    wsDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-m3-ws1-')));
+    m3Dirs.push(wsDir);
+    wsDir2 = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-m3-ws2-')));
+    m3Dirs.push(wsDir2);
+
+    const config = createConfig(dbDir);
+    const db = openDatabase(config);
+    runMigrations(db, defaultMigrationsDir());
+    server = createServer(config);
+  });
+
+  afterEach(async () => {
+    await server.close();
+    closeDatabase();
+    for (const dir of m3Dirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // POST /v1/goals/refine
+  it('POST /v1/goals/refine returns 200 with draft', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/goals/refine',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'My Goal', description: 'Goals:\n- ship it\nConstraints:\n- no budget' }
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as { draft: { skillId: string; title: string; successCriteria: string[] } };
+    expect(body.draft.skillId).toBe('guided-goal-refinement');
+    expect(body.draft.title).toBe('My Goal');
+    expect(body.draft.successCriteria).toEqual(['ship it']);
+  });
+
+  it('POST /v1/goals/refine rejects unknown fields with 400', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/goals/refine',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'x', skillId: 'sneaked-in' }
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('POST /v1/goals/refine without Authorization returns 401', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/goals/refine',
+      headers: { 'content-type': 'application/json' },
+      payload: { title: 'x' }
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  // POST /v1/goals — extended paths
+  it('POST /v1/goals with refined + 2 workspaces returns 201 and emits events in order', async () => {
+    const captured: string[] = [];
+    const unsub = eventBus.subscribe((e) => captured.push(e.type));
+
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/goals',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: {
+        title: DRAFT.title,
+        description: DRAFT.description,
+        refined: DRAFT,
+        workspaces: [{ inputPath: wsDir }, { inputPath: wsDir2 }]
+      }
+    });
+    unsub();
+
+    expect(res.statusCode).toBe(201);
+    const body = CreateGoalResponse.parse(JSON.parse(res.body));
+    expect(body.goal.title).toBe(DRAFT.title);
+    expect(captured).toEqual([
+      'skill.invoked', 'goal.created', 'goal.refined',
+      'workspace.attached', 'workspace.attached'
+    ]);
+  });
+
+  it('POST /v1/goals with one bad workspace path returns 400 with no events', async () => {
+    const captured: string[] = [];
+    const unsub = eventBus.subscribe((e) => captured.push(e.type));
+
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/goals',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: {
+        title: 'g',
+        refined: DRAFT,
+        workspaces: [{ inputPath: '/this/does/not/exist/ever/m3' }]
+      }
+    });
+    unsub();
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe('not_found');
+    expect(captured).toHaveLength(0);
+  });
+
+  it('POST /v1/goals with duplicate workspace paths returns 400 duplicate_workspace_in_request', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/goals',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: {
+        title: 'g',
+        refined: DRAFT,
+        workspaces: [{ inputPath: wsDir }, { inputPath: wsDir }]
+      }
+    });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe('duplicate_workspace_in_request');
+  });
+
+  // GET /v1/goals/:id
+  it('GET /v1/goals/:id returns 404 for nonexistent id', async () => {
+    const res = await server.inject({
+      method: 'GET',
+      url: '/v1/goals/nonexistent',
+      headers: AUTH_HEADERS
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('GET /v1/goals/:id returns 404 for archived goal', async () => {
+    const created = CreateGoalResponse.parse(JSON.parse(
+      (await server.inject({
+        method: 'POST', url: '/v1/goals',
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { title: 'to-archive' }
+      })).body
+    ));
+    await server.inject({ method: 'POST', url: `/v1/goals/${created.goal.id}/archive`, headers: AUTH_HEADERS });
+
+    const res = await server.inject({ method: 'GET', url: `/v1/goals/${created.goal.id}`, headers: AUTH_HEADERS });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('GET /v1/goals/:id returns bundle for refined goal with 2 workspaces', async () => {
+    const created = CreateGoalResponse.parse(JSON.parse(
+      (await server.inject({
+        method: 'POST', url: '/v1/goals',
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: {
+          title: DRAFT.title,
+          description: DRAFT.description,
+          refined: DRAFT,
+          workspaces: [{ inputPath: wsDir }, { inputPath: wsDir2 }]
+        }
+      })).body
+    ));
+
+    const res = await server.inject({ method: 'GET', url: `/v1/goals/${created.goal.id}`, headers: AUTH_HEADERS });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as {
+      goal: { id: string };
+      refinement: { successCriteria: string[] } | null;
+      workspaces: { path: string }[];
+    };
+    expect(body.goal.id).toBe(created.goal.id);
+    expect(body.refinement).not.toBeNull();
+    expect(body.refinement!.successCriteria).toEqual(DRAFT.successCriteria);
+    expect(body.workspaces).toHaveLength(2);
+    expect(body.workspaces.map((w) => w.path).sort()).toEqual([wsDir, wsDir2].sort());
+  });
+
+  it('GET /v1/goals/:id returns bundle with null refinement for quick goal', async () => {
+    const created = CreateGoalResponse.parse(JSON.parse(
+      (await server.inject({
+        method: 'POST', url: '/v1/goals',
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { title: 'quick', description: 'no refine' }
+      })).body
+    ));
+
+    const res = await server.inject({ method: 'GET', url: `/v1/goals/${created.goal.id}`, headers: AUTH_HEADERS });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as { refinement: null; workspaces: unknown[] };
+    expect(body.refinement).toBeNull();
+    expect(body.workspaces).toHaveLength(0);
+  });
+
+  it('GET /v1/goals/:id without Authorization returns 401', async () => {
+    const res = await server.inject({ method: 'GET', url: '/v1/goals/any' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  // POST /v1/goals/:id/workspaces
+  it('POST /v1/goals/:id/workspaces returns 201 with workspace for non-git folder', async () => {
+    const created = CreateGoalResponse.parse(JSON.parse(
+      (await server.inject({
+        method: 'POST', url: '/v1/goals',
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { title: 'ws-goal' }
+      })).body
+    ));
+
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${created.goal.id}/workspaces`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir }
+    });
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body) as { workspace: { path: string; workspaceType: string; gitProbe: string } };
+    expect(body.workspace.path).toBe(wsDir);
+    expect(body.workspace.workspaceType).toBe('folder');
+    expect(body.workspace.gitProbe).toBe('not_a_repo');
+  });
+
+  it('POST /v1/goals/:id/workspaces returns 409 on duplicate canonical path', async () => {
+    const created = CreateGoalResponse.parse(JSON.parse(
+      (await server.inject({
+        method: 'POST', url: '/v1/goals',
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { title: 'ws-goal' }
+      })).body
+    ));
+
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${created.goal.id}/workspaces`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir }
+    });
+
+    const dup = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${created.goal.id}/workspaces`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir }
+    });
+    expect(dup.statusCode).toBe(409);
+    const body = JSON.parse(dup.body) as { error: { code: string } };
+    expect(body.error.code).toBe('workspace_duplicate');
+  });
+
+  it('POST /v1/goals/:id/workspaces without Authorization returns 401', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/goals/any/workspaces',
+      headers: { 'content-type': 'application/json' },
+      payload: { inputPath: wsDir }
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  // DELETE /v1/goals/:id/workspaces/:workspaceId
+  it('DELETE /v1/goals/:id/workspaces/:workspaceId happy path returns 204', async () => {
+    const created = CreateGoalResponse.parse(JSON.parse(
+      (await server.inject({
+        method: 'POST', url: '/v1/goals',
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { title: 'ws-goal' }
+      })).body
+    ));
+    const attached = JSON.parse(
+      (await server.inject({
+        method: 'POST',
+        url: `/v1/goals/${created.goal.id}/workspaces`,
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { inputPath: wsDir }
+      })).body
+    ) as { workspace: { id: string } };
+
+    const res = await server.inject({
+      method: 'DELETE',
+      url: `/v1/goals/${created.goal.id}/workspaces/${attached.workspace.id}`,
+      headers: AUTH_HEADERS
+    });
+    expect(res.statusCode).toBe(204);
+  });
+
+  it('DELETE /v1/goals/:id/workspaces/:workspaceId returns 404 for mismatched goal/workspace ids', async () => {
+    const goal1 = CreateGoalResponse.parse(JSON.parse(
+      (await server.inject({ method: 'POST', url: '/v1/goals', headers: { 'content-type': 'application/json', ...AUTH_HEADERS }, payload: { title: 'g1' } })).body
+    ));
+    const goal2 = CreateGoalResponse.parse(JSON.parse(
+      (await server.inject({ method: 'POST', url: '/v1/goals', headers: { 'content-type': 'application/json', ...AUTH_HEADERS }, payload: { title: 'g2' } })).body
+    ));
+    const attached = JSON.parse(
+      (await server.inject({
+        method: 'POST',
+        url: `/v1/goals/${goal1.goal.id}/workspaces`,
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { inputPath: wsDir }
+      })).body
+    ) as { workspace: { id: string } };
+
+    const res = await server.inject({
+      method: 'DELETE',
+      url: `/v1/goals/${goal2.goal.id}/workspaces/${attached.workspace.id}`,
+      headers: AUTH_HEADERS
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('DELETE /v1/goals/:id/workspaces/:workspaceId without Authorization returns 401', async () => {
+    const res = await server.inject({ method: 'DELETE', url: '/v1/goals/any/workspaces/any' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  // POST /v1/workspaces/inspect
+  it('POST /v1/workspaces/inspect returns 200 with preview for existing non-git folder', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/workspaces/inspect',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir }
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as { preview: { workspaceType: string; gitProbe: string; path: string } };
+    expect(body.preview.workspaceType).toBe('folder');
+    expect(body.preview.gitProbe).toBe('not_a_repo');
+    expect(body.preview.path).toBe(wsDir);
+  });
+
+  it('POST /v1/workspaces/inspect returns 400 with invalid_input for relative path', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/workspaces/inspect',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: 'relative/path/here' }
+    });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe('invalid_input');
+  });
+
+  it('POST /v1/workspaces/inspect returns 400 with not_found for nonexistent path', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/workspaces/inspect',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: '/does/not/exist/at/all/m3test' }
+    });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe('not_found');
+  });
+
+  it('POST /v1/workspaces/inspect returns 400 with not_a_directory for file path', async () => {
+    const filePath = path.join(wsDir, 'testfile.txt');
+    writeFileSync(filePath, 'hello');
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/workspaces/inspect',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: filePath }
+    });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe('not_a_directory');
+  });
+
+  it('POST /v1/workspaces/inspect without Authorization returns 401', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/workspaces/inspect',
+      headers: { 'content-type': 'application/json' },
+      payload: { inputPath: wsDir }
+    });
+    expect(res.statusCode).toBe(401);
   });
 });

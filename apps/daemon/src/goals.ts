@@ -340,3 +340,13 @@ export function listGoals(): Goal[] {
   const rows = stmts.selectGoals.all() as GoalRow[];
   return rows.map(rowToGoal);
 }
+
+export function getGoalById(id: string): Goal | null {
+  const db = getDatabase();
+  const stmts = ensureStmts(db);
+  const row = stmts.selectGoalById.get(id) as GoalRow | undefined;
+  if (!row || row.archived_at !== null) {
+    return null;
+  }
+  return rowToGoal(row);
+}
