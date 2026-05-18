@@ -94,7 +94,12 @@ export const DomainEventType = z.enum([
   "skill.invoked",
   "goal.refined",
   "workspace.attached",
-  "workspace.removed"
+  "workspace.removed",
+  "session.created",
+  "session.started",
+  "session.exited",
+  "session.failed",
+  "session.stopped"
 ]);
 export type DomainEventType = z.infer<typeof DomainEventType>;
 
@@ -208,6 +213,219 @@ export const M3ErrorCode = z.enum([
   "runtime_misconfigured"
 ]);
 export type M3ErrorCode = z.infer<typeof M3ErrorCode>;
+
+export const M4SessionErrorCode = z.enum([
+  "goal_not_found",
+  "goal_archived",
+  "workspace_not_found",
+  "workspace_not_attached",
+  "workspace_unavailable",
+  "adapter_not_found",
+  "session_not_found",
+  "session_not_startable",
+  "session_not_stoppable",
+  "invalid_session_state"
+]);
+export type M4SessionErrorCode = z.infer<typeof M4SessionErrorCode>;
+
+export const SessionStatus = z.enum([
+  "created",
+  "starting",
+  "running",
+  "exited",
+  "failed",
+  "stopped",
+  "archived"
+]);
+export type SessionStatus = z.infer<typeof SessionStatus>;
+
+export const SessionFailureReason = z.enum([
+  "command_not_found",
+  "workspace_unavailable",
+  "spawn_failed",
+  "daemon_restart",
+  "internal_error"
+]);
+export type SessionFailureReason = z.infer<typeof SessionFailureReason>;
+
+export const AdapterId = z.enum(["shell-manual", "claude-code", "opencode", "codex"]);
+export type AdapterId = z.infer<typeof AdapterId>;
+
+export const AdapterAvailabilityStatus = z.enum([
+  "available",
+  "unavailable",
+  "unknown"
+]);
+export type AdapterAvailabilityStatus = z.infer<typeof AdapterAvailabilityStatus>;
+
+export const AdapterSummary = z.object({
+  id: AdapterId,
+  title: z.string(),
+  availability: AdapterAvailabilityStatus,
+  detail: z.string().optional()
+});
+export type AdapterSummary = z.infer<typeof AdapterSummary>;
+
+export const ListAdaptersResponse = z.object({
+  adapters: z.array(AdapterSummary)
+});
+export type ListAdaptersResponse = z.infer<typeof ListAdaptersResponse>;
+
+export const SessionSummary = z.object({
+  id: z.string(),
+  goalId: z.string(),
+  workspaceId: z.string(),
+  adapterId: AdapterId,
+  role: z.string().nullable(),
+  title: z.string(),
+  status: SessionStatus,
+  createdAt: z.string().datetime(),
+  startedAt: z.string().datetime().nullable(),
+  exitedAt: z.string().datetime().nullable()
+});
+export type SessionSummary = z.infer<typeof SessionSummary>;
+
+export const SessionDetail = SessionSummary.extend({
+  instruction: z.string().nullable(),
+  pid: z.number().nullable(),
+  command: z.string().nullable(),
+  args: z.array(z.string()).nullable(),
+  cwd: z.string().nullable(),
+  terminalCols: z.number().nullable(),
+  terminalRows: z.number().nullable(),
+  exitCode: z.number().nullable(),
+  exitSignal: z.string().nullable(),
+  failureReason: SessionFailureReason.nullable(),
+  failureDetail: z.string().nullable(),
+  archivedAt: z.string().datetime().nullable()
+});
+export type SessionDetail = z.infer<typeof SessionDetail>;
+
+const SessionOutputChunk = z.object({
+  seq: z.number().int().nonnegative(),
+  byteOffset: z.number().int().nonnegative(),
+  dataBase64: z.string()
+});
+
+export const SessionOutputSnapshot = z.object({
+  sessionId: z.string(),
+  firstByteOffset: z.number().int().nonnegative(),
+  nextSeq: z.number().int().nonnegative(),
+  totalBytesKept: z.number().int().nonnegative(),
+  chunks: z.array(SessionOutputChunk)
+});
+export type SessionOutputSnapshot = z.infer<typeof SessionOutputSnapshot>;
+
+export const CreateSessionRequest = z
+  .object({
+    workspaceId: z.string().min(1),
+    adapterId: AdapterId,
+    role: z.string().trim().max(100).optional(),
+    instruction: z.string().max(4000).optional(),
+    title: z.string().trim().min(1).max(200).optional()
+  })
+  .strict();
+export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>;
+
+export const CreateSessionResponse = z.object({
+  session: SessionDetail
+});
+export type CreateSessionResponse = z.infer<typeof CreateSessionResponse>;
+
+export const ListSessionsResponse = z.object({
+  sessions: z.array(SessionSummary)
+});
+export type ListSessionsResponse = z.infer<typeof ListSessionsResponse>;
+
+export const GetSessionResponse = z.object({
+  session: SessionDetail,
+  output: SessionOutputSnapshot
+});
+export type GetSessionResponse = z.infer<typeof GetSessionResponse>;
+
+export const StartSessionRequest = z
+  .object({
+    terminalCols: z.number().int().positive().max(1000),
+    terminalRows: z.number().int().positive().max(1000)
+  })
+  .strict();
+export type StartSessionRequest = z.infer<typeof StartSessionRequest>;
+
+export const StartSessionResponse = z.object({
+  session: SessionDetail
+});
+export type StartSessionResponse = z.infer<typeof StartSessionResponse>;
+
+export const StopSessionRequest = z.object({}).strict();
+export type StopSessionRequest = z.infer<typeof StopSessionRequest>;
+
+export const StopSessionResponse = z.object({
+  session: SessionDetail
+});
+export type StopSessionResponse = z.infer<typeof StopSessionResponse>;
+
+export const SessionSubscribeFrame = z
+  .object({
+    type: z.literal("session.subscribe"),
+    sessionId: z.string().min(1)
+  })
+  .strict();
+export type SessionSubscribeFrame = z.infer<typeof SessionSubscribeFrame>;
+
+export const SessionUnsubscribeFrame = z
+  .object({
+    type: z.literal("session.unsubscribe"),
+    sessionId: z.string().min(1)
+  })
+  .strict();
+export type SessionUnsubscribeFrame = z.infer<typeof SessionUnsubscribeFrame>;
+
+export const SessionInputFrame = z
+  .object({
+    type: z.literal("session.input"),
+    sessionId: z.string().min(1),
+    dataBase64: z.string().min(1)
+  })
+  .strict();
+export type SessionInputFrame = z.infer<typeof SessionInputFrame>;
+
+export const SessionResizeFrame = z
+  .object({
+    type: z.literal("session.resize"),
+    sessionId: z.string().min(1),
+    cols: z.number().int().positive().max(1000),
+    rows: z.number().int().positive().max(1000)
+  })
+  .strict();
+export type SessionResizeFrame = z.infer<typeof SessionResizeFrame>;
+
+export const SessionOutputFrame = z
+  .object({
+    type: z.literal("session.output"),
+    sessionId: z.string(),
+    seq: z.number().int().nonnegative(),
+    byteOffset: z.number().int().nonnegative(),
+    dataBase64: z.string()
+  })
+  .strict();
+export type SessionOutputFrame = z.infer<typeof SessionOutputFrame>;
+
+export const SessionErrorFrameCode = z.enum([
+  "unknown_session",
+  "not_active",
+  "invalid_message"
+]);
+export type SessionErrorFrameCode = z.infer<typeof SessionErrorFrameCode>;
+
+export const SessionErrorFrame = z
+  .object({
+    type: z.literal("session.error"),
+    sessionId: z.string().optional(),
+    code: SessionErrorFrameCode,
+    message: z.string()
+  })
+  .strict();
+export type SessionErrorFrame = z.infer<typeof SessionErrorFrame>;
 
 export const SkillSummary = z.object({
   id: z.string(),
