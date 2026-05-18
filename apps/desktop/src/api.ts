@@ -1,11 +1,18 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
+  AttachWorkspaceRequest,
+  AttachWorkspaceResponse,
+  GoalDetailResponse,
   HealthResponse,
+  InspectWorkspaceRequest,
+  InspectWorkspaceResponse,
   ListGoalsResponse,
   ListPluginsResponse,
   ListSkillsResponse,
   CreateGoalRequest,
   CreateGoalResponse,
+  RefineGoalRequest,
+  RefineGoalResponse,
   UpdateGoalRequest,
   UpdateGoalResponse,
   ArchiveGoalResponse,
@@ -49,6 +56,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public readonly cause?: unknown,
+    public readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -69,6 +77,75 @@ async function parseResponse<T>(
     return schema.parse(json);
   } catch (err) {
     throw new ApiError("Response validation failed", err);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+async function readJsonBody(res: Response): Promise<unknown | undefined> {
+  try {
+    return await res.json();
+  } catch {
+    return undefined;
+  }
+}
+
+function toApiError(
+  res: Response,
+  body: unknown,
+  fallbackMessage: string,
+): ApiError {
+  let message = `${fallbackMessage} (${res.status})`;
+  let code: string | undefined;
+
+  if (isRecord(body)) {
+    const error = body["error"];
+    if (typeof error === "string" && error.length > 0) {
+      message = error;
+    } else if (isRecord(error)) {
+      const bodyMessage = error["message"];
+      const bodyCode = error["code"];
+      if (typeof bodyMessage === "string" && bodyMessage.length > 0) {
+        message = bodyMessage;
+      }
+      if (typeof bodyCode === "string" && bodyCode.length > 0) {
+        code = bodyCode;
+      }
+    }
+  }
+
+  return new ApiError(message, body, code);
+}
+
+async function requestJson<T>(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  schema: { parse(data: unknown): T },
+  fallbackMessage: string,
+): Promise<T> {
+  const res = await fetch(input, init);
+  const json = await readJsonBody(res);
+  if (!res.ok) {
+    throw toApiError(res, json, fallbackMessage);
+  }
+  try {
+    return schema.parse(json);
+  } catch (err) {
+    throw new ApiError("Response validation failed", err);
+  }
+}
+
+async function requestVoid(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  fallbackMessage: string,
+): Promise<void> {
+  const res = await fetch(input, init);
+  if (!res.ok) {
+    const json = await readJsonBody(res);
+    throw toApiError(res, json, fallbackMessage);
   }
 }
 
@@ -116,15 +193,104 @@ export async function createGoal(
   input: CreateGoalRequest,
 ): Promise<CreateGoalResponse> {
   const { baseUrl, token } = await loadConfig();
-  const res = await fetch(`${baseUrl}/v1/goals`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(token),
+  return requestJson(
+    `${baseUrl}/v1/goals`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(CreateGoalRequest.parse(input)),
     },
-    body: JSON.stringify(CreateGoalRequest.parse(input)),
-  });
-  return parseResponse(res, CreateGoalResponse);
+    CreateGoalResponse,
+    "Create goal failed",
+  );
+}
+
+export async function refineGoal(
+  input: RefineGoalRequest,
+): Promise<RefineGoalResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/refine`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(RefineGoalRequest.parse(input)),
+    },
+    RefineGoalResponse,
+    "Refine goal failed",
+  );
+}
+
+export async function getGoalDetail(goalId: string): Promise<GoalDetailResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}`,
+    {
+      headers: authHeaders(token),
+    },
+    GoalDetailResponse,
+    "Get goal detail failed",
+  );
+}
+
+export async function inspectWorkspace(
+  input: InspectWorkspaceRequest,
+): Promise<InspectWorkspaceResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/workspaces/inspect`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(InspectWorkspaceRequest.parse(input)),
+    },
+    InspectWorkspaceResponse,
+    "Inspect workspace failed",
+  );
+}
+
+export async function attachWorkspace(
+  goalId: string,
+  input: AttachWorkspaceRequest,
+): Promise<AttachWorkspaceResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workspaces`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(AttachWorkspaceRequest.parse(input)),
+    },
+    AttachWorkspaceResponse,
+    "Attach workspace failed",
+  );
+}
+
+export async function detachWorkspace(
+  goalId: string,
+  workspaceId: string,
+): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  return requestVoid(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workspaces/${encodeURIComponent(workspaceId)}`,
+    {
+      method: "DELETE",
+      headers: authHeaders(token),
+    },
+    "Detach workspace failed",
+  );
 }
 
 export async function updateGoal(
