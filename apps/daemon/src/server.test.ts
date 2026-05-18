@@ -69,7 +69,7 @@ describe('server routes', () => {
     expect(body.status).toBe('ok');
     expect(typeof body.version).toBe('string');
     expect(typeof body.startedAt).toBe('string');
-    expect(body.registries).toEqual({ plugins: 3, skills: 1 });
+    expect(body.registries).toEqual({ plugins: 3, skills: 2 });
   });
 
   it('GET /v1/plugins returns built-in plugins in sorted order', async () => {
@@ -88,7 +88,7 @@ describe('server routes', () => {
     ]);
   });
 
-  it('GET /v1/skills returns the built-in quick-goal skill', async () => {
+  it('GET /v1/skills returns both built-in skills sorted by id', async () => {
     const response = await server.inject({
       method: 'GET',
       url: '/v1/skills',
@@ -98,6 +98,13 @@ describe('server routes', () => {
     expect(response.statusCode).toBe(200);
     const body = ListSkillsResponse.parse(JSON.parse(response.body));
     expect(body.skills).toEqual([
+      {
+        id: 'guided-goal-refinement',
+        pluginId: 'orca.default-skills',
+        extensionPoint: 'goal.refine',
+        title: 'Guided Goal Refinement',
+        description: 'Deterministic structuring of a rough Goal into success criteria, constraints, and assumptions.'
+      },
       {
         id: 'quick-goal',
         pluginId: 'orca.default-skills',

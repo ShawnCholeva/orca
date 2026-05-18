@@ -30,16 +30,19 @@ describe('bootstrapRegistries', () => {
     expect(plugins.byId('orca.shell-manual')?.capabilities).toEqual(['agent.adapter']);
   });
 
-  it('registers exactly 1 skill with correct id and extensionPoint', () => {
+  it('registers exactly 2 skills with correct ids and extensionPoints', () => {
     const plugins = new PluginRegistry();
     const skills = new SkillRegistry();
 
     bootstrapRegistries({ plugins, skills });
 
     const list = skills.list();
-    expect(list).toHaveLength(1);
-    expect(list[0]?.id).toBe('quick-goal');
-    expect(list[0]?.extensionPoint).toBe('goal.create');
+    expect(list).toHaveLength(2);
+    // list() returns sorted by id
+    expect(list[0]?.id).toBe('guided-goal-refinement');
+    expect(list[0]?.extensionPoint).toBe('goal.refine');
+    expect(list[1]?.id).toBe('quick-goal');
+    expect(list[1]?.extensionPoint).toBe('goal.create');
   });
 
   it('freezes both registries after bootstrap', () => {

@@ -87,7 +87,7 @@ describe.sequential('M2-014 — scenarios 1–6', () => {
     expect(res.statusCode).toBe(200);
     const body = HealthResponse.parse(JSON.parse(res.body));
     expect(body.status).toBe('ok');
-    expect(body.registries).toEqual({ plugins: 3, skills: 1 });
+    expect(body.registries).toEqual({ plugins: 3, skills: 2 });
   });
 
   it('S2a — registry: GET /v1/plugins returns three built-in ids in sorted order', async () => {
@@ -106,7 +106,7 @@ describe.sequential('M2-014 — scenarios 1–6', () => {
     ]);
   });
 
-  it('S2b — registry: GET /v1/skills returns quick-goal with goal.create extension point', async () => {
+  it('S2b — registry: GET /v1/skills returns both built-in skills (sorted by id)', async () => {
     const res = await server.inject({
       method: 'GET',
       url: '/v1/skills',
@@ -115,10 +115,13 @@ describe.sequential('M2-014 — scenarios 1–6', () => {
 
     expect(res.statusCode).toBe(200);
     const body = ListSkillsResponse.parse(JSON.parse(res.body));
-    expect(body.skills).toHaveLength(1);
-    expect(body.skills[0]?.id).toBe('quick-goal');
-    expect(body.skills[0]?.extensionPoint).toBe('goal.create');
-    expect(body.skills[0]?.pluginId).toBe('orca.default-skills');
+    expect(body.skills).toHaveLength(2);
+    // skills list is sorted by id; guided-goal-refinement < quick-goal
+    expect(body.skills[0]?.id).toBe('guided-goal-refinement');
+    expect(body.skills[0]?.extensionPoint).toBe('goal.refine');
+    expect(body.skills[1]?.id).toBe('quick-goal');
+    expect(body.skills[1]?.extensionPoint).toBe('goal.create');
+    expect(body.skills[1]?.pluginId).toBe('orca.default-skills');
   });
 
   it('S3 — create: skill.invoked (smaller seq) precedes goal.created; both share goal_id', async () => {

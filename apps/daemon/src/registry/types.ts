@@ -7,7 +7,7 @@ export interface PluginDescriptor {
   capabilities: PluginCapability[];
 }
 
-export type SkillExtensionPoint = "goal.create";
+export type SkillExtensionPoint = "goal.create" | "goal.refine";
 
 export interface SkillDescriptor<TInput = unknown, TOutput = unknown> {
   id: string;

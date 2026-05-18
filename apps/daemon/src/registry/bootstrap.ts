@@ -4,6 +4,7 @@ import path from 'node:path';
 import { PluginRegistry, pluginRegistry } from './plugin-registry.js';
 import { SkillRegistry, skillRegistry } from './skill-registry.js';
 import { quickGoalSkill } from '../skills/quick-goal.js';
+import { guidedGoalRefinementSkill } from '../skills/guided-goal-refinement.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -33,6 +34,7 @@ export function bootstrapRegistries(registries?: {
     plugins.register({ id: 'orca.shell-manual', name: 'Shell (Manual)', version, capabilities: ['agent.adapter'] });
 
     skills.register(quickGoalSkill);
+    skills.register(guidedGoalRefinementSkill);
 
     plugins.freeze();
     skills.freeze();
