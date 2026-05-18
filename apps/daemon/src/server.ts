@@ -134,8 +134,12 @@ export function createServer(config: Config): FastifyInstance {
     return { skills };
   });
 
-  function m3Error(code: string, message: string): { error: { code: string; message: string } } {
+  function apiError(code: string, message: string): { error: { code: string; message: string } } {
     return { error: { code, message } };
+  }
+
+  function inspectionStatus(e: WorkspaceInspectionError): 400 | 504 {
+    return e.code === 'inspection_timeout' ? 504 : 400;
   }
 
   server.post('/v1/goals/refine', async (request, reply) => {
@@ -148,13 +152,12 @@ export function createServer(config: Config): FastifyInstance {
     const skills = skillRegistry.byExtensionPoint('goal.refine');
     if (skills.length === 0) {
       reply.status(500);
-      return m3Error('runtime_misconfigured', 'No goal.refine skill registered');
+      return apiError('runtime_misconfigured', 'No goal.refine skill registered');
     }
 
     const skill = skills[0]!;
     const draft = skill.invoke(parsed.data, { now: () => new Date().toISOString() }) as GuidedRefinementOutput;
-    const response: RefineGoalResponse = { draft };
-    return response;
+    return { draft };
   });
 
   server.post('/v1/goals', async (request, reply) => {
@@ -179,11 +182,11 @@ export function createServer(config: Config): FastifyInstance {
       }
       if (error instanceof DuplicateWorkspaceInRequestError) {
         reply.status(400);
-        return m3Error(error.code, error.message);
+        return apiError(error.code, error.message);
       }
       if (error instanceof WorkspaceInspectionError) {
-        reply.status(error.code === 'inspection_timeout' ? 504 : 400);
-        return m3Error(error.code, error.message);
+        reply.status(inspectionStatus(error));
+        return apiError(error.code, error.message);
       }
       throw error;
     }
@@ -196,13 +199,13 @@ export function createServer(config: Config): FastifyInstance {
 
   server.get('/v1/goals/:id', async (request, reply): Promise<GoalDetailResponse | { error: unknown }> => {
     const { id } = request.params as { id: string };
-    const goal = getGoalById(id);
+    const db = getDatabase();
+    const goal = getGoalById(db, id);
     if (!goal) {
       reply.status(404);
-      return m3Error('not_found', `Goal not found: ${id}`);
+      return apiError('not_found', `Goal not found: ${id}`);
     }
 
-    const db = getDatabase();
     const refinement = getGoalRefinement(db, id);
     const workspaces = listWorkspacesByGoal(db, id);
     return { goal, refinement, workspaces };
@@ -226,15 +229,15 @@ export function createServer(config: Config): FastifyInstance {
     } catch (error) {
       if (error instanceof NotFoundError) {
         reply.status(404);
-        return m3Error('not_found', `Goal not found: ${goalId}`);
+        return apiError('not_found', `Goal not found: ${goalId}`);
       }
       if (error instanceof DuplicateWorkspaceError) {
         reply.status(409);
-        return m3Error(error.code, error.message);
+        return apiError(error.code, error.message);
       }
       if (error instanceof WorkspaceInspectionError) {
-        reply.status(error.code === 'inspection_timeout' ? 504 : 400);
-        return m3Error(error.code, error.message);
+        reply.status(inspectionStatus(error));
+        return apiError(error.code, error.message);
       }
       throw error;
     }
@@ -252,7 +255,7 @@ export function createServer(config: Config): FastifyInstance {
     } catch (error) {
       if (error instanceof NotFoundError) {
         reply.status(404);
-        return m3Error('not_found', `Workspace not found: ${workspaceId}`);
+        return apiError('not_found', `Workspace not found: ${workspaceId}`);
       }
       throw error;
     }
@@ -270,8 +273,8 @@ export function createServer(config: Config): FastifyInstance {
       return { preview };
     } catch (error) {
       if (error instanceof WorkspaceInspectionError) {
-        reply.status(error.code === 'inspection_timeout' ? 504 : 400);
-        return m3Error(error.code, error.message);
+        reply.status(inspectionStatus(error));
+        return apiError(error.code, error.message);
       }
       throw error;
     }

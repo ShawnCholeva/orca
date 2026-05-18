@@ -341,8 +341,7 @@ export function listGoals(): Goal[] {
   return rows.map(rowToGoal);
 }
 
-export function getGoalById(id: string): Goal | null {
-  const db = getDatabase();
+export function getGoalById(db: Database.Database, id: string): Goal | null {
   const stmts = ensureStmts(db);
   const row = stmts.selectGoalById.get(id) as GoalRow | undefined;
   if (!row || row.archived_at !== null) {
