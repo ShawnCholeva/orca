@@ -1,6 +1,10 @@
 import { GuidedRefinementInput, GuidedRefinementOutput } from "@orca/contracts";
 import type { SkillDescriptor } from "../registry/types.js";
 
+const SKILL_ID = "guided-goal-refinement";
+const MAX_ITEM_LENGTH = 200;
+const MAX_ITEMS_PER_SECTION = 20;
+
 type SectionKey = "successCriteria" | "constraints" | "assumptions";
 
 const SECTION_HEADERS: Array<{ pattern: RegExp; key: SectionKey }> = [
@@ -20,8 +24,8 @@ function processItems(items: string[]): string[] {
     const folded = trimmed.toLocaleLowerCase();
     if (seen.has(folded)) continue;
     seen.add(folded);
-    result.push(trimmed.slice(0, 200));
-    if (result.length >= 20) break;
+    result.push(trimmed.slice(0, MAX_ITEM_LENGTH));
+    if (result.length >= MAX_ITEMS_PER_SECTION) break;
   }
   return result;
 }
@@ -52,17 +56,12 @@ function parseDescription(raw: string): {
       const trimmed = line.trim();
       if (!trimmed) continue;
       const bullet = BULLET_RE.exec(line);
-      if (bullet) {
-        collected[currentSection].push(bullet[1]!.trim());
-      } else {
-        collected[currentSection].push(trimmed);
-      }
+      collected[currentSection].push((bullet?.[1] ?? trimmed).trim());
     } else {
       descLines.push(line);
     }
   }
 
-  // Collapse 3+ consecutive blank lines (4+ newlines) to 2 blank lines, then trim trailing whitespace.
   const description = descLines.join("\n").replace(/\n{4,}/g, "\n\n\n").trimEnd();
 
   return {
@@ -77,7 +76,7 @@ export const guidedGoalRefinementSkill: SkillDescriptor<
   GuidedRefinementInput,
   GuidedRefinementOutput
 > = {
-  id: "guided-goal-refinement",
+  id: SKILL_ID,
   pluginId: "orca.default-skills",
   extensionPoint: "goal.refine",
   title: "Guided Goal Refinement",
@@ -91,7 +90,7 @@ export const guidedGoalRefinementSkill: SkillDescriptor<
     );
 
     return GuidedRefinementOutput.parse({
-      skillId: "guided-goal-refinement",
+      skillId: SKILL_ID,
       title: parsed.title.trim(),
       description,
       successCriteria,
