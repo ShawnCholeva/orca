@@ -27,7 +27,8 @@ beforeAll(() => {
 });
 
 const ORCA_ENV_KEYS = ['ORCA_DATA_DIR', 'ORCA_PORT', 'ORCA_LOG_LEVEL', 'ORCA_TOKEN'] as const;
-const AUTH_HEADERS = { authorization: 'Bearer m3-int-token' } as const;
+const TOKEN = 'm3-int-token';
+const AUTH_HEADERS = { authorization: `Bearer ${TOKEN}` } as const;
 
 const tempDirs: string[] = [];
 
@@ -41,7 +42,7 @@ function resetOrcaEnv(dataDir: string): void {
   for (const key of ORCA_ENV_KEYS) delete process.env[key];
   process.env.ORCA_DATA_DIR = dataDir;
   process.env.ORCA_LOG_LEVEL = 'silent';
-  process.env.ORCA_TOKEN = 'm3-int-token';
+  process.env.ORCA_TOKEN = TOKEN;
 }
 
 interface BootResult {
@@ -66,7 +67,6 @@ async function stop(server: FastifyInstance): Promise<void> {
   closeDatabase();
 }
 
-// Step 11: all temp dirs cleaned after the suite.
 afterAll(() => {
   closeDatabase();
   for (const key of ORCA_ENV_KEYS) delete process.env[key];
@@ -245,13 +245,13 @@ Constraints:
         const folderWs = body.workspaces.find((w) => w.workspaceType === 'folder');
 
         expect(gitWs).toBeDefined();
-        expect(gitWs?.branch).toBe(expectedBranch);
-        expect(gitWs?.gitProbe).toBe('ok');
-        expect(gitWs?.isDirty).toBe(false);
+        expect(gitWs!.branch).toBe(expectedBranch);
+        expect(gitWs!.gitProbe).toBe('ok');
+        expect(gitWs!.isDirty).toBe(false);
 
         expect(folderWs).toBeDefined();
-        expect(folderWs?.gitProbe).toBe('not_a_repo');
-        expect(folderWs?.branch).toBeNull();
+        expect(folderWs!.gitProbe).toBe('not_a_repo');
+        expect(folderWs!.branch).toBeNull();
 
         gitWsId = gitWs!.id;
         folderWsId = folderWs!.id;
