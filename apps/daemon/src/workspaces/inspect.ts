@@ -20,6 +20,8 @@ type GitMeta = {
   gitProbe: "ok" | "unavailable" | "errored";
 };
 
+const GIT_ERRORED: GitMeta = { branch: null, isDirty: null, gitProbe: "errored" };
+
 function runGitCommand(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
@@ -42,21 +44,21 @@ async function probeGit(canonical: string): Promise<GitMeta> {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return { branch: null, isDirty: null, gitProbe: "unavailable" };
     }
-    return { branch: null, isDirty: null, gitProbe: "errored" };
+    return GIT_ERRORED;
   }
 
   const branch = branchRaw.trim();
 
   // Detached HEAD reports the literal string "HEAD"
   if (branch === "HEAD") {
-    return { branch: null, isDirty: null, gitProbe: "errored" };
+    return GIT_ERRORED;
   }
 
   try {
     const statusOut = await runGitCommand(["status", "--porcelain"], canonical);
     return { branch, isDirty: statusOut.length > 0, gitProbe: "ok" };
   } catch {
-    return { branch: null, isDirty: null, gitProbe: "errored" };
+    return GIT_ERRORED;
   }
 }
 
@@ -126,7 +128,7 @@ export async function inspectWorkspace(inputPath: string): Promise<InspectWorksp
     );
   }
 
-  let tid: ReturnType<typeof setTimeout>;
+  let tid: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     tid = setTimeout(() => reject(inspectionTimeout(inputPath)), INSPECTION_TIMEOUT_MS);
   });
@@ -134,6 +136,6 @@ export async function inspectWorkspace(inputPath: string): Promise<InspectWorksp
   try {
     return await Promise.race([doInspect(inputPath), timeoutPromise]);
   } finally {
-    clearTimeout(tid!);
+    clearTimeout(tid);
   }
 }
