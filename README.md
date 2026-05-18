@@ -2,7 +2,7 @@
 
 Local-first desktop application for multi-agent AI orchestration.
 
-> **Status:** Milestone 2 (Plugin and Skill Foundation). The daemon registers internal plugin descriptors and the Quick Goal skill at boot, routes Goal creation through Quick Goal, and persists `skill.invoked` + `goal.created` atomically. The desktop renders a read-only Runtime Diagnostics panel showing registered plugins and skills.
+> **Status:** Milestone 3 (Goal Refinement and Workspaces). On top of the M2 plugin/skill foundation, the daemon now exposes a deterministic `guided-goal-refinement` skill on the `goal.refine` extension point, persists Goal refinements and attached local workspaces, and serves a Goal detail bundle. The desktop has a three-step Create Goal flow and a Goal detail view with attach/remove workspace controls.
 
 ## What works today
 
@@ -11,23 +11,58 @@ Local-first desktop application for multi-agent AI orchestration.
 - Live UI refresh via `/v1/events` WebSocket
 - Per-launch auth token between desktop and daemon
 - Static internal plugin registry (`GET /v1/plugins`) with three built-in descriptors
-- Static internal skill registry (`GET /v1/skills`) with the Quick Goal skill
-- Atomic `skill.invoked` + `goal.created` event pair on every Goal creation
+- Static internal skill registry (`GET /v1/skills`) with `quick-goal` and `guided-goal-refinement`
+- Atomic `skill.invoked` + `goal.created` event pair on every Goal creation (M2 minimal flow unchanged)
+- Refined Goal creation (M3): deterministic refinement, multi-workspace attach, lazy git inspection, atomic commit of `skill.invoked` → `goal.created` → `goal.refined?` → `workspace.attached*`
+- Goal detail view (M3): refinement section + workspace list with attach / remove controls
 - Runtime Diagnostics section in the UI listing registered plugins and skills
+
+### M3 Create Goal flow
+
+A three-step flow in the desktop app:
+
+1. **Rough draft** — user enters a title and description.
+2. **Refine** — daemon runs `guided-goal-refinement` (`POST /v1/goals/refine`, deterministic, no model calls) and returns success criteria, constraints, and assumptions. The user can edit each field before continuing.
+3. **Attach workspaces** — user adds one or more local folders. Each is validated (`POST /v1/workspaces/inspect`) and submitted as part of `POST /v1/goals`. The daemon commits the refined Goal, refinement projection, and workspace attachments atomically, then broadcasts events. The user lands on the Goal detail view.
+
+### M3 HTTP endpoints
+
+| Method | Path | Purpose |
+| ------ | ---- | ------- |
+| `POST` | `/v1/goals/refine` | Pure compute. Returns a refined Goal draft. Persists nothing, emits no events. |
+| `POST` | `/v1/goals` | Extended additively with optional `refined` and `workspaces`. Response shape unchanged. |
+| `GET`  | `/v1/goals/:id` | Goal detail bundle: Goal + refinement (if any) + attached workspaces. |
+| `POST` | `/v1/workspaces/inspect` | Validate an absolute path and capture a bounded git snapshot. |
+| `POST` | `/v1/goals/:id/workspaces` | Attach a workspace to an existing Goal. Emits `workspace.attached` post-commit. |
+| `DELETE` | `/v1/goals/:id/workspaces/:workspaceId` | Detach a workspace. Emits `workspace.removed` post-commit. |
+
+### Workspace path rules
+
+- Paths submitted to the daemon must be absolute. `~`-expansion is the desktop's responsibility.
+- The daemon stores only the canonical realpath (`fs.realpath`). The original `input_path` is never persisted.
+- Duplicates are prevented per Goal by `(goal_id, canonical path)`.
+
+### Git behavior
+
+- Git inspection is **lazy and bounded** — never at boot, only on `POST /v1/workspaces/inspect` and at attach time.
+- Branch and dirty-status are captured as a snapshot at attach; no watchers or background refresh.
+- Calls are issued with `execFile` against the user's `git`. If `git` is missing, hangs past the bounded deadline, or the folder is not a working tree, the workspace is recorded as a non-git folder rather than failing the attach.
 
 ## Not yet implemented
 
-The following are specified in `docs/` but intentionally deferred past M2:
+The following are specified in `docs/` but intentionally deferred past M3:
 
 - PTY / agent sessions (Claude Code, opencode, Codex adapters)
 - Shared memory engine and context assembly
-- Orchestrator engine and recommendations
-- Workflow engine
-- Any AI reasoning
-- External plugin API package, dynamic plugin loading, JSON manifests, permissions/sandbox
+- Orchestrator engine, recommendations, workflow engine, task graph
+- Workspace indexing or file watchers
+- Any AI reasoning (refinement remains deterministic)
+- External plugin API package, dynamic plugin loading, JSON manifests, permissions / sandbox
+- Generic skill invocation endpoint, skill picker UI
+- Cloud sync, Level 4 supervised execution, Level 5 autonomy
 
-See [`docs/milestones/2.md`](docs/milestones/2.md) for the M2 scope,
-[`docs/implementation-plans/milestone-2.md`](docs/implementation-plans/milestone-2.md) for the task breakdown,
+See [`docs/milestones/3.md`](docs/milestones/3.md) for the M3 scope,
+[`docs/implementation-plans/milestone-3.md`](docs/implementation-plans/milestone-3.md) for the task breakdown,
 and [`docs/dev/internal-plugins-and-skills.md`](docs/dev/internal-plugins-and-skills.md) for how to add internal plugins and skills.
 
 ## Prerequisites
