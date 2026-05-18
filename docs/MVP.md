@@ -1022,10 +1022,11 @@ Build:
 - shell/manual session
 - Claude Code adapter
 - opencode adapter
+- codex adapter
 
 Exit criteria:
 
-- user can launch Claude Code/opencode from inside the app and interact normally
+- user can launch Claude Code/opencode/codex from inside the app and interact normally
 
 ---
 

@@ -29,7 +29,7 @@ const StoredRefinementShape = z.object({
 
 let _db: Database.Database | null = null;
 let _stmts: {
-  upsertGoalRefinement: Database.Statement;
+  insertRefinement: Database.Statement;
   selectGoalRefinement: Database.Statement;
 } | null = null;
 
@@ -37,8 +37,8 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
   if (db !== _db) {
     _db = db;
     _stmts = {
-      upsertGoalRefinement: db.prepare(
-        "INSERT OR REPLACE INTO goal_refinements (goal_id, skill_id, success_criteria, constraints, assumptions, refined_at) VALUES (?, ?, ?, ?, ?, ?)",
+      insertRefinement: db.prepare(
+        "INSERT INTO goal_refinements (goal_id, skill_id, success_criteria, constraints, assumptions, refined_at) VALUES (?, ?, ?, ?, ?, ?)",
       ),
       selectGoalRefinement: db.prepare(
         "SELECT goal_id, skill_id, success_criteria, constraints, assumptions, refined_at FROM goal_refinements WHERE goal_id = ?",
@@ -55,7 +55,7 @@ export function resetPreparedStatements(): void {
 
 export function insertGoalRefinement(db: Database.Database, row: GoalRefinementInsertRow): void {
   const stmts = ensureStmts(db);
-  stmts.upsertGoalRefinement.run(
+  stmts.insertRefinement.run(
     row.goalId,
     row.skillId,
     JSON.stringify(row.successCriteria),

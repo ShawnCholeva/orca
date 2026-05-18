@@ -494,6 +494,57 @@ describe("createGoal — M3-006 refined path", () => {
     expect(wsRow!.name).toBe("custom-name");
   });
 
+  it("rolls back all rows when goal_refinements insert fails — no events, no goal, no refinements, no broadcasts", async () => {
+    const { db, ctx } = setup();
+    const publishSpy = vi.spyOn(eventBus, "publish");
+    const refined = makeRefined();
+
+    db.exec(`
+      CREATE TRIGGER force_refinement_insert_failure BEFORE INSERT ON goal_refinements
+      BEGIN SELECT RAISE(ABORT, 'forced refinement failure'); END;
+    `);
+
+    await expect(createGoal({ title: refined.title, refined }, ctx)).rejects.toThrow();
+
+    const eventCount = (db.prepare("SELECT count(*) AS c FROM events").get() as { c: number }).c;
+    const goalCount = (db.prepare("SELECT count(*) AS c FROM goals").get() as { c: number }).c;
+    const refCount = (db.prepare("SELECT count(*) AS c FROM goal_refinements").get() as { c: number }).c;
+    expect(eventCount).toBe(0);
+    expect(goalCount).toBe(0);
+    expect(refCount).toBe(0);
+    expect(publishSpy).not.toHaveBeenCalled();
+  });
+
+  it("rolls back all rows when workspace insert fails — no events, no goal, no refinements, no workspaces, no broadcasts", async () => {
+    const { db, ctx } = setup();
+    const publishSpy = vi.spyOn(eventBus, "publish");
+    const refined = makeRefined();
+
+    const ctxWithInspect: CreateGoalCtx = {
+      ...ctx,
+      inspectWorkspace: (p) => Promise.resolve(makePreview(p)),
+    };
+
+    db.exec(`
+      CREATE TRIGGER force_workspace_insert_failure BEFORE INSERT ON workspaces
+      BEGIN SELECT RAISE(ABORT, 'forced workspace failure'); END;
+    `);
+
+    await expect(
+      createGoal({ title: refined.title, refined, workspaces: [{ inputPath: "/tmp/ws-fail" }] }, ctxWithInspect),
+    ).rejects.toThrow();
+
+    const eventCount = (db.prepare("SELECT count(*) AS c FROM events").get() as { c: number }).c;
+    const goalCount = (db.prepare("SELECT count(*) AS c FROM goals").get() as { c: number }).c;
+    const refCount = (db.prepare("SELECT count(*) AS c FROM goal_refinements").get() as { c: number }).c;
+    const wsCount = (db.prepare("SELECT count(*) AS c FROM workspaces").get() as { c: number }).c;
+    expect(eventCount).toBe(0);
+    expect(goalCount).toBe(0);
+    expect(refCount).toBe(0);
+    expect(wsCount).toBe(0);
+    expect(publishSpy).not.toHaveBeenCalled();
+  });
+
   it("M2 minimal path response shape is preserved (same fields, 2 events)", async () => {
     const { db, ctx } = setup();
 

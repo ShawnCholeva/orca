@@ -73,7 +73,7 @@ describe("goal-refinements projections", () => {
     });
   });
 
-  it("replace-on-second-insert keeps only the latest row", () => {
+  it("second insert for the same goal_id throws a constraint error", () => {
     const db = setup();
     const goalId = "goal-2";
     insertGoalRow(db, goalId);
@@ -81,37 +81,30 @@ describe("goal-refinements projections", () => {
     insertGoalRefinement(db, {
       goalId,
       skillId: "guided-goal-refinement",
-      successCriteria: ["Old"],
+      successCriteria: ["First"],
       constraints: [],
       assumptions: [],
       refinedAt: "2026-01-01T01:00:00.000Z",
     });
 
-    insertGoalRefinement(db, {
-      goalId,
-      skillId: "guided-goal-refinement",
-      successCriteria: ["New"],
-      constraints: ["Updated constraint"],
-      assumptions: ["Updated assumption"],
-      refinedAt: "2026-01-01T02:00:00.000Z",
-    });
+    expect(() =>
+      insertGoalRefinement(db, {
+        goalId,
+        skillId: "guided-goal-refinement",
+        successCriteria: ["Second"],
+        constraints: [],
+        assumptions: [],
+        refinedAt: "2026-01-01T02:00:00.000Z",
+      }),
+    ).toThrow();
 
+    // original row preserved
     const rows = (
       db.prepare("SELECT count(*) as cnt FROM goal_refinements WHERE goal_id = ?").get(goalId) as {
         cnt: number;
       }
     ).cnt;
     expect(rows).toBe(1);
-
-    const refinement = getGoalRefinement(db, goalId);
-    expect(refinement).toEqual({
-      goalId,
-      skillId: "guided-goal-refinement",
-      successCriteria: ["New"],
-      constraints: ["Updated constraint"],
-      assumptions: ["Updated assumption"],
-      refinedAt: "2026-01-01T02:00:00.000Z",
-    });
   });
 
   it("get missing goal refinement returns null", () => {

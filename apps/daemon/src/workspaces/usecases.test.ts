@@ -273,4 +273,32 @@ describe("detachWorkspace", () => {
 
     expect(publishSpy).not.toHaveBeenCalled();
   });
+
+  it("rolls back event when workspace delete fails — workspace row preserved, no broadcast", async () => {
+    const wsPath = "/tmp/orca-uc-detach-fail-" + Date.now();
+    const { db, ctx } = setup((p) => Promise.resolve(makeFolderPreview(p)));
+    const goalId = insertGoalRow(db);
+    const workspace = await attachWorkspace(ctx, { goalId, inputPath: wsPath });
+
+    db.exec(`
+      CREATE TRIGGER force_workspace_delete_failure BEFORE DELETE ON workspaces
+      BEGIN SELECT RAISE(ABORT, 'forced delete failure'); END;
+    `);
+
+    const publishSpy = vi.spyOn(eventBus, "publish");
+
+    await expect(
+      detachWorkspace(ctx, { goalId, workspaceId: workspace.id }),
+    ).rejects.toThrow();
+
+    expect(publishSpy).not.toHaveBeenCalled();
+
+    const row = db.prepare("SELECT id FROM workspaces WHERE id = ?").get(workspace.id);
+    expect(row).toBeDefined();
+
+    const removedEventCount = (
+      db.prepare("SELECT count(*) AS c FROM events WHERE type = 'workspace.removed'").get() as { c: number }
+    ).c;
+    expect(removedEventCount).toBe(0);
+  });
 });

@@ -150,9 +150,9 @@ export function createServer(config: Config): FastifyInstance {
     }
 
     const skills = skillRegistry.byExtensionPoint('goal.refine');
-    if (skills.length === 0) {
+    if (skills.length !== 1) {
       reply.status(500);
-      return apiError('runtime_misconfigured', 'No goal.refine skill registered');
+      return apiError('runtime_misconfigured', `Expected exactly one goal.refine skill, found ${skills.length}`);
     }
 
     const skill = skills[0]!;

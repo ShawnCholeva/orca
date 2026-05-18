@@ -19,6 +19,7 @@ export function WorkspaceListPanel({ goalId, workspaces, onChanged }: Props) {
   const [addError, setAddError] = useState<string | null>(null);
   const [addSubmitting, setAddSubmitting] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   async function handleInspect() {
     if (!addPath.trim()) return;
@@ -62,11 +63,12 @@ export function WorkspaceListPanel({ goalId, workspaces, onChanged }: Props) {
   async function handleRemove(ws: Workspace) {
     if (!confirm(`Remove workspace "${ws.name}"?`)) return;
     setRemovingId(ws.id);
+    setRemoveError(null);
     try {
       await detachWorkspace(goalId, ws.id);
       onChanged();
-    } catch {
-      // error silently; detail view will show stale state on next refetch
+    } catch (err) {
+      setRemoveError((err as ApiError).message ?? "Remove failed");
     } finally {
       setRemovingId(null);
     }
@@ -90,6 +92,8 @@ export function WorkspaceListPanel({ goalId, workspaces, onChanged }: Props) {
       {workspaces.length === 0 && !showAdd && (
         <p className="empty-state">No workspaces attached.</p>
       )}
+
+      {removeError && <p className="form-error">{removeError}</p>}
 
       {workspaces.length > 0 && (
         <ul className="workspace-list">
