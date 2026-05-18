@@ -1,9 +1,5 @@
 #!/usr/bin/env node
-// M4-001 feasibility spike: import node-pty, spawn a trivial PTY, observe
-// output, exit cleanly. Scratch script — its only job is to prove the native
-// dependency works on the local target before M4-002 begins. Delete after
-// findings are recorded if desired; the findings note is the artifact that
-// stays.
+// M4-001 node-pty feasibility spike (see notes/m4-001-pty-feasibility.md).
 
 import { spawn } from "node-pty";
 
@@ -27,8 +23,7 @@ const exitInfo = await new Promise((resolve) => {
   pty.onExit(({ exitCode, signal }) => resolve({ exitCode, signal }));
 });
 
-const sawSentinel = observed.includes(SENTINEL);
-if (!sawSentinel) {
+if (!observed.includes(SENTINEL)) {
   console.error(
     `[m4-001-spike] FAIL: sentinel "${SENTINEL}" not observed in output`
   );
