@@ -17,6 +17,7 @@
     "@orca/contracts": "workspace:*",
     "better-sqlite3": "^11.8.1",
     "fastify": "^5.2.1",
+    "node-pty": "^1.0.0",
     "pino": "^9.6.0",
     "zod": "^3.24.1"
   },
