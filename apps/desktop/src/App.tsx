@@ -1,18 +1,21 @@
 import { useState, useEffect, FormEvent } from "react";
-import { Goal, type PluginSummary, type SkillSummary } from "@orca/contracts";
+import { Goal, DomainEventType, type PluginSummary, type SkillSummary } from "@orca/contracts";
 import {
   fetchHealth,
   listGoals,
   listPlugins,
   listSkills,
-  createGoal,
   updateGoal,
   archiveGoal,
   openEventStream,
   ApiError,
   type ConnectionStatus,
 } from "./api";
+import { CreateGoalFlow } from "./create-goal-flow/CreateGoalFlow";
+import { GoalDetailView } from "./goal-detail/GoalDetailView";
 import "./styles.css";
+
+type AppMode = "list" | "detail";
 
 function toErrorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -20,14 +23,17 @@ function toErrorMessage(err: unknown, fallback: string): string {
 
 type Diagnostics = { plugins: PluginSummary[]; skills: SkillSummary[] };
 
+const DETAIL_REFETCH_EVENTS = new Set<DomainEventType>(["goal.refined", "workspace.attached", "workspace.removed"]);
+const GOAL_LIST_EVENTS = new Set<DomainEventType>(["goal.created", "goal.updated", "goal.archived"]);
+
 export default function App() {
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("connecting");
+  const [mode, setMode] = useState<AppMode>("list");
+  const [currentGoalId, setCurrentGoalId] = useState<string | null>(null);
+  const [detailRefreshKey, setDetailRefreshKey] = useState(0);
+  const [showCreateFlow, setShowCreateFlow] = useState(false);
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
@@ -76,32 +82,42 @@ export default function App() {
     loadDiagnostics();
   }, []);
 
-  // WebSocket event stream — refreshes goal list on any goal.* event
+  // WebSocket event stream — refreshes goal list or detail on relevant events
   useEffect(() => {
     const stream = openEventStream({
       onEvent(event) {
-        if (event.type.startsWith("goal.")) {
-          loadGoals();
+        if (GOAL_LIST_EVENTS.has(event.type)) {
+          void loadGoals();
+        }
+        if (
+          DETAIL_REFETCH_EVENTS.has(event.type) &&
+          event.goalId !== null &&
+          event.goalId === currentGoalId
+        ) {
+          setDetailRefreshKey((k) => k + 1);
         }
       },
       onStatus: setConnectionStatus,
     });
     return () => stream.close();
-  }, []);
+  }, [currentGoalId]);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setFormError(null);
-    setSubmitting(true);
-    try {
-      await createGoal({ title, description });
-      setTitle("");
-      setDescription("");
-    } catch (err) {
-      setFormError(toErrorMessage(err, "Failed to create goal. Please try again."));
-    } finally {
-      setSubmitting(false);
-    }
+  function handleCreateFlowDone(goalId: string) {
+    setShowCreateFlow(false);
+    setCurrentGoalId(goalId);
+    setDetailRefreshKey(0);
+    setMode("detail");
+  }
+
+  function handleBackToList() {
+    setMode("list");
+    setCurrentGoalId(null);
+  }
+
+  function openGoalDetail(goalId: string) {
+    setCurrentGoalId(goalId);
+    setDetailRefreshKey(0);
+    setMode("detail");
   }
 
   const connected = connectionStatus === "open";
@@ -127,95 +143,93 @@ export default function App() {
         </div>
       )}
 
-      <main className="main-content">
-        <section className="create-section">
-          <h2>New Goal</h2>
-          <form onSubmit={handleSubmit} className="create-form">
-            <div className="form-field">
-              <label htmlFor="goal-title">Title</label>
-              <input
-                id="goal-title"
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                maxLength={200}
-                required
-                disabled={!connected || submitting}
-                placeholder="What are you trying to achieve?"
-              />
-            </div>
-            <div className="form-field">
-              <label htmlFor="goal-description">Description</label>
-              <textarea
-                id="goal-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                maxLength={4000}
-                disabled={!connected || submitting}
-                placeholder="Optional details…"
-                rows={4}
-              />
-            </div>
-            {formError && <div className="form-error">{formError}</div>}
-            <button
-              type="submit"
-              className="submit-button"
-              disabled={!connected || submitting}
-            >
-              {submitting ? "Creating…" : "Create Goal"}
-            </button>
-          </form>
-        </section>
-
-        <section className="goals-section">
-          <h2>Goals</h2>
-          {goals.length === 0 ? (
-            <p className="empty-state">No goals yet. Create one to get started.</p>
-          ) : (
-            <ul className="goals-list">
-              {goals.map((goal) => (
-                <GoalItem key={goal.id} goal={goal} />
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="diagnostics-section">
-          <div className="diagnostics-header">
-            <h2>Runtime Diagnostics</h2>
+      {mode === "detail" && currentGoalId ? (
+        <div className="main-content main-content--full">
+          <GoalDetailView
+            goalId={currentGoalId}
+            onBack={handleBackToList}
+            refreshKey={detailRefreshKey}
+          />
+        </div>
+      ) : (
+        <main className="main-content">
+          <section className="create-section">
+            <h2>New Goal</h2>
+            <p className="create-section-hint">
+              Create a structured Goal with guided refinement and workspace attachment.
+            </p>
             <button
               type="button"
-              className="goal-action-button"
-              onClick={loadDiagnostics}
-              disabled={diagnosticsLoading}
+              className="submit-button"
+              onClick={() => setShowCreateFlow(true)}
+              disabled={!connected}
             >
-              {diagnosticsLoading ? "Loading…" : "Refresh"}
+              Create Goal…
             </button>
-          </div>
-          {diagnosticsError && <p className="diagnostics-error">{diagnosticsError}</p>}
-          {!diagnosticsLoading && !diagnosticsError && diagnostics !== null && (
-            <>
-              <h3 className="diagnostics-subheading">Plugins ({diagnostics.plugins.length})</h3>
-              <ul className="diagnostics-list">
-                {diagnostics.plugins.map((p) => (
-                  <li key={p.id}>{p.id} — {p.capabilities.join(", ")}</li>
+          </section>
+
+          <section className="goals-section">
+            <h2>Goals</h2>
+            {goals.length === 0 ? (
+              <p className="empty-state">No goals yet. Create one to get started.</p>
+            ) : (
+              <ul className="goals-list">
+                {goals.map((goal) => (
+                  <GoalItem
+                    key={goal.id}
+                    goal={goal}
+                    onView={() => openGoalDetail(goal.id)}
+                  />
                 ))}
               </ul>
-              <h3 className="diagnostics-subheading">Skills ({diagnostics.skills.length})</h3>
-              <ul className="diagnostics-list">
-                {diagnostics.skills.map((s) => (
-                  <li key={s.id}>{s.id} — {s.extensionPoint} ({s.title})</li>
-                ))}
-              </ul>
-            </>
-          )}
-        </section>
-      </main>
+            )}
+          </section>
+
+          <section className="diagnostics-section">
+            <div className="diagnostics-header">
+              <h2>Runtime Diagnostics</h2>
+              <button
+                type="button"
+                className="goal-action-button"
+                onClick={loadDiagnostics}
+                disabled={diagnosticsLoading}
+              >
+                {diagnosticsLoading ? "Loading…" : "Refresh"}
+              </button>
+            </div>
+            {diagnosticsError && <p className="diagnostics-error">{diagnosticsError}</p>}
+            {!diagnosticsLoading && !diagnosticsError && diagnostics !== null && (
+              <>
+                <h3 className="diagnostics-subheading">Plugins ({diagnostics.plugins.length})</h3>
+                <ul className="diagnostics-list">
+                  {diagnostics.plugins.map((p) => (
+                    <li key={p.id}>{p.id} — {p.capabilities.join(", ")}</li>
+                  ))}
+                </ul>
+                <h3 className="diagnostics-subheading">Skills ({diagnostics.skills.length})</h3>
+                <ul className="diagnostics-list">
+                  {diagnostics.skills.map((s) => (
+                    <li key={s.id}>{s.id} — {s.extensionPoint} ({s.title})</li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </section>
+        </main>
+      )}
+
+      {showCreateFlow && (
+        <CreateGoalFlow
+          connectionStatus={connectionStatus}
+          onClose={() => setShowCreateFlow(false)}
+          onDone={handleCreateFlowDone}
+        />
+      )}
     </div>
   );
 }
 
-function GoalItem({ goal }: { goal: Goal }) {
+function GoalItem({ goal, onView }: { goal: Goal; onView: () => void }) {
   const MAX_DESC = 200;
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(goal.title);
@@ -327,6 +341,14 @@ function GoalItem({ goal }: { goal: Goal }) {
           </div>
           {error && <div className="form-error">{error}</div>}
           <div className="goal-actions">
+            <button
+              type="button"
+              className="goal-action-button"
+              onClick={onView}
+              disabled={busy}
+            >
+              View
+            </button>
             <button
               type="button"
               className="goal-action-button"
