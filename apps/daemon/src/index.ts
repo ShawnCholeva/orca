@@ -7,6 +7,7 @@ import { bootstrapRegistries } from './registry/bootstrap.js';
 import { createServer } from './server.js';
 import { registerShutdown } from './shutdown.js';
 import { reconcileSessionsOnBoot } from './sessions/reconciliation.js';
+import { reconcileStaleExtractions } from './extractions/reconciliation.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -29,7 +30,9 @@ async function main(): Promise<void> {
   }
 
   // Reconcile stale sessions before accepting traffic.
-  reconcileSessionsOnBoot(db, eventBus, new Date().toISOString());
+  const bootNow = new Date().toISOString();
+  reconcileSessionsOnBoot(db, eventBus, bootNow);
+  reconcileStaleExtractions(db, eventBus, bootNow);
 
   const server = createServer(config);
 
