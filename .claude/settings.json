@@ -1,0 +1,7 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "node /home/shawn/projects/orca/.claude/statusline.js",
+    "refreshInterval": 60
+  }
+}

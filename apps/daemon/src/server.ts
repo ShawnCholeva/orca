@@ -33,6 +33,7 @@ import {
   SessionUnsubscribeFrame,
   StartSessionRequest,
   type StartSessionResponse,
+  StopSessionRequest,
   type StopSessionResponse,
   UpdateGoalRequest,
   type UpdateGoalResponse,
@@ -101,6 +102,8 @@ function readPackageVersion(): string {
   }
 }
 const pkg = { version: readPackageVersion() };
+
+const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 const CORS_ORIGINS = [
   'http://localhost:5173',
@@ -460,8 +463,13 @@ export function createServer(
     }
   });
 
-  server.post('/v1/sessions/:id/stop', async (request, reply): Promise<StopSessionResponse | { error: unknown }> => {
+  server.post('/v1/sessions/:id/stop', async (request, reply): Promise<StopSessionResponse | { error: unknown; issues?: unknown }> => {
     const { id } = request.params as { id: string };
+    const parsed = StopSessionRequest.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'validation_failed', issues: parsed.error.issues };
+    }
     try {
       const session = stopSession({ db, sessionRuntime }, id);
       return { session };
@@ -562,9 +570,18 @@ export function createServer(
               sendSessionError(wsClient, undefined, 'invalid_message', 'invalid session.input frame');
               return;
             }
+            if (!BASE64_RE.test(frame.data.dataBase64)) {
+              sendSessionError(wsClient, frame.data.sessionId, 'invalid_message', 'invalid base64 in dataBase64');
+              return;
+            }
             const handle = sessionRuntime.getHandle(frame.data.sessionId);
             if (!handle) {
-              sendSessionError(wsClient, frame.data.sessionId, 'not_active', 'session not running');
+              const session = getSessionDetail(db, frame.data.sessionId);
+              if (!session) {
+                sendSessionError(wsClient, frame.data.sessionId, 'unknown_session', 'session not found');
+              } else {
+                sendSessionError(wsClient, frame.data.sessionId, 'not_active', 'session not running');
+              }
               return;
             }
             handle.write(Buffer.from(frame.data.dataBase64, 'base64'));
@@ -575,6 +592,16 @@ export function createServer(
             const frame = SessionResizeFrame.safeParse(parsed);
             if (!frame.success) {
               sendSessionError(wsClient, undefined, 'invalid_message', 'invalid session.resize frame');
+              return;
+            }
+            const resizeHandle = sessionRuntime.getHandle(frame.data.sessionId);
+            if (!resizeHandle) {
+              const session = getSessionDetail(db, frame.data.sessionId);
+              if (!session) {
+                sendSessionError(wsClient, frame.data.sessionId, 'unknown_session', 'session not found');
+              } else {
+                sendSessionError(wsClient, frame.data.sessionId, 'not_active', 'session not running');
+              }
               return;
             }
             sessionRuntime.resize(db, frame.data.sessionId, frame.data.cols, frame.data.rows);

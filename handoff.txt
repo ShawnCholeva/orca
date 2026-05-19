@@ -1,0 +1,22 @@
+ This is an example table of how I view the handoff when building things
+
+| Task | Recommended model | Rationale |
+|---|---|---|
+| M5-000 Baseline verification | Codex 5.3 | Deterministic checklist and evidence capture; strongest fit for precise command execution with no product judgment. |
+| M5-001 Contracts | Codex 5.3 | Zod schemas + contract tests; schema-heavy, mechanical, and high-precision. |
+| M5-002 Migration | Codex 5.3 | Pure SQL DDL, indexes, and migration assertions; tightly bounded and deterministic. |
+| M5-003 Projections | GPT 5.4 | Projection helpers are bounded, but restart semantics and transaction composition need broader codebase reasoning than a purely mechanical pass. |
+| M5-004 Manual APIs | Sonnet 4.6 | Status-transition rules + transactional event emission. |
+| M5-005 Extraction state + reconciliation | Sonnet 4.6 | Lifecycle + boot ordering matters. |
+| M5-006 Fake extractor commit slice | Sonnet 4.6 | Atomicity + privacy boundary; review-heavy. |
+| M5-007 Bounded input builder | Sonnet 4.6 | Byte-window correctness + ANSI stripping. |
+| M5-008 Deterministic extractor | Codex 5.3 | Fixture-driven string/rule logic with deterministic expected outputs; ideal for structured tests and conservative implementation. |
+| M5-009 Refinement seed memory | GPT 5.4 | Bounded, but it crosses refinement commit paths, normalization, dedupe, and promotion rules; needs stronger integration judgment. |
+| M5-010 Runner + terminal hook + Goal-open | Sonnet 4.6 | Cross-module integration. |
+| M5-011 Reduced summary/extract endpoints | GPT 5.4 | Small endpoint surface, but retry/idempotency and terminal-session guards are behaviorally important. |
+| M5-012 Daemon proof-loop integration test | Sonnet 4.6, reviewed by GPT 5.5 | High-signal test; must be deterministic. |
+| M5-013 Desktop API wrappers | Codex 5.3 | Typed fetch wrappers and mocked API tests are mechanical once contracts and endpoints exist. |
+| M5-014 Memory panel | Sonnet 4.6 | UI states + actions. |
+| M5-015 Decisions panel | Sonnet 4.6 | UI states + actions. |
+| M5-016 Session badges + summary | Sonnet 4.6 | Existing component edits + new summary panel. |
+| M5-017 Live refresh + final regression | Sonnet 4.6, reviewed by GPT 5.5 + Human | Cross-cutting; final DoD. |

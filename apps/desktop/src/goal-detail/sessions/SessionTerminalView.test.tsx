@@ -230,7 +230,7 @@ describe("SessionTerminalView", () => {
     });
 
     expect(getSession).toHaveBeenCalledTimes(2);
-    expect(terminalWrites.map(textFromWrite)).toEqual(["tail\n", "tail\n", "missed\n", "gap\n"]);
+    expect(terminalWrites.map(textFromWrite)).toEqual(["tail\n", "missed\n", "gap\n"]);
   });
 
   it("refetches the tail and resubscribes when the session stream reconnects", async () => {
@@ -252,7 +252,7 @@ describe("SessionTerminalView", () => {
 
     expect(getSession).toHaveBeenCalledTimes(2);
     expect(sentFrames.filter((frame) => (frame as { type?: string }).type === "session.subscribe")).toHaveLength(2);
-    expect(terminalWrites.map(textFromWrite)).toEqual(["tail\n", "tail\n", "after-reconnect\n"]);
+    expect(terminalWrites.map(textFromWrite)).toEqual(["tail\n", "after-reconnect\n"]);
   });
 
   it("sends input frames, resize frames only on dimension changes, and unsubscribes on unmount", async () => {

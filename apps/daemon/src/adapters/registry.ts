@@ -4,9 +4,20 @@ import type { AgentAdapter, AdapterAvailability } from "./types.js";
 export class AdapterRegistry {
   private readonly adapters = new Map<string, AgentAdapter>();
   private readonly availabilityCache = new Map<string, AdapterAvailability>();
+  private frozen = false;
 
   register(adapter: AgentAdapter): void {
+    if (this.frozen) {
+      throw new Error('AdapterRegistry is frozen');
+    }
+    if (this.adapters.has(adapter.id)) {
+      throw new Error(`Duplicate adapter id: ${adapter.id}`);
+    }
     this.adapters.set(adapter.id, adapter);
+  }
+
+  freeze(): void {
+    this.frozen = true;
   }
 
   get(id: string): AgentAdapter | undefined {

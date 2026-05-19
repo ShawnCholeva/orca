@@ -554,7 +554,7 @@ describe('startSession', () => {
     await expect(startSession(ctx, sessionId, { terminalCols: 80, terminalRows: 24 })).rejects.toThrow(SessionWrongStateError);
   });
 
-  it('event ordering: session.started broadcast occurs after COMMIT (row visible at publish time)', async () => {
+  it('event ordering: session.started broadcast occurs after COMMIT with status=running (row visible at publish time)', async () => {
     const db = freshDb();
     const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-start-ordering-'));
     tempDirs.push(wsDir);
@@ -582,8 +582,9 @@ describe('startSession', () => {
     const ctx: StartSessionCtx = { db, bus: mockBus as never, adapterRegistry: registry, sessionOutputStore: store, sessionRuntime: runtime };
     await startSession(ctx, sessionId, { terminalCols: 80, terminalRows: 24 });
 
-    // At the time session.started was broadcast, status must have been 'starting' (the tx had committed)
-    expect(statusAtStartedPublish).toBe('starting');
+    // At the time session.started is broadcast, the projection already shows 'running'
+    // (status and event are committed in a single transaction before publish).
+    expect(statusAtStartedPublish).toBe('running');
   });
 
   it('output never written to event store: data chunks go to session_output_chunks only', async () => {

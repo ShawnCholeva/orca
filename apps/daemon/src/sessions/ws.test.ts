@@ -338,6 +338,73 @@ describe('session WS frames', () => {
     ws.terminate();
   });
 
+  it('session.input against unknown sessionId → session.error { code: "unknown_session" }', async () => {
+    const ws = await server.injectWS('/v1/events?token=test-token');
+
+    const errorPromise = firstMatch(ws, (m) => m.type === 'session.error');
+
+    ws.send(JSON.stringify({
+      type: 'session.input',
+      sessionId: 'no-such-session',
+      dataBase64: Buffer.from('cmd').toString('base64'),
+    }));
+
+    const frame = await errorPromise;
+    expect(frame.code).toBe('unknown_session');
+    expect(frame.sessionId).toBe('no-such-session');
+
+    ws.terminate();
+  });
+
+  it('session.input with invalid base64 → session.error { code: "invalid_message" }', async () => {
+    const ws = await server.injectWS('/v1/events?token=test-token');
+
+    const errorPromise = firstMatch(ws, (m) => m.type === 'session.error');
+
+    ws.send(JSON.stringify({
+      type: 'session.input',
+      sessionId,
+      dataBase64: 'not-valid-base64!!!',
+    }));
+
+    const frame = await errorPromise;
+    expect(frame.code).toBe('invalid_message');
+
+    ws.terminate();
+  });
+
+  it('session.resize against unknown sessionId → session.error { code: "unknown_session" }', async () => {
+    const ws = await server.injectWS('/v1/events?token=test-token');
+
+    const errorPromise = firstMatch(ws, (m) => m.type === 'session.error');
+
+    ws.send(JSON.stringify({ type: 'session.resize', sessionId: 'no-such-session', cols: 80, rows: 24 }));
+
+    const frame = await errorPromise;
+    expect(frame.code).toBe('unknown_session');
+    expect(frame.sessionId).toBe('no-such-session');
+
+    ws.terminate();
+  });
+
+  it('session.resize against exited session → session.error { code: "not_active" }', async () => {
+    const handle = runtime.getHandle(sessionId)!;
+    controlFakePty(handle).emitExit({ exitCode: 0, signal: null });
+    await tick();
+
+    const ws = await server.injectWS('/v1/events?token=test-token');
+
+    const errorPromise = firstMatch(ws, (m) => m.type === 'session.error');
+
+    ws.send(JSON.stringify({ type: 'session.resize', sessionId, cols: 120, rows: 40 }));
+
+    const frame = await errorPromise;
+    expect(frame.code).toBe('not_active');
+    expect(frame.sessionId).toBe(sessionId);
+
+    ws.terminate();
+  });
+
   it('WS close removes socket from all subscriber lists', async () => {
     const ws = await server.injectWS('/v1/events?token=test-token');
 

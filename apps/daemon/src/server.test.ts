@@ -307,6 +307,19 @@ describe('server routes', () => {
     expect(response.statusCode).toBe(404);
   });
 
+  it('POST /v1/sessions/:id/stop with extra body fields returns 400', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/sessions/any-id/stop',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { extra: 'field' },
+    });
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error?: string; issues?: unknown[] };
+    expect(body.error).toBe('validation_failed');
+    expect(Array.isArray(body.issues)).toBe(true);
+  });
+
   it('GET /v1/health is unauthenticated and returns 200', async () => {
     const response = await server.inject({ method: 'GET', url: '/v1/health' });
     expect(response.statusCode).toBe(200);

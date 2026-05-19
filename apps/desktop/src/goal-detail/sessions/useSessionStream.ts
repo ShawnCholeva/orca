@@ -61,8 +61,11 @@ export function useSessionStream(
 
   const writeSnapshot = useCallback(async () => {
     const detail = await getSession(sessionId);
+    const lastSeenSeq = lastSeenSeqRef.current;
     for (const chunk of detail.output.chunks) {
-      writerRef.current?.write(decodeBase64(chunk.dataBase64));
+      if (chunk.seq >= lastSeenSeq) {
+        writerRef.current?.write(decodeBase64(chunk.dataBase64));
+      }
     }
     lastSeenSeqRef.current = detail.output.nextSeq;
   }, [sessionId]);

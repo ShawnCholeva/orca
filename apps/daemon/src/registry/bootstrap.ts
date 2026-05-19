@@ -50,6 +50,7 @@ export function bootstrapRegistries(registries?: {
 
     plugins.freeze();
     skills.freeze();
+    adapters.freeze();
     console.info(
       `registries.bootstrap.ok plugins=${plugins.list().length} skills=${skills.list().length}`
     );

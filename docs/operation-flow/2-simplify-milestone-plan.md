@@ -8,14 +8,15 @@ the MVP Specification
 the Level 4 and Level 5 specifications
 the Milestone 1 implementation plan
 the Milestone 2 implementation plan
-the Milestone 3 implementation plan and review
-the Milestone 4 architecture and execution plan: `docs/milestones/4.md`
+the Milestone 3 implementation plan
+the Milestone 4 implementation plan and final validation notes
+the Milestone 5 architecture and execution plan: `docs/milestones/5.md`
 
 Your task is NOT to redesign the system.
 
 Your task is to:
 
-tighten, simplify, and operationalize Milestone 4 execution.
+tighten, simplify, and operationalize Milestone 5 execution.
 
 The platform is:
 
@@ -25,36 +26,35 @@ Node.js/TypeScript daemon
 event-driven
 plugin-oriented
 skill-oriented
-PTY/session-based in this milestone
-Goal/memory/reasoning-centric
+Goal-scoped
+Workspace-aware
+PTY/session-based from Milestone 4
+memory/reasoning-centric in this milestone
+optimized for orchestration and token efficiency
 
 The long-term vision is large, but:
 
-Milestone 4 must remain aggressively MVP-focused.
+Milestone 5 must remain aggressively MVP-focused.
 
-Milestone 4 is:
+Milestone 5 is:
 
-Embedded Sessions
+Shared Memory
 
 The intended proof point is:
 
 ```text
-User opens a refined Goal with attached workspaces
-  -> creates a manual session
-  -> chooses a workspace and an agent adapter
-  -> optionally chooses a role / short instruction
-  -> daemon validates the Goal, workspace, and adapter
-  -> daemon records a session and lifecycle events
-  -> daemon launches a PTY in the selected workspace
-  -> adapter starts shell / Claude Code / opencode / codex in the PTY
-  -> desktop renders an embedded terminal
-  -> user interacts with the agent normally
-  -> daemon captures output and lifecycle transitions
-  -> UI shows active/completed session state
-  -> session metadata and useful output history survive daemon restart
+User opens a Goal with completed or stopped sessions
+  -> daemon detects a session eligible for extraction
+  -> daemon reads bounded session metadata and persisted output tail
+  -> a memory extraction skill/job produces structured summary, memory candidates, and decision candidates
+  -> daemon validates and normalizes extracted items
+  -> daemon commits extraction state, Goal memory, decisions, and domain events atomically
+  -> memory and decisions become visible in the Goal detail UI
+  -> user can review, edit status, promote/archive items where appropriate
+  -> extracted Goal memory survives daemon restart
 ```
 
-Milestone 4 should build on the M1-M3 operational loop:
+Milestone 5 should build on the M1-M4 operational loop:
 
 ```text
 Tauri app
@@ -67,9 +67,11 @@ Tauri app
   -> state survives daemon restart
 ```
 
-M4 adds one new kind of runtime behavior: the daemon starts and manages local PTY processes.
+M5 adds one new product foundation:
 
-That makes the milestone higher risk than M1-M3, but it should still remain small.
+durable Goal-scoped memory and decisions extracted from bounded existing evidence.
+
+That makes the milestone strategically important, but it should still remain small.
 
 Your review should identify:
 
@@ -84,32 +86,42 @@ unnecessary flexibility
 unnecessary infrastructure
 things that can be hardcoded temporarily
 systems that should remain internal-only for now
-UI framework complexity that is not needed for a single embedded session surface
-session abstractions that are not needed before memory/context/task systems exist
-terminal abstractions that are not needed before a real product need appears
+AI/model integration that is premature before deterministic extraction is proven
+memory abstractions that are not needed before context assembly exists
+decision abstractions that are not needed before recommendations or supervised execution exist
+extraction infrastructure that is too broad for one Goal-scoped product loop
+UI complexity that is not needed for Goal detail memory and decision review
 
 Explain WHY each item is premature.
 
 Pay special attention to:
 
-generic adapter/plugin invocation APIs
-workflow engines for session creation
-session orchestration beyond create/start/stop/archive
-adapter hook systems
-adapter-owned PTY behavior
-adapter output transformers
-per-workspace command environments
-role catalogs
-context package injection
-memory extraction or summary stubs
-task assignment, recommendations, or auto-launching
-terminal multiplexing, panes, tabs, sharing, or replay engines
-binary WebSocket protocol rewrites
-custom terminal themes/keymaps/settings
-process re-parenting across daemon restart
-cross-Goal global session management
-adapter configuration UI
-cloud, remote execution, or distributed runtime assumptions
+generic skill invocation APIs
+generic extraction engines
+provider/model SDK integration
+prompt-management frameworks
+background queue systems
+worker pools
+schedulers
+workflow engines
+recommendation engines
+task graph systems
+context package assembly
+prompt injection into new sessions
+sibling-session awareness at session startup
+cross-Goal memory
+knowledge graphs
+embedding/vector databases
+semantic search
+conflict-detection systems
+memory consolidation engines
+memory ranking/relevance systems
+full transcript processing
+transcript replay or analytics
+storing raw extractor prompts/responses
+provider configuration UI
+policy/governance systems
+autonomous execution features
 
 2. Simplification Opportunities
 
@@ -121,15 +133,19 @@ shortcuts that preserve future evolution
 places where deterministic logic is enough
 places where AI reasoning is unnecessary
 opportunities to reduce operational complexity
-places where the existing WebSocket channel is sufficient
-places where projection reads are sufficient without replay utilities
-places where a single daemon-local module is enough
-places where hardcoded adapter defaults are better than configuration
+places where a daemon-local module is enough
+places where an in-process job runner is enough
+places where explicit retry is enough without a queue
+places where SQLite projection reads are sufficient
+places where bounded M4 output tails are sufficient
+places where M3 Goal refinement fields can seed memory without a generalized import system
+places where source attribution can be compact instead of transcript-scale
+places where manual edit/archive/promote controls can replace complex ranking
 
 For each simplification, explain:
 
 why it improves MVP velocity
-why it does not damage future M5/M6/Level 4 architecture
+why it does not damage future M6/M7/Level 4 architecture
 which future milestone should own the deferred complexity, if relevant
 
 3. Execution Risks
@@ -138,18 +154,24 @@ Identify:
 
 highest-risk implementation areas
 likely integration problems
-native dependency and packaging risks
-PTY lifecycle risks
-cross-platform shell risks
-adapter command resolution risks
-filesystem/cwd validation risks
-WebSocket throughput and ordering risks
-terminal UI risks
-output persistence risks
+extraction quality risks
+AI/provider dependency risks, if the plan includes them
+token/cost/latency risks
+hallucination and unsupported-memory risks
+bounded-output/truncation risks
+source-attribution risks
+duplicate extraction and idempotency risks
+automatic promotion risks
+high-impact decision confirmation risks
 SQLite migration and transaction pitfalls
 event-system risks
-Tauri desktop flow risks
-M1/M2/M3 regression risks
+daemon restart/reconciliation risks
+session output privacy and secret leakage risks
+logs accidentally containing terminal output, prompts, or extracted secrets
+database growth risks
+event payload growth risks
+desktop state and live-refresh risks
+M1/M2/M3/M4 regression risks
 
 For each risk:
 
@@ -158,62 +180,102 @@ recommend mitigation
 
 Pay special attention to:
 
-`node-pty` native module installation and sidecar packaging
-prebuilt availability for the supported target triples
-daemon dev mode versus bundled sidecar behavior
-ensuring only the PTY wrapper imports `node-pty`
-ensuring session state updates and domain events happen in the same transaction
+extracting only from bounded session metadata and capped output tail
+not requiring full transcripts
+not persisting raw prompts or full model responses in the general event store
+not writing large summaries or output bytes as domain events
+validating extractor JSON with zod before persistence
+idempotency by session/source/extractor version
+duplicate prevention across retries
+clear extraction lifecycle states
+boot reconciliation for pending/running extraction jobs
+source references that remain useful without storing full transcripts
+secret redaction before memory/decision persistence where feasible
+automatic promotion only for routine, low-risk memory
+confirmation-required state for high-impact or uncertain decisions
+events and projection rows committed in the same transaction
 broadcasting only after commit
-not persisting terminal input or resize events
-not writing high-volume output into the general event store
-output chunk ordering, sequence numbers, and duplicate replay handling
-output retention caps and SQLite growth
-secrets in persisted output and logs
-base64 overhead on the existing JSON WebSocket channel
-slow WebSocket consumers and backpressure policy
-adapter command-not-found behavior
-env-var override behavior for CLI paths
-argv handling without shell quoting
-shell fallback behavior on macOS/Linux/Windows
-detached, archived, or removed workspaces
-archived Goals
-sessions that were running when the daemon exits
-daemon boot reconciliation order before accepting HTTP/WebSocket traffic
-SIGTERM to SIGKILL stop behavior
-PTY exit versus explicit user stop race conditions
-xterm mount/unmount cleanup
-terminal resize loops
-desktop reconnect or stale-subscription behavior
+manual retry behavior that does not duplicate memory
+desktop behavior for extraction failed, pending, running, truncated, and unavailable-output states
 
 4. Milestone Boundary Violations
 
 Find anything that accidentally drifts toward:
 
-Milestone 5 shared memory
 Milestone 6 context assembly
+Milestone 7 recommendations
 Level 4 supervised execution
 Level 5 autonomy
 cloud infrastructure
-enterprise architecture
+enterprise governance
 distributed systems
 advanced plugin ecosystems
+generic skill execution
 workflow engines
 agent coordination systems
 task graphs
 recommendation engines
 workspace indexing or file watching
-AI-backed summaries or extraction
+AI-backed continuous reasoning loops
 multi-agent automation
+cross-Goal knowledge systems
+embedding/vector infrastructure
 
 Clearly distinguish:
 
-M4-required foundations
+M5-required foundations
 future-facing seams that are acceptable
 future systems that must be deferred
 
-5. Implementation Sequencing Improvements
+5. Scope Review And Simplification
 
-Review the milestone task ordering in `docs/milestones/4.md`.
+Review the proposed Milestone 5 scope and explicitly decide what should remain versus be deferred.
+
+Evaluate specifically:
+
+session summary extraction
+memory extraction
+decision extraction
+automatic memory promotion
+manual memory item creation
+manual decision creation
+memory list/detail views
+decision list/detail views
+edit/archive/promote/canonicalize controls
+decision confirmation controls
+extraction trigger on terminal session exit/stop/failure
+manual "extract now" action for a session
+retrying failed extractions
+backfilling M3 Goal refinement fields into initial Goal memory
+extracting from the capped M4 session output tail
+extracting from full transcripts, if no full transcript exists
+extraction status tracking
+extraction error handling
+extraction idempotency
+extraction confidence scores
+source attribution back to session/refinement/output offsets
+memory type taxonomy
+decision schema
+local deterministic extractor versus AI-backed extractor
+provider configuration or model SDK integration
+background queues / workers
+token budgeting and output truncation
+redaction / secret handling
+context package assembly
+prompt injection into new sessions
+sibling session awareness in new-session startup
+task/work-unit generation
+recommendation generation
+conflict detection
+workflow automation
+cross-Goal memory
+knowledge graph / embedding search / vector database
+
+Prefer the smallest product-complete M5 that satisfies the exit criteria.
+
+6. Implementation Sequencing Improvements
+
+Review the milestone task ordering in `docs/milestones/5.md`.
 
 Suggest:
 
@@ -222,24 +284,26 @@ earlier validation points
 dependency simplifications
 smaller executable increments
 easier debugging paths
-vertical slices that prove persistence, PTY behavior, and UI behavior sooner
+vertical slices that prove storage, extraction, events, and UI behavior sooner
 
 The revised order should make it easy to validate:
 
-M1/M2/M3 baseline still works
+M1/M2/M3/M4 baseline still works
 contracts compile before daemon code depends on them
-`node-pty` can install, load, and spawn before broader session work begins
-sidecar packaging feasibility is known early
-migration applies cleanly before projections use new tables
-adapter command resolution works before session start depends on it
-the PTY wrapper works behind a fake interface before usecases depend on it
-session create/list/detail works before PTY start is added
-output persistence works before live WebSocket streaming depends on it
-WebSocket subscription/input/resize works before desktop terminal integration
-the shell/manual adapter proves the full loop before Claude Code/opencode/codex polish
+SQLite migration applies cleanly before projections use new tables
+Goal-scoped memory and decision reads work before extraction writes them
+manual memory and decision APIs work before automatic extraction depends on them
+the extraction state table works before any extractor runs
+the deterministic/fake extractor contract works before any AI-backed behavior is considered
+M3 refinement backfill works before session output extraction broadens input sources
+session summary extraction works before memory and decision extraction depend on it
+idempotency and duplicate prevention work before retry behavior ships
+automatic promotion rules are explicit before UI exposes promoted/canonical states
+event persistence and projection updates happen atomically before WebSocket live refresh is added
 restart reconciliation works before final UI polish
+the Goal detail UI reads persisted memory and decisions before adding live extraction controls
 
-6. Repository Structure Review
+7. Repository Structure Review
 
 Review the proposed repository structure.
 
@@ -257,204 +321,224 @@ clean boundaries
 future extensibility
 daemon-owned domain state
 contract-driven HTTP responses
-adapter descriptors from the plugin registry
-the existing M1-M3 operational loop
+plugin-first direction
+skill-first direction
+the existing M1-M4 operational loop
 
-Do not propose new top-level packages unless there is a concrete Milestone 4 need.
+Do not propose new top-level packages unless there is a concrete Milestone 5 need.
 
 Evaluate specifically:
 
 `packages/contracts`
-`apps/daemon/src/pty`
-`apps/daemon/src/adapters`
+`apps/daemon/src/memory`
+`apps/daemon/src/decisions`
+`apps/daemon/src/extractions`
+`apps/daemon/src/skills`
 `apps/daemon/src/sessions`
-`apps/daemon/src/registry`
 `apps/daemon/src/server.ts`
-`apps/desktop/src/goal-detail/sessions`
-`apps/desktop/src-tauri`
+`apps/desktop/src/goal-detail`
 daemon tests
 desktop tests
-sidecar build scripts
+implementation notes
 
-7. API Surface Reduction
+8. API Surface Reduction
 
 Identify:
 
 endpoints that can wait
-endpoints that can be folded into existing endpoints
+endpoints that can be folded into existing Goal detail bundle endpoints
 abstractions that can remain internal
 areas where direct use-case calls are acceptable temporarily
-places where WebSocket messages should be preferred over HTTP routes
-places where HTTP routes should be preferred over WebSocket messages
+places where WebSocket/domain events are sufficient for live refresh
+places where HTTP routes should be preferred over WebSocket commands
 
-Evaluate the proposed M4 API surface specifically:
+Evaluate the proposed M5 API surface specifically:
 
-`GET /v1/adapters`
-`POST /v1/goals/:id/sessions`
-`GET /v1/goals/:id/sessions`
-`GET /v1/sessions/:id`
-`POST /v1/sessions/:id/start`
-`POST /v1/sessions/:id/stop`
-`POST /v1/sessions/:id/archive`
-
-Evaluate the proposed WebSocket message surface specifically:
-
-`session.subscribe`
-`session.unsubscribe`
-`session.input`
-`session.resize`
-`session.output`
-`session.error`
+`GET /v1/goals/:goalId/memory`
+`POST /v1/goals/:goalId/memory`
+`PATCH /v1/memory/:id`
+`POST /v1/memory/:id/promote`
+`POST /v1/memory/:id/canonicalize`
+`POST /v1/memory/:id/archive`
+`GET /v1/goals/:goalId/decisions`
+`POST /v1/goals/:goalId/decisions`
+`PATCH /v1/decisions/:id`
+`POST /v1/decisions/:id/confirm`
+`POST /v1/decisions/:id/archive`
+`GET /v1/sessions/:sessionId/summary`
+`POST /v1/sessions/:sessionId/extract-memory`
+`GET /v1/sessions/:sessionId/extractions`
 
 Recommend the minimum public surface needed to prove:
 
-manual session creation for a refined Goal
-adapter selection
-PTY launch in an attached workspace
-interactive terminal input/output/resize
-session stop
-session list/detail reload after restart
-persisted output tail replay after restart
-clear command-not-found behavior
+Goal-scoped memory list/reload after restart
+Goal-scoped decision list/reload after restart
+manual memory creation/edit/archive, if retained
+manual decision creation/edit/confirm/archive, if retained
+session summary read
+manual extraction trigger or retry, if retained
+automatic extraction from completed/stopped sessions
+memory/decision UI refresh after committed events
+clear failed-extraction behavior
 
-Reject generic adapter invocation or generic plugin execution unless a concrete M4 need remains after simplification.
+Reject generic skill invocation, generic extractor invocation, generic workflow execution, context assembly endpoints, recommendation endpoints, task endpoints, embedding search endpoints, or cross-Goal memory endpoints unless a concrete M5 need remains after simplification.
 
-8. Event System Scope Reduction
+9. Event System Scope Reduction
 
 Recommend the minimum viable event additions needed for:
 
-session creation
-session start
-session normal exit
-session failure
-explicit user stop
-session archive, if archive remains in scope
-future memory extraction compatibility
+extraction request/start/completion/failure
+session summary creation/update, if represented as an event
+memory item creation/update/promotion/canonicalization/archive
+decision creation/update/confirmation/archive
+future context assembly compatibility
 UI refresh after committed changes
 
 Evaluate whether these events are sufficient:
 
-`session.created`
-`session.started`
-`session.exited`
-`session.failed`
-`session.stopped`
-`session.archived`
+`memory.extraction.requested`
+`memory.extraction.started`
+`memory.extraction.completed`
+`memory.extraction.failed`
+`memory.item.created`
+`memory.item.updated`
+`memory.item.promoted`
+`memory.item.canonicalized`
+`memory.item.archived`
+`decision.created`
+`decision.updated`
+`decision.confirmed`
+`decision.archived`
 
-Define what should NOT be added in M4, including:
+Define what should NOT be added in M5, including:
 
-`session.output.received`
-`session.input.sent`
-`session.resized`
-memory events
-summary events
-context events
+raw terminal output events
+extractor prompt events
+extractor raw response events
+context package events
+prompt injection events
 task events
 recommendation events
-workspace refresh events
-workspace scan/index events
-adapter hook events
 workflow events
+cross-Goal memory events
+embedding/indexing events
+continuous reasoning events
+agent coordination events
 
 Avoid event-system overengineering.
 
-9. Database And Persistence Simplification
+10. Database And Persistence Simplification
 
 Review the proposed SQLite additions.
 
-Assess whether Milestone 4 can remain limited to:
+Assess whether Milestone 5 can remain limited to:
 
-`sessions`
-`session_output_chunks`
-minimal indexes required by Goal-scoped list/detail reads and output replay
+`goal_memory_items`
+`goal_decisions`
+`session_summaries`
+`memory_extractions`
+minimal indexes required by Goal detail reads, source lookup, and idempotent extraction
 
 Identify schema fields that are premature.
 
 Reject tables for:
 
-memory
-summaries
-context bundles
+context packages
+prompt bundles
 tasks
 recommendations
 workflows
 workspace indexing
 workspace scans
-adapter configuration
-role catalogs
-terminal panes/tabs
+cross-Goal memory
+knowledge graphs
+embeddings
+vector indexes
+provider configuration
+memory ranking/relevance models
+policy/governance systems
 
 Confirm that persistence supports:
 
 restart reload
-session metadata survival
-recent output tail survival
-running-session reconciliation after daemon restart
-session list/detail reads from projections
-M1/M2/M3 create/list/restart compatibility
+Goal-scoped memory survival
+Goal-scoped decision survival
+session summary survival
+extraction state reconciliation after daemon restart
+idempotent retry
+source attribution to existing evidence
+M1/M2/M3/M4 create/list/refine/workspace/session compatibility
 
-10. PTY And Terminal Review
+11. Extraction Skill / Job Review
 
-Review PTY and embedded terminal behavior specifically.
+Review the proposed extraction design specifically.
 
-Recommend the smallest implementation that proves M4:
+Recommend the smallest implementation that proves M5:
 
-`node-pty` behind one daemon-local wrapper
-one PTY per session
-one desktop terminal view per selected session
-xterm.js with default behavior
-terminal input over WebSocket only
-terminal resize over WebSocket only
-terminal output over WebSocket only
-chunked output persistence with a retention cap
-recent output replay through session detail
-explicit stop with SIGTERM then SIGKILL
-running sessions marked failed on daemon restart
-
-Reject or defer:
-
-terminal tabs
-terminal panes
-multi-viewer synchronization
-process re-parenting
-tmux/screen integration
-custom terminal themes
-custom keymaps
-full transcript export
-search inside terminal output
-binary WebSocket migration
-terminal command palettes
-terminal session sharing
-
-11. Adapter Review
-
-Review the proposed shell/manual, Claude Code, opencode, and codex adapters.
-
-Assess:
-
-whether adapters should remain pure spawn factories
-whether command resolution can be hardcoded plus env-var overrides
-whether availability detection should remain lazy
-whether adapter descriptors should stay internal-only
-whether role and instruction should remain opaque strings
-whether CLI-specific arguments should be avoided in M4
-whether shell/manual should be the first full-loop validation target
+one daemon-local extractor interface
+deterministic/fake extractor for tests
+bounded input assembled from Goal, refinement, session metadata, and capped output tail
+explicit byte/token budgets
+zod-validated output schema
+session summary output
+memory candidates output
+decision candidates output
+normalization before persistence
+idempotency key by source session/refinement plus extractor version
+retry without external queue infrastructure
+clear failed state with user-visible error
+no raw prompt/response persistence unless deliberately redacted and bounded
 
 Reject or defer:
 
-adapter configuration UI
-adapter marketplace loading
-adapter hook systems
-adapter-owned process management
-adapter-owned streaming
-adapter-specific output parsing
-adapter-specific summaries
-adapter-specific memory extraction
-adapter-generated context injection
-automatic prompt construction
 model-provider SDK integration
+provider configuration UI
+prompt-management libraries
+continuous daemon reasoning loops
+background worker pools
+distributed queues
+multi-extractor pipelines
+semantic deduplication
+embedding-based relevance
+memory consolidation engines
+confidence calibration systems
+cross-Goal extraction
+full transcript extraction
+adapter-specific extraction
+automatic context injection
+recommendation or task generation
 
-12. UI Scope Review
+12. Memory And Decision Domain Review
+
+Review the proposed memory and decision model.
+
+Assess whether M5 can stay limited to:
+
+Goal-scoped memory items
+Goal-scoped decisions
+routine automatic promotion for low-risk extracted memory
+confirmation-required state for high-impact or uncertain decisions
+manual edit/archive/promote/canonicalize controls only where they prove product value
+source attribution to Goal refinement, session, summary, or bounded output range
+simple type taxonomy
+simple status lifecycle
+
+Reject or defer:
+
+cross-Goal memory
+organizational memory
+knowledge graph relationships
+embedding search
+conflict resolution
+memory ranking/relevance algorithms
+memory aging/decay systems
+automatic canonicalization beyond explicit rules
+policy/governance review systems
+decision impact analysis engines
+recommendation generation from memory
+context package assembly from memory
+
+13. UI Scope Review
 
 Review the proposed desktop changes.
 
@@ -462,32 +546,34 @@ Keep UI minimal but real.
 
 Assess whether the UI can be limited to:
 
-Goal detail sessions panel
-create session dialog
-workspace selector using M3 attached workspaces
-adapter selector using `GET /v1/adapters`
-opaque role and instruction fields
-session list with statuses
-embedded xterm terminal view
-stop/archive controls
-inline command-not-found and unavailable-adapter errors
-existing diagnostics preserved, with optional read-only adapter availability
+Goal detail memory panel
+Goal detail decisions panel
+session summary display inside the existing sessions area
+extraction status on eligible sessions
+manual extract/retry action, if retained
+memory list with simple status/type/source metadata
+decision list with confirmation state
+create/edit/archive/promote/canonicalize controls only where backed by M5 APIs
+empty/loading/error/truncated-output states
+live refresh through existing event subscription/refetch behavior
 
 Reject or defer:
 
-global sessions dashboard
-command center
-memory panel
-tasks panel
+global memory dashboard
+cross-Goal search
+knowledge graph UI
 recommendations panel
+task panel
 workflow UI
-URL deep-linking unless already present and necessary
-terminal settings UI
-adapter configuration UI
-multi-pane/multi-tab terminal UI
-complex state management beyond local reducer/hooks
+command center
+autonomy controls
+context package viewer
+prompt package editor
+provider/model configuration UI
+complex filtering, ranking, or analytics
+new routing or deep-linking unless already required by the app
 
-13. MVP-Appropriate Recommendations
+14. MVP-Appropriate Recommendations
 
 For every recommendation:
 
@@ -500,19 +586,21 @@ Prefer:
 hardcoded over abstracted
 internal over extensible
 deterministic over intelligent
-single-client over multi-client
-projection reads over replay engines
-JSON WebSocket frames over protocol rewrites
-simple output retention over transcript systems
-operational over theoretical
+bounded evidence over full transcripts
+explicit source attribution over unsupported synthesis
+SQLite projection reads over replay engines
+in-process retry over queue systems
+Goal-scoped memory over global knowledge systems
+simple status lifecycles over policy engines
+manual controls over autonomous automation
 
 unless future architecture would be severely damaged.
 
-14. Revised Milestone 4
+15. Revised Milestone 5
 
 At the end, produce:
 
-a revised, simplified Milestone 4 plan (update the plan you reviewed)
+a revised, simplified Milestone 5 plan (update the plan you reviewed)
 
 Include:
 
@@ -520,10 +608,11 @@ revised scope
 revised task order
 revised architecture boundaries
 revised API surface
-revised WebSocket surface
 revised event list
 revised database surface
-revised PTY/adapter boundaries
+revised extraction boundaries
+revised memory/decision domain boundaries
+revised UI scope
 revised validation strategy
 revised definition of done
 
@@ -535,23 +624,28 @@ preserve clean architecture
 dramatically improve implementation velocity
 reduce unnecessary complexity
 maximize learnings per engineering hour
-prove the embedded session operating loop
-prepare cleanly for Milestone 5 shared memory without implementing memory extraction
+prove the shared memory loop
+prepare cleanly for Milestone 6 context assembly without implementing context assembly
+prepare cleanly for Milestone 7 recommendations without implementing recommendations
 
 Most important instruction:
 
-Optimize for proving the M4 product loop quickly.
+Optimize for proving the M5 product loop quickly.
 
 Do not optimize for hypothetical future scale.
 
-Do not let Sessions become the memory engine.
+Do not let Shared Memory become the context assembly engine.
 
-Do not let adapters become an orchestration framework.
+Do not let extraction become a continuous reasoning system.
 
-Do not let the PTY wrapper become a terminal multiplexer.
+Do not let memory become a cross-Goal knowledge graph.
 
-Do not let output persistence become a transcript analytics system.
+Do not let decisions become a recommendation engine.
 
-Do not let role/instruction fields become context assembly.
+Do not let summaries become transcript analytics.
 
-Do not let restart handling become process resumption.
+Do not let skills become a generic public invocation API.
+
+Do not let retry behavior become a queue system.
+
+Do not let UI become a command center or autonomy dashboard.

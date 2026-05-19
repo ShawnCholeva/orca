@@ -44,7 +44,6 @@ let _db: Database.Database | null = null;
 let _stmts: {
   insertEvent: Database.Statement;
   selectWorkspace: Database.Statement;
-  setRunning: Database.Statement;
   updateTerminalSize: Database.Statement;
 } | null = null;
 
@@ -56,7 +55,6 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
         'INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)'
       ),
       selectWorkspace: db.prepare('SELECT id, path FROM workspaces WHERE id = ?'),
-      setRunning: db.prepare('UPDATE sessions SET status = ? WHERE id = ?'),
       updateTerminalSize: db.prepare(
         'UPDATE sessions SET terminal_cols = ?, terminal_rows = ? WHERE id = ?'
       ),
@@ -224,7 +222,14 @@ export class SessionRuntime {
       handle = result.handle;
       ptyEvents = result.events;
     } catch (err) {
-      persistFailure(db, bus, sessionId, session.goalId, 'spawn_failed', now);
+      const isPtySpawnError = (err as { name?: string }).name === 'PtySpawnError';
+      const code = isPtySpawnError
+        ? ((err as { code?: string }).code ?? 'spawn_failed')
+        : 'spawn_failed';
+      persistFailure(db, bus, sessionId, session.goalId, code, now);
+      if (code === 'command_not_found') {
+        throw new CommandNotFoundError(session.adapterId);
+      }
       throw new SpawnFailedError(sessionId, err instanceof Error ? err.message : String(err));
     }
 
@@ -233,23 +238,25 @@ export class SessionRuntime {
     const startPayload = { sessionId, goalId: session.goalId, pid, cwd: spawnResult.cwd, terminalCols, terminalRows };
 
     let startedEvent!: DomainEvent;
-    db.transaction(() => {
-      setSessionStatus(db, sessionId, 'starting', {
-        pid,
-        command: spawnResult.command,
-        argsJson: JSON.stringify(spawnResult.args),
-        cwd: spawnResult.cwd,
-        terminalCols,
-        terminalRows,
-        startedAt,
-      });
-      startedEvent = insertEvent(db, 'session.started', session.goalId, startPayload, startedAt);
-    })();
+    try {
+      db.transaction(() => {
+        setSessionStatus(db, sessionId, 'running', {
+          pid,
+          command: spawnResult.command,
+          argsJson: JSON.stringify(spawnResult.args),
+          cwd: spawnResult.cwd,
+          terminalCols,
+          terminalRows,
+          startedAt,
+        });
+        startedEvent = insertEvent(db, 'session.started', session.goalId, startPayload, startedAt);
+      })();
+    } catch (err) {
+      handle.kill('SIGKILL');
+      throw err;
+    }
 
     bus.publish(startedEvent);
-
-    // Separate small tx: status=running (spawn handle confirmed alive post-commit)
-    stmts.setRunning.run('running', sessionId);
 
     const slot: HandleSlot = { handle, stopRequested: false, killTimer: null };
     this.handleSlots.set(sessionId, slot);

@@ -111,6 +111,10 @@ export function createSessionOutputStore(
         };
       }
 
+      // Bound to the cap so a single oversized chunk cannot exceed the storage limit.
+      const bounded = data.length > capBytes ? data.subarray(data.length - capBytes) : data;
+      const skipped = data.length - bounded.length;
+
       return db.transaction(() => {
         const current = stmts.selectCounters.get(sessionId) as SessionCounterRow | undefined;
         if (!current) {
@@ -121,10 +125,10 @@ export function createSessionOutputStore(
         const byteOffset = current.output_offset_first + current.output_bytes_kept;
         const now = new Date().toISOString();
 
-        stmts.insertChunk.run(sessionId, seq, byteOffset, data.length, now, data);
+        stmts.insertChunk.run(sessionId, seq, byteOffset + skipped, bounded.length, now, bounded);
 
         let outputSeq = seq + 1;
-        let outputBytesKept = current.output_bytes_kept + data.length;
+        let outputBytesKept = current.output_bytes_kept + bounded.length;
         let outputOffsetFirst = current.output_offset_first;
 
         while (outputBytesKept > capBytes) {
@@ -133,7 +137,6 @@ export function createSessionOutputStore(
             break;
           }
 
-          // Keep a single oversized chunk intact. The cap converges on a later append.
           if (oldest.seq === seq) {
             break;
           }

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { bootstrapRegistries } from "./bootstrap.js";
 import { PluginRegistry } from "./plugin-registry.js";
 import { SkillRegistry } from "./skill-registry.js";
+import { AdapterRegistry } from "../adapters/registry.js";
 
 describe("registry hardening", () => {
   it("throws on register-after-freeze for both registries", () => {
@@ -71,5 +72,38 @@ describe("registry hardening", () => {
     bootstrapRegistries({ plugins, skills });
 
     expect(() => bootstrapRegistries({ plugins, skills })).toThrowError("PluginRegistry is frozen");
+  });
+
+  it("freezes the adapter registry after bootstrap; rejects duplicate ids before freeze", () => {
+    const adapters = new AdapterRegistry();
+    bootstrapRegistries({ plugins: new PluginRegistry(), skills: new SkillRegistry(), adapters });
+
+    expect(() =>
+      adapters.register({
+        id: 'codex' as const,
+        title: 'Fake',
+        resolveSpawn: async () => ({ command: '', args: [], env: {}, cwd: '' }),
+        probeAvailability: async () => ({ status: 'unknown' as const }),
+      })
+    ).toThrowError("AdapterRegistry is frozen");
+  });
+
+  it("rejects duplicate adapter id before freeze", () => {
+    const adapters = new AdapterRegistry();
+    adapters.register({
+      id: 'shell-manual' as const,
+      title: 'First',
+      resolveSpawn: async () => ({ command: '', args: [], env: {}, cwd: '' }),
+      probeAvailability: async () => ({ status: 'unknown' as const }),
+    });
+
+    expect(() =>
+      adapters.register({
+        id: 'shell-manual' as const,
+        title: 'Duplicate',
+        resolveSpawn: async () => ({ command: '', args: [], env: {}, cwd: '' }),
+        probeAvailability: async () => ({ status: 'unknown' as const }),
+      })
+    ).toThrowError("Duplicate adapter id: shell-manual");
   });
 });
