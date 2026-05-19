@@ -27,6 +27,8 @@ import {
   type ListAdaptersResponse,
   RefineGoalRequest,
   type RefineGoalResponse,
+  StartSessionRequest,
+  type StartSessionResponse,
   UpdateGoalRequest,
   type UpdateGoalResponse,
   type ArchiveGoalResponse
@@ -58,9 +60,12 @@ import { skillRegistry } from './registry/skill-registry.js';
 import { adapterRegistry } from './adapters/registry.js';
 import {
   AdapterNotFoundError,
+  CommandNotFoundError,
   GoalArchivedError,
   GoalNotFoundError,
   SessionNotFoundError,
+  SessionWrongStateError,
+  SpawnFailedError,
   WorkspaceNotAttachedError,
   WorkspaceNotFoundError,
   WorkspaceUnavailableError,
@@ -69,8 +74,11 @@ import {
   createSession,
   getSession,
   listSessionsForGoal,
+  startSession,
 } from './sessions/usecases.js';
 import { createSessionOutputStore } from './sessions/output-store.js';
+import { SessionRuntime } from './sessions/runtime.js';
+import type { PtyManager } from './pty/types.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -94,12 +102,23 @@ const CORS_ORIGINS = [
 
 const WS_OPEN = 1; // ws library WebSocket.OPEN
 
-export function createServer(config: Config): FastifyInstance {
+// Wired in M4-011 with the real node-pty PtyManager; noop until then.
+const noopPtyManager: PtyManager = {
+  start() {
+    throw Object.assign(new Error('PTY manager not configured'), { code: 'spawn_failed' });
+  },
+};
+
+export function createServer(
+  config: Config,
+  deps?: { sessionRuntime?: SessionRuntime }
+): FastifyInstance {
   const startedAt = new Date().toISOString();
   const db = getDatabase();
   const sessionOutputStore = createSessionOutputStore(db, {
     tailBytes: config.sessionOutputTailBytes,
   });
+  const sessionRuntime = deps?.sessionRuntime ?? new SessionRuntime(noopPtyManager);
 
   const server = Fastify({
     logger: {
@@ -399,6 +418,41 @@ export function createServer(config: Config): FastifyInstance {
     } catch (error) {
       if (error instanceof SessionNotFoundError) {
         reply.status(404);
+        return apiError(error.code, error.message);
+      }
+      throw error;
+    }
+  });
+
+  server.post('/v1/sessions/:id/start', async (request, reply): Promise<StartSessionResponse | { error: unknown; issues?: unknown }> => {
+    const { id } = request.params as { id: string };
+    const parsed = StartSessionRequest.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'validation_failed', issues: parsed.error.issues };
+    }
+    try {
+      const session = await startSession(
+        { db, bus: eventBus, adapterRegistry, sessionOutputStore, sessionRuntime },
+        id,
+        parsed.data
+      );
+      return { session };
+    } catch (error) {
+      if (error instanceof SessionNotFoundError) {
+        reply.status(404);
+        return apiError(error.code, error.message);
+      }
+      if (error instanceof SessionWrongStateError) {
+        reply.status(409);
+        return apiError(error.code, error.message);
+      }
+      if (
+        error instanceof WorkspaceUnavailableError ||
+        error instanceof CommandNotFoundError ||
+        error instanceof SpawnFailedError
+      ) {
+        reply.status(422);
         return apiError(error.code, error.message);
       }
       throw error;

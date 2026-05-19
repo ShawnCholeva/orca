@@ -16,12 +16,18 @@ import {
 } from './errors.js';
 import { getSessionDetail, insertSession, listSessionsByGoal } from './projection.js';
 import type { SessionOutputStore } from './output-store.js';
+import { type RuntimeCtx, SessionRuntime } from './runtime.js';
 
 export interface SessionCtx {
   db: Database.Database;
   bus: EventBus;
   adapterRegistry: AdapterRegistry;
   sessionOutputStore?: SessionOutputStore;
+}
+
+export interface StartSessionCtx extends SessionCtx {
+  sessionOutputStore: SessionOutputStore;
+  sessionRuntime: SessionRuntime;
 }
 
 interface GoalRow {
@@ -191,4 +197,18 @@ export function getSession(
     ? outputStore.readTail(sessionId)
     : { sessionId, ...EMPTY_OUTPUT };
   return { session, output };
+}
+
+export async function startSession(
+  ctx: StartSessionCtx,
+  sessionId: string,
+  opts: { terminalCols: number; terminalRows: number }
+): Promise<SessionDetail> {
+  const runtimeCtx: RuntimeCtx = {
+    db: ctx.db,
+    bus: ctx.bus,
+    adapterRegistry: ctx.adapterRegistry,
+    sessionOutputStore: ctx.sessionOutputStore,
+  };
+  return ctx.sessionRuntime.start(runtimeCtx, sessionId, opts);
 }

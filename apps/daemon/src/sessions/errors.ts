@@ -53,3 +53,24 @@ export class SessionNotFoundError extends SessionError {
     this.name = 'SessionNotFoundError';
   }
 }
+
+export class SessionWrongStateError extends SessionError {
+  constructor(sessionId: string, currentStatus: string) {
+    super('session_not_startable', `Session ${sessionId} cannot be started (status: ${currentStatus})`);
+    this.name = 'SessionWrongStateError';
+  }
+}
+
+export class CommandNotFoundError extends SessionError {
+  constructor(adapterId: string) {
+    super('command_not_found', `Command not found for adapter: ${adapterId}`);
+    this.name = 'CommandNotFoundError';
+  }
+}
+
+export class SpawnFailedError extends SessionError {
+  constructor(sessionId: string, detail: string) {
+    super('spawn_failed', `Failed to spawn PTY for session ${sessionId}: ${detail}`);
+    this.name = 'SpawnFailedError';
+  }
+}
