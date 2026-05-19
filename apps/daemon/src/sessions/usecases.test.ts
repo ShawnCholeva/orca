@@ -31,9 +31,12 @@ import {
   listSessionsForGoal,
   resetPreparedStatements,
   startSession,
+  stopSession,
   type SessionCtx,
   type StartSessionCtx,
+  type StopSessionCtx,
 } from './usecases.js';
+import { SessionNotStoppableError } from './errors.js';
 import { resetPreparedStatements as resetProjectionStmts } from './projection.js';
 import { resetPreparedStatements as resetRuntimeStmts, SessionRuntime } from './runtime.js';
 import { createSessionOutputStore } from './output-store.js';
@@ -46,6 +49,7 @@ function createConfig(dataDir: string): Config {
     port: 8787,
     logLevel: 'silent',
     sessionOutputTailBytes: 1024 * 1024,
+    sessionStopGraceMs: 5000,
     getAuthToken: () => 'test-token',
   };
 }
@@ -607,5 +611,164 @@ describe('startSession', () => {
     // No output events in the domain event store
     const outputEventCount = (db.prepare("SELECT COUNT(*) AS c FROM events WHERE type LIKE 'session.output%'").get() as { c: number }).c;
     expect(outputEventCount).toBe(0);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// stopSession tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('stopSession', () => {
+  it('stop before natural exit → exactly one session.stopped, no session.exited', async () => {
+    const db = freshDb();
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-stop-happy-'));
+    tempDirs.push(wsDir);
+
+    // Use a very long grace period so SIGKILL never fires in this test
+    const capturing = new CapturingPtyManager();
+    const runtime = new SessionRuntime(capturing, 60_000);
+    const store = createSessionOutputStore(db, { tailBytes: 1024 * 1024 });
+    const registry = makeStartRegistry(wsDir);
+
+    const sessionId = await seedAndCreateSession(db, wsDir, registry);
+    const startCtx: StartSessionCtx = { db, bus: eventBus, adapterRegistry: registry, sessionOutputStore: store, sessionRuntime: runtime };
+    await startSession(startCtx, sessionId, { terminalCols: 80, terminalRows: 24 });
+
+    const stopCtx: StopSessionCtx = { db, sessionRuntime: runtime };
+    stopSession(stopCtx, sessionId);
+
+    // FakePtyManager.kill fires onExit synchronously, so session is already stopped
+    const { session } = getSession(db, sessionId, store);
+    expect(session.status).toBe('stopped');
+
+    const terminalEvents = db
+      .prepare("SELECT type FROM events WHERE type IN ('session.stopped', 'session.exited')")
+      .all() as { type: string }[];
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]!.type).toBe('session.stopped');
+  });
+
+  it('natural exit before stop → session.exited; subsequent stop returns SessionNotStoppableError', async () => {
+    const db = freshDb();
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-stop-natural-'));
+    tempDirs.push(wsDir);
+
+    const capturing = new CapturingPtyManager();
+    const runtime = new SessionRuntime(capturing);
+    const store = createSessionOutputStore(db, { tailBytes: 1024 * 1024 });
+    const registry = makeStartRegistry(wsDir);
+
+    const sessionId = await seedAndCreateSession(db, wsDir, registry);
+    const startCtx: StartSessionCtx = { db, bus: eventBus, adapterRegistry: registry, sessionOutputStore: store, sessionRuntime: runtime };
+    await startSession(startCtx, sessionId, { terminalCols: 80, terminalRows: 24 });
+
+    // Natural exit fires first
+    controlFakePty(capturing.lastHandle!).emitExit({ exitCode: 0, signal: null });
+
+    const { session: afterExit } = getSession(db, sessionId, store);
+    expect(afterExit.status).toBe('exited');
+
+    // Now try to stop — should throw because session is no longer running
+    const stopCtx: StopSessionCtx = { db, sessionRuntime: runtime };
+    expect(() => stopSession(stopCtx, sessionId)).toThrow(SessionNotStoppableError);
+
+    // Still exactly one terminal event (session.exited), no session.stopped
+    const terminalEvents = db
+      .prepare("SELECT type FROM events WHERE type IN ('session.stopped', 'session.exited')")
+      .all() as { type: string }[];
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]!.type).toBe('session.exited');
+  });
+
+  it('SIGKILL escalation: PTY ignores SIGTERM → timer fires SIGKILL → session.stopped committed once', async () => {
+    const db = freshDb();
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-stop-escalate-'));
+    tempDirs.push(wsDir);
+
+    vi.useFakeTimers();
+
+    // PTY that ignores SIGTERM, exits synchronously on SIGKILL
+    let exitHandler: ((exit: { exitCode: number | null; signal: string | null }) => void) | null = null;
+    const killCalls: string[] = [];
+    const sigkillPtyManager: PtyManager = {
+      start() {
+        const handle: PtyHandle = {
+          get pid() { return 9999; },
+          write() {},
+          resize() {},
+          kill(signal?: 'SIGTERM' | 'SIGKILL') {
+            const sig = signal ?? 'SIGTERM';
+            killCalls.push(sig);
+            if (sig === 'SIGKILL') {
+              exitHandler?.({ exitCode: null, signal: 'SIGKILL' });
+            }
+          },
+        };
+        const events: PtyEvents = {
+          onData() { return () => {}; },
+          onExit(handler) {
+            exitHandler = handler;
+            return () => {};
+          },
+        };
+        return { handle, events };
+      },
+    };
+
+    const store = createSessionOutputStore(db, { tailBytes: 1024 * 1024 });
+    const registry = makeStartRegistry(wsDir);
+    // Grace period of 100ms (fake timers)
+    const runtime = new SessionRuntime(sigkillPtyManager, 100);
+
+    const sessionId = await seedAndCreateSession(db, wsDir, registry);
+    const startCtx: StartSessionCtx = { db, bus: eventBus, adapterRegistry: registry, sessionOutputStore: store, sessionRuntime: runtime };
+    await startSession(startCtx, sessionId, { terminalCols: 80, terminalRows: 24 });
+
+    // Stop → SIGTERM sent, PTY ignores it
+    const stopCtx: StopSessionCtx = { db, sessionRuntime: runtime };
+    stopSession(stopCtx, sessionId);
+
+    expect(killCalls).toEqual(['SIGTERM']);
+    // Session still running (PTY ignored SIGTERM)
+    const { session: mid } = getSession(db, sessionId, store);
+    expect(mid.status).toBe('running');
+
+    // Advance fake timers past grace period → SIGKILL fires → PTY exits → session.stopped committed
+    vi.runAllTimers();
+
+    const { session: after } = getSession(db, sessionId, store);
+    expect(after.status).toBe('stopped');
+    expect(killCalls).toEqual(['SIGTERM', 'SIGKILL']);
+
+    // Exactly one terminal event
+    const terminalEvents = db
+      .prepare("SELECT type FROM events WHERE type IN ('session.stopped', 'session.exited')")
+      .all() as { type: string }[];
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]!.type).toBe('session.stopped');
+
+    vi.useRealTimers();
+  });
+
+  it('stop on non-existent session → SessionNotFoundError', () => {
+    const db = freshDb();
+    const runtime = new SessionRuntime(new FakePtyManager());
+    const stopCtx: StopSessionCtx = { db, sessionRuntime: runtime };
+    expect(() => stopSession(stopCtx, 'no-such-session')).toThrow(SessionNotFoundError);
+  });
+
+  it('stop on created (never started) session → SessionNotStoppableError', async () => {
+    const db = freshDb();
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-stop-created-'));
+    tempDirs.push(wsDir);
+    const registry = makeStartRegistry(wsDir);
+    seedGoal(db, 'g1');
+    seedWorkspace(db, 'ws1', 'g1', wsDir);
+    const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry: registry };
+    const detail = await createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'shell-manual' });
+
+    const runtime = new SessionRuntime(new FakePtyManager());
+    const stopCtx: StopSessionCtx = { db, sessionRuntime: runtime };
+    expect(() => stopSession(stopCtx, detail.id)).toThrow(SessionNotStoppableError);
   });
 });

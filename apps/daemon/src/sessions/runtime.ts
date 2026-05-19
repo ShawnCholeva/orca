@@ -8,11 +8,12 @@ import type { PtyEvents, PtyHandle, PtyManager } from '../pty/types.js';
 import { getSessionDetail, setSessionStatus } from './projection.js';
 import type { SessionOutputStore } from './output-store.js';
 import {
-  SessionNotFoundError,
-  SessionWrongStateError,
-  WorkspaceUnavailableError,
   CommandNotFoundError,
+  SessionNotFoundError,
+  SessionNotStoppableError,
+  SessionWrongStateError,
   SpawnFailedError,
+  WorkspaceUnavailableError,
 } from './errors.js';
 
 export interface RuntimeCtx {
@@ -20,6 +21,12 @@ export interface RuntimeCtx {
   bus: EventBus;
   adapterRegistry: AdapterRegistry;
   sessionOutputStore: SessionOutputStore;
+}
+
+interface HandleSlot {
+  handle: PtyHandle;
+  stopRequested: boolean;
+  killTimer: ReturnType<typeof setTimeout> | null;
 }
 
 // Module-level prepared statement cache (invalidated when db instance changes)
@@ -80,11 +87,13 @@ function persistFailure(
 }
 
 export class SessionRuntime {
-  private readonly handles = new Map<string, PtyHandle>();
+  private readonly handleSlots = new Map<string, HandleSlot>();
   private readonly ptyManager: PtyManager;
+  private readonly stopGraceMs: number;
 
-  constructor(ptyManager: PtyManager) {
+  constructor(ptyManager: PtyManager, stopGraceMs = 5000) {
     this.ptyManager = ptyManager;
+    this.stopGraceMs = stopGraceMs;
   }
 
   async start(
@@ -175,29 +184,68 @@ export class SessionRuntime {
     // Separate small tx: status=running (spawn handle confirmed alive post-commit)
     stmts.setRunning.run('running', sessionId);
 
-    this.handles.set(sessionId, handle);
+    const slot: HandleSlot = { handle, stopRequested: false, killTimer: null };
+    this.handleSlots.set(sessionId, slot);
 
     ptyEvents.onData((chunk: Buffer) => {
       sessionOutputStore.appendChunk(sessionId, chunk);
     });
 
-    // onExit: exactly one terminal lifecycle event per process (stopRequested check added in M4-009)
+    // Exactly one terminal lifecycle event per process: stopped (user-requested) or exited (natural).
     ptyEvents.onExit(({ exitCode, signal }) => {
+      const currentSlot = this.handleSlots.get(sessionId);
+      const wasStopRequested = currentSlot?.stopRequested ?? false;
+      if (currentSlot?.killTimer != null) clearTimeout(currentSlot.killTimer);
+      this.handleSlots.delete(sessionId);
+
       const exitedAt = new Date().toISOString();
-      const exitPayload = { sessionId, goalId: session.goalId, exitCode, exitSignal: signal };
-      let exitedEvent!: DomainEvent;
-      db.transaction(() => {
-        setSessionStatus(db, sessionId, 'exited', { exitCode, exitSignal: signal, exitedAt });
-        exitedEvent = insertEvent(db, 'session.exited', session.goalId, exitPayload, exitedAt);
-      })();
-      bus.publish(exitedEvent);
-      this.handles.delete(sessionId);
+
+      if (wasStopRequested) {
+        const payload = { sessionId, goalId: session.goalId, exitCode, exitSignal: signal, reason: 'user_request' };
+        let stoppedEvent!: DomainEvent;
+        db.transaction(() => {
+          setSessionStatus(db, sessionId, 'stopped', { exitCode, exitSignal: signal, exitedAt });
+          stoppedEvent = insertEvent(db, 'session.stopped', session.goalId, payload, exitedAt);
+        })();
+        bus.publish(stoppedEvent);
+      } else {
+        const payload = { sessionId, goalId: session.goalId, exitCode, exitSignal: signal };
+        let exitedEvent!: DomainEvent;
+        db.transaction(() => {
+          setSessionStatus(db, sessionId, 'exited', { exitCode, exitSignal: signal, exitedAt });
+          exitedEvent = insertEvent(db, 'session.exited', session.goalId, payload, exitedAt);
+        })();
+        bus.publish(exitedEvent);
+      }
     });
 
     return getSessionDetail(db, sessionId)!;
   }
 
+  // Initiate a user-requested stop. Sends SIGTERM; escalates to SIGKILL after stopGraceMs.
+  // Exactly one terminal event (session.stopped) will be committed when the process exits.
+  stop(db: Database.Database, sessionId: string): void {
+    const slot = this.handleSlots.get(sessionId);
+    if (!slot) {
+      const session = getSessionDetail(db, sessionId);
+      if (!session) throw new SessionNotFoundError(sessionId);
+      throw new SessionNotStoppableError(sessionId, session.status);
+    }
+
+    if (slot.stopRequested) return;
+
+    slot.stopRequested = true;
+    slot.handle.kill('SIGTERM');
+
+    slot.killTimer = setTimeout(() => {
+      slot.killTimer = null;
+      if (this.handleSlots.has(sessionId)) {
+        slot.handle.kill('SIGKILL');
+      }
+    }, this.stopGraceMs);
+  }
+
   getHandle(sessionId: string): PtyHandle | undefined {
-    return this.handles.get(sessionId);
+    return this.handleSlots.get(sessionId)?.handle;
   }
 }

@@ -43,6 +43,7 @@ function makeConfig(dataDir: string): Config {
     port: 8787,
     logLevel: 'silent',
     sessionOutputTailBytes: 1024 * 1024,
+    sessionStopGraceMs: 5000,
     getAuthToken: () => 'test-token'
   };
 }

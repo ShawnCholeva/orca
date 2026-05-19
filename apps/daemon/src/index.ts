@@ -1,10 +1,12 @@
 import { sidecarMigrationsDir } from './sidecar-bootstrap.js';
 import { loadConfig } from './config.js';
 import { openDatabase } from './db.js';
+import { eventBus } from './events.js';
 import { defaultMigrationsDir, runMigrations } from './migrations.js';
 import { bootstrapRegistries } from './registry/bootstrap.js';
 import { createServer } from './server.js';
 import { registerShutdown } from './shutdown.js';
+import { reconcileSessionsOnBoot } from './sessions/reconciliation.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -25,6 +27,9 @@ async function main(): Promise<void> {
     console.error('[orca-daemon] Registry bootstrap failed — aborting startup:', err);
     process.exit(1);
   }
+
+  // Reconcile stale sessions before accepting traffic.
+  reconcileSessionsOnBoot(db, eventBus, new Date().toISOString());
 
   const server = createServer(config);
 

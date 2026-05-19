@@ -29,6 +29,7 @@ import {
   type RefineGoalResponse,
   StartSessionRequest,
   type StartSessionResponse,
+  type StopSessionResponse,
   UpdateGoalRequest,
   type UpdateGoalResponse,
   type ArchiveGoalResponse
@@ -64,6 +65,7 @@ import {
   GoalArchivedError,
   GoalNotFoundError,
   SessionNotFoundError,
+  SessionNotStoppableError,
   SessionWrongStateError,
   SpawnFailedError,
   WorkspaceNotAttachedError,
@@ -75,6 +77,7 @@ import {
   getSession,
   listSessionsForGoal,
   startSession,
+  stopSession,
 } from './sessions/usecases.js';
 import { createSessionOutputStore } from './sessions/output-store.js';
 import { SessionRuntime } from './sessions/runtime.js';
@@ -118,7 +121,8 @@ export function createServer(
   const sessionOutputStore = createSessionOutputStore(db, {
     tailBytes: config.sessionOutputTailBytes,
   });
-  const sessionRuntime = deps?.sessionRuntime ?? new SessionRuntime(noopPtyManager);
+  const sessionRuntime =
+    deps?.sessionRuntime ?? new SessionRuntime(noopPtyManager, config.sessionStopGraceMs);
 
   const server = Fastify({
     logger: {
@@ -453,6 +457,24 @@ export function createServer(
         error instanceof SpawnFailedError
       ) {
         reply.status(422);
+        return apiError(error.code, error.message);
+      }
+      throw error;
+    }
+  });
+
+  server.post('/v1/sessions/:id/stop', async (request, reply): Promise<StopSessionResponse | { error: unknown }> => {
+    const { id } = request.params as { id: string };
+    try {
+      const session = stopSession({ db, sessionRuntime }, id);
+      return { session };
+    } catch (error) {
+      if (error instanceof SessionNotFoundError) {
+        reply.status(404);
+        return apiError(error.code, error.message);
+      }
+      if (error instanceof SessionNotStoppableError) {
+        reply.status(409);
         return apiError(error.code, error.message);
       }
       throw error;

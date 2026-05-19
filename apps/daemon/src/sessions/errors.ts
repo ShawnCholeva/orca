@@ -61,6 +61,13 @@ export class SessionWrongStateError extends SessionError {
   }
 }
 
+export class SessionNotStoppableError extends SessionError {
+  constructor(sessionId: string, currentStatus: string) {
+    super('session_not_stoppable', `Session ${sessionId} cannot be stopped (status: ${currentStatus})`);
+    this.name = 'SessionNotStoppableError';
+  }
+}
+
 export class CommandNotFoundError extends SessionError {
   constructor(adapterId: string) {
     super('command_not_found', `Command not found for adapter: ${adapterId}`);

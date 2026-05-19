@@ -212,3 +212,13 @@ export async function startSession(
   };
   return ctx.sessionRuntime.start(runtimeCtx, sessionId, opts);
 }
+
+export interface StopSessionCtx {
+  db: Database.Database;
+  sessionRuntime: SessionRuntime;
+}
+
+export function stopSession(ctx: StopSessionCtx, sessionId: string): SessionDetail {
+  ctx.sessionRuntime.stop(ctx.db, sessionId);
+  return getSessionDetail(ctx.db, sessionId)!;
+}
