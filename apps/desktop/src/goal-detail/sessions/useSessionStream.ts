@@ -28,8 +28,10 @@ function decodeBase64(dataBase64: string): Uint8Array {
   return bytes;
 }
 
+const encoder = new TextEncoder();
+
 function encodeBase64(data: string): string {
-  const bytes = new TextEncoder().encode(data);
+  const bytes = encoder.encode(data);
   let binary = "";
   for (const byte of bytes) {
     binary += String.fromCharCode(byte);
@@ -59,7 +61,7 @@ export function useSessionStream(
 
   const writeSnapshot = useCallback(async () => {
     const detail = await getSession(sessionId);
-    for (const chunk of [...detail.output.chunks].sort((a, b) => a.seq - b.seq)) {
+    for (const chunk of detail.output.chunks) {
       writerRef.current?.write(decodeBase64(chunk.dataBase64));
     }
     lastSeenSeqRef.current = detail.output.nextSeq;
@@ -91,13 +93,14 @@ export function useSessionStream(
 
     let disposed = false;
     let hasOpened = false;
+    const LOAD_ERROR = "Failed to load session output.";
     const initialSeed = writeSnapshot()
-      .catch((err) => setError(toErrorMessage(err, "Failed to load session output.")));
+      .catch((err) => setError(toErrorMessage(err, LOAD_ERROR)));
 
     const stream = openSessionStream({
       onOpen() {
         const seed = hasOpened
-          ? writeSnapshot().catch((err) => setError(toErrorMessage(err, "Failed to load session output.")))
+          ? writeSnapshot().catch((err) => setError(toErrorMessage(err, LOAD_ERROR)))
           : initialSeed;
         hasOpened = true;
 

@@ -513,12 +513,16 @@ interface SessionStreamHandlers {
 }
 
 function parseSessionServerFrame(data: unknown): SessionServerFrame | null {
-  const output = SessionOutputFrame.safeParse(data);
-  if (output.success) return output.data;
-
-  const error = SessionErrorFrame.safeParse(data);
-  if (error.success) return error.data;
-
+  if (typeof data !== "object" || data === null || !("type" in data)) return null;
+  const type = (data as Record<string, unknown>).type;
+  if (type === "session.output") {
+    const result = SessionOutputFrame.safeParse(data);
+    return result.success ? result.data : null;
+  }
+  if (type === "session.error") {
+    const result = SessionErrorFrame.safeParse(data);
+    return result.success ? result.data : null;
+  }
   return null;
 }
 

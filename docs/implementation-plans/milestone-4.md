@@ -1171,6 +1171,13 @@ Opus reserved for cross-cutting decisions:
 
 ---
 
+## Completion Notes
+
+M4-016 final regression evidence and the Gate 7 DoD checklist are recorded in
+`docs/implementation-plans/notes/m4-016-final-regression.md`.
+
+---
+
 ## Out-of-scope Reminder (read before any task)
 
 If a task is about to introduce any of the following, **stop and reject the diff**:

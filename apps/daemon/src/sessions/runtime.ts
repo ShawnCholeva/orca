@@ -31,7 +31,7 @@ export interface WsClient {
   close(code?: number, reason?: string): void;
 }
 
-const WS_CLIENT_OPEN = 1;
+export const WS_CLIENT_OPEN = 1;
 
 interface HandleSlot {
   handle: PtyHandle;
@@ -114,8 +114,7 @@ export class SessionRuntime {
     this.wsBufferLimitBytes = wsBufferLimitBytes;
   }
 
-  // Broadcast a session.output frame to all live subscribers for sessionId.
-  // Slow consumers (bufferedAmount exceeds limit) are closed and removed.
+  // Slow consumers (bufferedAmount > limit) are closed and removed after each send.
   private broadcastOutput(sessionId: string, seq: number, byteOffset: number, chunk: Buffer): void {
     const subscribers = this.subscriberMap.get(sessionId);
     if (!subscribers || subscribers.size === 0) return;
@@ -128,7 +127,7 @@ export class SessionRuntime {
       dataBase64: chunk.toString('base64'),
     });
 
-    for (const socket of [...subscribers]) {
+    for (const socket of subscribers) {
       if (socket.readyState !== WS_CLIENT_OPEN) {
         subscribers.delete(socket);
         continue;
@@ -145,7 +144,6 @@ export class SessionRuntime {
     }
   }
 
-  // Add a WS client as a subscriber for a session.
   subscribe(sessionId: string, socket: WsClient): void {
     let subscribers = this.subscriberMap.get(sessionId);
     if (!subscribers) {
@@ -155,12 +153,10 @@ export class SessionRuntime {
     subscribers.add(socket);
   }
 
-  // Remove a WS client from a specific session's subscriber list.
   unsubscribeSocket(sessionId: string, socket: WsClient): void {
     this.subscriberMap.get(sessionId)?.delete(socket);
   }
 
-  // Remove a WS client from all session subscriber lists (called on WS close).
   removeSocket(socket: WsClient): void {
     for (const subscribers of this.subscriberMap.values()) {
       subscribers.delete(socket);
@@ -269,6 +265,8 @@ export class SessionRuntime {
       const wasStopRequested = currentSlot?.stopRequested ?? false;
       if (currentSlot?.killTimer != null) clearTimeout(currentSlot.killTimer);
       this.handleSlots.delete(sessionId);
+      this.subscriberMap.delete(sessionId);
+      this.lastResizeMap.delete(sessionId);
 
       const exitedAt = new Date().toISOString();
 
@@ -332,8 +330,6 @@ export class SessionRuntime {
 
     this.lastResizeMap.set(sessionId, { cols, rows });
     slot.handle.resize(cols, rows);
-
-    // Update DB without emitting a domain event
     ensureStmts(db).updateTerminalSize.run(cols, rows, sessionId);
   }
 }
