@@ -95,9 +95,13 @@ import {
 import { createSessionOutputStore, type SessionOutputStore } from './sessions/output-store.js';
 import { SessionRuntime, WS_CLIENT_OPEN, type WsClient } from './sessions/runtime.js';
 import { ExtractionRunner } from './extractions/runner.js';
+import { DETERMINISTIC_EXTRACTOR_VERSION } from './extractions/deterministic-extractor.js';
 import { enqueueEligibleForGoal, tryEnqueueForTerminalSession } from './extractions/goal-open.js';
 import { getSessionDetail } from './sessions/projection.js';
 import { NodePtyManager } from './pty/manager.js';
+import {
+  getLatestSummaryForSession,
+} from './extractions/projection.js';
 import {
   createMemoryItem,
   patchMemoryItem,
@@ -117,6 +121,12 @@ import {
   DecisionNotFoundError,
   InvalidDecisionTransitionError,
 } from './decisions/usecases.js';
+import {
+  manualExtractEnqueue,
+  SessionArchivedForExtractionError,
+  SessionNotFoundForExtractionError,
+  SessionNotTerminalError,
+} from './extractions/usecases.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -616,6 +626,58 @@ export function createServer(
     } catch (error) {
       if (error instanceof SessionNotFoundError) {
         reply.status(404);
+        return apiError(error.code, error.message);
+      }
+      throw error;
+    }
+  });
+
+  server.get('/v1/sessions/:sessionId/summary', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const summary = getLatestSummaryForSession(db, sessionId);
+    if (!summary) {
+      reply.status(404);
+      return apiError('summary_not_found', `No summary found for session ${sessionId}`);
+    }
+    return { summary };
+  });
+
+  server.post('/v1/sessions/:sessionId/extract-memory', async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+
+    if (!extractionRunner) {
+      reply.status(500);
+      return apiError('runtime_misconfigured', 'Extraction runner is not configured');
+    }
+
+    try {
+      const result = manualExtractEnqueue(
+        {
+          db,
+          bus: eventBus,
+          outputStore: sessionOutputStore,
+          extractorVersion: DETERMINISTIC_EXTRACTOR_VERSION,
+        },
+        sessionId
+      );
+      if (result.created) {
+        extractionRunner.notify();
+        reply.status(201);
+      } else {
+        reply.status(200);
+      }
+      return { extraction: result.extraction };
+    } catch (error) {
+      if (error instanceof SessionNotFoundForExtractionError) {
+        reply.status(404);
+        return apiError(error.code, error.message);
+      }
+      if (error instanceof SessionNotTerminalError) {
+        reply.status(409);
+        return apiError(error.code, error.message);
+      }
+      if (error instanceof SessionArchivedForExtractionError) {
+        reply.status(409);
         return apiError(error.code, error.message);
       }
       throw error;

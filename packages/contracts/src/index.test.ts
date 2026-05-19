@@ -15,6 +15,7 @@ import {
   DecisionCreatedEventPayload,
   DecisionUpdatedEventPayload,
   DomainEventType,
+  ExtractSessionMemoryResponse,
   GetSessionResponse,
   CreateGoalRequest,
   GitProbe,
@@ -596,6 +597,11 @@ describe("M5 contracts", () => {
     expectRoundTrip(GoalDecision.parse, decision, decision);
     expectRoundTrip(SessionMemorySummary.parse, summary, summary);
     expectRoundTrip(MemoryExtraction.parse, extraction, extraction);
+    expectRoundTrip(
+      ExtractSessionMemoryResponse.parse,
+      { extraction },
+      { extraction }
+    );
     expectRoundTrip(
       ListGoalMemoryResponse.parse,
       { items: [memoryItem] },

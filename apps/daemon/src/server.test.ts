@@ -8,6 +8,8 @@ import {
   CreateGoalResponse,
   CreateSessionResponse,
   DomainEvent,
+  ExtractSessionMemoryResponse,
+  GetSessionMemorySummaryResponse,
   GetSessionResponse,
   GoalDecision,
   GoalMemoryItem,
@@ -20,6 +22,7 @@ import {
   ListPluginsResponse,
   ListSessionsResponse,
   ListSkillsResponse,
+  SessionExtractionOutput,
   UpdateGoalResponse
 } from '@orca/contracts';
 import type { Config } from './config.js';
@@ -28,6 +31,17 @@ import { closeDatabase, openDatabase } from './db.js';
 import { defaultMigrationsDir, runMigrations } from './migrations.js';
 import { bootstrapRegistries } from './registry/bootstrap.js';
 import { eventBus } from './events.js';
+import { setSessionStatus } from './sessions/projection.js';
+import { createSessionOutputStore, type SessionOutputStore } from './sessions/output-store.js';
+import { DETERMINISTIC_EXTRACTOR_VERSION } from './extractions/deterministic-extractor.js';
+import { computeSourceFingerprint } from './extractions/fingerprint.js';
+import { FakeExtractor } from './extractions/fake-extractor.js';
+import { ExtractionRunner } from './extractions/runner.js';
+import {
+  getLatestExtractionForSession,
+  insertExtraction,
+  insertSummary,
+} from './extractions/projection.js';
 
 // Populate the skill registry once for the file — mirrors the daemon boot sequence.
 // createGoal resolves quick-goal from the registry (M2-008).
@@ -1578,5 +1592,353 @@ describe('M4-006 session and adapter routes', () => {
     const decisionEvents = capturedEvents.filter((e) => e.type === 'decision.created');
     expect(decisionEvents).toHaveLength(1);
     expect(decisionEvents[0]!.goalId).toBe(goalId);
+  });
+});
+
+describe('M5-011 summary and extract-memory routes', () => {
+  let server: FastifyInstance;
+  let goalId: string;
+  let workspaceId: string;
+  let wsDir: string;
+  let outputStore: SessionOutputStore;
+  let runner: ExtractionRunner;
+  let extractor: FakeExtractor;
+  const dirs: string[] = [];
+
+  beforeEach(async () => {
+    const dbDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m5-011-srv-'));
+    dirs.push(dbDir);
+    wsDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-m5-011-ws-')));
+    dirs.push(wsDir);
+
+    const config = createConfig(dbDir);
+    const db = openDatabase(config);
+    runMigrations(db, defaultMigrationsDir());
+
+    outputStore = createSessionOutputStore(db, { tailBytes: config.sessionOutputTailBytes });
+    extractor = new FakeExtractor();
+    runner = new ExtractionRunner({
+      db,
+      bus: eventBus,
+      outputStore,
+      extractor,
+      config: {
+        memoryExtractionMaxInputBytes: config.memoryExtractionMaxInputBytes,
+        memoryExtractionTimeoutMs: config.memoryExtractionTimeoutMs,
+      },
+    });
+    runner.start();
+    server = createServer(config, { sessionOutputStore: outputStore, extractionRunner: runner });
+
+    const goalRes = await server.inject({
+      method: 'POST',
+      url: '/v1/goals',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'm5-011-goal' },
+    });
+    goalId = CreateGoalResponse.parse(JSON.parse(goalRes.body)).goal.id;
+
+    const wsRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/workspaces`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir },
+    });
+    workspaceId = (JSON.parse(wsRes.body) as { workspace: { id: string } }).workspace.id;
+  });
+
+  afterEach(async () => {
+    runner.stop();
+    await server.close();
+    closeDatabase();
+    for (const dir of dirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  async function createSession(title: string): Promise<string> {
+    const response = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/sessions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workspaceId, adapterId: 'shell-manual', title },
+    });
+    expect(response.statusCode).toBe(201);
+    return CreateSessionResponse.parse(JSON.parse(response.body)).session.id;
+  }
+
+  function markSessionTerminal(
+    sessionId: string,
+    status: 'exited' | 'failed' | 'stopped' = 'exited',
+    exitCode = 0,
+  ): void {
+    setSessionStatus(openDatabase(createConfig(dirs[0]!)), sessionId, status, {
+      exitCode,
+      exitedAt: '2026-01-01T00:01:00.000Z',
+    });
+  }
+
+  function appendOutput(sessionId: string, text: string): void {
+    outputStore.appendChunk(sessionId, Buffer.from(text, 'utf8'));
+  }
+
+  function currentWindow(sessionId: string): { first: number; last: number; fingerprint: string } {
+    const snapshot = outputStore.readTail(sessionId);
+    const first = snapshot.firstByteOffset;
+    const last = snapshot.firstByteOffset + snapshot.totalBytesKept;
+    return {
+      first,
+      last,
+      fingerprint: computeSourceFingerprint({
+        sessionId,
+        sourceOffsetFirst: first,
+        sourceOffsetLast: last,
+        extractorVersion: DETERMINISTIC_EXTRACTOR_VERSION,
+      }),
+    };
+  }
+
+  async function waitFor(predicate: () => boolean, timeoutMs = 3000): Promise<void> {
+    const started = Date.now();
+    while (!predicate()) {
+      if (Date.now() - started > timeoutMs) {
+        throw new Error('timed out waiting for extraction');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
+  it('GET /v1/sessions/:sessionId/summary returns 404 when no summary exists', async () => {
+    const sessionId = await createSession('no-summary');
+    markSessionTerminal(sessionId);
+
+    const response = await server.inject({
+      method: 'GET',
+      url: `/v1/sessions/${sessionId}/summary`,
+      headers: AUTH_HEADERS,
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('GET /v1/sessions/:sessionId/summary returns the latest summary when present', async () => {
+    const db = openDatabase(createConfig(dirs[0]!));
+    const sessionId = await createSession('has-summary');
+    markSessionTerminal(sessionId);
+
+    insertExtraction(db, {
+      id: 'ext-summary',
+      goalId,
+      sessionId,
+      trigger: 'manual',
+      status: 'succeeded',
+      extractorVersion: DETERMINISTIC_EXTRACTOR_VERSION,
+      sourceFingerprint: 'fp-summary',
+      sourceOffsetFirst: 0,
+      sourceOffsetLast: 42,
+      summaryId: 'sum-latest',
+      itemCount: 0,
+      decisionCount: 0,
+      promotedCount: 0,
+      failureCode: null,
+      failureMessage: null,
+      requestedAt: '2026-01-01T00:00:00.000Z',
+      startedAt: '2026-01-01T00:00:01.000Z',
+      finishedAt: '2026-01-01T00:00:02.000Z',
+    });
+    insertSummary(db, {
+      id: 'sum-latest',
+      sessionId,
+      goalId,
+      extractionId: 'ext-summary',
+      headline: 'Summary headline',
+      summaryText: 'Summary text',
+      truncated: false,
+      sourceOffsetFirst: 0,
+      sourceOffsetLast: 42,
+      createdAt: '2026-01-01T00:00:02.000Z',
+    });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: `/v1/sessions/${sessionId}/summary`,
+      headers: AUTH_HEADERS,
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = GetSessionMemorySummaryResponse.parse(JSON.parse(response.body));
+    expect(body.summary?.sessionId).toBe(sessionId);
+    expect(body.summary?.headline).toBe('Summary headline');
+  });
+
+  it('POST /v1/sessions/:sessionId/extract-memory returns 409 for a non-terminal session', async () => {
+    const sessionId = await createSession('running-session');
+
+    const response = await server.inject({
+      method: 'POST',
+      url: `/v1/sessions/${sessionId}/extract-memory`,
+      headers: AUTH_HEADERS,
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect((JSON.parse(response.body) as { error: { code: string } }).error.code).toBe('session_not_terminal');
+  });
+
+  it('POST /v1/sessions/:sessionId/extract-memory is idempotent for the current fingerprint', async () => {
+    const db = openDatabase(createConfig(dirs[0]!));
+    const sessionId = await createSession('double-click');
+    appendOutput(sessionId, 'DECISION: keep retries manual\n');
+    markSessionTerminal(sessionId);
+
+    const first = await server.inject({
+      method: 'POST',
+      url: `/v1/sessions/${sessionId}/extract-memory`,
+      headers: AUTH_HEADERS,
+    });
+    expect(first.statusCode).toBe(201);
+    const firstExtraction = ExtractSessionMemoryResponse.parse(JSON.parse(first.body)).extraction;
+
+    const second = await server.inject({
+      method: 'POST',
+      url: `/v1/sessions/${sessionId}/extract-memory`,
+      headers: AUTH_HEADERS,
+    });
+    expect(second.statusCode).toBe(200);
+    const secondExtraction = ExtractSessionMemoryResponse.parse(JSON.parse(second.body)).extraction;
+
+    expect(secondExtraction.id).toBe(firstExtraction.id);
+    const count = (db.prepare('SELECT COUNT(*) AS count FROM memory_extractions WHERE session_id = ?').get(sessionId) as { count: number }).count;
+    expect(count).toBe(1);
+  });
+
+  it('POST /v1/sessions/:sessionId/extract-memory creates a new pending row after failure and the runner processes it', async () => {
+    const db = openDatabase(createConfig(dirs[0]!));
+    const sessionId = await createSession('retry-after-failure');
+    appendOutput(sessionId, 'DECISION: pin pnpm\n');
+    markSessionTerminal(sessionId);
+
+    const { first, last, fingerprint } = currentWindow(sessionId);
+    insertExtraction(db, {
+      id: 'ext-failed',
+      goalId,
+      sessionId,
+      trigger: 'manual',
+      status: 'failed',
+      extractorVersion: DETERMINISTIC_EXTRACTOR_VERSION,
+      sourceFingerprint: fingerprint,
+      sourceOffsetFirst: first,
+      sourceOffsetLast: last,
+      summaryId: null,
+      itemCount: 0,
+      decisionCount: 0,
+      promotedCount: 0,
+      failureCode: 'internal_error',
+      failureMessage: null,
+      requestedAt: '2026-01-01T00:00:00.000Z',
+      startedAt: '2026-01-01T00:00:01.000Z',
+      finishedAt: '2026-01-01T00:00:02.000Z',
+    });
+
+    extractor.setOutput(sessionId, {
+      summary: {
+        headline: 'Found one decision',
+        text: 'The session decided to pin pnpm.',
+        truncated: false,
+      },
+      memoryCandidates: [],
+      decisionCandidates: [
+        {
+          title: 'Pin pnpm',
+          decisionText: 'Use pnpm for workspace commands.',
+          confirmationRequired: true,
+        },
+      ],
+    } satisfies SessionExtractionOutput);
+
+    const response = await server.inject({
+      method: 'POST',
+      url: `/v1/sessions/${sessionId}/extract-memory`,
+      headers: AUTH_HEADERS,
+    });
+
+    expect(response.statusCode).toBe(201);
+    const extraction = ExtractSessionMemoryResponse.parse(JSON.parse(response.body)).extraction;
+    expect(extraction.id).not.toBe('ext-failed');
+    expect(extraction.status).toBe('pending');
+
+    await waitFor(() => getLatestExtractionForSession(db, sessionId)?.status === 'succeeded');
+
+    const latest = getLatestExtractionForSession(db, sessionId);
+    expect(latest?.id).toBe(extraction.id);
+    expect(latest?.status).toBe('succeeded');
+  });
+
+  it('existing session list/detail responses expose latestExtraction and latestSummaryHeadline', async () => {
+    const db = openDatabase(createConfig(dirs[0]!));
+    const sessionId = await createSession('session-fields');
+    appendOutput(sessionId, 'Validation passed\n');
+    markSessionTerminal(sessionId);
+
+    const { first, last, fingerprint } = currentWindow(sessionId);
+    insertExtraction(db, {
+      id: 'ext-fields',
+      goalId,
+      sessionId,
+      trigger: 'manual',
+      status: 'succeeded',
+      extractorVersion: DETERMINISTIC_EXTRACTOR_VERSION,
+      sourceFingerprint: fingerprint,
+      sourceOffsetFirst: first,
+      sourceOffsetLast: last,
+      summaryId: 'sum-fields',
+      itemCount: 1,
+      decisionCount: 0,
+      promotedCount: 0,
+      failureCode: null,
+      failureMessage: null,
+      requestedAt: '2026-01-01T00:00:00.000Z',
+      startedAt: '2026-01-01T00:00:01.000Z',
+      finishedAt: '2026-01-01T00:00:02.000Z',
+    });
+    insertSummary(db, {
+      id: 'sum-fields',
+      sessionId,
+      goalId,
+      extractionId: 'ext-fields',
+      headline: 'Validation passed',
+      summaryText: 'The terminal session completed cleanly.',
+      truncated: false,
+      sourceOffsetFirst: first,
+      sourceOffsetLast: last,
+      createdAt: '2026-01-01T00:00:02.000Z',
+    });
+
+    const listResponse = await server.inject({
+      method: 'GET',
+      url: `/v1/goals/${goalId}/sessions`,
+      headers: AUTH_HEADERS,
+    });
+    expect(listResponse.statusCode).toBe(200);
+    const listBody = ListSessionsResponse.parse(JSON.parse(listResponse.body));
+    expect(listBody.sessions[0]?.latestExtraction).toMatchObject({
+      id: 'ext-fields',
+      status: 'succeeded',
+      truncated: false,
+    });
+    expect(listBody.sessions[0]?.latestSummaryHeadline).toBe('Validation passed');
+
+    const detailResponse = await server.inject({
+      method: 'GET',
+      url: `/v1/sessions/${sessionId}`,
+      headers: AUTH_HEADERS,
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    const detailBody = GetSessionResponse.parse(JSON.parse(detailResponse.body));
+    expect(detailBody.session.latestExtraction).toMatchObject({
+      id: 'ext-fields',
+      status: 'succeeded',
+      truncated: false,
+    });
+    expect(detailBody.session.latestSummaryHeadline).toBe('Validation passed');
   });
 });

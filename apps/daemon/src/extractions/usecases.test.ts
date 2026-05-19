@@ -15,6 +15,7 @@ import {
   enqueueExtraction,
   markExtractionStarted,
   markExtractionFailed,
+  manualExtractEnqueue,
   SessionNotFoundForExtractionError,
   SessionNotTerminalError,
   SessionArchivedForExtractionError,
@@ -86,6 +87,12 @@ function seedSession(
 
 function makeCtx(db: Database.Database, bus: EventBus, nowStr?: string) {
   return { db, bus, now: nowStr ? () => nowStr : undefined };
+}
+
+function makeOutputStore(firstByteOffset: number, totalBytesKept: number) {
+  return {
+    readTail: () => ({ firstByteOffset, totalBytesKept }),
+  };
 }
 
 const NOW = '2026-01-01T12:00:00.000Z';
@@ -194,6 +201,68 @@ describe('enqueueExtraction', () => {
     const second = enqueueExtraction(makeCtx(db, bus, NOW), input);
     expect(second.id).not.toBe(first.id);
     expect(second.status).toBe('pending');
+  });
+
+  it('manualExtractEnqueue returns an existing active row for the current fingerprint', () => {
+    const db = openTestDb();
+    const bus = new EventBus();
+
+    seedGoal(db, 'goal-1');
+    seedWorkspace(db, 'ws-1', 'goal-1');
+    seedSession(db, 'sess-1', 'goal-1', 'ws-1', 'exited');
+
+    const first = enqueueExtraction(makeCtx(db, bus, NOW), {
+      goalId: 'goal-1',
+      sessionId: 'sess-1',
+      trigger: 'manual',
+      sourceOffsetFirst: 10,
+      sourceOffsetLast: 20,
+      extractorVersion: 'v1',
+    });
+
+    const result = manualExtractEnqueue(
+      {
+        ...makeCtx(db, bus, NOW),
+        outputStore: makeOutputStore(10, 10),
+        extractorVersion: 'v1',
+      },
+      'sess-1'
+    );
+
+    expect(result.created).toBe(false);
+    expect(result.extraction.id).toBe(first.id);
+  });
+
+  it('manualExtractEnqueue creates a new pending row after a failed extraction for the same fingerprint', () => {
+    const db = openTestDb();
+    const bus = new EventBus();
+
+    seedGoal(db, 'goal-1');
+    seedWorkspace(db, 'ws-1', 'goal-1');
+    seedSession(db, 'sess-1', 'goal-1', 'ws-1', 'exited');
+
+    const first = enqueueExtraction(makeCtx(db, bus, NOW), {
+      goalId: 'goal-1',
+      sessionId: 'sess-1',
+      trigger: 'manual',
+      sourceOffsetFirst: 10,
+      sourceOffsetLast: 20,
+      extractorVersion: 'v1',
+    });
+    markExtractionFailed(makeCtx(db, bus, NOW), first.id, { failureCode: 'internal_error' });
+
+    const result = manualExtractEnqueue(
+      {
+        ...makeCtx(db, bus, NOW),
+        outputStore: makeOutputStore(10, 10),
+        extractorVersion: 'v1',
+      },
+      'sess-1'
+    );
+
+    expect(result.created).toBe(true);
+    expect(result.extraction.id).not.toBe(first.id);
+    expect(result.extraction.status).toBe('pending');
   });
 
   it('throws SessionNotFoundForExtractionError for missing session', () => {

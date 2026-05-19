@@ -19,6 +19,13 @@ export interface ExtractionCtx {
   now?: () => string;
 }
 
+export interface ReadOnlySessionOutputStore {
+  readTail(sessionId: string): {
+    firstByteOffset: number;
+    totalBytesKept: number;
+  };
+}
+
 export class SessionNotFoundForExtractionError extends Error {
   readonly code = 'session_not_found' as const;
   constructor(sessionId: string) {
@@ -72,6 +79,16 @@ export interface EnqueueExtractionInput {
 
 interface ActiveFingerprintRow {
   id: string;
+}
+
+export interface ManualExtractEnqueueCtx extends ExtractionCtx {
+  outputStore: ReadOnlySessionOutputStore;
+  extractorVersion: string;
+}
+
+export interface ManualExtractEnqueueResult {
+  extraction: MemoryExtraction;
+  created: boolean;
 }
 
 let _db: Database.Database | null = null;
@@ -195,6 +212,56 @@ export function enqueueExtraction(
   }
 
   return row;
+}
+
+export function manualExtractEnqueue(
+  ctx: ManualExtractEnqueueCtx,
+  sessionId: string
+): ManualExtractEnqueueResult {
+  const session = getSessionDetail(ctx.db, sessionId);
+  if (!session) {
+    throw new SessionNotFoundForExtractionError(sessionId);
+  }
+  if (!TERMINAL_STATUSES.has(session.status)) {
+    throw new SessionNotTerminalError(sessionId, session.status);
+  }
+  if (session.archivedAt !== null) {
+    throw new SessionArchivedForExtractionError(sessionId);
+  }
+
+  const snapshot = ctx.outputStore.readTail(sessionId);
+  const sourceOffsetFirst = snapshot.firstByteOffset;
+  const sourceOffsetLast = snapshot.firstByteOffset + snapshot.totalBytesKept;
+  const fingerprint = computeSourceFingerprint({
+    sessionId,
+    sourceOffsetFirst,
+    sourceOffsetLast,
+    extractorVersion: ctx.extractorVersion,
+  });
+
+  const existing = ensureStmts(ctx.db).findActiveByFingerprint.get(
+    sessionId,
+    fingerprint
+  ) as ActiveFingerprintRow | undefined;
+
+  if (existing) {
+    return {
+      extraction: getExtractionById(ctx.db, existing.id)!,
+      created: false,
+    };
+  }
+
+  return {
+    extraction: enqueueExtraction(ctx, {
+      goalId: session.goalId,
+      sessionId,
+      trigger: 'manual',
+      sourceOffsetFirst,
+      sourceOffsetLast,
+      extractorVersion: ctx.extractorVersion,
+    }),
+    created: true,
+  };
 }
 
 export function markExtractionStarted(ctx: ExtractionCtx, id: string): MemoryExtraction {

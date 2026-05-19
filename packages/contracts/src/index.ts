@@ -783,6 +783,15 @@ export type GetSessionMemorySummaryResponse = z.infer<
   typeof GetSessionMemorySummaryResponse
 >;
 
+export const ExtractSessionMemoryResponse = z
+  .object({
+    extraction: MemoryExtraction
+  })
+  .strict();
+export type ExtractSessionMemoryResponse = z.infer<
+  typeof ExtractSessionMemoryResponse
+>;
+
 export const MemoryExtractionRequestedEventPayload = z
   .object({
     extractionId: z.string(),
