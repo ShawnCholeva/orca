@@ -16,7 +16,7 @@ import {
 import { loadConfig } from '../src/config.js';
 import { closeDatabase, getDatabase, openDatabase } from '../src/db.js';
 import { eventBus } from '../src/events.js';
-import { defaultMigrationsDir, runMigrations } from '../src/migrations.js';
+import { defaultMigrationsDir, migrationFiles, runMigrations } from '../src/migrations.js';
 import { createServer } from '../src/server.js';
 import { bootstrapRegistries } from '../src/registry/bootstrap.js';
 
@@ -120,10 +120,7 @@ describe.sequential('M1-017 daemon integration loop', () => {
     const secondBoot = await boot(dir);
 
     try {
-      expect(firstRows).toHaveLength(3);
-      expect(firstRows[0]?.name).toBe('0001_init.sql');
-      expect(firstRows[1]?.name).toBe('0002_workspaces_refinements.sql');
-      expect(firstRows[2]?.name).toBe('0004_sessions.sql');
+      expect(firstRows.map((row) => row.name)).toEqual([...migrationFiles]);
       expect(secondBoot.migrationRows).toEqual(firstRows);
     } finally {
       await stop(secondBoot.server);
