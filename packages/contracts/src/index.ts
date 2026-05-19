@@ -99,9 +99,37 @@ export const DomainEventType = z.enum([
   "session.started",
   "session.exited",
   "session.failed",
-  "session.stopped"
+  "session.stopped",
+  "memory.extraction.requested",
+  "memory.extraction.started",
+  "memory.extraction.completed",
+  "memory.extraction.failed",
+  "memory.item.created",
+  "memory.item.updated",
+  "memory.item.promoted",
+  "memory.item.archived",
+  "decision.created",
+  "decision.updated",
+  "decision.confirmed",
+  "decision.archived"
 ]);
 export type DomainEventType = z.infer<typeof DomainEventType>;
+
+export const M5DomainEventType = z.enum([
+  "memory.extraction.requested",
+  "memory.extraction.started",
+  "memory.extraction.completed",
+  "memory.extraction.failed",
+  "memory.item.created",
+  "memory.item.updated",
+  "memory.item.promoted",
+  "memory.item.archived",
+  "decision.created",
+  "decision.updated",
+  "decision.confirmed",
+  "decision.archived"
+]);
+export type M5DomainEventType = z.infer<typeof M5DomainEventType>;
 
 export const PluginCapability = z.enum([
   "storage",
@@ -228,6 +256,49 @@ export const M4SessionErrorCode = z.enum([
 ]);
 export type M4SessionErrorCode = z.infer<typeof M4SessionErrorCode>;
 
+export const GoalMemoryStatus = z.enum(["candidate", "promoted", "archived"]);
+export type GoalMemoryStatus = z.infer<typeof GoalMemoryStatus>;
+
+export const GoalMemoryType = z.enum([
+  "constraint",
+  "success_criterion",
+  "assumption",
+  "blocker",
+  "open_question",
+  "validation_result",
+  "architecture_note",
+  "note"
+]);
+export type GoalMemoryType = z.infer<typeof GoalMemoryType>;
+
+export const GoalDecisionStatus = z.enum(["proposed", "confirmed", "archived"]);
+export type GoalDecisionStatus = z.infer<typeof GoalDecisionStatus>;
+
+export const MemoryExtractionStatus = z.enum(["pending", "running", "succeeded", "failed"]);
+export type MemoryExtractionStatus = z.infer<typeof MemoryExtractionStatus>;
+
+export const MemoryExtractionTrigger = z.enum(["terminal_state", "goal_open", "manual"]);
+export type MemoryExtractionTrigger = z.infer<typeof MemoryExtractionTrigger>;
+
+export const MemoryExtractionFailureCode = z.enum([
+  "invalid_output",
+  "timeout",
+  "session_not_terminal",
+  "output_unavailable",
+  "source_truncated",
+  "goal_archived",
+  "session_archived",
+  "daemon_restart",
+  "internal_error"
+]);
+export type MemoryExtractionFailureCode = z.infer<typeof MemoryExtractionFailureCode>;
+
+export const MemorySourceType = z.enum(["refinement", "session", "manual"]);
+export type MemorySourceType = z.infer<typeof MemorySourceType>;
+
+export const DecisionSourceType = z.enum(["session", "manual"]);
+export type DecisionSourceType = z.infer<typeof DecisionSourceType>;
+
 export const SessionStatus = z.enum([
   "created",
   "starting",
@@ -271,6 +342,18 @@ export const ListAdaptersResponse = z.object({
 });
 export type ListAdaptersResponse = z.infer<typeof ListAdaptersResponse>;
 
+export const SessionLatestExtraction = z
+  .object({
+    id: z.string(),
+    status: MemoryExtractionStatus,
+    requestedAt: z.string().datetime(),
+    finishedAt: z.string().datetime().nullable(),
+    failureCode: MemoryExtractionFailureCode.nullable(),
+    truncated: z.boolean()
+  })
+  .strict();
+export type SessionLatestExtraction = z.infer<typeof SessionLatestExtraction>;
+
 export const SessionSummary = z.object({
   id: z.string(),
   goalId: z.string(),
@@ -281,7 +364,9 @@ export const SessionSummary = z.object({
   status: SessionStatus,
   createdAt: z.string().datetime(),
   startedAt: z.string().datetime().nullable(),
-  exitedAt: z.string().datetime().nullable()
+  exitedAt: z.string().datetime().nullable(),
+  latestExtraction: SessionLatestExtraction.optional(),
+  latestSummaryHeadline: z.string().max(200).nullable().optional()
 });
 export type SessionSummary = z.infer<typeof SessionSummary>;
 
@@ -426,6 +511,492 @@ export const SessionErrorFrame = z
   })
   .strict();
 export type SessionErrorFrame = z.infer<typeof SessionErrorFrame>;
+
+export const GoalMemoryItem = z
+  .object({
+    id: z.string(),
+    goalId: z.string(),
+    type: GoalMemoryType,
+    status: GoalMemoryStatus,
+    content: z.string().min(1).max(4000),
+    contentHash: z.string(),
+    confidence: z.number().min(0).max(1).nullable(),
+    sourceType: MemorySourceType,
+    sourceId: z.string().nullable(),
+    sourceSessionId: z.string().nullable(),
+    sourceExtractionId: z.string().nullable(),
+    sourceOffsetFirst: z.number().int().nonnegative().nullable(),
+    sourceOffsetLast: z.number().int().nonnegative().nullable(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    promotedAt: z.string().datetime().nullable(),
+    archivedAt: z.string().datetime().nullable()
+  })
+  .strict();
+export type GoalMemoryItem = z.infer<typeof GoalMemoryItem>;
+
+export const GoalDecision = z
+  .object({
+    id: z.string(),
+    goalId: z.string(),
+    title: z.string().min(1).max(200),
+    decisionText: z.string().min(1).max(4000),
+    rationale: z.string().max(4000).nullable(),
+    status: GoalDecisionStatus,
+    confirmationRequired: z.boolean(),
+    confidence: z.number().min(0).max(1).nullable(),
+    sourceType: DecisionSourceType,
+    sourceId: z.string().nullable(),
+    sourceSessionId: z.string().nullable(),
+    sourceExtractionId: z.string().nullable(),
+    sourceOffsetFirst: z.number().int().nonnegative().nullable(),
+    sourceOffsetLast: z.number().int().nonnegative().nullable(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    confirmedAt: z.string().datetime().nullable(),
+    archivedAt: z.string().datetime().nullable()
+  })
+  .strict();
+export type GoalDecision = z.infer<typeof GoalDecision>;
+
+export const SessionMemorySummary = z
+  .object({
+    id: z.string(),
+    sessionId: z.string(),
+    goalId: z.string(),
+    extractionId: z.string(),
+    headline: z.string().min(1).max(200),
+    summaryText: z.string().min(1).max(4000),
+    truncated: z.boolean(),
+    sourceOffsetFirst: z.number().int().nonnegative(),
+    sourceOffsetLast: z.number().int().nonnegative(),
+    createdAt: z.string().datetime()
+  })
+  .strict();
+export type SessionMemorySummary = z.infer<typeof SessionMemorySummary>;
+
+export const MemoryExtraction = z
+  .object({
+    id: z.string(),
+    goalId: z.string(),
+    sessionId: z.string(),
+    trigger: MemoryExtractionTrigger,
+    status: MemoryExtractionStatus,
+    extractorVersion: z.string(),
+    sourceFingerprint: z.string(),
+    sourceOffsetFirst: z.number().int().nonnegative().nullable(),
+    sourceOffsetLast: z.number().int().nonnegative().nullable(),
+    summaryId: z.string().nullable(),
+    itemCount: z.number().int().nonnegative(),
+    decisionCount: z.number().int().nonnegative(),
+    promotedCount: z.number().int().nonnegative(),
+    failureCode: MemoryExtractionFailureCode.nullable(),
+    failureMessage: z.string().max(500).nullable(),
+    requestedAt: z.string().datetime(),
+    startedAt: z.string().datetime().nullable(),
+    finishedAt: z.string().datetime().nullable()
+  })
+  .strict();
+export type MemoryExtraction = z.infer<typeof MemoryExtraction>;
+
+export const CreateGoalMemoryRequest = z
+  .object({
+    type: GoalMemoryType,
+    content: z.string().trim().min(1).max(4000),
+    status: z.enum(["candidate", "promoted"]).default("candidate"),
+    confidence: z.number().min(0).max(1).optional()
+  })
+  .strict();
+export type CreateGoalMemoryRequest = z.infer<typeof CreateGoalMemoryRequest>;
+
+export const PatchGoalMemoryRequest = z
+  .object({
+    type: GoalMemoryType.optional(),
+    content: z.string().trim().min(1).max(4000).optional(),
+    status: GoalMemoryStatus.optional()
+  })
+  .strict()
+  .refine(
+    (data) => data.type !== undefined || data.content !== undefined || data.status !== undefined,
+    { message: "at least one of type, content, or status must be provided" }
+  );
+export type PatchGoalMemoryRequest = z.infer<typeof PatchGoalMemoryRequest>;
+
+export const CreateGoalDecisionRequest = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    decisionText: z.string().trim().min(1).max(4000),
+    rationale: z.string().max(4000).optional(),
+    status: z.enum(["proposed", "confirmed"]).default("proposed"),
+    confidence: z.number().min(0).max(1).optional(),
+    confirmationRequired: z.boolean().optional()
+  })
+  .strict();
+export type CreateGoalDecisionRequest = z.infer<typeof CreateGoalDecisionRequest>;
+
+export const PatchGoalDecisionRequest = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    decisionText: z.string().trim().min(1).max(4000).optional(),
+    rationale: z.string().max(4000).optional(),
+    status: GoalDecisionStatus.optional()
+  })
+  .strict()
+  .refine(
+    (data) =>
+      data.title !== undefined ||
+      data.decisionText !== undefined ||
+      data.rationale !== undefined ||
+      data.status !== undefined,
+    {
+      message:
+        "at least one of title, decisionText, rationale, or status must be provided"
+    }
+  );
+export type PatchGoalDecisionRequest = z.infer<typeof PatchGoalDecisionRequest>;
+
+const SessionExtractionGoalInput = z
+  .object({
+    id: z.string(),
+    title: z.string().min(1).max(200),
+    status: GoalStatus,
+    archived: z.boolean()
+  })
+  .strict();
+
+const SessionExtractionRefinementInput = z
+  .object({
+    id: z.string(),
+    problemStatement: z.string().max(4000).optional(),
+    constraints: z.array(z.string().min(1).max(200)).optional(),
+    successCriteria: z.array(z.string().min(1).max(200)).optional(),
+    stakeholders: z.array(z.string().min(1).max(200)).optional()
+  })
+  .strict();
+
+const SessionExtractionWorkspaceInput = z
+  .object({
+    id: z.string(),
+    label: z.string().min(1).max(200),
+    rootPath: z.string().min(1).max(1024)
+  })
+  .strict();
+
+const SessionExtractionSessionInput = z
+  .object({
+    id: z.string(),
+    adapterId: AdapterId,
+    role: z.string().nullable(),
+    instructions: z.string().nullable(),
+    exitCode: z.number().int().nullable(),
+    terminalReason: z.string().nullable(),
+    startedAt: z.string().datetime().nullable(),
+    terminatedAt: z.string().datetime().nullable()
+  })
+  .strict();
+
+const SessionExtractionOutputTailInput = z
+  .object({
+    text: z.string(),
+    byteOffsetFirst: z.number().int().nonnegative(),
+    byteOffsetLast: z.number().int().nonnegative(),
+    truncated: z.boolean()
+  })
+  .strict();
+
+export const SessionExtractionInput = z
+  // Internal-only shared schema: used by daemon extraction plumbing and tests.
+  .object({
+    goal: SessionExtractionGoalInput,
+    refinement: SessionExtractionRefinementInput.nullable(),
+    workspaces: z.array(SessionExtractionWorkspaceInput),
+    session: SessionExtractionSessionInput,
+    outputTail: SessionExtractionOutputTailInput,
+    extractorVersion: z.string().min(1)
+  })
+  .strict();
+export type SessionExtractionInput = z.infer<typeof SessionExtractionInput>;
+
+export const MemoryCandidate = z
+  .object({
+    type: GoalMemoryType,
+    content: z.string().trim().min(1).max(4000),
+    confidence: z.number().min(0).max(1).optional(),
+    confirmationRequired: z.boolean().optional(),
+    sourceOffsetFirst: z.number().int().nonnegative().optional(),
+    sourceOffsetLast: z.number().int().nonnegative().optional(),
+    promoteEligible: z.boolean().default(false)
+  })
+  .strict();
+export type MemoryCandidate = z.infer<typeof MemoryCandidate>;
+
+export const DecisionCandidate = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    decisionText: z.string().trim().min(1).max(4000),
+    rationale: z.string().max(4000).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    confirmationRequired: z.boolean().default(true),
+    sourceOffsetFirst: z.number().int().nonnegative().optional(),
+    sourceOffsetLast: z.number().int().nonnegative().optional()
+  })
+  .strict();
+export type DecisionCandidate = z.infer<typeof DecisionCandidate>;
+
+export const SessionExtractionOutput = z
+  // Internal-only shared schema: used by daemon extraction plumbing and tests.
+  .object({
+    summary: z
+      .object({
+        headline: z.string().trim().min(1).max(200),
+        text: z.string().trim().min(1).max(4000),
+        truncated: z.boolean()
+      })
+      .strict()
+      .optional(),
+    memoryCandidates: z.array(MemoryCandidate).max(25),
+    decisionCandidates: z.array(DecisionCandidate).max(10)
+  })
+  .strict();
+export type SessionExtractionOutput = z.infer<typeof SessionExtractionOutput>;
+
+export const ListGoalMemoryResponse = z
+  .object({
+    items: z.array(GoalMemoryItem)
+  })
+  .strict();
+export type ListGoalMemoryResponse = z.infer<typeof ListGoalMemoryResponse>;
+
+export const ListGoalDecisionsResponse = z
+  .object({
+    items: z.array(GoalDecision)
+  })
+  .strict();
+export type ListGoalDecisionsResponse = z.infer<typeof ListGoalDecisionsResponse>;
+
+export const GetSessionMemorySummaryResponse = z
+  .object({
+    summary: SessionMemorySummary.nullable()
+  })
+  .strict();
+export type GetSessionMemorySummaryResponse = z.infer<
+  typeof GetSessionMemorySummaryResponse
+>;
+
+export const MemoryExtractionRequestedEventPayload = z
+  .object({
+    extractionId: z.string(),
+    goalId: z.string(),
+    sessionId: z.string(),
+    trigger: MemoryExtractionTrigger
+  })
+  .strict();
+export type MemoryExtractionRequestedEventPayload = z.infer<
+  typeof MemoryExtractionRequestedEventPayload
+>;
+
+export const MemoryExtractionStartedEventPayload = z
+  .object({
+    extractionId: z.string(),
+    goalId: z.string(),
+    sessionId: z.string()
+  })
+  .strict();
+export type MemoryExtractionStartedEventPayload = z.infer<
+  typeof MemoryExtractionStartedEventPayload
+>;
+
+export const MemoryExtractionCompletedEventPayload = z
+  .object({
+    extractionId: z.string(),
+    goalId: z.string(),
+    sessionId: z.string(),
+    summaryId: z.string().nullable(),
+    itemCount: z.number().int().nonnegative(),
+    decisionCount: z.number().int().nonnegative(),
+    promotedCount: z.number().int().nonnegative(),
+    truncated: z.boolean()
+  })
+  .strict();
+export type MemoryExtractionCompletedEventPayload = z.infer<
+  typeof MemoryExtractionCompletedEventPayload
+>;
+
+export const MemoryExtractionFailedEventPayload = z
+  .object({
+    extractionId: z.string(),
+    goalId: z.string(),
+    sessionId: z.string(),
+    failureCode: MemoryExtractionFailureCode
+  })
+  .strict();
+export type MemoryExtractionFailedEventPayload = z.infer<
+  typeof MemoryExtractionFailedEventPayload
+>;
+
+export const MemoryItemCreatedEventPayload = z
+  .object({
+    memoryItemId: z.string(),
+    goalId: z.string(),
+    type: GoalMemoryType,
+    status: z.enum(["candidate", "promoted"]),
+    sourceType: MemorySourceType,
+    sourceSessionId: z.string().nullable(),
+    sourceExtractionId: z.string().nullable()
+  })
+  .strict();
+export type MemoryItemCreatedEventPayload = z.infer<
+  typeof MemoryItemCreatedEventPayload
+>;
+
+export const MemoryItemUpdatedEventPayload = z
+  .object({
+    memoryItemId: z.string(),
+    goalId: z.string(),
+    type: GoalMemoryType,
+    status: z.enum(["candidate", "promoted"])
+  })
+  .strict();
+export type MemoryItemUpdatedEventPayload = z.infer<
+  typeof MemoryItemUpdatedEventPayload
+>;
+
+export const MemoryItemPromotedEventPayload = z
+  .object({
+    memoryItemId: z.string(),
+    goalId: z.string(),
+    type: GoalMemoryType
+  })
+  .strict();
+export type MemoryItemPromotedEventPayload = z.infer<
+  typeof MemoryItemPromotedEventPayload
+>;
+
+export const MemoryItemArchivedEventPayload = z
+  .object({
+    memoryItemId: z.string(),
+    goalId: z.string()
+  })
+  .strict();
+export type MemoryItemArchivedEventPayload = z.infer<
+  typeof MemoryItemArchivedEventPayload
+>;
+
+export const DecisionCreatedEventPayload = z
+  .object({
+    decisionId: z.string(),
+    goalId: z.string(),
+    status: z.enum(["proposed", "confirmed"]),
+    confirmationRequired: z.boolean(),
+    sourceType: DecisionSourceType,
+    sourceSessionId: z.string().nullable(),
+    sourceExtractionId: z.string().nullable()
+  })
+  .strict();
+export type DecisionCreatedEventPayload = z.infer<typeof DecisionCreatedEventPayload>;
+
+export const DecisionUpdatedEventPayload = z
+  .object({
+    decisionId: z.string(),
+    goalId: z.string(),
+    status: z.enum(["proposed", "confirmed"])
+  })
+  .strict();
+export type DecisionUpdatedEventPayload = z.infer<typeof DecisionUpdatedEventPayload>;
+
+export const DecisionConfirmedEventPayload = z
+  .object({
+    decisionId: z.string(),
+    goalId: z.string()
+  })
+  .strict();
+export type DecisionConfirmedEventPayload = z.infer<
+  typeof DecisionConfirmedEventPayload
+>;
+
+export const DecisionArchivedEventPayload = z
+  .object({
+    decisionId: z.string(),
+    goalId: z.string()
+  })
+  .strict();
+export type DecisionArchivedEventPayload = z.infer<typeof DecisionArchivedEventPayload>;
+
+export const M5Event = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("memory.extraction.requested"),
+      payload: MemoryExtractionRequestedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("memory.extraction.started"),
+      payload: MemoryExtractionStartedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("memory.extraction.completed"),
+      payload: MemoryExtractionCompletedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("memory.extraction.failed"),
+      payload: MemoryExtractionFailedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("memory.item.created"),
+      payload: MemoryItemCreatedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("memory.item.updated"),
+      payload: MemoryItemUpdatedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("memory.item.promoted"),
+      payload: MemoryItemPromotedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("memory.item.archived"),
+      payload: MemoryItemArchivedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("decision.created"),
+      payload: DecisionCreatedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("decision.updated"),
+      payload: DecisionUpdatedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("decision.confirmed"),
+      payload: DecisionConfirmedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("decision.archived"),
+      payload: DecisionArchivedEventPayload
+    })
+    .strict()
+]);
+export type M5Event = z.infer<typeof M5Event>;
 
 export const SkillSummary = z.object({
   id: z.string(),

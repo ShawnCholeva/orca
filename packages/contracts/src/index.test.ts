@@ -5,13 +5,23 @@ import {
   AdapterSummary,
   AttachWorkspaceRequest,
   AttachWorkspaceResponse,
+  CreateGoalDecisionRequest,
+  CreateGoalMemoryRequest,
   CreateSessionRequest,
   CreateSessionResponse,
+  DecisionArchivedEventPayload,
+  DecisionCandidate,
+  DecisionConfirmedEventPayload,
+  DecisionCreatedEventPayload,
+  DecisionUpdatedEventPayload,
+  DomainEventType,
   GetSessionResponse,
   CreateGoalRequest,
   GitProbe,
+  GoalDecision,
   Goal,
   GoalDetailResponse,
+  GoalMemoryItem,
   GoalRefinement,
   GuidedRefinementInput,
   GuidedRefinementOutput,
@@ -19,13 +29,32 @@ import {
   InspectWorkspaceRequest,
   InspectWorkspaceResponse,
   ListAdaptersResponse,
+  ListGoalDecisionsResponse,
+  ListGoalMemoryResponse,
   ListSessionsResponse,
   M4SessionErrorCode,
+  M5DomainEventType,
   M3ErrorCode,
+  M5Event,
+  MemoryCandidate,
+  MemoryExtraction,
+  MemoryExtractionCompletedEventPayload,
+  MemoryExtractionFailedEventPayload,
+  MemoryExtractionRequestedEventPayload,
+  MemoryExtractionStartedEventPayload,
+  MemoryItemArchivedEventPayload,
+  MemoryItemCreatedEventPayload,
+  MemoryItemPromotedEventPayload,
+  MemoryItemUpdatedEventPayload,
+  PatchGoalDecisionRequest,
+  PatchGoalMemoryRequest,
   RefineGoalRequest,
   RefineGoalResponse,
   SessionDetail,
   SessionErrorFrame,
+  SessionExtractionInput,
+  SessionExtractionOutput,
+  SessionMemorySummary,
   SessionInputFrame,
   SessionOutputFrame,
   SessionOutputSnapshot,
@@ -40,8 +69,7 @@ import {
   StopSessionResponse,
   SkillExtensionPoint,
   Workspace,
-  WorkspaceType,
-  DomainEventType
+  WorkspaceType
 } from "./index.js";
 
 const now = "2026-01-01T00:00:00.000Z";
@@ -259,7 +287,9 @@ describe("M4 contracts", () => {
   });
 
   it("appends the new domain event literals in order", () => {
-    const sessionEvents = DomainEventType.options.slice(-5);
+    const sessionEvents = DomainEventType.options.filter((eventType) =>
+      eventType.startsWith("session.")
+    );
     expect(sessionEvents).toEqual([
       "session.created",
       "session.started",
@@ -469,6 +499,435 @@ describe("M4 contracts", () => {
         code: "unknown_session",
         message: "missing session",
         extra: true
+      })
+    ).toThrow();
+  });
+});
+
+describe("M5 contracts", () => {
+  it("parses M5 enums and event union", () => {
+    expect(M5DomainEventType.parse("memory.item.promoted")).toBe("memory.item.promoted");
+    expect(() => M5DomainEventType.parse("memory.item.deleted")).toThrow();
+
+    const event = {
+      type: "memory.item.archived" as const,
+      payload: {
+        memoryItemId: "mem-1",
+        goalId: "goal-1"
+      }
+    };
+    expectRoundTrip(M5Event.parse, event, event);
+  });
+
+  it("accepts valid M5 row shapes and list wrappers", () => {
+    const memoryItem = {
+      id: "mem-1",
+      goalId: "goal-1",
+      type: "constraint" as const,
+      status: "candidate" as const,
+      content: "Use pnpm only",
+      contentHash: "hash-1",
+      confidence: 0.8,
+      sourceType: "session" as const,
+      sourceId: null,
+      sourceSessionId: "sess-1",
+      sourceExtractionId: "ext-1",
+      sourceOffsetFirst: 10,
+      sourceOffsetLast: 20,
+      createdAt: now,
+      updatedAt: now,
+      promotedAt: null,
+      archivedAt: null
+    };
+    const decision = {
+      id: "dec-1",
+      goalId: "goal-1",
+      title: "Keep local-first",
+      decisionText: "Do not add cloud sync in M5.",
+      rationale: "Scope control",
+      status: "proposed" as const,
+      confirmationRequired: true,
+      confidence: 0.7,
+      sourceType: "session" as const,
+      sourceId: null,
+      sourceSessionId: "sess-1",
+      sourceExtractionId: "ext-1",
+      sourceOffsetFirst: 5,
+      sourceOffsetLast: 25,
+      createdAt: now,
+      updatedAt: now,
+      confirmedAt: null,
+      archivedAt: null
+    };
+    const summary = {
+      id: "sum-1",
+      sessionId: "sess-1",
+      goalId: "goal-1",
+      extractionId: "ext-1",
+      headline: "Session found one blocker",
+      summaryText: "The run stopped due to a missing env var.",
+      truncated: false,
+      sourceOffsetFirst: 0,
+      sourceOffsetLast: 99,
+      createdAt: now
+    };
+    const extraction = {
+      id: "ext-1",
+      goalId: "goal-1",
+      sessionId: "sess-1",
+      trigger: "manual" as const,
+      status: "succeeded" as const,
+      extractorVersion: "m5-deterministic-v1",
+      sourceFingerprint: "abc123",
+      sourceOffsetFirst: 0,
+      sourceOffsetLast: 99,
+      summaryId: "sum-1",
+      itemCount: 1,
+      decisionCount: 1,
+      promotedCount: 0,
+      failureCode: null,
+      failureMessage: null,
+      requestedAt: now,
+      startedAt: now,
+      finishedAt: now
+    };
+
+    expectRoundTrip(GoalMemoryItem.parse, memoryItem, memoryItem);
+    expectRoundTrip(GoalDecision.parse, decision, decision);
+    expectRoundTrip(SessionMemorySummary.parse, summary, summary);
+    expectRoundTrip(MemoryExtraction.parse, extraction, extraction);
+    expectRoundTrip(
+      ListGoalMemoryResponse.parse,
+      { items: [memoryItem] },
+      { items: [memoryItem] }
+    );
+    expectRoundTrip(
+      ListGoalDecisionsResponse.parse,
+      { items: [decision] },
+      { items: [decision] }
+    );
+  });
+
+  it("accepts valid extractor input/output schemas", () => {
+    const input = {
+      goal: {
+        id: "goal-1",
+        title: "Ship M5",
+        status: "active" as const,
+        archived: false
+      },
+      refinement: {
+        id: "ref-1",
+        problemStatement: "Capture durable goal memory",
+        constraints: ["local-first"],
+        successCriteria: ["memory rows survive restart"],
+        stakeholders: ["developer"]
+      },
+      workspaces: [
+        {
+          id: "ws-1",
+          label: "orca",
+          rootPath: "/home/user/orca"
+        }
+      ],
+      session: {
+        id: "sess-1",
+        adapterId: "shell-manual" as const,
+        role: null,
+        instructions: "run tests",
+        exitCode: 0,
+        terminalReason: "exited",
+        startedAt: now,
+        terminatedAt: now
+      },
+      outputTail: {
+        text: "Tests passed",
+        byteOffsetFirst: 0,
+        byteOffsetLast: 12,
+        truncated: false
+      },
+      extractorVersion: "m5-deterministic-v1"
+    };
+    const memoryCandidate = {
+      type: "validation_result" as const,
+      content: "pnpm -r test passed cleanly",
+      confidence: 0.95,
+      sourceOffsetFirst: 0,
+      sourceOffsetLast: 12,
+      promoteEligible: true
+    };
+    const decisionCandidate = {
+      title: "Keep retry manual",
+      decisionText: "Retry remains explicit via endpoint.",
+      confidence: 0.8,
+      confirmationRequired: true,
+      sourceOffsetFirst: 0,
+      sourceOffsetLast: 12
+    };
+    const output = {
+      summary: {
+        headline: "Tests passed",
+        text: "No failures in this run.",
+        truncated: false
+      },
+      memoryCandidates: [memoryCandidate],
+      decisionCandidates: [decisionCandidate]
+    };
+
+    expectRoundTrip(SessionExtractionInput.parse, input, input);
+    expectRoundTrip(MemoryCandidate.parse, memoryCandidate, memoryCandidate);
+    expectRoundTrip(DecisionCandidate.parse, decisionCandidate, decisionCandidate);
+    expectRoundTrip(SessionExtractionOutput.parse, output, output);
+  });
+
+  it("accepts all M5 event payload schemas", () => {
+    const payloads: Array<[parse: (input: unknown) => unknown, input: unknown]> = [
+      [
+        MemoryExtractionRequestedEventPayload.parse,
+        { extractionId: "ext-1", goalId: "goal-1", sessionId: "sess-1", trigger: "manual" }
+      ],
+      [
+        MemoryExtractionStartedEventPayload.parse,
+        { extractionId: "ext-1", goalId: "goal-1", sessionId: "sess-1" }
+      ],
+      [
+        MemoryExtractionCompletedEventPayload.parse,
+        {
+          extractionId: "ext-1",
+          goalId: "goal-1",
+          sessionId: "sess-1",
+          summaryId: "sum-1",
+          itemCount: 2,
+          decisionCount: 1,
+          promotedCount: 1,
+          truncated: true
+        }
+      ],
+      [
+        MemoryExtractionFailedEventPayload.parse,
+        {
+          extractionId: "ext-1",
+          goalId: "goal-1",
+          sessionId: "sess-1",
+          failureCode: "invalid_output"
+        }
+      ],
+      [
+        MemoryItemCreatedEventPayload.parse,
+        {
+          memoryItemId: "mem-1",
+          goalId: "goal-1",
+          type: "constraint",
+          status: "candidate",
+          sourceType: "session",
+          sourceSessionId: "sess-1",
+          sourceExtractionId: "ext-1"
+        }
+      ],
+      [
+        MemoryItemUpdatedEventPayload.parse,
+        { memoryItemId: "mem-1", goalId: "goal-1", type: "constraint", status: "promoted" }
+      ],
+      [
+        MemoryItemPromotedEventPayload.parse,
+        { memoryItemId: "mem-1", goalId: "goal-1", type: "constraint" }
+      ],
+      [MemoryItemArchivedEventPayload.parse, { memoryItemId: "mem-1", goalId: "goal-1" }],
+      [
+        DecisionCreatedEventPayload.parse,
+        {
+          decisionId: "dec-1",
+          goalId: "goal-1",
+          status: "proposed",
+          confirmationRequired: true,
+          sourceType: "session",
+          sourceSessionId: "sess-1",
+          sourceExtractionId: "ext-1"
+        }
+      ],
+      [DecisionUpdatedEventPayload.parse, { decisionId: "dec-1", goalId: "goal-1", status: "confirmed" }],
+      [DecisionConfirmedEventPayload.parse, { decisionId: "dec-1", goalId: "goal-1" }],
+      [DecisionArchivedEventPayload.parse, { decisionId: "dec-1", goalId: "goal-1" }]
+    ];
+
+    for (const [parse, input] of payloads) {
+      expect(parse(input)).toEqual(input);
+    }
+  });
+
+  it("rejects oversized row/request/output fields", () => {
+    expect(() =>
+      GoalMemoryItem.parse({
+        id: "mem-1",
+        goalId: "goal-1",
+        type: "constraint",
+        status: "candidate",
+        content: "x".repeat(4001),
+        contentHash: "hash-1",
+        confidence: null,
+        sourceType: "manual",
+        sourceId: null,
+        sourceSessionId: null,
+        sourceExtractionId: null,
+        sourceOffsetFirst: null,
+        sourceOffsetLast: null,
+        createdAt: now,
+        updatedAt: now,
+        promotedAt: null,
+        archivedAt: null
+      })
+    ).toThrow();
+    expect(() =>
+      SessionMemorySummary.parse({
+        id: "sum-1",
+        sessionId: "sess-1",
+        goalId: "goal-1",
+        extractionId: "ext-1",
+        headline: "x".repeat(201),
+        summaryText: "ok",
+        truncated: false,
+        sourceOffsetFirst: 0,
+        sourceOffsetLast: 1,
+        createdAt: now
+      })
+    ).toThrow();
+    expect(() =>
+      CreateGoalDecisionRequest.parse({
+        title: "x".repeat(201),
+        decisionText: "ok"
+      })
+    ).toThrow();
+    expect(() =>
+      MemoryExtraction.parse({
+        id: "ext-1",
+        goalId: "goal-1",
+        sessionId: "sess-1",
+        trigger: "manual",
+        status: "failed",
+        extractorVersion: "m5-deterministic-v1",
+        sourceFingerprint: "abc123",
+        sourceOffsetFirst: null,
+        sourceOffsetLast: null,
+        summaryId: null,
+        itemCount: 0,
+        decisionCount: 0,
+        promotedCount: 0,
+        failureCode: "internal_error",
+        failureMessage: "x".repeat(501),
+        requestedAt: now,
+        startedAt: now,
+        finishedAt: now
+      })
+    ).toThrow();
+  });
+
+  it("rejects unknown or forbidden event payload fields", () => {
+    expect(() =>
+      MemoryItemCreatedEventPayload.parse({
+        memoryItemId: "mem-1",
+        goalId: "goal-1",
+        type: "constraint",
+        status: "candidate",
+        sourceType: "session",
+        sourceSessionId: "sess-1",
+        sourceExtractionId: "ext-1",
+        content: "secret text"
+      })
+    ).toThrow();
+    expect(() =>
+      DecisionCreatedEventPayload.parse({
+        decisionId: "dec-1",
+        goalId: "goal-1",
+        status: "proposed",
+        confirmationRequired: true,
+        sourceType: "session",
+        sourceSessionId: "sess-1",
+        sourceExtractionId: "ext-1",
+        decisionText: "never include in events"
+      })
+    ).toThrow();
+    expect(() =>
+      MemoryExtractionCompletedEventPayload.parse({
+        extractionId: "ext-1",
+        goalId: "goal-1",
+        sessionId: "sess-1",
+        summaryId: "sum-1",
+        itemCount: 1,
+        decisionCount: 0,
+        promotedCount: 0,
+        truncated: false,
+        summaryText: "forbidden"
+      })
+    ).toThrow();
+  });
+
+  it("rejects invalid enums and invalid request status usage", () => {
+    expect(() =>
+      CreateGoalMemoryRequest.parse({
+        type: "constraint",
+        content: "x",
+        status: "archived"
+      })
+    ).toThrow();
+    expect(() =>
+      CreateGoalDecisionRequest.parse({
+        title: "t",
+        decisionText: "x",
+        status: "archived"
+      })
+    ).toThrow();
+    expect(() => PatchGoalMemoryRequest.parse({})).toThrow();
+    expect(() => PatchGoalMemoryRequest.parse({ status: "invalid" })).toThrow();
+    expect(() => PatchGoalDecisionRequest.parse({})).toThrow();
+    expect(() => PatchGoalDecisionRequest.parse({ status: "done" })).toThrow();
+  });
+
+  it("enforces extractor candidate count caps", () => {
+    const memoryCandidate = { type: "note" as const, content: "x", promoteEligible: false };
+    const decisionCandidate = { title: "t", decisionText: "x", confirmationRequired: true };
+
+    expect(() =>
+      SessionExtractionOutput.parse({
+        memoryCandidates: new Array(26).fill(memoryCandidate),
+        decisionCandidates: []
+      })
+    ).toThrow();
+    expect(() =>
+      SessionExtractionOutput.parse({
+        memoryCandidates: [],
+        decisionCandidates: new Array(11).fill(decisionCandidate)
+      })
+    ).toThrow();
+  });
+
+  it("keeps session read schemas back-compatible while allowing latest extraction fields", () => {
+    const withLatest = {
+      id: "sess-2",
+      goalId: "goal-1",
+      workspaceId: "ws-1",
+      adapterId: "shell-manual" as const,
+      role: null,
+      title: "Shell session",
+      status: "exited" as const,
+      createdAt: now,
+      startedAt: now,
+      exitedAt: now,
+      latestExtraction: {
+        id: "ext-2",
+        status: "failed" as const,
+        requestedAt: now,
+        finishedAt: now,
+        failureCode: "timeout" as const,
+        truncated: true
+      },
+      latestSummaryHeadline: "Timed out before full completion"
+    };
+
+    expect(SessionSummary.parse(withLatest)).toEqual(withLatest);
+    expect(() =>
+      SessionSummary.parse({
+        ...withLatest,
+        latestExtraction: { ...withLatest.latestExtraction, failureCode: "unknown" }
       })
     ).toThrow();
   });
