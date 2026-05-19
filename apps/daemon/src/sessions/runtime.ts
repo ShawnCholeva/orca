@@ -23,6 +23,16 @@ export interface RuntimeCtx {
   sessionOutputStore: SessionOutputStore;
 }
 
+// Minimal WS client interface; ws.WebSocket satisfies this shape.
+export interface WsClient {
+  readonly readyState: number;
+  readonly bufferedAmount: number;
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+}
+
+const WS_CLIENT_OPEN = 1;
+
 interface HandleSlot {
   handle: PtyHandle;
   stopRequested: boolean;
@@ -35,6 +45,7 @@ let _stmts: {
   insertEvent: Database.Statement;
   selectWorkspace: Database.Statement;
   setRunning: Database.Statement;
+  updateTerminalSize: Database.Statement;
 } | null = null;
 
 function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
@@ -46,6 +57,9 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
       ),
       selectWorkspace: db.prepare('SELECT id, path FROM workspaces WHERE id = ?'),
       setRunning: db.prepare('UPDATE sessions SET status = ? WHERE id = ?'),
+      updateTerminalSize: db.prepare(
+        'UPDATE sessions SET terminal_cols = ?, terminal_rows = ? WHERE id = ?'
+      ),
     };
   }
   return _stmts!;
@@ -88,12 +102,69 @@ function persistFailure(
 
 export class SessionRuntime {
   private readonly handleSlots = new Map<string, HandleSlot>();
+  private readonly subscriberMap = new Map<string, Set<WsClient>>();
+  private readonly lastResizeMap = new Map<string, { cols: number; rows: number }>();
   private readonly ptyManager: PtyManager;
   private readonly stopGraceMs: number;
+  private readonly wsBufferLimitBytes: number;
 
-  constructor(ptyManager: PtyManager, stopGraceMs = 5000) {
+  constructor(ptyManager: PtyManager, stopGraceMs = 5000, wsBufferLimitBytes = 1024 * 1024) {
     this.ptyManager = ptyManager;
     this.stopGraceMs = stopGraceMs;
+    this.wsBufferLimitBytes = wsBufferLimitBytes;
+  }
+
+  // Broadcast a session.output frame to all live subscribers for sessionId.
+  // Slow consumers (bufferedAmount exceeds limit) are closed and removed.
+  private broadcastOutput(sessionId: string, seq: number, byteOffset: number, chunk: Buffer): void {
+    const subscribers = this.subscriberMap.get(sessionId);
+    if (!subscribers || subscribers.size === 0) return;
+
+    const frame = JSON.stringify({
+      type: 'session.output',
+      sessionId,
+      seq,
+      byteOffset,
+      dataBase64: chunk.toString('base64'),
+    });
+
+    for (const socket of [...subscribers]) {
+      if (socket.readyState !== WS_CLIENT_OPEN) {
+        subscribers.delete(socket);
+        continue;
+      }
+      try {
+        socket.send(frame);
+        if (socket.bufferedAmount > this.wsBufferLimitBytes) {
+          socket.close(1008, 'slow consumer');
+          subscribers.delete(socket);
+        }
+      } catch {
+        subscribers.delete(socket);
+      }
+    }
+  }
+
+  // Add a WS client as a subscriber for a session.
+  subscribe(sessionId: string, socket: WsClient): void {
+    let subscribers = this.subscriberMap.get(sessionId);
+    if (!subscribers) {
+      subscribers = new Set();
+      this.subscriberMap.set(sessionId, subscribers);
+    }
+    subscribers.add(socket);
+  }
+
+  // Remove a WS client from a specific session's subscriber list.
+  unsubscribeSocket(sessionId: string, socket: WsClient): void {
+    this.subscriberMap.get(sessionId)?.delete(socket);
+  }
+
+  // Remove a WS client from all session subscriber lists (called on WS close).
+  removeSocket(socket: WsClient): void {
+    for (const subscribers of this.subscriberMap.values()) {
+      subscribers.delete(socket);
+    }
   }
 
   async start(
@@ -188,7 +259,8 @@ export class SessionRuntime {
     this.handleSlots.set(sessionId, slot);
 
     ptyEvents.onData((chunk: Buffer) => {
-      sessionOutputStore.appendChunk(sessionId, chunk);
+      const { seq, byteOffset } = sessionOutputStore.appendChunk(sessionId, chunk);
+      this.broadcastOutput(sessionId, seq, byteOffset, chunk);
     });
 
     // Exactly one terminal lifecycle event per process: stopped (user-requested) or exited (natural).
@@ -247,5 +319,21 @@ export class SessionRuntime {
 
   getHandle(sessionId: string): PtyHandle | undefined {
     return this.handleSlots.get(sessionId)?.handle;
+  }
+
+  // Update terminal size without emitting a domain event.
+  // Deduplicates: only forwards to PTY handle if dimensions changed.
+  resize(db: Database.Database, sessionId: string, cols: number, rows: number): void {
+    const slot = this.handleSlots.get(sessionId);
+    if (!slot) return;
+
+    const last = this.lastResizeMap.get(sessionId);
+    if (last && last.cols === cols && last.rows === rows) return;
+
+    this.lastResizeMap.set(sessionId, { cols, rows });
+    slot.handle.resize(cols, rows);
+
+    // Update DB without emitting a domain event
+    ensureStmts(db).updateTerminalSize.run(cols, rows, sessionId);
   }
 }

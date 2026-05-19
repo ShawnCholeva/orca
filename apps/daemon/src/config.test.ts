@@ -13,7 +13,8 @@ const ORCA_ENV_KEYS = [
   "ORCA_PORT",
   "ORCA_LOG_LEVEL",
   "ORCA_TOKEN",
-  "ORCA_SESSION_OUTPUT_TAIL_BYTES"
+  "ORCA_SESSION_OUTPUT_TAIL_BYTES",
+  "ORCA_SESSION_WS_BUFFER_LIMIT_BYTES"
 ] as const;
 
 const createdDirs: string[] = [];
@@ -76,5 +77,15 @@ describe("loadConfig", () => {
     setOrcaEnv({ ORCA_SESSION_OUTPUT_TAIL_BYTES: "64" });
     const configOverride = loadConfig();
     expect(configOverride.sessionOutputTailBytes).toBe(64);
+  });
+
+  it("uses a default WS buffer limit and supports ORCA_SESSION_WS_BUFFER_LIMIT_BYTES override", () => {
+    setOrcaEnv({});
+    const configDefault = loadConfig();
+    expect(configDefault.sessionWsBufferLimitBytes).toBe(1024 * 1024);
+
+    setOrcaEnv({ ORCA_SESSION_WS_BUFFER_LIMIT_BYTES: "512" });
+    const configOverride = loadConfig();
+    expect(configOverride.sessionWsBufferLimitBytes).toBe(512);
   });
 });

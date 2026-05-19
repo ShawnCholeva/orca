@@ -7,6 +7,7 @@ import { z } from "zod";
 const DEFAULT_PORT = 8787;
 const DEFAULT_SESSION_OUTPUT_TAIL_BYTES = 1024 * 1024;
 const DEFAULT_SESSION_STOP_GRACE_MS = 5000;
+const DEFAULT_SESSION_WS_BUFFER_LIMIT_BYTES = 1024 * 1024;
 
 const LogLevelSchema = z.enum([
   "fatal",
@@ -24,12 +25,14 @@ const EnvSchema = z.object({
   ORCA_LOG_LEVEL: LogLevelSchema.optional(),
   ORCA_TOKEN: z.string().min(1).optional(),
   ORCA_SESSION_OUTPUT_TAIL_BYTES: z.string().optional(),
-  ORCA_SESSION_STOP_GRACE_MS: z.string().optional()
+  ORCA_SESSION_STOP_GRACE_MS: z.string().optional(),
+  ORCA_SESSION_WS_BUFFER_LIMIT_BYTES: z.string().optional()
 });
 
 const PortSchema = z.coerce.number().int().min(1).max(65535);
 const SessionOutputTailBytesSchema = z.coerce.number().int().positive();
 const SessionStopGraceMsSchema = z.coerce.number().int().positive();
+const SessionWsBufferLimitBytesSchema = z.coerce.number().int().positive();
 
 export interface Config {
   dataDir: string;
@@ -37,6 +40,7 @@ export interface Config {
   logLevel: z.infer<typeof LogLevelSchema>;
   sessionOutputTailBytes: number;
   sessionStopGraceMs: number;
+  sessionWsBufferLimitBytes: number;
   getAuthToken: () => string;
 }
 
@@ -75,12 +79,18 @@ export function loadConfig(): Config {
       ? DEFAULT_SESSION_STOP_GRACE_MS
       : SessionStopGraceMsSchema.parse(env.ORCA_SESSION_STOP_GRACE_MS);
 
+  const sessionWsBufferLimitBytes =
+    env.ORCA_SESSION_WS_BUFFER_LIMIT_BYTES === undefined
+      ? DEFAULT_SESSION_WS_BUFFER_LIMIT_BYTES
+      : SessionWsBufferLimitBytesSchema.parse(env.ORCA_SESSION_WS_BUFFER_LIMIT_BYTES);
+
   return {
     dataDir,
     port,
     logLevel,
     sessionOutputTailBytes,
     sessionStopGraceMs,
+    sessionWsBufferLimitBytes,
     getAuthToken: () => authToken
   };
 }

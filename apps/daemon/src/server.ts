@@ -27,6 +27,10 @@ import {
   type ListAdaptersResponse,
   RefineGoalRequest,
   type RefineGoalResponse,
+  SessionInputFrame,
+  SessionResizeFrame,
+  SessionSubscribeFrame,
+  SessionUnsubscribeFrame,
   StartSessionRequest,
   type StartSessionResponse,
   type StopSessionResponse,
@@ -80,7 +84,8 @@ import {
   stopSession,
 } from './sessions/usecases.js';
 import { createSessionOutputStore } from './sessions/output-store.js';
-import { SessionRuntime } from './sessions/runtime.js';
+import { SessionRuntime, type WsClient } from './sessions/runtime.js';
+import { getSessionDetail } from './sessions/projection.js';
 import type { PtyManager } from './pty/types.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
@@ -122,7 +127,8 @@ export function createServer(
     tailBytes: config.sessionOutputTailBytes,
   });
   const sessionRuntime =
-    deps?.sessionRuntime ?? new SessionRuntime(noopPtyManager, config.sessionStopGraceMs);
+    deps?.sessionRuntime ??
+    new SessionRuntime(noopPtyManager, config.sessionStopGraceMs, config.sessionWsBufferLimitBytes);
 
   const server = Fastify({
     logger: {
@@ -481,6 +487,19 @@ export function createServer(
     }
   });
 
+  // Sends a session.error frame if the socket is still open.
+  function sendSessionError(
+    socket: WsClient,
+    sessionId: string | undefined,
+    code: 'unknown_session' | 'not_active' | 'invalid_message',
+    message: string
+  ): void {
+    if (socket.readyState !== WS_OPEN) return;
+    const frame: Record<string, unknown> = { type: 'session.error', code, message };
+    if (sessionId !== undefined) frame.sessionId = sessionId;
+    socket.send(JSON.stringify(frame));
+  }
+
   // WS route must be inside a register callback so @fastify/websocket's onRoute hook fires
   server.register(async (fastify) => {
     fastify.route({
@@ -500,8 +519,88 @@ export function createServer(
           }
         });
 
+        // Handle incoming session frames from this client.
+        socket.on('message', (rawData: Buffer) => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(rawData.toString());
+          } catch {
+            sendSessionError(socket as unknown as WsClient, undefined, 'invalid_message', 'malformed JSON');
+            return;
+          }
+
+          if (typeof parsed !== 'object' || parsed === null) {
+            sendSessionError(socket as unknown as WsClient, undefined, 'invalid_message', 'expected JSON object');
+            return;
+          }
+
+          const type = (parsed as { type?: unknown }).type;
+          if (typeof type !== 'string' || !type.startsWith('session.')) {
+            // Not a session frame — ignore (domain event bus frames are server→client only)
+            return;
+          }
+
+          if (type === 'session.subscribe') {
+            const frame = SessionSubscribeFrame.safeParse(parsed);
+            if (!frame.success) {
+              sendSessionError(socket as unknown as WsClient, undefined, 'invalid_message', 'invalid session.subscribe frame');
+              return;
+            }
+            const session = getSessionDetail(db, frame.data.sessionId);
+            if (!session) {
+              sendSessionError(socket as unknown as WsClient, frame.data.sessionId, 'unknown_session', 'session not found');
+              return;
+            }
+            sessionRuntime.subscribe(frame.data.sessionId, socket as unknown as WsClient);
+            return;
+          }
+
+          if (type === 'session.unsubscribe') {
+            const frame = SessionUnsubscribeFrame.safeParse(parsed);
+            if (!frame.success) {
+              sendSessionError(socket as unknown as WsClient, undefined, 'invalid_message', 'invalid session.unsubscribe frame');
+              return;
+            }
+            sessionRuntime.unsubscribeSocket(frame.data.sessionId, socket as unknown as WsClient);
+            return;
+          }
+
+          if (type === 'session.input') {
+            const frame = SessionInputFrame.safeParse(parsed);
+            if (!frame.success) {
+              sendSessionError(socket as unknown as WsClient, undefined, 'invalid_message', 'invalid session.input frame');
+              return;
+            }
+            const handle = sessionRuntime.getHandle(frame.data.sessionId);
+            if (!handle) {
+              sendSessionError(socket as unknown as WsClient, frame.data.sessionId, 'not_active', 'session not running');
+              return;
+            }
+            handle.write(Buffer.from(frame.data.dataBase64, 'base64'));
+            return;
+          }
+
+          if (type === 'session.resize') {
+            const frame = SessionResizeFrame.safeParse(parsed);
+            if (!frame.success) {
+              sendSessionError(socket as unknown as WsClient, undefined, 'invalid_message', 'invalid session.resize frame');
+              return;
+            }
+            sessionRuntime.resize(db, frame.data.sessionId, frame.data.cols, frame.data.rows);
+            return;
+          }
+
+          // Unknown session.* frame
+          sendSessionError(socket as unknown as WsClient, undefined, 'invalid_message', `unknown frame type: ${type}`);
+        });
+
         socket.on('close', () => {
           unsubscribe();
+          sessionRuntime.removeSocket(socket as unknown as WsClient);
+        });
+
+        socket.on('error', () => {
+          sessionRuntime.removeSocket(socket as unknown as WsClient);
         });
       },
       handler: async (request, reply): Promise<ListEventsResponse | { error: string; issues?: unknown }> => {

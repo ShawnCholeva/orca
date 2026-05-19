@@ -44,6 +44,7 @@ function makeConfig(dataDir: string): Config {
     logLevel: 'silent',
     sessionOutputTailBytes: 1024 * 1024,
     sessionStopGraceMs: 5000,
+    sessionWsBufferLimitBytes: 1024 * 1024,
     getAuthToken: () => 'test-token'
   };
 }

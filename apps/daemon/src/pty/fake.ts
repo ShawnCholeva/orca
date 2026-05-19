@@ -3,6 +3,7 @@ import type { PtyEvents, PtyHandle, PtyManager, PtyStartOptions } from "./types.
 interface FakePtyState {
   pid: number;
   dead: boolean;
+  writtenChunks: Buffer[];
   dataHandlers: Set<(chunk: Buffer) => void>;
   exitHandlers: Set<(exit: { exitCode: number | null; signal: string | null }) => void>;
 }
@@ -15,6 +16,8 @@ export interface FakePtyControl {
   emitExit(exit: { exitCode: number | null; signal: string | null }): void;
   /** True after exit has been emitted. */
   readonly isDead: boolean;
+  /** Bytes written to the PTY via handle.write(). */
+  readonly writtenChunks: readonly Buffer[];
 }
 
 const stateMap = new WeakMap<PtyHandle, FakePtyState>();
@@ -39,6 +42,9 @@ export function controlFakePty(handle: PtyHandle): FakePtyControl {
     get isDead() {
       return state.dead;
     },
+    get writtenChunks() {
+      return state.writtenChunks as readonly Buffer[];
+    },
   };
 }
 
@@ -49,6 +55,7 @@ export class FakePtyManager implements PtyManager {
     const state: FakePtyState = {
       pid: this.nextPid++,
       dead: false,
+      writtenChunks: [],
       dataHandlers: new Set(),
       exitHandlers: new Set(),
     };
@@ -57,8 +64,9 @@ export class FakePtyManager implements PtyManager {
       get pid() {
         return state.pid;
       },
-      write(_data: Buffer): void {
+      write(data: Buffer): void {
         if (state.dead) return;
+        state.writtenChunks.push(data);
       },
       resize(_cols: number, _rows: number): void {},
       kill(signal?: "SIGTERM" | "SIGKILL"): void {
