@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, rmdirSync, chmodSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { mkdtemp, rmdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -378,15 +378,12 @@ function makeStartRegistry(cwd: string): AdapterRegistry {
   return registry;
 }
 
-function makeFailingShellRegistry(wsDir: string): AdapterRegistry {
+function makeFailingShellRegistry(): AdapterRegistry {
   const registry = new AdapterRegistry();
   const failingAdapter = new ShellManualAdapter(() =>
     Promise.resolve({ error: 'not_found', tried: ['/no/such/binary'] })
   );
   registry.register(failingAdapter);
-  // Patch cwd: ShellManualAdapter.resolveSpawn uses workspacePath from input,
-  // so we don't need to track it here
-  void wsDir;
   return registry;
 }
 
@@ -459,7 +456,7 @@ describe('startSession', () => {
 
     const runtime = new SessionRuntime(new CapturingPtyManager());
     const store = createSessionOutputStore(db, { tailBytes: 1024 * 1024 });
-    const registry = makeFailingShellRegistry(wsDir);
+    const registry = makeFailingShellRegistry();
 
     const sessionId = await seedAndCreateSession(db, wsDir, registry);
     const ctx: StartSessionCtx = { db, bus: eventBus, adapterRegistry: registry, sessionOutputStore: store, sessionRuntime: runtime };
@@ -565,8 +562,6 @@ describe('startSession', () => {
       subscribe: () => () => {},
       publish: (event: DomainEvent) => {
         if (event.type === 'session.started') {
-          const row = db.prepare('SELECT status FROM sessions WHERE id = ?').get(event.goalId) as { status: string } | undefined;
-          // The session row for this session should exist with status=starting or running
           const sessionRow = db.prepare('SELECT status FROM sessions WHERE id = ?').get(
             (event.payload as { sessionId: string }).sessionId
           ) as { status: string } | undefined;

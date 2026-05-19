@@ -24,21 +24,29 @@ export interface RuntimeCtx {
 
 // Module-level prepared statement cache (invalidated when db instance changes)
 let _db: Database.Database | null = null;
-let _insertEventStmt: Database.Statement | null = null;
+let _stmts: {
+  insertEvent: Database.Statement;
+  selectWorkspace: Database.Statement;
+  setRunning: Database.Statement;
+} | null = null;
 
-function getInsertEventStmt(db: Database.Database): Database.Statement {
+function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
   if (db !== _db) {
     _db = db;
-    _insertEventStmt = db.prepare(
-      'INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)'
-    );
+    _stmts = {
+      insertEvent: db.prepare(
+        'INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)'
+      ),
+      selectWorkspace: db.prepare('SELECT id, path FROM workspaces WHERE id = ?'),
+      setRunning: db.prepare('UPDATE sessions SET status = ? WHERE id = ?'),
+    };
   }
-  return _insertEventStmt!;
+  return _stmts!;
 }
 
 export function resetPreparedStatements(): void {
   _db = null;
-  _insertEventStmt = null;
+  _stmts = null;
 }
 
 function insertEvent(
@@ -49,7 +57,7 @@ function insertEvent(
   createdAt: string
 ): DomainEvent {
   const id = randomUUID();
-  const result = getInsertEventStmt(db).run(id, type, goalId, JSON.stringify(payload), createdAt);
+  const result = ensureStmts(db).insertEvent.run(id, type, goalId, JSON.stringify(payload), createdAt);
   return { seq: Number(result.lastInsertRowid), id, type, goalId, payload, createdAt };
 }
 
@@ -72,8 +80,6 @@ function persistFailure(
 }
 
 export class SessionRuntime {
-  // Spawn-before-event ordering: PTY spawned first so pid is known before the started tx commits.
-  // onExit checks stopRequested (added in M4-009) to choose session.exited vs session.stopped.
   private readonly handles = new Map<string, PtyHandle>();
   private readonly ptyManager: PtyManager;
 
@@ -88,17 +94,14 @@ export class SessionRuntime {
   ): Promise<import('@orca/contracts').SessionDetail> {
     const { db, bus, adapterRegistry, sessionOutputStore } = ctx;
     const { terminalCols, terminalRows } = opts;
+    const stmts = ensureStmts(db);
     const now = new Date().toISOString();
 
-    // 1. Load and validate session state
     const session = getSessionDetail(db, sessionId);
     if (!session) throw new SessionNotFoundError(sessionId);
     if (session.status !== 'created') throw new SessionWrongStateError(sessionId, session.status);
 
-    // 2. Validate workspace path is accessible
-    const wsRow = db
-      .prepare('SELECT id, path FROM workspaces WHERE id = ?')
-      .get(session.workspaceId) as { id: string; path: string } | undefined;
+    const wsRow = stmts.selectWorkspace.get(session.workspaceId) as { id: string; path: string } | undefined;
     if (!wsRow) {
       persistFailure(db, bus, sessionId, session.goalId, 'workspace_unavailable', now);
       throw new WorkspaceUnavailableError('unknown');
@@ -110,7 +113,6 @@ export class SessionRuntime {
       throw new WorkspaceUnavailableError(wsRow.path);
     }
 
-    // 3. Resolve adapter spawn command
     const adapter = adapterRegistry.get(session.adapterId);
     if (!adapter) {
       persistFailure(db, bus, sessionId, session.goalId, 'command_not_found', now);
@@ -130,7 +132,8 @@ export class SessionRuntime {
       throw new CommandNotFoundError(session.adapterId);
     }
 
-    // 4. Spawn PTY — pid is now known before writing session.started
+    // Spawn-before-event ordering: pid is known before session.started tx commits.
+    // If spawn throws, only session.failed is emitted (no session.started).
     let handle: PtyHandle;
     let ptyEvents: PtyEvents;
     try {
@@ -153,7 +156,6 @@ export class SessionRuntime {
     const startedAt = new Date().toISOString();
     const startPayload = { sessionId, goalId: session.goalId, pid, cwd: spawnResult.cwd, terminalCols, terminalRows };
 
-    // 5. Single tx: status=starting + session.started event (pid known, spawn succeeded)
     let startedEvent!: DomainEvent;
     db.transaction(() => {
       setSessionStatus(db, sessionId, 'starting', {
@@ -168,21 +170,18 @@ export class SessionRuntime {
       startedEvent = insertEvent(db, 'session.started', session.goalId, startPayload, startedAt);
     })();
 
-    // Broadcast after COMMIT
     bus.publish(startedEvent);
 
-    // 6. Fold status=running into a second small tx (spawn handle confirmed alive)
-    db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run('running', sessionId);
+    // Separate small tx: status=running (spawn handle confirmed alive post-commit)
+    stmts.setRunning.run('running', sessionId);
 
-    // 7. Track live handle
     this.handles.set(sessionId, handle);
 
-    // 8. Data handler: persist chunks only (broadcast wired in M4-010)
     ptyEvents.onData((chunk: Buffer) => {
       sessionOutputStore.appendChunk(sessionId, chunk);
     });
 
-    // 9. Exit handler: exactly one terminal lifecycle event per process
+    // onExit: exactly one terminal lifecycle event per process (stopRequested check added in M4-009)
     ptyEvents.onExit(({ exitCode, signal }) => {
       const exitedAt = new Date().toISOString();
       const exitPayload = { sessionId, goalId: session.goalId, exitCode, exitSignal: signal };
