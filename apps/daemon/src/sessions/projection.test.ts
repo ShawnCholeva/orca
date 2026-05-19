@@ -16,7 +16,13 @@ import {
 const tempDirs: string[] = [];
 
 function createConfig(dataDir: string): Config {
-  return { dataDir, port: 8787, logLevel: 'silent', getAuthToken: () => 'test-token' };
+  return {
+    dataDir,
+    port: 8787,
+    logLevel: 'silent',
+    sessionOutputTailBytes: 1024 * 1024,
+    getAuthToken: () => 'test-token',
+  };
 }
 
 function freshDb(): Database.Database {

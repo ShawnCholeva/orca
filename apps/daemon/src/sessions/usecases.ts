@@ -15,11 +15,13 @@ import {
   WorkspaceUnavailableError,
 } from './errors.js';
 import { getSessionDetail, insertSession, listSessionsByGoal } from './projection.js';
+import type { SessionOutputStore } from './output-store.js';
 
 export interface SessionCtx {
   db: Database.Database;
   bus: EventBus;
   adapterRegistry: AdapterRegistry;
+  sessionOutputStore?: SessionOutputStore;
 }
 
 interface GoalRow {
@@ -179,11 +181,14 @@ export function listSessionsForGoal(
 
 export function getSession(
   db: Database.Database,
-  sessionId: string
+  sessionId: string,
+  outputStore?: SessionOutputStore
 ): { session: SessionDetail; output: SessionOutputSnapshot } {
   const session = getSessionDetail(db, sessionId);
   if (!session) throw new SessionNotFoundError(sessionId);
 
-  const output: SessionOutputSnapshot = { sessionId, ...EMPTY_OUTPUT };
+  const output: SessionOutputSnapshot = outputStore
+    ? outputStore.readTail(sessionId)
+    : { sessionId, ...EMPTY_OUTPUT };
   return { session, output };
 }

@@ -12,7 +12,8 @@ const ORCA_ENV_KEYS = [
   "ORCA_DATA_DIR",
   "ORCA_PORT",
   "ORCA_LOG_LEVEL",
-  "ORCA_TOKEN"
+  "ORCA_TOKEN",
+  "ORCA_SESSION_OUTPUT_TAIL_BYTES"
 ] as const;
 
 const createdDirs: string[] = [];
@@ -65,5 +66,15 @@ describe("loadConfig", () => {
     const configWithEnvToken = loadConfig();
 
     expect(configWithEnvToken.getAuthToken()).toBe("local-dev-token");
+  });
+
+  it("uses a default session output tail cap and supports ORCA_SESSION_OUTPUT_TAIL_BYTES override", () => {
+    setOrcaEnv({});
+    const configDefault = loadConfig();
+    expect(configDefault.sessionOutputTailBytes).toBe(1024 * 1024);
+
+    setOrcaEnv({ ORCA_SESSION_OUTPUT_TAIL_BYTES: "64" });
+    const configOverride = loadConfig();
+    expect(configOverride.sessionOutputTailBytes).toBe(64);
   });
 });

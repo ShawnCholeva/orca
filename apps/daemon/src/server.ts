@@ -70,6 +70,7 @@ import {
   getSession,
   listSessionsForGoal,
 } from './sessions/usecases.js';
+import { createSessionOutputStore } from './sessions/output-store.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -95,6 +96,10 @@ const WS_OPEN = 1; // ws library WebSocket.OPEN
 
 export function createServer(config: Config): FastifyInstance {
   const startedAt = new Date().toISOString();
+  const db = getDatabase();
+  const sessionOutputStore = createSessionOutputStore(db, {
+    tailBytes: config.sessionOutputTailBytes,
+  });
 
   const server = Fastify({
     logger: {
@@ -354,7 +359,7 @@ export function createServer(config: Config): FastifyInstance {
 
     try {
       const session = await createSession(
-        { db: getDatabase(), bus: eventBus, adapterRegistry },
+        { db, bus: eventBus, adapterRegistry },
         { goalId, ...parsed.data }
       );
       reply.status(201);
@@ -383,14 +388,14 @@ export function createServer(config: Config): FastifyInstance {
 
   server.get('/v1/goals/:goalId/sessions', async (request): Promise<ListSessionsResponse> => {
     const { goalId } = request.params as { goalId: string };
-    const sessions = listSessionsForGoal(getDatabase(), goalId);
+    const sessions = listSessionsForGoal(db, goalId);
     return { sessions };
   });
 
   server.get('/v1/sessions/:id', async (request, reply): Promise<GetSessionResponse | { error: unknown }> => {
     const { id } = request.params as { id: string };
     try {
-      return getSession(getDatabase(), id);
+      return getSession(db, id, sessionOutputStore);
     } catch (error) {
       if (error instanceof SessionNotFoundError) {
         reply.status(404);

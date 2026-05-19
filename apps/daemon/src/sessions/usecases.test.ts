@@ -27,11 +27,18 @@ import {
   type SessionCtx,
 } from './usecases.js';
 import { resetPreparedStatements as resetProjectionStmts } from './projection.js';
+import { createSessionOutputStore } from './output-store.js';
 
 const tempDirs: string[] = [];
 
 function createConfig(dataDir: string): Config {
-  return { dataDir, port: 8787, logLevel: 'silent', getAuthToken: () => 'test-token' };
+  return {
+    dataDir,
+    port: 8787,
+    logLevel: 'silent',
+    sessionOutputTailBytes: 1024 * 1024,
+    getAuthToken: () => 'test-token',
+  };
 }
 
 function freshDb(): Database.Database {
@@ -304,5 +311,30 @@ describe('getSession', () => {
   it('throws SessionNotFoundError for missing session', () => {
     const db = freshDb();
     expect(() => getSession(db, 'no-such-session')).toThrow(SessionNotFoundError);
+  });
+
+  it('returns persisted output tail when output store is provided', async () => {
+    const db = freshDb();
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-uc-tail-'));
+    tempDirs.push(wsDir);
+    seedGoal(db, 'g1');
+    seedWorkspace(db, 'ws1', 'g1', wsDir);
+
+    const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry: makeAdapterRegistry() };
+    const created = await createSession(ctx, {
+      goalId: 'g1',
+      workspaceId: 'ws1',
+      adapterId: 'shell-manual',
+    });
+
+    const store = createSessionOutputStore(db, { tailBytes: 1024 });
+    store.appendChunk(created.id, Buffer.from('hello '));
+    store.appendChunk(created.id, Buffer.from('world'));
+
+    const { output } = getSession(db, created.id, store);
+    expect(output.nextSeq).toBe(2);
+    expect(output.totalBytesKept).toBe(11);
+    expect(output.firstByteOffset).toBe(0);
+    expect(output.chunks.map((chunk) => chunk.seq)).toEqual([0, 1]);
   });
 });
