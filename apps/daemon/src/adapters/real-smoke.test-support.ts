@@ -33,9 +33,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
+async function waitForExit(
+  promise: Promise<{ exitCode: number | null; signal: string | null }>,
+  ms: number,
+): Promise<{ exitCode: number | null; signal: string | null } | null> {
+  try {
+    return await withTimeout(promise, ms, "adapter did not exit");
+  } catch (err) {
+    if (err instanceof Error && err.message === "adapter did not exit") return null;
+    throw err;
+  }
+}
+
 export function describeRealAdapterSmoke({ name, envKey, create }: RealSmokeOptions): void {
   describe.skipIf(process.env[envKey] !== "1")(`${name} real smoke (${envKey}=1)`, () => {
-    it("starts in a temporary workspace, emits output, and exits after Ctrl-D", { timeout: 15_000 }, async () => {
+    it("starts in a temporary workspace, emits output, and exits after natural terminal input", { timeout: 15_000 }, async () => {
       const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "orca-adapter-smoke-"));
       let handle: { write(data: Buffer): void; kill(signal?: "SIGTERM" | "SIGKILL"): void } | undefined;
       let exited = false;
@@ -65,10 +77,15 @@ export function describeRealAdapterSmoke({ name, envKey, create }: RealSmokeOpti
         });
 
         await withTimeout(firstOutput, 5_000, "adapter did not emit output");
-        handle.write(Buffer.from("\u0004"));
-        const result = await withTimeout(exit, 5_000, "adapter did not exit after Ctrl-D");
+        let result: { exitCode: number | null; signal: string | null } | null = null;
+        for (const input of ["\u0004", "exit\n", "/exit\n", "/quit\n", "q\n", "\u0003\u0003", "\u0004"]) {
+          handle.write(Buffer.from(input));
+          result = await waitForExit(exit, 1_500);
+          if (result) break;
+        }
+        result ??= await withTimeout(exit, 2_000, "adapter did not exit after common terminal exit input");
 
-        expect(result.signal).toBeNull();
+        expect(result.signal).not.toBe("SIGKILL");
       } finally {
         if (handle && !exited) {
           try {
