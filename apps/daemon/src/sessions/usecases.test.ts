@@ -52,6 +52,7 @@ function createConfig(dataDir: string): Config {
     sessionStopGraceMs: 5000,
     sessionWsBufferLimitBytes: 1024 * 1024,
     memoryExtractionMaxInputBytes: 131072,
+    memoryExtractionTimeoutMs: 15000,
     getAuthToken: () => 'test-token',
   };
 }
@@ -773,5 +774,96 @@ describe('stopSession', () => {
     const runtime = new SessionRuntime(new FakePtyManager());
     const stopCtx: StopSessionCtx = { db, sessionRuntime: runtime };
     expect(() => stopSession(stopCtx, detail.id)).toThrow(SessionNotStoppableError);
+  });
+
+  it('onTerminalState hook fires after M4 commit on natural exit', async () => {
+    const db = freshDb();
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-hook-exit-'));
+    tempDirs.push(wsDir);
+
+    const capturing = new CapturingPtyManager();
+    const runtime = new SessionRuntime(capturing);
+    const store = createSessionOutputStore(db, { tailBytes: 1024 * 1024 });
+    const registry = makeStartRegistry(wsDir);
+
+    const sessionId = await seedAndCreateSession(db, wsDir, registry);
+
+    const hookCalls: Array<{ sessionId: string; goalId: string }> = [];
+    const ctx: StartSessionCtx = {
+      db,
+      bus: eventBus,
+      adapterRegistry: registry,
+      sessionOutputStore: store,
+      sessionRuntime: runtime,
+      onTerminalState: (sid, gid) => {
+        // Hook must only be called after M4 tx commits: session status must already be terminal
+        const s = getSession(db, sid, store).session;
+        expect(['exited', 'failed', 'stopped']).toContain(s.status);
+        hookCalls.push({ sessionId: sid, goalId: gid });
+      },
+    };
+
+    await startSession(ctx, sessionId, { terminalCols: 80, terminalRows: 24 });
+    const ctrl = controlFakePty(capturing.lastHandle!);
+    ctrl.emitExit({ exitCode: 0, signal: null });
+
+    expect(hookCalls).toHaveLength(1);
+    expect(hookCalls[0]!.sessionId).toBe(sessionId);
+  });
+
+  it('onTerminalState hook fires after M4 commit on user-requested stop', async () => {
+    const db = freshDb();
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-hook-stop-'));
+    tempDirs.push(wsDir);
+
+    const capturing = new CapturingPtyManager();
+    const runtime = new SessionRuntime(capturing);
+    const store = createSessionOutputStore(db, { tailBytes: 1024 * 1024 });
+    const registry = makeStartRegistry(wsDir);
+
+    const sessionId = await seedAndCreateSession(db, wsDir, registry);
+
+    const hookCalls: string[] = [];
+    const ctx: StartSessionCtx = {
+      db,
+      bus: eventBus,
+      adapterRegistry: registry,
+      sessionOutputStore: store,
+      sessionRuntime: runtime,
+      onTerminalState: (sid) => hookCalls.push(sid),
+    };
+
+    await startSession(ctx, sessionId, { terminalCols: 80, terminalRows: 24 });
+    stopSession({ db, sessionRuntime: runtime }, sessionId);
+
+    expect(hookCalls).toHaveLength(1);
+    expect(hookCalls[0]).toBe(sessionId);
+  });
+
+  it('onTerminalState hook fires after M4 commit on session.failed', async () => {
+    const db = freshDb();
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-hook-fail-'));
+    tempDirs.push(wsDir);
+
+    const runtime = new SessionRuntime(new CapturingPtyManager());
+    const store = createSessionOutputStore(db, { tailBytes: 1024 * 1024 });
+    const registry = makeFailingShellRegistry();
+
+    const sessionId = await seedAndCreateSession(db, wsDir, registry);
+
+    const hookCalls: string[] = [];
+    const ctx: StartSessionCtx = {
+      db,
+      bus: eventBus,
+      adapterRegistry: registry,
+      sessionOutputStore: store,
+      sessionRuntime: runtime,
+      onTerminalState: (sid) => hookCalls.push(sid),
+    };
+
+    await expect(startSession(ctx, sessionId, { terminalCols: 80, terminalRows: 24 })).rejects.toThrow();
+
+    expect(hookCalls).toHaveLength(1);
+    expect(hookCalls[0]).toBe(sessionId);
   });
 });

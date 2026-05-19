@@ -92,8 +92,10 @@ import {
   startSession,
   stopSession,
 } from './sessions/usecases.js';
-import { createSessionOutputStore } from './sessions/output-store.js';
+import { createSessionOutputStore, type SessionOutputStore } from './sessions/output-store.js';
 import { SessionRuntime, WS_CLIENT_OPEN, type WsClient } from './sessions/runtime.js';
+import { ExtractionRunner } from './extractions/runner.js';
+import { enqueueEligibleForGoal, tryEnqueueForTerminalSession } from './extractions/goal-open.js';
 import { getSessionDetail } from './sessions/projection.js';
 import { NodePtyManager } from './pty/manager.js';
 import {
@@ -140,16 +142,21 @@ const CORS_ORIGINS = [
 
 export function createServer(
   config: Config,
-  deps?: { sessionRuntime?: SessionRuntime }
+  deps?: {
+    sessionRuntime?: SessionRuntime;
+    sessionOutputStore?: SessionOutputStore;
+    extractionRunner?: ExtractionRunner;
+  }
 ): FastifyInstance {
   const startedAt = new Date().toISOString();
   const db = getDatabase();
-  const sessionOutputStore = createSessionOutputStore(db, {
-    tailBytes: config.sessionOutputTailBytes,
-  });
+  const sessionOutputStore =
+    deps?.sessionOutputStore ??
+    createSessionOutputStore(db, { tailBytes: config.sessionOutputTailBytes });
   const sessionRuntime =
     deps?.sessionRuntime ??
     new SessionRuntime(new NodePtyManager(), config.sessionStopGraceMs, config.sessionWsBufferLimitBytes);
+  const extractionRunner = deps?.extractionRunner;
 
   const server = Fastify({
     logger: {
@@ -279,6 +286,17 @@ export function createServer(
     if (!goal) {
       reply.status(404);
       return apiError('not_found', `Goal not found: ${id}`);
+    }
+
+    if (extractionRunner) {
+      try {
+        enqueueEligibleForGoal(
+          { db, bus: eventBus, outputStore: sessionOutputStore, runner: extractionRunner },
+          id
+        );
+      } catch {
+        // Non-blocking: enqueue errors must not fail the read
+      }
     }
 
     const refinement = getGoalRefinement(db, id);
@@ -613,7 +631,19 @@ export function createServer(
     }
     try {
       const session = await startSession(
-        { db, bus: eventBus, adapterRegistry, sessionOutputStore, sessionRuntime },
+        {
+          db,
+          bus: eventBus,
+          adapterRegistry,
+          sessionOutputStore,
+          sessionRuntime,
+          onTerminalState: extractionRunner
+            ? (sid) => tryEnqueueForTerminalSession(
+                { db: getDatabase(), bus: eventBus, outputStore: sessionOutputStore, runner: extractionRunner },
+                sid
+              )
+            : undefined,
+        },
         id,
         parsed.data
       );

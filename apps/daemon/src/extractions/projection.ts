@@ -82,6 +82,7 @@ let _stmts: {
   getExtractionById: Database.Statement;
   getLatestExtractionForSession: Database.Statement;
   listEligibleSessionsForGoal: Database.Statement;
+  listPendingExtractions: Database.Statement;
   listActiveAndRunningExtractions: Database.Statement;
   insertSummary: Database.Statement;
   getLatestSummaryForSession: Database.Statement;
@@ -118,6 +119,12 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
                AND memory_extractions.status IN ('pending', 'running', 'succeeded')
            )
          ORDER BY created_at DESC, id ASC`
+      ),
+      listPendingExtractions: db.prepare(
+        `SELECT ${EXTRACTION_COLS}
+         FROM memory_extractions
+         WHERE status = 'pending'
+         ORDER BY requested_at ASC, id ASC`
       ),
       listActiveAndRunningExtractions: db.prepare(
         `SELECT ${EXTRACTION_COLS}
@@ -290,6 +297,12 @@ export function listEligibleSessionsForGoal(
   const stmts = ensureStmts(db);
   const rows = stmts.listEligibleSessionsForGoal.all(goalId) as SessionRow[];
   return rows.map(rowToSession);
+}
+
+export function listPendingExtractions(db: Database.Database): MemoryExtraction[] {
+  const stmts = ensureStmts(db);
+  const rows = stmts.listPendingExtractions.all() as ExtractionRow[];
+  return rows.map(rowToExtraction);
 }
 
 export function listActiveAndRunningExtractions(db: Database.Database): MemoryExtraction[] {

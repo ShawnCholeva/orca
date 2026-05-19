@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { closeDatabase } from './db.js';
+import type { ExtractionRunner } from './extractions/runner.js';
 
 const SHUTDOWN_BUDGET_MS = 5000;
 
 // Registers SIGTERM/SIGINT handlers that drain in-flight requests, close WS
 // clients, and flush the DB before exiting. Must be called after server.listen.
-export function registerShutdown(server: FastifyInstance): void {
+export function registerShutdown(server: FastifyInstance, extractionRunner?: ExtractionRunner): void {
   let isShuttingDown = false;
 
   async function shutdown(signal: string): Promise<void> {
@@ -21,6 +22,8 @@ export function registerShutdown(server: FastifyInstance): void {
     forceTimer.unref();
 
     try {
+      extractionRunner?.stop();
+
       // Close open WS connections with 1001 (Going Away) before draining HTTP
       for (const client of server.websocketServer.clients) {
         client.close(1001, 'Server shutting down');

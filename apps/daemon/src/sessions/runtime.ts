@@ -21,6 +21,7 @@ export interface RuntimeCtx {
   bus: EventBus;
   adapterRegistry: AdapterRegistry;
   sessionOutputStore: SessionOutputStore;
+  onTerminalState?: (sessionId: string, goalId: string) => void;
 }
 
 // Minimal WS client interface; ws.WebSocket satisfies this shape.
@@ -87,7 +88,8 @@ function persistFailure(
   sessionId: string,
   goalId: string,
   failureReason: string,
-  now: string
+  now: string,
+  onTerminalState?: (sessionId: string, goalId: string) => void
 ): void {
   const payload = { sessionId, goalId, failureReason };
   let event!: DomainEvent;
@@ -96,6 +98,7 @@ function persistFailure(
     event = insertEvent(db, 'session.failed', goalId, payload, now);
   })();
   bus.publish(event);
+  onTerminalState?.(sessionId, goalId);
 }
 
 export class SessionRuntime {
@@ -166,7 +169,7 @@ export class SessionRuntime {
     sessionId: string,
     opts: { terminalCols: number; terminalRows: number }
   ): Promise<import('@orca/contracts').SessionDetail> {
-    const { db, bus, adapterRegistry, sessionOutputStore } = ctx;
+    const { db, bus, adapterRegistry, sessionOutputStore, onTerminalState } = ctx;
     const { terminalCols, terminalRows } = opts;
     const stmts = ensureStmts(db);
     const now = new Date().toISOString();
@@ -177,19 +180,19 @@ export class SessionRuntime {
 
     const wsRow = stmts.selectWorkspace.get(session.workspaceId) as { id: string; path: string } | undefined;
     if (!wsRow) {
-      persistFailure(db, bus, sessionId, session.goalId, 'workspace_unavailable', now);
+      persistFailure(db, bus, sessionId, session.goalId, 'workspace_unavailable', now, onTerminalState);
       throw new WorkspaceUnavailableError('unknown');
     }
     try {
       await access(wsRow.path);
     } catch {
-      persistFailure(db, bus, sessionId, session.goalId, 'workspace_unavailable', now);
+      persistFailure(db, bus, sessionId, session.goalId, 'workspace_unavailable', now, onTerminalState);
       throw new WorkspaceUnavailableError(wsRow.path);
     }
 
     const adapter = adapterRegistry.get(session.adapterId);
     if (!adapter) {
-      persistFailure(db, bus, sessionId, session.goalId, 'command_not_found', now);
+      persistFailure(db, bus, sessionId, session.goalId, 'command_not_found', now, onTerminalState);
       throw new CommandNotFoundError(session.adapterId);
     }
     let spawnResult: { command: string; args: string[]; env: Record<string, string>; cwd: string };
@@ -202,7 +205,7 @@ export class SessionRuntime {
         instruction: session.instruction ?? undefined,
       });
     } catch {
-      persistFailure(db, bus, sessionId, session.goalId, 'command_not_found', now);
+      persistFailure(db, bus, sessionId, session.goalId, 'command_not_found', now, onTerminalState);
       throw new CommandNotFoundError(session.adapterId);
     }
 
@@ -226,7 +229,7 @@ export class SessionRuntime {
       const code = isPtySpawnError
         ? ((err as { code?: string }).code ?? 'spawn_failed')
         : 'spawn_failed';
-      persistFailure(db, bus, sessionId, session.goalId, code, now);
+      persistFailure(db, bus, sessionId, session.goalId, code, now, onTerminalState);
       if (code === 'command_not_found') {
         throw new CommandNotFoundError(session.adapterId);
       }
@@ -285,6 +288,7 @@ export class SessionRuntime {
           stoppedEvent = insertEvent(db, 'session.stopped', session.goalId, payload, exitedAt);
         })();
         bus.publish(stoppedEvent);
+        onTerminalState?.(sessionId, session.goalId);
       } else {
         const payload = { sessionId, goalId: session.goalId, exitCode, exitSignal: signal };
         let exitedEvent!: DomainEvent;
@@ -293,6 +297,7 @@ export class SessionRuntime {
           exitedEvent = insertEvent(db, 'session.exited', session.goalId, payload, exitedAt);
         })();
         bus.publish(exitedEvent);
+        onTerminalState?.(sessionId, session.goalId);
       }
     });
 

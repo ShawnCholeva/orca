@@ -7,7 +7,10 @@ import { bootstrapRegistries } from './registry/bootstrap.js';
 import { createServer } from './server.js';
 import { registerShutdown } from './shutdown.js';
 import { reconcileSessionsOnBoot } from './sessions/reconciliation.js';
+import { createSessionOutputStore } from './sessions/output-store.js';
 import { reconcileStaleExtractions } from './extractions/reconciliation.js';
+import { ExtractionRunner } from './extractions/runner.js';
+import { DeterministicExtractor } from './extractions/deterministic-extractor.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -29,12 +32,29 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Reconcile stale sessions before accepting traffic.
+  // Reconcile stale sessions and extractions before accepting traffic.
   const bootNow = new Date().toISOString();
   reconcileSessionsOnBoot(db, eventBus, bootNow);
   reconcileStaleExtractions(db, eventBus, bootNow);
 
-  const server = createServer(config);
+  const sessionOutputStore = createSessionOutputStore(db, {
+    tailBytes: config.sessionOutputTailBytes,
+  });
+
+  const extractionRunner = new ExtractionRunner({
+    db,
+    bus: eventBus,
+    outputStore: sessionOutputStore,
+    extractor: new DeterministicExtractor(),
+    config: {
+      memoryExtractionMaxInputBytes: config.memoryExtractionMaxInputBytes,
+      memoryExtractionTimeoutMs: config.memoryExtractionTimeoutMs,
+    },
+  });
+
+  extractionRunner.start();
+
+  const server = createServer(config, { sessionOutputStore, extractionRunner });
 
   try {
     await server.listen({ host: '127.0.0.1', port: config.port });
@@ -43,7 +63,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  registerShutdown(server);
+  registerShutdown(server, extractionRunner);
 }
 
 main().catch((err) => {
