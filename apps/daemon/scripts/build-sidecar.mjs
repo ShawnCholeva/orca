@@ -66,7 +66,7 @@ function listMigrations() {
 const nativeRuntimeShim = {
   name: "native-runtime-shim",
   setup(build) {
-    const externals = new Set(["better-sqlite3", "bindings"]);
+    const externals = new Set(["better-sqlite3", "bindings", "node-pty"]);
     build.onResolve({ filter: /.*/ }, (args) => {
       if (!externals.has(args.path)) return null;
       return { path: args.path, namespace: "native-runtime-shim" };
@@ -129,7 +129,7 @@ function copyRuntimeTree() {
   };
 
   const skipDirs = new Set(["node_modules", "src", "deps", "test", "obj", "obj.target"]);
-  for (const name of ["better-sqlite3", "bindings", "file-uri-to-path"]) {
+  for (const name of ["better-sqlite3", "bindings", "file-uri-to-path", "node-pty"]) {
     const src = findPkg(name);
     const dst = path.join(runtimeNodeModules, name);
     cpSync(src, dst, {
@@ -140,6 +140,43 @@ function copyRuntimeTree() {
         return !segments.some((seg) => skipDirs.has(seg));
       },
     });
+  }
+}
+
+function expectedNodePtyArtifacts() {
+  if (process.platform === "linux") {
+    return ["build/Release/pty.node"];
+  }
+
+  if (process.platform === "darwin") {
+    const platformArch = `darwin-${process.arch}`;
+    return [
+      `prebuilds/${platformArch}/pty.node`,
+      `prebuilds/${platformArch}/spawn-helper`,
+    ];
+  }
+
+  if (process.platform === "win32") {
+    const platformArch = `win32-${process.arch}`;
+    return [
+      `prebuilds/${platformArch}/pty.node`,
+      `prebuilds/${platformArch}/conpty.node`,
+      `prebuilds/${platformArch}/conpty_console_list.node`,
+    ];
+  }
+
+  throw new Error(`Unsupported platform: ${process.platform}`);
+}
+
+function verifyNodePtyRuntimeTree() {
+  const missing = expectedNodePtyArtifacts()
+    .map((rel) => path.join("node-pty", rel))
+    .filter((rel) => !existsSync(path.join(runtimeNodeModules, rel)));
+
+  if (missing.length > 0) {
+    throw new Error(
+      `node-pty runtime artifact(s) missing from sidecar runtime: ${missing.join(", ")}`
+    );
   }
 }
 
@@ -205,8 +242,9 @@ async function main() {
   console.log("[sidecar] bundling daemon with esbuild...");
   await bundleDaemon();
 
-  console.log("[sidecar] copying runtime tree (better-sqlite3 + bindings)...");
+  console.log("[sidecar] copying runtime tree (better-sqlite3 + bindings + node-pty)...");
   copyRuntimeTree();
+  verifyNodePtyRuntimeTree();
 
   console.log("[sidecar] writing SEA config...");
   const migrations = listMigrations();
