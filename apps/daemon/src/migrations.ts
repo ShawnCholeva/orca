@@ -3,6 +3,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 
+export const migrationFiles = [
+  "0001_init.sql",
+  "0002_workspaces_refinements.sql",
+  "0004_sessions.sql",
+  "0005_memory.sql"
+] as const;
+
 export function runMigrations(
   db: Database.Database,
   dir: string
@@ -21,9 +28,14 @@ export function runMigrations(
     )
   );
 
-  const files = readdirSync(dir)
+  const discoveredFiles = readdirSync(dir)
     .filter((f) => f.endsWith(".sql"))
     .sort();
+  const discoveredSet = new Set(discoveredFiles);
+  const knownSet = new Set<string>(migrationFiles);
+  const knownFiles = migrationFiles.filter((file) => discoveredSet.has(file));
+  const extraFiles = discoveredFiles.filter((file) => !knownSet.has(file));
+  const files = [...knownFiles, ...extraFiles];
 
   const applied: string[] = [];
 

@@ -53,7 +53,8 @@ describe("runMigrations", () => {
     expect(result.applied).toEqual([
       "0001_init.sql",
       "0002_workspaces_refinements.sql",
-      "0004_sessions.sql"
+      "0004_sessions.sql",
+      "0005_memory.sql"
     ]);
   });
 
@@ -120,7 +121,11 @@ describe("runMigrations", () => {
 
     const upgradeResult = runMigrations(db, defaultMigrationsDir());
 
-    expect(upgradeResult.applied).toEqual(["0002_workspaces_refinements.sql", "0004_sessions.sql"]);
+    expect(upgradeResult.applied).toEqual([
+      "0002_workspaces_refinements.sql",
+      "0004_sessions.sql",
+      "0005_memory.sql"
+    ]);
 
     const goalCount = (
       db.prepare("SELECT count(*) AS cnt FROM goals WHERE id = ?").get("goal-1") as {
@@ -229,7 +234,7 @@ describe("M4-003 session tables migration", () => {
     expect(indices).toContain("idx_session_output_session_seq");
   });
 
-  it("upgrades a DB with only 0001 and 0002 to 0004 without error", () => {
+  it("upgrades a DB with only 0001 and 0002 to the latest migration without error", () => {
     const db = freshDb();
     const m3Dir = createMigrationsDir(["0001_init.sql", "0002_workspaces_refinements.sql"]);
 
@@ -237,7 +242,7 @@ describe("M4-003 session tables migration", () => {
     expect(initialResult.applied).toEqual(["0001_init.sql", "0002_workspaces_refinements.sql"]);
 
     const upgradeResult = runMigrations(db, defaultMigrationsDir());
-    expect(upgradeResult.applied).toEqual(["0004_sessions.sql"]);
+    expect(upgradeResult.applied).toEqual(["0004_sessions.sql", "0005_memory.sql"]);
 
     const tables = (
       db
@@ -301,5 +306,239 @@ describe("M4-003 session tables migration", () => {
         .get("sess-chunk") as { cnt: number }
     ).cnt;
     expect(count).toBe(0);
+  });
+});
+
+describe("M5-002 memory tables migration", () => {
+  function seedGoal(db: ReturnType<typeof freshDb>, id: string) {
+    db.prepare(
+      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(id, "Memory Goal", "", "active", 1, "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z", null);
+  }
+
+  function seedWorkspace(db: ReturnType<typeof freshDb>, id: string, goalId: string) {
+    db.prepare(
+      "INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(id, goalId, "/tmp/ws-memory", "ws-memory", "folder", null, null, "not_a_repo", "2026-01-01T00:00:00.000Z");
+  }
+
+  function seedSession(db: ReturnType<typeof freshDb>, id: string, goalId: string, workspaceId: string) {
+    db.prepare(
+      "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(id, goalId, workspaceId, "shell-manual", "Memory Session", "exited", "2026-01-01T00:00:00.000Z");
+  }
+
+  function insertExtraction(
+    db: ReturnType<typeof freshDb>,
+    id: string,
+    goalId: string,
+    sessionId: string,
+    status: "pending" | "running" | "succeeded" | "failed"
+  ) {
+    db.prepare(
+      `INSERT INTO memory_extractions (
+        id, goal_id, session_id, trigger, status, extractor_version, source_fingerprint,
+        source_offset_first, source_offset_last, summary_id, item_count, decision_count, promoted_count,
+        failure_code, failure_message, requested_at, started_at, finished_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      goalId,
+      sessionId,
+      "manual",
+      status,
+      "deterministic-v1",
+      "fp-same",
+      0,
+      128,
+      null,
+      0,
+      0,
+      0,
+      status === "failed" ? "internal_error" : null,
+      status === "failed" ? "failed as expected" : null,
+      "2026-01-01T00:00:00.000Z",
+      null,
+      null
+    );
+  }
+
+  it("creates all four M5 tables and required indexes", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    const tables = (
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+        .all() as { name: string }[]
+    ).map((row) => row.name);
+
+    expect(tables).toContain("goal_memory_items");
+    expect(tables).toContain("goal_decisions");
+    expect(tables).toContain("session_summaries");
+    expect(tables).toContain("memory_extractions");
+
+    const memoryIndexes = (
+      db.prepare("PRAGMA index_list('goal_memory_items')").all() as { name: string }[]
+    ).map((row) => row.name);
+    const decisionIndexes = (
+      db.prepare("PRAGMA index_list('goal_decisions')").all() as { name: string }[]
+    ).map((row) => row.name);
+    const summaryIndexes = (
+      db.prepare("PRAGMA index_list('session_summaries')").all() as { name: string }[]
+    ).map((row) => row.name);
+    const extractionIndexes = (
+      db.prepare("PRAGMA index_list('memory_extractions')").all() as { name: string }[]
+    ).map((row) => row.name);
+
+    expect(memoryIndexes).toContain("idx_memory_goal_status_created");
+    expect(memoryIndexes).toContain("idx_memory_goal_type");
+    expect(memoryIndexes).toContain("idx_memory_dedupe");
+    expect(decisionIndexes).toContain("idx_decision_goal_status_created");
+    expect(summaryIndexes).toContain("idx_summary_session_created");
+    expect(summaryIndexes).toContain("idx_summary_goal_created");
+    expect(extractionIndexes).toContain("idx_extraction_session_requested");
+    expect(extractionIndexes).toContain("idx_extraction_goal_status");
+    expect(extractionIndexes).toContain("idx_extraction_runner_pickup");
+    expect(extractionIndexes).toContain("idx_extraction_active_fingerprint");
+  });
+
+  it("enforces foreign keys on M5 tables", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    expect(() => {
+      db.prepare(
+        `INSERT INTO goal_memory_items (
+          id, goal_id, type, status, content, content_hash, confidence, source_type, source_id, source_session_id,
+          source_extraction_id, source_offset_first, source_offset_last, created_at, updated_at, promoted_at, archived_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "mem-missing-goal",
+        "missing-goal",
+        "note",
+        "candidate",
+        "content",
+        "hash-1",
+        null,
+        "manual",
+        null,
+        null,
+        null,
+        null,
+        null,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+        null,
+        null
+      );
+    }).toThrow(/FOREIGN KEY constraint failed/);
+  });
+
+  it("enforces partial unique active extraction fingerprint index", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    seedGoal(db, "goal-fp");
+    seedWorkspace(db, "ws-fp", "goal-fp");
+    seedSession(db, "sess-fp", "goal-fp", "ws-fp");
+
+    insertExtraction(db, "extract-pending-1", "goal-fp", "sess-fp", "pending");
+    insertExtraction(db, "extract-failed-1", "goal-fp", "sess-fp", "failed");
+
+    expect(() => {
+      insertExtraction(db, "extract-pending-2", "goal-fp", "sess-fp", "pending");
+    }).toThrow(/UNIQUE constraint failed/);
+  });
+
+  it("enforces partial unique memory dedupe index and allows reinsertion after archive", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    seedGoal(db, "goal-memory-dedupe");
+
+    db.prepare(
+      `INSERT INTO goal_memory_items (
+        id, goal_id, type, status, content, content_hash, confidence, source_type, source_id, source_session_id,
+        source_extraction_id, source_offset_first, source_offset_last, created_at, updated_at, promoted_at, archived_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "mem-live-1",
+      "goal-memory-dedupe",
+      "note",
+      "candidate",
+      "same content",
+      "same-hash",
+      null,
+      "manual",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z",
+      null,
+      null
+    );
+
+    expect(() => {
+      db.prepare(
+        `INSERT INTO goal_memory_items (
+          id, goal_id, type, status, content, content_hash, confidence, source_type, source_id, source_session_id,
+          source_extraction_id, source_offset_first, source_offset_last, created_at, updated_at, promoted_at, archived_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "mem-live-2",
+        "goal-memory-dedupe",
+        "note",
+        "candidate",
+        "same content",
+        "same-hash",
+        null,
+        "manual",
+        null,
+        null,
+        null,
+        null,
+        null,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+        null,
+        null
+      );
+    }).toThrow(/UNIQUE constraint failed/);
+
+    db.prepare("UPDATE goal_memory_items SET status = ?, archived_at = ?, updated_at = ? WHERE id = ?").run(
+      "archived",
+      "2026-01-02T00:00:00.000Z",
+      "2026-01-02T00:00:00.000Z",
+      "mem-live-1"
+    );
+
+    db.prepare(
+      `INSERT INTO goal_memory_items (
+        id, goal_id, type, status, content, content_hash, confidence, source_type, source_id, source_session_id,
+        source_extraction_id, source_offset_first, source_offset_last, created_at, updated_at, promoted_at, archived_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "mem-live-3",
+      "goal-memory-dedupe",
+      "note",
+      "candidate",
+      "same content",
+      "same-hash",
+      null,
+      "manual",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "2026-01-03T00:00:00.000Z",
+      "2026-01-03T00:00:00.000Z",
+      null,
+      null
+    );
   });
 });
