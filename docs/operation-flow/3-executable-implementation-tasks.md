@@ -50,7 +50,8 @@ Goal/memory/reasoning-centric later
 The implementation tasks will later be executed by:
 
 Sonnet 4.6
-GPT 5.3 Codex
+Codex 5.3
+GPT 5.4
 future orchestrated AI sessions
 
 Therefore:
@@ -421,42 +422,119 @@ full-suite review gates
 
 2. Suggested Model Assignment
 
-For each task recommend:
+Use model roles based on decision complexity, implementation ambiguity, and blast radius.
+
+Opus 4.7
+
+Best for:
+
+architecture design
+milestone planning
+task decomposition
+orchestration reasoning
+resolving scope conflicts
+reviewing major architectural tradeoffs
+designing plugin/skill/workflow boundaries
+diagnosing complex cross-system failures
+
+Avoid using Opus for:
+
+boilerplate
+simple endpoints
+migrations
+repetitive tests
+small UI tweaks
+GPT 5.5
+
+Best for:
+
+implementation review
+architecture drift detection
+simplification passes
+MVP scope tightening
+risk analysis
+operational sequencing
+debugging strategy
+“is this overengineered?” reviews
+
+Use GPT 5.5 as the principal reviewer / architectural immune system.
 
 Sonnet 4.6
-GPT 5.3 Codex
+
+Best for:
+
+primary feature implementation
+medium-to-large coding tasks
+daemon/runtime integration
+UI wiring
+API implementation
+refactors with context
+iterative debugging
+implementing task contracts end-to-end
+
+Use Sonnet as the main implementation engineer.
+
+GPT 5.4 / Codex
+
+Best for:
+
+bounded implementation tasks
+schemas
+migrations
+tests
+simple endpoints
+type cleanup
+utility functions
+small refactors
+repetitive code generation
+isolated bug fixes
+
+Use Codex/GPT 5.4 when the task has:
+
+clear scope
+known files
+explicit acceptance criteria
+low architectural ambiguity
 Human
-Opus
 
-based on task complexity.
+Best for:
 
-Examples:
+product judgment
+final approval gates
+native desktop smoke testing
+packaging/install verification
+UX feel decisions
+security-sensitive choices
+resolving business/product ambiguity
+deciding when “good enough” is good enough
 
-Sonnet:
-- medium feature implementation
-- runtime integration
-- UI wiring
+Humans should own judgment, not boilerplate.
 
-Codex:
-- schemas
-- migrations
-- tests
-- simple endpoints
-- bounded refactors
-
-Opus/GPT 5.5:
-- architectural review
-- native runtime debugging
-- manual desktop smoke testing
-- difficult local packaging issues
-- architectural decomposition
-- orchestration reasoning
-- resolving scope conflicts
-
-Human:
-- approving native dependency strategy
-- manual Tauri/dev shell smoke
-- confirming installed agent adapter behavior when local binaries differ
+Cleaner Assignment Rule
+Opus 4.7     = architect / decomposer
+GPT 5.5      = reviewer / simplifier / drift detector
+Sonnet 4.6   = main builder
+GPT 5.4/Codex = bounded task executor
+Human        = product judgment + final validation
+Task Routing Matrix
+Task type	Best model
+Architecture design	Opus 4.7
+Milestone decomposition	Opus 4.7
+Scope conflict resolution	Opus 4.7 or GPT 5.5
+Architecture drift review	GPT 5.5
+MVP simplification	GPT 5.5
+Runtime integration	Sonnet 4.6
+UI implementation	Sonnet 4.6
+API implementation	Sonnet 4.6
+Debugging implementation failures	Sonnet 4.6, then GPT 5.5 if systemic
+SQLite migrations	GPT 5.4/Codex
+Zod schemas/contracts	GPT 5.4/Codex
+Unit tests	GPT 5.4/Codex
+Simple endpoints	GPT 5.4/Codex
+Bounded refactors	GPT 5.4/Codex or Sonnet
+Native packaging issues	Human + Sonnet, escalate to Opus only if architectural
+UX/product feel	Human
+Final milestone acceptance	Human + GPT 5.5
 
 3. Recommended Review Gates
 
