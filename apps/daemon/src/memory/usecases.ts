@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { DomainEvent, GoalMemoryItem } from '@orca/contracts';
 import { GoalArchivedError, GoalNotFoundError } from '../sessions/errors.js';
@@ -12,6 +12,7 @@ import {
   updateMemoryItem,
   type ListMemoryOptions,
 } from './projection.js';
+import { normalizeText, redactSecrets, computeContentHash } from './normalize.js';
 
 export { GoalNotFoundError, GoalArchivedError, MemoryDuplicateError, listMemoryByGoal };
 export type { ListMemoryOptions };
@@ -36,26 +37,6 @@ export class InvalidMemoryTransitionError extends Error {
     super(`Invalid memory status transition: ${from} -> ${to}`);
     this.name = 'InvalidMemoryTransitionError';
   }
-}
-
-const CONTENT_MAX = 4000;
-
-function normalizeContent(content: string): string {
-  return content.trim().replace(/\s+/g, ' ').slice(0, CONTENT_MAX);
-}
-
-function redactSecrets(content: string): string {
-  return content
-    .replace(/\b(password|token|api_key)\s*=\s*\S+/gi, (match) => {
-      const eqIdx = match.indexOf('=');
-      return match.slice(0, eqIdx + 1) + '[redacted]';
-    })
-    .replace(/authorization\s*:\s*bearer\s+\S+/gi, 'authorization: bearer [redacted]');
-}
-
-// sha256 of type+content — formula must stay stable (M5-006 extracts this to normalize.ts).
-function computeContentHash(type: string, normalizedContent: string): string {
-  return createHash('sha256').update(type + '' + normalizedContent).digest('hex');
 }
 
 interface GoalRow {
@@ -103,8 +84,8 @@ export function createMemoryItem(ctx: MemoryCtx, input: CreateMemoryInput): Goal
   if (!goalRow) throw new GoalNotFoundError(input.goalId);
   if (goalRow.archived_at !== null) throw new GoalArchivedError(input.goalId);
 
-  const normalized = redactSecrets(normalizeContent(input.content));
-  const contentHash = computeContentHash(input.type, normalized);
+  const normalized = redactSecrets(normalizeText(input.content));
+  const contentHash = computeContentHash({ type: input.type, content: normalized });
   const id = randomUUID();
   const status = input.status ?? 'candidate';
   const promotedAt = status === 'promoted' ? now : null;
@@ -216,10 +197,10 @@ export function patchMemoryItem(ctx: MemoryCtx, id: string, patch: PatchMemoryIn
 
   if (patch.content !== undefined || patch.type !== undefined) {
     const raw = patch.content ?? current.content;
-    const normalized = redactSecrets(normalizeContent(raw));
+    const normalized = redactSecrets(normalizeText(raw));
     const resolvedType = patch.type ?? current.type;
     newContent = normalized;
-    newContentHash = computeContentHash(resolvedType, normalized);
+    newContentHash = computeContentHash({ type: resolvedType, content: normalized });
   }
 
   const toPublish: DomainEvent[] = [];
