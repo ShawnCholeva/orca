@@ -35,5 +35,5 @@ export class CodexAdapter implements AgentAdapter {
 
 function codexCandidates(): string[] {
   const override = process.env["ORCA_CODEX_BIN"];
-  return override ? [override, "codex"] : ["codex"];
+  return override ? [override] : ["codex"];
 }

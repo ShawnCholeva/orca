@@ -1,8 +1,12 @@
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ClaudeCodeAdapter } from "./claude-code.js";
 import { OpenCodeAdapter } from "./opencode.js";
 import { CodexAdapter } from "./codex.js";
 import type { AgentAdapter } from "./types.js";
+import { resolveBinary } from "./resolve.js";
 import type { ResolveBinaryResult, ResolveFn } from "./resolve.js";
 
 function makeResolve(result: ResolveBinaryResult): ResolveFn {
@@ -52,21 +56,31 @@ const ADAPTER_CASES: AdapterCase[] = [
   },
 ];
 
+async function createFakeExecutable(prefix: string): Promise<{ dir: string; filePath: string }> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), `${prefix}-`));
+  const filePath = path.join(dir, "fake-adapter");
+  await writeFile(filePath, "#!/bin/sh\necho hello\nexit 0\n", { mode: 0o755 });
+  await chmod(filePath, 0o755);
+  return { dir, filePath };
+}
+
 for (const { name, envKey, defaultBin, create } of ADAPTER_CASES) {
   describe(name, () => {
     let savedEnv: string | undefined;
+    const tmpDirs: string[] = [];
 
     beforeEach(() => {
       savedEnv = process.env[envKey];
       delete process.env[envKey];
     });
 
-    afterEach(() => {
+    afterEach(async () => {
       if (savedEnv === undefined) {
         delete process.env[envKey];
       } else {
         process.env[envKey] = savedEnv;
       }
+      await Promise.all(tmpDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
     });
 
     describe("resolveSpawn", () => {
@@ -112,12 +126,12 @@ for (const { name, envKey, defaultBin, create } of ADAPTER_CASES) {
         await expect(adapter.resolveSpawn(INPUT)).rejects.toMatchObject({ code: "command_not_found" });
       });
 
-      it("env override is first candidate when set", async () => {
+      it("env override is the only candidate when set", async () => {
         process.env[envKey] = "/custom/override/bin";
         const { fn, getCaptured } = makeCapturingResolve({ resolvedPath: "/custom/override/bin" });
         const adapter = create(fn);
         await adapter.resolveSpawn(INPUT);
-        expect(getCaptured()[0]).toBe("/custom/override/bin");
+        expect(getCaptured()).toEqual(["/custom/override/bin"]);
       });
 
       it("default binary name is used as candidate when override not set", async () => {
@@ -135,6 +149,29 @@ for (const { name, envKey, defaultBin, create } of ADAPTER_CASES) {
         expect(result.status).toBe("available");
       });
 
+      it("returns available when env override points at an executable script", async () => {
+        const fake = await createFakeExecutable(envKey.toLowerCase());
+        tmpDirs.push(fake.dir);
+        process.env[envKey] = fake.filePath;
+
+        const adapter = create(resolveBinary);
+        const result = await adapter.probeAvailability();
+
+        expect(result.status).toBe("available");
+      });
+
+      it("returns unavailable when env override points at a missing binary", async () => {
+        process.env[envKey] = "/no/such/binary";
+        const { fn, getCaptured } = makeCapturingResolve({ error: "not_found", tried: ["/no/such/binary"] });
+        const adapter = create(fn);
+
+        const result = await adapter.probeAvailability();
+
+        expect(getCaptured()).toEqual(["/no/such/binary"]);
+        expect(result.status).toBe("unavailable");
+        expect((result as { detail: string }).detail).toContain("/no/such/binary");
+      });
+
       it("returns unavailable with non-empty detail when binary not found", async () => {
         const adapter = create(makeResolve({ error: "not_found", tried: [defaultBin] }));
         const result = await adapter.probeAvailability();
@@ -149,6 +186,5 @@ for (const { name, envKey, defaultBin, create } of ADAPTER_CASES) {
         expect((result as { detail: string }).detail).toContain(envKey.replace("ORCA_", "ORCA_").split("_BIN")[0].replace("ORCA_", ""));
       });
     });
-
   });
 }

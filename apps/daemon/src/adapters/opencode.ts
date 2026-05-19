@@ -35,5 +35,5 @@ export class OpenCodeAdapter implements AgentAdapter {
 
 function openCodeCandidates(): string[] {
   const override = process.env["ORCA_OPENCODE_BIN"];
-  return override ? [override, "opencode"] : ["opencode"];
+  return override ? [override] : ["opencode"];
 }

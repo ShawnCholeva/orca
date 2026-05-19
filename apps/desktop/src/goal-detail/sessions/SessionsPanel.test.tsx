@@ -41,6 +41,8 @@ function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
 const adapters = [
   { id: "shell-manual" as AdapterId, title: "Shell / Manual", availability: "available" as const },
   { id: "claude-code" as AdapterId, title: "Claude Code", availability: "unavailable" as const, detail: "not in PATH; set ORCA_CLAUDE_CODE_BIN" },
+  { id: "opencode" as AdapterId, title: "opencode", availability: "unavailable" as const, detail: "not in PATH; set ORCA_OPENCODE_BIN" },
+  { id: "codex" as AdapterId, title: "Codex", availability: "unavailable" as const, detail: "not in PATH; set ORCA_CODEX_BIN" },
 ];
 
 function mockApi(overrides: Record<string, unknown> = {}) {
@@ -388,6 +390,41 @@ describe("CreateSessionDialog", () => {
     });
 
     expect(container.textContent).toContain("not in PATH");
+  });
+
+  it("shows unavailable labels and env override hints for all agent adapters", async () => {
+    mockApi();
+    const { CreateSessionDialog } = await import("./CreateSessionDialog");
+
+    await act(async () => {
+      createRoot(container).render(
+        <CreateSessionDialog
+          goalId="goal-1"
+          workspaces={[workspace]}
+          onCreated={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+    });
+
+    const adapterSelect = container.querySelector<HTMLSelectElement>("#create-session-adapter");
+    expect(adapterSelect?.textContent).toContain("Claude Code (unavailable)");
+    expect(adapterSelect?.textContent).toContain("opencode (unavailable)");
+    expect(adapterSelect?.textContent).toContain("Codex (unavailable)");
+
+    for (const [adapterId, envKey] of [
+      ["claude-code", "ORCA_CLAUDE_CODE_BIN"],
+      ["opencode", "ORCA_OPENCODE_BIN"],
+      ["codex", "ORCA_CODEX_BIN"],
+    ] as const) {
+      await act(async () => {
+        if (adapterSelect) {
+          adapterSelect.value = adapterId;
+          adapterSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      });
+      expect(container.textContent).toContain(envKey);
+    }
   });
 
   it("calls createSession and startSession on successful submit", async () => {

@@ -35,5 +35,5 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 
 function claudeCodeCandidates(): string[] {
   const override = process.env["ORCA_CLAUDE_CODE_BIN"];
-  return override ? [override, "claude"] : ["claude"];
+  return override ? [override] : ["claude"];
 }
