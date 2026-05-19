@@ -53,8 +53,8 @@ export class NodePtyManager implements PtyManager {
     const exitHandlers = new Set<(exit: { exitCode: number | null; signal: string | null }) => void>();
 
     const dataDisposable = pty.onData((data) => {
-      const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as string);
-      for (const h of dataHandlers) h(buf);
+      // node-pty types onData as IEvent<string>, but encoding:null delivers Buffer at runtime
+      for (const h of dataHandlers) h(data as unknown as Buffer);
     });
 
     const exitDisposable = pty.onExit(({ exitCode, signal }) => {
@@ -65,6 +65,8 @@ export class NodePtyManager implements PtyManager {
       for (const h of exitHandlers) h(exit);
       dataDisposable.dispose();
       exitDisposable.dispose();
+      dataHandlers.clear();
+      exitHandlers.clear();
     });
 
     const events: PtyEvents = {

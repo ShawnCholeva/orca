@@ -18,7 +18,6 @@ export interface FakePtyControl {
 }
 
 const stateMap = new WeakMap<PtyHandle, FakePtyState>();
-let nextPid = 1000;
 
 /** Returns a FakePtyControl for a handle produced by FakePtyManager. */
 export function controlFakePty(handle: PtyHandle): FakePtyControl {
@@ -34,6 +33,8 @@ export function controlFakePty(handle: PtyHandle): FakePtyControl {
       if (state.dead) return;
       state.dead = true;
       for (const h of state.exitHandlers) h(exit);
+      state.dataHandlers.clear();
+      state.exitHandlers.clear();
     },
     get isDead() {
       return state.dead;
@@ -42,11 +43,11 @@ export function controlFakePty(handle: PtyHandle): FakePtyControl {
 }
 
 export class FakePtyManager implements PtyManager {
-  private readonly handles: PtyHandle[] = [];
+  private nextPid = 1000;
 
   start(_opts: PtyStartOptions): { handle: PtyHandle; events: PtyEvents } {
     const state: FakePtyState = {
-      pid: nextPid++,
+      pid: this.nextPid++,
       dead: false,
       dataHandlers: new Set(),
       exitHandlers: new Set(),
@@ -57,22 +58,20 @@ export class FakePtyManager implements PtyManager {
         return state.pid;
       },
       write(_data: Buffer): void {
-        // no-op after exit; noop in fake otherwise
         if (state.dead) return;
       },
-      resize(_cols: number, _rows: number): void {
-        // no-op in fake
-      },
+      resize(_cols: number, _rows: number): void {},
       kill(signal?: "SIGTERM" | "SIGKILL"): void {
         if (state.dead) return;
         state.dead = true;
         const sig = signal ?? "SIGTERM";
         for (const h of state.exitHandlers) h({ exitCode: null, signal: sig });
+        state.dataHandlers.clear();
+        state.exitHandlers.clear();
       },
     };
 
     stateMap.set(handle, state);
-    this.handles.push(handle);
 
     const events: PtyEvents = {
       onData(handler): () => void {
@@ -88,9 +87,8 @@ export class FakePtyManager implements PtyManager {
     return { handle, events };
   }
 
-  /** Reset all live handles; call between tests. */
+  /** Reset pid counter between tests. */
   reset(): void {
-    this.handles.length = 0;
-    nextPid = 1000;
+    this.nextPid = 1000;
   }
 }

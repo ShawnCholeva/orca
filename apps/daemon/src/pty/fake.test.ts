@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FakePtyManager, controlFakePty } from "./fake.js";
 import type { PtyHandle } from "./types.js";
 
@@ -13,14 +13,9 @@ const OPTS = {
 
 describe("FakePtyManager", () => {
   let manager: FakePtyManager;
-  let handle: PtyHandle;
-  let ctl: ReturnType<typeof controlFakePty>;
 
   beforeEach(() => {
     manager = new FakePtyManager();
-    const result = manager.start(OPTS);
-    handle = result.handle;
-    ctl = controlFakePty(handle);
   });
 
   afterEach(() => {
@@ -28,20 +23,18 @@ describe("FakePtyManager", () => {
   });
 
   it("assigns a numeric pid", () => {
+    const { handle } = manager.start(OPTS);
     expect(typeof handle.pid).toBe("number");
     expect(handle.pid).toBeGreaterThan(0);
   });
 
   it("onData: handler receives injected bytes", () => {
-    const { events } = manager.start(OPTS);
-    const ctl2 = controlFakePty(manager.start(OPTS).handle);
-    // fresh start for cleaner test
-    const { handle: h2, events: ev2 } = manager.start(OPTS);
-    const ctrl2 = controlFakePty(h2);
+    const { handle: h, events } = manager.start(OPTS);
+    const ctrl = controlFakePty(h);
     const received: Buffer[] = [];
-    ev2.onData((chunk) => received.push(chunk));
+    events.onData((chunk) => received.push(chunk));
     const expected = Buffer.from("hello");
-    ctrl2.emitData(expected);
+    ctrl.emitData(expected);
     expect(received).toHaveLength(1);
     expect(received[0]).toEqual(expected);
   });
