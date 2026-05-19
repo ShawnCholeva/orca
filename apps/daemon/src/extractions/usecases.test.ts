@@ -33,6 +33,7 @@ function createConfig(dataDir: string): Config {
     sessionOutputTailBytes: 1024 * 1024,
     sessionStopGraceMs: 5000,
     sessionWsBufferLimitBytes: 1024 * 1024,
+    memoryExtractionMaxInputBytes: 131072,
     getAuthToken: () => 'test-token',
   };
 }
