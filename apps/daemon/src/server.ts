@@ -86,7 +86,7 @@ import {
 import { createSessionOutputStore } from './sessions/output-store.js';
 import { SessionRuntime, type WsClient } from './sessions/runtime.js';
 import { getSessionDetail } from './sessions/projection.js';
-import type { PtyManager } from './pty/types.js';
+import { NodePtyManager } from './pty/manager.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -110,13 +110,6 @@ const CORS_ORIGINS = [
 
 const WS_OPEN = 1; // ws library WebSocket.OPEN
 
-// Wired in M4-011 with the real node-pty PtyManager; noop until then.
-const noopPtyManager: PtyManager = {
-  start() {
-    throw Object.assign(new Error('PTY manager not configured'), { code: 'spawn_failed' });
-  },
-};
-
 export function createServer(
   config: Config,
   deps?: { sessionRuntime?: SessionRuntime }
@@ -128,7 +121,7 @@ export function createServer(
   });
   const sessionRuntime =
     deps?.sessionRuntime ??
-    new SessionRuntime(noopPtyManager, config.sessionStopGraceMs, config.sessionWsBufferLimitBytes);
+    new SessionRuntime(new NodePtyManager(), config.sessionStopGraceMs, config.sessionWsBufferLimitBytes);
 
   const server = Fastify({
     logger: {
