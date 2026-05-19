@@ -1,8 +1,7 @@
 import type { AgentAdapter, AdapterSpawnInput, AdapterSpawnResult, AdapterAvailability } from "./types.js";
+import { buildSpawnEnv } from "./types.js";
 import { resolveBinary } from "./resolve.js";
-import type { ResolveBinaryResult } from "./resolve.js";
-
-type ResolveFn = (candidates: string[]) => Promise<ResolveBinaryResult>;
+import type { ResolveFn } from "./resolve.js";
 
 export class OpenCodeAdapter implements AgentAdapter {
   readonly id = "opencode" as const;
@@ -15,38 +14,20 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   async resolveSpawn(input: AdapterSpawnInput): Promise<AdapterSpawnResult> {
-    const candidates = openCodeCandidates();
-    const result = await this.resolveFn(candidates);
+    const result = await this.resolveFn(openCodeCandidates());
     if ("error" in result) {
       throw Object.assign(
-        new Error(`opencode binary not found. Set ORCA_OPENCODE_BIN or install opencode. Tried: ${result.tried.join(", ")}`),
+        new Error(`opencode not found. Set ORCA_OPENCODE_BIN or install opencode. Tried: ${result.tried.join(", ")}`),
         { code: "command_not_found" }
       );
     }
-
-    const env: Record<string, string> = {};
-    if (process.env["PATH"]) env["PATH"] = process.env["PATH"];
-    env["ORCA_GOAL_ID"] = input.goalId;
-    env["ORCA_SESSION_ID"] = input.sessionId;
-    if (input.role) env["ORCA_ROLE"] = input.role;
-    if (input.instruction) env["ORCA_INSTRUCTION"] = input.instruction;
-
-    return {
-      command: result.resolvedPath,
-      args: [],
-      env,
-      cwd: input.workspacePath,
-    };
+    return { command: result.resolvedPath, args: [], env: buildSpawnEnv(input), cwd: input.workspacePath };
   }
 
   async probeAvailability(): Promise<AdapterAvailability> {
-    const candidates = openCodeCandidates();
-    const result = await this.resolveFn(candidates);
+    const result = await this.resolveFn(openCodeCandidates());
     if ("error" in result) {
-      return {
-        status: "unavailable",
-        detail: `opencode not found. Set ORCA_OPENCODE_BIN or install opencode.`,
-      };
+      return { status: "unavailable", detail: `opencode not found. Set ORCA_OPENCODE_BIN or install opencode. Tried: ${result.tried.join(", ")}` };
     }
     return { status: "available" };
   }

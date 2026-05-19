@@ -3,9 +3,7 @@ import { ClaudeCodeAdapter } from "./claude-code.js";
 import { OpenCodeAdapter } from "./opencode.js";
 import { CodexAdapter } from "./codex.js";
 import type { AgentAdapter } from "./types.js";
-import type { ResolveBinaryResult } from "./resolve.js";
-
-type ResolveFn = (candidates: string[]) => Promise<ResolveBinaryResult>;
+import type { ResolveBinaryResult, ResolveFn } from "./resolve.js";
 
 function makeResolve(result: ResolveBinaryResult): ResolveFn {
   return (_candidates) => Promise.resolve(result);

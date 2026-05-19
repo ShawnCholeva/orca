@@ -4,10 +4,10 @@ import { ShellManualAdapter } from "./shell-manual.js";
 import { ClaudeCodeAdapter } from "./claude-code.js";
 import { OpenCodeAdapter } from "./opencode.js";
 import { CodexAdapter } from "./codex.js";
-import type { ResolveBinaryResult } from "./resolve.js";
+import type { ResolveBinaryResult, ResolveFn } from "./resolve.js";
 
-function makeResolve(result: ResolveBinaryResult) {
-  return (_candidates: string[]) => Promise.resolve(result);
+function makeResolve(result: ResolveBinaryResult): ResolveFn {
+  return (_candidates) => Promise.resolve(result);
 }
 
 const available = makeResolve({ resolvedPath: "/usr/local/bin/tool" });

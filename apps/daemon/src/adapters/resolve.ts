@@ -5,6 +5,9 @@ export type ResolveBinaryResult =
   | { resolvedPath: string }
   | { error: "not_found"; tried: string[] };
 
+/** Injectable resolve function — accepts candidates, returns a result. Used by adapters for testability. */
+export type ResolveFn = (candidates: string[]) => Promise<ResolveBinaryResult>;
+
 export interface ResolveBinaryOpts {
   /** Override the environment used for PATH lookup (defaults to process.env). */
   env?: Record<string, string>;
@@ -35,20 +38,15 @@ export async function resolveBinary(
       try {
         await checkAccess(candidate, constants.X_OK);
         return { resolvedPath: candidate };
-      } catch {
-        // not found or not executable
-      }
+      } catch { /* intentionally empty */ }
     } else {
-      // Bare name: walk each PATH directory
       for (const dir of pathDirs) {
         const full = path.join(dir, candidate);
         tried.push(full);
         try {
           await checkAccess(full, constants.X_OK);
           return { resolvedPath: full };
-        } catch {
-          // try next dir
-        }
+        } catch { /* intentionally empty */ }
       }
     }
   }

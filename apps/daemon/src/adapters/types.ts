@@ -26,3 +26,14 @@ export interface AgentAdapter {
   resolveSpawn(input: AdapterSpawnInput): Promise<AdapterSpawnResult>;
   probeAvailability(): Promise<AdapterAvailability>;
 }
+
+/** Build the spawn env from a session input: PATH pass-through + ORCA_* session vars. */
+export function buildSpawnEnv(input: AdapterSpawnInput): Record<string, string> {
+  const env: Record<string, string> = {};
+  if (process.env["PATH"]) env["PATH"] = process.env["PATH"];
+  env["ORCA_GOAL_ID"] = input.goalId;
+  env["ORCA_SESSION_ID"] = input.sessionId;
+  if (input.role) env["ORCA_ROLE"] = input.role;
+  if (input.instruction) env["ORCA_INSTRUCTION"] = input.instruction;
+  return env;
+}

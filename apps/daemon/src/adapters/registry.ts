@@ -1,4 +1,4 @@
-import type { AdapterId, AdapterSummary } from "@orca/contracts";
+import type { AdapterSummary } from "@orca/contracts";
 import type { AgentAdapter, AdapterAvailability } from "./types.js";
 
 export class AdapterRegistry {
@@ -13,27 +13,30 @@ export class AdapterRegistry {
     return this.adapters.get(id);
   }
 
-  /** Probe and cache availability lazily; cached for the process lifetime. */
+  /** Probe and cache availability lazily; probes are parallelized on a cold cache. */
   async list(): Promise<AdapterSummary[]> {
-    const results: AdapterSummary[] = [];
-    for (const adapter of this.adapters.values()) {
-      let availability = this.availabilityCache.get(adapter.id);
-      if (!availability) {
-        try {
-          availability = await adapter.probeAvailability();
-        } catch {
-          availability = { status: "unknown" };
-        }
-        this.availabilityCache.set(adapter.id, availability);
-      }
-      results.push({
-        id: adapter.id as AdapterId,
+    const adapterList = [...this.adapters.values()];
+    const uncached = adapterList.filter(a => !this.availabilityCache.has(a.id));
+
+    if (uncached.length > 0) {
+      const outcomes = await Promise.allSettled(uncached.map(a => a.probeAvailability()));
+      uncached.forEach((a, i) => {
+        const outcome = outcomes[i]!;
+        const availability: AdapterAvailability =
+          outcome.status === "fulfilled" ? outcome.value : { status: "unknown" };
+        this.availabilityCache.set(a.id, availability);
+      });
+    }
+
+    return adapterList.map(adapter => {
+      const availability = this.availabilityCache.get(adapter.id) ?? { status: "unknown" as const };
+      return {
+        id: adapter.id,
         title: adapter.title,
         availability: availability.status,
         detail: "detail" in availability ? availability.detail : undefined,
-      });
-    }
-    return results;
+      };
+    });
   }
 
   /** Clear the availability cache (useful in tests). */

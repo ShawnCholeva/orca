@@ -1,8 +1,7 @@
 import type { AgentAdapter, AdapterSpawnInput, AdapterSpawnResult, AdapterAvailability } from "./types.js";
+import { buildSpawnEnv } from "./types.js";
 import { resolveBinary } from "./resolve.js";
-import type { ResolveBinaryResult } from "./resolve.js";
-
-type ResolveFn = (candidates: string[]) => Promise<ResolveBinaryResult>;
+import type { ResolveFn } from "./resolve.js";
 
 export class ShellManualAdapter implements AgentAdapter {
   readonly id = "shell-manual" as const;
@@ -15,53 +14,28 @@ export class ShellManualAdapter implements AgentAdapter {
   }
 
   async resolveSpawn(input: AdapterSpawnInput): Promise<AdapterSpawnResult> {
-    const candidates = shellCandidates();
-    const result = await this.resolveFn(candidates);
+    const result = await this.resolveFn(shellCandidates());
     if ("error" in result) {
       throw Object.assign(
         new Error(`No shell binary found. Tried: ${result.tried.join(", ")}`),
         { code: "command_not_found" }
       );
     }
-
-    const env: Record<string, string> = {};
-    if (process.env["PATH"]) env["PATH"] = process.env["PATH"];
-    env["ORCA_GOAL_ID"] = input.goalId;
-    env["ORCA_SESSION_ID"] = input.sessionId;
-    if (input.role) env["ORCA_ROLE"] = input.role;
-    if (input.instruction) env["ORCA_INSTRUCTION"] = input.instruction;
-
-    return {
-      command: result.resolvedPath,
-      args: [],
-      env,
-      cwd: input.workspacePath,
-    };
+    return { command: result.resolvedPath, args: [], env: buildSpawnEnv(input), cwd: input.workspacePath };
   }
 
   async probeAvailability(): Promise<AdapterAvailability> {
-    const candidates = shellCandidates();
-    const result = await this.resolveFn(candidates);
+    const result = await this.resolveFn(shellCandidates());
     if ("error" in result) {
-      return {
-        status: "unavailable",
-        detail: `No shell found. Tried: ${result.tried.join(", ")}`,
-      };
+      return { status: "unavailable", detail: `No shell found. Tried: ${result.tried.join(", ")}` };
     }
     return { status: "available" };
   }
 }
 
 function shellCandidates(): string[] {
-  const candidates: string[] = [];
-  if (process.platform === "win32") {
-    if (process.env["ORCA_SHELL"]) candidates.push(process.env["ORCA_SHELL"]);
-    if (process.env["COMSPEC"]) candidates.push(process.env["COMSPEC"]);
-    candidates.push("cmd.exe");
-  } else {
-    if (process.env["ORCA_SHELL"]) candidates.push(process.env["ORCA_SHELL"]);
-    if (process.env["SHELL"]) candidates.push(process.env["SHELL"]);
-    candidates.push("/bin/zsh", "/bin/bash", "/bin/sh");
-  }
-  return candidates.filter(Boolean);
+  const base: Array<string | undefined> = process.platform === "win32"
+    ? [process.env["COMSPEC"], "cmd.exe"]
+    : [process.env["SHELL"], "/bin/zsh", "/bin/bash", "/bin/sh"];
+  return [process.env["ORCA_SHELL"], ...base].filter((s): s is string => s != null && s.length > 0);
 }

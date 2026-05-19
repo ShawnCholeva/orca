@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ShellManualAdapter } from "./shell-manual.js";
-import type { ResolveBinaryResult } from "./resolve.js";
+import type { ResolveBinaryResult, ResolveFn } from "./resolve.js";
 
-function makeResolve(result: ResolveBinaryResult) {
-  return (_candidates: string[]) => Promise.resolve(result);
+function makeResolve(result: ResolveBinaryResult): ResolveFn {
+  return (_candidates) => Promise.resolve(result);
 }
 
 function makeCapturingResolve(result: ResolveBinaryResult) {
   let captured: string[] = [];
-  const fn = (candidates: string[]) => {
+  const fn: ResolveFn = (candidates) => {
     captured = candidates;
     return Promise.resolve(result);
   };
