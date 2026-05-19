@@ -175,4 +175,142 @@ describe('listSessionsByGoal', () => {
     expect(g1Sessions).toHaveLength(1);
     expect(g1Sessions[0]!.id).toBe('sess-g1');
   });
+
+  it('surfaces latest extraction details and latest summary headline when present', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedWorkspace(db, 'ws1', 'g1');
+
+    insertSession(db, {
+      id: 'sess-1',
+      goalId: 'g1',
+      workspaceId: 'ws1',
+      adapterId: 'shell-manual',
+      title: 'Session with extraction',
+      status: 'exited',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    db.prepare(
+      `INSERT INTO memory_extractions (
+        id, goal_id, session_id, trigger, status, extractor_version, source_fingerprint,
+        source_offset_first, source_offset_last, summary_id, item_count, decision_count,
+        promoted_count, failure_code, failure_message, requested_at, started_at, finished_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      'ext-1',
+      'g1',
+      'sess-1',
+      'manual',
+      'failed',
+      'm5-test-v1',
+      'fp-1',
+      0,
+      25,
+      null,
+      0,
+      0,
+      0,
+      'timeout',
+      'Timed out',
+      '2026-01-01T00:10:00.000Z',
+      '2026-01-01T00:10:01.000Z',
+      '2026-01-01T00:10:30.000Z'
+    );
+
+    db.prepare(
+      `INSERT INTO memory_extractions (
+        id, goal_id, session_id, trigger, status, extractor_version, source_fingerprint,
+        source_offset_first, source_offset_last, summary_id, item_count, decision_count,
+        promoted_count, failure_code, failure_message, requested_at, started_at, finished_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      'ext-0',
+      'g1',
+      'sess-1',
+      'manual',
+      'succeeded',
+      'm5-test-v1',
+      'fp-0',
+      0,
+      10,
+      'sum-1',
+      1,
+      0,
+      0,
+      null,
+      null,
+      '2026-01-01T00:08:00.000Z',
+      '2026-01-01T00:08:01.000Z',
+      '2026-01-01T00:08:30.000Z'
+    );
+
+    db.prepare(
+      `INSERT INTO session_summaries (
+        id, session_id, goal_id, extraction_id, headline, summary_text, truncated,
+        source_offset_first, source_offset_last, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      'sum-1',
+      'sess-1',
+      'g1',
+      'ext-0',
+      'Most recent completed summary',
+      'Summary text',
+      1,
+      0,
+      10,
+      '2026-01-01T00:09:00.000Z'
+    );
+
+    const summary = listSessionsByGoal(db, 'g1')[0];
+    const detail = getSessionDetail(db, 'sess-1');
+
+    expect(summary).toMatchObject({
+      latestExtraction: {
+        id: 'ext-1',
+        status: 'failed',
+        requestedAt: '2026-01-01T00:10:00.000Z',
+        finishedAt: '2026-01-01T00:10:30.000Z',
+        failureCode: 'timeout',
+        truncated: false,
+      },
+      latestSummaryHeadline: 'Most recent completed summary',
+    });
+    expect(detail).toMatchObject({
+      latestExtraction: {
+        id: 'ext-1',
+        status: 'failed',
+        requestedAt: '2026-01-01T00:10:00.000Z',
+        finishedAt: '2026-01-01T00:10:30.000Z',
+        failureCode: 'timeout',
+        truncated: false,
+      },
+      latestSummaryHeadline: 'Most recent completed summary',
+    });
+  });
+
+  it('keeps latest extraction undefined and latest summary headline null when absent', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedWorkspace(db, 'ws1', 'g1');
+
+    insertSession(db, {
+      id: 'sess-1',
+      goalId: 'g1',
+      workspaceId: 'ws1',
+      adapterId: 'shell-manual',
+      title: 'Session without extraction',
+      status: 'created',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    const summary = listSessionsByGoal(db, 'g1')[0]!;
+    const detail = getSessionDetail(db, 'sess-1')!;
+
+    expect(summary.latestExtraction).toBeUndefined();
+    expect(summary.latestSummaryHeadline).toBeNull();
+    expect(detail.latestExtraction).toBeUndefined();
+    expect(detail.latestSummaryHeadline).toBeNull();
+  });
 });
