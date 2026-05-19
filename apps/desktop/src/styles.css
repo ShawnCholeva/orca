@@ -314,6 +314,56 @@ h2 {
   border-color: #dc2626;
 }
 
+/* ── Sessions ──────────────────────────────────────────────── */
+
+.session-terminal {
+  margin-top: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #101114;
+  overflow: hidden;
+}
+
+.session-terminal-header {
+  min-height: 32px;
+  padding: 7px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid #272a30;
+  color: #d1d5db;
+  font-size: 12px;
+}
+
+.session-terminal-status,
+.session-terminal-ended {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.session-terminal-status--open {
+  color: #86efac;
+}
+
+.session-terminal-status--connecting {
+  color: #fde68a;
+}
+
+.session-terminal-status--closed,
+.session-terminal-ended {
+  color: #fca5a5;
+}
+
+.session-terminal .form-error {
+  margin: 10px;
+}
+
+.session-terminal-surface {
+  height: 360px;
+  min-height: 240px;
+  padding: 8px;
+}
+
 /* ── Runtime Diagnostics ────────────────────────────────────── */
 
 .diagnostics-section {

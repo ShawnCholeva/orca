@@ -18,6 +18,8 @@ import {
   CreateGoalResponse,
   RefineGoalRequest,
   RefineGoalResponse,
+  SessionErrorFrame,
+  SessionOutputFrame,
   StartSessionRequest,
   StartSessionResponse,
   StopSessionResponse,
@@ -26,6 +28,12 @@ import {
   ArchiveGoalResponse,
   DomainEvent,
   type PluginSummary,
+  type SessionErrorFrame as SessionErrorFrameData,
+  type SessionInputFrame as SessionInputFrameData,
+  type SessionOutputFrame as SessionOutputFrameData,
+  type SessionResizeFrame as SessionResizeFrameData,
+  type SessionSubscribeFrame as SessionSubscribeFrameData,
+  type SessionUnsubscribeFrame as SessionUnsubscribeFrameData,
   type SkillSummary,
 } from "@orca/contracts";
 
@@ -482,6 +490,94 @@ export function openEventStream(handlers: EventStreamHandlers): {
   void connect();
 
   return {
+    close() {
+      stopped = true;
+      ws?.close();
+      onStatus("closed");
+    },
+  };
+}
+
+export type SessionClientFrame =
+  | SessionSubscribeFrameData
+  | SessionUnsubscribeFrameData
+  | SessionInputFrameData
+  | SessionResizeFrameData;
+
+export type SessionServerFrame = SessionOutputFrameData | SessionErrorFrameData;
+
+interface SessionStreamHandlers {
+  onOpen(): void;
+  onFrame(frame: SessionServerFrame): void;
+  onStatus(status: ConnectionStatus): void;
+}
+
+function parseSessionServerFrame(data: unknown): SessionServerFrame | null {
+  const output = SessionOutputFrame.safeParse(data);
+  if (output.success) return output.data;
+
+  const error = SessionErrorFrame.safeParse(data);
+  if (error.success) return error.data;
+
+  return null;
+}
+
+export function openSessionStream(handlers: SessionStreamHandlers): {
+  send(frame: SessionClientFrame): boolean;
+  close(): void;
+} {
+  const { onOpen, onFrame, onStatus } = handlers;
+  let ws: WebSocket | null = null;
+  let stopped = false;
+
+  async function connect() {
+    if (stopped) return;
+    const { baseUrl, token } = await loadConfig();
+    if (stopped) return;
+
+    const wsBase = baseUrl.replace(/^http/, "ws");
+    const url = new URL(`${wsBase}/v1/events`);
+    if (token) url.searchParams.set("token", token);
+
+    onStatus("connecting");
+    ws = new WebSocket(url.toString());
+
+    ws.addEventListener("open", () => {
+      onStatus("open");
+      onOpen();
+    });
+
+    ws.addEventListener("message", (ev) => {
+      try {
+        const frame = parseSessionServerFrame(JSON.parse(ev.data as string));
+        if (frame !== null) onFrame(frame);
+      } catch {
+        // ignore malformed session frames
+      }
+    });
+
+    ws.addEventListener("close", () => {
+      if (!stopped) {
+        onStatus("closed");
+        setTimeout(() => {
+          void connect();
+        }, 1000);
+      }
+    });
+
+    ws.addEventListener("error", () => {
+      ws?.close();
+    });
+  }
+
+  void connect();
+
+  return {
+    send(frame: SessionClientFrame) {
+      if (ws?.readyState !== WebSocket.OPEN) return false;
+      ws.send(JSON.stringify(frame));
+      return true;
+    },
     close() {
       stopped = true;
       ws?.close();

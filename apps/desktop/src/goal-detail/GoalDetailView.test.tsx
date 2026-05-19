@@ -58,6 +58,11 @@ function mockDetail(detail: GoalDetailResponse) {
     stopSession: vi.fn(),
     openEventStream: vi.fn().mockReturnValue({ close: vi.fn() }),
   }));
+  vi.doMock("./sessions/SessionTerminalView", () => ({
+    SessionTerminalView: ({ sessionId }: { sessionId: string }) => (
+      <div className="session-terminal" data-session-id={sessionId} />
+    ),
+  }));
 }
 
 describe("GoalDetailView", () => {
@@ -142,6 +147,11 @@ describe("GoalDetailView", () => {
       listAdapters: vi.fn().mockResolvedValue({ adapters: [] }),
       stopSession: vi.fn(),
       openEventStream: vi.fn().mockReturnValue({ close: vi.fn() }),
+    }));
+    vi.doMock("./sessions/SessionTerminalView", () => ({
+      SessionTerminalView: ({ sessionId }: { sessionId: string }) => (
+        <div className="session-terminal" data-session-id={sessionId} />
+      ),
     }));
     const { GoalDetailView } = await import("./GoalDetailView");
 

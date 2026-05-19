@@ -3,6 +3,7 @@ import type { Workspace } from "@orca/contracts";
 import { useSessionsPanel } from "./state";
 import { SessionListItem } from "./SessionListItem";
 import { CreateSessionDialog } from "./CreateSessionDialog";
+import { SessionTerminalView } from "./SessionTerminalView";
 
 type Props = {
   goalId: string;
@@ -23,6 +24,7 @@ export function SessionsPanel({ goalId, workspaces }: Props) {
   } = useSessionsPanel(goalId);
 
   const workspaceById = useMemo(() => new Map(workspaces.map((ws) => [ws.id, ws])), [workspaces]);
+  const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null;
 
   function handleCreated(sessionId: string) {
     setShowCreate(false);
@@ -76,6 +78,14 @@ export function SessionsPanel({ goalId, workspaces }: Props) {
             />
           ))}
         </ul>
+      )}
+
+      {selectedSession && (
+        <SessionTerminalView
+          key={selectedSession.id}
+          sessionId={selectedSession.id}
+          status={selectedSession.status}
+        />
       )}
     </section>
   );

@@ -61,6 +61,11 @@ function mockApi(overrides: Record<string, unknown> = {}) {
     },
     ...overrides,
   }));
+  vi.doMock("./SessionTerminalView", () => ({
+    SessionTerminalView: ({ sessionId, status }: { sessionId: string; status: string }) => (
+      <div className="session-terminal" data-session-id={sessionId} data-status={status} />
+    ),
+  }));
 }
 
 describe("SessionsPanel", () => {
@@ -109,6 +114,29 @@ describe("SessionsPanel", () => {
 
     const items = container.querySelectorAll(".session-list-item");
     expect(items).toHaveLength(2);
+  });
+
+  it("renders the terminal for the selected session", async () => {
+    mockApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [makeSession({ id: "sess-1", status: "running" })],
+      }),
+    });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    await act(async () => {
+      container.querySelector<HTMLElement>(".session-list-item")?.click();
+    });
+
+    const terminal = container.querySelector<HTMLElement>(".session-terminal");
+    expect(terminal?.dataset.sessionId).toBe("sess-1");
+    expect(terminal?.dataset.status).toBe("running");
   });
 
   it("shows stop button only for running/starting sessions", async () => {
