@@ -9,9 +9,13 @@ import {
   CreateSessionResponse,
   DomainEvent,
   GetSessionResponse,
+  GoalDecision,
+  GoalMemoryItem,
   HealthResponse,
   ListAdaptersResponse,
   ListEventsResponse,
+  ListGoalMemoryResponse,
+  ListGoalDecisionsResponse,
   ListGoalsResponse,
   ListPluginsResponse,
   ListSessionsResponse,
@@ -1216,5 +1220,359 @@ describe('M4-006 session and adapter routes', () => {
   it('GET /v1/sessions/:id without Authorization returns 401', async () => {
     const res = await server.inject({ method: 'GET', url: '/v1/sessions/any' });
     expect(res.statusCode).toBe(401);
+  });
+
+  // ---- M5 Memory routes ----
+
+  async function createGoalForTest(): Promise<string> {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/goals',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'Test Goal' },
+    });
+    return (CreateGoalResponse.parse(JSON.parse(res.body))).goal.id;
+  }
+
+  it('GET /v1/goals/:goalId/memory returns empty list for new goal', async () => {
+    const goalId = await createGoalForTest();
+    const res = await server.inject({
+      method: 'GET',
+      url: `/v1/goals/${goalId}/memory`,
+      headers: AUTH_HEADERS,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = ListGoalMemoryResponse.parse(JSON.parse(res.body));
+    expect(body.items).toHaveLength(0);
+  });
+
+  it('POST /v1/goals/:goalId/memory creates item → 201 → list reflects it', async () => {
+    const goalId = await createGoalForTest();
+
+    const createRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/memory`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { type: 'note', content: 'Remember this' },
+    });
+    expect(createRes.statusCode).toBe(201);
+    const created = JSON.parse(createRes.body) as { item: GoalMemoryItem };
+    expect(created.item.status).toBe('candidate');
+    expect(created.item.type).toBe('note');
+    expect(created.item.content).toBe('Remember this');
+
+    const listRes = await server.inject({
+      method: 'GET',
+      url: `/v1/goals/${goalId}/memory`,
+      headers: AUTH_HEADERS,
+    });
+    const list = ListGoalMemoryResponse.parse(JSON.parse(listRes.body));
+    expect(list.items).toHaveLength(1);
+    expect(list.items[0]!.id).toBe(created.item.id);
+  });
+
+  it('PATCH /v1/memory/:id promotes candidate → promoted, list reflects change', async () => {
+    const goalId = await createGoalForTest();
+    const createRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/memory`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { type: 'note', content: 'Promote me' },
+    });
+    const { item } = JSON.parse(createRes.body) as { item: GoalMemoryItem };
+
+    const patchRes = await server.inject({
+      method: 'PATCH',
+      url: `/v1/memory/${item.id}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { status: 'promoted' },
+    });
+    expect(patchRes.statusCode).toBe(200);
+    const patched = JSON.parse(patchRes.body) as { item: GoalMemoryItem };
+    expect(patched.item.status).toBe('promoted');
+
+    const listRes = await server.inject({
+      method: 'GET',
+      url: `/v1/goals/${goalId}/memory`,
+      headers: AUTH_HEADERS,
+    });
+    const list = ListGoalMemoryResponse.parse(JSON.parse(listRes.body));
+    expect(list.items[0]!.status).toBe('promoted');
+  });
+
+  it('PATCH /v1/memory/:id archives item, default list excludes it', async () => {
+    const goalId = await createGoalForTest();
+    const createRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/memory`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { type: 'note', content: 'Archive me' },
+    });
+    const { item } = JSON.parse(createRes.body) as { item: GoalMemoryItem };
+
+    await server.inject({
+      method: 'PATCH',
+      url: `/v1/memory/${item.id}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { status: 'archived' },
+    });
+
+    const defaultList = await server.inject({
+      method: 'GET',
+      url: `/v1/goals/${goalId}/memory`,
+      headers: AUTH_HEADERS,
+    });
+    expect(ListGoalMemoryResponse.parse(JSON.parse(defaultList.body)).items).toHaveLength(0);
+
+    const includedList = await server.inject({
+      method: 'GET',
+      url: `/v1/goals/${goalId}/memory?includeArchived=1`,
+      headers: AUTH_HEADERS,
+    });
+    expect(ListGoalMemoryResponse.parse(JSON.parse(includedList.body)).items).toHaveLength(1);
+  });
+
+  it('PATCH /v1/memory/:id returns 409 for invalid transition (archived → promoted)', async () => {
+    const goalId = await createGoalForTest();
+    const createRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/memory`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { type: 'note', content: 'Will be archived' },
+    });
+    const { item } = JSON.parse(createRes.body) as { item: GoalMemoryItem };
+
+    await server.inject({
+      method: 'PATCH',
+      url: `/v1/memory/${item.id}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { status: 'archived' },
+    });
+
+    const res = await server.inject({
+      method: 'PATCH',
+      url: `/v1/memory/${item.id}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { status: 'promoted' },
+    });
+    expect(res.statusCode).toBe(409);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe('invalid_status_transition');
+  });
+
+  it('POST /v1/goals/:goalId/memory returns 409 for duplicate (goal_id, type, content_hash)', async () => {
+    const goalId = await createGoalForTest();
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/memory`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { type: 'note', content: 'Duplicate content' },
+    });
+
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/memory`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { type: 'note', content: 'Duplicate content' },
+    });
+    expect(res.statusCode).toBe(409);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe('memory_duplicate');
+  });
+
+  it('POST /v1/goals/:goalId/memory rejects unknown fields with 400', async () => {
+    const goalId = await createGoalForTest();
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/memory`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { type: 'note', content: 'Test', unknownField: 'value' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('POST /v1/goals/:goalId/memory rejects oversized content with 400', async () => {
+    const goalId = await createGoalForTest();
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/memory`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { type: 'note', content: 'x'.repeat(4001) },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('memory events appear on the bus after POST /v1/goals/:goalId/memory', async () => {
+    const goalId = await createGoalForTest();
+    const capturedEvents: DomainEvent[] = [];
+    const unsub = eventBus.subscribe((e) => capturedEvents.push(e));
+
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/memory`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { type: 'note', content: 'Observed event' },
+    });
+
+    unsub();
+    const memoryEvents = capturedEvents.filter((e) => e.type === 'memory.item.created');
+    expect(memoryEvents).toHaveLength(1);
+    expect(memoryEvents[0]!.goalId).toBe(goalId);
+  });
+
+  // ---- M5 Decision routes ----
+
+  it('GET /v1/goals/:goalId/decisions returns empty list for new goal', async () => {
+    const goalId = await createGoalForTest();
+    const res = await server.inject({
+      method: 'GET',
+      url: `/v1/goals/${goalId}/decisions`,
+      headers: AUTH_HEADERS,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = ListGoalDecisionsResponse.parse(JSON.parse(res.body));
+    expect(body.items).toHaveLength(0);
+  });
+
+  it('POST /v1/goals/:goalId/decisions creates decision → 201 → list reflects it', async () => {
+    const goalId = await createGoalForTest();
+
+    const createRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/decisions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: {
+        title: 'Use SQLite',
+        decisionText: 'SQLite is the only storage boundary.',
+      },
+    });
+    expect(createRes.statusCode).toBe(201);
+    const created = JSON.parse(createRes.body) as { item: GoalDecision };
+    expect(created.item.status).toBe('proposed');
+    expect(created.item.title).toBe('Use SQLite');
+
+    const listRes = await server.inject({
+      method: 'GET',
+      url: `/v1/goals/${goalId}/decisions`,
+      headers: AUTH_HEADERS,
+    });
+    const list = ListGoalDecisionsResponse.parse(JSON.parse(listRes.body));
+    expect(list.items).toHaveLength(1);
+    expect(list.items[0]!.id).toBe(created.item.id);
+  });
+
+  it('PATCH /v1/decisions/:id confirms proposed → confirmed', async () => {
+    const goalId = await createGoalForTest();
+    const createRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/decisions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'Use SQLite', decisionText: 'SQLite storage.' },
+    });
+    const { item } = JSON.parse(createRes.body) as { item: GoalDecision };
+
+    const patchRes = await server.inject({
+      method: 'PATCH',
+      url: `/v1/decisions/${item.id}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { status: 'confirmed' },
+    });
+    expect(patchRes.statusCode).toBe(200);
+    const patched = JSON.parse(patchRes.body) as { item: GoalDecision };
+    expect(patched.item.status).toBe('confirmed');
+    expect(patched.item.confirmedAt).toBeTruthy();
+  });
+
+  it('PATCH /v1/decisions/:id archives proposed → archived', async () => {
+    const goalId = await createGoalForTest();
+    const createRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/decisions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'Dropped', decisionText: 'No longer relevant.' },
+    });
+    const { item } = JSON.parse(createRes.body) as { item: GoalDecision };
+
+    const patchRes = await server.inject({
+      method: 'PATCH',
+      url: `/v1/decisions/${item.id}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { status: 'archived' },
+    });
+    expect(patchRes.statusCode).toBe(200);
+    const patched = JSON.parse(patchRes.body) as { item: GoalDecision };
+    expect(patched.item.status).toBe('archived');
+  });
+
+  it('PATCH /v1/decisions/:id returns 409 for invalid transition (archived → confirmed)', async () => {
+    const goalId = await createGoalForTest();
+    const createRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/decisions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'Decision', decisionText: 'Some decision.' },
+    });
+    const { item } = JSON.parse(createRes.body) as { item: GoalDecision };
+
+    await server.inject({
+      method: 'PATCH',
+      url: `/v1/decisions/${item.id}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { status: 'archived' },
+    });
+
+    const res = await server.inject({
+      method: 'PATCH',
+      url: `/v1/decisions/${item.id}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { status: 'confirmed' },
+    });
+    expect(res.statusCode).toBe(409);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe('invalid_status_transition');
+  });
+
+  it('POST /v1/goals/:goalId/decisions rejects unknown fields with 400', async () => {
+    const goalId = await createGoalForTest();
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/decisions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: {
+        title: 'Test',
+        decisionText: 'Test decision.',
+        unknownField: 'value',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('POST /v1/goals/:goalId/decisions rejects oversized title with 400', async () => {
+    const goalId = await createGoalForTest();
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/decisions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'x'.repeat(201), decisionText: 'Valid text.' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('decision events appear on the bus after POST /v1/goals/:goalId/decisions', async () => {
+    const goalId = await createGoalForTest();
+    const capturedEvents: DomainEvent[] = [];
+    const unsub = eventBus.subscribe((e) => capturedEvents.push(e));
+
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/decisions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'Test decision', decisionText: 'Some decision text.' },
+    });
+
+    unsub();
+    const decisionEvents = capturedEvents.filter((e) => e.type === 'decision.created');
+    expect(decisionEvents).toHaveLength(1);
+    expect(decisionEvents[0]!.goalId).toBe(goalId);
   });
 });

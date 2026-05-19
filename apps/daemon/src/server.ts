@@ -9,6 +9,12 @@ import {
   type AttachWorkspaceResponse,
   CreateGoalRequest,
   type CreateGoalResponse,
+  CreateGoalMemoryRequest,
+  type ListGoalMemoryResponse,
+  PatchGoalMemoryRequest,
+  CreateGoalDecisionRequest,
+  type ListGoalDecisionsResponse,
+  PatchGoalDecisionRequest,
   CreateSessionRequest,
   type CreateSessionResponse,
   type GetSessionResponse,
@@ -37,7 +43,9 @@ import {
   type StopSessionResponse,
   UpdateGoalRequest,
   type UpdateGoalResponse,
-  type ArchiveGoalResponse
+  type ArchiveGoalResponse,
+  type GoalMemoryItem,
+  type GoalDecision
 } from '@orca/contracts';
 import type { Config } from './config.js';
 import { getDatabase } from './db.js';
@@ -88,6 +96,25 @@ import { createSessionOutputStore } from './sessions/output-store.js';
 import { SessionRuntime, WS_CLIENT_OPEN, type WsClient } from './sessions/runtime.js';
 import { getSessionDetail } from './sessions/projection.js';
 import { NodePtyManager } from './pty/manager.js';
+import {
+  createMemoryItem,
+  patchMemoryItem,
+  listMemoryByGoal,
+  GoalArchivedError as MemoryGoalArchivedError,
+  GoalNotFoundError as MemoryGoalNotFoundError,
+  MemoryDuplicateError,
+  MemoryNotFoundError,
+  InvalidMemoryTransitionError,
+} from './memory/usecases.js';
+import {
+  createDecision,
+  patchDecision,
+  listDecisionsByGoal,
+  GoalArchivedError as DecisionGoalArchivedError,
+  GoalNotFoundError as DecisionGoalNotFoundError,
+  DecisionNotFoundError,
+  InvalidDecisionTransitionError,
+} from './decisions/usecases.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -366,6 +393,155 @@ export function createServer(
       throw error;
     }
   });
+
+  // ---- M5 Memory routes ----
+
+  server.get(
+    '/v1/goals/:goalId/memory',
+    async (request): Promise<ListGoalMemoryResponse> => {
+      const { goalId } = request.params as { goalId: string };
+      const { includeArchived } = request.query as { includeArchived?: string };
+      const items = listMemoryByGoal(db, goalId, {
+        includeArchived: includeArchived === '1',
+      });
+      return { items };
+    }
+  );
+
+  server.post(
+    '/v1/goals/:goalId/memory',
+    async (request, reply): Promise<{ item: GoalMemoryItem } | { error: unknown; issues?: unknown }> => {
+      const { goalId } = request.params as { goalId: string };
+      const parsed = CreateGoalMemoryRequest.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: 'validation_failed', issues: parsed.error.issues };
+      }
+
+      try {
+        const item = createMemoryItem(
+          { db, bus: eventBus },
+          { goalId, ...parsed.data }
+        );
+        reply.status(201);
+        return { item };
+      } catch (error) {
+        if (error instanceof MemoryGoalNotFoundError) {
+          reply.status(404);
+          return apiError(error.code, error.message);
+        }
+        if (error instanceof MemoryGoalArchivedError) {
+          reply.status(409);
+          return apiError(error.code, error.message);
+        }
+        if (error instanceof MemoryDuplicateError) {
+          reply.status(409);
+          return apiError(error.code, error.message);
+        }
+        throw error;
+      }
+    }
+  );
+
+  server.patch(
+    '/v1/memory/:id',
+    async (request, reply): Promise<{ item: GoalMemoryItem } | { error: unknown; issues?: unknown }> => {
+      const { id } = request.params as { id: string };
+      const parsed = PatchGoalMemoryRequest.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: 'validation_failed', issues: parsed.error.issues };
+      }
+
+      try {
+        const item = patchMemoryItem({ db, bus: eventBus }, id, parsed.data);
+        return { item };
+      } catch (error) {
+        if (error instanceof MemoryNotFoundError) {
+          reply.status(404);
+          return apiError(error.code, error.message);
+        }
+        if (error instanceof InvalidMemoryTransitionError) {
+          reply.status(409);
+          return apiError(error.code, error.message);
+        }
+        if (error instanceof MemoryDuplicateError) {
+          reply.status(409);
+          return apiError(error.code, error.message);
+        }
+        throw error;
+      }
+    }
+  );
+
+  // ---- M5 Decision routes ----
+
+  server.get(
+    '/v1/goals/:goalId/decisions',
+    async (request): Promise<ListGoalDecisionsResponse> => {
+      const { goalId } = request.params as { goalId: string };
+      const items = listDecisionsByGoal(db, goalId);
+      return { items };
+    }
+  );
+
+  server.post(
+    '/v1/goals/:goalId/decisions',
+    async (request, reply): Promise<{ item: GoalDecision } | { error: unknown; issues?: unknown }> => {
+      const { goalId } = request.params as { goalId: string };
+      const parsed = CreateGoalDecisionRequest.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: 'validation_failed', issues: parsed.error.issues };
+      }
+
+      try {
+        const item = createDecision(
+          { db, bus: eventBus },
+          { goalId, ...parsed.data }
+        );
+        reply.status(201);
+        return { item };
+      } catch (error) {
+        if (error instanceof DecisionGoalNotFoundError) {
+          reply.status(404);
+          return apiError(error.code, error.message);
+        }
+        if (error instanceof DecisionGoalArchivedError) {
+          reply.status(409);
+          return apiError(error.code, error.message);
+        }
+        throw error;
+      }
+    }
+  );
+
+  server.patch(
+    '/v1/decisions/:id',
+    async (request, reply): Promise<{ item: GoalDecision } | { error: unknown; issues?: unknown }> => {
+      const { id } = request.params as { id: string };
+      const parsed = PatchGoalDecisionRequest.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: 'validation_failed', issues: parsed.error.issues };
+      }
+
+      try {
+        const item = patchDecision({ db, bus: eventBus }, id, parsed.data);
+        return { item };
+      } catch (error) {
+        if (error instanceof DecisionNotFoundError) {
+          reply.status(404);
+          return apiError(error.code, error.message);
+        }
+        if (error instanceof InvalidDecisionTransitionError) {
+          reply.status(409);
+          return apiError(error.code, error.message);
+        }
+        throw error;
+      }
+    }
+  );
 
   server.get('/v1/adapters', async (): Promise<ListAdaptersResponse> => {
     const adapters = await adapterRegistry.list();

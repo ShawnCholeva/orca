@@ -132,7 +132,7 @@ function rowToMemoryItem(row: MemoryRow): GoalMemoryItem {
   });
 }
 
-function isSqliteUniqueConstraintError(error: unknown): boolean {
+export function isSqliteUniqueConstraintError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
   }
