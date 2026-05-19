@@ -683,7 +683,9 @@ describe('M3 routes', () => {
     expect(body.goal.title).toBe(DRAFT.title);
     expect(captured).toEqual([
       'skill.invoked', 'goal.created', 'goal.refined',
-      'workspace.attached', 'workspace.attached'
+      'workspace.attached', 'workspace.attached',
+      'memory.item.created', 'memory.item.promoted',
+      'memory.item.created', 'memory.item.promoted',
     ]);
   });
 

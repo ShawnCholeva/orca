@@ -201,22 +201,40 @@ Constraints:
           .prepare('SELECT seq, type FROM events WHERE goal_id = ? ORDER BY seq ASC')
           .all(goalId) as { seq: number; type: string }[];
 
-        expect(rows).toHaveLength(5);
-        expect(rows[0]?.type).toBe('skill.invoked');
-        expect(rows[1]?.type).toBe('goal.created');
-        expect(rows[2]?.type).toBe('goal.refined');
-        expect(rows[3]?.type).toBe('workspace.attached');
-        expect(rows[4]?.type).toBe('workspace.attached');
+        expect(rows).toHaveLength(13);
+        expect(rows.map((row) => row.type)).toEqual([
+          'skill.invoked',
+          'goal.created',
+          'goal.refined',
+          'workspace.attached',
+          'workspace.attached',
+          'memory.item.created',
+          'memory.item.promoted',
+          'memory.item.created',
+          'memory.item.promoted',
+          'memory.item.created',
+          'memory.item.promoted',
+          'memory.item.created',
+          'memory.item.promoted',
+        ]);
 
         // Bus must publish in the same order as DB seq.
         const busEvents = publishedEvents.filter((e) => e.goalId === goalId);
-        expect(busEvents).toHaveLength(5);
+        expect(busEvents).toHaveLength(13);
         expect(busEvents.map((e) => e.type)).toEqual([
           'skill.invoked',
           'goal.created',
           'goal.refined',
           'workspace.attached',
           'workspace.attached',
+          'memory.item.created',
+          'memory.item.promoted',
+          'memory.item.created',
+          'memory.item.promoted',
+          'memory.item.created',
+          'memory.item.promoted',
+          'memory.item.created',
+          'memory.item.promoted',
         ]);
         // Seq values from bus events must be monotonically increasing and match DB rows.
         const busSeqs = busEvents.map((e) => e.seq);

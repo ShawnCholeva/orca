@@ -268,7 +268,7 @@ describe("createGoal — M3-006 refined path", () => {
     };
   }
 
-  it("refined-only create: 3 events in order (skill.invoked guided, goal.created, goal.refined) and one goal_refinements row", async () => {
+  it("refined-only create seeds promoted memory rows from constraints and success criteria", async () => {
     const { db, ctx } = setup();
     const refined = makeRefined();
 
@@ -278,10 +278,16 @@ describe("createGoal — M3-006 refined path", () => {
       .prepare("SELECT seq, type FROM events WHERE goal_id = ? ORDER BY seq ASC")
       .all(goal.id) as { seq: number; type: string }[];
 
-    expect(rows).toHaveLength(3);
-    expect(rows[0]!.type).toBe("skill.invoked");
-    expect(rows[1]!.type).toBe("goal.created");
-    expect(rows[2]!.type).toBe("goal.refined");
+    expect(rows).toHaveLength(7);
+    expect(rows.map((row) => row.type)).toEqual([
+      "skill.invoked",
+      "goal.created",
+      "goal.refined",
+      "memory.item.created",
+      "memory.item.promoted",
+      "memory.item.created",
+      "memory.item.promoted",
+    ]);
     expect(rows[0]!.seq).toBeLessThan(rows[1]!.seq);
     expect(rows[1]!.seq).toBeLessThan(rows[2]!.seq);
 
@@ -299,9 +305,38 @@ describe("createGoal — M3-006 refined path", () => {
     expect(refRow).toBeDefined();
     expect(refRow!.skill_id).toBe("guided-goal-refinement");
     expect(JSON.parse(refRow!.success_criteria)).toEqual(refined.successCriteria);
+
+    const memoryRows = db
+      .prepare(
+        "SELECT type, status, content, source_type, source_id FROM goal_memory_items WHERE goal_id = ? ORDER BY type ASC, content ASC"
+      )
+      .all(goal.id) as Array<{
+      type: string;
+      status: string;
+      content: string;
+      source_type: string;
+      source_id: string | null;
+    }>;
+
+    expect(memoryRows).toEqual([
+      {
+        type: "constraint",
+        status: "promoted",
+        content: "Must run on-premises",
+        source_type: "refinement",
+        source_id: goal.id,
+      },
+      {
+        type: "success_criterion",
+        status: "promoted",
+        content: "P95 query latency < 50ms",
+        source_type: "refinement",
+        source_id: goal.id,
+      },
+    ]);
   });
 
-  it("refined + 2 workspaces: 5 events in order and 2 workspace rows, 1 refinement row", async () => {
+  it("refined + 2 workspaces: seed-memory events are appended after the existing workspace events", async () => {
     const { db, ctx } = setup();
     const refined = makeRefined();
     const pathA = "/tmp/ws-a";
@@ -321,12 +356,18 @@ describe("createGoal — M3-006 refined path", () => {
       .prepare("SELECT seq, type FROM events WHERE goal_id = ? ORDER BY seq ASC")
       .all(goal.id) as { seq: number; type: string }[];
 
-    expect(rows).toHaveLength(5);
-    expect(rows[0]!.type).toBe("skill.invoked");
-    expect(rows[1]!.type).toBe("goal.created");
-    expect(rows[2]!.type).toBe("goal.refined");
-    expect(rows[3]!.type).toBe("workspace.attached");
-    expect(rows[4]!.type).toBe("workspace.attached");
+    expect(rows).toHaveLength(9);
+    expect(rows.map((row) => row.type)).toEqual([
+      "skill.invoked",
+      "goal.created",
+      "goal.refined",
+      "workspace.attached",
+      "workspace.attached",
+      "memory.item.created",
+      "memory.item.promoted",
+      "memory.item.created",
+      "memory.item.promoted",
+    ]);
 
     const wsRows = db
       .prepare("SELECT path FROM workspaces WHERE goal_id = ?")
@@ -399,16 +440,24 @@ describe("createGoal — M3-006 refined path", () => {
     expect(publishSpy).not.toHaveBeenCalled();
   });
 
-  it("broadcasts events in committed order (skill.invoked before goal.created before goal.refined)", async () => {
+  it("broadcasts refined-goal events in committed order, including seed-memory events", async () => {
     const { ctx } = setup();
     const publishSpy = vi.spyOn(eventBus, "publish");
     const refined = makeRefined();
 
     await createGoal({ title: refined.title, refined }, ctx);
 
-    expect(publishSpy).toHaveBeenCalledTimes(3);
+    expect(publishSpy).toHaveBeenCalledTimes(7);
     const types = publishSpy.mock.calls.map((c) => c[0]!.type);
-    expect(types).toEqual(["skill.invoked", "goal.created", "goal.refined"]);
+    expect(types).toEqual([
+      "skill.invoked",
+      "goal.created",
+      "goal.refined",
+      "memory.item.created",
+      "memory.item.promoted",
+      "memory.item.created",
+      "memory.item.promoted",
+    ]);
     const seqs = publishSpy.mock.calls.map((c) => c[0]!.seq);
     expect(seqs[0]!).toBeLessThan(seqs[1]!);
     expect(seqs[1]!).toBeLessThan(seqs[2]!);

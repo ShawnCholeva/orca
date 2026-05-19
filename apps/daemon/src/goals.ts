@@ -13,6 +13,7 @@ import { getDatabase } from "./db.js";
 import { eventBus, EventBus } from "./events.js";
 import type { SkillRegistry } from "./registry/skill-registry.js";
 import { insertGoalRefinement } from "./goal-refinements.js";
+import { seedRefinementMemory } from "./memory/refinement-seed.js";
 import { insertWorkspace } from "./workspaces/projection.js";
 
 export interface CreateGoalCtx {
@@ -241,6 +242,10 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
 
   for (const event of toPublish) {
     ctx.bus.publish(event);
+  }
+
+  if (validatedRefined) {
+    seedRefinementMemory({ db: ctx.db, bus: ctx.bus }, goalId);
   }
 
   return {
