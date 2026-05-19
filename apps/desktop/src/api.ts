@@ -71,6 +71,10 @@ export class ApiError extends Error {
   }
 }
 
+export function toErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
+}
+
 function authHeaders(token: string): HeadersInit {
   if (!token) return {};
   return { Authorization: `Bearer ${token}` };

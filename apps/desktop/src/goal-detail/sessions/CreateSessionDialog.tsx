@@ -1,6 +1,10 @@
 import { useState, useEffect, FormEvent } from "react";
 import type { AdapterSummary, Workspace } from "@orca/contracts";
-import { listAdapters, createSession, startSession, ApiError } from "../../api";
+import { listAdapters, createSession, startSession, ApiError, toErrorMessage } from "../../api";
+
+function adapterBinEnvVar(id: string): string {
+  return `ORCA_${id.toUpperCase().replace(/-/g, "_")}_BIN`;
+}
 
 type Props = {
   goalId: string;
@@ -26,14 +30,13 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose }: 
     listAdapters()
       .then((res) => {
         setAdapters(res.adapters);
-        if (res.adapters.length > 0 && !adapterId) {
+        if (res.adapters.length > 0) {
           setAdapterId(res.adapters[0]!.id);
         }
       })
-      .catch((err) => setAdaptersError(err instanceof ApiError ? err.message : "Failed to load adapters."))
+      .catch((err) => setAdaptersError(toErrorMessage(err, "Failed to load adapters.")))
       .finally(() => setAdaptersLoading(false));
-    // intentionally run once on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selectedAdapter = adapters.find((a) => a.id === adapterId);
@@ -60,13 +63,11 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose }: 
       const ae = err instanceof ApiError ? err : null;
       const code = ae?.code;
       if (code === "command_not_found") {
-        setError(
-          `Adapter command not found. Set the binary path via the ORCA_${adapterId.toUpperCase().replace(/-/g, "_")}_BIN env var.`,
-        );
+        setError(`Adapter command not found. Set the binary path via the ${adapterBinEnvVar(adapterId)} env var.`);
       } else if (code === "workspace_unavailable") {
         setError("Workspace path is not accessible. Check that the directory exists.");
       } else {
-        setError(ae?.message ?? "Failed to create session.");
+        setError(toErrorMessage(err, "Failed to create session."));
       }
     } finally {
       setSubmitting(false);

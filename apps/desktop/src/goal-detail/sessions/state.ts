@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import type { SessionSummary } from "@orca/contracts";
-import { listSessions, stopSession, openEventStream, ApiError } from "../../api";
+import { listSessions, stopSession, openEventStream, toErrorMessage } from "../../api";
 
 const SESSION_LIFECYCLE_EVENTS = new Set([
   "session.created",
@@ -18,7 +18,6 @@ export interface SessionsPanelState {
   stopping: Set<string>;
   stopError: string | null;
   selectSession(id: string | null): void;
-  refresh(): void;
   handleStop(sessionId: string): Promise<void>;
 }
 
@@ -35,7 +34,7 @@ export function useSessionsPanel(goalId: string): SessionsPanelState {
     setError(null);
     listSessions(goalId)
       .then((res) => setSessions(res.sessions))
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load sessions."))
+      .catch((err) => setError(toErrorMessage(err, "Failed to load sessions.")))
       .finally(() => setLoading(false));
   }, [goalId]);
 
@@ -65,9 +64,8 @@ export function useSessionsPanel(goalId: string): SessionsPanelState {
     setStopError(null);
     try {
       await stopSession(sessionId);
-      refresh();
     } catch (err) {
-      setStopError(err instanceof ApiError ? err.message : "Failed to stop session.");
+      setStopError(toErrorMessage(err, "Failed to stop session."));
     } finally {
       setStopping((prev) => {
         const next = new Set(prev);
@@ -85,7 +83,6 @@ export function useSessionsPanel(goalId: string): SessionsPanelState {
     stopping,
     stopError,
     selectSession: setSelectedSessionId,
-    refresh,
     handleStop,
   };
 }

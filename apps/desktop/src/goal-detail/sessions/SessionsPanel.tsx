@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { Workspace } from "@orca/contracts";
 import { useSessionsPanel } from "./state";
 import { SessionListItem } from "./SessionListItem";
@@ -19,16 +19,14 @@ export function SessionsPanel({ goalId, workspaces }: Props) {
     stopping,
     stopError,
     selectSession,
-    refresh,
     handleStop,
   } = useSessionsPanel(goalId);
 
-  const workspaceById = new Map(workspaces.map((ws) => [ws.id, ws]));
+  const workspaceById = useMemo(() => new Map(workspaces.map((ws) => [ws.id, ws])), [workspaces]);
 
   function handleCreated(sessionId: string) {
     setShowCreate(false);
     selectSession(sessionId);
-    refresh();
   }
 
   return (
