@@ -2,8 +2,11 @@ import type Database from 'better-sqlite3';
 import type { SessionExtractionInput, SessionOutputSnapshot } from '@orca/contracts';
 import { SessionExtractionInput as SessionExtractionInputSchema } from '@orca/contracts';
 import { getGoalRefinement } from '../goal-refinements.js';
+import { SessionNotFoundError, GoalNotFoundError } from '../sessions/errors.js';
 import { getSessionDetail } from '../sessions/projection.js';
 import { listWorkspacesByGoal } from '../workspaces/projection.js';
+
+export { SessionNotFoundError, GoalNotFoundError };
 
 export interface InputBuilderCtx {
   db: Database.Database;
@@ -19,23 +22,24 @@ export class OutputUnavailableError extends Error {
   }
 }
 
-export class SessionNotFoundError extends Error {
-  readonly code = 'session_not_found' as const;
-  constructor(sessionId: string) {
-    super(`Session not found: ${sessionId}`);
-    this.name = 'SessionNotFoundError';
+type GoalRow = { id: string; title: string; status: string; archived_at: string | null };
+
+let _db: Database.Database | null = null;
+let _selectGoal: Database.Statement<[string], GoalRow> | null = null;
+
+function getGoalStmt(db: Database.Database): Database.Statement<[string], GoalRow> {
+  if (db !== _db) {
+    _db = db;
+    _selectGoal = db.prepare('SELECT id, title, status, archived_at FROM goals WHERE id = ?');
   }
+  return _selectGoal!;
 }
 
-export class GoalNotFoundError extends Error {
-  readonly code = 'goal_not_found' as const;
-  constructor(goalId: string) {
-    super(`Goal not found: ${goalId}`);
-    this.name = 'GoalNotFoundError';
-  }
+export function resetPreparedStatements(): void {
+  _db = null;
+  _selectGoal = null;
 }
 
-// Strips ANSI/CSI/OSC escape sequences and C0 control characters except \t and \n.
 function stripAnsi(text: string): string {
   return (
     text
@@ -52,7 +56,6 @@ function stripAnsi(text: string): string {
   );
 }
 
-// Extracts bytes from the snapshot within [windowStart, windowEnd), returning the raw Buffer.
 function extractWindowBytes(
   snapshot: SessionOutputSnapshot,
   windowStart: number,
@@ -80,11 +83,7 @@ export async function buildSessionExtractionInput(
     throw new SessionNotFoundError(sessionId);
   }
 
-  const goalRow = ctx.db
-    .prepare('SELECT id, title, status, archived_at FROM goals WHERE id = ?')
-    .get(session.goalId) as
-    | { id: string; title: string; status: string; archived_at: string | null }
-    | undefined;
+  const goalRow = getGoalStmt(ctx.db).get(session.goalId);
   if (!goalRow) {
     throw new GoalNotFoundError(session.goalId);
   }
@@ -100,25 +99,24 @@ export async function buildSessionExtractionInput(
   const cap = ctx.config.memoryExtractionMaxInputBytes;
   const m4TailEnd = snapshot.firstByteOffset + snapshot.totalBytesKept;
 
-  // m4 truncation: bytes were dropped from the front by the rolling window
+  // M4 rolling window may have dropped bytes from the front; M5 cap may further trim
   const m4Truncated = snapshot.firstByteOffset > 0;
-  // m5 cap: our cap is smaller than what M4 has
   const m5Capped = snapshot.totalBytesKept > cap;
   const truncated = m4Truncated || m5Capped;
 
   const windowStart = m5Capped ? m4TailEnd - cap : snapshot.firstByteOffset;
   const windowEnd = m4TailEnd;
 
-  let text = '';
-  let byteOffsetFirst = windowStart;
-  let byteOffsetLast = windowEnd;
+  let text: string;
+  let byteOffsetFirst: number;
+  let byteOffsetLast: number;
 
   if (snapshot.totalBytesKept > 0) {
-    const raw = extractWindowBytes(snapshot, windowStart, windowEnd);
-    text = stripAnsi(raw.toString('utf8'));
+    text = stripAnsi(extractWindowBytes(snapshot, windowStart, windowEnd).toString('utf8'));
     byteOffsetFirst = windowStart;
     byteOffsetLast = windowEnd;
   } else {
+    text = '';
     byteOffsetFirst = 0;
     byteOffsetLast = 0;
   }
@@ -133,10 +131,8 @@ export async function buildSessionExtractionInput(
     refinement: refinement
       ? {
           id: refinement.goalId,
-          problemStatement: undefined,
           constraints: refinement.constraints,
           successCriteria: refinement.successCriteria,
-          stakeholders: undefined,
         }
       : null,
     workspaces: workspaces.map((ws) => ({

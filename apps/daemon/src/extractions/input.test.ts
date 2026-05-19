@@ -12,7 +12,7 @@ import {
   resetPreparedStatements as resetSessionStmts,
 } from '../sessions/projection.js';
 import { resetPreparedStatements as resetRefinementStmts } from '../goal-refinements.js';
-import { buildSessionExtractionInput, OutputUnavailableError, type InputBuilderCtx } from './input.js';
+import { buildSessionExtractionInput, OutputUnavailableError, resetPreparedStatements as resetInputStmts, type InputBuilderCtx } from './input.js';
 
 const tempDirs: string[] = [];
 
@@ -112,6 +112,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetInputStmts();
   resetSessionStmts();
   resetRefinementStmts();
   closeDatabase();
