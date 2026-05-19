@@ -9,6 +9,9 @@ import {
   type AttachWorkspaceResponse,
   CreateGoalRequest,
   type CreateGoalResponse,
+  CreateSessionRequest,
+  type CreateSessionResponse,
+  type GetSessionResponse,
   type GoalDetailResponse,
   type GuidedRefinementOutput,
   HealthResponse,
@@ -19,7 +22,9 @@ import {
   type ListEventsResponse,
   type ListGoalsResponse,
   type ListPluginsResponse,
+  type ListSessionsResponse,
   type ListSkillsResponse,
+  type ListAdaptersResponse,
   RefineGoalRequest,
   type RefineGoalResponse,
   UpdateGoalRequest,
@@ -50,6 +55,21 @@ import {
 } from './workspaces/usecases.js';
 import { pluginRegistry } from './registry/plugin-registry.js';
 import { skillRegistry } from './registry/skill-registry.js';
+import { adapterRegistry } from './adapters/registry.js';
+import {
+  AdapterNotFoundError,
+  GoalArchivedError,
+  GoalNotFoundError,
+  SessionNotFoundError,
+  WorkspaceNotAttachedError,
+  WorkspaceNotFoundError,
+  WorkspaceUnavailableError,
+} from './sessions/errors.js';
+import {
+  createSession,
+  getSession,
+  listSessionsForGoal,
+} from './sessions/usecases.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -314,6 +334,67 @@ export function createServer(config: Config): FastifyInstance {
       if (error instanceof NotFoundError) {
         reply.status(404);
         return { error: 'not_found' };
+      }
+      throw error;
+    }
+  });
+
+  server.get('/v1/adapters', async (): Promise<ListAdaptersResponse> => {
+    const adapters = await adapterRegistry.list();
+    return { adapters };
+  });
+
+  server.post('/v1/goals/:goalId/sessions', async (request, reply): Promise<CreateSessionResponse | { error: unknown; issues?: unknown }> => {
+    const { goalId } = request.params as { goalId: string };
+    const parsed = CreateSessionRequest.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'validation_failed', issues: parsed.error.issues };
+    }
+
+    try {
+      const session = await createSession(
+        { db: getDatabase(), bus: eventBus, adapterRegistry },
+        { goalId, ...parsed.data }
+      );
+      reply.status(201);
+      return { session };
+    } catch (error) {
+      if (error instanceof GoalNotFoundError) {
+        reply.status(404);
+        return apiError(error.code, error.message);
+      }
+      if (error instanceof GoalArchivedError) {
+        reply.status(409);
+        return apiError(error.code, error.message);
+      }
+      if (
+        error instanceof WorkspaceNotFoundError ||
+        error instanceof WorkspaceNotAttachedError ||
+        error instanceof WorkspaceUnavailableError ||
+        error instanceof AdapterNotFoundError
+      ) {
+        reply.status(422);
+        return apiError(error.code, error.message);
+      }
+      throw error;
+    }
+  });
+
+  server.get('/v1/goals/:goalId/sessions', async (request): Promise<ListSessionsResponse> => {
+    const { goalId } = request.params as { goalId: string };
+    const sessions = listSessionsForGoal(getDatabase(), goalId);
+    return { sessions };
+  });
+
+  server.get('/v1/sessions/:id', async (request, reply): Promise<GetSessionResponse | { error: unknown }> => {
+    const { id } = request.params as { id: string };
+    try {
+      return getSession(getDatabase(), id);
+    } catch (error) {
+      if (error instanceof SessionNotFoundError) {
+        reply.status(404);
+        return apiError(error.code, error.message);
       }
       throw error;
     }

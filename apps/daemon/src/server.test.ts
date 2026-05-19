@@ -6,11 +6,15 @@ import type { FastifyInstance } from 'fastify';
 import {
   ArchiveGoalResponse,
   CreateGoalResponse,
+  CreateSessionResponse,
   DomainEvent,
+  GetSessionResponse,
   HealthResponse,
+  ListAdaptersResponse,
   ListEventsResponse,
   ListGoalsResponse,
   ListPluginsResponse,
+  ListSessionsResponse,
   ListSkillsResponse,
   UpdateGoalResponse
 } from '@orca/contracts';
@@ -948,6 +952,253 @@ describe('M3 routes', () => {
       headers: { 'content-type': 'application/json' },
       payload: { inputPath: wsDir }
     });
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('M4-006 session and adapter routes', () => {
+  let server: FastifyInstance;
+  let goalId: string;
+  let workspaceId: string;
+  let wsDir: string;
+  const m4Dirs: string[] = [];
+
+  beforeEach(async () => {
+    const dbDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m4-srv-'));
+    m4Dirs.push(dbDir);
+    wsDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-m4-ws-')));
+    m4Dirs.push(wsDir);
+
+    const config = createConfig(dbDir);
+    const db = openDatabase(config);
+    runMigrations(db, defaultMigrationsDir());
+    server = createServer(config);
+
+    // Create a goal with an attached workspace to use in session tests
+    const goalRes = await server.inject({
+      method: 'POST',
+      url: '/v1/goals',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'm4-goal' }
+    });
+    goalId = (CreateGoalResponse.parse(JSON.parse(goalRes.body))).goal.id;
+
+    const wsRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/workspaces`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir }
+    });
+    const wsBody = JSON.parse(wsRes.body) as { workspace: { id: string } };
+    workspaceId = wsBody.workspace.id;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    closeDatabase();
+    for (const dir of m4Dirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // GET /v1/adapters
+  it('GET /v1/adapters returns all four adapters', async () => {
+    const res = await server.inject({
+      method: 'GET',
+      url: '/v1/adapters',
+      headers: AUTH_HEADERS
+    });
+    expect(res.statusCode).toBe(200);
+    const body = ListAdaptersResponse.parse(JSON.parse(res.body));
+    expect(body.adapters.map((a) => a.id).sort()).toEqual(
+      ['claude-code', 'codex', 'opencode', 'shell-manual']
+    );
+  });
+
+  it('GET /v1/adapters without Authorization returns 401', async () => {
+    const res = await server.inject({ method: 'GET', url: '/v1/adapters' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  // POST /v1/goals/:goalId/sessions
+  it('POST /v1/goals/:goalId/sessions happy path returns 201 with SessionDetail', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/sessions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workspaceId, adapterId: 'shell-manual', role: 'Engineer', title: 'My Session' }
+    });
+    expect(res.statusCode).toBe(201);
+    const body = CreateSessionResponse.parse(JSON.parse(res.body));
+    expect(body.session.goalId).toBe(goalId);
+    expect(body.session.workspaceId).toBe(workspaceId);
+    expect(body.session.adapterId).toBe('shell-manual');
+    expect(body.session.role).toBe('Engineer');
+    expect(body.session.title).toBe('My Session');
+    expect(body.session.status).toBe('created');
+  });
+
+  it('POST /v1/goals/:goalId/sessions uses adapterId as title fallback', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/sessions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workspaceId, adapterId: 'shell-manual' }
+    });
+    expect(res.statusCode).toBe(201);
+    const body = CreateSessionResponse.parse(JSON.parse(res.body));
+    expect(body.session.title).toBe('shell-manual session');
+  });
+
+  it('POST /v1/goals/:goalId/sessions returns 400 for invalid body', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/sessions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { adapterId: 'shell-manual' } // missing workspaceId
+    });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body) as { error: string };
+    expect(body.error).toBe('validation_failed');
+  });
+
+  it('POST /v1/goals/:goalId/sessions rejects unknown fields (strict schema)', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/sessions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workspaceId, adapterId: 'shell-manual', extraField: 'sneaked' }
+    });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body) as { error: string };
+    expect(body.error).toBe('validation_failed');
+  });
+
+  it('POST /v1/goals/:goalId/sessions returns 404 for missing goal', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/goals/no-such-goal/sessions',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workspaceId, adapterId: 'shell-manual' }
+    });
+    expect(res.statusCode).toBe(404);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe('goal_not_found');
+  });
+
+  it('POST /v1/goals/:goalId/sessions returns 409 for archived goal', async () => {
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/archive`,
+      headers: AUTH_HEADERS
+    });
+
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/sessions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workspaceId, adapterId: 'shell-manual' }
+    });
+    expect(res.statusCode).toBe(409);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe('goal_archived');
+  });
+
+  it('POST /v1/goals/:goalId/sessions returns 422 for workspace not attached to goal', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/sessions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workspaceId: 'not-attached-ws', adapterId: 'shell-manual' }
+    });
+    expect(res.statusCode).toBe(422);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe('workspace_not_found');
+  });
+
+  it('POST /v1/goals/:goalId/sessions without Authorization returns 401', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/sessions`,
+      headers: { 'content-type': 'application/json' },
+      payload: { workspaceId, adapterId: 'shell-manual' }
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  // GET /v1/goals/:goalId/sessions
+  it('GET /v1/goals/:goalId/sessions returns created sessions', async () => {
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/sessions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workspaceId, adapterId: 'shell-manual' }
+    });
+
+    const res = await server.inject({
+      method: 'GET',
+      url: `/v1/goals/${goalId}/sessions`,
+      headers: AUTH_HEADERS
+    });
+    expect(res.statusCode).toBe(200);
+    const body = ListSessionsResponse.parse(JSON.parse(res.body));
+    expect(body.sessions).toHaveLength(1);
+    expect(body.sessions[0]!.adapterId).toBe('shell-manual');
+  });
+
+  it('GET /v1/goals/:goalId/sessions returns empty list for unknown goal', async () => {
+    const res = await server.inject({
+      method: 'GET',
+      url: '/v1/goals/no-such-goal/sessions',
+      headers: AUTH_HEADERS
+    });
+    expect(res.statusCode).toBe(200);
+    const body = ListSessionsResponse.parse(JSON.parse(res.body));
+    expect(body.sessions).toEqual([]);
+  });
+
+  it('GET /v1/goals/:goalId/sessions without Authorization returns 401', async () => {
+    const res = await server.inject({ method: 'GET', url: `/v1/goals/${goalId}/sessions` });
+    expect(res.statusCode).toBe(401);
+  });
+
+  // GET /v1/sessions/:id
+  it('GET /v1/sessions/:id returns session detail with empty output snapshot', async () => {
+    const createRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/sessions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workspaceId, adapterId: 'shell-manual' }
+    });
+    const sessionId = (CreateSessionResponse.parse(JSON.parse(createRes.body))).session.id;
+
+    const res = await server.inject({
+      method: 'GET',
+      url: `/v1/sessions/${sessionId}`,
+      headers: AUTH_HEADERS
+    });
+    expect(res.statusCode).toBe(200);
+    const body = GetSessionResponse.parse(JSON.parse(res.body));
+    expect(body.session.id).toBe(sessionId);
+    expect(body.session.status).toBe('created');
+    expect(body.output.sessionId).toBe(sessionId);
+    expect(body.output.chunks).toEqual([]);
+    expect(body.output.nextSeq).toBe(0);
+  });
+
+  it('GET /v1/sessions/:id returns 404 for missing session', async () => {
+    const res = await server.inject({
+      method: 'GET',
+      url: '/v1/sessions/no-such-session',
+      headers: AUTH_HEADERS
+    });
+    expect(res.statusCode).toBe(404);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe('session_not_found');
+  });
+
+  it('GET /v1/sessions/:id without Authorization returns 401', async () => {
+    const res = await server.inject({ method: 'GET', url: '/v1/sessions/any' });
     expect(res.statusCode).toBe(401);
   });
 });
