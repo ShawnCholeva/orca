@@ -1,14 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { PluginRegistry } from './plugin-registry.js';
 import { SkillRegistry } from './skill-registry.js';
+import { AdapterRegistry } from '../adapters/registry.js';
 import { bootstrapRegistries } from './bootstrap.js';
+
+function makeRegistries() {
+  return {
+    plugins: new PluginRegistry(),
+    skills: new SkillRegistry(),
+    adapters: new AdapterRegistry(),
+  };
+}
 
 describe('bootstrapRegistries', () => {
   it('registers exactly 3 plugins with correct ids (sorted)', () => {
-    const plugins = new PluginRegistry();
-    const skills = new SkillRegistry();
+    const { plugins, skills, adapters } = makeRegistries();
 
-    bootstrapRegistries({ plugins, skills });
+    bootstrapRegistries({ plugins, skills, adapters });
 
     const list = plugins.list();
     expect(list).toHaveLength(3);
@@ -20,10 +28,9 @@ describe('bootstrapRegistries', () => {
   });
 
   it('registers plugins with correct capabilities', () => {
-    const plugins = new PluginRegistry();
-    const skills = new SkillRegistry();
+    const { plugins, skills, adapters } = makeRegistries();
 
-    bootstrapRegistries({ plugins, skills });
+    bootstrapRegistries({ plugins, skills, adapters });
 
     expect(plugins.byId('orca.sqlite')?.capabilities).toEqual(['storage']);
     expect(plugins.byId('orca.default-skills')?.capabilities).toEqual(['skill.provider']);
@@ -31,10 +38,9 @@ describe('bootstrapRegistries', () => {
   });
 
   it('registers exactly 2 skills with correct ids and extensionPoints', () => {
-    const plugins = new PluginRegistry();
-    const skills = new SkillRegistry();
+    const { plugins, skills, adapters } = makeRegistries();
 
-    bootstrapRegistries({ plugins, skills });
+    bootstrapRegistries({ plugins, skills, adapters });
 
     const list = skills.list();
     expect(list).toHaveLength(2);
@@ -45,11 +51,31 @@ describe('bootstrapRegistries', () => {
     expect(list[1]?.extensionPoint).toBe('goal.create');
   });
 
-  it('freezes both registries after bootstrap', () => {
-    const plugins = new PluginRegistry();
-    const skills = new SkillRegistry();
+  it('registers all four agent adapters', () => {
+    const { plugins, skills, adapters } = makeRegistries();
 
-    bootstrapRegistries({ plugins, skills });
+    bootstrapRegistries({ plugins, skills, adapters });
+
+    expect(adapters.get('shell-manual')).toBeDefined();
+    expect(adapters.get('claude-code')).toBeDefined();
+    expect(adapters.get('opencode')).toBeDefined();
+    expect(adapters.get('codex')).toBeDefined();
+  });
+
+  it('registered adapters have correct ids', async () => {
+    const { plugins, skills, adapters } = makeRegistries();
+
+    bootstrapRegistries({ plugins, skills, adapters });
+
+    const list = await adapters.list();
+    const ids = list.map((a) => a.id).sort();
+    expect(ids).toEqual(['claude-code', 'codex', 'opencode', 'shell-manual']);
+  });
+
+  it('freezes both plugin and skill registries after bootstrap', () => {
+    const { plugins, skills, adapters } = makeRegistries();
+
+    bootstrapRegistries({ plugins, skills, adapters });
 
     expect(() =>
       plugins.register({ id: 'extra.plugin', name: 'Extra', version: '0.0.0', capabilities: [] })
@@ -67,13 +93,12 @@ describe('bootstrapRegistries', () => {
     ).toThrow();
   });
 
-  it('throws on second call with the same registry pair (duplicate id)', () => {
-    const plugins = new PluginRegistry();
-    const skills = new SkillRegistry();
+  it('throws on second call with the same plugin registry (duplicate id)', () => {
+    const { plugins, skills, adapters } = makeRegistries();
 
-    bootstrapRegistries({ plugins, skills });
+    bootstrapRegistries({ plugins, skills, adapters });
 
-    // throws because registries are frozen after the first call
-    expect(() => bootstrapRegistries({ plugins, skills })).toThrow();
+    // throws because plugin registry is frozen after the first call
+    expect(() => bootstrapRegistries({ plugins, skills, adapters: new AdapterRegistry() })).toThrow();
   });
 });
