@@ -53,6 +53,10 @@ function mockDetail(detail: GoalDetailResponse) {
     inspectWorkspace: vi.fn(),
     attachWorkspace: vi.fn(),
     detachWorkspace: vi.fn(),
+    listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+    listAdapters: vi.fn().mockResolvedValue({ adapters: [] }),
+    stopSession: vi.fn(),
+    openEventStream: vi.fn().mockReturnValue({ close: vi.fn() }),
   }));
 }
 
@@ -114,6 +118,19 @@ describe("GoalDetailView", () => {
     expect(items[1]?.textContent).toBe("beta");
   });
 
+  it("renders sessions panel", async () => {
+    mockDetail({ goal, refinement: null, workspaces: [ws1] });
+    const { GoalDetailView } = await import("./GoalDetailView");
+
+    await act(async () => {
+      createRoot(container).render(
+        <GoalDetailView goalId="goal-1" onBack={vi.fn()} refreshKey={0} />,
+      );
+    });
+
+    expect(container.querySelector(".sessions-panel")).toBeTruthy();
+  });
+
   it("calls getGoalDetail again when refreshKey changes", async () => {
     const getGoalDetailMock = vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [] });
     vi.doMock("../api", () => ({
@@ -121,6 +138,10 @@ describe("GoalDetailView", () => {
       inspectWorkspace: vi.fn(),
       attachWorkspace: vi.fn(),
       detachWorkspace: vi.fn(),
+      listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+      listAdapters: vi.fn().mockResolvedValue({ adapters: [] }),
+      stopSession: vi.fn(),
+      openEventStream: vi.fn().mockReturnValue({ close: vi.fn() }),
     }));
     const { GoalDetailView } = await import("./GoalDetailView");
 

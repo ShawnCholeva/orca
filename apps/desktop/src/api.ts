@@ -2,17 +2,25 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   AttachWorkspaceRequest,
   AttachWorkspaceResponse,
+  CreateSessionRequest,
+  CreateSessionResponse,
+  GetSessionResponse,
   GoalDetailResponse,
   HealthResponse,
   InspectWorkspaceRequest,
   InspectWorkspaceResponse,
+  ListAdaptersResponse,
   ListGoalsResponse,
   ListPluginsResponse,
+  ListSessionsResponse,
   ListSkillsResponse,
   CreateGoalRequest,
   CreateGoalResponse,
   RefineGoalRequest,
   RefineGoalResponse,
+  StartSessionRequest,
+  StartSessionResponse,
+  StopSessionResponse,
   UpdateGoalRequest,
   UpdateGoalResponse,
   ArchiveGoalResponse,
@@ -325,6 +333,93 @@ export async function archiveGoal(id: string): Promise<ArchiveGoalResponse> {
     throw new ApiError(`Archive failed (${res.status})`);
   }
   return parseResponse(res, ArchiveGoalResponse);
+}
+
+export async function listAdapters(): Promise<ListAdaptersResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/adapters`,
+    { headers: authHeaders(token) },
+    ListAdaptersResponse,
+    "List adapters failed",
+  );
+}
+
+export async function listSessions(goalId: string): Promise<ListSessionsResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/sessions`,
+    { headers: authHeaders(token) },
+    ListSessionsResponse,
+    "List sessions failed",
+  );
+}
+
+export async function getSession(sessionId: string): Promise<GetSessionResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}`,
+    { headers: authHeaders(token) },
+    GetSessionResponse,
+    "Get session failed",
+  );
+}
+
+export async function createSession(
+  goalId: string,
+  body: CreateSessionRequest,
+): Promise<CreateSessionResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/sessions`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(CreateSessionRequest.parse(body)),
+    },
+    CreateSessionResponse,
+    "Create session failed",
+  );
+}
+
+export async function startSession(
+  sessionId: string,
+  body: StartSessionRequest,
+): Promise<StartSessionResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/start`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(StartSessionRequest.parse(body)),
+    },
+    StartSessionResponse,
+    "Start session failed",
+  );
+}
+
+export async function stopSession(sessionId: string): Promise<StopSessionResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/stop`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify({}),
+    },
+    StopSessionResponse,
+    "Stop session failed",
+  );
 }
 
 export type ConnectionStatus = "connecting" | "open" | "closed";

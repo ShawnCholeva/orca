@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { GoalDetailResponse } from "@orca/contracts";
 import { getGoalDetail } from "../api";
 import { WorkspaceListPanel } from "./WorkspaceListPanel";
+import { SessionsPanel } from "./sessions/SessionsPanel";
 
 type Props = {
   goalId: string;
@@ -116,6 +117,8 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           workspaces={workspaces}
           onChanged={() => void loadDetail()}
         />
+
+        <SessionsPanel goalId={goalId} workspaces={workspaces} />
       </div>
     </div>
   );

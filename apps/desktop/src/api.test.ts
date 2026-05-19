@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GuidedRefinementOutput } from "@orca/contracts";
+import { GuidedRefinementOutput, type AdapterId } from "@orca/contracts";
 
 vi.mock("@tauri-apps/api/core", () => ({
   isTauri: () => false,
@@ -229,6 +229,175 @@ describe("desktop api client", () => {
     await expect(api.inspectWorkspace({ inputPath: "/tmp/workspace" })).rejects.toMatchObject({
       name: "ApiError",
       code: "inspection_timeout",
+    });
+  });
+
+  it("listAdapters fetches adapter list", async () => {
+    const adapters = [
+      { id: "shell-manual" as AdapterId, title: "Shell / Manual", availability: "available" as const },
+      { id: "claude-code" as AdapterId, title: "Claude Code", availability: "unavailable" as const, detail: "binary not found" },
+    ];
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { adapters }));
+
+    const response = await api.listAdapters();
+
+    expect(response.adapters).toHaveLength(2);
+    expect(response.adapters[0]!.id).toBe("shell-manual");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/adapters");
+    expect(init?.method).toBeUndefined();
+  });
+
+  it("listSessions fetches sessions for goal", async () => {
+    const sessions = [
+      {
+        id: "sess-1",
+        goalId: "goal-1",
+        workspaceId: "ws-1",
+        adapterId: "shell-manual" as AdapterId,
+        role: null,
+        title: "shell-manual session",
+        status: "created" as const,
+        createdAt: now,
+        startedAt: null,
+        exitedAt: null,
+      },
+    ];
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { sessions }));
+
+    const response = await api.listSessions("goal-1");
+
+    expect(response.sessions).toHaveLength(1);
+    expect(response.sessions[0]!.id).toBe("sess-1");
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/sessions");
+  });
+
+  it("createSession posts to goal sessions endpoint", async () => {
+    const session = {
+      id: "sess-1",
+      goalId: "goal-1",
+      workspaceId: "ws-1",
+      adapterId: "shell-manual" as AdapterId,
+      role: null,
+      title: "shell-manual session",
+      status: "created" as const,
+      createdAt: now,
+      startedAt: null,
+      exitedAt: null,
+      instruction: null,
+      pid: null,
+      command: null,
+      args: null,
+      cwd: null,
+      terminalCols: null,
+      terminalRows: null,
+      exitCode: null,
+      exitSignal: null,
+      failureReason: null,
+      failureDetail: null,
+      archivedAt: null,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { session }));
+
+    const response = await api.createSession("goal-1", {
+      workspaceId: "ws-1",
+      adapterId: "shell-manual",
+    });
+
+    expect(response.session.id).toBe("sess-1");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/sessions");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      workspaceId: "ws-1",
+      adapterId: "shell-manual",
+    });
+  });
+
+  it("startSession posts to session start endpoint", async () => {
+    const session = {
+      id: "sess-1",
+      goalId: "goal-1",
+      workspaceId: "ws-1",
+      adapterId: "shell-manual" as AdapterId,
+      role: null,
+      title: "shell-manual session",
+      status: "running" as const,
+      createdAt: now,
+      startedAt: now,
+      exitedAt: null,
+      instruction: null,
+      pid: 1234,
+      command: "/bin/sh",
+      args: null,
+      cwd: "/tmp",
+      terminalCols: 80,
+      terminalRows: 24,
+      exitCode: null,
+      exitSignal: null,
+      failureReason: null,
+      failureDetail: null,
+      archivedAt: null,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { session }));
+
+    const response = await api.startSession("sess-1", { terminalCols: 80, terminalRows: 24 });
+
+    expect(response.session.status).toBe("running");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/sessions/sess-1/start");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ terminalCols: 80, terminalRows: 24 });
+  });
+
+  it("stopSession posts to session stop endpoint", async () => {
+    const session = {
+      id: "sess-1",
+      goalId: "goal-1",
+      workspaceId: "ws-1",
+      adapterId: "shell-manual" as AdapterId,
+      role: null,
+      title: "shell-manual session",
+      status: "stopped" as const,
+      createdAt: now,
+      startedAt: now,
+      exitedAt: now,
+      instruction: null,
+      pid: null,
+      command: null,
+      args: null,
+      cwd: null,
+      terminalCols: null,
+      terminalRows: null,
+      exitCode: null,
+      exitSignal: null,
+      failureReason: null,
+      failureDetail: null,
+      archivedAt: null,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { session }));
+
+    const response = await api.stopSession("sess-1");
+
+    expect(response.session.status).toBe("stopped");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/sessions/sess-1/stop");
+    expect(init?.method).toBe("POST");
+  });
+
+  it("createSession rejects with ApiError on 422", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(422, {
+        error: { code: "workspace_unavailable", message: "Workspace path not accessible" },
+      }),
+    );
+
+    await expect(
+      api.createSession("goal-1", { workspaceId: "ws-1", adapterId: "shell-manual" }),
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      code: "workspace_unavailable",
     });
   });
 });
