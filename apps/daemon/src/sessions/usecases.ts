@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { access } from 'node:fs/promises';
 import type Database from 'better-sqlite3';
-import type { DomainEvent, SessionDetail, SessionOutputSnapshot, SessionSummary } from '@orca/contracts';
+import { SessionDetail } from '@orca/contracts';
+import type { DomainEvent, SessionOutputSnapshot, SessionSummary } from '@orca/contracts';
 import type { EventBus } from '../events.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import {
@@ -142,7 +143,31 @@ export async function createSession(
   // Broadcast only after COMMIT
   ctx.bus.publish(event);
 
-  return getSessionDetail(ctx.db, sessionId)!;
+  // Construct the detail from the already-known insert values rather than re-reading.
+  return SessionDetail.parse({
+    id: sessionId,
+    goalId,
+    workspaceId,
+    adapterId,
+    role: role ?? null,
+    instruction: instruction ?? null,
+    title: resolvedTitle,
+    status: 'created',
+    createdAt: now,
+    startedAt: null,
+    exitedAt: null,
+    pid: null,
+    command: null,
+    args: null,
+    cwd: null,
+    terminalCols: null,
+    terminalRows: null,
+    exitCode: null,
+    exitSignal: null,
+    failureReason: null,
+    failureDetail: null,
+    archivedAt: null,
+  });
 }
 
 export function listSessionsForGoal(
