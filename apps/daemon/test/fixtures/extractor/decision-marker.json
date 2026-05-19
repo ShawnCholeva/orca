@@ -1,0 +1,29 @@
+{
+  "input": {
+    "goal": {
+      "id": "goal-3",
+      "title": "Storage choice",
+      "status": "active",
+      "archived": false
+    },
+    "refinement": null,
+    "workspaces": [],
+    "session": {
+      "id": "session-decision",
+      "adapterId": "shell-manual",
+      "role": null,
+      "instructions": null,
+      "exitCode": 0,
+      "terminalReason": null,
+      "startedAt": "2026-05-19T12:00:00.000Z",
+      "terminatedAt": "2026-05-19T12:05:00.000Z"
+    },
+    "outputTail": {
+      "text": "DECISION: Use SQLite WAL\n",
+      "byteOffsetFirst": 300,
+      "byteOffsetLast": 325,
+      "truncated": false
+    },
+    "extractorVersion": "deterministic-1.0.0"
+  }
+}

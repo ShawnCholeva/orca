@@ -1,0 +1,29 @@
+{
+  "input": {
+    "goal": {
+      "id": "goal-2",
+      "title": "Fix deployment",
+      "status": "active",
+      "archived": false
+    },
+    "refinement": null,
+    "workspaces": [],
+    "session": {
+      "id": "session-fail",
+      "adapterId": "shell-manual",
+      "role": null,
+      "instructions": null,
+      "exitCode": 2,
+      "terminalReason": "internal_error",
+      "startedAt": "2026-05-19T11:00:00.000Z",
+      "terminatedAt": "2026-05-19T11:01:00.000Z"
+    },
+    "outputTail": {
+      "text": "Compiling\nERROR: missing dependency\nFATAL: build crashed\n",
+      "byteOffsetFirst": 120,
+      "byteOffsetLast": 176,
+      "truncated": false
+    },
+    "extractorVersion": "deterministic-1.0.0"
+  }
+}

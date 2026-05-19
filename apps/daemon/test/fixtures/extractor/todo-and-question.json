@@ -1,0 +1,29 @@
+{
+  "input": {
+    "goal": {
+      "id": "goal-5",
+      "title": "Follow-ups",
+      "status": "active",
+      "archived": false
+    },
+    "refinement": null,
+    "workspaces": [],
+    "session": {
+      "id": "session-openq",
+      "adapterId": "shell-manual",
+      "role": null,
+      "instructions": null,
+      "exitCode": 0,
+      "terminalReason": null,
+      "startedAt": "2026-05-19T14:00:00.000Z",
+      "terminatedAt": "2026-05-19T14:02:00.000Z"
+    },
+    "outputTail": {
+      "text": "TODO: tighten retry policy\nShould we keep this adapter?\nFIXME add timeout cap\n",
+      "byteOffsetFirst": 500,
+      "byteOffsetLast": 576,
+      "truncated": false
+    },
+    "extractorVersion": "deterministic-1.0.0"
+  }
+}

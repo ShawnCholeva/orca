@@ -1,0 +1,29 @@
+{
+  "input": {
+    "goal": {
+      "id": "goal-1",
+      "title": "Stabilize tests",
+      "status": "active",
+      "archived": false
+    },
+    "refinement": null,
+    "workspaces": [],
+    "session": {
+      "id": "session-clean",
+      "adapterId": "shell-manual",
+      "role": null,
+      "instructions": null,
+      "exitCode": 0,
+      "terminalReason": null,
+      "startedAt": "2026-05-19T10:00:00.000Z",
+      "terminatedAt": "2026-05-19T10:03:00.000Z"
+    },
+    "outputTail": {
+      "text": "Running test suite\nAll tests passed\nPASS\n",
+      "byteOffsetFirst": 0,
+      "byteOffsetLast": 39,
+      "truncated": false
+    },
+    "extractorVersion": "deterministic-1.0.0"
+  }
+}

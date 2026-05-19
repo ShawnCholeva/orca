@@ -1,0 +1,29 @@
+{
+  "input": {
+    "goal": {
+      "id": "goal-4",
+      "title": "Discussion",
+      "status": "active",
+      "archived": false
+    },
+    "refinement": null,
+    "workspaces": [],
+    "session": {
+      "id": "session-vague",
+      "adapterId": "shell-manual",
+      "role": null,
+      "instructions": null,
+      "exitCode": 0,
+      "terminalReason": null,
+      "startedAt": "2026-05-19T13:00:00.000Z",
+      "terminatedAt": "2026-05-19T13:10:00.000Z"
+    },
+    "outputTail": {
+      "text": "Maybe we should use SQLite someday.\nThis might be a good idea.\n",
+      "byteOffsetFirst": 0,
+      "byteOffsetLast": 63,
+      "truncated": false
+    },
+    "extractorVersion": "deterministic-1.0.0"
+  }
+}

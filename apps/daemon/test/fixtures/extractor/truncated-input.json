@@ -1,0 +1,29 @@
+{
+  "input": {
+    "goal": {
+      "id": "goal-6",
+      "title": "Truncated tail",
+      "status": "active",
+      "archived": false
+    },
+    "refinement": null,
+    "workspaces": [],
+    "session": {
+      "id": "session-truncated",
+      "adapterId": "shell-manual",
+      "role": null,
+      "instructions": null,
+      "exitCode": 2,
+      "terminalReason": "spawn_failed",
+      "startedAt": "2026-05-19T15:00:00.000Z",
+      "terminatedAt": "2026-05-19T15:00:10.000Z"
+    },
+    "outputTail": {
+      "text": "ERROR: connection dropped\n",
+      "byteOffsetFirst": 4096,
+      "byteOffsetLast": 4122,
+      "truncated": true
+    },
+    "extractorVersion": "deterministic-1.0.0"
+  }
+}

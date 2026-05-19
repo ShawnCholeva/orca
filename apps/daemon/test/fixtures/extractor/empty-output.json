@@ -1,0 +1,29 @@
+{
+  "input": {
+    "goal": {
+      "id": "goal-7",
+      "title": "No output",
+      "status": "active",
+      "archived": false
+    },
+    "refinement": null,
+    "workspaces": [],
+    "session": {
+      "id": "session-empty",
+      "adapterId": "shell-manual",
+      "role": null,
+      "instructions": null,
+      "exitCode": null,
+      "terminalReason": null,
+      "startedAt": "2026-05-19T16:00:00.000Z",
+      "terminatedAt": "2026-05-19T16:00:30.000Z"
+    },
+    "outputTail": {
+      "text": "",
+      "byteOffsetFirst": 0,
+      "byteOffsetLast": 0,
+      "truncated": false
+    },
+    "extractorVersion": "deterministic-1.0.0"
+  }
+}
