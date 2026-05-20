@@ -4,7 +4,8 @@ Date: 2026-05-20
 Reviewer: Codex
 Baseline note: `docs/implementation-plans/notes/m6-000-baseline.md`
 Baseline SHA: `31f24cd8a3c05511f486a5e9bac9d02860398bbf`
-Review HEAD: `ed411c983790ffd5f76bf972132c48eab566c5cf`
+Review start HEAD: `ed411c983790ffd5f76bf972132c48eab566c5cf`
+Gate hardening commit: `88c2f0a`
 
 ## Scope
 
@@ -26,6 +27,8 @@ After hardening M6-005 transaction/order coverage:
 - `pnpm --filter @orca/daemon test -- context-reconcile context-usecases context-projection` -> exit 0
   - 3 files passed, 39 tests passed
 - `pnpm --filter @orca/daemon typecheck` -> exit 0
+- `pnpm --filter @orca/daemon test -- m4-011-shell-vertical-slice m5-shared-memory` -> exit 0
+  - 2 files passed, 4 tests passed
 
 ## Gate Checks
 
