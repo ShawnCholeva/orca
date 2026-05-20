@@ -7,6 +7,8 @@ import type { EventBus } from '../events.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import {
   AdapterNotFoundError,
+  ContextPackageMismatchError,
+  ContextPackageNotFoundError,
   GoalArchivedError,
   GoalNotFoundError,
   SessionNotFoundError,
@@ -15,6 +17,7 @@ import {
   WorkspaceUnavailableError,
 } from './errors.js';
 import { getSessionDetail, insertSession, listSessionsByGoal } from './projection.js';
+import { getContextPackageById } from '../context/projection.js';
 import type { SessionOutputStore } from './output-store.js';
 import { type RuntimeCtx, SessionRuntime } from './runtime.js';
 
@@ -81,12 +84,13 @@ export async function createSession(
     goalId: string;
     workspaceId: string;
     adapterId: string;
+    contextPackageId?: string;
     role?: string;
     instruction?: string;
     title?: string;
   }
 ): Promise<SessionDetail> {
-  const { goalId, workspaceId, adapterId, role, instruction, title } = input;
+  const { goalId, workspaceId, adapterId, contextPackageId, role, instruction, title } = input;
   const stmts = ensureStmts(ctx.db);
 
   // Validate goal
@@ -110,6 +114,20 @@ export async function createSession(
   const adapter = ctx.adapterRegistry.get(adapterId);
   if (!adapter) throw new AdapterNotFoundError(adapterId);
 
+  // Validate context package if provided
+  if (contextPackageId !== undefined) {
+    const pkg = getContextPackageById(ctx.db, contextPackageId);
+    if (!pkg) throw new ContextPackageNotFoundError(contextPackageId);
+    if (pkg.goalId !== goalId)
+      throw new ContextPackageMismatchError(`Package goal ${pkg.goalId} does not match session goal ${goalId}`);
+    if (pkg.status !== 'ready')
+      throw new ContextPackageMismatchError(`Package status is '${pkg.status}', expected 'ready'`);
+    if (pkg.adapterId !== adapterId)
+      throw new ContextPackageMismatchError(`Package adapter '${pkg.adapterId}' does not match session adapter '${adapterId}'`);
+    if (pkg.workspaceId !== null && pkg.workspaceId !== workspaceId)
+      throw new ContextPackageMismatchError(`Package workspace '${pkg.workspaceId}' does not match session workspace '${workspaceId}'`);
+  }
+
   const sessionId = randomUUID();
   const now = new Date().toISOString();
   const resolvedTitle = title ?? `${adapterId} session`;
@@ -122,6 +140,7 @@ export async function createSession(
       goalId,
       workspaceId,
       adapterId,
+      contextPackageId: contextPackageId ?? null,
       role: role ?? null,
       instruction: instruction ?? null,
       title: resolvedTitle,
@@ -130,7 +149,7 @@ export async function createSession(
     });
 
     const eventId = randomUUID();
-    const payload = { sessionId, goalId, workspaceId, adapterId };
+    const payload = { sessionId, goalId, workspaceId, adapterId, contextPackageId: contextPackageId ?? null };
     const result = stmts.insertEvent.run(
       eventId,
       'session.created',
@@ -158,6 +177,7 @@ export async function createSession(
     goalId,
     workspaceId,
     adapterId,
+    contextPackageId: contextPackageId ?? null,
     role: role ?? null,
     instruction: instruction ?? null,
     title: resolvedTitle,

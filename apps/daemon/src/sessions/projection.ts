@@ -39,6 +39,7 @@ export interface InsertSessionRow {
   goalId: string;
   workspaceId: string;
   adapterId: string;
+  contextPackageId?: string | null;
   role?: string | null;
   instruction?: string | null;
   title: string;
@@ -155,8 +156,8 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
     _db = db;
     _stmts = {
       insertSession: db.prepare(
-        `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, role, instruction, title, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, context_package_id, role, instruction, title, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ),
       listByGoal: db.prepare(
         `SELECT ${SESSION_COLS} ${SESSION_FROM} WHERE s.goal_id = ? ORDER BY s.created_at DESC, s.id ASC`
@@ -181,6 +182,7 @@ export function insertSession(db: Database.Database, row: InsertSessionRow): voi
     row.goalId,
     row.workspaceId,
     row.adapterId,
+    row.contextPackageId ?? null,
     row.role ?? null,
     row.instruction ?? null,
     row.title,

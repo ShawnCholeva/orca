@@ -81,3 +81,17 @@ export class SpawnFailedError extends SessionError {
     this.name = 'SpawnFailedError';
   }
 }
+
+export class ContextPackageNotFoundError extends SessionError {
+  constructor(packageId: string) {
+    super('context_package_not_found', `Context package not found: ${packageId}`);
+    this.name = 'ContextPackageNotFoundError';
+  }
+}
+
+export class ContextPackageMismatchError extends SessionError {
+  constructor(reason: string) {
+    super('context_package_mismatch', reason);
+    this.name = 'ContextPackageMismatchError';
+  }
+}

@@ -75,6 +75,8 @@ import { adapterRegistry } from './adapters/registry.js';
 import {
   AdapterNotFoundError,
   CommandNotFoundError,
+  ContextPackageMismatchError,
+  ContextPackageNotFoundError,
   GoalArchivedError,
   GoalNotFoundError,
   SessionNotFoundError,
@@ -609,8 +611,16 @@ export function createServer(
         reply.status(404);
         return apiError(error.code, error.message);
       }
+      if (error instanceof ContextPackageNotFoundError) {
+        reply.status(404);
+        return apiError(error.code, error.message);
+      }
       if (error instanceof GoalArchivedError) {
         reply.status(409);
+        return apiError(error.code, error.message);
+      }
+      if (error instanceof ContextPackageMismatchError) {
+        reply.status(400);
         return apiError(error.code, error.message);
       }
       if (
