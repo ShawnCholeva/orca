@@ -1,9 +1,28 @@
 import { useState, useEffect, FormEvent } from "react";
-import type { AdapterSummary, Workspace } from "@orca/contracts";
-import { listAdapters, createSession, startSession, ApiError, toErrorMessage } from "../../api";
+import type { AdapterSummary, ContextAssembly, ContextPackage, ContextRole, CreateContextPackageResponse, Workspace } from "@orca/contracts";
+import { listAdapters, createSession, startSession, createContextPackage, ApiError, toErrorMessage } from "../../api";
+import { ContextPreviewPanel } from "../context-preview-panel";
+
+const CONTEXT_ROLES: { value: ContextRole; label: string }[] = [
+  { value: "architect", label: "Architect" },
+  { value: "engineer", label: "Engineer" },
+  { value: "reviewer", label: "Reviewer" },
+  { value: "generalist", label: "Generalist" },
+];
 
 function adapterBinEnvVar(id: string): string {
   return `ORCA_${id.toUpperCase().replace(/-/g, "_")}_BIN`;
+}
+
+function sessionErrorMessage(err: unknown, adapterId: string): string {
+  const code = err instanceof ApiError ? err.code : undefined;
+  if (code === "command_not_found") {
+    return `Adapter command not found. Set the binary path via the ${adapterBinEnvVar(adapterId)} env var.`;
+  }
+  if (code === "workspace_unavailable") {
+    return "Workspace path is not accessible. Check that the directory exists.";
+  }
+  return toErrorMessage(err, "Failed to create session.");
 }
 
 type Props = {
@@ -11,19 +30,23 @@ type Props = {
   workspaces: Workspace[];
   onCreated(sessionId: string): void;
   onClose(): void;
+  onContextPrepared?: (response: CreateContextPackageResponse) => void;
 };
 
-export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose }: Props) {
+export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose, onContextPrepared }: Props) {
   const [adapters, setAdapters] = useState<AdapterSummary[]>([]);
   const [adaptersLoading, setAdaptersLoading] = useState(true);
   const [adaptersError, setAdaptersError] = useState<string | null>(null);
 
   const [workspaceId, setWorkspaceId] = useState(workspaces[0]?.id ?? "");
   const [adapterId, setAdapterId] = useState("");
-  const [role, setRole] = useState("");
-  const [instruction, setInstruction] = useState("");
+  const [contextRole, setContextRole] = useState<ContextRole | "">("");
+  const [objective, setObjective] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [contextAssembly, setContextAssembly] = useState<ContextAssembly | null>(null);
+  const [contextPkg, setContextPkg] = useState<ContextPackage | null>(null);
 
   useEffect(() => {
     setAdaptersLoading(true);
@@ -40,13 +63,37 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose }: 
   }, []);
 
   const selectedAdapter = adapters.find((a) => a.id === adapterId);
+  const busy = submitting || preparing;
+  const canPrepare = !!contextRole && objective.trim().length >= 4;
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function handlePrepareContext(replacePackageId?: string) {
     if (!workspaceId) { setError("Workspace is required."); return; }
     if (!adapterId) { setError("Adapter is required."); return; }
-    if (role.length > 100) { setError("Role must be 100 characters or fewer."); return; }
-    if (instruction.length > 4000) { setError("Instruction must be 4000 characters or fewer."); return; }
+    if (!contextRole) return;
+
+    setPreparing(true);
+    setError(null);
+    try {
+      const response = await createContextPackage(goalId, {
+        adapterId: adapterId as Parameters<typeof createContextPackage>[1]["adapterId"],
+        role: contextRole,
+        objective: objective.trim(),
+        workspaceId: workspaceId || undefined,
+        replacePackageId,
+      });
+      setContextAssembly(response.assembly);
+      setContextPkg(response.package);
+      onContextPrepared?.(response);
+    } catch (err) {
+      setError(toErrorMessage(err, "Failed to prepare context."));
+    } finally {
+      setPreparing(false);
+    }
+  }
+
+  async function handleLaunchWithContext(contextPackageId: string) {
+    if (!workspaceId) { setError("Workspace is required."); return; }
+    if (!adapterId) { setError("Adapter is required."); return; }
 
     setSubmitting(true);
     setError(null);
@@ -54,21 +101,38 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose }: 
       const { session } = await createSession(goalId, {
         workspaceId,
         adapterId: adapterId as Parameters<typeof createSession>[1]["adapterId"],
-        role: role.trim() || undefined,
-        instruction: instruction.trim() || undefined,
+        role: contextRole || undefined,
+        instruction: objective.trim() || undefined,
+        contextPackageId,
       });
       await startSession(session.id, { terminalCols: 80, terminalRows: 24 });
       onCreated(session.id);
     } catch (err) {
-      const ae = err instanceof ApiError ? err : null;
-      const code = ae?.code;
-      if (code === "command_not_found") {
-        setError(`Adapter command not found. Set the binary path via the ${adapterBinEnvVar(adapterId)} env var.`);
-      } else if (code === "workspace_unavailable") {
-        setError("Workspace path is not accessible. Check that the directory exists.");
-      } else {
-        setError(toErrorMessage(err, "Failed to create session."));
-      }
+      setError(sessionErrorMessage(err, adapterId));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSkipContext(e: FormEvent) {
+    e.preventDefault();
+    if (!workspaceId) { setError("Workspace is required."); return; }
+    if (!adapterId) { setError("Adapter is required."); return; }
+    if (objective.length > 4000) { setError("Objective must be 4000 characters or fewer."); return; }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      const { session } = await createSession(goalId, {
+        workspaceId,
+        adapterId: adapterId as Parameters<typeof createSession>[1]["adapterId"],
+        role: contextRole || undefined,
+        instruction: objective.trim() || undefined,
+      });
+      await startSession(session.id, { terminalCols: 80, terminalRows: 24 });
+      onCreated(session.id);
+    } catch (err) {
+      setError(sessionErrorMessage(err, adapterId));
     } finally {
       setSubmitting(false);
     }
@@ -78,19 +142,19 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose }: 
     <div className="create-session-dialog" role="dialog" aria-label="Create Session">
       <div className="create-session-dialog-header">
         <h3 className="create-session-dialog-title">New Session</h3>
-        <button type="button" className="goal-action-button" onClick={onClose} disabled={submitting}>
+        <button type="button" className="goal-action-button" onClick={onClose} disabled={busy}>
           Cancel
         </button>
       </div>
 
-      <form onSubmit={(e) => void handleSubmit(e)} className="create-form">
+      <form onSubmit={(e) => void handleSkipContext(e)} className="create-form">
         <div className="form-field">
           <label htmlFor="create-session-workspace">Workspace</label>
           <select
             id="create-session-workspace"
             value={workspaceId}
             onChange={(e) => setWorkspaceId(e.target.value)}
-            disabled={submitting}
+            disabled={busy}
             required
           >
             <option value="">— select workspace —</option>
@@ -112,7 +176,7 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose }: 
                 id="create-session-adapter"
                 value={adapterId}
                 onChange={(e) => setAdapterId(e.target.value)}
-                disabled={submitting}
+                disabled={busy}
                 required
               >
                 <option value="">— select adapter —</option>
@@ -133,27 +197,34 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose }: 
 
         <div className="form-field">
           <label htmlFor="create-session-role">Role (optional)</label>
-          <input
+          <select
             id="create-session-role"
-            type="text"
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            maxLength={100}
-            placeholder="e.g. Architect"
-            disabled={submitting}
-          />
+            value={contextRole}
+            onChange={(e) => setContextRole(e.target.value as ContextRole | "")}
+            disabled={busy}
+          >
+            <option value="">— select role —</option>
+            {CONTEXT_ROLES.map((r) => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
         </div>
 
         <div className="form-field">
-          <label htmlFor="create-session-instruction">Instruction (optional)</label>
+          <label htmlFor="create-session-objective">
+            Objective (optional)
+            <span className="form-char-count" aria-label={`${objective.length} of 4000 characters`}>
+              {objective.length}/4000
+            </span>
+          </label>
           <textarea
-            id="create-session-instruction"
-            value={instruction}
-            onChange={(e) => setInstruction(e.target.value)}
+            id="create-session-objective"
+            value={objective}
+            onChange={(e) => setObjective(e.target.value)}
             maxLength={4000}
             rows={3}
-            placeholder="Short instruction for this session…"
-            disabled={submitting}
+            placeholder="Short objective for this session…"
+            disabled={busy}
           />
         </div>
 
@@ -161,14 +232,34 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose }: 
 
         <div className="form-actions">
           <button
+            type="button"
+            className="submit-button submit-button--primary"
+            onClick={() => void handlePrepareContext()}
+            disabled={busy || !canPrepare}
+          >
+            {preparing ? "Preparing…" : "Prepare context"}
+          </button>
+          <button
             type="submit"
             className="submit-button"
-            disabled={submitting}
+            disabled={busy}
           >
-            {submitting ? "Creating…" : "Create & Start"}
+            {submitting ? "Creating…" : "Skip context"}
           </button>
         </div>
       </form>
+
+      {contextAssembly && (
+        <ContextPreviewPanel
+          goalId={goalId}
+          assembly={contextAssembly}
+          pkg={contextPkg}
+          onStartSession={(packageId) => void handleLaunchWithContext(packageId)}
+          onRegenerate={(replacePackageId) => void handlePrepareContext(replacePackageId)}
+          onRetry={() => void handlePrepareContext()}
+          busy={busy}
+        />
+      )}
     </div>
   );
 }

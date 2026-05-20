@@ -1305,7 +1305,7 @@ M6-011 (Adapter delivery)
 | M6-003 | Sonnet 4.6 | Projection helpers with transaction discipline |
 | M6-004 | Sonnet 4.6 | Use-case orchestration + atomic events |
 | M6-005 | Sonnet 4.6 | Boot reconciliation + ordering with M4/M5 reconcilers |
-| M6-006 | Sonnet 4.6 (fixtures by GPT 5.4) | Bounded reads + fingerprint + tail-isolation |
+| M6-006 | Sonnet 4.6 | Bounded reads + fingerprint + tail-isolation |
 | M6-007 | GPT 5.4 | Pure deterministic selection functions |
 | M6-008 | Sonnet 4.6 | Role-aware assembler + renderer (medium complexity) |
 | M6-009 | Sonnet 4.6 | HTTP routes + status mapping |
