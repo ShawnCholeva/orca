@@ -3,6 +3,7 @@ import type { GoalDetailResponse } from "@orca/contracts";
 import { getGoalDetail } from "../api";
 import { WorkspaceListPanel } from "./WorkspaceListPanel";
 import { SessionsPanel } from "./sessions/SessionsPanel";
+import { MemoryPanel } from "./memory/MemoryPanel";
 
 type Props = {
   goalId: string;
@@ -119,6 +120,8 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
         />
 
         <SessionsPanel goalId={goalId} workspaces={workspaces} />
+
+        <MemoryPanel goalId={goalId} />
       </div>
     </div>
   );

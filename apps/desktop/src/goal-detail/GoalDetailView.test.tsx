@@ -55,6 +55,7 @@ function mockDetail(detail: GoalDetailResponse) {
     detachWorkspace: vi.fn(),
     listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
     listAdapters: vi.fn().mockResolvedValue({ adapters: [] }),
+    listGoalMemory: vi.fn().mockResolvedValue([]),
     stopSession: vi.fn(),
     openEventStream: vi.fn().mockReturnValue({ close: vi.fn() }),
   }));
@@ -145,6 +146,7 @@ describe("GoalDetailView", () => {
       detachWorkspace: vi.fn(),
       listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
       listAdapters: vi.fn().mockResolvedValue({ adapters: [] }),
+      listGoalMemory: vi.fn().mockResolvedValue([]),
       stopSession: vi.fn(),
       openEventStream: vi.fn().mockReturnValue({ close: vi.fn() }),
     }));
