@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import type { Workspace } from "@orca/contracts";
 import { useSessionsPanel } from "./state";
 import { SessionListItem } from "./SessionListItem";
+import { SessionSummaryPanel } from "./SessionSummaryPanel";
 import { CreateSessionDialog } from "./CreateSessionDialog";
 import { SessionTerminalView } from "./SessionTerminalView";
 
@@ -18,13 +19,16 @@ export function SessionsPanel({ goalId, workspaces }: Props) {
     error,
     selectedSessionId,
     stopping,
+    extracting,
     stopError,
     selectSession,
     handleStop,
+    handleExtract,
   } = useSessionsPanel(goalId);
 
   const workspaceById = useMemo(() => new Map(workspaces.map((ws) => [ws.id, ws])), [workspaces]);
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null;
+  const TERMINAL = new Set(["exited", "failed", "stopped"]);
 
   function handleCreated(sessionId: string) {
     setShowCreate(false);
@@ -73,19 +77,26 @@ export function SessionsPanel({ goalId, workspaces }: Props) {
               workspaceName={workspaceById.get(session.workspaceId)?.name ?? session.workspaceId}
               selected={selectedSessionId === session.id}
               stopping={stopping.has(session.id)}
+              extracting={extracting.has(session.id)}
               onSelect={() => selectSession(session.id)}
               onStop={() => void handleStop(session.id)}
+              onExtract={() => void handleExtract(session.id)}
             />
           ))}
         </ul>
       )}
 
       {selectedSession && (
-        <SessionTerminalView
-          key={selectedSession.id}
-          sessionId={selectedSession.id}
-          status={selectedSession.status}
-        />
+        <>
+          <SessionTerminalView
+            key={selectedSession.id}
+            sessionId={selectedSession.id}
+            status={selectedSession.status}
+          />
+          {TERMINAL.has(selectedSession.status) && (
+            <SessionSummaryPanel key={`summary-${selectedSession.id}`} sessionId={selectedSession.id} />
+          )}
+        </>
       )}
     </section>
   );

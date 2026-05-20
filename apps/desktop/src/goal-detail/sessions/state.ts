@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import type { SessionSummary } from "@orca/contracts";
-import { listSessions, stopSession, openEventStream, toErrorMessage } from "../../api";
+import { listSessions, stopSession, extractSessionMemory, openEventStream, toErrorMessage } from "../../api";
 
 const SESSION_LIFECYCLE_EVENTS = new Set([
   "session.created",
@@ -10,15 +10,24 @@ const SESSION_LIFECYCLE_EVENTS = new Set([
   "session.stopped",
 ]);
 
+const EXTRACTION_EVENTS = new Set([
+  "memory.extraction.requested",
+  "memory.extraction.started",
+  "memory.extraction.completed",
+  "memory.extraction.failed",
+]);
+
 export interface SessionsPanelState {
   sessions: SessionSummary[];
   loading: boolean;
   error: string | null;
   selectedSessionId: string | null;
   stopping: Set<string>;
+  extracting: Set<string>;
   stopError: string | null;
   selectSession(id: string | null): void;
   handleStop(sessionId: string): Promise<void>;
+  handleExtract(sessionId: string): Promise<void>;
 }
 
 export function useSessionsPanel(goalId: string): SessionsPanelState {
@@ -27,6 +36,7 @@ export function useSessionsPanel(goalId: string): SessionsPanelState {
   const [error, setError] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [stopping, setStopping] = useState<Set<string>>(new Set());
+  const [extracting, setExtracting] = useState<Set<string>>(new Set());
   const [stopError, setStopError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -42,15 +52,11 @@ export function useSessionsPanel(goalId: string): SessionsPanelState {
     refresh();
   }, [refresh]);
 
-  // Refresh the session list when session lifecycle events arrive for this goal.
   useEffect(() => {
     const stream = openEventStream({
       onEvent(event) {
-        if (
-          SESSION_LIFECYCLE_EVENTS.has(event.type) &&
-          event.goalId !== null &&
-          event.goalId === goalId
-        ) {
+        if (event.goalId === null || event.goalId !== goalId) return;
+        if (SESSION_LIFECYCLE_EVENTS.has(event.type) || EXTRACTION_EVENTS.has(event.type)) {
           refresh();
         }
       },
@@ -75,14 +81,32 @@ export function useSessionsPanel(goalId: string): SessionsPanelState {
     }
   }
 
+  async function handleExtract(sessionId: string) {
+    setExtracting((prev) => new Set(prev).add(sessionId));
+    try {
+      await extractSessionMemory(sessionId);
+      refresh();
+    } catch {
+      // extraction errors surface via latestExtraction.status on next refresh
+    } finally {
+      setExtracting((prev) => {
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
+    }
+  }
+
   return {
     sessions,
     loading,
     error,
     selectedSessionId,
     stopping,
+    extracting,
     stopError,
     selectSession: setSelectedSessionId,
     handleStop,
+    handleExtract,
   };
 }

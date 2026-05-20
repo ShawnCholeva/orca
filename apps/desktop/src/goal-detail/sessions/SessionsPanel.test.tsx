@@ -52,6 +52,9 @@ function mockApi(overrides: Record<string, unknown> = {}) {
     createSession: vi.fn(),
     startSession: vi.fn(),
     stopSession: vi.fn(),
+    extractSessionMemory: vi.fn().mockResolvedValue({ id: "ext-1", status: "pending" }),
+    toErrorMessage: (err: unknown, fallback: string) =>
+      err instanceof Error ? err.message : fallback,
     openEventStream: vi.fn().mockReturnValue({ close: vi.fn() }),
     ApiError: class ApiError extends Error {
       code: string | undefined;
@@ -66,6 +69,11 @@ function mockApi(overrides: Record<string, unknown> = {}) {
   vi.doMock("./SessionTerminalView", () => ({
     SessionTerminalView: ({ sessionId, status }: { sessionId: string; status: string }) => (
       <div className="session-terminal" data-session-id={sessionId} data-status={status} />
+    ),
+  }));
+  vi.doMock("./SessionSummaryPanel", () => ({
+    SessionSummaryPanel: ({ sessionId }: { sessionId: string }) => (
+      <div className="session-summary-panel" data-session-id={sessionId} />
     ),
   }));
 }
@@ -273,6 +281,318 @@ describe("SessionsPanel", () => {
     });
 
     expect(listSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows extraction badge 'no extraction' when latestExtraction absent", async () => {
+    mockApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [makeSession({ id: "sess-1", status: "exited" })],
+      }),
+    });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    expect(container.querySelector(".extraction-badge--none")).toBeTruthy();
+    expect(container.textContent).toContain("no extraction");
+  });
+
+  it("shows pending extraction badge", async () => {
+    mockApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [makeSession({
+          id: "sess-1",
+          status: "exited",
+          latestExtraction: {
+            id: "ext-1", status: "pending", requestedAt: now,
+            finishedAt: null, failureCode: null, truncated: false,
+          },
+        })],
+      }),
+    });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    expect(container.querySelector(".extraction-badge--busy")).toBeTruthy();
+    expect(container.textContent).toContain("extraction pending");
+  });
+
+  it("shows running extraction badge", async () => {
+    mockApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [makeSession({
+          id: "sess-1",
+          status: "exited",
+          latestExtraction: {
+            id: "ext-1", status: "running", requestedAt: now,
+            finishedAt: null, failureCode: null, truncated: false,
+          },
+        })],
+      }),
+    });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    expect(container.querySelector(".extraction-badge--busy")).toBeTruthy();
+    expect(container.textContent).toContain("extracting");
+  });
+
+  it("shows succeeded extraction badge", async () => {
+    mockApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [makeSession({
+          id: "sess-1",
+          status: "exited",
+          latestExtraction: {
+            id: "ext-1", status: "succeeded", requestedAt: now,
+            finishedAt: now, failureCode: null, truncated: false,
+          },
+        })],
+      }),
+    });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    expect(container.querySelector(".extraction-badge--succeeded")).toBeTruthy();
+    expect(container.textContent).toContain("extracted");
+  });
+
+  it("shows succeeded+truncated extraction badge with tooltip", async () => {
+    mockApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [makeSession({
+          id: "sess-1",
+          status: "exited",
+          latestExtraction: {
+            id: "ext-1", status: "succeeded", requestedAt: now,
+            finishedAt: now, failureCode: null, truncated: true,
+          },
+        })],
+      }),
+    });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    const badge = container.querySelector(".extraction-badge--succeeded");
+    expect(badge?.textContent).toContain("extracted (truncated)");
+    expect(badge?.getAttribute("title")).toContain("truncated");
+  });
+
+  it("shows failed extraction badge with failureCode tooltip", async () => {
+    mockApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [makeSession({
+          id: "sess-1",
+          status: "exited",
+          latestExtraction: {
+            id: "ext-1", status: "failed", requestedAt: now,
+            finishedAt: now, failureCode: "output_unavailable", truncated: false,
+          },
+        })],
+      }),
+    });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    const badge = container.querySelector(".extraction-badge--failed");
+    expect(badge?.textContent).toContain("extraction failed");
+    expect(badge?.getAttribute("title")).toBe("output_unavailable");
+  });
+
+  it("shows Extract now button for terminal session without extraction", async () => {
+    mockApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [makeSession({ id: "sess-1", status: "exited" })],
+      }),
+    });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    const extractBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Extract now"),
+    );
+    expect(extractBtn).toBeTruthy();
+    expect(extractBtn?.disabled).toBe(false);
+  });
+
+  it("shows Retry extraction button for failed extraction", async () => {
+    mockApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [makeSession({
+          id: "sess-1",
+          status: "exited",
+          latestExtraction: {
+            id: "ext-1", status: "failed", requestedAt: now,
+            finishedAt: now, failureCode: "internal_error", truncated: false,
+          },
+        })],
+      }),
+    });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    const retryBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Retry extraction"),
+    );
+    expect(retryBtn).toBeTruthy();
+  });
+
+  it("extract button disabled while extraction pending", async () => {
+    mockApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [makeSession({
+          id: "sess-1",
+          status: "exited",
+          latestExtraction: {
+            id: "ext-1", status: "pending", requestedAt: now,
+            finishedAt: null, failureCode: null, truncated: false,
+          },
+        })],
+      }),
+    });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    const extractBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Extract now"),
+    );
+    expect(extractBtn?.disabled).toBe(true);
+  });
+
+  it("no extract button for non-terminal session", async () => {
+    mockApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [makeSession({ id: "sess-1", status: "running" })],
+      }),
+    });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    const extractBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Extract now") || b.textContent?.includes("Retry"),
+    );
+    expect(extractBtn).toBeUndefined();
+  });
+
+  it("calls extractSessionMemory when extract button clicked", async () => {
+    const extractSessionMemory = vi.fn().mockResolvedValue({ id: "ext-new", status: "pending" });
+    mockApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [makeSession({ id: "sess-1", status: "exited" })],
+      }),
+      extractSessionMemory,
+    });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    const extractBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Extract now"),
+    );
+    await act(async () => { extractBtn?.click(); });
+
+    expect(extractSessionMemory).toHaveBeenCalledWith("sess-1");
+  });
+
+  it("refreshes on extraction events for this goal", async () => {
+    let capturedHandler: ((event: { type: string; goalId: string | null }) => void) | null = null;
+    const openEventStream = vi.fn().mockImplementation((handlers: { onEvent: (e: { type: string; goalId: string | null }) => void }) => {
+      capturedHandler = handlers.onEvent;
+      return { close: vi.fn() };
+    });
+    const listSessions = vi.fn().mockResolvedValue({ sessions: [] });
+    mockApi({ openEventStream, listSessions });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    expect(listSessions).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      capturedHandler?.({ type: "memory.extraction.completed", goalId: "goal-1" });
+    });
+
+    expect(listSessions).toHaveBeenCalledTimes(2);
+  });
+
+  it("mounts SessionSummaryPanel for selected terminal session", async () => {
+    mockApi({
+      listSessions: vi.fn().mockResolvedValue({
+        sessions: [makeSession({ id: "sess-1", status: "exited" })],
+      }),
+    });
+    const { SessionsPanel } = await import("./SessionsPanel");
+
+    await act(async () => {
+      createRoot(container).render(
+        <SessionsPanel goalId="goal-1" workspaces={[workspace]} />,
+      );
+    });
+
+    await act(async () => {
+      container.querySelector<HTMLElement>(".session-list-item")?.click();
+    });
+
+    const panel = container.querySelector<HTMLElement>(".session-summary-panel");
+    expect(panel).toBeTruthy();
+    expect(panel?.dataset.sessionId).toBe("sess-1");
   });
 });
 
