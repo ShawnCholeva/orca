@@ -29,9 +29,6 @@ export function SessionContextPanel({ goalId, pkg, assembly, open, onToggle }: P
             assembly={assembly}
             pkg={pkg}
             readOnly
-            onStartSession={() => {}}
-            onRegenerate={() => {}}
-            onRetry={() => {}}
           />
         </div>
       )}

@@ -67,11 +67,7 @@ export function useSessionsPanel(goalId: string, sessionsRefreshKey = 0): Sessio
     ])
       .then(([sessRes, pkgRes]) => {
         setSessions(sessRes.sessions);
-        const pkgMap = new Map<string, ContextPackage>();
-        for (const pkg of pkgRes.packages) {
-          pkgMap.set(pkg.id, pkg);
-        }
-        setPackages(pkgMap);
+        setPackages(new Map(pkgRes.packages.map((pkg) => [pkg.id, pkg])));
         setAssemblies(pkgRes.assemblies);
       })
       .catch((err) => setError(toErrorMessage(err, "Failed to load sessions.")))

@@ -37,9 +37,9 @@ type Props = {
   goalId: string;
   assembly: ContextAssembly | null;
   pkg: ContextPackage | null;
-  onStartSession: (packageId: string) => void;
-  onRegenerate: (replacePackageId: string) => void;
-  onRetry: () => void;
+  onStartSession?: (packageId: string) => void;
+  onRegenerate?: (replacePackageId: string) => void;
+  onRetry?: () => void;
   busy?: boolean;
   readOnly?: boolean;
 };
@@ -160,7 +160,7 @@ export function ContextPreviewPanel({
               Code: <code>{liveAssembly.failureCode}</code>
             </p>
           )}
-          {!readOnly && (
+          {!readOnly && onRetry && (
             <button
               type="button"
               className="submit-button"
@@ -221,24 +221,28 @@ export function ContextPreviewPanel({
             </div>
           )}
 
-          {!readOnly && (
+          {!readOnly && (onStartSession || onRegenerate) && (
             <div className="context-preview-actions">
-              <button
-                type="button"
-                className="submit-button submit-button--primary"
-                onClick={() => onStartSession(livePkg.id)}
-                disabled={busy}
-              >
-                Start session
-              </button>
-              <button
-                type="button"
-                className="submit-button submit-button--secondary"
-                onClick={() => onRegenerate(livePkg.id)}
-                disabled={busy}
-              >
-                Regenerate
-              </button>
+              {onStartSession && (
+                <button
+                  type="button"
+                  className="submit-button submit-button--primary"
+                  onClick={() => onStartSession(livePkg.id)}
+                  disabled={busy}
+                >
+                  Start session
+                </button>
+              )}
+              {onRegenerate && (
+                <button
+                  type="button"
+                  className="submit-button submit-button--secondary"
+                  onClick={() => onRegenerate(livePkg.id)}
+                  disabled={busy}
+                >
+                  Regenerate
+                </button>
+              )}
             </div>
           )}
         </>
