@@ -56,7 +56,8 @@ describe("runMigrations", () => {
       "0001_init.sql",
       "0002_workspaces_refinements.sql",
       "0004_sessions.sql",
-      "0005_memory.sql"
+      "0005_memory.sql",
+      "0006_context.sql"
     ]);
   });
 
@@ -126,7 +127,8 @@ describe("runMigrations", () => {
     expect(upgradeResult.applied).toEqual([
       "0002_workspaces_refinements.sql",
       "0004_sessions.sql",
-      "0005_memory.sql"
+      "0005_memory.sql",
+      "0006_context.sql"
     ]);
 
     const goalCount = (
@@ -244,7 +246,11 @@ describe("M4-003 session tables migration", () => {
     expect(initialResult.applied).toEqual(["0001_init.sql", "0002_workspaces_refinements.sql"]);
 
     const upgradeResult = runMigrations(db, defaultMigrationsDir());
-    expect(upgradeResult.applied).toEqual(["0004_sessions.sql", "0005_memory.sql"]);
+    expect(upgradeResult.applied).toEqual([
+      "0004_sessions.sql",
+      "0005_memory.sql",
+      "0006_context.sql"
+    ]);
 
     const tables = (
       db
