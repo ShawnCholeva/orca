@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
-import type { GoalDetailResponse, Workspace } from "@orca/contracts";
+import type { GoalDetailResponse, Workspace, DomainEvent } from "@orca/contracts";
+import type { ConnectionStatus } from "../api";
 
 vi.mock("@tauri-apps/api/core", () => ({
   isTauri: () => false,
@@ -56,14 +57,94 @@ function mockDetail(detail: GoalDetailResponse) {
     listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
     listAdapters: vi.fn().mockResolvedValue({ adapters: [] }),
     listGoalMemory: vi.fn().mockResolvedValue([]),
+    listGoalDecisions: vi.fn().mockResolvedValue([]),
     stopSession: vi.fn(),
     openEventStream: vi.fn().mockReturnValue({ close: vi.fn() }),
+    toErrorMessage: (err: unknown, fallback: string) =>
+      err instanceof Error ? err.message : fallback,
+    extractSessionMemory: vi.fn().mockResolvedValue({ id: "ext-1", status: "pending" }),
+    ApiError: class ApiError extends Error {
+      code: string | undefined;
+      constructor(message: string, _cause?: unknown, code?: string) {
+        super(message);
+        this.name = "ApiError";
+        this.code = code;
+      }
+    },
   }));
   vi.doMock("./sessions/SessionTerminalView", () => ({
     SessionTerminalView: ({ sessionId }: { sessionId: string }) => (
       <div className="session-terminal" data-session-id={sessionId} />
     ),
   }));
+}
+
+function makeEvent(
+  type: DomainEvent["type"],
+  goalId: string = "goal-1",
+): DomainEvent {
+  return {
+    seq: 1,
+    id: "evt-1",
+    type,
+    goalId,
+    payload: {},
+    createdAt: now,
+  };
+}
+
+function setupM5EventCapture() {
+  let capturedOnEvent: ((e: DomainEvent) => void) = () => {};
+  let capturedOnStatus: ((s: ConnectionStatus) => void) = () => {};
+  const listGoalMemoryMock = vi.fn().mockResolvedValue([]);
+  const listGoalDecisionsMock = vi.fn().mockResolvedValue([]);
+
+  vi.doMock("../api", () => ({
+    getGoalDetail: vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [] }),
+    inspectWorkspace: vi.fn(),
+    attachWorkspace: vi.fn(),
+    detachWorkspace: vi.fn(),
+    listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+    listAdapters: vi.fn().mockResolvedValue({ adapters: [] }),
+    listGoalMemory: listGoalMemoryMock,
+    listGoalDecisions: listGoalDecisionsMock,
+    stopSession: vi.fn(),
+    openEventStream: vi.fn().mockImplementation(
+      (handlers: { onEvent: (e: DomainEvent) => void; onStatus: (s: ConnectionStatus) => void }) => {
+        capturedOnEvent = handlers.onEvent;
+        capturedOnStatus = handlers.onStatus;
+        return { close: vi.fn() };
+      },
+    ),
+    toErrorMessage: (err: unknown, fallback: string) =>
+      err instanceof Error ? err.message : fallback,
+    extractSessionMemory: vi.fn().mockResolvedValue({ id: "ext-1", status: "pending" }),
+    ApiError: class ApiError extends Error {
+      code: string | undefined;
+      constructor(message: string, _cause?: unknown, code?: string) {
+        super(message);
+        this.name = "ApiError";
+        this.code = code;
+      }
+    },
+  }));
+
+  vi.doMock("./sessions/SessionsPanel", () => ({
+    SessionsPanel: () => <div className="sessions-panel" />,
+  }));
+
+  vi.doMock("./sessions/SessionTerminalView", () => ({
+    SessionTerminalView: ({ sessionId }: { sessionId: string }) => (
+      <div className="session-terminal" data-session-id={sessionId} />
+    ),
+  }));
+
+  return {
+    getOnEvent: () => capturedOnEvent,
+    getOnStatus: () => capturedOnStatus,
+    listGoalMemoryMock,
+    listGoalDecisionsMock,
+  };
 }
 
 describe("GoalDetailView", () => {
@@ -147,8 +228,20 @@ describe("GoalDetailView", () => {
       listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
       listAdapters: vi.fn().mockResolvedValue({ adapters: [] }),
       listGoalMemory: vi.fn().mockResolvedValue([]),
+      listGoalDecisions: vi.fn().mockResolvedValue([]),
       stopSession: vi.fn(),
       openEventStream: vi.fn().mockReturnValue({ close: vi.fn() }),
+      toErrorMessage: (err: unknown, fallback: string) =>
+        err instanceof Error ? err.message : fallback,
+      extractSessionMemory: vi.fn().mockResolvedValue({ id: "ext-1", status: "pending" }),
+      ApiError: class ApiError extends Error {
+        code: string | undefined;
+        constructor(message: string, _cause?: unknown, code?: string) {
+          super(message);
+          this.name = "ApiError";
+          this.code = code;
+        }
+      },
     }));
     vi.doMock("./sessions/SessionTerminalView", () => ({
       SessionTerminalView: ({ sessionId }: { sessionId: string }) => (
@@ -171,5 +264,121 @@ describe("GoalDetailView", () => {
     });
 
     expect(getGoalDetailMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("GoalDetailView M5 live-refresh", () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    document.body.removeChild(container);
+  });
+
+  it("memory.item.created triggers listGoalMemory refetch", async () => {
+    const { getOnEvent, listGoalMemoryMock } = setupM5EventCapture();
+    const { GoalDetailView } = await import("./GoalDetailView");
+
+    await act(async () => {
+      createRoot(container).render(
+        <GoalDetailView goalId="goal-1" onBack={vi.fn()} refreshKey={0} />,
+      );
+    });
+
+    const callsAfterMount = listGoalMemoryMock.mock.calls.length;
+    await act(async () => {
+      getOnEvent()(makeEvent("memory.item.created"));
+    });
+
+    expect(listGoalMemoryMock.mock.calls.length).toBeGreaterThan(callsAfterMount);
+  });
+
+  it("decision.confirmed triggers listGoalDecisions refetch", async () => {
+    const { getOnEvent, listGoalDecisionsMock } = setupM5EventCapture();
+    const { GoalDetailView } = await import("./GoalDetailView");
+
+    await act(async () => {
+      createRoot(container).render(
+        <GoalDetailView goalId="goal-1" onBack={vi.fn()} refreshKey={0} />,
+      );
+    });
+
+    const callsAfterMount = listGoalDecisionsMock.mock.calls.length;
+    await act(async () => {
+      getOnEvent()(makeEvent("decision.confirmed"));
+    });
+
+    expect(listGoalDecisionsMock.mock.calls.length).toBeGreaterThan(callsAfterMount);
+  });
+
+  it("memory.extraction.completed triggers both memory and decisions refetch", async () => {
+    const { getOnEvent, listGoalMemoryMock, listGoalDecisionsMock } = setupM5EventCapture();
+    const { GoalDetailView } = await import("./GoalDetailView");
+
+    await act(async () => {
+      createRoot(container).render(
+        <GoalDetailView goalId="goal-1" onBack={vi.fn()} refreshKey={0} />,
+      );
+    });
+
+    const memoryCalls = listGoalMemoryMock.mock.calls.length;
+    const decisionCalls = listGoalDecisionsMock.mock.calls.length;
+    await act(async () => {
+      getOnEvent()(makeEvent("memory.extraction.completed"));
+    });
+
+    expect(listGoalMemoryMock.mock.calls.length).toBeGreaterThan(memoryCalls);
+    expect(listGoalDecisionsMock.mock.calls.length).toBeGreaterThan(decisionCalls);
+  });
+
+  it("event for different goal does not trigger refetch", async () => {
+    const { getOnEvent, listGoalMemoryMock } = setupM5EventCapture();
+    const { GoalDetailView } = await import("./GoalDetailView");
+
+    await act(async () => {
+      createRoot(container).render(
+        <GoalDetailView goalId="goal-1" onBack={vi.fn()} refreshKey={0} />,
+      );
+    });
+
+    const callsAfterMount = listGoalMemoryMock.mock.calls.length;
+    await act(async () => {
+      getOnEvent()(makeEvent("memory.item.created", "goal-other"));
+    });
+
+    expect(listGoalMemoryMock.mock.calls.length).toBe(callsAfterMount);
+  });
+
+  it("reconnect triggers memory and decisions refetch", async () => {
+    const { getOnStatus, listGoalMemoryMock, listGoalDecisionsMock } = setupM5EventCapture();
+    const { GoalDetailView } = await import("./GoalDetailView");
+
+    await act(async () => {
+      createRoot(container).render(
+        <GoalDetailView goalId="goal-1" onBack={vi.fn()} refreshKey={0} />,
+      );
+    });
+
+    // first open = initial connection, no refetch
+    await act(async () => {
+      getOnStatus()("open");
+    });
+
+    const memoryCalls = listGoalMemoryMock.mock.calls.length;
+    const decisionCalls = listGoalDecisionsMock.mock.calls.length;
+
+    // second open = reconnect, triggers refetch
+    await act(async () => {
+      getOnStatus()("open");
+    });
+
+    expect(listGoalMemoryMock.mock.calls.length).toBeGreaterThan(memoryCalls);
+    expect(listGoalDecisionsMock.mock.calls.length).toBeGreaterThan(decisionCalls);
   });
 });

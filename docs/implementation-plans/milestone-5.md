@@ -1176,3 +1176,66 @@ M5 is complete when:
 14. M3 refinement fields seed Goal memory without a generalized import system.
 15. Events are small and content-free.
 16. No context assembly, prompt injection, recommendations, tasks, workflows, cross-Goal memory, embeddings, vector search, provider configuration, generic skill invocation API, or autonomous execution has been introduced.
+
+---
+
+## Completion Record
+
+**Final commit SHA:** TBD — see commit following this edit.
+
+**Full-suite test summary (pnpm -r test):**
+- contracts: 30 passed
+- daemon: 553 passed, 5 skipped (4 smoke tests, 1 integration)
+- desktop: 132 passed
+- Total: 715 passed, 5 skipped, 0 failures
+
+**Full-suite typecheck (pnpm -r typecheck):** green — contracts, daemon, desktop all pass.
+
+### New Endpoints
+
+- `GET /v1/goals/:goalId/memory`
+- `POST /v1/goals/:goalId/memory`
+- `PATCH /v1/memory/:id`
+- `GET /v1/goals/:goalId/decisions`
+- `POST /v1/goals/:goalId/decisions`
+- `PATCH /v1/decisions/:id`
+- `GET /v1/sessions/:sessionId/summary`
+- `POST /v1/sessions/:sessionId/extract-memory`
+
+### New Domain Events
+
+- `memory.extraction.requested`
+- `memory.extraction.started`
+- `memory.extraction.completed`
+- `memory.extraction.failed`
+- `memory.item.created`
+- `memory.item.updated`
+- `memory.item.promoted`
+- `memory.item.archived`
+- `decision.created`
+- `decision.updated`
+- `decision.confirmed`
+- `decision.archived`
+
+### New Tables
+
+- `goal_memory_items`
+- `goal_decisions`
+- `session_summaries`
+- `memory_extractions`
+
+### Non-Goals Reaffirmed
+
+The following were explicitly not implemented in M5 and remain out of scope:
+
+- **No context assembly** — memory is projected and queryable but never injected into agent sessions.
+- **No prompt injection** — no session context is assembled or sent to agents from stored memory.
+- **No recommendations** — the recommendation engine is not started; no recommendation events or tables.
+- **No tasks** — no task decomposition, task events, or task tables.
+- **No workflows** — no workflow engine, workflow events, or workflow tables.
+- **No AI provider integration** — no AI SDK, no model calls, no provider configuration UI or tables. The deterministic extractor runs entirely in-process with no network calls.
+- **No cross-Goal memory** — all memory items, decisions, and summaries are strictly Goal-scoped.
+- **No embeddings or vector search** — no vector tables, no embedding generation, no similarity search.
+- **No transcript persistence** — terminal output is not captured beyond the M4 capped output tail already stored by M4.
+- **No continuous reasoning** — extraction is triggered at discrete points (terminal-state transitions, Goal-open) not continuously.
+- **No global memory dashboard** — memory and decisions are accessible only within Goal detail.

@@ -5,11 +5,12 @@ import { MemoryEditModal, type MemorySaveData } from "./MemoryEditModal";
 
 type Props = {
   goalId: string;
+  refreshKey?: number;
 };
 
 type EditTarget = "new" | GoalMemoryItem;
 
-export function MemoryPanel({ goalId }: Props) {
+export function MemoryPanel({ goalId, refreshKey = 0 }: Props) {
   const [items, setItems] = useState<GoalMemoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +33,7 @@ export function MemoryPanel({ goalId }: Props) {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   async function handleSave(data: MemorySaveData) {
     if (editTarget === "new") {

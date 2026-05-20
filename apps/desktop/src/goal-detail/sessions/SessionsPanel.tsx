@@ -11,9 +11,11 @@ const TERMINAL_SESSION_STATUSES = new Set(["exited", "failed", "stopped"]);
 type Props = {
   goalId: string;
   workspaces: Workspace[];
+  sessionsRefreshKey?: number;
+  summaryRefreshKey?: number;
 };
 
-export function SessionsPanel({ goalId, workspaces }: Props) {
+export function SessionsPanel({ goalId, workspaces, sessionsRefreshKey = 0, summaryRefreshKey = 0 }: Props) {
   const [showCreate, setShowCreate] = useState(false);
   const {
     sessions,
@@ -26,7 +28,7 @@ export function SessionsPanel({ goalId, workspaces }: Props) {
     selectSession,
     handleStop,
     handleExtract,
-  } = useSessionsPanel(goalId);
+  } = useSessionsPanel(goalId, sessionsRefreshKey);
 
   const workspaceById = useMemo(() => new Map(workspaces.map((ws) => [ws.id, ws])), [workspaces]);
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null;
@@ -95,7 +97,7 @@ export function SessionsPanel({ goalId, workspaces }: Props) {
             status={selectedSession.status}
           />
           {TERMINAL_SESSION_STATUSES.has(selectedSession.status) && (
-            <SessionSummaryPanel key={`summary-${selectedSession.id}`} sessionId={selectedSession.id} />
+            <SessionSummaryPanel key={`summary-${selectedSession.id}`} sessionId={selectedSession.id} refreshKey={summaryRefreshKey} />
           )}
         </>
       )}

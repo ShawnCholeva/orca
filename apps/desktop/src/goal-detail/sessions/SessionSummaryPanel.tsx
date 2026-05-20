@@ -4,9 +4,10 @@ import { getSessionSummary, toErrorMessage } from "../../api";
 
 type Props = {
   sessionId: string;
+  refreshKey?: number;
 };
 
-export function SessionSummaryPanel({ sessionId }: Props) {
+export function SessionSummaryPanel({ sessionId, refreshKey = 0 }: Props) {
   const [open, setOpen] = useState(false);
   const [summary, setSummary] = useState<SessionMemorySummary | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +21,7 @@ export function SessionSummaryPanel({ sessionId }: Props) {
       .then((s) => { if (!cancelled) setSummary(s); })
       .catch((err) => { if (!cancelled) setError(toErrorMessage(err, "Failed to load summary.")); });
     return () => { cancelled = true; };
-  }, [sessionId, open]);
+  }, [sessionId, open, refreshKey]);
 
   return (
     <div className="session-summary-panel">

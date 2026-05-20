@@ -1,10 +1,24 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { GoalDetailResponse } from "@orca/contracts";
-import { getGoalDetail } from "../api";
+import { getGoalDetail, openEventStream } from "../api";
 import { WorkspaceListPanel } from "./WorkspaceListPanel";
 import { SessionsPanel } from "./sessions/SessionsPanel";
 import { MemoryPanel } from "./memory/MemoryPanel";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
+
+const MEMORY_ITEM_EVENTS = new Set([
+  "memory.item.created",
+  "memory.item.updated",
+  "memory.item.promoted",
+  "memory.item.archived",
+]);
+
+const DECISION_EVENTS = new Set([
+  "decision.created",
+  "decision.updated",
+  "decision.confirmed",
+  "decision.archived",
+]);
 
 type Props = {
   goalId: string;
@@ -16,6 +30,11 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
   const [detail, setDetail] = useState<GoalDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [memoryRefreshKey, setMemoryRefreshKey] = useState(0);
+  const [decisionsRefreshKey, setDecisionsRefreshKey] = useState(0);
+  const [summaryRefreshKey, setSummaryRefreshKey] = useState(0);
+  const [sessionsRefreshKey, setSessionsRefreshKey] = useState(0);
+  const hasConnectedRef = useRef(false);
 
   const loadDetail = useCallback(async () => {
     setLoading(true);
@@ -33,6 +52,36 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
   useEffect(() => {
     void loadDetail();
   }, [loadDetail, refreshKey]);
+
+  useEffect(() => {
+    hasConnectedRef.current = false;
+    const stream = openEventStream({
+      onEvent(event) {
+        if (event.goalId === null || event.goalId !== goalId) return;
+        if (event.type === "memory.extraction.completed") {
+          setMemoryRefreshKey((k) => k + 1);
+          setDecisionsRefreshKey((k) => k + 1);
+          setSummaryRefreshKey((k) => k + 1);
+        } else if (MEMORY_ITEM_EVENTS.has(event.type)) {
+          setMemoryRefreshKey((k) => k + 1);
+        } else if (DECISION_EVENTS.has(event.type)) {
+          setDecisionsRefreshKey((k) => k + 1);
+        }
+      },
+      onStatus(status) {
+        if (status === "open") {
+          if (hasConnectedRef.current) {
+            setMemoryRefreshKey((k) => k + 1);
+            setDecisionsRefreshKey((k) => k + 1);
+            setSummaryRefreshKey((k) => k + 1);
+            setSessionsRefreshKey((k) => k + 1);
+          }
+          hasConnectedRef.current = true;
+        }
+      },
+    });
+    return () => stream.close();
+  }, [goalId]);
 
   if (loading && !detail) {
     return (
@@ -120,11 +169,16 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           onChanged={() => void loadDetail()}
         />
 
-        <SessionsPanel goalId={goalId} workspaces={workspaces} />
+        <SessionsPanel
+          goalId={goalId}
+          workspaces={workspaces}
+          sessionsRefreshKey={sessionsRefreshKey}
+          summaryRefreshKey={summaryRefreshKey}
+        />
 
-        <MemoryPanel goalId={goalId} />
+        <MemoryPanel goalId={goalId} refreshKey={memoryRefreshKey} />
 
-        <DecisionsPanel goalId={goalId} />
+        <DecisionsPanel goalId={goalId} refreshKey={decisionsRefreshKey} />
       </div>
     </div>
   );

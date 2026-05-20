@@ -30,7 +30,7 @@ export interface SessionsPanelState {
   handleExtract(sessionId: string): Promise<void>;
 }
 
-export function useSessionsPanel(goalId: string): SessionsPanelState {
+export function useSessionsPanel(goalId: string, sessionsRefreshKey = 0): SessionsPanelState {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +50,7 @@ export function useSessionsPanel(goalId: string): SessionsPanelState {
 
   useEffect(() => {
     refresh();
-  }, [refresh]);
+  }, [refresh, sessionsRefreshKey]);
 
   useEffect(() => {
     const stream = openEventStream({

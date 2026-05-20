@@ -5,11 +5,12 @@ import { DecisionEditModal, type DecisionSaveData } from "./DecisionEditModal";
 
 type Props = {
   goalId: string;
+  refreshKey?: number;
 };
 
 type EditTarget = "new" | GoalDecision;
 
-export function DecisionsPanel({ goalId }: Props) {
+export function DecisionsPanel({ goalId, refreshKey = 0 }: Props) {
   const [items, setItems] = useState<GoalDecision[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +33,7 @@ export function DecisionsPanel({ goalId }: Props) {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   async function handleSave(data: DecisionSaveData) {
     if (editTarget === "new") {
