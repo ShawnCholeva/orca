@@ -25,26 +25,17 @@ function apiError(code: string, message: string): { error: { code: string; messa
   return { error: { code, message } };
 }
 
-function determineTrigger(
-  db: Database.Database,
-  goalId: string,
-  adapterId: string,
-  role: string,
-  replacePackageId: string | null
-): string {
-  if (replacePackageId !== null) return 'regenerate';
-  const row = db
-    .prepare(
-      `SELECT status FROM context_assemblies
-       WHERE goal_id = ? AND adapter_id = ? AND role = ?
-       ORDER BY requested_at DESC LIMIT 1`
-    )
-    .get(goalId, adapterId, role) as { status: string } | undefined;
-  return row?.status === 'failed' ? 'retry' : 'prepare';
-}
-
 export function registerContextRoutes(server: FastifyInstance, deps: ContextRouteDeps): void {
   const { db, bus, assembler, adapterRegistry } = deps;
+
+  const stmtGetGoal = db.prepare<[string], { id: string; archived_at: string | null }>(
+    'SELECT id, archived_at FROM goals WHERE id = ?'
+  );
+  const stmtGetTrigger = db.prepare<[string, string, string], { status: string }>(
+    `SELECT status FROM context_assemblies
+     WHERE goal_id = ? AND adapter_id = ? AND role = ?
+     ORDER BY requested_at DESC LIMIT 1`
+  );
 
   server.post('/v1/goals/:goalId/context-packages', async (request, reply) => {
     const { goalId } = request.params as { goalId: string };
@@ -57,10 +48,7 @@ export function registerContextRoutes(server: FastifyInstance, deps: ContextRout
 
     const { adapterId, role, objective, workspaceId, replacePackageId } = parsed.data;
 
-    const goalRow = db
-      .prepare('SELECT id, archived_at FROM goals WHERE id = ?')
-      .get(goalId) as { id: string; archived_at: string | null } | undefined;
-
+    const goalRow = stmtGetGoal.get(goalId);
     if (!goalRow) {
       reply.status(404);
       return apiError('goal_not_found', `Goal not found: ${goalId}`);
@@ -94,7 +82,13 @@ export function registerContextRoutes(server: FastifyInstance, deps: ContextRout
       }
     }
 
-    const trigger = determineTrigger(db, goalId, adapterId, role, replacePackageId ?? null);
+    let trigger: string;
+    if (replacePackageId !== undefined) {
+      trigger = 'regenerate';
+    } else {
+      const triggerRow = stmtGetTrigger.get(goalId, adapterId, role);
+      trigger = triggerRow?.status === 'failed' ? 'retry' : 'prepare';
+    }
 
     const result = requestContextPackage(
       { db, bus, assembler },
@@ -109,7 +103,7 @@ export function registerContextRoutes(server: FastifyInstance, deps: ContextRout
       }
     );
 
-    const httpStatus = result.reused ? 200 : result.assembly.status === 'failed' ? 200 : 201;
+    const httpStatus = result.reused || result.assembly.status === 'failed' ? 200 : 201;
     reply.status(httpStatus);
     return CreateContextPackageResponse.parse({
       package: result.package,
