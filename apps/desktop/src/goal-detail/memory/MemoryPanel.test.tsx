@@ -39,6 +39,8 @@ function mockApi(overrides: Record<string, unknown> = {}) {
     listGoalMemory: vi.fn().mockResolvedValue([]),
     createGoalMemory: vi.fn().mockResolvedValue(makeMemoryItem()),
     patchMemoryItem: vi.fn().mockResolvedValue(makeMemoryItem()),
+    toErrorMessage: (err: unknown, fallback: string) =>
+      err instanceof Error ? err.message : fallback,
     ApiError: class ApiError extends Error {
       code: string | undefined;
       constructor(message: string, _cause?: unknown, code?: string) {

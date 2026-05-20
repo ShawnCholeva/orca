@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import type { GoalMemoryItem } from "@orca/contracts";
-import { listGoalMemory, createGoalMemory, patchMemoryItem } from "../../api";
+import { listGoalMemory, createGoalMemory, patchMemoryItem, toErrorMessage } from "../../api";
 import { MemoryEditModal, type MemorySaveData } from "./MemoryEditModal";
 
 type Props = {
@@ -24,7 +24,7 @@ export function MemoryPanel({ goalId }: Props) {
       const fetched = await listGoalMemory(goalId, { includeArchived: true });
       setItems(fetched);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load memory.");
+      setError(toErrorMessage(err, "Failed to load memory."));
     } finally {
       setLoading(false);
     }
@@ -35,9 +35,9 @@ export function MemoryPanel({ goalId }: Props) {
   }, [load]);
 
   async function handleSave(data: MemorySaveData) {
-    if (!editTarget || editTarget === "new") {
+    if (editTarget === "new") {
       await createGoalMemory(goalId, data);
-    } else {
+    } else if (editTarget) {
       await patchMemoryItem(editTarget.id, {
         type: data.type,
         content: data.content,
@@ -48,23 +48,13 @@ export function MemoryPanel({ goalId }: Props) {
     await load();
   }
 
-  async function handlePromote(item: GoalMemoryItem) {
+  async function handleStatusPatch(item: GoalMemoryItem, status: "promoted" | "archived") {
     setActionError(null);
     try {
-      await patchMemoryItem(item.id, { status: "promoted" });
+      await patchMemoryItem(item.id, { status });
       await load();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Action failed.");
-    }
-  }
-
-  async function handleArchive(item: GoalMemoryItem) {
-    setActionError(null);
-    try {
-      await patchMemoryItem(item.id, { status: "archived" });
-      await load();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Action failed.");
+      setActionError(toErrorMessage(err, "Action failed."));
     }
   }
 
@@ -121,8 +111,8 @@ export function MemoryPanel({ goalId }: Props) {
               key={item.id}
               item={item}
               onEdit={() => setEditTarget(item)}
-              onPromote={() => void handlePromote(item)}
-              onArchive={() => void handleArchive(item)}
+              onPromote={() => void handleStatusPatch(item, "promoted")}
+              onArchive={() => void handleStatusPatch(item, "archived")}
             />
           ))}
         </ul>
@@ -141,7 +131,7 @@ export function MemoryPanel({ goalId }: Props) {
       {editTarget !== null && (
         <MemoryEditModal
           item={editTarget === "new" ? null : editTarget}
-          onSave={(data) => handleSave(data)}
+          onSave={handleSave}
           onClose={() => setEditTarget(null)}
         />
       )}

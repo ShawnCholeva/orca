@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { GoalMemoryItem, GoalMemoryType } from "@orca/contracts";
+import { toErrorMessage } from "../../api";
 
 const MEMORY_TYPES: GoalMemoryType[] = [
   "constraint",
@@ -27,9 +28,9 @@ type Props = {
 export function MemoryEditModal({ item, onSave, onClose }: Props) {
   const [type, setType] = useState<GoalMemoryType>(item?.type ?? "note");
   const [content, setContent] = useState(item?.content ?? "");
-  const initialStatus: "candidate" | "promoted" =
-    item?.status === "promoted" ? "promoted" : "candidate";
-  const [status, setStatus] = useState<"candidate" | "promoted">(initialStatus);
+  const [status, setStatus] = useState<"candidate" | "promoted">(
+    item?.status === "promoted" ? "promoted" : "candidate",
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +46,7 @@ export function MemoryEditModal({ item, onSave, onClose }: Props) {
     try {
       await onSave({ type, content: trimmed, status });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed.");
+      setError(toErrorMessage(err, "Save failed."));
       setSaving(false);
     }
   }
