@@ -65,21 +65,15 @@ export class ContextProjectionError extends Error {
 const SourcesSchema = z.array(ContextSourceRef);
 const WarningsSchema = z.array(z.string());
 
+function parseJsonField<T>(schema: z.ZodType<T>, json: string, field: string): T {
+  try {
+    return schema.parse(JSON.parse(json));
+  } catch (err) {
+    throw new ContextProjectionError(field, err instanceof Error ? err.message : String(err));
+  }
+}
+
 function rowToContextPackage(row: ContextPackageDbRow): ContextPackage {
-  let sources: z.infer<typeof SourcesSchema>;
-  try {
-    sources = SourcesSchema.parse(JSON.parse(row.sources_json));
-  } catch (err) {
-    throw new ContextProjectionError('sources_json', err instanceof Error ? err.message : String(err));
-  }
-
-  let warnings: string[];
-  try {
-    warnings = WarningsSchema.parse(JSON.parse(row.warnings_json));
-  } catch (err) {
-    throw new ContextProjectionError('warnings_json', err instanceof Error ? err.message : String(err));
-  }
-
   return ContextPackage.parse({
     id: row.id,
     goalId: row.goal_id,
@@ -95,8 +89,8 @@ function rowToContextPackage(row: ContextPackageDbRow): ContextPackage {
     truncated: row.truncated !== 0,
     sparse: row.sparse !== 0,
     sourceCount: row.source_count,
-    sources,
-    warnings,
+    sources: parseJsonField(SourcesSchema, row.sources_json, 'sources_json'),
+    warnings: parseJsonField(WarningsSchema, row.warnings_json, 'warnings_json'),
     sourceFingerprint: row.source_fingerprint,
     assemblerVersion: row.assembler_version,
     createdAt: row.created_at,
@@ -133,6 +127,64 @@ const PKG_COLS = `id, goal_id, supersedes_package_id, adapter_id, workspace_id, 
 const ASM_COLS = `id, goal_id, package_id, replace_package_id, adapter_id, workspace_id, role,
   objective_hash, source_fingerprint, assembler_version, request_fingerprint,
   status, trigger, failure_code, failure_message, requested_at, started_at, finished_at`;
+
+let _db: Database.Database | null = null;
+let _stmts: {
+  insertPkg: Database.Statement;
+  insertAsm: Database.Statement;
+  updateAsmStarted: Database.Statement;
+  updateAsmSucceeded: Database.Statement;
+  updateAsmFailed: Database.Statement;
+  getPkgById: Database.Statement;
+  getActiveAsmByFp: Database.Statement;
+  setSessionPkgId: Database.Statement;
+} | null = null;
+
+function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
+  if (db !== _db) {
+    _db = db;
+    _stmts = {
+      insertPkg: db.prepare(
+        `INSERT INTO context_packages (
+          id, goal_id, supersedes_package_id, adapter_id, workspace_id, role, objective, status,
+          rendered_context, rendered_bytes, estimated_tokens, truncated, sparse, source_count,
+          sources_json, warnings_json, source_fingerprint, assembler_version, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ),
+      insertAsm: db.prepare(
+        `INSERT INTO context_assemblies (
+          id, goal_id, package_id, replace_package_id, adapter_id, workspace_id, role,
+          objective_hash, source_fingerprint, assembler_version, request_fingerprint,
+          status, trigger, failure_code, failure_message, requested_at, started_at, finished_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ),
+      updateAsmStarted: db.prepare(
+        `UPDATE context_assemblies SET status = 'running', started_at = ? WHERE id = ?`
+      ),
+      updateAsmSucceeded: db.prepare(
+        `UPDATE context_assemblies SET status = 'succeeded', package_id = ?, finished_at = ? WHERE id = ?`
+      ),
+      updateAsmFailed: db.prepare(
+        `UPDATE context_assemblies SET status = 'failed', failure_code = ?, failure_message = ?, finished_at = ? WHERE id = ?`
+      ),
+      getPkgById: db.prepare(`SELECT ${PKG_COLS} FROM context_packages WHERE id = ?`),
+      getActiveAsmByFp: db.prepare(
+        `SELECT ${ASM_COLS} FROM context_assemblies
+         WHERE goal_id = ? AND request_fingerprint = ? AND status IN ('pending', 'running', 'succeeded')
+         LIMIT 1`
+      ),
+      setSessionPkgId: db.prepare(
+        `UPDATE sessions SET context_package_id = ? WHERE id = ?`
+      ),
+    };
+  }
+  return _stmts!;
+}
+
+export function resetPreparedStatements(): void {
+  _db = null;
+  _stmts = null;
+}
 
 export interface InsertContextPackageInput {
   id: string;
@@ -178,13 +230,8 @@ export interface InsertContextAssemblyInput {
 }
 
 export function insertContextPackage(db: Database.Database, input: InsertContextPackageInput): void {
-  db.prepare(
-    `INSERT INTO context_packages (
-      id, goal_id, supersedes_package_id, adapter_id, workspace_id, role, objective, status,
-      rendered_context, rendered_bytes, estimated_tokens, truncated, sparse, source_count,
-      sources_json, warnings_json, source_fingerprint, assembler_version, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
+  const stmts = ensureStmts(db);
+  stmts.insertPkg.run(
     input.id,
     input.goalId,
     input.supersedesPackageId,
@@ -208,13 +255,8 @@ export function insertContextPackage(db: Database.Database, input: InsertContext
 }
 
 export function insertContextAssembly(db: Database.Database, input: InsertContextAssemblyInput): void {
-  db.prepare(
-    `INSERT INTO context_assemblies (
-      id, goal_id, package_id, replace_package_id, adapter_id, workspace_id, role,
-      objective_hash, source_fingerprint, assembler_version, request_fingerprint,
-      status, trigger, failure_code, failure_message, requested_at, started_at, finished_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
+  const stmts = ensureStmts(db);
+  stmts.insertAsm.run(
     input.id,
     input.goalId,
     input.packageId,
@@ -237,9 +279,7 @@ export function insertContextAssembly(db: Database.Database, input: InsertContex
 }
 
 export function updateAssemblyStarted(db: Database.Database, id: string, startedAt: string): void {
-  db.prepare(
-    `UPDATE context_assemblies SET status = 'running', started_at = ? WHERE id = ?`
-  ).run(startedAt, id);
+  ensureStmts(db).updateAsmStarted.run(startedAt, id);
 }
 
 export function updateAssemblySucceeded(
@@ -247,9 +287,7 @@ export function updateAssemblySucceeded(
   id: string,
   opts: { packageId: string; finishedAt: string }
 ): void {
-  db.prepare(
-    `UPDATE context_assemblies SET status = 'succeeded', package_id = ?, finished_at = ? WHERE id = ?`
-  ).run(opts.packageId, opts.finishedAt, id);
+  ensureStmts(db).updateAsmSucceeded.run(opts.packageId, opts.finishedAt, id);
 }
 
 export function updateAssemblyFailed(
@@ -257,15 +295,11 @@ export function updateAssemblyFailed(
   id: string,
   opts: { failureCode: ContextAssemblyFailureCode; failureMessage: string | null; finishedAt: string }
 ): void {
-  db.prepare(
-    `UPDATE context_assemblies SET status = 'failed', failure_code = ?, failure_message = ?, finished_at = ? WHERE id = ?`
-  ).run(opts.failureCode, opts.failureMessage, opts.finishedAt, id);
+  ensureStmts(db).updateAsmFailed.run(opts.failureCode, opts.failureMessage, opts.finishedAt, id);
 }
 
 export function getContextPackageById(db: Database.Database, id: string): ContextPackage | null {
-  const row = db
-    .prepare(`SELECT ${PKG_COLS} FROM context_packages WHERE id = ?`)
-    .get(id) as ContextPackageDbRow | undefined;
+  const row = ensureStmts(db).getPkgById.get(id) as ContextPackageDbRow | undefined;
   if (!row) return null;
   return rowToContextPackage(row);
 }
@@ -326,13 +360,7 @@ export function getActiveAssemblyByFingerprint(
   goalId: string,
   requestFingerprint: string
 ): ContextAssembly | null {
-  const row = db
-    .prepare(
-      `SELECT ${ASM_COLS} FROM context_assemblies
-       WHERE goal_id = ? AND request_fingerprint = ? AND status IN ('pending', 'running', 'succeeded')
-       LIMIT 1`
-    )
-    .get(goalId, requestFingerprint) as ContextAssemblyDbRow | undefined;
+  const row = ensureStmts(db).getActiveAsmByFp.get(goalId, requestFingerprint) as ContextAssemblyDbRow | undefined;
   if (!row) return null;
   return rowToContextAssembly(row);
 }
@@ -356,5 +384,5 @@ export function setSessionContextPackageId(
   sessionId: string,
   packageId: string
 ): void {
-  db.prepare('UPDATE sessions SET context_package_id = ? WHERE id = ?').run(packageId, sessionId);
+  ensureStmts(db).setSessionPkgId.run(packageId, sessionId);
 }
