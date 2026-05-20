@@ -726,6 +726,7 @@ export function createServer(
           adapterRegistry,
           sessionOutputStore,
           sessionRuntime,
+          dataDir: config.dataDir,
           onTerminalState: extractionRunner
             ? (sid) => tryEnqueueForTerminalSession(
                 { db: getDatabase(), bus: eventBus, outputStore: sessionOutputStore, runner: extractionRunner },

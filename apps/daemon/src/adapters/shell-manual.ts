@@ -1,4 +1,4 @@
-import type { AgentAdapter, AdapterSpawnInput, AdapterSpawnResult, AdapterAvailability } from "./types.js";
+import type { AgentAdapter, AdapterSpawnInput, AdapterSpawnResult, AdapterAvailability, AdapterContextDelivery } from "./types.js";
 import { buildSpawnEnv } from "./types.js";
 import { resolveBinary } from "./resolve.js";
 import type { ResolveFn } from "./resolve.js";
@@ -6,6 +6,7 @@ import type { ResolveFn } from "./resolve.js";
 export class ShellManualAdapter implements AgentAdapter {
   readonly id = "shell-manual" as const;
   readonly title = "Shell (Manual)";
+  readonly contextDelivery: AdapterContextDelivery = { mode: 'initial_input', maxBytes: 32768 };
 
   private readonly resolveFn: ResolveFn;
 

@@ -1,5 +1,12 @@
 import type { AdapterId } from "@orca/contracts";
 
+export interface AdapterContextDelivery {
+  mode: 'initial_input' | 'context_file' | 'preview_only';
+  contextFileEnvVar?: string;
+  contextFileArgFlag?: string;
+  maxBytes: number;
+}
+
 export interface AdapterSpawnInput {
   goalId: string;
   sessionId: string;
@@ -23,6 +30,7 @@ export type AdapterAvailability =
 export interface AgentAdapter {
   id: AdapterId;
   title: string;
+  contextDelivery: AdapterContextDelivery;
   resolveSpawn(input: AdapterSpawnInput): Promise<AdapterSpawnResult>;
   probeAvailability(): Promise<AdapterAvailability>;
 }

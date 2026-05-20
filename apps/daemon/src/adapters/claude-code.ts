@@ -1,4 +1,4 @@
-import type { AgentAdapter, AdapterSpawnInput, AdapterSpawnResult, AdapterAvailability } from "./types.js";
+import type { AgentAdapter, AdapterSpawnInput, AdapterSpawnResult, AdapterAvailability, AdapterContextDelivery } from "./types.js";
 import { buildSpawnEnv } from "./types.js";
 import { resolveBinary } from "./resolve.js";
 import type { ResolveFn } from "./resolve.js";
@@ -6,6 +6,8 @@ import type { ResolveFn } from "./resolve.js";
 export class ClaudeCodeAdapter implements AgentAdapter {
   readonly id = "claude-code" as const;
   readonly title = "Claude Code";
+  // preview_only: no verified safe CLI surface for context-file delivery in M6
+  readonly contextDelivery: AdapterContextDelivery = { mode: 'preview_only', maxBytes: 32768 };
 
   private readonly resolveFn: ResolveFn;
 

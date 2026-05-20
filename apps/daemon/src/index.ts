@@ -12,6 +12,7 @@ import { reconcileStaleExtractions } from './extractions/reconciliation.js';
 import { ExtractionRunner } from './extractions/runner.js';
 import { DeterministicExtractor } from './extractions/deterministic-extractor.js';
 import { reconcileStaleAssemblies } from './context/reconcile.js';
+import { sweepOrphanContextFiles } from './sessions/context-delivery.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -38,6 +39,12 @@ async function main(): Promise<void> {
   reconcileSessionsOnBoot(db, eventBus, bootNow);
   reconcileStaleExtractions(db, eventBus, bootNow);
   reconcileStaleAssemblies(db, eventBus, bootNow);
+
+  // Sweep orphan context files for sessions no longer in an active state (best-effort)
+  const activeSessionIds = new Set(
+    (db.prepare('SELECT id FROM sessions WHERE status IN (?, ?)').all('created', 'running') as { id: string }[]).map(r => r.id)
+  );
+  sweepOrphanContextFiles(config.dataDir, (id) => activeSessionIds.has(id)).catch(() => {});
 
   const sessionOutputStore = createSessionOutputStore(db, {
     tailBytes: config.sessionOutputTailBytes,

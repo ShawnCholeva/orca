@@ -4,17 +4,26 @@ import type Database from 'better-sqlite3';
 import type { DomainEvent, DomainEventType } from '@orca/contracts';
 import type { EventBus } from '../events.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
+import type { AdapterContextDelivery } from '../adapters/types.js';
 import type { PtyEvents, PtyHandle, PtyManager } from '../pty/types.js';
 import { getSessionDetail, setSessionStatus } from './projection.js';
 import type { SessionOutputStore } from './output-store.js';
 import {
   CommandNotFoundError,
+  DeliveryUnavailableError,
   SessionNotFoundError,
   SessionNotStoppableError,
   SessionWrongStateError,
   SpawnFailedError,
   WorkspaceUnavailableError,
 } from './errors.js';
+import {
+  checkArgvEnvSafety,
+  deleteContextFile,
+  deliverContextToStdin,
+  getRenderedContextForDelivery,
+  writeContextFile,
+} from './context-delivery.js';
 
 export interface RuntimeCtx {
   db: Database.Database;
@@ -22,6 +31,7 @@ export interface RuntimeCtx {
   adapterRegistry: AdapterRegistry;
   sessionOutputStore: SessionOutputStore;
   onTerminalState?: (sessionId: string, goalId: string) => void;
+  dataDir?: string;
 }
 
 // Minimal WS client interface; ws.WebSocket satisfies this shape.
@@ -169,7 +179,7 @@ export class SessionRuntime {
     sessionId: string,
     opts: { terminalCols: number; terminalRows: number }
   ): Promise<import('@orca/contracts').SessionDetail> {
-    const { db, bus, adapterRegistry, sessionOutputStore, onTerminalState } = ctx;
+    const { db, bus, adapterRegistry, sessionOutputStore, onTerminalState, dataDir } = ctx;
     const { terminalCols, terminalRows } = opts;
     const stmts = ensureStmts(db);
     const now = new Date().toISOString();
@@ -209,6 +219,54 @@ export class SessionRuntime {
       throw new CommandNotFoundError(session.adapterId);
     }
 
+    // Resolve context delivery mode from adapter (defaults to preview_only for stub adapters in tests)
+    const delivery: AdapterContextDelivery =
+      (adapter as { contextDelivery?: AdapterContextDelivery }).contextDelivery ??
+      { mode: 'preview_only' as const, maxBytes: 32768 };
+
+    let deliveryRenderedContext: string | null = null;
+    let contextFilePath: string | null = null;
+
+    if (session.contextPackageId && dataDir && delivery.mode !== 'preview_only') {
+      const renderedContext = getRenderedContextForDelivery(db, session.contextPackageId);
+      if (renderedContext === null) {
+        persistFailure(db, bus, sessionId, session.goalId, 'delivery_unavailable', now, onTerminalState);
+        throw new DeliveryUnavailableError('context package not found at start time');
+      }
+      deliveryRenderedContext = renderedContext;
+
+      // Defensive check: rendered context must not appear in argv or env
+      if (!checkArgvEnvSafety(spawnResult.args, spawnResult.env, renderedContext)) {
+        persistFailure(db, bus, sessionId, session.goalId, 'delivery_unavailable', now, onTerminalState);
+        throw new DeliveryUnavailableError('rendered context found in argv or env');
+      }
+
+      if (delivery.mode === 'context_file') {
+        try {
+          contextFilePath = await writeContextFile(sessionId, dataDir, renderedContext);
+        } catch (err) {
+          persistFailure(db, bus, sessionId, session.goalId, 'delivery_unavailable', now, onTerminalState);
+          throw new DeliveryUnavailableError(
+            `failed to write context file: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+
+        if (delivery.contextFileArgFlag) {
+          spawnResult.args.push(delivery.contextFileArgFlag, contextFilePath);
+        }
+        if (delivery.contextFileEnvVar) {
+          spawnResult.env[delivery.contextFileEnvVar] = contextFilePath;
+        }
+
+        // Post-modification defensive check: path must not coincidentally equal rendered content
+        if (!checkArgvEnvSafety(spawnResult.args, spawnResult.env, renderedContext)) {
+          void deleteContextFile(sessionId, dataDir).catch(() => {});
+          persistFailure(db, bus, sessionId, session.goalId, 'delivery_unavailable', now, onTerminalState);
+          throw new DeliveryUnavailableError('rendered context found in argv or env after delivery setup');
+        }
+      }
+    }
+
     // Spawn-before-event ordering: pid is known before session.started tx commits.
     // If spawn throws, only session.failed is emitted (no session.started).
     let handle: PtyHandle;
@@ -225,6 +283,9 @@ export class SessionRuntime {
       handle = result.handle;
       ptyEvents = result.events;
     } catch (err) {
+      if (contextFilePath && dataDir) {
+        void deleteContextFile(sessionId, dataDir).catch(() => {});
+      }
       const isPtySpawnError = (err as { name?: string }).name === 'PtySpawnError';
       const code = isPtySpawnError
         ? ((err as { code?: string }).code ?? 'spawn_failed')
@@ -256,10 +317,18 @@ export class SessionRuntime {
       })();
     } catch (err) {
       handle.kill('SIGKILL');
+      if (contextFilePath && dataDir) {
+        void deleteContextFile(sessionId, dataDir).catch(() => {});
+      }
       throw err;
     }
 
     bus.publish(startedEvent);
+
+    // Deliver context to PTY stdin for initial_input mode (shell/manual)
+    if (deliveryRenderedContext !== null && delivery.mode === 'initial_input') {
+      deliverContextToStdin(handle, deliveryRenderedContext);
+    }
 
     const slot: HandleSlot = { handle, stopRequested: false, killTimer: null };
     this.handleSlots.set(sessionId, slot);
@@ -279,6 +348,11 @@ export class SessionRuntime {
       this.lastResizeMap.delete(sessionId);
 
       const exitedAt = new Date().toISOString();
+
+      // Best-effort context file cleanup on terminal state
+      if (contextFilePath && dataDir) {
+        void deleteContextFile(sessionId, dataDir).catch(() => {});
+      }
 
       if (wasStopRequested) {
         const payload = { sessionId, goalId: session.goalId, exitCode, exitSignal: signal, reason: 'user_request' };

@@ -32,6 +32,7 @@ export interface StartSessionCtx extends SessionCtx {
   sessionOutputStore: SessionOutputStore;
   sessionRuntime: SessionRuntime;
   onTerminalState?: (sessionId: string, goalId: string) => void;
+  dataDir?: string;
 }
 
 interface GoalRow {
@@ -231,6 +232,7 @@ export async function startSession(
     adapterRegistry: ctx.adapterRegistry,
     sessionOutputStore: ctx.sessionOutputStore,
     onTerminalState: ctx.onTerminalState,
+    dataDir: ctx.dataDir,
   };
   return ctx.sessionRuntime.start(runtimeCtx, sessionId, opts);
 }

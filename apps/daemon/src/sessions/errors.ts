@@ -95,3 +95,10 @@ export class ContextPackageMismatchError extends SessionError {
     this.name = 'ContextPackageMismatchError';
   }
 }
+
+export class DeliveryUnavailableError extends SessionError {
+  constructor(detail: string) {
+    super('delivery_unavailable', `Context delivery unavailable: ${detail}`);
+    this.name = 'DeliveryUnavailableError';
+  }
+}
