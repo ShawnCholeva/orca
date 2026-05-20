@@ -176,7 +176,6 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
     mkdirSync(workspaceDir);
     mkdirSync(dbDir);
 
-    // Collect all events for the end-of-test privacy check.
     const allEvents: DomainEvent[] = [];
     const unsubCollect = eventBus.subscribe((e) => allEvents.push(e));
 
@@ -184,11 +183,9 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
     let b2: BootResult | undefined;
 
     try {
-      // ── Boot 1 ────────────────────────────────────────────────────────────────
       b1 = await boot(dbDir);
       const { baseUrl, outputStore, extractor } = b1;
 
-      // ── Create a refined Goal (triggers seed memory) ──────────────────────────
       const refineResp = await postJson(baseUrl, '/v1/goals/refine', {
         title: 'M5-012 Integration Goal',
         description: [
@@ -218,7 +215,6 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
       const { goal } = CreateGoalResponse.parse(await createGoalResp.json());
       const goalId = goal.id;
 
-      // Seed memory is created atomically with the goal refinement.
       const seedResp = await getJson(baseUrl, `/v1/goals/${goalId}/memory`);
       expect(seedResp.status).toBe(200);
       const { items: seedItems } = ListGoalMemoryResponse.parse(await seedResp.json());
@@ -226,13 +222,11 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
       expect(refinementItems.length).toBeGreaterThanOrEqual(2); // ≥1 constraint + ≥1 criterion
       expect(refinementItems.every((m) => m.status === 'promoted')).toBe(true);
 
-      // ── Get workspace id ──────────────────────────────────────────────────────
       const goalDetailResp = await getJson(baseUrl, `/v1/goals/${goalId}`);
       expect(goalDetailResp.status).toBe(200);
       const { workspaces } = GoalDetailResponse.parse(await goalDetailResp.json());
       const workspaceId = workspaces[0]!.id;
 
-      // ── Create session via API then set to exited (no real PTY) ───────────────
       const createSessionResp = await postJson(baseUrl, `/v1/goals/${goalId}/sessions`, {
         workspaceId,
         adapterId: 'shell-manual',
@@ -242,24 +236,20 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
       const { session } = CreateSessionResponse.parse(await createSessionResp.json());
       const sessionId = session.id;
 
-      // Write a fixture output tail directly into the M4 output store.
       const sessionOutput = Buffer.from(
         'DECISION: Use file-backed SQLite for integration tests to enable restart assertions\n' +
         'All integration tests passed\n'
       );
       outputStore.appendChunk(sessionId, sessionOutput);
 
-      // Set session to terminal state in DB — no PTY spawn needed for extraction.
       const db1 = getDatabase();
       setSessionStatus(db1, sessionId, 'exited', {
         exitCode: 0,
         exitedAt: new Date().toISOString(),
       });
 
-      // Configure the fake extractor to return the fixture output.
       extractor.setOutput(sessionId, FIXTURE_OUTPUT);
 
-      // ── Open Goal → triggers seed backfill (no-op) and enqueue ───────────────
       // Subscribe to bus BEFORE opening the goal so we don't miss the completed event.
       const completedPromise = waitForBusEvent(
         (e) => e.type === 'memory.extraction.completed' && e.goalId === goalId,
@@ -272,7 +262,6 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
       const completedEvent = await completedPromise;
       expect(completedEvent.type).toBe('memory.extraction.completed');
 
-      // ── Assert memory: seed rows + extracted blocker ─────────────────────────
       const memResp = await getJson(baseUrl, `/v1/goals/${goalId}/memory`);
       expect(memResp.status).toBe(200);
       const { items: memItems } = ListGoalMemoryResponse.parse(await memResp.json());
@@ -287,7 +276,6 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
 
       const memCountAfterFirstExtraction = memItems.length;
 
-      // ── Assert decisions ──────────────────────────────────────────────────────
       const decResp = await getJson(baseUrl, `/v1/goals/${goalId}/decisions`);
       expect(decResp.status).toBe(200);
       const { items: decisions } = ListGoalDecisionsResponse.parse(await decResp.json());
@@ -296,26 +284,23 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
       expect(decisions[0]!.confirmationRequired).toBe(true);
       expect(decisions[0]!.title).toBe('Use file-backed SQLite');
 
-      // ── Assert session summary ────────────────────────────────────────────────
       const summaryResp = await getJson(baseUrl, `/v1/sessions/${sessionId}/summary`);
       expect(summaryResp.status).toBe(200);
       const summaryBody = (await summaryResp.json()) as { summary: { headline: string; truncated: boolean } };
       expect(summaryBody.summary.headline).toBe('shell-manual session completed');
       expect(summaryBody.summary.truncated).toBe(false);
 
-      // ── Duplicate extraction: same fingerprint → 200, no new rows ─────────────
       const dupResp = await postJson(baseUrl, `/v1/sessions/${sessionId}/extract-memory`, {});
       expect(dupResp.status).toBe(200);
       const dupBody = ExtractSessionMemoryResponse.parse(await dupResp.json());
       expect(dupBody.extraction.status).toBe('succeeded');
 
       const memAfterDupResp = await getJson(baseUrl, `/v1/goals/${goalId}/memory`);
-      const { items: memAfterDup } = ListGoalMemoryResponse.parse(await memAfterDupResp.json());
-      expect(memAfterDup.length).toBe(memCountAfterFirstExtraction);
+      expect(
+        ListGoalMemoryResponse.parse(await memAfterDupResp.json()).items.length
+      ).toBe(memCountAfterFirstExtraction);
 
-      // ── Failed extraction: append bytes to change fingerprint, extractor throws ──
       extractor.setError(sessionId, 'simulated extractor failure for M5-012 test');
-      // Writing extra bytes changes the source byte window → new fingerprint.
       outputStore.appendChunk(sessionId, Buffer.from(' [extra bytes for new fingerprint]\n'));
 
       const failedPromise = waitForBusEvent(
@@ -330,12 +315,10 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
 
       await failedPromise;
 
-      // Failed extraction must not add or remove memory rows.
       const memAfterFailResp = await getJson(baseUrl, `/v1/goals/${goalId}/memory`);
       const { items: memAfterFail } = ListGoalMemoryResponse.parse(await memAfterFailResp.json());
       expect(memAfterFail.length).toBe(memCountAfterFirstExtraction);
 
-      // ── Retry after failure: same fingerprint now 'failed' → creates new pending ──
       extractor.setOutput(sessionId, FIXTURE_OUTPUT);
 
       const retryCompletedPromise = waitForBusEvent(
@@ -352,24 +335,19 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
       const memAfterRetryResp = await getJson(baseUrl, `/v1/goals/${goalId}/memory`);
       const { items: memAfterRetry } = ListGoalMemoryResponse.parse(await memAfterRetryResp.json());
       expect(memAfterRetry.length).toBe(memCountAfterFirstExtraction);
-      // Original session-sourced row is still present.
       expect(memAfterRetry.filter((m) => m.sourceType === 'session').length).toBe(1);
 
-      // ── Shutdown ──────────────────────────────────────────────────────────────
       await stop(b1.server, b1.runner);
       b1 = undefined;
 
-      // ── Boot 2 (restart) ─────────────────────────────────────────────────────
       b2 = await boot(dbDir);
 
-      // Reconciliation must have cleared any stale pending/running extractions.
       const db2 = getDatabase();
       const staleRows = db2
         .prepare("SELECT id FROM memory_extractions WHERE status IN ('pending', 'running')")
         .all() as { id: string }[];
       expect(staleRows).toHaveLength(0);
 
-      // All committed rows survive restart.
       const memAfterRestartResp = await getJson(b2.baseUrl, `/v1/goals/${goalId}/memory`);
       expect(memAfterRestartResp.status).toBe(200);
       const { items: memAfterRestart } = ListGoalMemoryResponse.parse(await memAfterRestartResp.json());
@@ -390,8 +368,6 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
       await stop(b2.server, b2.runner);
       b2 = undefined;
 
-      // ── Privacy check: no content fields in any emitted event payload ──────────
-      // The spec forbids: content, decisionText, summaryText, outputTail, prompt, response
       const FORBIDDEN_PAYLOAD_KEYS = [
         'content',
         'decisionText',
@@ -415,6 +391,103 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
       unsubCollect();
       if (b1) await stop(b1.server, b1.runner).catch(() => {});
       if (b2) await stop(b2.server, b2.runner).catch(() => {});
+    }
+  });
+});
+
+describe.sequential('M5 privacy redaction integration', () => {
+  it('redacts obvious secrets in persisted summary, memory, and decision rows', async () => {
+    const rootDir = mktemp('orca-m5-redaction-');
+    const workspaceDir = path.join(rootDir, 'workspace');
+    const dbDir = path.join(rootDir, 'daemon-db');
+    mkdirSync(workspaceDir);
+    mkdirSync(dbDir);
+
+    let booted: BootResult | undefined;
+
+    try {
+      booted = await boot(dbDir);
+      const { baseUrl, outputStore, extractor } = booted;
+
+      const createGoalResp = await postJson(baseUrl, '/v1/goals', {
+        title: 'M5 redaction Goal',
+        workspaces: [{ inputPath: workspaceDir }],
+      });
+      expect(createGoalResp.status).toBe(201);
+      const { goal } = CreateGoalResponse.parse(await createGoalResp.json());
+
+      const goalDetailResp = await getJson(baseUrl, `/v1/goals/${goal.id}`);
+      expect(goalDetailResp.status).toBe(200);
+      const { workspaces } = GoalDetailResponse.parse(await goalDetailResp.json());
+
+      const createSessionResp = await postJson(baseUrl, `/v1/goals/${goal.id}/sessions`, {
+        workspaceId: workspaces[0]!.id,
+        adapterId: 'shell-manual',
+        title: 'M5 Redaction Test Session',
+      });
+      expect(createSessionResp.status).toBe(201);
+      const { session } = CreateSessionResponse.parse(await createSessionResp.json());
+
+      outputStore.appendChunk(session.id, Buffer.from('completed\n'));
+      setSessionStatus(getDatabase(), session.id, 'exited', {
+        exitCode: 0,
+        exitedAt: new Date().toISOString(),
+      });
+
+      extractor.setOutput(session.id, {
+        summary: {
+          headline: 'token=secret headline',
+          text: 'password=abc api_key=xyz authorization: bearer TOKEN',
+          truncated: false,
+        },
+        memoryCandidates: [
+          {
+            type: 'note',
+            content: 'token=memory-secret',
+          },
+        ],
+        decisionCandidates: [
+          {
+            title: 'api_key=decision-title',
+            decisionText: 'authorization: bearer DECISIONTOKEN',
+            rationale: 'password=decision-rationale',
+            confirmationRequired: true,
+          },
+        ],
+      });
+
+      const completedPromise = waitForBusEvent(
+        (e) => e.type === 'memory.extraction.completed' && e.goalId === goal.id,
+        5000
+      );
+
+      const extractResp = await postJson(baseUrl, `/v1/sessions/${session.id}/extract-memory`, {});
+      expect(extractResp.status).toBe(201);
+      await completedPromise;
+
+      const summaryResp = await getJson(baseUrl, `/v1/sessions/${session.id}/summary`);
+      expect(summaryResp.status).toBe(200);
+      const summaryBody = (await summaryResp.json()) as {
+        summary: { headline: string; summaryText: string };
+      };
+      expect(summaryBody.summary.headline).toBe('token=[redacted] headline');
+      expect(summaryBody.summary.summaryText).toBe(
+        'password=[redacted] api_key=[redacted] authorization: bearer [redacted]'
+      );
+
+      const memoryResp = await getJson(baseUrl, `/v1/goals/${goal.id}/memory`);
+      const { items: memoryItems } = ListGoalMemoryResponse.parse(await memoryResp.json());
+      expect(memoryItems.find((item) => item.sourceType === 'session')?.content).toBe(
+        'token=[redacted]'
+      );
+
+      const decisionsResp = await getJson(baseUrl, `/v1/goals/${goal.id}/decisions`);
+      const { items: decisions } = ListGoalDecisionsResponse.parse(await decisionsResp.json());
+      expect(decisions[0]!.title).toBe('api_key=[redacted]');
+      expect(decisions[0]!.decisionText).toBe('authorization: bearer [redacted]');
+      expect(decisions[0]!.rationale).toBe('password=[redacted]');
+    } finally {
+      if (booted) await stop(booted.server, booted.runner).catch(() => {});
     }
   });
 });

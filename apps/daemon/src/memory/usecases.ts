@@ -243,14 +243,16 @@ export function patchMemoryItem(ctx: MemoryCtx, id: string, patch: PatchMemoryIn
         };
       };
 
-      toPublish.push(
-        emitEvent('memory.item.updated', {
-          memoryItemId: id,
-          goalId: current.goalId,
-          type: patch.type ?? current.type,
-          status: newStatus,
-        })
-      );
+      if (newStatus !== 'archived') {
+        toPublish.push(
+          emitEvent('memory.item.updated', {
+            memoryItemId: id,
+            goalId: current.goalId,
+            type: patch.type ?? current.type,
+            status: newStatus,
+          })
+        );
+      }
 
       if (newStatus === 'promoted' && current.status !== 'promoted') {
         toPublish.push(

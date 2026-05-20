@@ -167,6 +167,21 @@ describe('createDecision', () => {
 
     expect(item.confirmationRequired).toBe(true);
   });
+
+  it('normalizes and redacts obvious secrets in manual decision fields', () => {
+    seedGoal(db, 'goal-1');
+
+    const item = createDecision(ctx, {
+      goalId: 'goal-1',
+      title: '  token=title-secret   title  ',
+      decisionText: 'password=text-secret   api_key=key-secret',
+      rationale: 'authorization: bearer RATIONALESECRET',
+    });
+
+    expect(item.title).toBe('token=[redacted] title');
+    expect(item.decisionText).toBe('password=[redacted] api_key=[redacted]');
+    expect(item.rationale).toBe('authorization: bearer [redacted]');
+  });
 });
 
 describe('patchDecision', () => {
@@ -188,7 +203,7 @@ describe('patchDecision', () => {
     expect(bus.captured[1]!.type).toBe('decision.confirmed');
   });
 
-  it('patches proposed → archived and emits updated + archived events', () => {
+  it('patches proposed → archived and emits archived event only', () => {
     seedGoal(db, 'goal-1');
     const item = createDecision(ctx, {
       goalId: 'goal-1',
@@ -201,10 +216,10 @@ describe('patchDecision', () => {
 
     expect(updated.status).toBe('archived');
     expect(updated.archivedAt).toBe('2026-05-01T00:00:00.000Z');
-    expect(bus.captured.map((e) => e.type)).toEqual(['decision.updated', 'decision.archived']);
+    expect(bus.captured.map((e) => e.type)).toEqual(['decision.archived']);
   });
 
-  it('patches confirmed → archived and emits updated + archived events', () => {
+  it('patches confirmed → archived and emits archived event only', () => {
     seedGoal(db, 'goal-1');
     const item = createDecision(ctx, {
       goalId: 'goal-1',
@@ -216,7 +231,7 @@ describe('patchDecision', () => {
 
     const updated = patchDecision(ctx, item.id, { status: 'archived' });
     expect(updated.status).toBe('archived');
-    expect(bus.captured.map((e) => e.type)).toEqual(['decision.updated', 'decision.archived']);
+    expect(bus.captured.map((e) => e.type)).toEqual(['decision.archived']);
   });
 
   it('rejects archived → proposed with InvalidDecisionTransitionError', () => {
@@ -270,13 +285,32 @@ describe('patchDecision', () => {
     expect(bus.captured[0]!.type).toBe('decision.updated');
   });
 
+  it('normalizes and redacts obvious secrets when patching manual decision fields', () => {
+    seedGoal(db, 'goal-1');
+    const item = createDecision(ctx, {
+      goalId: 'goal-1',
+      title: 'Old title',
+      decisionText: 'Old text',
+    });
+
+    const updated = patchDecision(ctx, item.id, {
+      title: 'token=patched-title',
+      decisionText: 'password=patched-text',
+      rationale: 'api_key=patched-rationale',
+    });
+
+    expect(updated.title).toBe('token=[redacted]');
+    expect(updated.decisionText).toBe('password=[redacted]');
+    expect(updated.rationale).toBe('api_key=[redacted]');
+  });
+
   it('throws DecisionNotFoundError for unknown id', () => {
     expect(() => patchDecision(ctx, 'nonexistent', { status: 'confirmed' })).toThrow(
       DecisionNotFoundError
     );
   });
 
-  it('list includes archived decisions', () => {
+  it('list hides archived decisions by default', () => {
     seedGoal(db, 'goal-1');
     const item = createDecision(ctx, {
       goalId: 'goal-1',
@@ -286,6 +320,19 @@ describe('patchDecision', () => {
     patchDecision(ctx, item.id, { status: 'archived' });
 
     const decisions = listDecisionsByGoal(db, 'goal-1');
+    expect(decisions).toHaveLength(0);
+  });
+
+  it('list includes archived decisions when requested', () => {
+    seedGoal(db, 'goal-1');
+    const item = createDecision(ctx, {
+      goalId: 'goal-1',
+      title: 'Use SQLite',
+      decisionText: 'SQLite only',
+    });
+    patchDecision(ctx, item.id, { status: 'archived' });
+
+    const decisions = listDecisionsByGoal(db, 'goal-1', { includeArchived: true });
     expect(decisions).toHaveLength(1);
     expect(decisions[0]!.status).toBe('archived');
   });

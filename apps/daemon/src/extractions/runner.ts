@@ -152,6 +152,14 @@ export class ExtractionRunner {
       });
     } catch (err) {
       console.info('[runner] extraction %s failed: commit error: %s', extractionId, (err as Error).message);
+      try {
+        commitExtractionFailure(commitCtx, extractionId, {
+          failureCode: 'internal_error',
+          failureMessage: null,
+        });
+      } catch {
+        // The extraction may already be terminal; reconciliation will handle any stale row.
+      }
     }
   }
 }

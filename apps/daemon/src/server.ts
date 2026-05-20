@@ -123,6 +123,7 @@ import {
 } from './decisions/usecases.js';
 import {
   manualExtractEnqueue,
+  GoalArchivedForExtractionError,
   SessionArchivedForExtractionError,
   SessionNotFoundForExtractionError,
   SessionNotTerminalError,
@@ -508,7 +509,10 @@ export function createServer(
     '/v1/goals/:goalId/decisions',
     async (request): Promise<ListGoalDecisionsResponse> => {
       const { goalId } = request.params as { goalId: string };
-      const items = listDecisionsByGoal(db, goalId);
+      const { includeArchived } = request.query as { includeArchived?: string };
+      const items = listDecisionsByGoal(db, goalId, {
+        includeArchived: includeArchived === '1',
+      });
       return { items };
     }
   );
@@ -677,6 +681,10 @@ export function createServer(
         return apiError(error.code, error.message);
       }
       if (error instanceof SessionArchivedForExtractionError) {
+        reply.status(409);
+        return apiError(error.code, error.message);
+      }
+      if (error instanceof GoalArchivedForExtractionError) {
         reply.status(409);
         return apiError(error.code, error.message);
       }

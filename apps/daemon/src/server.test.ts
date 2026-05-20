@@ -1593,6 +1593,46 @@ describe('M4-006 session and adapter routes', () => {
     expect(decisionEvents).toHaveLength(1);
     expect(decisionEvents[0]!.goalId).toBe(goalId);
   });
+
+  it('GET /v1/goals/:goalId/decisions hides archived decisions unless includeArchived=1', async () => {
+    const goalId = await createGoalForTest();
+    const activeRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/decisions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'Active', decisionText: 'Keep this visible.' },
+    });
+    const archivedRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/decisions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'Archived', decisionText: 'Hide this by default.' },
+    });
+    const archived = (JSON.parse(archivedRes.body) as { item: GoalDecision }).item;
+
+    await server.inject({
+      method: 'PATCH',
+      url: `/v1/decisions/${archived.id}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { status: 'archived' },
+    });
+
+    expect(activeRes.statusCode).toBe(201);
+
+    const defaultList = await server.inject({
+      method: 'GET',
+      url: `/v1/goals/${goalId}/decisions`,
+      headers: AUTH_HEADERS,
+    });
+    expect(ListGoalDecisionsResponse.parse(JSON.parse(defaultList.body)).items).toHaveLength(1);
+
+    const archivedList = await server.inject({
+      method: 'GET',
+      url: `/v1/goals/${goalId}/decisions?includeArchived=1`,
+      headers: AUTH_HEADERS,
+    });
+    expect(ListGoalDecisionsResponse.parse(JSON.parse(archivedList.body)).items).toHaveLength(2);
+  });
 });
 
 describe('M5-011 summary and extract-memory routes', () => {
@@ -1782,6 +1822,28 @@ describe('M5-011 summary and extract-memory routes', () => {
 
     expect(response.statusCode).toBe(409);
     expect((JSON.parse(response.body) as { error: { code: string } }).error.code).toBe('session_not_terminal');
+  });
+
+  it('POST /v1/sessions/:sessionId/extract-memory returns 409 for an archived goal', async () => {
+    const sessionId = await createSession('archived-goal-session');
+    appendOutput(sessionId, 'DECISION: keep archived goals stable\n');
+    markSessionTerminal(sessionId);
+
+    const archiveResponse = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/archive`,
+      headers: AUTH_HEADERS,
+    });
+    expect(archiveResponse.statusCode).toBe(200);
+
+    const response = await server.inject({
+      method: 'POST',
+      url: `/v1/sessions/${sessionId}/extract-memory`,
+      headers: AUTH_HEADERS,
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect((JSON.parse(response.body) as { error: { code: string } }).error.code).toBe('goal_archived');
   });
 
   it('POST /v1/sessions/:sessionId/extract-memory is idempotent for the current fingerprint', async () => {

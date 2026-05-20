@@ -10,13 +10,14 @@ Level 5 Specification
 Milestone 1 implementation plan
 Milestone 2 implementation plan
 Milestone 3 implementation plan
-Milestone 4 implementation plan
+Milestone 4 implementation plan and final validation notes
+Milestone 5 architecture, implementation plan, and final validation notes
 
 Your task is NOT to immediately generate code.
 
 Your task is to produce:
 
-an implementation architecture and milestone execution plan for Milestone 5 of the MVP.
+an implementation architecture and milestone execution plan for Milestone 6 of the MVP.
 
 The system is:
 
@@ -29,7 +30,7 @@ skill-oriented
 Goal-scoped
 Workspace-aware
 PTY/session-based from Milestone 4
-memory/reasoning-centric in this milestone
+memory/decision-aware from Milestone 5
 optimized for orchestration and token efficiency
 
 The implementation plan must optimize for:
@@ -41,34 +42,34 @@ token efficiency
 maintainability
 operational simplicity
 avoiding premature complexity
-preserving future Level 4 and Level 5 evolution
+preserving future Milestone 7, Level 4, and Level 5 evolution
 
 The implementation plan should NOT overengineer the MVP.
 
 We are currently starting:
 
-## Milestone 5 — Shared Memory
+## Milestone 6 - Context Assembly
 
 Build:
 
-- session summary extraction
-- memory extraction
-- decision extraction
-- automatic memory promotion
-- memory and decisions views
+- session preparation skill
+- relevant Goal memory injection
+- sibling session summaries
+- role-aware context package
 
 Exit criteria:
 
-- completed session creates useful Goal memory automatically
+- new session starts with useful, compact Goal context
 
-Milestone 5 builds on:
+Milestone 6 builds on:
 
 - Milestone 1: local Tauri app, Node daemon, SQLite, event store, Goal projection, Goal CRUD, live events
 - Milestone 2: internal plugin registry, internal skill registry, default skill provider, Quick Goal skill, `skill.invoked` event, read-only plugin/skill diagnostics, adapter-capable plugin metadata
 - Milestone 3: deterministic Goal refinement, Goal detail bundle, canonical workspace attachments, lazy workspace/git inspection, workspace attach/remove events and projections
 - Milestone 4: daemon-managed PTY sessions, shell/manual + Claude Code + opencode + codex adapters, session lifecycle events, capped session output tail, embedded terminal UI, restart reconciliation
+- Milestone 5: durable Goal-scoped memory, decisions, session summaries, extraction lifecycle state, bounded extraction from M4 session output tails, memory/decision views, explicit review/edit/promote/archive/confirm controls
 
-The Milestone 5 plan should preserve the M1-M4 operational loop:
+The Milestone 6 plan should preserve the M1-M5 operational loop:
 
 ```text
 Tauri app
@@ -81,199 +82,201 @@ Tauri app
   -> state survives daemon restart
 ```
 
-Milestone 5 should prove the next product loop:
+Milestone 6 should prove the next product loop:
 
 ```text
-User opens a Goal with completed or stopped sessions
-  -> daemon detects a session is eligible for extraction
-  -> daemon reads bounded session metadata and persisted output tail
-  -> a memory extraction skill/job produces structured summary, memory candidates, and decision candidates
-  -> daemon validates and normalizes extracted items
-  -> daemon commits extraction state, Goal memory, decisions, and domain events atomically
-  -> memory and decisions become visible in the Goal detail UI
-  -> user can review, edit status, promote/archive items where appropriate
-  -> extracted Goal memory survives daemon restart
-  -> future milestones can use this memory for context assembly and recommendations
+User starts a new Goal session for a selected adapter and role
+  -> daemon gathers bounded Goal, refinement, workspace, memory, decision, and sibling-session summary inputs
+  -> daemon runs a session preparation skill/job through an explicit internal boundary
+  -> the preparation job produces a compact role-aware context package
+  -> daemon validates, caps, redacts, and persists context package metadata and rendered context atomically
+  -> daemon records context assembly lifecycle events without storing raw terminal output or oversized payloads in the event store
+  -> desktop shows the assembled context preview/status before or during session creation
+  -> adapter startup receives the compact context as initial session instructions or prefilled input according to adapter capability
+  -> the new session begins with useful Goal context and remains a normal M4-managed PTY session
+  -> context package metadata survives daemon restart
+  -> future milestones can use context packages for recommendations and supervised execution
 ```
 
-Keep Milestone 5 focused. It should not become the context assembly engine, prompt construction system, task graph, recommendation engine, workflow engine, supervised execution engine, autonomous launcher, cross-Goal knowledge graph, or enterprise governance layer.
+Keep Milestone 6 focused. It should not become the recommendation engine, task graph, workflow engine, supervised execution engine, autonomous launcher, continuous reasoning loop, workspace indexer, cross-Goal knowledge system, embedding/vector system, provider configuration layer, prompt-management platform, or enterprise governance layer.
 
 The implementation document should include:
 
 1. Milestone Purpose
 
-Explain why this milestone exists and what architectural foundation it establishes beyond M1-M4.
+Explain why this milestone exists and what architectural foundation it establishes beyond M1-M5.
 
 The explanation should clarify:
 
-- why shared Goal memory is the next foundation after embedded sessions
-- why memory must be scoped to existing Goals and sourced from existing sessions / refinements
-- why session output from M4 should be consumed carefully and boundedly
-- why memory extraction should use explicit skill/job boundaries instead of constant daemon reasoning loops
-- how M5 prepares for Milestone 6 context assembly without injecting context into sessions yet
-- how M5 prepares for Milestone 7 recommendations without generating next-action recommendations yet
-- which memory state must survive restart versus which extraction jobs can be retried or marked failed
+- why context assembly is the next foundation after shared Goal memory
+- why context must be scoped to existing Goals, sessions, workspaces, memory, decisions, and summaries
+- why M5 memory and decisions should be consumed selectively rather than dumped wholesale into every session
+- why sibling-session summaries are useful context but raw transcripts and output tails are not session-start material
+- why session preparation should use explicit skill/job boundaries instead of constant daemon reasoning loops
+- how M6 prepares for Milestone 7 recommendations without generating recommendations yet
+- how M6 prepares for Level 4 supervised execution without auto-launching or approving work
+- which context package state must survive restart versus which assembly jobs can be retried or marked failed
 
 2. Scope Review And Simplification
 
-Review the natural interpretation of Milestone 5 and identify what should be included versus deferred.
+Review the natural interpretation of Milestone 6 and identify what should be included versus deferred.
 
-Explicitly decide how MVP-appropriate the following are for M5:
+Explicitly decide how MVP-appropriate the following are for M6:
 
-- session summary extraction
-- memory extraction
-- decision extraction
-- automatic memory promotion
-- manual memory item creation
-- manual decision creation
-- memory and decision list/detail views
-- edit/archive/promote/canonicalize controls
-- extraction trigger on terminal session exit/stop/failure
-- manual "extract now" action for a session
-- retrying failed extractions
-- backfilling M3 Goal refinement fields into initial Goal memory
-- extracting from the capped M4 session output tail
-- extracting from full transcripts, if no full transcript exists
-- extraction status tracking
-- extraction error handling
-- extraction idempotency
-- extraction confidence scores
-- confirmation-required flags for high-impact decisions
-- source attribution back to session/refinement/output offsets
-- memory type taxonomy
-- decision schema
-- local deterministic extractor versus AI-backed extractor
+- session preparation skill/job
+- role-aware context package generation
+- adapter-aware context delivery for shell/manual, Claude Code, opencode, and codex sessions
+- relevant Goal memory selection
+- relevant decision selection
+- inclusion of confirmed versus proposed decisions
+- inclusion of confirmation-required decisions
+- sibling session summaries
+- current Goal refinement fields
+- attached workspace metadata
+- lazy workspace/git inspection reuse from M3
+- session role selection
+- task objective or session objective input
+- context preview before session launch
+- context status display on created sessions
+- manual regenerate context action
+- retrying failed context assembly
+- context package persistence
+- context package event lifecycle
+- context package idempotency
+- context source attribution
+- context byte and token-equivalent budgets
+- deterministic context assembler versus AI-backed context assembler
 - provider configuration or model SDK integration
 - background queues / workers
-- token budgeting and output truncation
+- prompt template libraries
+- user-editable context before launch
+- context diffing between regenerations
 - redaction / secret handling
-- context package assembly
 - prompt injection into new sessions
-- sibling session awareness in new-session startup
+- automatic session launch after context assembly
 - task/work-unit generation
 - recommendation generation
+- validation recommendation
 - conflict detection
 - workflow automation
 - cross-Goal memory
-- knowledge graph / embedding search / vector database
+- workspace indexing / file watching
+- full transcript processing
+- embedding search / vector database
+- memory ranking, aging, consolidation, or semantic relevance systems
 
-Prefer the smallest product-complete M5 that satisfies the exit criteria.
+Prefer the smallest product-complete M6 that satisfies the exit criteria.
 
 3. High-Level Runtime Architecture
 
-Show how these pieces interact during Milestone 5:
+Show how these pieces interact during Milestone 6:
 
 - Tauri app
-- React Goal detail / memory panel / decisions panel
+- React Goal detail / session creation UI / context preview surface
 - Node daemon
 - existing HTTP/WebSocket API layer
 - existing plugin and skill registries
-- new memory extraction skill/job contract
-- existing session domain/usecases
-- existing session output store
-- existing Goal refinement projection
-- new memory domain/usecases
-- new decision domain/usecases
+- existing session adapter registry and M4 PTY/session usecases
+- new session preparation skill/job contract
+- existing Goal and Goal refinement projections
+- existing workspace attachment and lazy inspection data
+- existing M5 memory, decision, session summary, and extraction projections
+- new context assembly domain/usecases
 - SQLite storage
 - event system
-- memory and decision projections
-- future M6 context assembly consumers, as read-only future consumers only
+- context package projection
+- future M7 recommendation consumers, as read-only future consumers only
 
 Describe the key flows:
 
-- backfill refined Goal fields into seed memory
-- detect a session that is eligible for extraction
-- run extraction from a completed/stopped session
-- validate extractor output
-- persist session summary, memory items, decisions, and lifecycle events
-- promote routine extracted memory automatically
-- mark high-impact or uncertain items as requiring confirmation
-- show memory and decisions in Goal detail
-- manually add memory or a decision
-- edit, archive, promote, and mark canonical memory / decisions
-- retry a failed extraction
-- handle extraction skill failure
-- handle missing or truncated session output
-- handle daemon restart while extraction was pending or running
+- assemble context when a user starts a new session
+- gather bounded Goal/refinement/workspace inputs
+- select relevant memory and decisions from M5 projections
+- include sibling session summaries without loading raw output tails
+- run a deterministic or fakeable session preparation job
+- validate and cap assembled context
+- persist context package rows and lifecycle events atomically
+- deliver context to each supported adapter at session startup
+- show context preview and status in the UI
+- regenerate or retry context assembly
+- handle preparation skill failure
+- handle missing or sparse memory/decisions/summaries
+- handle oversized context inputs and outputs
+- handle daemon restart while context assembly was pending or running
+- handle session creation if context assembly fails
 
 4. Repository Structure
 
-Design the M5 repository changes on top of the existing M1-M4 monorepo.
+Design the M6 repository changes on top of the existing M1-M5 monorepo.
 
 Cover likely additions under:
 
 - `packages/contracts`
-- `apps/daemon/src/memory*`
-- `apps/daemon/src/decisions*`
-- `apps/daemon/src/extractions*` or equivalent
-- `apps/daemon/src/skills*`
+- `apps/daemon/src/context*` or equivalent
 - `apps/daemon/src/sessions*`
+- `apps/daemon/src/adapters*`
+- `apps/daemon/src/skills*`
 - `apps/daemon/src/server.ts`
 - `apps/desktop/src`
 - daemon tests
 - desktop tests or smoke coverage
 - docs / implementation notes
 
-Do not propose large package extraction unless there is a concrete M5 need.
+Do not propose large package extraction unless there is a concrete M6 need.
 
 5. Technology Decisions
 
-Recommend M5-specific technology choices and explain why:
+Recommend M6-specific technology choices and explain why:
 
-- whether the first extractor should be deterministic, AI-backed, or an interface with deterministic default
-- whether to introduce an AI provider SDK in M5 or keep model calls behind an internal skill boundary for later
-- how to read and truncate session output safely
-- how to represent source attribution without storing full transcripts
-- how to store summary text versus structured memory items
-- how to model memory status, promotion, canonical state, and archive state
-- how to model decisions as first-class records or specialized memory items
-- how to ensure extraction idempotency
-- how to handle extraction retries without a queue system
-- how to avoid leaking secrets in persisted memory, decisions, events, and logs
-- how to validate extractor JSON with zod
-- how to keep token and byte budgets explicit
-- how to test extraction behavior deterministically
+- whether the first context assembler should be deterministic, AI-backed, or an interface with deterministic default
+- whether to introduce an AI provider SDK in M6 or keep model calls behind an internal skill boundary for later
+- how to select memory and decisions without semantic search or embeddings
+- how to include sibling session summaries without reading full transcripts
+- how to build adapter-specific startup context without fragmenting session behavior
+- how to represent source attribution without copying all source content
+- how to store rendered context versus metadata and selected source ids
+- how to model context package lifecycle state
+- how to ensure context assembly idempotency
+- how to handle retries without a queue system
+- how to avoid leaking secrets in persisted context, events, logs, and adapter startup text
+- how to validate assembler input/output with zod
+- how to keep byte and token-equivalent budgets explicit
+- how to test context assembly behavior deterministically
 
 Avoid adding heavy dependencies unless they materially reduce risk.
 
 6. Runtime Lifecycle
 
-Describe how M5 changes daemon and desktop lifecycle behavior.
+Describe how M6 changes daemon and desktop lifecycle behavior.
 
 Include:
 
-- daemon boot migrations for memory, decisions, summaries, and extraction state
-- boot reconciliation for extraction jobs that were pending/running during daemon shutdown
-- when extraction triggers fire relative to session lifecycle events
-- whether extraction runs synchronously in the HTTP request, after committed session events, or through a simple in-process job runner
-- behavior when the desktop disconnects while extraction is running
-- behavior when the daemon receives shutdown while extraction is running
-- behavior on daemon restart with sessions already eligible for extraction
-- how the UI handles extraction pending/running/failed/completed states
-- how memory and decision changes are broadcast live
-- what happens if session output was truncated or unavailable
-- what happens if the selected Goal or Session was archived
+- daemon boot migrations for context packages and assembly state
+- boot reconciliation for context assembly jobs that were pending/running during daemon shutdown
+- when context assembly triggers fire relative to session creation
+- whether assembly runs synchronously in the session-create HTTP request, through a preflight endpoint, or through a simple in-process job runner
+- whether users can start a session without context if assembly fails
+- behavior when the desktop disconnects while context assembly is running
+- behavior when the daemon receives shutdown while context assembly is running
+- behavior on daemon restart with sessions that already have associated context packages
+- how the UI handles assembly pending/running/failed/completed states
+- how context package changes are broadcast live
+- what happens if memory, decisions, summaries, or workspace metadata are missing
+- what happens if the selected Goal, Workspace, or Session was archived
 
 7. Event System Design
 
-Design the M5 event additions.
+Design the M6 event additions.
 
 Include concrete event names and payload guidance for:
 
-- `memory.extraction.requested`
-- `memory.extraction.started`
-- `memory.extraction.completed`
-- `memory.extraction.failed`
-- `memory.item.created`
-- `memory.item.updated`
-- `memory.item.promoted`
-- `memory.item.canonicalized`
-- `memory.item.archived`
-- `decision.created`
-- `decision.updated`
-- `decision.confirmed`
-- `decision.archived`
-- any session-summary event, if included separately
+- `context.assembly.requested`
+- `context.assembly.started`
+- `context.assembly.completed`
+- `context.assembly.failed`
+- `context.package.created`
+- `context.package.updated`
+- any session-start context attachment event, if included separately
 
 Define:
 
@@ -282,54 +285,43 @@ Define:
 - event ordering rules
 - which events update which projections
 - which events are broadcast live
-- which extraction internals should NOT become domain events
+- which context internals should NOT become domain events
 - payload size limits
-- source references to sessions, refinements, and output chunks
-- how extraction state changes remain idempotent and restart-safe
+- source references to Goals, refinements, memory items, decisions, session summaries, workspaces, and sessions
+- how context assembly state remains idempotent and restart-safe
 
-Keep the event design MVP-appropriate and append-only. Be explicit about why raw terminal output and large extraction prompts/responses do not belong in the general event store.
+Keep the event design MVP-appropriate and append-only. Be explicit about why rendered context, raw terminal output, full prompts, full source memory text, and large assembler inputs/outputs do not belong in the general event store.
 
 8. Database Design
 
-Design the SQLite schema changes for M5.
+Design the SQLite schema changes for M6.
 
 Cover:
 
-- `goal_memory_items` or equivalent
-- `goal_decisions` or equivalent
-- `session_summaries` or equivalent
-- `memory_extractions` or equivalent extraction state table
-- memory type, status, importance, confidence, source type, source id, timestamps
-- decision title, decision text, reasoning, alternatives, tradeoffs, impact area, confidence, confirmation state
-- source attribution to Goal refinement fields, session ids, and output byte offsets if useful
-- indexes needed for Goal detail memory and decisions views
-- migration strategy from the M1-M4 schema
-- backfill strategy for M3 `goal_refinements` into initial memory
+- `context_packages` or equivalent
+- `context_assemblies` or equivalent assembly lifecycle table
+- package goal id, session id if created, adapter id, role, objective, status, byte counts, source counts, timestamps
+- rendered context storage versus compact selected-source references
+- source attribution to memory item ids, decision ids, session summary ids, refinement ids, workspace ids, and Goal ids
+- indexes needed for Goal detail reads, session reads, retry/idempotency, and runner pickup
+- migration strategy from the M1-M5 schema
 - retention and archive strategy
 
-Avoid premature tables for context packages, recommendations, tasks, workflows, embeddings, vector indexes, cross-Goal memory, or knowledge graphs.
+Avoid premature tables for recommendations, tasks, workflows, conflicts, embeddings, vector indexes, cross-Goal memory, provider prompts, prompt libraries, or agent policies.
 
 9. API Contract Design
 
-Define the M5 API surface with concrete endpoint examples.
+Define the M6 API surface with concrete endpoint examples.
 
 At minimum, evaluate:
 
-- `GET /v1/goals/:goalId/memory`
-- `POST /v1/goals/:goalId/memory`
-- `PATCH /v1/memory/:id`
-- `POST /v1/memory/:id/promote`
-- `POST /v1/memory/:id/canonicalize`
-- `POST /v1/memory/:id/archive`
-- `GET /v1/goals/:goalId/decisions`
-- `POST /v1/goals/:goalId/decisions`
-- `PATCH /v1/decisions/:id`
-- `POST /v1/decisions/:id/confirm`
-- `POST /v1/decisions/:id/archive`
-- `GET /v1/sessions/:sessionId/summary`
-- `POST /v1/sessions/:sessionId/extract-memory`
-- `GET /v1/sessions/:sessionId/extractions`
-- WebSocket/domain event behavior for memory, decisions, summaries, and extraction states
+- `POST /v1/goals/:goalId/context-packages`
+- `GET /v1/goals/:goalId/context-packages`
+- `GET /v1/context-packages/:id`
+- `POST /v1/context-packages/:id/regenerate`
+- `POST /v1/sessions` changes needed to attach or request context
+- `GET /v1/sessions/:sessionId/context`
+- WebSocket/domain event behavior for context packages and assembly states
 
 For each endpoint/message, specify:
 
@@ -339,82 +331,100 @@ For each endpoint/message, specify:
 - authorization behavior inherited from M1
 - emitted events
 - whether it is idempotent
-- whether it is required for M5 or should be deferred
+- whether it is required for M6 or should be deferred
 
-Do not introduce context assembly endpoints, recommendation endpoints, task endpoints, workflow endpoints, cross-Goal memory endpoints, embedding search endpoints, or generic skill invocation endpoints unless the plan demonstrates a concrete M5 need.
+Do not introduce recommendation endpoints, task endpoints, workflow endpoints, conflict endpoints, cross-Goal memory endpoints, embedding search endpoints, generic skill invocation endpoints, generic context-builder endpoints, provider/model configuration endpoints, or WebSocket commands unless the plan demonstrates a concrete M6 need.
 
-10. Extraction Skill / Job Design
+10. Session Preparation Skill / Job Design
 
-Define the M5 extraction behavior.
+Define the M6 session preparation behavior.
 
 Cover:
 
-- extractor interface shape
-- input data available to the extractor
-- output schema for session summary, memory candidates, and decision candidates
-- deterministic default extractor behavior, if chosen
-- AI-backed extractor behavior, if chosen
+- assembler interface shape
+- input data available to the assembler
+- output schema for context package sections
+- deterministic default assembler behavior, if chosen
+- AI-backed assembler behavior, if chosen
+- role-aware context sections
+- adapter-specific rendering rules
 - validation and normalization rules
-- confidence and importance calculation
-- confirmation-required rules
-- automatic promotion rules
-- duplicate detection / idempotency rules
+- source selection rules
 - source attribution rules
+- duplicate and stale source handling
+- confidence/importance use from M5, if any
+- confirmation-required decision handling
 - error handling and retry rules
-- payload size and token-budget limits
-- privacy rules for logs and persisted prompts/responses
-- how extraction remains internal-first while preserving future plugin-first architecture
+- payload size and token-equivalent budget limits
+- privacy rules for logs and persisted context
+- how assembly remains internal-first while preserving future plugin-first architecture
 
-Keep extraction focused on converting existing Goal/session/refinement evidence into durable Goal memory. Do not build M6 context assembly or M7 recommendations in this milestone.
+Keep preparation focused on converting existing Goal evidence into compact startup context. Do not build M7 recommendations, task/work-unit generation, or Level 4 supervised execution in this milestone.
 
-11. Memory And Decision Domain Design
+11. Context Package Domain Design
 
-Define how memory and decisions work in M5.
+Define how context packages work in M6.
 
 Include:
 
 - domain model fields
-- status lifecycle
-- allowed type taxonomy
-- manual creation behavior
-- automatic extraction behavior
-- automatic promotion behavior
-- user confirmation behavior
-- edit/archive behavior
+- lifecycle statuses
+- allowed role taxonomy, or why roles should remain a small string enum for now
+- relationship between context package and session creation
+- relationship between context package and M5 memory/decisions/session summaries
+- relationship between context package and workspace metadata
 - source attribution behavior
-- ordering and grouping in Goal detail
-- relationship between decisions and memory items
-- relationship between session summaries and memory items
-- behavior for archived Goals, archived sessions, or missing source sessions
+- rendered context section ordering
+- byte/token-equivalent budget behavior
+- regeneration behavior
+- archive/retention behavior
+- behavior for archived Goals, Workspaces, Sessions, memory, decisions, or summaries
 - security/privacy considerations
 
-Keep the domain focused on Goal-scoped shared memory. Do not build cross-Goal memory, graph traversal, semantic search, embeddings, or organizational learning.
+Keep the domain focused on Goal-scoped session startup context. Do not build cross-Goal context, context search, semantic ranking, embeddings, prompt experimentation frameworks, or organizational learning.
 
-12. UI Architecture
+12. Adapter And Session Startup Design
 
-Define the M5 UI changes.
+Define how M6 integrates context with M4 session adapters.
 
 Cover:
 
-- where memory and decisions appear in the existing Goal detail view
-- memory list grouping and filtering
-- decision list grouping and filtering
-- session summary display
-- extraction status on sessions
-- manual "extract now" / retry action, if included
-- manual memory item creation
-- manual decision creation
-- edit/archive/promote/canonicalize controls
-- confirmation-required affordance for decisions
-- empty, loading, failed, and truncated-output states
+- how shell/manual sessions receive context
+- how Claude Code sessions receive context
+- how opencode sessions receive context
+- how codex sessions receive context
+- what adapter capability metadata is needed, if any
+- whether context is written as initial terminal input, startup args, temp file content, environment variable, or pre-session preview only
+- how to avoid leaking secrets through process args, environment, shell history, logs, or events
+- how context delivery failure affects session creation
+- how context package id is associated with session id
+- how session restart/reconciliation treats existing context packages
+- how to keep M4 PTY streaming/input/resize behavior intact
+
+Prefer simple, explicit adapter integration over a generic prompt-injection framework.
+
+13. UI Architecture
+
+Define the M6 UI changes.
+
+Cover:
+
+- where session role/objective/context controls appear in the existing Goal detail session creation flow
+- context preview before launch
+- context package status on sessions
+- context source summary display
+- regenerate/retry controls, if included
+- handling no memory, no decisions, no summaries, or sparse Goal data
+- handling oversized/truncated context
+- handling failed assembly
 - live event refresh behavior
-- keeping existing M4 session terminal behavior intact
+- keeping existing M4 terminal behavior and M5 memory/decision panels intact
 
-Keep UI minimal but real. Avoid placeholder panels for context packages, tasks, recommendations, workflows, command center, global dashboards, or autonomy controls unless backed by M5 data.
+Keep UI minimal but real. Avoid placeholder panels for recommendations, tasks, workflows, command center, autonomy controls, global dashboards, context analytics, or provider/model settings unless backed by M6 data.
 
-13. Milestone Task Breakdown
+14. Milestone Task Breakdown
 
-Break Milestone 5 into sequential implementation tasks.
+Break Milestone 6 into sequential implementation tasks.
 
 Each task should include:
 
@@ -430,112 +440,119 @@ The breakdown should be detailed enough that another agent could execute tasks o
 
 Include task sequencing for:
 
-- baseline verification of M1-M4
+- baseline verification of M1-M5
 - contract updates
 - database migration
-- memory/decision projection helpers
-- extraction state model
-- deterministic extraction skill/job contract
-- refinement backfill into Goal memory
-- session summary extraction
-- memory extraction
-- decision extraction
-- automatic promotion rules
-- manual memory and decision APIs
-- extraction trigger / retry behavior
-- Goal detail memory and decisions UI
+- context package projection helpers
+- context assembly lifecycle model
+- deterministic session preparation job contract
+- bounded input builder from Goal/refinement/workspace/memory/decision/session-summary sources
+- memory and decision selection rules
+- sibling session summary inclusion
+- adapter-specific context rendering
+- session creation integration
+- context package APIs
+- Goal detail session creation UI changes
+- context preview/status UI
 - integration tests
 - restart/reconciliation behavior tests
 - documentation
 
-14. Validation Strategy
+15. Validation Strategy
 
 Define how we validate:
 
-- M1-M4 regression safety
+- M1-M5 regression safety
 - daemon startup after migration
-- memory and decision contract parsing
+- context contract parsing
 - migration from existing DBs
-- M3 refinement backfill
-- session summary creation from M4 session output
-- memory extraction from bounded output tail
-- decision extraction from bounded output tail
-- extraction idempotency and duplicate prevention
-- automatic promotion rules
-- manual memory create/edit/archive
-- manual decision create/edit/confirm/archive
+- context source selection from M5 memory and decisions
+- sibling session summary inclusion
+- exclusion of raw terminal output and full transcripts
+- role-aware section rendering
+- adapter-specific context delivery
+- context package idempotency and duplicate prevention
+- manual regenerate/retry behavior
 - event persistence and ordering
 - projection correctness
 - WebSocket/UI refresh behavior
-- daemon restart behavior for pending/running extraction jobs
-- extraction failure and retry behavior
+- daemon restart behavior for pending/running assembly jobs
+- assembly failure and retry behavior
 - secret/output logging safeguards
-- desktop Goal detail memory and decisions flow
+- desktop session-start context flow
 
-Prefer deterministic tests using fixture session output and a fake extraction skill/job. Use AI/model-backed behavior only if it can be tested deterministically behind an interface.
+Prefer deterministic tests using fixture memory, decisions, summaries, workspaces, and fake preparation jobs. Use AI/model-backed behavior only if it can be tested deterministically behind an interface.
 
-15. Risks and Simplifications
+16. Risks and Simplifications
 
 Identify:
 
 - biggest technical risks
 - AI/provider dependency risks, if any
 - token/cost/latency risks
-- extraction quality risks
-- hallucination and unsupported-memory risks
+- context quality risks
+- unsupported or stale context risks
 - source-attribution risks
-- duplicate extraction risks
-- privacy/security risks around terminal output and extracted memory
+- duplicate/regenerated context risks
+- confirmation-required decision risks
+- adapter startup and prompt delivery risks
+- SQLite migration and transaction pitfalls
+- event-system risks
+- daemon restart/recovery risks
+- privacy/security risks around memory, summaries, terminal output, and startup context
+- logs accidentally containing rendered context, raw memory text, terminal output, prompts, or secrets
 - database growth risks
 - event payload growth risks
-- daemon restart/recovery risks
-- UI complexity risks
+- desktop state and live-refresh risks
+- M1/M2/M3/M4/M5 regression risks
 - overengineering traps to avoid
 - things intentionally deferred
 
-16. Definition of Done
+17. Definition of Done
 
-Provide a precise "Milestone 5 complete" definition.
+Provide a precise "Milestone 6 complete" definition.
 
-The definition should make clear that M5 is complete only when:
+The definition should make clear that M6 is complete only when:
 
-- completed or stopped M4 sessions can produce a bounded structured summary
-- useful Goal memory is automatically created from eligible session output
-- useful Goal decisions are automatically created when supported by session output
-- routine extracted memory can be automatically promoted according to explicit rules
-- high-impact or uncertain decisions can require user confirmation
-- memory and decisions are visible in the Goal detail UI
-- users can manually add/edit/archive memory and decisions, if included in scope
-- extraction state survives daemon restart or is safely reconciled
-- extraction failures are visible and retryable, if retry is included in scope
-- M3 refinement fields are preserved and either backfilled into memory or explicitly deferred with rationale
-- M1-M4 functionality still works
-- no context assembly engine, prompt injection, recommendation engine, workflow engine, task graph, cross-Goal memory, embedding/vector system, or Level 4/5 automation has been introduced
+- a new Goal session can be started with an associated compact context package
+- context packages can include bounded Goal objective/refinement/workspace context
+- context packages can include selected M5 memory and decisions
+- context packages can include sibling session summaries without reading raw transcripts
+- role-aware rendering is implemented for the supported MVP roles
+- adapter startup receives context through explicit adapter-safe delivery paths
+- context assembly state survives daemon restart or is safely reconciled
+- context assembly failures are visible and retryable, if retry is included in scope
+- context preview/status is visible in the desktop session creation or session detail flow
+- source attribution is retained compactly
+- rendered context and source selection are capped, validated, and redacted where feasible
+- M1-M5 functionality still works
+- no recommendations, task graph, workflow engine, supervised execution, auto-launching, cross-Goal memory, embedding/vector system, provider configuration, prompt-management platform, or Level 4/5 automation has been introduced
 
 Very important constraints:
 
 Preserve plugin-first architecture
 Preserve skill-first architecture
 Preserve event-driven design
-Build on the existing M1-M4 runtime instead of replacing it
-Use M4 Sessions and capped output tails as the primary automatic extraction source
-Use M3 Goal refinements as seed memory input where appropriate
-Do NOT build cloud infrastructure
-Do NOT build Level 4/5 autonomous systems yet
-Do NOT build M6 context assembly in M5
-Do NOT inject memory into new sessions in M5
-Do NOT build task graph/recommendation systems in M5
-Do NOT build workflow automation in M5
-Do NOT build auto-launching sessions in M5
-Do NOT build workspace indexing or file watching in M5
-Do NOT build cross-Goal memory in M5
-Do NOT add embeddings/vector search/knowledge graph infrastructure in M5
-Do NOT add generic skill invocation endpoints in M5
+Build on the existing M1-M5 runtime instead of replacing it
+Use M5 memory, decisions, and session summaries as primary context sources
+Use M3 Goal refinements and workspace attachments as bounded context sources where appropriate
+Do NOT build recommendation generation in M6
+Do NOT build task/work-unit generation in M6
+Do NOT build workflow automation in M6
+Do NOT build supervised execution in M6
+Do NOT build autonomous session launching in M6
+Do NOT build continuous reasoning loops in M6
+Do NOT build workspace indexing or file watching in M6
+Do NOT build cross-Goal memory or cross-Goal context in M6
+Do NOT add embeddings/vector search/knowledge graph infrastructure in M6
+Do NOT add provider/model configuration UI in M6
+Do NOT add generic skill invocation endpoints in M6
+Do NOT store raw terminal output, full transcripts, raw prompts, or raw model responses in the event store
 Avoid premature microservices
 Avoid overengineering
 Favor clean boundaries over feature quantity
 Favor deterministic systems over excessive AI reasoning
-Favor bounded extraction over full transcript processing
+Favor bounded context over exhaustive context
 Favor explicit source attribution over unsupported synthesis
 Favor local-first behavior and explicit user control
 

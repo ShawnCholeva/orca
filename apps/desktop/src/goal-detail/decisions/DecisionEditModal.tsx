@@ -103,15 +103,17 @@ export function DecisionEditModal({ item, onSave, onClose }: Props) {
             <option value="confirmed">Confirmed</option>
           </select>
 
-          <label className="decision-confirmation-required-label">
-            <input
-              type="checkbox"
-              checked={confirmationRequired}
-              onChange={(e) => setConfirmationRequired(e.target.checked)}
-              disabled={saving}
-            />
-            {" "}Requires confirmation
-          </label>
+          {item === null && (
+            <label className="decision-confirmation-required-label">
+              <input
+                type="checkbox"
+                checked={confirmationRequired}
+                onChange={(e) => setConfirmationRequired(e.target.checked)}
+                disabled={saving}
+              />
+              {" "}Requires confirmation
+            </label>
+          )}
 
           {error && <p className="form-error">{error}</p>}
 

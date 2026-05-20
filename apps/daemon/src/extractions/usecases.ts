@@ -50,6 +50,14 @@ export class SessionArchivedForExtractionError extends Error {
   }
 }
 
+export class GoalArchivedForExtractionError extends Error {
+  readonly code = 'goal_archived' as const;
+  constructor(goalId: string) {
+    super(`Goal ${goalId} is archived`);
+    this.name = 'GoalArchivedForExtractionError';
+  }
+}
+
 export class ExtractionNotFoundError extends Error {
   readonly code = 'extraction_not_found' as const;
   constructor(id: string) {
@@ -81,6 +89,10 @@ interface ActiveFingerprintRow {
   id: string;
 }
 
+interface GoalRow {
+  archived_at: string | null;
+}
+
 export interface ManualExtractEnqueueCtx extends ExtractionCtx {
   outputStore: ReadOnlySessionOutputStore;
   extractorVersion: string;
@@ -95,6 +107,7 @@ let _db: Database.Database | null = null;
 let _stmts: {
   insertEvent: Database.Statement;
   findActiveByFingerprint: Database.Statement;
+  selectGoal: Database.Statement;
 } | null = null;
 
 function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
@@ -109,6 +122,7 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
          WHERE session_id = ? AND source_fingerprint = ? AND status IN ('pending', 'running', 'succeeded')
          LIMIT 1`
       ),
+      selectGoal: db.prepare('SELECT archived_at FROM goals WHERE id = ?'),
     };
   }
   return _stmts!;
@@ -153,6 +167,10 @@ export function enqueueExtraction(
   }
   if (session.archivedAt !== null) {
     throw new SessionArchivedForExtractionError(input.sessionId);
+  }
+  const goalRow = stmts.selectGoal.get(input.goalId) as GoalRow | undefined;
+  if (goalRow && goalRow.archived_at !== null) {
+    throw new GoalArchivedForExtractionError(input.goalId);
   }
 
   const fingerprint = computeSourceFingerprint({

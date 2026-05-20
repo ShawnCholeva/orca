@@ -40,6 +40,10 @@ export interface UpdateDecisionPatch {
   archivedAt?: string | null;
 }
 
+export interface ListDecisionsOptions {
+  includeArchived?: boolean;
+}
+
 const DECISION_COLS = `id, goal_id, title, decision_text, rationale, status, confirmation_required,
   confidence, source_type, source_id, source_session_id, source_extraction_id,
   source_offset_first, source_offset_last, created_at, updated_at, confirmed_at, archived_at`;
@@ -49,6 +53,7 @@ let _stmts: {
   insertDecision: Database.Statement;
   getDecisionById: Database.Statement;
   listDecisionsByGoal: Database.Statement;
+  listDecisionsByGoalIncludingArchived: Database.Statement;
 } | null = null;
 
 function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
@@ -64,6 +69,20 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
       ),
       getDecisionById: db.prepare(`SELECT ${DECISION_COLS} FROM goal_decisions WHERE id = ?`),
       listDecisionsByGoal: db.prepare(
+        `SELECT ${DECISION_COLS}
+         FROM goal_decisions
+         WHERE goal_id = ?
+           AND status != 'archived'
+         ORDER BY
+           CASE status
+             WHEN 'proposed' THEN 0
+             WHEN 'confirmed' THEN 1
+             ELSE 2
+           END,
+           created_at DESC,
+           id ASC`
+      ),
+      listDecisionsByGoalIncludingArchived: db.prepare(
         `SELECT ${DECISION_COLS}
          FROM goal_decisions
          WHERE goal_id = ?
@@ -109,9 +128,16 @@ export function resetPreparedStatements(): void {
   _stmts = null;
 }
 
-export function listDecisionsByGoal(db: Database.Database, goalId: string): GoalDecision[] {
+export function listDecisionsByGoal(
+  db: Database.Database,
+  goalId: string,
+  options: ListDecisionsOptions = {}
+): GoalDecision[] {
   const stmts = ensureStmts(db);
-  const rows = stmts.listDecisionsByGoal.all(goalId) as DecisionRow[];
+  const statement = options.includeArchived
+    ? stmts.listDecisionsByGoalIncludingArchived
+    : stmts.listDecisionsByGoal;
+  const rows = statement.all(goalId) as DecisionRow[];
   return rows.map(rowToDecision);
 }
 

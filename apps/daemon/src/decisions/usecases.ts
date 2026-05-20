@@ -9,6 +9,7 @@ import {
   listDecisionsByGoal,
   updateDecision,
 } from './projection.js';
+import { normalizeText, redactSecrets } from '../memory/normalize.js';
 
 export { GoalNotFoundError, GoalArchivedError, listDecisionsByGoal };
 
@@ -35,11 +36,6 @@ export class InvalidDecisionTransitionError extends Error {
 }
 
 const TITLE_MAX = 200;
-const TEXT_MAX = 4000;
-
-function capText(text: string, max: number): string {
-  return text.trim().slice(0, max);
-}
 
 interface GoalRow {
   id: string;
@@ -96,9 +92,9 @@ export function createDecision(ctx: DecisionCtx, input: CreateDecisionInput): Go
   const row: GoalDecision = {
     id,
     goalId: input.goalId,
-    title: capText(input.title, TITLE_MAX),
-    decisionText: capText(input.decisionText, TEXT_MAX),
-    rationale: input.rationale !== undefined ? capText(input.rationale, TEXT_MAX) : null,
+    title: redactSecrets(normalizeText(input.title, TITLE_MAX)),
+    decisionText: redactSecrets(normalizeText(input.decisionText)),
+    rationale: input.rationale !== undefined ? redactSecrets(normalizeText(input.rationale)) : null,
     status,
     confirmationRequired,
     confidence: input.confidence ?? null,
@@ -200,9 +196,9 @@ export function patchDecision(ctx: DecisionCtx, id: string, patch: PatchDecision
 
   ctx.db.transaction(() => {
     const projPatch: Parameters<typeof updateDecision>[2] = { updatedAt: now };
-    if (patch.title !== undefined) projPatch.title = capText(patch.title, TITLE_MAX);
-    if (patch.decisionText !== undefined) projPatch.decisionText = capText(patch.decisionText, TEXT_MAX);
-    if (patch.rationale !== undefined) projPatch.rationale = capText(patch.rationale, TEXT_MAX);
+    if (patch.title !== undefined) projPatch.title = redactSecrets(normalizeText(patch.title, TITLE_MAX));
+    if (patch.decisionText !== undefined) projPatch.decisionText = redactSecrets(normalizeText(patch.decisionText));
+    if (patch.rationale !== undefined) projPatch.rationale = redactSecrets(normalizeText(patch.rationale));
     if (patch.status !== undefined) projPatch.status = patch.status;
     if (newStatus === 'confirmed' && current.confirmedAt === null) {
       projPatch.confirmedAt = now;
@@ -235,13 +231,15 @@ export function patchDecision(ctx: DecisionCtx, id: string, patch: PatchDecision
       };
     };
 
-    toPublish.push(
-      emitEvent('decision.updated', {
-        decisionId: id,
-        goalId: current.goalId,
-        status: newStatus,
-      })
-    );
+    if (newStatus !== 'archived') {
+      toPublish.push(
+        emitEvent('decision.updated', {
+          decisionId: id,
+          goalId: current.goalId,
+          status: newStatus,
+        })
+      );
+    }
 
     if (newStatus === 'confirmed' && current.status !== 'confirmed') {
       toPublish.push(

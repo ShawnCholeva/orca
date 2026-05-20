@@ -119,7 +119,7 @@ describe('decision projections', () => {
     expect(getDecisionById(db, 'dec-1')).toEqual(decisionRow());
   });
 
-  it('lists decisions for one goal in status groups with archived last', () => {
+  it('lists active decisions by default and includes archived when requested', () => {
     const db = openTestDb();
     seedGoal(db, 'goal-1');
     seedGoal(db, 'goal-2');
@@ -179,6 +179,14 @@ describe('decision projections', () => {
     );
 
     expect(listDecisionsByGoal(db, 'goal-1').map((decision) => decision.id)).toEqual([
+      'proposed-newer',
+      'proposed-older',
+      'confirmed',
+    ]);
+
+    expect(
+      listDecisionsByGoal(db, 'goal-1', { includeArchived: true }).map((decision) => decision.id)
+    ).toEqual([
       'proposed-newer',
       'proposed-older',
       'confirmed',

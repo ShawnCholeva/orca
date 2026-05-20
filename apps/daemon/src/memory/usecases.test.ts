@@ -234,7 +234,7 @@ describe('patchMemoryItem', () => {
     expect(bus.captured[1]!.type).toBe('memory.item.promoted');
   });
 
-  it('patches candidate → archived and emits updated + archived events', () => {
+  it('patches candidate → archived and emits archived event only', () => {
     seedGoal(db, 'goal-1');
     const item = createMemoryItem(ctx, {
       goalId: 'goal-1',
@@ -247,11 +247,10 @@ describe('patchMemoryItem', () => {
 
     expect(updated.status).toBe('archived');
     expect(updated.archivedAt).toBe('2026-05-01T00:00:00.000Z');
-    expect(bus.captured[0]!.type).toBe('memory.item.updated');
-    expect(bus.captured[1]!.type).toBe('memory.item.archived');
+    expect(bus.captured.map((e) => e.type)).toEqual(['memory.item.archived']);
   });
 
-  it('patches promoted → archived and emits updated + archived events', () => {
+  it('patches promoted → archived and emits archived event only', () => {
     seedGoal(db, 'goal-1');
     const item = createMemoryItem(ctx, {
       goalId: 'goal-1',
@@ -263,7 +262,7 @@ describe('patchMemoryItem', () => {
 
     const updated = patchMemoryItem(ctx, item.id, { status: 'archived' });
     expect(updated.status).toBe('archived');
-    expect(bus.captured.map((e) => e.type)).toEqual(['memory.item.updated', 'memory.item.archived']);
+    expect(bus.captured.map((e) => e.type)).toEqual(['memory.item.archived']);
   });
 
   it('rejects archived → promoted with InvalidMemoryTransitionError', () => {
