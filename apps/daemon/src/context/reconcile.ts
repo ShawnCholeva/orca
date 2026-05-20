@@ -13,15 +13,14 @@ export function reconcileStaleAssemblies(
   bus: EventBus,
   now: string
 ): void {
-  const stale = getAssembliesByStatus(db, ['pending', 'running']);
-  if (stale.length === 0) return;
-
   const insertEvent = db.prepare(
     'INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)'
   );
   const events: DomainEvent[] = [];
 
   db.transaction(() => {
+    const stale = getAssembliesByStatus(db, ['pending', 'running']);
+
     for (const assembly of stale) {
       updateAssemblyFailed(db, assembly.id, {
         failureCode: 'daemon_restart',

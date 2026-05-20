@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -227,8 +227,22 @@ describe('reconcileStaleAssemblies', () => {
     expect(p['failureCode']).toBe('daemon_restart');
   });
 
-  // Boot ordering: reconcileStaleAssemblies is called in index.ts after reconcileStaleExtractions
-  // and before server.listen — verified by code inspection of apps/daemon/src/index.ts.
+  it('is wired after M4/M5 reconcilers and before HTTP listen', () => {
+    const source = readFileSync(path.join(process.cwd(), 'src/index.ts'), 'utf8');
+
+    const migrations = source.indexOf('runMigrations(db, migrationsDir)');
+    const m4 = source.indexOf('reconcileSessionsOnBoot(db, eventBus, bootNow)');
+    const m5 = source.indexOf('reconcileStaleExtractions(db, eventBus, bootNow)');
+    const m6 = source.indexOf('reconcileStaleAssemblies(db, eventBus, bootNow)');
+    const listen = source.indexOf('await server.listen');
+
+    expect(migrations).toBeGreaterThanOrEqual(0);
+    expect(m4).toBeGreaterThan(migrations);
+    expect(m5).toBeGreaterThan(m4);
+    expect(m6).toBeGreaterThan(m5);
+    expect(listen).toBeGreaterThan(m6);
+  });
+
   it('works across multiple goals', () => {
     const db = openTestDb();
     const bus = new EventBus();
