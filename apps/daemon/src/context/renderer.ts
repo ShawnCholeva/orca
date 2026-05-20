@@ -18,7 +18,7 @@ export function renderToCanonical(sections: ContextSection[]): RenderResult {
     const body = redactSecrets(section.body);
     parts.push(`# ${section.title}\n${body}`);
   }
-  const rendered = (parts.length > 0 ? parts.join('\n') : '') + '\n';
+  const rendered = parts.join('\n') + '\n';
   const renderedBytes = Buffer.byteLength(rendered, 'utf8');
   const estimatedTokens = Math.ceil(renderedBytes / 4);
   return { rendered, renderedBytes, estimatedTokens };

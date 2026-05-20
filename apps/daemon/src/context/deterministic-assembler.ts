@@ -303,7 +303,7 @@ export class DeterministicAssembler implements SessionPreparationAssembler {
     const memGroup = buildMemorySection(selectedMemory, perSectionMaxBytes);
     const decGroup = buildDecisionsSections(selectedDecisions, perSectionMaxBytes);
     const sumGroup = buildSiblingSection(selectedSummaries, perSectionMaxBytes);
-    const notesResult = buildNotesSection(refinement ?? null);
+    const notesResult = buildNotesSection(refinement);
 
     const groupMap: Record<SectionGroupKey, SectionGroup> = {
       objective: { sections: [objResult.section], sources: objResult.sources, truncated: false },
@@ -322,7 +322,7 @@ export class DeterministicAssembler implements SessionPreparationAssembler {
     };
 
     // Assemble in role order
-    const order = ROLE_ORDER[role] ?? ROLE_ORDER.generalist;
+    const order = ROLE_ORDER[role];
     const allSections: ContextSection[] = [];
     const sourcesByMarker = new Map<string, ContextSourceRef>();
     let anyTruncated = false;
@@ -354,8 +354,8 @@ export class DeterministicAssembler implements SessionPreparationAssembler {
     for (const s of allSections) {
       totalBytes += Buffer.byteLength(`# ${s.title}\n${s.body}`, 'utf8');
     }
-    if (allSections.length > 1) totalBytes += allSections.length - 1; // separating newlines
-    totalBytes += 1; // final newline
+    if (allSections.length > 1) totalBytes += allSections.length - 1;
+    totalBytes += 1;
     const estimatedTokens = Math.ceil(totalBytes / 4);
 
     return {
