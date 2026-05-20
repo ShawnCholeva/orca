@@ -1,5 +1,7 @@
-export { FakeContextAssembler } from './assembler.js';
+export { FakeContextAssembler, DeterministicAssembler, ASSEMBLER_VERSION } from './assembler.js';
 export type { SessionPreparationAssembler } from './assembler.js';
+export { renderToCanonical } from './renderer.js';
+export type { RenderResult } from './renderer.js';
 export {
   buildContextAssemblyInput,
   resetPreparedStatements as resetInputStatements,

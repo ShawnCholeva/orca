@@ -20,6 +20,7 @@ import {
   updateAssemblySucceeded,
 } from './projection.js';
 import { buildContextAssemblyInput } from './input.js';
+import { renderToCanonical } from './renderer.js';
 
 export interface RequestContextPackageCtx {
   db: Database.Database;
@@ -98,12 +99,6 @@ function computeRequestFingerprint(parts: {
     parts.replacePackageId,
   ].join(':');
   return sha256(raw);
-}
-
-// Minimal section-to-text renderer for M6-004.
-// REPLACED by the real renderer in M6-008.
-function stubRenderSections(sections: { title: string; body: string }[]): string {
-  return sections.map((s) => `# ${s.title}\n${s.body}`).join('\n') + '\n';
 }
 
 function buildFailedAssembly(
@@ -287,9 +282,8 @@ export function requestContextPackage(
       return;
     }
 
-    // Render sections to text and enforce byte cap.
-    const renderedContext = stubRenderSections(output.sections);
-    const renderedBytes = Buffer.byteLength(renderedContext, 'utf8');
+    // Render sections to canonical text and enforce byte cap.
+    const { rendered: renderedContext, renderedBytes } = renderToCanonical(output.sections);
 
     if (renderedBytes > CONTEXT_PACKAGE_MAX_RENDERED_BYTES) {
       const fc: ContextAssemblyFailureCode = 'output_too_large';
@@ -304,7 +298,7 @@ export function requestContextPackage(
 
     // Success path.
     const packageId = idFactory();
-    const estimatedTokens = Math.ceil(renderedBytes / 4);
+    const estimatedTokens = Math.ceil(renderedBytes / 4); // renderedBytes from renderToCanonical
     const createdAt = now;
 
     insertContextPackage(ctx.db, {

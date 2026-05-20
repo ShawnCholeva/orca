@@ -1,4 +1,5 @@
 import type { ContextAssemblyInput, ContextAssemblyOutput } from '@orca/contracts';
+export { DeterministicAssembler, ASSEMBLER_VERSION } from './deterministic-assembler.js';
 
 export interface SessionPreparationAssembler {
   readonly version: string;
