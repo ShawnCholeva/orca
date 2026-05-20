@@ -1,5 +1,14 @@
 export { FakeContextAssembler } from './assembler.js';
 export type { SessionPreparationAssembler } from './assembler.js';
+export {
+  buildContextAssemblyInput,
+  resetPreparedStatements as resetInputStatements,
+} from './input.js';
+export type {
+  BuildContextInputDeps,
+  BuildContextInputRequest,
+  BuildContextInputResult,
+} from './input.js';
 export { reconcileStaleAssemblies } from './reconcile.js';
 export {
   requestContextPackage,

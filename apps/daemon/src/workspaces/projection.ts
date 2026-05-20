@@ -27,6 +27,7 @@ let _stmts: {
   insertWorkspace: Database.Statement;
   deleteWorkspace: Database.Statement;
   findWorkspaceByPath: Database.Statement;
+  findWorkspaceByIdAndGoal: Database.Statement;
   listWorkspacesByGoal: Database.Statement;
 } | null = null;
 
@@ -40,6 +41,9 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
       deleteWorkspace: db.prepare("DELETE FROM workspaces WHERE goal_id = ? AND id = ?"),
       findWorkspaceByPath: db.prepare(
         "SELECT id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at FROM workspaces WHERE goal_id = ? AND path = ?",
+      ),
+      findWorkspaceByIdAndGoal: db.prepare(
+        "SELECT id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at FROM workspaces WHERE id = ? AND goal_id = ?",
       ),
       listWorkspacesByGoal: db.prepare(
         "SELECT id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at FROM workspaces WHERE goal_id = ? ORDER BY attached_at ASC, id ASC",
@@ -116,6 +120,19 @@ export function findWorkspaceByPath(
 ): Workspace | null {
   const stmts = ensureStmts(db);
   const row = stmts.findWorkspaceByPath.get(goalId, path) as WorkspaceRow | undefined;
+  if (!row) {
+    return null;
+  }
+  return rowToWorkspace(row);
+}
+
+export function getWorkspaceByIdAndGoal(
+  db: Database.Database,
+  workspaceId: string,
+  goalId: string,
+): Workspace | null {
+  const stmts = ensureStmts(db);
+  const row = stmts.findWorkspaceByIdAndGoal.get(workspaceId, goalId) as WorkspaceRow | undefined;
   if (!row) {
     return null;
   }

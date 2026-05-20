@@ -2,7 +2,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import {
   ContextAssembly,
-  ContextAssemblyInput,
   ContextAssemblyOutput,
   ContextPackage,
   CONTEXT_PACKAGE_MAX_RENDERED_BYTES,
@@ -20,7 +19,7 @@ import {
   updateAssemblyStarted,
   updateAssemblySucceeded,
 } from './projection.js';
-import { GoalNotFoundError } from '../sessions/errors.js';
+import { buildContextAssemblyInput } from './input.js';
 
 export interface RequestContextPackageCtx {
   db: Database.Database;
@@ -46,20 +45,10 @@ export interface RequestContextPackageResult {
   reused: boolean;
 }
 
-const PER_SECTION_MAX_BYTES = 8 * 1024;
-const ESTIMATED_TOKEN_BUDGET = 8000;
 const FAILURE_MESSAGE_MAX_CHARS = 256;
-
-interface GoalRow {
-  id: string;
-  title: string;
-  status: string;
-  archived_at: string | null;
-}
 
 let _db: Database.Database | null = null;
 let _stmts: {
-  selectGoal: Database.Statement;
   insertEvent: Database.Statement;
 } | null = null;
 
@@ -67,7 +56,6 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
   if (db !== _db) {
     _db = db;
     _stmts = {
-      selectGoal: db.prepare('SELECT id, title, status, archived_at FROM goals WHERE id = ?'),
       insertEvent: db.prepare(
         'INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)'
       ),
@@ -176,11 +164,14 @@ export function requestContextPackage(
 
   const normalizedObjective = objective.trim();
   const objectiveHash = sha256(normalizedObjective);
-
-  // Stub source fingerprint — REPLACED IN M6-006 with real fingerprint computation
-  // based on sorted M5 source row hashes and workspace/refinement metadata.
-  const sourceFingerprint = sha256(`stub:${goalId}:${role}:${adapterId}`);
   const assemblerVersion = ctx.assembler.version;
+
+  // Build real assembler input and compute real source fingerprint from M1/M3/M5 projections.
+  // Throws GoalNotFoundError if the goal does not exist.
+  const { input: assemblyInput, sourceFingerprint, goalArchivedAt } = buildContextAssemblyInput(
+    { db: ctx.db, assemblerVersion },
+    { goalId, workspaceId, role, adapterId, objective: normalizedObjective, objectiveHash }
+  );
 
   const requestFingerprint = computeRequestFingerprint({
     goalId,
@@ -198,12 +189,6 @@ export function requestContextPackage(
   if (existing) {
     const pkg = existing.packageId ? getContextPackageById(ctx.db, existing.packageId) : null;
     return { assembly: existing, package: pkg, reused: true };
-  }
-
-  // Goal validation (read-only, before transaction).
-  const goalRow = stmts.selectGoal.get(goalId) as GoalRow | undefined;
-  if (!goalRow) {
-    throw new GoalNotFoundError(goalId);
   }
 
   const assemblyId = idFactory();
@@ -227,7 +212,7 @@ export function requestContextPackage(
     requestedAt: now,
   };
 
-  if (goalRow.archived_at !== null) {
+  if (goalArchivedAt !== null) {
     // Goal is archived: insert failed assembly atomically with failure event.
     const failureCode: ContextAssemblyFailureCode = 'goal_archived';
     const failureMessage = capFailureMessage('goal is archived');
@@ -256,29 +241,6 @@ export function requestContextPackage(
     };
   }
 
-  // Build stub assembler input (REPLACED IN M6-006 by real input builder).
-  const stubInput = ContextAssemblyInput.parse({
-    goal: {
-      id: goalRow.id,
-      title: goalRow.title,
-      status: goalRow.status,
-      archivedAt: goalRow.archived_at,
-    },
-    refinement: null,
-    workspace: null,
-    role,
-    adapterId,
-    objective: normalizedObjective.slice(0, 4000),
-    memory: [],
-    decisions: [],
-    siblingSummaries: [],
-    budget: {
-      maxBytes: CONTEXT_PACKAGE_MAX_RENDERED_BYTES,
-      perSectionMaxBytes: PER_SECTION_MAX_BYTES,
-      estimatedTokenBudget: ESTIMATED_TOKEN_BUDGET,
-    },
-  });
-
   ctx.db.transaction(() => {
     // Insert assembly as pending.
     insertContextAssembly(ctx.db, {
@@ -296,13 +258,13 @@ export function requestContextPackage(
       emitEvent(stmts, 'context.assembly.requested', goalId, { assemblyId, goalId, adapterId, role }, now)
     );
 
-    // Invoke assembler synchronously.
+    // Invoke assembler synchronously with the real input built from M1/M3/M5 projections.
     let output: ContextAssemblyOutput | null = null;
     let failureCode: ContextAssemblyFailureCode = 'internal_error';
     let failureMessage = 'unknown assembler error';
 
     try {
-      const raw = ctx.assembler.assemble(stubInput);
+      const raw = ctx.assembler.assemble(assemblyInput);
       const parsed = ContextAssemblyOutput.safeParse(raw);
       if (!parsed.success) {
         failureCode = 'invalid_output';
