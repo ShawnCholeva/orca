@@ -24,6 +24,7 @@ import { resetPreparedStatements as resetProjectionStmts } from '../src/sessions
 import {
   checkArgvEnvSafety,
   deleteContextFile,
+  resetPreparedStatements as resetDeliveryStmts,
   sessionContextFilePath,
   sweepOrphanContextFiles,
   writeContextFile,
@@ -139,6 +140,7 @@ afterEach(async () => {
   resetProjectionStmts();
   resetRuntimeStmts();
   resetContextProjectionStmts();
+  resetDeliveryStmts();
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }

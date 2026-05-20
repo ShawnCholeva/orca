@@ -219,10 +219,8 @@ export class SessionRuntime {
       throw new CommandNotFoundError(session.adapterId);
     }
 
-    // Resolve context delivery mode from adapter (defaults to preview_only for stub adapters in tests)
     const delivery: AdapterContextDelivery =
-      (adapter as { contextDelivery?: AdapterContextDelivery }).contextDelivery ??
-      { mode: 'preview_only' as const, maxBytes: 32768 };
+      adapter.contextDelivery ?? { mode: 'preview_only' as const, maxBytes: 32768 };
 
     let deliveryRenderedContext: string | null = null;
     let contextFilePath: string | null = null;

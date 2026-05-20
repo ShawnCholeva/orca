@@ -14,10 +14,8 @@ export function sessionContextFilePath(dataDir: string, sessionId: string): stri
   return path.join(sessionContextDir(dataDir, sessionId), CONTEXT_FILENAME);
 }
 
-/**
- * Returns false if any argv element or env value contains the first 1 KiB of rendered context.
- * Defensive against regressions that inline rendered content into process args or env.
- */
+// Returns false if any argv element or env value contains the first 1 KiB of rendered context.
+// Guards against regressions that accidentally inline rendered content into process args or env.
 export function checkArgvEnvSafety(
   argv: string[],
   env: Record<string, string>,
@@ -34,11 +32,6 @@ export function checkArgvEnvSafety(
   return true;
 }
 
-/**
- * Writes rendered context to a session-scoped context file with mode 0600.
- * Uses O_CREAT|O_EXCL so a stale file cannot be silently overwritten.
- * Returns the absolute file path on success.
- */
 export async function writeContextFile(
   sessionId: string,
   dataDir: string,
@@ -50,7 +43,7 @@ export async function writeContextFile(
   const filePath = sessionContextFilePath(dataDir, sessionId);
   const content = Buffer.from(renderedContext, 'utf8');
 
-  // 'ax' = O_CREAT|O_EXCL|O_WRONLY — fails if file already exists
+  // 'ax' = O_CREAT|O_EXCL|O_WRONLY — fails if a stale file from a previous crashed session exists
   const fh = await open(filePath, 'ax', 0o600);
   try {
     await fh.write(content);
@@ -61,17 +54,10 @@ export async function writeContextFile(
   return filePath;
 }
 
-/**
- * Writes rendered context to PTY stdin followed by the Orca context terminator.
- * Used for shell/manual adapter with initial_input mode.
- */
 export function deliverContextToStdin(handle: PtyHandle, renderedContext: string): void {
   handle.write(Buffer.from(renderedContext + INITIAL_INPUT_TERMINATOR, 'utf8'));
 }
 
-/**
- * Deletes the per-session context file. Best-effort: silently ignores missing files.
- */
 export async function deleteContextFile(sessionId: string, dataDir: string): Promise<void> {
   try {
     await unlink(sessionContextFilePath(dataDir, sessionId));
@@ -80,11 +66,6 @@ export async function deleteContextFile(sessionId: string, dataDir: string): Pro
   }
 }
 
-/**
- * Sweeps context files for sessions that are no longer active (not returned by isActiveSession).
- * Called at daemon boot after session reconciliation to clean up orphan files.
- * Best-effort: errors per-file are silently ignored.
- */
 export async function sweepOrphanContextFiles(
   dataDir: string,
   isActiveSession: (sessionId: string) => boolean
@@ -107,13 +88,21 @@ export async function sweepOrphanContextFiles(
   }
 }
 
-/**
- * Reads only the rendered_context column from context_packages for delivery.
- * Avoids importing the full context package schema into the sessions module.
- */
+// Reads only the rendered_context column — avoids importing the full context schema
+// into the sessions module and loading fields not needed for delivery.
+let _deliveryDb: Database.Database | null = null;
+let _deliveryStmt: Database.Statement | null = null;
+
 export function getRenderedContextForDelivery(db: Database.Database, packageId: string): string | null {
-  const row = db
-    .prepare('SELECT rendered_context FROM context_packages WHERE id = ?')
-    .get(packageId) as { rendered_context: string } | undefined;
+  if (db !== _deliveryDb) {
+    _deliveryDb = db;
+    _deliveryStmt = db.prepare('SELECT rendered_context FROM context_packages WHERE id = ?');
+  }
+  const row = _deliveryStmt!.get(packageId) as { rendered_context: string } | undefined;
   return row?.rendered_context ?? null;
+}
+
+export function resetPreparedStatements(): void {
+  _deliveryDb = null;
+  _deliveryStmt = null;
 }
