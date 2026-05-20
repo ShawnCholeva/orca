@@ -390,6 +390,49 @@ describe("desktop api client", () => {
     });
   });
 
+  it("createSession includes contextPackageId when provided", async () => {
+    const session = {
+      id: "sess-ctx-1",
+      goalId: "goal-1",
+      workspaceId: "ws-1",
+      adapterId: "shell-manual" as AdapterId,
+      contextPackageId: "pkg-1",
+      role: null,
+      title: "shell-manual session",
+      status: "created" as const,
+      createdAt: now,
+      startedAt: null,
+      exitedAt: null,
+      instruction: null,
+      pid: null,
+      command: null,
+      args: null,
+      cwd: null,
+      terminalCols: null,
+      terminalRows: null,
+      exitCode: null,
+      exitSignal: null,
+      failureReason: null,
+      failureDetail: null,
+      archivedAt: null,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { session }));
+
+    const response = await api.createSession("goal-1", {
+      workspaceId: "ws-1",
+      adapterId: "shell-manual",
+      contextPackageId: "pkg-1",
+    });
+
+    expect(response.session.contextPackageId).toBe("pkg-1");
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      workspaceId: "ws-1",
+      adapterId: "shell-manual",
+      contextPackageId: "pkg-1",
+    });
+  });
+
   it("startSession posts to session start endpoint", async () => {
     const session = {
       id: "sess-1",

@@ -2,6 +2,8 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   AttachWorkspaceRequest,
   AttachWorkspaceResponse,
+  CreateContextPackageRequest,
+  CreateContextPackageResponse,
   CreateGoalDecisionRequest,
   CreateGoalMemoryRequest,
   CreateGoalRequest,
@@ -10,6 +12,7 @@ import {
   CreateSessionResponse,
   DomainEvent,
   ExtractSessionMemoryResponse,
+  GetContextPackageResponse,
   GetSessionResponse,
   GetSessionMemorySummaryResponse,
   GoalDecision,
@@ -19,6 +22,8 @@ import {
   InspectWorkspaceRequest,
   InspectWorkspaceResponse,
   ListAdaptersResponse,
+  ListContextPackagesQuery,
+  ListContextPackagesResponse,
   ListGoalDecisionsResponse,
   ListGoalMemoryResponse,
   ListGoalsResponse,
@@ -556,6 +561,61 @@ export async function listSessions(goalId: string): Promise<ListSessionsResponse
     { headers: authHeaders(token) },
     ListSessionsResponse,
     "List sessions failed",
+  );
+}
+
+export async function createContextPackage(
+  goalId: string,
+  request: CreateContextPackageRequest,
+): Promise<CreateContextPackageResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/context-packages`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(CreateContextPackageRequest.parse(request)),
+    },
+    CreateContextPackageResponse,
+    "Create context package failed",
+  );
+}
+
+export async function listContextPackages(
+  goalId: string,
+  query?: ListContextPackagesQuery,
+): Promise<ListContextPackagesResponse> {
+  const { baseUrl, token } = await loadConfig();
+  const parsed = ListContextPackagesQuery.parse(query ?? {});
+  const url = new URL(`${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/context-packages`);
+  if (parsed.sessionId !== undefined) {
+    url.searchParams.set("sessionId", parsed.sessionId);
+  }
+  if (parsed.adapterId !== undefined) {
+    url.searchParams.set("adapterId", parsed.adapterId);
+  }
+  if (query?.limit !== undefined) {
+    url.searchParams.set("limit", String(parsed.limit));
+  }
+
+  return requestJson(
+    url.toString(),
+    { headers: authHeaders(token) },
+    ListContextPackagesResponse,
+    "List context packages failed",
+  );
+}
+
+export async function getContextPackage(packageId: string): Promise<GetContextPackageResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/context-packages/${encodeURIComponent(packageId)}`,
+    { headers: authHeaders(token) },
+    GetContextPackageResponse,
+    "Get context package failed",
   );
 }
 
