@@ -17,7 +17,7 @@ import {
   WorkspaceUnavailableError,
 } from './errors.js';
 import { getSessionDetail, insertSession, listSessionsByGoal } from './projection.js';
-import { getContextPackageById } from '../context/projection.js';
+import { getContextPackageMetaById } from '../context/projection.js';
 import type { SessionOutputStore } from './output-store.js';
 import { type RuntimeCtx, SessionRuntime } from './runtime.js';
 
@@ -116,7 +116,7 @@ export async function createSession(
 
   // Validate context package if provided
   if (contextPackageId !== undefined) {
-    const pkg = getContextPackageById(ctx.db, contextPackageId);
+    const pkg = getContextPackageMetaById(ctx.db, contextPackageId);
     if (!pkg) throw new ContextPackageNotFoundError(contextPackageId);
     if (pkg.goalId !== goalId)
       throw new ContextPackageMismatchError(`Package goal ${pkg.goalId} does not match session goal ${goalId}`);

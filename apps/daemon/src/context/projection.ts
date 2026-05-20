@@ -304,6 +304,22 @@ export function getContextPackageById(db: Database.Database, id: string): Contex
   return rowToContextPackage(row);
 }
 
+export interface ContextPackageMeta {
+  id: string;
+  goalId: string;
+  adapterId: string;
+  workspaceId: string | null;
+  status: string;
+}
+
+export function getContextPackageMetaById(db: Database.Database, id: string): ContextPackageMeta | null {
+  const row = db
+    .prepare('SELECT id, goal_id, adapter_id, workspace_id, status FROM context_packages WHERE id = ?')
+    .get(id) as { id: string; goal_id: string; adapter_id: string; workspace_id: string | null; status: string } | undefined;
+  if (!row) return null;
+  return { id: row.id, goalId: row.goal_id, adapterId: row.adapter_id, workspaceId: row.workspace_id, status: row.status };
+}
+
 export interface ListContextPackagesOptions {
   sessionId?: string;
   adapterId?: string;
