@@ -7,8 +7,22 @@ import {
   AttachWorkspaceResponse,
   CreateGoalDecisionRequest,
   CreateGoalMemoryRequest,
+  CreateContextPackageRequest,
+  CreateContextPackageResponse,
   CreateSessionRequest,
   CreateSessionResponse,
+  ContextAssembly,
+  ContextAssemblyCompletedEventPayload,
+  ContextAssemblyFailedEventPayload,
+  ContextAssemblyFailureCode,
+  ContextAssemblyInput,
+  ContextAssemblyOutput,
+  ContextAssemblyRequestedEventPayload,
+  ContextAssemblyStatus,
+  ContextPackage,
+  ContextPackageCreatedEventPayload,
+  ContextRole,
+  ContextSourceRef,
   DecisionArchivedEventPayload,
   DecisionCandidate,
   DecisionConfirmedEventPayload,
@@ -26,10 +40,13 @@ import {
   GoalRefinement,
   GuidedRefinementInput,
   GuidedRefinementOutput,
+  GetContextPackageResponse,
   InspectWorkspacePreview,
   InspectWorkspaceRequest,
   InspectWorkspaceResponse,
   ListAdaptersResponse,
+  ListContextPackagesQuery,
+  ListContextPackagesResponse,
   ListGoalDecisionsResponse,
   ListGoalMemoryResponse,
   ListSessionsResponse,
@@ -55,6 +72,7 @@ import {
   SessionErrorFrame,
   SessionExtractionInput,
   SessionExtractionOutput,
+  SessionCreatedEventPayload,
   SessionMemorySummary,
   SessionInputFrame,
   SessionOutputFrame,
@@ -362,6 +380,7 @@ describe("M4 contracts", () => {
       {
         workspaceId: "ws-1",
         adapterId: "claude-code",
+        contextPackageId: "pkg-1",
         role: " implementer ",
         instruction: "Do the work",
         title: " Session one "
@@ -369,6 +388,7 @@ describe("M4 contracts", () => {
       {
         workspaceId: "ws-1",
         adapterId: "claude-code",
+        contextPackageId: "pkg-1",
         role: "implementer",
         instruction: "Do the work",
         title: "Session one"
@@ -379,6 +399,13 @@ describe("M4 contracts", () => {
         workspaceId: "ws-1",
         adapterId: "claude-code",
         extra: true
+      })
+    ).toThrow();
+    expect(() =>
+      CreateSessionRequest.parse({
+        workspaceId: "ws-1",
+        adapterId: "claude-code",
+        contextPackageId: 1
       })
     ).toThrow();
 
@@ -500,6 +527,39 @@ describe("M4 contracts", () => {
         code: "unknown_session",
         message: "missing session",
         extra: true
+      })
+    ).toThrow();
+  });
+
+  it("parses session.created payload with optional contextPackageId", () => {
+    const payloadWithContext = {
+      sessionId: "sess-1",
+      goalId: "goal-1",
+      workspaceId: "ws-1",
+      adapterId: "shell-manual" as const,
+      contextPackageId: "pkg-1"
+    };
+    expectRoundTrip(
+      SessionCreatedEventPayload.parse,
+      payloadWithContext,
+      payloadWithContext
+    );
+
+    const payloadWithoutContext = {
+      sessionId: "sess-2",
+      goalId: "goal-1",
+      workspaceId: "ws-1",
+      adapterId: "shell-manual" as const
+    };
+    expectRoundTrip(
+      SessionCreatedEventPayload.parse,
+      payloadWithoutContext,
+      payloadWithoutContext
+    );
+    expect(() =>
+      SessionCreatedEventPayload.parse({
+        ...payloadWithContext,
+        contextPackageId: 123
       })
     ).toThrow();
   });
@@ -936,5 +996,300 @@ describe("M5 contracts", () => {
         latestExtraction: { ...withLatest.latestExtraction, failureCode: "unknown" }
       })
     ).toThrow();
+  });
+});
+
+describe("M6 contracts", () => {
+  const sourceFixture = {
+    type: "memory_item" as const,
+    id: "mem-1",
+    sourceSessionId: "sess-1",
+    label: "Constraint: local-first",
+    reason: "required" as const,
+    marker: "[M1]"
+  };
+
+  const packageFixture = {
+    id: "pkg-1",
+    goalId: "goal-1",
+    supersedesPackageId: null,
+    adapterId: "shell-manual" as const,
+    workspaceId: "ws-1",
+    role: "engineer" as const,
+    objective: "Ship bounded context package",
+    status: "ready" as const,
+    renderedContext: "## Objective\n- Ship bounded context package",
+    renderedBytes: 42,
+    estimatedTokens: 11,
+    truncated: false,
+    sparse: false,
+    sourceCount: 1,
+    sources: [sourceFixture],
+    warnings: [],
+    sourceFingerprint: "srcfp-1",
+    assemblerVersion: "m6-deterministic-v1",
+    createdAt: now
+  };
+
+  const assemblyFixture = {
+    id: "asm-1",
+    goalId: "goal-1",
+    packageId: "pkg-1",
+    replacePackageId: null,
+    adapterId: "shell-manual" as const,
+    workspaceId: "ws-1",
+    role: "engineer" as const,
+    objectiveHash: "obj-1",
+    sourceFingerprint: "srcfp-1",
+    assemblerVersion: "m6-deterministic-v1",
+    requestFingerprint: "reqfp-1",
+    status: "succeeded" as const,
+    trigger: "prepare" as const,
+    failureCode: null,
+    failureMessage: null,
+    requestedAt: now,
+    startedAt: now,
+    finishedAt: now
+  };
+
+  it("parses context rows, request, responses, and event payloads", () => {
+    expectRoundTrip(ContextSourceRef.parse, sourceFixture, sourceFixture);
+    expectRoundTrip(ContextPackage.parse, packageFixture, packageFixture);
+    expectRoundTrip(ContextAssembly.parse, assemblyFixture, assemblyFixture);
+
+    const request = {
+      adapterId: "shell-manual" as const,
+      role: "architect" as const,
+      objective: "Plan deterministic assembly",
+      workspaceId: "ws-1"
+    };
+    expectRoundTrip(CreateContextPackageRequest.parse, request, request);
+    expectRoundTrip(ListContextPackagesQuery.parse, {}, { limit: 20 });
+
+    const createResponse = {
+      package: packageFixture,
+      assembly: assemblyFixture,
+      reused: false
+    };
+    expectRoundTrip(
+      CreateContextPackageResponse.parse,
+      createResponse,
+      createResponse
+    );
+    expectRoundTrip(
+      ListContextPackagesResponse.parse,
+      { packages: [packageFixture], assemblies: [assemblyFixture] },
+      { packages: [packageFixture], assemblies: [assemblyFixture] }
+    );
+    expectRoundTrip(
+      GetContextPackageResponse.parse,
+      { package: packageFixture },
+      { package: packageFixture }
+    );
+
+    const eventPayloads: Array<[parse: (input: unknown) => unknown, input: unknown]> = [
+      [
+        ContextAssemblyRequestedEventPayload.parse,
+        {
+          assemblyId: "asm-1",
+          goalId: "goal-1",
+          adapterId: "shell-manual",
+          role: "engineer"
+        }
+      ],
+      [
+        ContextAssemblyCompletedEventPayload.parse,
+        {
+          assemblyId: "asm-1",
+          goalId: "goal-1",
+          packageId: "pkg-1",
+          sourceCount: 4,
+          renderedBytes: 1024,
+          truncated: false
+        }
+      ],
+      [
+        ContextAssemblyFailedEventPayload.parse,
+        {
+          assemblyId: "asm-2",
+          goalId: "goal-1",
+          failureCode: "invalid_output"
+        }
+      ],
+      [
+        ContextPackageCreatedEventPayload.parse,
+        {
+          packageId: "pkg-1",
+          goalId: "goal-1",
+          adapterId: "shell-manual",
+          role: "engineer",
+          sourceCount: 4,
+          renderedBytes: 1024
+        }
+      ]
+    ];
+
+    for (const [parse, input] of eventPayloads) {
+      expect(parse(input)).toEqual(input);
+    }
+  });
+
+  it("rejects oversized M6 fields and source/warning caps", () => {
+    expect(() =>
+      ContextPackage.parse({
+        ...packageFixture,
+        renderedBytes: 32769
+      })
+    ).toThrow();
+    expect(() =>
+      ContextPackage.parse({
+        ...packageFixture,
+        objective: "x".repeat(4001)
+      })
+    ).toThrow();
+    expect(() =>
+      ContextPackage.parse({
+        ...packageFixture,
+        warnings: new Array(11).fill("warn")
+      })
+    ).toThrow();
+    expect(() =>
+      ContextPackage.parse({
+        ...packageFixture,
+        sources: new Array(61).fill(sourceFixture)
+      })
+    ).toThrow();
+    expect(() =>
+      ContextAssembly.parse({
+        ...assemblyFixture,
+        failureMessage: "x".repeat(257)
+      })
+    ).toThrow();
+  });
+
+  it("rejects forbidden content fields on strict M6 event payloads", () => {
+    expect(() =>
+      ContextPackageCreatedEventPayload.parse({
+        packageId: "pkg-1",
+        goalId: "goal-1",
+        adapterId: "shell-manual",
+        role: "engineer",
+        sourceCount: 2,
+        renderedBytes: 256,
+        renderedContext: "do not leak"
+      })
+    ).toThrow();
+    expect(() =>
+      ContextAssemblyFailedEventPayload.parse({
+        assemblyId: "asm-1",
+        goalId: "goal-1",
+        failureCode: "internal_error",
+        objective: "forbidden"
+      })
+    ).toThrow();
+    expect(() =>
+      ContextAssemblyCompletedEventPayload.parse({
+        assemblyId: "asm-1",
+        goalId: "goal-1",
+        packageId: "pkg-1",
+        sourceCount: 2,
+        renderedBytes: 256,
+        truncated: false,
+        assemblerInput: { raw: true }
+      })
+    ).toThrow();
+  });
+
+  it("rejects invalid M6 enum values", () => {
+    expect(() => ContextRole.parse("qa")).toThrow();
+    expect(() => ContextAssemblyStatus.parse("queued")).toThrow();
+    expect(() => ContextAssemblyFailureCode.parse("timeout")).toThrow();
+  });
+
+  it("parses internal assembly IO schemas", () => {
+    const input = {
+      goal: {
+        id: "goal-1",
+        title: "Ship M6",
+        status: "active" as const,
+        archivedAt: null
+      },
+      refinement: {
+        id: "ref-1",
+        version: 2,
+        objective: "Bounded assembly",
+        constraints: ["local-first"],
+        successCriteria: ["events are content-free"],
+        scopeNotes: "No provider integrations"
+      },
+      workspace: {
+        id: "ws-1",
+        name: "orca",
+        pathDisplay: "/home/shawn/projects/orca",
+        branch: "main",
+        dirty: false
+      },
+      role: "reviewer" as const,
+      adapterId: "shell-manual" as const,
+      objective: "Validate M6 contracts only",
+      memory: [
+        {
+          id: "mem-1",
+          type: "constraint" as const,
+          status: "promoted" as const,
+          content: "Keep payloads content-free",
+          contentHash: "hash-1",
+          confidence: 0.9,
+          sourceSessionId: "sess-1",
+          updatedAt: now
+        }
+      ],
+      decisions: [
+        {
+          id: "dec-1",
+          title: "No transcript reads",
+          decisionText: "Assembler never imports transcript modules.",
+          rationale: null,
+          status: "confirmed" as const,
+          confirmationRequired: true,
+          confidence: 0.9,
+          sourceSessionId: "sess-1",
+          updatedAt: now
+        }
+      ],
+      siblingSummaries: [
+        {
+          id: "sum-1",
+          sessionId: "sess-2",
+          headline: "Regression checks pass",
+          summaryText: "M5 loop remains green.",
+          truncated: false,
+          createdAt: now
+        }
+      ],
+      budget: {
+        maxBytes: 32768,
+        perSectionMaxBytes: 8192,
+        estimatedTokenBudget: 8192
+      }
+    };
+    expectRoundTrip(ContextAssemblyInput.parse, input, input);
+
+    const output = {
+      sections: [
+        {
+          kind: "objective" as const,
+          title: "Objective",
+          body: "Validate bounded M6 contract surface.",
+          markers: ["[G1]"]
+        }
+      ],
+      sources: [sourceFixture],
+      warnings: [],
+      truncated: false,
+      sparse: false,
+      estimatedTokens: 10
+    };
+    expectRoundTrip(ContextAssemblyOutput.parse, output, output);
   });
 });

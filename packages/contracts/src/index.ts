@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+const UTF8_ENCODER = new TextEncoder();
+
+function utf8ByteLength(value: string): number {
+  return UTF8_ENCODER.encode(value).length;
+}
+
 export const GoalStatus = z.enum(["active", "archived"]);
 export type GoalStatus = z.infer<typeof GoalStatus>;
 
@@ -111,7 +117,11 @@ export const DomainEventType = z.enum([
   "decision.created",
   "decision.updated",
   "decision.confirmed",
-  "decision.archived"
+  "decision.archived",
+  "context.assembly.requested",
+  "context.assembly.completed",
+  "context.assembly.failed",
+  "context.package.created"
 ]);
 export type DomainEventType = z.infer<typeof DomainEventType>;
 
@@ -322,6 +332,67 @@ export type SessionFailureReason = z.infer<typeof SessionFailureReason>;
 export const AdapterId = z.enum(["shell-manual", "claude-code", "opencode", "codex"]);
 export type AdapterId = z.infer<typeof AdapterId>;
 
+export const ContextRole = z.enum([
+  "architect",
+  "engineer",
+  "reviewer",
+  "generalist"
+]);
+export type ContextRole = z.infer<typeof ContextRole>;
+
+export const ContextPackageStatus = z.enum(["ready"]);
+export type ContextPackageStatus = z.infer<typeof ContextPackageStatus>;
+
+export const ContextAssemblyStatus = z.enum([
+  "pending",
+  "running",
+  "succeeded",
+  "failed"
+]);
+export type ContextAssemblyStatus = z.infer<typeof ContextAssemblyStatus>;
+
+export const ContextAssemblyTrigger = z.enum(["prepare", "regenerate", "retry"]);
+export type ContextAssemblyTrigger = z.infer<typeof ContextAssemblyTrigger>;
+
+export const ContextAssemblyFailureCode = z.enum([
+  "invalid_input",
+  "invalid_output",
+  "output_too_large",
+  "goal_archived",
+  "source_missing",
+  "delivery_unavailable",
+  "internal_error",
+  "daemon_restart"
+]);
+export type ContextAssemblyFailureCode = z.infer<typeof ContextAssemblyFailureCode>;
+
+export const ContextSourceType = z.enum([
+  "goal",
+  "refinement",
+  "workspace",
+  "memory_item",
+  "decision",
+  "session_summary"
+]);
+export type ContextSourceType = z.infer<typeof ContextSourceType>;
+
+export const ContextSourceReason = z.enum([
+  "required",
+  "high_confidence",
+  "recency",
+  "role_match",
+  "sibling",
+  "objective_hint"
+]);
+export type ContextSourceReason = z.infer<typeof ContextSourceReason>;
+
+export const AdapterContextDeliveryMode = z.enum([
+  "initial_input",
+  "context_file",
+  "preview_only"
+]);
+export type AdapterContextDeliveryMode = z.infer<typeof AdapterContextDeliveryMode>;
+
 export const AdapterAvailabilityStatus = z.enum([
   "available",
   "unavailable",
@@ -359,6 +430,7 @@ export const SessionSummary = z.object({
   goalId: z.string(),
   workspaceId: z.string(),
   adapterId: AdapterId,
+  contextPackageId: z.string().nullable().optional(),
   role: z.string().nullable(),
   title: z.string(),
   status: SessionStatus,
@@ -405,6 +477,7 @@ export const CreateSessionRequest = z
   .object({
     workspaceId: z.string().min(1),
     adapterId: AdapterId,
+    contextPackageId: z.string().min(1).optional(),
     role: z.string().trim().max(100).optional(),
     instruction: z.string().max(4000).optional(),
     title: z.string().trim().min(1).max(200).optional()
@@ -1006,6 +1079,351 @@ export const M5Event = z.discriminatedUnion("type", [
     .strict()
 ]);
 export type M5Event = z.infer<typeof M5Event>;
+
+export const CONTEXT_PACKAGE_MAX_RENDERED_BYTES = 32 * 1024;
+export const CONTEXT_PACKAGE_MAX_OBJECTIVE_CHARS = 4000;
+export const CONTEXT_PACKAGE_MAX_WARNING_COUNT = 10;
+export const CONTEXT_PACKAGE_MAX_WARNING_CHARS = 200;
+export const CONTEXT_PACKAGE_MAX_SOURCE_COUNT = 60;
+
+export const ContextSourceRef = z
+  .object({
+    type: ContextSourceType,
+    id: z.string(),
+    sourceSessionId: z.string().nullable().optional(),
+    label: z.string().min(1).max(64),
+    reason: ContextSourceReason,
+    marker: z.string().min(1).max(64)
+  })
+  .strict();
+export type ContextSourceRef = z.infer<typeof ContextSourceRef>;
+
+export const ContextPackage = z
+  .object({
+    id: z.string(),
+    goalId: z.string(),
+    supersedesPackageId: z.string().nullable().optional(),
+    adapterId: AdapterId,
+    workspaceId: z.string().nullable().optional(),
+    role: ContextRole,
+    objective: z.string().max(CONTEXT_PACKAGE_MAX_OBJECTIVE_CHARS),
+    status: ContextPackageStatus,
+    renderedContext: z
+      .string()
+      .refine(
+        (value) => utf8ByteLength(value) <= CONTEXT_PACKAGE_MAX_RENDERED_BYTES,
+        `renderedContext must be at most ${CONTEXT_PACKAGE_MAX_RENDERED_BYTES} bytes`
+      ),
+    renderedBytes: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(CONTEXT_PACKAGE_MAX_RENDERED_BYTES),
+    estimatedTokens: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+    sparse: z.boolean(),
+    sourceCount: z.number().int().nonnegative(),
+    sources: z.array(ContextSourceRef).max(CONTEXT_PACKAGE_MAX_SOURCE_COUNT),
+    warnings: z
+      .array(z.string().max(CONTEXT_PACKAGE_MAX_WARNING_CHARS))
+      .max(CONTEXT_PACKAGE_MAX_WARNING_COUNT),
+    sourceFingerprint: z.string(),
+    assemblerVersion: z.string(),
+    createdAt: z.string().datetime()
+  })
+  .strict();
+export type ContextPackage = z.infer<typeof ContextPackage>;
+
+export const ContextAssembly = z
+  .object({
+    id: z.string(),
+    goalId: z.string(),
+    packageId: z.string().nullable().optional(),
+    replacePackageId: z.string().nullable().optional(),
+    adapterId: AdapterId,
+    workspaceId: z.string().nullable().optional(),
+    role: ContextRole,
+    objectiveHash: z.string(),
+    sourceFingerprint: z.string(),
+    assemblerVersion: z.string(),
+    requestFingerprint: z.string(),
+    status: ContextAssemblyStatus,
+    trigger: ContextAssemblyTrigger,
+    failureCode: ContextAssemblyFailureCode.nullable().optional(),
+    failureMessage: z.string().max(256).nullable().optional(),
+    requestedAt: z.string().datetime(),
+    startedAt: z.string().datetime().nullable().optional(),
+    finishedAt: z.string().datetime().nullable().optional()
+  })
+  .strict();
+export type ContextAssembly = z.infer<typeof ContextAssembly>;
+
+export const CreateContextPackageRequest = z
+  .object({
+    adapterId: AdapterId,
+    role: ContextRole,
+    objective: z.string().trim().min(1).max(CONTEXT_PACKAGE_MAX_OBJECTIVE_CHARS),
+    workspaceId: z.string().min(1).optional(),
+    replacePackageId: z.string().min(1).optional()
+  })
+  .strict();
+export type CreateContextPackageRequest = z.infer<typeof CreateContextPackageRequest>;
+
+export const ListContextPackagesQuery = z
+  .object({
+    sessionId: z.string().min(1).optional(),
+    adapterId: AdapterId.optional(),
+    limit: z.coerce.number().int().positive().max(50).default(20)
+  })
+  .strict();
+export type ListContextPackagesQuery = z.infer<typeof ListContextPackagesQuery>;
+
+export const CreateContextPackageResponse = z
+  .object({
+    package: ContextPackage.nullable(),
+    assembly: ContextAssembly,
+    reused: z.boolean()
+  })
+  .strict()
+  .refine(
+    (value) => (value.package === null ? value.assembly.status === "failed" : true),
+    { message: "package can be null only when assembly.status is failed" }
+  );
+export type CreateContextPackageResponse = z.infer<typeof CreateContextPackageResponse>;
+
+export const ListContextPackagesResponse = z
+  .object({
+    packages: z.array(ContextPackage),
+    assemblies: z.array(ContextAssembly)
+  })
+  .strict();
+export type ListContextPackagesResponse = z.infer<typeof ListContextPackagesResponse>;
+
+export const GetContextPackageResponse = z
+  .object({
+    package: ContextPackage
+  })
+  .strict();
+export type GetContextPackageResponse = z.infer<typeof GetContextPackageResponse>;
+
+export const ContextAssemblyRequestedEventPayload = z
+  .object({
+    assemblyId: z.string(),
+    goalId: z.string(),
+    adapterId: AdapterId,
+    role: ContextRole
+  })
+  .strict();
+export type ContextAssemblyRequestedEventPayload = z.infer<
+  typeof ContextAssemblyRequestedEventPayload
+>;
+
+export const ContextAssemblyCompletedEventPayload = z
+  .object({
+    assemblyId: z.string(),
+    goalId: z.string(),
+    packageId: z.string(),
+    sourceCount: z.number().int().nonnegative(),
+    renderedBytes: z.number().int().nonnegative(),
+    truncated: z.boolean()
+  })
+  .strict();
+export type ContextAssemblyCompletedEventPayload = z.infer<
+  typeof ContextAssemblyCompletedEventPayload
+>;
+
+export const ContextAssemblyFailedEventPayload = z
+  .object({
+    assemblyId: z.string(),
+    goalId: z.string(),
+    failureCode: ContextAssemblyFailureCode
+  })
+  .strict();
+export type ContextAssemblyFailedEventPayload = z.infer<
+  typeof ContextAssemblyFailedEventPayload
+>;
+
+export const ContextPackageCreatedEventPayload = z
+  .object({
+    packageId: z.string(),
+    goalId: z.string(),
+    adapterId: AdapterId,
+    role: ContextRole,
+    sourceCount: z.number().int().nonnegative(),
+    renderedBytes: z.number().int().nonnegative()
+  })
+  .strict();
+export type ContextPackageCreatedEventPayload = z.infer<
+  typeof ContextPackageCreatedEventPayload
+>;
+
+export const M6Event = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("context.assembly.requested"),
+      payload: ContextAssemblyRequestedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("context.assembly.completed"),
+      payload: ContextAssemblyCompletedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("context.assembly.failed"),
+      payload: ContextAssemblyFailedEventPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("context.package.created"),
+      payload: ContextPackageCreatedEventPayload
+    })
+    .strict()
+]);
+export type M6Event = z.infer<typeof M6Event>;
+
+export const SessionCreatedEventPayload = z
+  .object({
+    sessionId: z.string(),
+    goalId: z.string(),
+    workspaceId: z.string(),
+    adapterId: AdapterId,
+    contextPackageId: z.string().nullable().optional()
+  })
+  .strict();
+export type SessionCreatedEventPayload = z.infer<typeof SessionCreatedEventPayload>;
+
+export const SelectableMemory = z
+  .object({
+    id: z.string(),
+    type: GoalMemoryType,
+    status: GoalMemoryStatus,
+    content: z.string().min(1).max(4000),
+    contentHash: z.string(),
+    confidence: z.number().min(0).max(1).nullable(),
+    sourceSessionId: z.string().nullable(),
+    updatedAt: z.string().datetime()
+  })
+  .strict();
+export type SelectableMemory = z.infer<typeof SelectableMemory>;
+
+export const SelectableDecision = z
+  .object({
+    id: z.string(),
+    title: z.string().min(1).max(200),
+    decisionText: z.string().min(1).max(4000),
+    rationale: z.string().max(4000).nullable(),
+    status: GoalDecisionStatus,
+    confirmationRequired: z.boolean(),
+    confidence: z.number().min(0).max(1).nullable(),
+    sourceSessionId: z.string().nullable(),
+    updatedAt: z.string().datetime()
+  })
+  .strict();
+export type SelectableDecision = z.infer<typeof SelectableDecision>;
+
+export const SelectableSummary = z
+  .object({
+    id: z.string(),
+    sessionId: z.string(),
+    headline: z.string().min(1).max(200),
+    summaryText: z.string().min(1).max(4000),
+    truncated: z.boolean(),
+    createdAt: z.string().datetime()
+  })
+  .strict();
+export type SelectableSummary = z.infer<typeof SelectableSummary>;
+
+export const ContextSection = z
+  .object({
+    kind: z.enum([
+      "objective",
+      "refinement",
+      "workspace",
+      "memory",
+      "decisions",
+      "sibling_summaries",
+      "notes"
+    ]),
+    title: z.string().min(1).max(200),
+    body: z.string(),
+    markers: z.array(z.string().min(1).max(64))
+  })
+  .strict();
+export type ContextSection = z.infer<typeof ContextSection>;
+
+const ContextAssemblyGoalInput = z
+  .object({
+    id: z.string(),
+    title: z.string().min(1).max(200),
+    status: GoalStatus,
+    archivedAt: z.string().datetime().nullable()
+  })
+  .strict();
+
+const ContextAssemblyRefinementInput = z
+  .object({
+    id: z.string(),
+    version: z.number().int().nonnegative().optional(),
+    objective: z.string().max(4000).optional(),
+    constraints: z.array(z.string().min(1).max(200)).optional(),
+    successCriteria: z.array(z.string().min(1).max(200)).optional(),
+    scopeNotes: z.string().max(4000).optional()
+  })
+  .strict();
+
+const ContextAssemblyWorkspaceInput = z
+  .object({
+    id: z.string(),
+    name: z.string().min(1).max(100),
+    pathDisplay: z.string().min(1).max(1024),
+    branch: z.string().nullable().optional(),
+    dirty: z.boolean().nullable().optional()
+  })
+  .strict();
+
+const ContextAssemblyBudget = z
+  .object({
+    maxBytes: z.number().int().positive(),
+    perSectionMaxBytes: z.number().int().positive(),
+    estimatedTokenBudget: z.number().int().positive()
+  })
+  .strict();
+
+export const ContextAssemblyInput = z
+  // @internal Internal-only shared schema for daemon-local context assembly input.
+  .object({
+    goal: ContextAssemblyGoalInput,
+    refinement: ContextAssemblyRefinementInput.nullable(),
+    workspace: ContextAssemblyWorkspaceInput.nullable().optional(),
+    role: ContextRole,
+    adapterId: AdapterId,
+    objective: z.string().max(CONTEXT_PACKAGE_MAX_OBJECTIVE_CHARS),
+    memory: z.array(SelectableMemory),
+    decisions: z.array(SelectableDecision),
+    siblingSummaries: z.array(SelectableSummary),
+    budget: ContextAssemblyBudget
+  })
+  .strict();
+export type ContextAssemblyInput = z.infer<typeof ContextAssemblyInput>;
+
+export const ContextAssemblyOutput = z
+  // @internal Internal-only shared schema for daemon-local context assembly output.
+  .object({
+    sections: z.array(ContextSection),
+    sources: z.array(ContextSourceRef).max(CONTEXT_PACKAGE_MAX_SOURCE_COUNT),
+    warnings: z
+      .array(z.string().max(CONTEXT_PACKAGE_MAX_WARNING_CHARS))
+      .max(CONTEXT_PACKAGE_MAX_WARNING_COUNT),
+    truncated: z.boolean(),
+    sparse: z.boolean(),
+    estimatedTokens: z.number().int().nonnegative()
+  })
+  .strict();
+export type ContextAssemblyOutput = z.infer<typeof ContextAssemblyOutput>;
 
 export const SkillSummary = z.object({
   id: z.string(),
