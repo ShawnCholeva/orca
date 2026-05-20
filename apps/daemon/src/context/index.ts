@@ -1,5 +1,6 @@
 export { FakeContextAssembler } from './assembler.js';
 export type { SessionPreparationAssembler } from './assembler.js';
+export { reconcileStaleAssemblies } from './reconcile.js';
 export {
   requestContextPackage,
   resetPreparedStatements as resetUsecaseStatements,

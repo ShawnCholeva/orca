@@ -11,6 +11,7 @@ import { createSessionOutputStore } from './sessions/output-store.js';
 import { reconcileStaleExtractions } from './extractions/reconciliation.js';
 import { ExtractionRunner } from './extractions/runner.js';
 import { DeterministicExtractor } from './extractions/deterministic-extractor.js';
+import { reconcileStaleAssemblies } from './context/reconcile.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -32,10 +33,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Reconcile stale sessions and extractions before accepting traffic.
+  // Reconcile stale sessions, extractions, and context assemblies before accepting traffic.
   const bootNow = new Date().toISOString();
   reconcileSessionsOnBoot(db, eventBus, bootNow);
   reconcileStaleExtractions(db, eventBus, bootNow);
+  reconcileStaleAssemblies(db, eventBus, bootNow);
 
   const sessionOutputStore = createSessionOutputStore(db, {
     tailBytes: config.sessionOutputTailBytes,
