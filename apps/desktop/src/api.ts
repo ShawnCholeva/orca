@@ -2,23 +2,36 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   AttachWorkspaceRequest,
   AttachWorkspaceResponse,
+  CreateGoalDecisionRequest,
+  CreateGoalMemoryRequest,
+  CreateGoalRequest,
+  CreateGoalResponse,
   CreateSessionRequest,
   CreateSessionResponse,
+  DomainEvent,
+  ExtractSessionMemoryResponse,
   GetSessionResponse,
+  GetSessionMemorySummaryResponse,
+  GoalDecision,
   GoalDetailResponse,
+  GoalMemoryItem,
   HealthResponse,
   InspectWorkspaceRequest,
   InspectWorkspaceResponse,
   ListAdaptersResponse,
+  ListGoalDecisionsResponse,
+  ListGoalMemoryResponse,
   ListGoalsResponse,
   ListPluginsResponse,
   ListSessionsResponse,
   ListSkillsResponse,
-  CreateGoalRequest,
-  CreateGoalResponse,
+  MemoryExtraction,
+  PatchGoalDecisionRequest,
+  PatchGoalMemoryRequest,
   RefineGoalRequest,
   RefineGoalResponse,
   SessionErrorFrame,
+  SessionMemorySummary,
   SessionOutputFrame,
   StartSessionRequest,
   StartSessionResponse,
@@ -26,7 +39,6 @@ import {
   UpdateGoalRequest,
   UpdateGoalResponse,
   ArchiveGoalResponse,
-  DomainEvent,
   type PluginSummary,
   type SessionErrorFrame as SessionErrorFrameData,
   type SessionInputFrame as SessionInputFrameData,
@@ -48,6 +60,29 @@ interface DaemonEndpoint {
 }
 
 let configPromise: Promise<Config> | null = null;
+
+const GoalMemoryItemResponse = {
+  parse(data: unknown): { item: GoalMemoryItem } {
+    if (!isRecord(data) || !("item" in data) || Object.keys(data).length !== 1) {
+      throw new Error("invalid goal memory item response");
+    }
+    return { item: GoalMemoryItem.parse(data.item) };
+  },
+};
+
+const GoalDecisionResponse = {
+  parse(data: unknown): { item: GoalDecision } {
+    if (!isRecord(data) || !("item" in data) || Object.keys(data).length !== 1) {
+      throw new Error("invalid goal decision response");
+    }
+    return { item: GoalDecision.parse(data.item) };
+  },
+};
+
+type CreateGoalMemoryInput = Parameters<typeof CreateGoalMemoryRequest.parse>[0];
+type PatchGoalMemoryInput = Parameters<typeof PatchGoalMemoryRequest.parse>[0];
+type CreateGoalDecisionInput = Parameters<typeof CreateGoalDecisionRequest.parse>[0];
+type PatchGoalDecisionInput = Parameters<typeof PatchGoalDecisionRequest.parse>[0];
 
 function loadConfig(): Promise<Config> {
   if (configPromise) return configPromise;
@@ -257,6 +292,163 @@ export async function getGoalDetail(goalId: string): Promise<GoalDetailResponse>
     GoalDetailResponse,
     "Get goal detail failed",
   );
+}
+
+export async function listGoalMemory(
+  goalId: string,
+  options?: { includeArchived?: boolean },
+): Promise<GoalMemoryItem[]> {
+  const { baseUrl, token } = await loadConfig();
+  const url = new URL(`${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/memory`);
+  if (options?.includeArchived) {
+    url.searchParams.set("includeArchived", "1");
+  }
+  const body = await requestJson(
+    url.toString(),
+    { headers: authHeaders(token) },
+    ListGoalMemoryResponse,
+    "List goal memory failed",
+  );
+  return body.items;
+}
+
+export async function createGoalMemory(
+  goalId: string,
+  input: CreateGoalMemoryInput,
+): Promise<GoalMemoryItem> {
+  const { baseUrl, token } = await loadConfig();
+  const body = await requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/memory`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(CreateGoalMemoryRequest.parse(input)),
+    },
+    GoalMemoryItemResponse,
+    "Create goal memory failed",
+  );
+  return body.item;
+}
+
+export async function patchMemoryItem(
+  id: string,
+  patch: PatchGoalMemoryInput,
+): Promise<GoalMemoryItem> {
+  const { baseUrl, token } = await loadConfig();
+  const body = await requestJson(
+    `${baseUrl}/v1/memory/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(PatchGoalMemoryRequest.parse(patch)),
+    },
+    GoalMemoryItemResponse,
+    "Patch memory item failed",
+  );
+  return body.item;
+}
+
+export async function listGoalDecisions(goalId: string): Promise<GoalDecision[]> {
+  const { baseUrl, token } = await loadConfig();
+  const body = await requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/decisions`,
+    { headers: authHeaders(token) },
+    ListGoalDecisionsResponse,
+    "List goal decisions failed",
+  );
+  return body.items;
+}
+
+export async function createGoalDecision(
+  goalId: string,
+  input: CreateGoalDecisionInput,
+): Promise<GoalDecision> {
+  const { baseUrl, token } = await loadConfig();
+  const body = await requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/decisions`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(CreateGoalDecisionRequest.parse(input)),
+    },
+    GoalDecisionResponse,
+    "Create goal decision failed",
+  );
+  return body.item;
+}
+
+export async function patchDecision(
+  id: string,
+  patch: PatchGoalDecisionInput,
+): Promise<GoalDecision> {
+  const { baseUrl, token } = await loadConfig();
+  const body = await requestJson(
+    `${baseUrl}/v1/decisions/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(PatchGoalDecisionRequest.parse(patch)),
+    },
+    GoalDecisionResponse,
+    "Patch decision failed",
+  );
+  return body.item;
+}
+
+export async function getSessionSummary(
+  sessionId: string,
+): Promise<SessionMemorySummary | null> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(
+    `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/summary`,
+    { headers: authHeaders(token) },
+  );
+  if (res.status === 404) {
+    return null;
+  }
+
+  const json = await readJsonBody(res);
+  if (!res.ok) {
+    throw toApiError(res, json, "Get session summary failed");
+  }
+
+  try {
+    return GetSessionMemorySummaryResponse.parse(json).summary;
+  } catch (err) {
+    throw new ApiError("Response validation failed", err);
+  }
+}
+
+export async function extractSessionMemory(
+  sessionId: string,
+): Promise<MemoryExtraction> {
+  const { baseUrl, token } = await loadConfig();
+  const body = await requestJson(
+    `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/extract-memory`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify({}),
+    },
+    ExtractSessionMemoryResponse,
+    "Extract session memory failed",
+  );
+  return body.extraction;
 }
 
 export async function inspectWorkspace(

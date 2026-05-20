@@ -42,6 +42,81 @@ const workspace = {
   attachedAt: now,
 };
 
+const memoryItem = {
+  id: "mem-1",
+  goalId: "goal-1",
+  type: "constraint" as const,
+  status: "candidate" as const,
+  content: "Use deterministic extraction only.",
+  contentHash: "hash-1",
+  confidence: 0.9,
+  sourceType: "manual" as const,
+  sourceId: null,
+  sourceSessionId: null,
+  sourceExtractionId: null,
+  sourceOffsetFirst: null,
+  sourceOffsetLast: null,
+  createdAt: now,
+  updatedAt: now,
+  promotedAt: null,
+  archivedAt: null,
+};
+
+const decision = {
+  id: "dec-1",
+  goalId: "goal-1",
+  title: "Retry extraction manually",
+  decisionText: "Use manual retry for failed extraction rows.",
+  rationale: null,
+  status: "proposed" as const,
+  confirmationRequired: true,
+  confidence: 0.8,
+  sourceType: "manual" as const,
+  sourceId: null,
+  sourceSessionId: null,
+  sourceExtractionId: null,
+  sourceOffsetFirst: null,
+  sourceOffsetLast: null,
+  createdAt: now,
+  updatedAt: now,
+  confirmedAt: null,
+  archivedAt: null,
+};
+
+const summary = {
+  id: "sum-1",
+  sessionId: "sess-1",
+  goalId: "goal-1",
+  extractionId: "ext-1",
+  headline: "Session completed with one blocker",
+  summaryText: "Build passed after retrying tests.",
+  truncated: false,
+  sourceOffsetFirst: 0,
+  sourceOffsetLast: 120,
+  createdAt: now,
+};
+
+const extraction = {
+  id: "ext-1",
+  goalId: "goal-1",
+  sessionId: "sess-1",
+  trigger: "manual" as const,
+  status: "pending" as const,
+  extractorVersion: "m5-deterministic-v1",
+  sourceFingerprint: "fp-1",
+  sourceOffsetFirst: 0,
+  sourceOffsetLast: 120,
+  summaryId: null,
+  itemCount: 0,
+  decisionCount: 0,
+  promotedCount: 0,
+  failureCode: null,
+  failureMessage: null,
+  requestedAt: now,
+  startedAt: null,
+  finishedAt: null,
+};
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -384,6 +459,147 @@ describe("desktop api client", () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("http://127.0.0.1:8787/v1/sessions/sess-1/stop");
     expect(init?.method).toBe("POST");
+  });
+
+  it("listGoalMemory fetches and returns parsed items", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { items: [memoryItem] }));
+
+    const response = await api.listGoalMemory("goal-1");
+
+    expect(response).toHaveLength(1);
+    expect(response[0]!.id).toBe("mem-1");
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/memory");
+  });
+
+  it("listGoalMemory includes archived filter when requested", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { items: [memoryItem] }));
+
+    await api.listGoalMemory("goal-1", { includeArchived: true });
+
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/memory?includeArchived=1");
+  });
+
+  it("listGoalMemory throws on unexpected response shape", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { items: [{ id: "missing-fields" }] }));
+
+    await expect(api.listGoalMemory("goal-1")).rejects.toMatchObject({
+      name: "ApiError",
+      message: "Response validation failed",
+    });
+  });
+
+  it("createGoalMemory posts and returns created item", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { item: memoryItem }));
+
+    const response = await api.createGoalMemory("goal-1", {
+      type: "constraint",
+      content: "Use deterministic extraction only.",
+      confidence: 0.9,
+    });
+
+    expect(response.id).toBe("mem-1");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/memory");
+    expect(init?.method).toBe("POST");
+  });
+
+  it("patchMemoryItem patches and returns item", async () => {
+    const promoted = { ...memoryItem, status: "promoted" as const, promotedAt: now, updatedAt: now };
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { item: promoted }));
+
+    const response = await api.patchMemoryItem("mem-1", { status: "promoted" });
+
+    expect(response.status).toBe("promoted");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/memory/mem-1");
+    expect(init?.method).toBe("PATCH");
+  });
+
+  it("listGoalDecisions fetches and returns parsed items", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { items: [decision] }));
+
+    const response = await api.listGoalDecisions("goal-1");
+
+    expect(response).toHaveLength(1);
+    expect(response[0]!.id).toBe("dec-1");
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/decisions");
+  });
+
+  it("createGoalDecision posts and returns created item", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { item: decision }));
+
+    const response = await api.createGoalDecision("goal-1", {
+      title: "Retry extraction manually",
+      decisionText: "Use manual retry for failed extraction rows.",
+      confirmationRequired: true,
+    });
+
+    expect(response.id).toBe("dec-1");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/decisions");
+    expect(init?.method).toBe("POST");
+  });
+
+  it("patchDecision patches and returns item", async () => {
+    const confirmed = { ...decision, status: "confirmed" as const, confirmedAt: now, updatedAt: now };
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { item: confirmed }));
+
+    const response = await api.patchDecision("dec-1", { status: "confirmed" });
+
+    expect(response.status).toBe("confirmed");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/decisions/dec-1");
+    expect(init?.method).toBe("PATCH");
+  });
+
+  it("getSessionSummary returns parsed summary", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { summary }));
+
+    const response = await api.getSessionSummary("sess-1");
+
+    expect(response?.id).toBe("sum-1");
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/sessions/sess-1/summary");
+  });
+
+  it("getSessionSummary returns null on 404", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(404, { error: { code: "summary_not_found", message: "No summary found" } }),
+    );
+
+    await expect(api.getSessionSummary("sess-1")).resolves.toBeNull();
+  });
+
+  it("extractSessionMemory parses created and existing extraction responses", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(201, { extraction }))
+      .mockResolvedValueOnce(jsonResponse(200, { extraction }));
+
+    const first = await api.extractSessionMemory("sess-1");
+    const second = await api.extractSessionMemory("sess-1");
+
+    expect(first.id).toBe("ext-1");
+    expect(second.id).toBe("ext-1");
+    const [firstUrl, firstInit] = fetchMock.mock.calls[0]!;
+    expect(firstUrl).toBe("http://127.0.0.1:8787/v1/sessions/sess-1/extract-memory");
+    expect(firstInit?.method).toBe("POST");
+    expect(firstInit?.body).toBe("{}");
+  });
+
+  it("extractSessionMemory surfaces structured 409 errors", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(409, {
+        error: { code: "session_not_terminal", message: "Session is not terminal" },
+      }),
+    );
+
+    await expect(api.extractSessionMemory("sess-1")).rejects.toMatchObject({
+      name: "ApiError",
+      code: "session_not_terminal",
+    });
   });
 
   it("createSession rejects with ApiError on 422", async () => {
