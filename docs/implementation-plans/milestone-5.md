@@ -1181,7 +1181,7 @@ M5 is complete when:
 
 ## Completion Record
 
-**Final commit SHA:** TBD — see commit following this edit.
+**Final commit SHA:** 3519c66
 
 **Full-suite test summary (pnpm -r test):**
 - contracts: 30 passed
