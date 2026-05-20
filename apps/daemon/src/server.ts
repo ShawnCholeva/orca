@@ -128,6 +128,9 @@ import {
   SessionNotFoundForExtractionError,
   SessionNotTerminalError,
 } from './extractions/usecases.js';
+import { DeterministicAssembler } from './context/assembler.js';
+import type { SessionPreparationAssembler } from './context/assembler.js';
+import { registerContextRoutes } from './context/routes.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -157,6 +160,7 @@ export function createServer(
     sessionRuntime?: SessionRuntime;
     sessionOutputStore?: SessionOutputStore;
     extractionRunner?: ExtractionRunner;
+    assembler?: SessionPreparationAssembler;
   }
 ): FastifyInstance {
   const startedAt = new Date().toISOString();
@@ -168,6 +172,7 @@ export function createServer(
     deps?.sessionRuntime ??
     new SessionRuntime(new NodePtyManager(), config.sessionStopGraceMs, config.sessionWsBufferLimitBytes);
   const extractionRunner = deps?.extractionRunner;
+  const assembler = deps?.assembler ?? new DeterministicAssembler();
 
   const server = Fastify({
     logger: {
@@ -574,6 +579,10 @@ export function createServer(
       }
     }
   );
+
+  // ---- M6 Context Package routes ----
+
+  registerContextRoutes(server, { db, bus: eventBus, assembler, adapterRegistry });
 
   server.get('/v1/adapters', async (): Promise<ListAdaptersResponse> => {
     const adapters = await adapterRegistry.list();
