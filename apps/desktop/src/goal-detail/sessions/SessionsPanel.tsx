@@ -6,6 +6,8 @@ import { SessionSummaryPanel } from "./SessionSummaryPanel";
 import { CreateSessionDialog } from "./CreateSessionDialog";
 import { SessionTerminalView } from "./SessionTerminalView";
 
+const TERMINAL_SESSION_STATUSES = new Set(["exited", "failed", "stopped"]);
+
 type Props = {
   goalId: string;
   workspaces: Workspace[];
@@ -28,7 +30,6 @@ export function SessionsPanel({ goalId, workspaces }: Props) {
 
   const workspaceById = useMemo(() => new Map(workspaces.map((ws) => [ws.id, ws])), [workspaces]);
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null;
-  const TERMINAL = new Set(["exited", "failed", "stopped"]);
 
   function handleCreated(sessionId: string) {
     setShowCreate(false);
@@ -93,7 +94,7 @@ export function SessionsPanel({ goalId, workspaces }: Props) {
             sessionId={selectedSession.id}
             status={selectedSession.status}
           />
-          {TERMINAL.has(selectedSession.status) && (
+          {TERMINAL_SESSION_STATUSES.has(selectedSession.status) && (
             <SessionSummaryPanel key={`summary-${selectedSession.id}`} sessionId={selectedSession.id} />
           )}
         </>

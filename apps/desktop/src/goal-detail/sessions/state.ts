@@ -85,9 +85,8 @@ export function useSessionsPanel(goalId: string): SessionsPanelState {
     setExtracting((prev) => new Set(prev).add(sessionId));
     try {
       await extractSessionMemory(sessionId);
-      refresh();
     } catch {
-      // extraction errors surface via latestExtraction.status on next refresh
+      // extraction errors surface via latestExtraction.status on next event-driven refresh
     } finally {
       setExtracting((prev) => {
         const next = new Set(prev);

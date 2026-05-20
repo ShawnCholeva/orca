@@ -15,9 +15,11 @@ export function SessionSummaryPanel({ sessionId }: Props) {
     if (!open) return;
     setSummary(undefined);
     setError(null);
+    let cancelled = false;
     getSessionSummary(sessionId)
-      .then((s) => setSummary(s))
-      .catch((err) => setError(toErrorMessage(err, "Failed to load summary.")));
+      .then((s) => { if (!cancelled) setSummary(s); })
+      .catch((err) => { if (!cancelled) setError(toErrorMessage(err, "Failed to load summary.")); });
+    return () => { cancelled = true; };
   }, [sessionId, open]);
 
   return (
