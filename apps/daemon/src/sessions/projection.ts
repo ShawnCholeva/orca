@@ -6,6 +6,7 @@ interface SessionRow {
   goal_id: string;
   workspace_id: string;
   adapter_id: string;
+  context_package_id: string | null;
   role: string | null;
   instruction: string | null;
   title: string;
@@ -45,7 +46,7 @@ export interface InsertSessionRow {
   createdAt: string;
 }
 
-const SESSION_COLS = `s.id, s.goal_id, s.workspace_id, s.adapter_id, s.role, s.instruction, s.title, s.status, s.pid,
+const SESSION_COLS = `s.id, s.goal_id, s.workspace_id, s.adapter_id, s.context_package_id, s.role, s.instruction, s.title, s.status, s.pid,
   s.command, s.args_json, s.cwd, s.terminal_cols, s.terminal_rows, s.exit_code, s.exit_signal,
   s.failure_reason, s.failure_detail, s.created_at, s.started_at, s.exited_at, s.archived_at,
   latest_extraction.id AS latest_extraction_id,
@@ -82,6 +83,7 @@ function rowToSummary(row: SessionRow): SessionSummary {
     goalId: row.goal_id,
     workspaceId: row.workspace_id,
     adapterId: row.adapter_id,
+    contextPackageId: row.context_package_id,
     role: row.role,
     title: row.title,
     status: row.status,
@@ -108,6 +110,7 @@ function rowToDetail(row: SessionRow): SessionDetail {
     goalId: row.goal_id,
     workspaceId: row.workspace_id,
     adapterId: row.adapter_id,
+    contextPackageId: row.context_package_id,
     role: row.role,
     title: row.title,
     status: row.status,
