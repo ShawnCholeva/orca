@@ -48,9 +48,17 @@ function makeWorkspace(id: string, name: string, attachedAt: string): Workspace 
 const ws1 = makeWorkspace("ws-1", "alpha", "2026-01-01T00:00:01.000Z");
 const ws2 = makeWorkspace("ws-2", "beta", "2026-01-01T00:00:02.000Z");
 
-function mockDetail(detail: GoalDetailResponse) {
-  vi.doMock("../api", () => ({
-    getGoalDetail: vi.fn().mockResolvedValue(detail),
+class ApiError extends Error {
+  code: string | undefined;
+  constructor(message: string, _cause?: unknown, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+  }
+}
+
+function makeBaseApiMock(overrides: Record<string, unknown> = {}) {
+  return {
     inspectWorkspace: vi.fn(),
     attachWorkspace: vi.fn(),
     detachWorkspace: vi.fn(),
@@ -63,14 +71,15 @@ function mockDetail(detail: GoalDetailResponse) {
     toErrorMessage: (err: unknown, fallback: string) =>
       err instanceof Error ? err.message : fallback,
     extractSessionMemory: vi.fn().mockResolvedValue({ id: "ext-1", status: "pending" }),
-    ApiError: class ApiError extends Error {
-      code: string | undefined;
-      constructor(message: string, _cause?: unknown, code?: string) {
-        super(message);
-        this.name = "ApiError";
-        this.code = code;
-      }
-    },
+    ApiError,
+    ...overrides,
+  };
+}
+
+function mockDetail(detail: GoalDetailResponse) {
+  vi.doMock("../api", () => ({
+    getGoalDetail: vi.fn().mockResolvedValue(detail),
+    ...makeBaseApiMock(),
   }));
   vi.doMock("./sessions/SessionTerminalView", () => ({
     SessionTerminalView: ({ sessionId }: { sessionId: string }) => (
@@ -101,32 +110,17 @@ function setupM5EventCapture() {
 
   vi.doMock("../api", () => ({
     getGoalDetail: vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [] }),
-    inspectWorkspace: vi.fn(),
-    attachWorkspace: vi.fn(),
-    detachWorkspace: vi.fn(),
-    listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
-    listAdapters: vi.fn().mockResolvedValue({ adapters: [] }),
-    listGoalMemory: listGoalMemoryMock,
-    listGoalDecisions: listGoalDecisionsMock,
-    stopSession: vi.fn(),
-    openEventStream: vi.fn().mockImplementation(
-      (handlers: { onEvent: (e: DomainEvent) => void; onStatus: (s: ConnectionStatus) => void }) => {
-        capturedOnEvent = handlers.onEvent;
-        capturedOnStatus = handlers.onStatus;
-        return { close: vi.fn() };
-      },
-    ),
-    toErrorMessage: (err: unknown, fallback: string) =>
-      err instanceof Error ? err.message : fallback,
-    extractSessionMemory: vi.fn().mockResolvedValue({ id: "ext-1", status: "pending" }),
-    ApiError: class ApiError extends Error {
-      code: string | undefined;
-      constructor(message: string, _cause?: unknown, code?: string) {
-        super(message);
-        this.name = "ApiError";
-        this.code = code;
-      }
-    },
+    ...makeBaseApiMock({
+      listGoalMemory: listGoalMemoryMock,
+      listGoalDecisions: listGoalDecisionsMock,
+      openEventStream: vi.fn().mockImplementation(
+        (handlers: { onEvent: (e: DomainEvent) => void; onStatus: (s: ConnectionStatus) => void }) => {
+          capturedOnEvent = handlers.onEvent;
+          capturedOnStatus = handlers.onStatus;
+          return { close: vi.fn() };
+        },
+      ),
+    }),
   }));
 
   vi.doMock("./sessions/SessionsPanel", () => ({
@@ -222,26 +216,7 @@ describe("GoalDetailView", () => {
     const getGoalDetailMock = vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [] });
     vi.doMock("../api", () => ({
       getGoalDetail: getGoalDetailMock,
-      inspectWorkspace: vi.fn(),
-      attachWorkspace: vi.fn(),
-      detachWorkspace: vi.fn(),
-      listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
-      listAdapters: vi.fn().mockResolvedValue({ adapters: [] }),
-      listGoalMemory: vi.fn().mockResolvedValue([]),
-      listGoalDecisions: vi.fn().mockResolvedValue([]),
-      stopSession: vi.fn(),
-      openEventStream: vi.fn().mockReturnValue({ close: vi.fn() }),
-      toErrorMessage: (err: unknown, fallback: string) =>
-        err instanceof Error ? err.message : fallback,
-      extractSessionMemory: vi.fn().mockResolvedValue({ id: "ext-1", status: "pending" }),
-      ApiError: class ApiError extends Error {
-        code: string | undefined;
-        constructor(message: string, _cause?: unknown, code?: string) {
-          super(message);
-          this.name = "ApiError";
-          this.code = code;
-        }
-      },
+      ...makeBaseApiMock(),
     }));
     vi.doMock("./sessions/SessionTerminalView", () => ({
       SessionTerminalView: ({ sessionId }: { sessionId: string }) => (

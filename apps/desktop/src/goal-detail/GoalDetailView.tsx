@@ -1,19 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { GoalDetailResponse } from "@orca/contracts";
+import type { GoalDetailResponse, DomainEventType } from "@orca/contracts";
 import { getGoalDetail, openEventStream } from "../api";
 import { WorkspaceListPanel } from "./WorkspaceListPanel";
 import { SessionsPanel } from "./sessions/SessionsPanel";
 import { MemoryPanel } from "./memory/MemoryPanel";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
 
-const MEMORY_ITEM_EVENTS = new Set([
+const MEMORY_ITEM_EVENTS = new Set<DomainEventType>([
   "memory.item.created",
   "memory.item.updated",
   "memory.item.promoted",
   "memory.item.archived",
 ]);
 
-const DECISION_EVENTS = new Set([
+const DECISION_EVENTS = new Set<DomainEventType>([
   "decision.created",
   "decision.updated",
   "decision.confirmed",
