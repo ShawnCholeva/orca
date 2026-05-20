@@ -1241,6 +1241,7 @@ describe("M6 contracts", () => {
           contentHash: "hash-1",
           confidence: 0.9,
           sourceSessionId: "sess-1",
+          createdAt: now,
           updatedAt: now
         }
       ],
@@ -1254,6 +1255,8 @@ describe("M6 contracts", () => {
           confirmationRequired: true,
           confidence: 0.9,
           sourceSessionId: "sess-1",
+          createdAt: now,
+          confirmedAt: now,
           updatedAt: now
         }
       ],

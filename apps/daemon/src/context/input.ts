@@ -154,6 +154,7 @@ export function buildContextAssemblyInput(
     contentHash: item.contentHash,
     confidence: item.confidence,
     sourceSessionId: item.sourceSessionId,
+    createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   }));
 
@@ -166,6 +167,8 @@ export function buildContextAssemblyInput(
     confirmationRequired: d.confirmationRequired,
     confidence: d.confidence,
     sourceSessionId: d.sourceSessionId,
+    createdAt: d.createdAt,
+    confirmedAt: d.confirmedAt,
     updatedAt: d.updatedAt,
   }));
 

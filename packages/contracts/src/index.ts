@@ -1305,6 +1305,7 @@ export const SelectableMemory = z
     contentHash: z.string(),
     confidence: z.number().min(0).max(1).nullable(),
     sourceSessionId: z.string().nullable(),
+    createdAt: z.string().datetime(),
     updatedAt: z.string().datetime()
   })
   .strict();
@@ -1320,6 +1321,8 @@ export const SelectableDecision = z
     confirmationRequired: z.boolean(),
     confidence: z.number().min(0).max(1).nullable(),
     sourceSessionId: z.string().nullable(),
+    createdAt: z.string().datetime(),
+    confirmedAt: z.string().datetime().nullable(),
     updatedAt: z.string().datetime()
   })
   .strict();
