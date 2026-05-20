@@ -4,7 +4,7 @@
 
 - Baseline SHA: `31f24cd8a3c05511f486a5e9bac9d02860398bbf`
 - Pre-M6-016 HEAD: `abd5403f48a608d1432d41c49e93460d1ddb0a23`
-- M6-016 implementation SHA: recorded by the commit containing `context-proof-loop.integration.test.ts`
+- M6-016 implementation SHA: `3d6eb681b371fa9f8785a63adf50ea98cb812ed2`
 - Date: 2026-05-20
 - Pre-existing dirty paths before M6-016: `docs/operation-flow/4-do-implementation-plan.md`
 
@@ -45,7 +45,7 @@ association.
 - M6-012: `6cccbad` desktop API wrappers
 - M6-013/M6-014: `9184c3b` context controls, preview, status, retry, live refresh
 - M6-015: `df274b5` session badge/restart UI; `abd5403` simplify
-- M6-016: this change set, adding the final daemon proof-loop test and final notes
+- M6-016: `3d6eb68` final daemon proof-loop test and final notes
 
 ## Gate 7 Review
 
