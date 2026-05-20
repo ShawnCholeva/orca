@@ -4,6 +4,7 @@ import { getGoalDetail } from "../api";
 import { WorkspaceListPanel } from "./WorkspaceListPanel";
 import { SessionsPanel } from "./sessions/SessionsPanel";
 import { MemoryPanel } from "./memory/MemoryPanel";
+import { DecisionsPanel } from "./decisions/DecisionsPanel";
 
 type Props = {
   goalId: string;
@@ -122,6 +123,8 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
         <SessionsPanel goalId={goalId} workspaces={workspaces} />
 
         <MemoryPanel goalId={goalId} />
+
+        <DecisionsPanel goalId={goalId} />
       </div>
     </div>
   );
