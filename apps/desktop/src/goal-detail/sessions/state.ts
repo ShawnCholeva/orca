@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
-import type { SessionSummary } from "@orca/contracts";
-import { listSessions, stopSession, extractSessionMemory, openEventStream, toErrorMessage } from "../../api";
+import type { ContextAssembly, ContextPackage, SessionSummary } from "@orca/contracts";
+import {
+  listSessions,
+  listContextPackages,
+  stopSession,
+  extractSessionMemory,
+  openEventStream,
+  toErrorMessage,
+} from "../../api";
 
 const SESSION_LIFECYCLE_EVENTS = new Set([
   "session.created",
@@ -17,8 +24,18 @@ const EXTRACTION_EVENTS = new Set([
   "memory.extraction.failed",
 ]);
 
+const CONTEXT_EVENTS = new Set([
+  "context.assembly.requested",
+  "context.assembly.completed",
+  "context.assembly.failed",
+  "context.package.created",
+]);
+
 export interface SessionsPanelState {
   sessions: SessionSummary[];
+  packages: Map<string, ContextPackage>;
+  assemblies: ContextAssembly[];
+  hasDaemonRestartFailure: boolean;
   loading: boolean;
   error: string | null;
   selectedSessionId: string | null;
@@ -32,6 +49,8 @@ export interface SessionsPanelState {
 
 export function useSessionsPanel(goalId: string, sessionsRefreshKey = 0): SessionsPanelState {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [packages, setPackages] = useState<Map<string, ContextPackage>>(new Map());
+  const [assemblies, setAssemblies] = useState<ContextAssembly[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -42,8 +61,19 @@ export function useSessionsPanel(goalId: string, sessionsRefreshKey = 0): Sessio
   const refresh = useCallback(() => {
     setLoading(true);
     setError(null);
-    listSessions(goalId)
-      .then((res) => setSessions(res.sessions))
+    Promise.all([
+      listSessions(goalId),
+      listContextPackages(goalId),
+    ])
+      .then(([sessRes, pkgRes]) => {
+        setSessions(sessRes.sessions);
+        const pkgMap = new Map<string, ContextPackage>();
+        for (const pkg of pkgRes.packages) {
+          pkgMap.set(pkg.id, pkg);
+        }
+        setPackages(pkgMap);
+        setAssemblies(pkgRes.assemblies);
+      })
       .catch((err) => setError(toErrorMessage(err, "Failed to load sessions.")))
       .finally(() => setLoading(false));
   }, [goalId]);
@@ -56,7 +86,11 @@ export function useSessionsPanel(goalId: string, sessionsRefreshKey = 0): Sessio
     const stream = openEventStream({
       onEvent(event) {
         if (event.goalId === null || event.goalId !== goalId) return;
-        if (SESSION_LIFECYCLE_EVENTS.has(event.type) || EXTRACTION_EVENTS.has(event.type)) {
+        if (
+          SESSION_LIFECYCLE_EVENTS.has(event.type) ||
+          EXTRACTION_EVENTS.has(event.type) ||
+          CONTEXT_EVENTS.has(event.type)
+        ) {
           refresh();
         }
       },
@@ -64,6 +98,10 @@ export function useSessionsPanel(goalId: string, sessionsRefreshKey = 0): Sessio
     });
     return () => stream.close();
   }, [goalId, refresh]);
+
+  const hasDaemonRestartFailure = assemblies.some(
+    (a) => a.status === "failed" && a.failureCode === "daemon_restart"
+  );
 
   async function handleStop(sessionId: string) {
     setStopping((prev) => new Set(prev).add(sessionId));
@@ -98,6 +136,9 @@ export function useSessionsPanel(goalId: string, sessionsRefreshKey = 0): Sessio
 
   return {
     sessions,
+    packages,
+    assemblies,
+    hasDaemonRestartFailure,
     loading,
     error,
     selectedSessionId,

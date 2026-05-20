@@ -1,4 +1,5 @@
-import type { SessionSummary, SessionLatestExtraction } from "@orca/contracts";
+import type { ContextPackage, SessionSummary, SessionLatestExtraction } from "@orca/contracts";
+import { SessionContextBadge } from "./SessionContextBadge";
 
 type Props = {
   session: SessionSummary;
@@ -6,9 +7,11 @@ type Props = {
   selected: boolean;
   stopping: boolean;
   extracting: boolean;
+  pkg: ContextPackage | null | undefined;
   onSelect(): void;
   onStop(): void;
   onExtract(): void;
+  onOpenContextPreview(): void;
 };
 
 const STOPPABLE = new Set(["starting", "running"]);
@@ -40,7 +43,18 @@ function ExtractionBadge({ extraction }: { extraction: SessionLatestExtraction |
   return null;
 }
 
-export function SessionListItem({ session, workspaceName, selected, stopping, extracting, onSelect, onStop, onExtract }: Props) {
+export function SessionListItem({
+  session,
+  workspaceName,
+  selected,
+  stopping,
+  extracting,
+  pkg,
+  onSelect,
+  onStop,
+  onExtract,
+  onOpenContextPreview,
+}: Props) {
   const shortId = session.id.slice(0, 8);
   const canStop = STOPPABLE.has(session.status);
   const isTerminal = TERMINAL.has(session.status);
@@ -68,6 +82,11 @@ export function SessionListItem({ session, workspaceName, selected, stopping, ex
           {new Date(session.createdAt).toLocaleString()}
         </time>
         <ExtractionBadge extraction={session.latestExtraction} />
+        <SessionContextBadge
+          session={session}
+          pkg={pkg}
+          onClick={onOpenContextPreview}
+        />
       </div>
       <div className="session-list-item-actions">
         {canStop && (

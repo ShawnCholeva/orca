@@ -48,6 +48,7 @@ const adapters = [
 function mockApi(overrides: Record<string, unknown> = {}) {
   vi.doMock("../../api", () => ({
     listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+    listContextPackages: vi.fn().mockResolvedValue({ packages: [], assemblies: [] }),
     listAdapters: vi.fn().mockResolvedValue({ adapters }),
     createSession: vi.fn(),
     startSession: vi.fn(),

@@ -63,6 +63,7 @@ function makeBaseApiMock(overrides: Record<string, unknown> = {}) {
     attachWorkspace: vi.fn(),
     detachWorkspace: vi.fn(),
     listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+    listContextPackages: vi.fn().mockResolvedValue({ packages: [], assemblies: [] }),
     listAdapters: vi.fn().mockResolvedValue({ adapters: [] }),
     listGoalMemory: vi.fn().mockResolvedValue([]),
     listGoalDecisions: vi.fn().mockResolvedValue([]),

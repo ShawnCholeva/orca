@@ -41,6 +41,7 @@ type Props = {
   onRegenerate: (replacePackageId: string) => void;
   onRetry: () => void;
   busy?: boolean;
+  readOnly?: boolean;
 };
 
 function countByType(types: ContextSourceType[]): Partial<Record<ContextSourceType, number>> {
@@ -59,6 +60,7 @@ export function ContextPreviewPanel({
   onRegenerate,
   onRetry,
   busy = false,
+  readOnly = false,
 }: Props) {
   const [liveAssembly, setLiveAssembly] = useState<ContextAssembly | null>(assembly);
   const [livePkg, setLivePkg] = useState<ContextPackage | null>(pkg);
@@ -158,14 +160,16 @@ export function ContextPreviewPanel({
               Code: <code>{liveAssembly.failureCode}</code>
             </p>
           )}
-          <button
-            type="button"
-            className="submit-button"
-            onClick={() => onRetry()}
-            disabled={busy}
-          >
-            Retry
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              className="submit-button"
+              onClick={() => onRetry()}
+              disabled={busy}
+            >
+              Retry
+            </button>
+          )}
         </div>
       )}
 
@@ -217,24 +221,26 @@ export function ContextPreviewPanel({
             </div>
           )}
 
-          <div className="context-preview-actions">
-            <button
-              type="button"
-              className="submit-button submit-button--primary"
-              onClick={() => onStartSession(livePkg.id)}
-              disabled={busy}
-            >
-              Start session
-            </button>
-            <button
-              type="button"
-              className="submit-button submit-button--secondary"
-              onClick={() => onRegenerate(livePkg.id)}
-              disabled={busy}
-            >
-              Regenerate
-            </button>
-          </div>
+          {!readOnly && (
+            <div className="context-preview-actions">
+              <button
+                type="button"
+                className="submit-button submit-button--primary"
+                onClick={() => onStartSession(livePkg.id)}
+                disabled={busy}
+              >
+                Start session
+              </button>
+              <button
+                type="button"
+                className="submit-button submit-button--secondary"
+                onClick={() => onRegenerate(livePkg.id)}
+                disabled={busy}
+              >
+                Regenerate
+              </button>
+            </div>
+          )}
         </>
       )}
 
