@@ -356,11 +356,18 @@ export function buildRecommendationInput(
   const pkgRow = stmts.getLatestContextPackageId.get(goalId) as ContextPkgIdRow | undefined;
   const latestContextPackageId = pkgRow?.id ?? null;
 
-  const activeRecsRaw = listRecommendationsByGoal(db, {
+  // Fetch both proposed and modified so suppression checks cover both non-terminal statuses.
+  const proposedRecs = listRecommendationsByGoal(db, {
     goalId,
     status: 'proposed',
     limit: MAX_ACTIVE_RECS,
   }).recommendations;
+  const modifiedRecs = listRecommendationsByGoal(db, {
+    goalId,
+    status: 'modified',
+    limit: MAX_ACTIVE_RECS,
+  }).recommendations;
+  const activeRecsRaw = [...proposedRecs, ...modifiedRecs].slice(0, MAX_ACTIVE_RECS);
   const activeRecommendations: ActiveRecommendationInput[] = activeRecsRaw.map((r) => ({
     id: r.id,
     type: r.type,

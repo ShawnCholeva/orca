@@ -19,6 +19,8 @@ import {
   askUserRule,
   markCompleteRule,
   pauseWorkRule,
+  runValidationRule,
+  reviewOutputRule,
 } from './rules.js';
 import { recommendationFingerprint, canonicalizeProposedActionJson } from './fingerprint.js';
 
@@ -114,6 +116,8 @@ export class DeterministicRecommendationProvider implements RecommendationProvid
       ...askUserRule(input),
       ...markCompleteRule(input),
       ...pauseWorkRule(input),
+      ...runValidationRule(input),
+      ...reviewOutputRule(input),
     ];
 
     // Dedup within this generation by recommendation fingerprint

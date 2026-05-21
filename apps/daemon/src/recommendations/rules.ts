@@ -12,10 +12,18 @@ import type {
   RecommendationInput,
   TaskInput,
   SessionInput,
+  SessionSummaryInput,
   DecisionInput,
   MemoryItemInput,
+  ActiveRecommendationInput,
   ActiveConflictInput,
 } from './input.js';
+import {
+  detectImplementationEvidence,
+  detectReviewerRejection,
+  type SessionSummaryEvidence,
+} from './evidence.js';
+import { recommendationFingerprint, canonicalizeProposedActionJson } from './fingerprint.js';
 
 // ── Candidate type ─────────────────────────────────────────────────────────────
 
@@ -584,6 +592,259 @@ export function pauseWorkRule(input: RecommendationInput): RecommendationCandida
       confidence: 0.7,
       sources: sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES),
       relatedTaskId: taskId,
+    });
+  }
+
+  return candidates;
+}
+
+// ── run_validation ─────────────────────────────────────────────────────────────
+
+// Archive threshold: number of new arch notes before review_output fires (Trigger 2).
+const ARCH_NOTE_THRESHOLD = 3;
+
+function buildRunValidationObjective(
+  session: SessionInput,
+  tasks: TaskInput[]
+): string {
+  if (session.taskId) {
+    const task = tasks.find((t) => t.id === session.taskId);
+    if (task) return `${task.title} (${task.role})`.slice(0, 200);
+  }
+  return `${session.role ?? 'engineer'} session`.slice(0, 200);
+}
+
+function isActiveSuppressed(
+  goalId: string,
+  type: RecommendationType,
+  proposedAction: object,
+  activeRecommendations: ActiveRecommendationInput[]
+): boolean {
+  const canonical = canonicalizeProposedActionJson(JSON.stringify(proposedAction));
+  const fp = recommendationFingerprint(goalId, type, canonical);
+  return activeRecommendations.some(
+    (r) => r.fingerprint === fp && (r.status === 'proposed' || r.status === 'modified')
+  );
+}
+
+export function runValidationRule(input: RecommendationInput): RecommendationCandidate[] {
+  const summaryBySession = new Map<string, SessionSummaryInput>();
+  for (const s of input.sessionSummaries) {
+    if (!summaryBySession.has(s.sessionId)) {
+      summaryBySession.set(s.sessionId, s);
+    }
+  }
+
+  const validationResultSessionIds = new Set<string>(
+    input.memoryItems
+      .filter((m) => m.type === 'validation_result')
+      .map((m) => m.sourceSessionId)
+      .filter((id): id is string => id !== null)
+  );
+
+  const candidates: RecommendationCandidate[] = [];
+
+  for (const session of input.sessions) {
+    if (session.role !== 'engineer') continue;
+    if (session.exitedAt === null) continue;
+
+    const summary = summaryBySession.get(session.id);
+    const evidence: SessionSummaryEvidence = {
+      sessionId: session.id,
+      sessionStatus: session.status,
+      sessionRole: session.role,
+      summaryText: summary?.summaryText ?? '',
+      hasValidationResult: validationResultSessionIds.has(session.id),
+    };
+
+    if (!detectImplementationEvidence(evidence)) continue;
+
+    // Skip if reviewer/qa session with positive outcome exists after this engineer session.
+    const positiveReviewExists = input.sessions.some((s) => {
+      if (s.role !== 'reviewer' && s.role !== 'qa') return false;
+      if (s.exitedAt === null) return false;
+      if (s.status === 'failed') return false;
+      return s.exitedAt > (session.exitedAt ?? '');
+    });
+
+    if (positiveReviewExists) continue;
+
+    const objective = buildRunValidationObjective(session, input.tasks);
+    const proposedAction = {
+      kind: 'run_validation' as const,
+      sessionId: session.id,
+      ...(session.taskId ? { taskId: session.taskId } : {}),
+      suggestedRole: 'reviewer' as const,
+      objective,
+    };
+
+    const actionJson = JSON.stringify(proposedAction);
+    if (!capProposedActionJson(actionJson)) continue;
+
+    if (isActiveSuppressed(input.goalId, 'run_validation', proposedAction, input.activeRecommendations)) {
+      continue;
+    }
+
+    const sources: RecommendationSourceRef[] = [
+      { type: 'session', id: session.id, reason: 'subject' },
+    ];
+    if (summary) {
+      sources.push({ type: 'session_summary', id: summary.id, reason: 'evidence' });
+    }
+
+    candidates.push({
+      type: 'run_validation',
+      title: capTitle(`Validate: ${objective}`),
+      rationale: capRationale(
+        'Engineer session completed with implementation evidence. A reviewer or QA session is recommended.'
+      ),
+      proposedAction,
+      confidence: 0.85,
+      sources: sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES),
+      relatedSessionId: session.id,
+      ...(session.taskId ? { relatedTaskId: session.taskId } : {}),
+    });
+  }
+
+  return candidates;
+}
+
+// ── review_output ──────────────────────────────────────────────────────────────
+
+function mostRecentCompletedSession(sessions: SessionInput[]): SessionInput | undefined {
+  return sessions
+    .filter((s) => s.exitedAt !== null)
+    .sort((a, b) => (b.exitedAt ?? '').localeCompare(a.exitedAt ?? ''))
+    .at(0);
+}
+
+export function reviewOutputRule(input: RecommendationInput): RecommendationCandidate[] {
+  const candidates: RecommendationCandidate[] = [];
+
+  // Trigger 1: decision requiring confirmation.
+  const confirmRequired = input.decisions.filter(
+    (d) => d.confirmationRequired && d.status !== 'confirmed' && d.status !== 'archived'
+  );
+
+  if (confirmRequired.length > 0) {
+    const anchorSession = mostRecentCompletedSession(input.sessions);
+    if (anchorSession) {
+      const proposedAction = {
+        kind: 'review_output' as const,
+        sessionId: anchorSession.id,
+      };
+      const actionJson = JSON.stringify(proposedAction);
+      if (
+        capProposedActionJson(actionJson) &&
+        !isActiveSuppressed(input.goalId, 'review_output', proposedAction, input.activeRecommendations)
+      ) {
+        const sources: RecommendationSourceRef[] = [
+          { type: 'session', id: anchorSession.id, reason: 'subject' },
+          ...confirmRequired
+            .slice(0, M7_RECOMMENDATION_MAX_SOURCES - 1)
+            .map((d) => ({ type: 'decision' as const, id: d.id, reason: 'driver' })),
+        ];
+        candidates.push({
+          type: 'review_output',
+          title: capTitle('Review output: decision requires confirmation'),
+          rationale: capRationale(
+            'One or more decisions require confirmation. A review of the current session output is recommended.'
+          ),
+          proposedAction,
+          confidence: 0.8,
+          sources: sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES),
+          relatedSessionId: anchorSession.id,
+        });
+      }
+    }
+  }
+
+  // Trigger 2: >= ARCH_NOTE_THRESHOLD non-archived architecture notes accumulated.
+  const archNotes = input.memoryItems.filter(
+    (m) => m.type === 'architecture_note' && m.status !== 'archived'
+  );
+  if (archNotes.length >= ARCH_NOTE_THRESHOLD) {
+    const anchorSession = mostRecentCompletedSession(input.sessions);
+    if (anchorSession) {
+      const proposedAction = {
+        kind: 'review_output' as const,
+        sessionId: anchorSession.id,
+      };
+      const actionJson = JSON.stringify(proposedAction);
+      if (
+        capProposedActionJson(actionJson) &&
+        !isActiveSuppressed(input.goalId, 'review_output', proposedAction, input.activeRecommendations)
+      ) {
+        const sources: RecommendationSourceRef[] = [
+          { type: 'session', id: anchorSession.id, reason: 'subject' },
+          ...archNotes
+            .slice(0, M7_RECOMMENDATION_MAX_SOURCES - 1)
+            .map((m) => ({ type: 'memory_item' as const, id: m.id, reason: 'evidence' })),
+        ];
+        candidates.push({
+          type: 'review_output',
+          title: capTitle(`Review output: ${archNotes.length} architecture notes`),
+          rationale: capRationale(
+            `${archNotes.length} architecture notes have accumulated. A review is recommended to confirm architectural direction.`
+          ),
+          proposedAction,
+          confidence: 0.8,
+          sources: sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES),
+          relatedSessionId: anchorSession.id,
+        });
+      }
+    }
+  }
+
+  // Trigger 3: reviewer-role session with negative outcome.
+  const summaryBySession = new Map<string, SessionSummaryInput>();
+  for (const s of input.sessionSummaries) {
+    if (!summaryBySession.has(s.sessionId)) {
+      summaryBySession.set(s.sessionId, s);
+    }
+  }
+
+  for (const session of input.sessions) {
+    if (session.role !== 'reviewer') continue;
+    const summary = summaryBySession.get(session.id);
+    if (!summary) continue;
+
+    const evidence: SessionSummaryEvidence = {
+      sessionId: session.id,
+      sessionStatus: session.status,
+      sessionRole: session.role,
+      summaryText: summary.summaryText,
+      hasValidationResult: false,
+    };
+
+    if (!detectReviewerRejection(evidence)) continue;
+
+    const proposedAction = {
+      kind: 'review_output' as const,
+      sessionId: session.id,
+      reviewerRole: 'reviewer' as const,
+    };
+
+    const actionJson = JSON.stringify(proposedAction);
+    if (!capProposedActionJson(actionJson)) continue;
+
+    if (isActiveSuppressed(input.goalId, 'review_output', proposedAction, input.activeRecommendations)) {
+      continue;
+    }
+
+    candidates.push({
+      type: 'review_output',
+      title: capTitle('Review output: reviewer session reported issues'),
+      rationale: capRationale(
+        'A reviewer session failed, indicating rejection or issues with the current output. A follow-up review is recommended.'
+      ),
+      proposedAction,
+      confidence: 0.8,
+      sources: [
+        { type: 'session', id: session.id, reason: 'subject' },
+        { type: 'session_summary', id: summary.id, reason: 'evidence' },
+      ],
+      relatedSessionId: session.id,
     });
   }
 

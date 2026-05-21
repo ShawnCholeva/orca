@@ -9,8 +9,20 @@ import {
   askUserRule,
   markCompleteRule,
   pauseWorkRule,
+  runValidationRule,
+  reviewOutputRule,
   resolveConflictCandidate,
 } from './rules.js';
+import {
+  engineerSession,
+  reviewerSession,
+  sessionSummary,
+  taskInput,
+  decisionInput,
+  memoryItem,
+  activeRecommendation,
+} from './fixtures/index.js';
+import { recommendationFingerprint, canonicalizeProposedActionJson } from './fingerprint.js';
 
 // ── Minimal input factory ──────────────────────────────────────────────────────
 
@@ -531,5 +543,253 @@ describe('resolveConflictCandidate', () => {
     expect(action.conflictId).toBe('conflict-1');
     expect(candidate.relatedConflictId).toBe('conflict-1');
     expect(candidate.sources[0]).toMatchObject({ type: 'conflict', id: 'conflict-1' });
+  });
+});
+
+// ── run_validation (snapshot tests) ───────────────────────────────────────────
+
+describe('runValidationRule', () => {
+  it('engineer-completed-with-evidence: fires run_validation with confidence 0.85', () => {
+    const eng = engineerSession({ id: 's-eng-1', taskId: 't-1', status: 'exited', exitedAt: '2025-01-02T10:00:00.000Z' });
+    const task = taskInput({ id: 't-1', title: 'Implement login', role: 'engineer' });
+    const sum = sessionSummary('s-eng-1', 'All tests pass and build succeeded');
+    const input = baseInput({
+      tasks: [task],
+      sessions: [eng],
+      sessionSummaries: [sum],
+    });
+    const candidates = runValidationRule(input);
+    expect(candidates).toHaveLength(1);
+    const c = candidates[0];
+    expect(c.type).toBe('run_validation');
+    expect(c.confidence).toBe(0.85);
+    expect(c.relatedSessionId).toBe('s-eng-1');
+    expect(c.relatedTaskId).toBe('t-1');
+    const action = c.proposedAction as {
+      kind: string; sessionId: string; taskId: string; suggestedRole: string; objective: string;
+    };
+    expect(action.kind).toBe('run_validation');
+    expect(action.sessionId).toBe('s-eng-1');
+    expect(action.taskId).toBe('t-1');
+    expect(action.suggestedRole).toBe('reviewer');
+    expect(action.objective).toContain('Implement login');
+    expect(c.sources.some((s) => s.type === 'session' && s.id === 's-eng-1')).toBe(true);
+    expect(c.sources.some((s) => s.type === 'session_summary' && s.id === 'sum-s-eng-1')).toBe(true);
+  });
+
+  it('engineer-completed-without-evidence: does NOT fire when summary has no impl tokens', () => {
+    const eng = engineerSession({ id: 's-eng-1', status: 'exited', exitedAt: '2025-01-02T10:00:00.000Z' });
+    const sum = sessionSummary('s-eng-1', 'Session completed');
+    const input = baseInput({ sessions: [eng], sessionSummaries: [sum] });
+    expect(runValidationRule(input)).toHaveLength(0);
+  });
+
+  it('does NOT fire when session status is running (not exited)', () => {
+    const eng = engineerSession({ status: 'running', exitedAt: null });
+    const sum = sessionSummary('s-eng-1', 'Running tests and build');
+    const input = baseInput({ sessions: [eng], sessionSummaries: [sum] });
+    expect(runValidationRule(input)).toHaveLength(0);
+  });
+
+  it('does NOT fire when positive reviewer session exists after engineer session', () => {
+    const eng = engineerSession({
+      id: 's-eng-1', status: 'exited', exitedAt: '2025-01-02T10:00:00.000Z',
+    });
+    const rev = reviewerSession({
+      id: 's-rev-1', status: 'exited', exitedAt: '2025-01-02T11:00:00.000Z',
+    });
+    const sum = sessionSummary('s-eng-1', 'All tests pass');
+    const input = baseInput({ sessions: [eng, rev], sessionSummaries: [sum] });
+    expect(runValidationRule(input)).toHaveLength(0);
+  });
+
+  it('fires when validation_result memory item exists for session (even without text tokens)', () => {
+    const eng = engineerSession({ id: 's-eng-1', status: 'exited', exitedAt: '2025-01-02T10:00:00.000Z', taskId: null });
+    const sum = sessionSummary('s-eng-1', 'Session completed');
+    const valResult = memoryItem('validation_result', { sourceSessionId: 's-eng-1' });
+    const input = baseInput({ sessions: [eng], sessionSummaries: [sum], memoryItems: [valResult] });
+    const candidates = runValidationRule(input);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].type).toBe('run_validation');
+  });
+
+  it('double-review-suppressed: does NOT emit when proposed run_validation has same fingerprint', () => {
+    const eng = engineerSession({ id: 's-eng-1', taskId: 't-1', status: 'exited', exitedAt: '2025-01-02T10:00:00.000Z' });
+    const task = taskInput({ id: 't-1' });
+    const sum = sessionSummary('s-eng-1', 'All tests pass');
+    // Compute the fingerprint the rule would produce
+    const proposedAction = {
+      kind: 'run_validation',
+      sessionId: 's-eng-1',
+      taskId: 't-1',
+      suggestedRole: 'reviewer',
+      objective: 'Implement login (engineer)',
+    };
+    const fp = recommendationFingerprint(
+      'goal-1',
+      'run_validation',
+      canonicalizeProposedActionJson(JSON.stringify(proposedAction))
+    );
+    const existingRec = activeRecommendation('run_validation', fp, 'proposed');
+    const input = baseInput({
+      tasks: [task],
+      sessions: [eng],
+      sessionSummaries: [sum],
+      activeRecommendations: [existingRec],
+    });
+    expect(runValidationRule(input)).toHaveLength(0);
+  });
+
+  it('double-review-suppressed: does NOT emit when modified run_validation has same fingerprint', () => {
+    const eng = engineerSession({ id: 's-eng-1', taskId: 't-1', status: 'exited', exitedAt: '2025-01-02T10:00:00.000Z' });
+    const task = taskInput({ id: 't-1' });
+    const sum = sessionSummary('s-eng-1', 'All tests pass');
+    const proposedAction = {
+      kind: 'run_validation',
+      sessionId: 's-eng-1',
+      taskId: 't-1',
+      suggestedRole: 'reviewer',
+      objective: 'Implement login (engineer)',
+    };
+    const fp = recommendationFingerprint(
+      'goal-1',
+      'run_validation',
+      canonicalizeProposedActionJson(JSON.stringify(proposedAction))
+    );
+    const existingRec = activeRecommendation('run_validation', fp, 'modified');
+    const input = baseInput({
+      tasks: [task],
+      sessions: [eng],
+      sessionSummaries: [sum],
+      activeRecommendations: [existingRec],
+    });
+    expect(runValidationRule(input)).toHaveLength(0);
+  });
+
+  it('does NOT fire when session role is not engineer', () => {
+    const qa = engineerSession({ role: 'qa', status: 'exited', exitedAt: '2025-01-02T10:00:00.000Z' });
+    const sum = sessionSummary('s-eng-1', 'All tests pass');
+    const input = baseInput({ sessions: [qa], sessionSummaries: [sum] });
+    expect(runValidationRule(input)).toHaveLength(0);
+  });
+});
+
+// ── review_output (snapshot tests) ────────────────────────────────────────────
+
+describe('reviewOutputRule', () => {
+  it('reviewer-rejected: fires review_output with confidence 0.8', () => {
+    const rev = reviewerSession({ id: 's-rev-1', status: 'failed', exitedAt: '2025-01-02T11:00:00.000Z' });
+    const sum = sessionSummary('s-rev-1', 'Reviewer found critical issues');
+    const input = baseInput({ sessions: [rev], sessionSummaries: [sum] });
+    const candidates = reviewOutputRule(input);
+    expect(candidates).toHaveLength(1);
+    const c = candidates[0];
+    expect(c.type).toBe('review_output');
+    expect(c.confidence).toBe(0.8);
+    expect(c.relatedSessionId).toBe('s-rev-1');
+    const action = c.proposedAction as { kind: string; sessionId: string; reviewerRole: string };
+    expect(action.kind).toBe('review_output');
+    expect(action.sessionId).toBe('s-rev-1');
+    expect(action.reviewerRole).toBe('reviewer');
+    expect(c.sources.some((s) => s.type === 'session' && s.id === 's-rev-1')).toBe(true);
+    expect(c.sources.some((s) => s.type === 'session_summary')).toBe(true);
+  });
+
+  it('fires when decision requires confirmation and a completed session exists', () => {
+    const eng = engineerSession({ id: 's-eng-1', status: 'exited', exitedAt: '2025-01-02T10:00:00.000Z' });
+    const decision = decisionInput({ confirmationRequired: true, status: 'proposed' });
+    const input = baseInput({ sessions: [eng], decisions: [decision] });
+    const candidates = reviewOutputRule(input);
+    const confirmRec = candidates.find((c) => {
+      const a = c.proposedAction as { kind: string };
+      return a.kind === 'review_output';
+    });
+    expect(confirmRec).toBeDefined();
+    expect(confirmRec?.confidence).toBe(0.8);
+  });
+
+  it('does NOT fire for decision trigger when no completed session exists', () => {
+    const decision = decisionInput({ confirmationRequired: true, status: 'proposed' });
+    const input = baseInput({ decisions: [decision] });
+    expect(reviewOutputRule(input)).toHaveLength(0);
+  });
+
+  it('fires when >= 3 architecture notes accumulated and completed session exists', () => {
+    const eng = engineerSession({ status: 'exited', exitedAt: '2025-01-02T10:00:00.000Z' });
+    const notes = [
+      memoryItem('architecture_note', { id: 'm-1', status: 'promoted' }),
+      memoryItem('architecture_note', { id: 'm-2', status: 'promoted' }),
+      memoryItem('architecture_note', { id: 'm-3', status: 'promoted' }),
+    ];
+    const input = baseInput({ sessions: [eng], memoryItems: notes });
+    const candidates = reviewOutputRule(input);
+    expect(candidates.some((c) => c.type === 'review_output')).toBe(true);
+  });
+
+  it('does NOT fire for arch notes when count < 3', () => {
+    const eng = engineerSession({ status: 'exited', exitedAt: '2025-01-02T10:00:00.000Z' });
+    const notes = [
+      memoryItem('architecture_note', { id: 'm-1' }),
+      memoryItem('architecture_note', { id: 'm-2' }),
+    ];
+    const input = baseInput({ sessions: [eng], memoryItems: notes });
+    // check no review_output for arch-note trigger (may still fire for other triggers)
+    const archNoteCandidates = reviewOutputRule(input).filter((c) => {
+      const a = c.proposedAction as { kind: string };
+      return a.kind === 'review_output';
+    });
+    // Only 2 notes so arch-note trigger does not fire; no other triggers active
+    expect(archNoteCandidates).toHaveLength(0);
+  });
+
+  it('does NOT fire for reviewer rejection when reviewer session exited (not failed)', () => {
+    const rev = reviewerSession({ status: 'exited', exitedAt: '2025-01-02T11:00:00.000Z' });
+    const sum = sessionSummary('s-rev-1', 'Review passed');
+    const input = baseInput({ sessions: [rev], sessionSummaries: [sum] });
+    expect(reviewOutputRule(input)).toHaveLength(0);
+  });
+
+  it('double-review-suppressed: does NOT emit when proposed review_output has same fingerprint', () => {
+    const rev = reviewerSession({ id: 's-rev-1', status: 'failed', exitedAt: '2025-01-02T11:00:00.000Z' });
+    const sum = sessionSummary('s-rev-1', 'Issues found');
+    const proposedAction = {
+      kind: 'review_output',
+      sessionId: 's-rev-1',
+      reviewerRole: 'reviewer',
+    };
+    const fp = recommendationFingerprint(
+      'goal-1',
+      'review_output',
+      canonicalizeProposedActionJson(JSON.stringify(proposedAction))
+    );
+    const existingRec = activeRecommendation('review_output', fp, 'proposed');
+    const input = baseInput({
+      sessions: [rev],
+      sessionSummaries: [sum],
+      activeRecommendations: [existingRec],
+    });
+    expect(reviewOutputRule(input)).toHaveLength(0);
+  });
+
+  it('double-review-suppressed: does NOT emit when modified review_output has same fingerprint', () => {
+    const rev = reviewerSession({ id: 's-rev-1', status: 'failed', exitedAt: '2025-01-02T11:00:00.000Z' });
+    const sum = sessionSummary('s-rev-1', 'Issues found');
+    const proposedAction = {
+      kind: 'review_output',
+      sessionId: 's-rev-1',
+      reviewerRole: 'reviewer',
+    };
+    const fp = recommendationFingerprint(
+      'goal-1',
+      'review_output',
+      canonicalizeProposedActionJson(JSON.stringify(proposedAction))
+    );
+    const existingRec = activeRecommendation('review_output', fp, 'modified');
+    const input = baseInput({
+      sessions: [rev],
+      sessionSummaries: [sum],
+      activeRecommendations: [existingRec],
+    });
+    expect(reviewOutputRule(input)).toHaveLength(0);
   });
 });
