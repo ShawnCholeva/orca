@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { computeGenerationRequestFingerprint } from '../orchestrator/fingerprint.js';
 
 /**
  * Fingerprint for deduplicating generator-origin tasks.
@@ -12,9 +13,8 @@ export function taskFingerprint(goalId: string, title: string, role: string): st
 
 /**
  * Request fingerprint for idempotent generation runs.
- * sha256(goalId:triggerKind:triggerSourceId:generatorId:generatorVersion:inputFingerprint)
- * Partial unique index `idx_task_generations_active_fp` enforces one active row
- * per fingerprint (pending|running|succeeded). Failed rows excluded so retry works.
+ * Delegates to the shared orchestrator helper so task and recommendation
+ * generations use the same canonical formula.
  */
 export function taskGenerationRequestFingerprint(
   goalId: string,
@@ -24,6 +24,7 @@ export function taskGenerationRequestFingerprint(
   generatorVersion: string,
   inputFingerprint: string
 ): string {
-  const raw = [goalId, triggerKind, triggerSourceId ?? '', generatorId, generatorVersion, inputFingerprint].join(':');
-  return createHash('sha256').update(raw, 'utf8').digest('hex');
+  return computeGenerationRequestFingerprint(
+    goalId, triggerKind, triggerSourceId, generatorId, generatorVersion, inputFingerprint
+  );
 }

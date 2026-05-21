@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { computeGenerationRequestFingerprint } from '../orchestrator/fingerprint.js';
 
 function sortKeysDeep(val: unknown): unknown {
   if (Array.isArray(val)) return val.map(sortKeysDeep);
@@ -36,10 +37,8 @@ export function recommendationFingerprint(
 
 /**
  * Request fingerprint for idempotent generation runs.
- * sha256(goalId:triggerKind:triggerSourceId:providerId:providerVersion:inputFingerprint)
- * Partial unique index `idx_rec_generations_active_fp` enforces one active row
- * per fingerprint (pending|running|succeeded). Failed rows excluded so retry creates
- * a new row.
+ * Delegates to the shared orchestrator helper so task and recommendation
+ * generations use the same canonical formula.
  */
 export function recommendationGenerationRequestFingerprint(
   goalId: string,
@@ -49,6 +48,7 @@ export function recommendationGenerationRequestFingerprint(
   providerVersion: string,
   inputFingerprint: string
 ): string {
-  const raw = [goalId, triggerKind, triggerSourceId ?? '', providerId, providerVersion, inputFingerprint].join(':');
-  return createHash('sha256').update(raw, 'utf8').digest('hex');
+  return computeGenerationRequestFingerprint(
+    goalId, triggerKind, triggerSourceId, providerId, providerVersion, inputFingerprint
+  );
 }
