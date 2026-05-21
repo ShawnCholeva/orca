@@ -141,6 +141,7 @@ describe('M6-002 migration 0006_context.sql', () => {
       '0004_sessions.sql',
       '0005_memory.sql',
       '0006_context.sql',
+      'm7-001-suggested-orchestration.sql',
     ]);
 
     const tables = (
@@ -206,7 +207,7 @@ describe('M6-002 migration 0006_context.sql', () => {
     seedSession(db, 'sess-upgrade', 'goal-upgrade', 'ws-upgrade');
 
     const upgrade = runMigrations(db, defaultMigrationsDir());
-    expect(upgrade.applied).toEqual(['0006_context.sql']);
+    expect(upgrade.applied).toEqual(['0006_context.sql', 'm7-001-suggested-orchestration.sql']);
 
     const counts = {
       goals: (db.prepare('SELECT count(*) AS cnt FROM goals').get() as { cnt: number }).cnt,
