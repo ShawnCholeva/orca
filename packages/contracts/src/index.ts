@@ -6,6 +6,10 @@ function utf8ByteLength(value: string): number {
   return UTF8_ENCODER.encode(value).length;
 }
 
+function hasMaxSerializedBytes(value: unknown, maxBytes: number): boolean {
+  return utf8ByteLength(JSON.stringify(value)) <= maxBytes;
+}
+
 export const GoalStatus = z.enum(["active", "archived"]);
 export type GoalStatus = z.infer<typeof GoalStatus>;
 
@@ -121,7 +125,28 @@ export const DomainEventType = z.enum([
   "context.assembly.requested",
   "context.assembly.completed",
   "context.assembly.failed",
-  "context.package.created"
+  "context.package.created",
+  "task.generation.requested",
+  "task.generated",
+  "task.generation.failed",
+  "task.created",
+  "task.updated",
+  "task.split",
+  "task.status_changed",
+  "task.associated_with_session",
+  "task.associated_with_context_package",
+  "recommendation.generation.requested",
+  "recommendation.generated",
+  "recommendation.generation.failed",
+  "recommendation.accepted",
+  "recommendation.rejected",
+  "recommendation.dismissed",
+  "recommendation.modified",
+  "recommendation.superseded",
+  "conflict.detected",
+  "conflict.resolved",
+  "conflict.dismissed",
+  "user.feedback.recorded"
 ]);
 export type DomainEventType = z.infer<typeof DomainEventType>;
 
@@ -431,6 +456,8 @@ export const SessionSummary = z.object({
   workspaceId: z.string(),
   adapterId: AdapterId,
   contextPackageId: z.string().nullable().optional(),
+  taskId: z.string().nullable().optional(),
+  fromRecommendationId: z.string().nullable().optional(),
   role: z.string().nullable(),
   title: z.string(),
   status: SessionStatus,
@@ -478,6 +505,8 @@ export const CreateSessionRequest = z
     workspaceId: z.string().min(1),
     adapterId: AdapterId,
     contextPackageId: z.string().min(1).optional(),
+    taskId: z.string().min(1).optional(),
+    fromRecommendationId: z.string().min(1).optional(),
     role: z.string().trim().max(100).optional(),
     instruction: z.string().max(4000).optional(),
     title: z.string().trim().min(1).max(200).optional()
@@ -1105,6 +1134,8 @@ export const ContextPackage = z
     supersedesPackageId: z.string().nullable().optional(),
     adapterId: AdapterId,
     workspaceId: z.string().nullable().optional(),
+    taskId: z.string().nullable().optional(),
+    fromRecommendationId: z.string().nullable().optional(),
     role: ContextRole,
     objective: z.string().max(CONTEXT_PACKAGE_MAX_OBJECTIVE_CHARS),
     status: ContextPackageStatus,
@@ -1164,7 +1195,9 @@ export const CreateContextPackageRequest = z
     role: ContextRole,
     objective: z.string().trim().min(1).max(CONTEXT_PACKAGE_MAX_OBJECTIVE_CHARS),
     workspaceId: z.string().min(1).optional(),
-    replacePackageId: z.string().min(1).optional()
+    replacePackageId: z.string().min(1).optional(),
+    taskId: z.string().min(1).optional(),
+    fromRecommendationId: z.string().min(1).optional()
   })
   .strict();
 export type CreateContextPackageRequest = z.infer<typeof CreateContextPackageRequest>;
@@ -1249,6 +1282,8 @@ export const ContextPackageCreatedEventPayload = z
     goalId: z.string(),
     adapterId: AdapterId,
     role: ContextRole,
+    taskId: z.string().nullable().optional(),
+    fromRecommendationId: z.string().nullable().optional(),
     sourceCount: z.number().int().nonnegative(),
     renderedBytes: z.number().int().nonnegative()
   })
@@ -1291,10 +1326,1237 @@ export const SessionCreatedEventPayload = z
     goalId: z.string(),
     workspaceId: z.string(),
     adapterId: AdapterId,
-    contextPackageId: z.string().nullable().optional()
+    contextPackageId: z.string().nullable().optional(),
+    taskId: z.string().nullable().optional(),
+    fromRecommendationId: z.string().nullable().optional()
   })
   .strict();
 export type SessionCreatedEventPayload = z.infer<typeof SessionCreatedEventPayload>;
+
+export const M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS = 256;
+export const M7_TASK_MAX_TITLE_CHARS = 256;
+export const M7_TASK_MAX_DESCRIPTION_CHARS = 8 * 1024;
+export const M7_TASK_MAX_ACCEPTANCE_CRITERIA = 20;
+export const M7_TASK_MAX_VALIDATION_STEPS = 20;
+export const M7_TASK_MAX_ITEM_TEXT_CHARS = 256;
+export const M7_TASK_MAX_SOURCES = 32;
+export const M7_RECOMMENDATION_MAX_TITLE_CHARS = 256;
+export const M7_RECOMMENDATION_MAX_RATIONALE_CHARS = 4 * 1024;
+export const M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES = 4 * 1024;
+export const M7_RECOMMENDATION_MAX_SOURCES = 32;
+export const M7_CONFLICT_MAX_DESCRIPTION_CHARS = 1024;
+export const M7_CONFLICT_MAX_RESOLUTION_NOTE_CHARS = 4 * 1024;
+export const M7_FEEDBACK_MAX_NOTE_CHARS = 2 * 1024;
+export const M7_SOURCE_REF_MAX_REASON_CHARS = 128;
+
+export const GenerationLifecycleStatus = z.enum([
+  "pending",
+  "running",
+  "succeeded",
+  "failed"
+]);
+export type GenerationLifecycleStatus = z.infer<typeof GenerationLifecycleStatus>;
+
+export const M7FailureCode = z.enum([
+  "invalid_input",
+  "invalid_output",
+  "provider_error",
+  "daemon_restart",
+  "goal_archived",
+  "sparse_input",
+  "internal_error"
+]);
+export type M7FailureCode = z.infer<typeof M7FailureCode>;
+
+export const TriggerKind = z.enum([
+  "manual",
+  "refinement_applied",
+  "session_completed",
+  "session_summary_created",
+  "session_summary_updated",
+  "memory_promoted",
+  "memory_canonical",
+  "decision_confirmed",
+  "decision_confirmation_required",
+  "context_package_created",
+  "task_created",
+  "task_status_changed",
+  "conflict_detected",
+  "user_feedback_recorded"
+]);
+export type TriggerKind = z.infer<typeof TriggerKind>;
+
+export const TaskRole = z.enum([
+  "architect",
+  "engineer",
+  "reviewer",
+  "qa",
+  "generalist"
+]);
+export type TaskRole = z.infer<typeof TaskRole>;
+
+export const TaskStatus = z.enum([
+  "proposed",
+  "open",
+  "in_progress",
+  "blocked",
+  "done",
+  "cancelled",
+  "archived"
+]);
+export type TaskStatus = z.infer<typeof TaskStatus>;
+
+export const TaskOrigin = z.enum(["user", "generator", "recommendation"]);
+export type TaskOrigin = z.infer<typeof TaskOrigin>;
+
+export const TaskSourceRefType = z.enum([
+  "refinement",
+  "memory_item",
+  "decision",
+  "session_summary",
+  "context_package",
+  "recommendation"
+]);
+export type TaskSourceRefType = z.infer<typeof TaskSourceRefType>;
+
+export const TaskSourceRef = z
+  .object({
+    type: TaskSourceRefType,
+    id: z.string().min(1),
+    reason: z.string().max(M7_SOURCE_REF_MAX_REASON_CHARS).optional()
+  })
+  .strict();
+export type TaskSourceRef = z.infer<typeof TaskSourceRef>;
+
+export const TaskAcceptanceCriterion = z
+  .object({
+    id: z.string(),
+    text: z.string().trim().min(1).max(M7_TASK_MAX_ITEM_TEXT_CHARS)
+  })
+  .strict();
+export type TaskAcceptanceCriterion = z.infer<typeof TaskAcceptanceCriterion>;
+
+export const TaskValidationStepKind = z.enum(["manual", "test", "review", "qa"]);
+export type TaskValidationStepKind = z.infer<typeof TaskValidationStepKind>;
+
+export const TaskValidationStep = z
+  .object({
+    id: z.string(),
+    text: z.string().trim().min(1).max(M7_TASK_MAX_ITEM_TEXT_CHARS),
+    kind: TaskValidationStepKind
+  })
+  .strict();
+export type TaskValidationStep = z.infer<typeof TaskValidationStep>;
+
+export const TaskFieldKey = z.enum([
+  "title",
+  "description",
+  "role",
+  "workspaceId",
+  "status",
+  "acceptanceCriteria",
+  "validationSteps",
+  "dependencies",
+  "sources",
+  "parentTaskId",
+  "archivedAt"
+]);
+export type TaskFieldKey = z.infer<typeof TaskFieldKey>;
+
+export const Task = z
+  .object({
+    id: z.string(),
+    goalId: z.string(),
+    parentTaskId: z.string().nullable(),
+    workspaceId: z.string().nullable(),
+    role: TaskRole,
+    status: TaskStatus,
+    origin: TaskOrigin,
+    title: z.string().trim().min(1).max(M7_TASK_MAX_TITLE_CHARS),
+    description: z.string().max(M7_TASK_MAX_DESCRIPTION_CHARS),
+    acceptanceCriteria: z
+      .array(TaskAcceptanceCriterion)
+      .max(M7_TASK_MAX_ACCEPTANCE_CRITERIA),
+    validationSteps: z.array(TaskValidationStep).max(M7_TASK_MAX_VALIDATION_STEPS),
+    dependencies: z.array(z.string().min(1)),
+    sources: z.array(TaskSourceRef).max(M7_TASK_MAX_SOURCES),
+    generationId: z.string().nullable(),
+    fingerprint: z.string(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    archivedAt: z.string().datetime().nullable()
+  })
+  .strict();
+export type Task = z.infer<typeof Task>;
+
+export const TaskGenerationTrigger = z.enum(["manual", "refinement_applied"]);
+export type TaskGenerationTrigger = z.infer<typeof TaskGenerationTrigger>;
+
+export const TaskGeneration = z
+  .object({
+    id: z.string(),
+    goalId: z.string(),
+    trigger: TaskGenerationTrigger,
+    triggerSourceId: z.string().nullable(),
+    generatorId: z.string(),
+    generatorVersion: z.string(),
+    inputFingerprint: z.string(),
+    requestFingerprint: z.string(),
+    status: GenerationLifecycleStatus,
+    failureCode: M7FailureCode.nullable(),
+    failureMessage: z
+      .string()
+      .max(M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS)
+      .nullable(),
+    sparse: z.boolean(),
+    requestedAt: z.string().datetime(),
+    startedAt: z.string().datetime().nullable(),
+    finishedAt: z.string().datetime().nullable()
+  })
+  .strict();
+export type TaskGeneration = z.infer<typeof TaskGeneration>;
+
+export const RecommendationType = z.enum([
+  "create_session",
+  "continue_session",
+  "review_output",
+  "refine_goal",
+  "split_task",
+  "run_validation",
+  "resolve_conflict",
+  "update_plan",
+  "ask_user",
+  "mark_complete",
+  "pause_work"
+]);
+export type RecommendationType = z.infer<typeof RecommendationType>;
+
+export const RecommendationStatus = z.enum([
+  "proposed",
+  "accepted",
+  "rejected",
+  "dismissed",
+  "modified",
+  "superseded"
+]);
+export type RecommendationStatus = z.infer<typeof RecommendationStatus>;
+
+export const RecommendationSource = z.enum([
+  "deterministic_provider",
+  "user_modified"
+]);
+export type RecommendationSource = z.infer<typeof RecommendationSource>;
+
+export const RecommendationSourceRefType = z.enum([
+  "goal",
+  "refinement",
+  "workspace",
+  "task",
+  "memory_item",
+  "decision",
+  "session_summary",
+  "session",
+  "context_package",
+  "conflict"
+]);
+export type RecommendationSourceRefType = z.infer<typeof RecommendationSourceRefType>;
+
+export const RecommendationSourceRef = z
+  .object({
+    type: RecommendationSourceRefType,
+    id: z.string().min(1),
+    reason: z.string().max(M7_SOURCE_REF_MAX_REASON_CHARS).optional()
+  })
+  .strict();
+export type RecommendationSourceRef = z.infer<typeof RecommendationSourceRef>;
+
+export const RecommendationFeedbackAction = z.enum([
+  "accept",
+  "reject",
+  "dismiss",
+  "modify"
+]);
+export type RecommendationFeedbackAction = z.infer<
+  typeof RecommendationFeedbackAction
+>;
+
+const RecommendationActionRole = z.enum([
+  "architect",
+  "engineer",
+  "reviewer",
+  "qa",
+  "generalist"
+]);
+type RecommendationActionRole = z.infer<typeof RecommendationActionRole>;
+
+export const RefinementFieldKey = z.enum([
+  "objective",
+  "success_criteria",
+  "constraints",
+  "scope_notes",
+  "assumptions"
+]);
+export type RefinementFieldKey = z.infer<typeof RefinementFieldKey>;
+
+export const ProposedActionKind = RecommendationType;
+export type ProposedActionKind = z.infer<typeof ProposedActionKind>;
+
+export const ProposedAction = z
+  .discriminatedUnion("kind", [
+    z
+      .object({
+        kind: z.literal("create_session"),
+        adapterId: AdapterId,
+        workspaceId: z.string().min(1).optional(),
+        role: RecommendationActionRole,
+        objective: z.string().trim().min(1).max(CONTEXT_PACKAGE_MAX_OBJECTIVE_CHARS),
+        contextPackageId: z.string().min(1).optional(),
+        contextRequest: z
+          .object({
+            adapterId: AdapterId,
+            role: ContextRole,
+            objective: z
+              .string()
+              .trim()
+              .min(1)
+              .max(CONTEXT_PACKAGE_MAX_OBJECTIVE_CHARS),
+            workspaceId: z.string().min(1).optional()
+          })
+          .strict()
+          .optional()
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("continue_session"),
+        sessionId: z.string().min(1)
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("review_output"),
+        sessionId: z.string().min(1),
+        reviewerRole: z.enum(["reviewer", "qa"]).optional()
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("refine_goal"),
+        missingFields: z.array(RefinementFieldKey).min(1).max(20)
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("split_task"),
+        taskId: z.string().min(1),
+        suggestedChildren: z
+          .array(
+            z
+              .object({
+                title: z.string().trim().min(1).max(M7_TASK_MAX_TITLE_CHARS),
+                role: TaskRole.optional()
+              })
+              .strict()
+          )
+          .min(1)
+          .max(20)
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("run_validation"),
+        taskId: z.string().min(1).optional(),
+        sessionId: z.string().min(1).optional(),
+        suggestedRole: z.enum(["reviewer", "qa"]),
+        objective: z.string().trim().min(1).max(CONTEXT_PACKAGE_MAX_OBJECTIVE_CHARS)
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("resolve_conflict"),
+        conflictId: z.string().min(1),
+        suggestedResolutionNote: z
+          .string()
+          .max(M7_CONFLICT_MAX_RESOLUTION_NOTE_CHARS)
+          .optional()
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("update_plan"),
+        taskId: z.string().min(1),
+        suggestedStatus: TaskStatus.optional(),
+        addAcceptanceCriteria: z
+          .array(z.string().trim().min(1).max(M7_TASK_MAX_ITEM_TEXT_CHARS))
+          .max(M7_TASK_MAX_ACCEPTANCE_CRITERIA)
+          .optional()
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("ask_user"),
+        question: z.string().trim().min(1).max(1024)
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("mark_complete"),
+        taskId: z.string().min(1)
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("pause_work"),
+        reason: z.string().trim().min(1).max(1024),
+        relatedTaskIds: z.array(z.string().min(1)).max(20)
+      })
+      .strict()
+  ])
+  .superRefine((value, ctx) => {
+    if (
+      value.kind === "run_validation" &&
+      value.taskId === undefined &&
+      value.sessionId === undefined
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "run_validation requires taskId or sessionId"
+      });
+    }
+
+    if (!hasMaxSerializedBytes(value, M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `proposedAction must be at most ${M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES} bytes when serialized`
+      });
+    }
+  });
+export type ProposedAction = z.infer<typeof ProposedAction>;
+
+export const RecommendationFieldKey = z.enum([
+  "title",
+  "rationale",
+  "proposedAction",
+  "status",
+  "source",
+  "supersededById"
+]);
+export type RecommendationFieldKey = z.infer<typeof RecommendationFieldKey>;
+
+export const Recommendation = z
+  .object({
+    id: z.string(),
+    goalId: z.string(),
+    type: RecommendationType,
+    status: RecommendationStatus,
+    source: RecommendationSource,
+    title: z.string().trim().min(1).max(M7_RECOMMENDATION_MAX_TITLE_CHARS),
+    rationale: z.string().max(M7_RECOMMENDATION_MAX_RATIONALE_CHARS),
+    proposedAction: ProposedAction,
+    confidence: z.number().min(0).max(1),
+    sources: z.array(RecommendationSourceRef).max(M7_RECOMMENDATION_MAX_SOURCES),
+    relatedTaskId: z.string().nullable(),
+    relatedSessionId: z.string().nullable(),
+    relatedContextPackageId: z.string().nullable(),
+    relatedConflictId: z.string().nullable(),
+    generationId: z.string().nullable(),
+    fingerprint: z.string(),
+    supersededById: z.string().nullable(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime()
+  })
+  .strict();
+export type Recommendation = z.infer<typeof Recommendation>;
+
+export const RecommendationGeneration = z
+  .object({
+    id: z.string(),
+    goalId: z.string(),
+    trigger: TriggerKind,
+    triggerSourceId: z.string().nullable(),
+    providerId: z.string(),
+    providerVersion: z.string(),
+    inputFingerprint: z.string(),
+    requestFingerprint: z.string(),
+    status: GenerationLifecycleStatus,
+    failureCode: M7FailureCode.nullable(),
+    failureMessage: z
+      .string()
+      .max(M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS)
+      .nullable(),
+    sparse: z.boolean(),
+    requestedAt: z.string().datetime(),
+    startedAt: z.string().datetime().nullable(),
+    finishedAt: z.string().datetime().nullable()
+  })
+  .strict();
+export type RecommendationGeneration = z.infer<typeof RecommendationGeneration>;
+
+export const RecommendationFeedback = z
+  .object({
+    id: z.string(),
+    goalId: z.string(),
+    recommendationId: z.string(),
+    action: RecommendationFeedbackAction,
+    note: z.string().max(M7_FEEDBACK_MAX_NOTE_CHARS).nullable(),
+    modifiedPayloadJson: z
+      .string()
+      .max(M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES)
+      .nullable(),
+    createdAt: z.string().datetime()
+  })
+  .strict();
+export type RecommendationFeedback = z.infer<typeof RecommendationFeedback>;
+
+export const ConflictType = z.enum([
+  "workspace_overlap",
+  "contradictory_decisions",
+  "reviewer_rejection",
+  "blocker_reported",
+  "unresolved_question"
+]);
+export type ConflictType = z.infer<typeof ConflictType>;
+
+export const ConflictSeverity = z.enum(["info", "warning", "blocker"]);
+export type ConflictSeverity = z.infer<typeof ConflictSeverity>;
+
+export const ConflictStatus = z.enum(["open", "resolved", "dismissed"]);
+export type ConflictStatus = z.infer<typeof ConflictStatus>;
+
+export const ConflictSourceRefType = z.enum([
+  "session",
+  "workspace",
+  "task",
+  "decision",
+  "memory_item",
+  "session_summary"
+]);
+export type ConflictSourceRefType = z.infer<typeof ConflictSourceRefType>;
+
+export const ConflictSourceRef = z
+  .object({
+    type: ConflictSourceRefType,
+    id: z.string().min(1),
+    role: z.enum(["subject_a", "subject_b", "context"]).optional()
+  })
+  .strict();
+export type ConflictSourceRef = z.infer<typeof ConflictSourceRef>;
+
+export const Conflict = z
+  .object({
+    id: z.string(),
+    goalId: z.string(),
+    conflictType: ConflictType,
+    severity: ConflictSeverity,
+    status: ConflictStatus,
+    title: z.string().trim().min(1).max(M7_TASK_MAX_TITLE_CHARS),
+    description: z.string().max(M7_CONFLICT_MAX_DESCRIPTION_CHARS),
+    sources: z.array(ConflictSourceRef).max(M7_RECOMMENDATION_MAX_SOURCES),
+    fingerprint: z.string(),
+    resolutionNote: z
+      .string()
+      .max(M7_CONFLICT_MAX_RESOLUTION_NOTE_CHARS)
+      .nullable(),
+    detectedAt: z.string().datetime(),
+    resolvedAt: z.string().datetime().nullable()
+  })
+  .strict();
+export type Conflict = z.infer<typeof Conflict>;
+
+export const M7EventType = z.enum([
+  "task.generation.requested",
+  "task.generated",
+  "task.generation.failed",
+  "task.created",
+  "task.updated",
+  "task.split",
+  "task.status_changed",
+  "task.associated_with_session",
+  "task.associated_with_context_package",
+  "recommendation.generation.requested",
+  "recommendation.generated",
+  "recommendation.generation.failed",
+  "recommendation.accepted",
+  "recommendation.rejected",
+  "recommendation.dismissed",
+  "recommendation.modified",
+  "recommendation.superseded",
+  "conflict.detected",
+  "conflict.resolved",
+  "conflict.dismissed",
+  "user.feedback.recorded"
+]);
+export type M7EventType = z.infer<typeof M7EventType>;
+
+export const TaskGenerationRequestedPayload = z
+  .object({
+    generationId: z.string(),
+    goalId: z.string(),
+    trigger: TaskGenerationTrigger,
+    triggerSourceId: z.string().nullable()
+  })
+  .strict();
+export type TaskGenerationRequestedPayload = z.infer<
+  typeof TaskGenerationRequestedPayload
+>;
+
+export const TaskGeneratedPayload = z
+  .object({
+    generationId: z.string(),
+    goalId: z.string(),
+    taskIds: z.array(z.string()),
+    count: z.number().int().nonnegative(),
+    sparse: z.boolean()
+  })
+  .strict();
+export type TaskGeneratedPayload = z.infer<typeof TaskGeneratedPayload>;
+
+export const TaskGenerationFailedPayload = z
+  .object({
+    generationId: z.string(),
+    goalId: z.string(),
+    failureCode: M7FailureCode
+  })
+  .strict();
+export type TaskGenerationFailedPayload = z.infer<typeof TaskGenerationFailedPayload>;
+
+export const TaskCreatedPayload = z
+  .object({
+    taskId: z.string(),
+    goalId: z.string(),
+    status: TaskStatus,
+    role: TaskRole,
+    workspaceId: z.string().nullable(),
+    origin: TaskOrigin,
+    generationId: z.string().nullable()
+  })
+  .strict();
+export type TaskCreatedPayload = z.infer<typeof TaskCreatedPayload>;
+
+export const TaskUpdatedPayload = z
+  .object({
+    taskId: z.string(),
+    goalId: z.string(),
+    changedFields: z.array(TaskFieldKey)
+  })
+  .strict();
+export type TaskUpdatedPayload = z.infer<typeof TaskUpdatedPayload>;
+
+export const TaskSplitPayload = z
+  .object({
+    parentTaskId: z.string(),
+    childTaskIds: z.array(z.string()),
+    goalId: z.string()
+  })
+  .strict();
+export type TaskSplitPayload = z.infer<typeof TaskSplitPayload>;
+
+export const TaskStatusChangedReason = z.enum([
+  "user",
+  "recommendation_accepted",
+  "session_associated"
+]);
+export type TaskStatusChangedReason = z.infer<typeof TaskStatusChangedReason>;
+
+export const TaskStatusChangedPayload = z
+  .object({
+    taskId: z.string(),
+    goalId: z.string(),
+    fromStatus: TaskStatus,
+    toStatus: TaskStatus,
+    reason: TaskStatusChangedReason
+  })
+  .strict();
+export type TaskStatusChangedPayload = z.infer<typeof TaskStatusChangedPayload>;
+
+export const TaskAssociatedWithSessionPayload = z
+  .object({
+    taskId: z.string(),
+    goalId: z.string(),
+    sessionId: z.string()
+  })
+  .strict();
+export type TaskAssociatedWithSessionPayload = z.infer<
+  typeof TaskAssociatedWithSessionPayload
+>;
+
+export const TaskAssociatedWithContextPackagePayload = z
+  .object({
+    taskId: z.string(),
+    goalId: z.string(),
+    contextPackageId: z.string()
+  })
+  .strict();
+export type TaskAssociatedWithContextPackagePayload = z.infer<
+  typeof TaskAssociatedWithContextPackagePayload
+>;
+
+export const RecommendationGenerationRequestedPayload = z
+  .object({
+    generationId: z.string(),
+    goalId: z.string(),
+    trigger: TriggerKind,
+    triggerSourceId: z.string().nullable()
+  })
+  .strict();
+export type RecommendationGenerationRequestedPayload = z.infer<
+  typeof RecommendationGenerationRequestedPayload
+>;
+
+export const RecommendationGeneratedPayload = z
+  .object({
+    generationId: z.string(),
+    goalId: z.string(),
+    recommendationIds: z.array(z.string()),
+    supersededIds: z.array(z.string()),
+    count: z.number().int().nonnegative(),
+    sparse: z.boolean()
+  })
+  .strict();
+export type RecommendationGeneratedPayload = z.infer<
+  typeof RecommendationGeneratedPayload
+>;
+
+export const RecommendationGenerationFailedPayload = z
+  .object({
+    generationId: z.string(),
+    goalId: z.string(),
+    failureCode: M7FailureCode
+  })
+  .strict();
+export type RecommendationGenerationFailedPayload = z.infer<
+  typeof RecommendationGenerationFailedPayload
+>;
+
+export const RecommendationAcceptedPayload = z
+  .object({
+    recommendationId: z.string(),
+    goalId: z.string(),
+    type: RecommendationType
+  })
+  .strict();
+export type RecommendationAcceptedPayload = z.infer<
+  typeof RecommendationAcceptedPayload
+>;
+
+export const RecommendationRejectedPayload = z
+  .object({
+    recommendationId: z.string(),
+    goalId: z.string(),
+    type: RecommendationType
+  })
+  .strict();
+export type RecommendationRejectedPayload = z.infer<
+  typeof RecommendationRejectedPayload
+>;
+
+export const RecommendationDismissedPayload = z
+  .object({
+    recommendationId: z.string(),
+    goalId: z.string(),
+    type: RecommendationType
+  })
+  .strict();
+export type RecommendationDismissedPayload = z.infer<
+  typeof RecommendationDismissedPayload
+>;
+
+export const RecommendationModifiedPayload = z
+  .object({
+    recommendationId: z.string(),
+    goalId: z.string(),
+    changedFields: z.array(RecommendationFieldKey)
+  })
+  .strict();
+export type RecommendationModifiedPayload = z.infer<
+  typeof RecommendationModifiedPayload
+>;
+
+export const RecommendationSupersededPayload = z
+  .object({
+    recommendationId: z.string(),
+    goalId: z.string(),
+    bySupersedingId: z.string().nullable(),
+    reason: z.enum(["duplicate", "source_archived", "manual"])
+  })
+  .strict();
+export type RecommendationSupersededPayload = z.infer<
+  typeof RecommendationSupersededPayload
+>;
+
+export const ConflictDetectedPayload = z
+  .object({
+    conflictId: z.string(),
+    goalId: z.string(),
+    conflictType: ConflictType,
+    severity: ConflictSeverity
+  })
+  .strict();
+export type ConflictDetectedPayload = z.infer<typeof ConflictDetectedPayload>;
+
+export const ConflictResolvedPayload = z
+  .object({
+    conflictId: z.string(),
+    goalId: z.string(),
+    resolution: z.literal("resolved")
+  })
+  .strict();
+export type ConflictResolvedPayload = z.infer<typeof ConflictResolvedPayload>;
+
+export const ConflictDismissedPayload = z
+  .object({
+    conflictId: z.string(),
+    goalId: z.string(),
+    resolution: z.literal("dismissed")
+  })
+  .strict();
+export type ConflictDismissedPayload = z.infer<typeof ConflictDismissedPayload>;
+
+export const UserFeedbackRecordedPayload = z
+  .object({
+    feedbackId: z.string(),
+    goalId: z.string(),
+    recommendationId: z.string(),
+    action: RecommendationFeedbackAction
+  })
+  .strict();
+export type UserFeedbackRecordedPayload = z.infer<typeof UserFeedbackRecordedPayload>;
+
+export const M7Event = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("task.generation.requested"),
+      payload: TaskGenerationRequestedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("task.generated"),
+      payload: TaskGeneratedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("task.generation.failed"),
+      payload: TaskGenerationFailedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("task.created"),
+      payload: TaskCreatedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("task.updated"),
+      payload: TaskUpdatedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("task.split"),
+      payload: TaskSplitPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("task.status_changed"),
+      payload: TaskStatusChangedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("task.associated_with_session"),
+      payload: TaskAssociatedWithSessionPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("task.associated_with_context_package"),
+      payload: TaskAssociatedWithContextPackagePayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("recommendation.generation.requested"),
+      payload: RecommendationGenerationRequestedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("recommendation.generated"),
+      payload: RecommendationGeneratedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("recommendation.generation.failed"),
+      payload: RecommendationGenerationFailedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("recommendation.accepted"),
+      payload: RecommendationAcceptedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("recommendation.rejected"),
+      payload: RecommendationRejectedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("recommendation.dismissed"),
+      payload: RecommendationDismissedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("recommendation.modified"),
+      payload: RecommendationModifiedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("recommendation.superseded"),
+      payload: RecommendationSupersededPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("conflict.detected"),
+      payload: ConflictDetectedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("conflict.resolved"),
+      payload: ConflictResolvedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("conflict.dismissed"),
+      payload: ConflictDismissedPayload
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("user.feedback.recorded"),
+      payload: UserFeedbackRecordedPayload
+    })
+    .strict()
+]);
+export type M7Event = z.infer<typeof M7Event>;
+
+export const TaskGenerationRequest = z
+  .object({
+    trigger: z.literal("manual")
+  })
+  .strict();
+export type TaskGenerationRequest = z.infer<typeof TaskGenerationRequest>;
+
+export const TaskGenerationResponse = z
+  .object({
+    generation: TaskGeneration
+  })
+  .strict();
+export type TaskGenerationResponse = z.infer<typeof TaskGenerationResponse>;
+
+export const ListTasksQuery = z
+  .object({
+    status: TaskStatus.optional(),
+    workspaceId: z.string().min(1).optional(),
+    role: TaskRole.optional(),
+    parentTaskId: z.string().min(1).optional(),
+    includeArchived: z.coerce.boolean().default(false),
+    limit: z.coerce.number().int().positive().max(200).default(50),
+    cursor: z.string().min(1).optional()
+  })
+  .strict();
+export type ListTasksQuery = z.infer<typeof ListTasksQuery>;
+
+export const ListTasksResponse = z
+  .object({
+    tasks: z.array(Task),
+    generations: z.array(TaskGeneration)
+  })
+  .strict();
+export type ListTasksResponse = z.infer<typeof ListTasksResponse>;
+
+export const TaskDraftValidationStep = z
+  .object({
+    text: z.string().trim().min(1).max(M7_TASK_MAX_ITEM_TEXT_CHARS),
+    kind: TaskValidationStepKind.default("manual")
+  })
+  .strict();
+export type TaskDraftValidationStep = z.infer<typeof TaskDraftValidationStep>;
+
+export const CreateTaskRequest = z
+  .object({
+    title: z.string().trim().min(1).max(M7_TASK_MAX_TITLE_CHARS),
+    description: z.string().max(M7_TASK_MAX_DESCRIPTION_CHARS).default(""),
+    role: TaskRole,
+    workspaceId: z.string().min(1).nullable().default(null),
+    parentTaskId: z.string().min(1).nullable().default(null),
+    acceptanceCriteria: z
+      .array(z.string().trim().min(1).max(M7_TASK_MAX_ITEM_TEXT_CHARS))
+      .max(M7_TASK_MAX_ACCEPTANCE_CRITERIA)
+      .default([]),
+    validationSteps: z
+      .array(TaskDraftValidationStep)
+      .max(M7_TASK_MAX_VALIDATION_STEPS)
+      .default([]),
+    dependencies: z.array(z.string().min(1)).default([]),
+    sources: z.array(TaskSourceRef).max(M7_TASK_MAX_SOURCES).default([])
+  })
+  .strict();
+export type CreateTaskRequest = z.infer<typeof CreateTaskRequest>;
+
+export const CreateTaskResponse = z
+  .object({
+    task: Task
+  })
+  .strict();
+export type CreateTaskResponse = z.infer<typeof CreateTaskResponse>;
+
+export const UpdateTaskRequest = z
+  .object({
+    title: z.string().trim().min(1).max(M7_TASK_MAX_TITLE_CHARS).optional(),
+    description: z.string().max(M7_TASK_MAX_DESCRIPTION_CHARS).optional(),
+    role: TaskRole.optional(),
+    workspaceId: z.string().min(1).nullable().optional(),
+    status: TaskStatus.optional(),
+    acceptanceCriteria: z
+      .array(z.string().trim().min(1).max(M7_TASK_MAX_ITEM_TEXT_CHARS))
+      .max(M7_TASK_MAX_ACCEPTANCE_CRITERIA)
+      .optional(),
+    validationSteps: z
+      .array(TaskDraftValidationStep)
+      .max(M7_TASK_MAX_VALIDATION_STEPS)
+      .optional(),
+    dependencies: z.array(z.string().min(1)).optional(),
+    sources: z.array(TaskSourceRef).max(M7_TASK_MAX_SOURCES).optional()
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.title !== undefined ||
+      value.description !== undefined ||
+      value.role !== undefined ||
+      value.workspaceId !== undefined ||
+      value.status !== undefined ||
+      value.acceptanceCriteria !== undefined ||
+      value.validationSteps !== undefined ||
+      value.dependencies !== undefined ||
+      value.sources !== undefined,
+    { message: "at least one updatable task field must be provided" }
+  );
+export type UpdateTaskRequest = z.infer<typeof UpdateTaskRequest>;
+
+export const UpdateTaskResponse = z
+  .object({
+    task: Task
+  })
+  .strict();
+export type UpdateTaskResponse = z.infer<typeof UpdateTaskResponse>;
+
+export const SplitTaskChildInput = z
+  .object({
+    title: z.string().trim().min(1).max(M7_TASK_MAX_TITLE_CHARS),
+    description: z.string().max(M7_TASK_MAX_DESCRIPTION_CHARS).default(""),
+    role: TaskRole.default("engineer"),
+    workspaceId: z.string().min(1).nullable().optional(),
+    acceptanceCriteria: z
+      .array(z.string().trim().min(1).max(M7_TASK_MAX_ITEM_TEXT_CHARS))
+      .max(M7_TASK_MAX_ACCEPTANCE_CRITERIA)
+      .default([]),
+    validationSteps: z
+      .array(TaskDraftValidationStep)
+      .max(M7_TASK_MAX_VALIDATION_STEPS)
+      .default([]),
+    dependencies: z.array(z.string().min(1)).default([]),
+    sources: z.array(TaskSourceRef).max(M7_TASK_MAX_SOURCES).default([])
+  })
+  .strict();
+export type SplitTaskChildInput = z.infer<typeof SplitTaskChildInput>;
+
+export const SplitTaskRequest = z
+  .object({
+    children: z.array(SplitTaskChildInput).min(1).max(20),
+    setParentStatus: z.literal("blocked").optional()
+  })
+  .strict();
+export type SplitTaskRequest = z.infer<typeof SplitTaskRequest>;
+
+export const SplitTaskResponse = z
+  .object({
+    parentTask: Task,
+    childTasks: z.array(Task)
+  })
+  .strict();
+export type SplitTaskResponse = z.infer<typeof SplitTaskResponse>;
+
+export const AssociateTaskSessionRequest = z
+  .object({
+    sessionId: z.string().min(1)
+  })
+  .strict();
+export type AssociateTaskSessionRequest = z.infer<typeof AssociateTaskSessionRequest>;
+
+export const AssociateTaskSessionResponse = z
+  .object({
+    task: Task
+  })
+  .strict();
+export type AssociateTaskSessionResponse = z.infer<typeof AssociateTaskSessionResponse>;
+
+export const RecommendationGenerationRequest = z
+  .object({
+    trigger: z.literal("manual")
+  })
+  .strict();
+export type RecommendationGenerationRequest = z.infer<
+  typeof RecommendationGenerationRequest
+>;
+
+export const RecommendationGenerationResponse = z
+  .object({
+    generation: RecommendationGeneration
+  })
+  .strict();
+export type RecommendationGenerationResponse = z.infer<
+  typeof RecommendationGenerationResponse
+>;
+
+export const ListRecommendationsQuery = z
+  .object({
+    status: RecommendationStatus.optional(),
+    type: RecommendationType.optional(),
+    relatedTaskId: z.string().min(1).optional(),
+    limit: z.coerce.number().int().positive().max(200).default(50),
+    cursor: z.string().min(1).optional(),
+    includeGenerations: z.coerce.boolean().default(true)
+  })
+  .strict();
+export type ListRecommendationsQuery = z.infer<typeof ListRecommendationsQuery>;
+
+export const ListRecommendationsResponse = z
+  .object({
+    recommendations: z.array(Recommendation),
+    generations: z.array(RecommendationGeneration)
+  })
+  .strict();
+export type ListRecommendationsResponse = z.infer<typeof ListRecommendationsResponse>;
+
+export const GetRecommendationResponse = z
+  .object({
+    recommendation: Recommendation,
+    feedback: z.array(RecommendationFeedback)
+  })
+  .strict();
+export type GetRecommendationResponse = z.infer<typeof GetRecommendationResponse>;
+
+export const RecommendationFeedbackRequest = z
+  .object({
+    note: z.string().max(M7_FEEDBACK_MAX_NOTE_CHARS).optional()
+  })
+  .strict();
+export type RecommendationFeedbackRequest = z.infer<
+  typeof RecommendationFeedbackRequest
+>;
+
+export const AcceptRecommendationResponse = z
+  .object({
+    recommendation: Recommendation,
+    proposedAction: ProposedAction,
+    feedback: RecommendationFeedback
+  })
+  .strict();
+export type AcceptRecommendationResponse = z.infer<
+  typeof AcceptRecommendationResponse
+>;
+
+export const RejectRecommendationResponse = z
+  .object({
+    recommendation: Recommendation,
+    feedback: RecommendationFeedback
+  })
+  .strict();
+export type RejectRecommendationResponse = z.infer<typeof RejectRecommendationResponse>;
+
+export const DismissRecommendationResponse = z
+  .object({
+    recommendation: Recommendation,
+    feedback: RecommendationFeedback
+  })
+  .strict();
+export type DismissRecommendationResponse = z.infer<
+  typeof DismissRecommendationResponse
+>;
+
+export const ModifyRecommendationRequest = z
+  .object({
+    title: z.string().trim().min(1).max(M7_RECOMMENDATION_MAX_TITLE_CHARS).optional(),
+    rationale: z.string().max(M7_RECOMMENDATION_MAX_RATIONALE_CHARS).optional(),
+    proposedAction: ProposedAction.optional()
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.title !== undefined ||
+      value.rationale !== undefined ||
+      value.proposedAction !== undefined,
+    { message: "at least one modifiable recommendation field must be provided" }
+  );
+export type ModifyRecommendationRequest = z.infer<
+  typeof ModifyRecommendationRequest
+>;
+
+export const ModifyRecommendationResponse = z
+  .object({
+    recommendation: Recommendation,
+    feedback: RecommendationFeedback
+  })
+  .strict();
+export type ModifyRecommendationResponse = z.infer<
+  typeof ModifyRecommendationResponse
+>;
+
+export const ListConflictsQuery = z
+  .object({
+    status: ConflictStatus.default("open"),
+    severity: ConflictSeverity.optional(),
+    limit: z.coerce.number().int().positive().max(200).default(50),
+    cursor: z.string().min(1).optional()
+  })
+  .strict();
+export type ListConflictsQuery = z.infer<typeof ListConflictsQuery>;
+
+export const ListConflictsResponse = z
+  .object({
+    conflicts: z.array(Conflict)
+  })
+  .strict();
+export type ListConflictsResponse = z.infer<typeof ListConflictsResponse>;
+
+export const ResolveConflictRequest = z
+  .object({
+    resolution: z.enum(["resolved", "dismissed"]),
+    note: z.string().max(M7_CONFLICT_MAX_RESOLUTION_NOTE_CHARS).optional()
+  })
+  .strict();
+export type ResolveConflictRequest = z.infer<typeof ResolveConflictRequest>;
+
+export const ResolveConflictResponse = z
+  .object({
+    conflict: Conflict
+  })
+  .strict();
+export type ResolveConflictResponse = z.infer<typeof ResolveConflictResponse>;
 
 export const SelectableMemory = z
   .object({
