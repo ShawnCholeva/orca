@@ -1,3 +1,4 @@
+import type Database from 'better-sqlite3';
 import type { DomainEvent, DomainEventType, TriggerKind } from '@orca/contracts';
 import type { DaemonContext } from '../daemon-context.js';
 import { runTaskGeneration } from '../tasks/usecases.js';
@@ -84,6 +85,29 @@ export const TRIGGER_MAP: Readonly<Partial<Record<DomainEventType, TriggerEntry>
   },
 };
 
+// ── Payload-based entry constants ─────────────────────────────────────────────
+
+const ENTRY_SESSION_SUMMARY_CREATED: TriggerEntry = {
+  triggerKind: 'session_summary_created',
+  runRecs: true,
+  runConflicts: true,
+  runTasksIfEmpty: false,
+};
+
+const ENTRY_DECISION_CONFIRMATION_REQUIRED: TriggerEntry = {
+  triggerKind: 'decision_confirmation_required',
+  runRecs: true,
+  runConflicts: false,
+  runTasksIfEmpty: false,
+};
+
+const ENTRY_USER_FEEDBACK_RECORDED: TriggerEntry = {
+  triggerKind: 'user_feedback_recorded',
+  runRecs: true,
+  runConflicts: false,
+  runTasksIfEmpty: false,
+};
+
 // ── Payload-based dispatch ────────────────────────────────────────────────────
 
 interface MappedAction {
@@ -94,58 +118,31 @@ interface MappedAction {
 function mapEventToAction(event: DomainEvent): MappedAction | null {
   const { type, payload } = event;
 
-  // Static table lookup first
   const staticEntry = TRIGGER_MAP[type];
   if (staticEntry !== undefined) {
-    const sourceId = extractStaticSourceId(type, payload);
-    return { entry: staticEntry, triggerSourceId: sourceId };
+    return { entry: staticEntry, triggerSourceId: extractStaticSourceId(payload) };
   }
 
-  // memory.extraction.completed: session_summary_created when summaryId present
   if (type === 'memory.extraction.completed') {
     const summaryId = typeof payload.summaryId === 'string' ? payload.summaryId : null;
     if (summaryId !== null) {
-      return {
-        entry: {
-          triggerKind: 'session_summary_created',
-          runRecs: true,
-          runConflicts: true,
-          runTasksIfEmpty: false,
-        },
-        triggerSourceId: summaryId,
-      };
+      return { entry: ENTRY_SESSION_SUMMARY_CREATED, triggerSourceId: summaryId };
     }
     return null;
   }
 
-  // decision.created / decision.updated with confirmationRequired
   if (type === 'decision.created' || type === 'decision.updated') {
     if (payload.confirmationRequired === true) {
-      return {
-        entry: {
-          triggerKind: 'decision_confirmation_required',
-          runRecs: true,
-          runConflicts: false,
-          runTasksIfEmpty: false,
-        },
-        triggerSourceId: typeof payload.decisionId === 'string' ? payload.decisionId : null,
-      };
+      const sourceId = typeof payload.decisionId === 'string' ? payload.decisionId : null;
+      return { entry: ENTRY_DECISION_CONFIRMATION_REQUIRED, triggerSourceId: sourceId };
     }
     return null;
   }
 
-  // user.feedback.recorded: only for modify action
   if (type === 'user.feedback.recorded') {
     if (payload.action === 'modify') {
-      return {
-        entry: {
-          triggerKind: 'user_feedback_recorded',
-          runRecs: true,
-          runConflicts: false,
-          runTasksIfEmpty: false,
-        },
-        triggerSourceId: typeof payload.feedbackId === 'string' ? payload.feedbackId : null,
-      };
+      const sourceId = typeof payload.feedbackId === 'string' ? payload.feedbackId : null;
+      return { entry: ENTRY_USER_FEEDBACK_RECORDED, triggerSourceId: sourceId };
     }
     return null;
   }
@@ -153,40 +150,46 @@ function mapEventToAction(event: DomainEvent): MappedAction | null {
   return null;
 }
 
-function extractStaticSourceId(
-  type: DomainEventType,
-  payload: Record<string, unknown>
-): string | null {
-  // Best-effort extraction of a meaningful source id from the event payload
-  // to store as triggerSourceId on generation rows.
-  const candidates: (keyof typeof payload)[] = [
-    'refinementId',
-    'sessionId',
-    'memoryItemId',
-    'decisionId',
-    'conflictId',
-    'taskId',
-    'contextPackageId',
-    'feedbackId',
-  ];
-  for (const key of candidates) {
+const SOURCE_ID_KEYS = [
+  'refinementId',
+  'sessionId',
+  'memoryItemId',
+  'decisionId',
+  'conflictId',
+  'taskId',
+  'contextPackageId',
+  'feedbackId',
+] as const;
+
+function extractStaticSourceId(payload: Record<string, unknown>): string | null {
+  for (const key of SOURCE_ID_KEYS) {
     const v = payload[key];
     if (typeof v === 'string' && v.length > 0) return v;
   }
-  void type;
   return null;
 }
 
 // ── Count helper ──────────────────────────────────────────────────────────────
 
-function countActiveTasks(db: DaemonContext['db'], goalId: string): number {
-  const row = db
-    .prepare(
+let _countDb: Database.Database | null = null;
+let _countStmt: Database.Statement | null = null;
+
+function countActiveTasks(db: Database.Database, goalId: string): number {
+  if (db !== _countDb) {
+    _countDb = db;
+    _countStmt = db.prepare(
       `SELECT COUNT(*) as cnt FROM tasks
        WHERE goal_id = ? AND status NOT IN ('cancelled','archived')`
-    )
-    .get(goalId) as { cnt: number };
+    );
+  }
+  const row = _countStmt!.get(goalId) as { cnt: number };
   return row.cnt;
+}
+
+/** Reset cached prepared statements. For use in tests only. */
+export function resetPreparedStatements(): void {
+  _countDb = null;
+  _countStmt = null;
 }
 
 // ── Trigger handler ───────────────────────────────────────────────────────────

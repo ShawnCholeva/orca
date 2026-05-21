@@ -12,7 +12,7 @@ import { FakeRecommendationProvider } from '../recommendations/provider.js';
 import { FakeTaskGenerator } from '../tasks/rules.js';
 import { FakeConflictDetector } from '../conflicts/detectors.js';
 import { resetRunnerState } from './runner.js';
-import { TRIGGER_MAP, subscribeOrchestrationTriggers } from './triggers.js';
+import { TRIGGER_MAP, subscribeOrchestrationTriggers, resetPreparedStatements as resetTriggerStmts } from './triggers.js';
 import type { DaemonContext } from '../daemon-context.js';
 import { resetPreparedStatements as resetTaskStmts } from '../tasks/projection.js';
 import { resetPreparedStatements as resetRecStmts } from '../recommendations/projection.js';
@@ -124,6 +124,7 @@ afterEach(() => {
   resetRecStmts();
   resetConflictStmts();
   resetConflictUsecaseStmts();
+  resetTriggerStmts();
   _idSeq = 0;
   _nowSeq = 0;
   for (const dir of tempDirs.splice(0)) {
@@ -431,13 +432,6 @@ describe('single-flight and dirty-flag re-evaluation', () => {
     const ctx = makeCtx(db, bus, { provider });
     subscribeOrchestrationTriggers(ctx);
 
-    const allGeneratedEvents: DomainEvent[] = [];
-    bus.subscribe((e) => {
-      if (e.type === 'recommendation.generated' || e.type === 'recommendation.generation.failed') {
-        allGeneratedEvents.push(e);
-      }
-    });
-
     const ev1: DomainEvent = {
       seq: 1, id: 'ev-1', type: 'session.exited',
       goalId: 'g1', payload: { sessionId: 's1', goalId: 'g1' }, createdAt: NOW,
@@ -446,6 +440,17 @@ describe('single-flight and dirty-flag re-evaluation', () => {
       seq: 2, id: 'ev-2', type: 'session.exited',
       goalId: 'g1', payload: { sessionId: 's2', goalId: 'g1' }, createdAt: NOW,
     };
+
+    // Wait for the re-evaluation generation (second 'recommendation.generated' event)
+    let generatedCount = 0;
+    const bothDone = new Promise<void>((resolve) => {
+      bus.subscribe((e) => {
+        if (e.type === 'recommendation.generated' || e.type === 'recommendation.generation.failed') {
+          generatedCount++;
+          if (generatedCount >= 2) resolve();
+        }
+      });
+    });
 
     // Emit first trigger, wait for generation to start (gate)
     bus.publish(ev1);
@@ -457,14 +462,7 @@ describe('single-flight and dirty-flag re-evaluation', () => {
     // Unblock first generation
     firstGenerationUnblock!();
 
-    // Wait for both generations to complete (first + re-evaluation)
-    await new Promise<void>((resolve) => {
-      const check = (): void => {
-        if (allGeneratedEvents.length >= 2) { resolve(); return; }
-        setTimeout(check, 20);
-      };
-      check();
-    });
+    await bothDone;
 
     // Exactly two generation rows: original + re-evaluation
     const genRows = db.prepare(
