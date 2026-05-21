@@ -18,6 +18,7 @@ import {
   markTaskGenerationRunning,
   markTaskGenerationSucceeded,
   markTaskGenerationFailed,
+  runTaskGeneration,
   getTaskById,
   DuplicateTaskFingerprintError,
   InvalidStatusTransitionError,
@@ -26,6 +27,7 @@ import {
   resetPreparedStatements,
   type TaskCtx,
 } from './usecases.js';
+import { DeterministicTaskGenerator, FakeTaskGenerator } from './rules.js';
 
 const tempDirs: string[] = [];
 
@@ -57,6 +59,13 @@ function seedGoal(db: Database.Database, id: string, archived = false): void {
     `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
      VALUES (?, 'G', '', 'active', 1, ?, ?, ?)`
   ).run(id, now, now, archived ? now : null);
+}
+
+function seedRefinement(db: Database.Database, goalId: string, successCriteria: string[]): void {
+  db.prepare(
+    `INSERT INTO goal_refinements (goal_id, skill_id, success_criteria, constraints, assumptions, refined_at)
+     VALUES (?, 'guided-goal-refinement', ?, '[]', '[]', '2026-01-01T00:00:00.000Z')`
+  ).run(goalId, JSON.stringify(successCriteria));
 }
 
 function seedWorkspace(db: Database.Database, id: string, goalId: string): void {
@@ -107,6 +116,24 @@ function makeCtx(db: Database.Database, overrides?: Partial<TaskCtx>): TaskCtx {
     idFactory: () => `id-${++globalCounter}-${Math.random().toString(36).slice(2, 8)}`,
     ...overrides,
   };
+}
+
+async function waitForTaskGenerationTerminal(
+  db: Database.Database,
+  generationId: string,
+  timeoutMs = 2000
+): Promise<{ status: string; failure_code: string | null }> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const row = db
+      .prepare('SELECT status, failure_code FROM task_generations WHERE id = ?')
+      .get(generationId) as { status: string; failure_code: string | null } | undefined;
+    if (row && (row.status === 'succeeded' || row.status === 'failed')) {
+      return row;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for terminal generation status: ${generationId}`);
 }
 
 describe('createTask', () => {
@@ -613,6 +640,121 @@ describe('task generation lifecycle', () => {
     const longMsg = 'x'.repeat(1000);
     const updated = markTaskGenerationFailed(makeCtx(db), generation.id, 'internal_error', longMsg);
     expect(updated.failureMessage!.length).toBeLessThanOrEqual(256);
+  });
+});
+
+describe('runTaskGeneration', () => {
+  it('runs deterministic generator and persists generated tasks linked to generation', async () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedRefinement(db, 'g1', ['Implement task generator', 'Write deterministic tests']);
+
+    const generation = await runTaskGeneration(
+      {
+        ...makeCtx(db),
+        taskGenerator: new DeterministicTaskGenerator(),
+      },
+      {
+        goalId: 'g1',
+        trigger: 'manual',
+        triggerSourceId: null,
+      }
+    );
+
+    const terminal = await waitForTaskGenerationTerminal(db, generation.id);
+    expect(terminal.status).toBe('succeeded');
+
+    const created = db
+      .prepare(
+        `SELECT generation_id, origin FROM tasks WHERE goal_id = ? ORDER BY created_at ASC, id ASC`
+      )
+      .all('g1') as Array<{ generation_id: string | null; origin: string }>;
+    expect(created.length).toBeGreaterThan(0);
+    expect(created.every((row) => row.origin === 'generator')).toBe(true);
+    expect(created.every((row) => row.generation_id === generation.id)).toBe(true);
+  });
+
+  it('creates a new generation after snapshot changes, without duplicating tasks', async () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedRefinement(db, 'g1', ['Implement task generator']);
+    const taskGenerator = new DeterministicTaskGenerator();
+    const context = {
+      ...makeCtx(db),
+      taskGenerator,
+    };
+
+    const first = await runTaskGeneration(context, {
+      goalId: 'g1',
+      trigger: 'manual',
+      triggerSourceId: null,
+    });
+    await waitForTaskGenerationTerminal(db, first.id);
+
+    const taskCountBeforeSecond = (
+      db.prepare('SELECT count(*) AS cnt FROM tasks WHERE goal_id = ?').get('g1') as {
+        cnt: number;
+      }
+    ).cnt;
+
+    const second = await runTaskGeneration(context, {
+      goalId: 'g1',
+      trigger: 'manual',
+      triggerSourceId: null,
+    });
+    const secondTerminal = await waitForTaskGenerationTerminal(db, second.id);
+    expect(secondTerminal.status).toBe('succeeded');
+
+    expect(second.id).not.toBe(first.id);
+    const generationCount = (
+      db.prepare('SELECT count(*) AS cnt FROM task_generations WHERE goal_id = ?').get('g1') as {
+        cnt: number;
+      }
+    ).cnt;
+    expect(generationCount).toBe(2);
+
+    const taskCountAfterSecond = (
+      db.prepare('SELECT count(*) AS cnt FROM tasks WHERE goal_id = ?').get('g1') as {
+        cnt: number;
+      }
+    ).cnt;
+    expect(taskCountAfterSecond).toBe(taskCountBeforeSecond);
+  });
+
+  it('marks generation failed with invalid_output for malformed generator output', async () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedRefinement(db, 'g1', ['Implement task generator']);
+
+    const badGenerator = new FakeTaskGenerator({
+      candidates: [
+        {
+          title: 'x'.repeat(300),
+          description: 'desc',
+          role: 'engineer',
+          workspaceId: null,
+          sources: [],
+        },
+      ],
+      sparse: false,
+      warnings: [],
+    } as never);
+
+    const generation = await runTaskGeneration(
+      {
+        ...makeCtx(db),
+        taskGenerator: badGenerator,
+      },
+      {
+        goalId: 'g1',
+        trigger: 'manual',
+        triggerSourceId: null,
+      }
+    );
+
+    const terminal = await waitForTaskGenerationTerminal(db, generation.id);
+    expect(terminal.status).toBe('failed');
+    expect(terminal.failure_code).toBe('invalid_output');
   });
 });
 

@@ -1,0 +1,9 @@
+{
+  "name": "three-criteria",
+  "goalDescription": "",
+  "successCriteria": [
+    "Implement deterministic generator",
+    "Write integration tests",
+    "Review output and refine edge cases"
+  ]
+}

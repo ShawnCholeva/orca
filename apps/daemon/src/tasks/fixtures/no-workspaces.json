@@ -1,0 +1,7 @@
+{
+  "name": "no-workspaces",
+  "goalDescription": "",
+  "successCriteria": [
+    "Implement API routes for generation lifecycle"
+  ]
+}

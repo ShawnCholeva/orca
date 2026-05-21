@@ -1,0 +1,5 @@
+{
+  "name": "objective-only",
+  "goalDescription": "Stabilize orchestration behavior for repeatable local runs.",
+  "successCriteria": []
+}

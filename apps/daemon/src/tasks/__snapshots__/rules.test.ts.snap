@@ -1,0 +1,228 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`generateTasks > snapshot fixture: ambiguous-role-defaults.json 1`] = `
+{
+  "candidates": [
+    {
+      "description": "Document remaining unknowns for the handoff note",
+      "role": "generalist",
+      "sources": [
+        {
+          "id": "goal-ambiguous-role-defaults",
+          "reason": "driver",
+          "type": "refinement",
+        },
+      ],
+      "title": "Document remaining unknowns for the handoff note",
+      "workspaceId": null,
+    },
+  ],
+  "sparse": false,
+  "warnings": [],
+}
+`;
+
+exports[`generateTasks > snapshot fixture: empty-refinement.json 1`] = `
+{
+  "candidates": [],
+  "sparse": true,
+  "warnings": [],
+}
+`;
+
+exports[`generateTasks > snapshot fixture: multi-role-mixed.json 1`] = `
+{
+  "candidates": [
+    {
+      "description": "Design migration strategy",
+      "role": "architect",
+      "sources": [
+        {
+          "id": "goal-multi-role-mixed",
+          "reason": "driver",
+          "type": "refinement",
+        },
+      ],
+      "title": "Design migration strategy",
+      "workspaceId": null,
+    },
+    {
+      "description": "implement table migration",
+      "role": "engineer",
+      "sources": [
+        {
+          "id": "goal-multi-role-mixed",
+          "reason": "driver",
+          "type": "refinement",
+        },
+      ],
+      "title": "implement table migration",
+      "workspaceId": null,
+    },
+    {
+      "description": "review diff",
+      "role": "reviewer",
+      "sources": [
+        {
+          "id": "goal-multi-role-mixed",
+          "reason": "driver",
+          "type": "refinement",
+        },
+      ],
+      "title": "review diff",
+      "workspaceId": null,
+    },
+    {
+      "description": "validate integration tests",
+      "role": "qa",
+      "sources": [
+        {
+          "id": "goal-multi-role-mixed",
+          "reason": "driver",
+          "type": "refinement",
+        },
+      ],
+      "title": "validate integration tests",
+      "workspaceId": null,
+    },
+  ],
+  "sparse": false,
+  "warnings": [],
+}
+`;
+
+exports[`generateTasks > snapshot fixture: no-workspaces.json 1`] = `
+{
+  "candidates": [
+    {
+      "description": "Implement API routes for generation lifecycle",
+      "role": "engineer",
+      "sources": [
+        {
+          "id": "goal-no-workspaces",
+          "reason": "driver",
+          "type": "refinement",
+        },
+      ],
+      "title": "Implement API routes for generation lifecycle",
+      "workspaceId": null,
+    },
+  ],
+  "sparse": false,
+  "warnings": [],
+}
+`;
+
+exports[`generateTasks > snapshot fixture: objective-only.json 1`] = `
+{
+  "candidates": [
+    {
+      "description": "Stabilize orchestration behavior for repeatable local runs.",
+      "role": "generalist",
+      "sources": [
+        {
+          "id": "goal-objective-only",
+          "reason": "objective_only",
+          "type": "refinement",
+        },
+      ],
+      "title": "Stabilize orchestration behavior for repeatable local runs.",
+      "workspaceId": null,
+    },
+  ],
+  "sparse": false,
+  "warnings": [],
+}
+`;
+
+exports[`generateTasks > snapshot fixture: oversize-input.json 1`] = `
+{
+  "candidates": [
+    {
+      "description": "Implement deterministic generation behavior with explicit guardrails and ensure the description remains detailed enough for downstream action while still respecting hard content caps by carrying a very long explanatory sequence that should be truncated by the rule implementation before persistence and before projection-level validation so that runtime behavior remains deterministic and bounded under stress conditions.",
+      "role": "engineer",
+      "sources": [
+        {
+          "id": "goal-oversize-input",
+          "reason": "driver",
+          "type": "refinement",
+        },
+      ],
+      "title": "Implement deterministic generation behavior with explicit guardrails and ensure",
+      "workspaceId": null,
+    },
+  ],
+  "sparse": false,
+  "warnings": [],
+}
+`;
+
+exports[`generateTasks > snapshot fixture: single-objective-criterion.json 1`] = `
+{
+  "candidates": [
+    {
+      "description": "Build a task generation endpoint",
+      "role": "engineer",
+      "sources": [
+        {
+          "id": "goal-single-objective-criterion",
+          "reason": "driver",
+          "type": "refinement",
+        },
+      ],
+      "title": "Build a task generation endpoint",
+      "workspaceId": null,
+    },
+  ],
+  "sparse": false,
+  "warnings": [],
+}
+`;
+
+exports[`generateTasks > snapshot fixture: three-criteria.json 1`] = `
+{
+  "candidates": [
+    {
+      "description": "Implement deterministic generator",
+      "role": "engineer",
+      "sources": [
+        {
+          "id": "goal-three-criteria",
+          "reason": "driver",
+          "type": "refinement",
+        },
+      ],
+      "title": "Implement deterministic generator",
+      "workspaceId": null,
+    },
+    {
+      "description": "Write integration tests",
+      "role": "generalist",
+      "sources": [
+        {
+          "id": "goal-three-criteria",
+          "reason": "driver",
+          "type": "refinement",
+        },
+      ],
+      "title": "Write integration tests",
+      "workspaceId": null,
+    },
+    {
+      "description": "Review output and refine edge cases",
+      "role": "reviewer",
+      "sources": [
+        {
+          "id": "goal-three-criteria",
+          "reason": "driver",
+          "type": "refinement",
+        },
+      ],
+      "title": "Review output and refine edge cases",
+      "workspaceId": null,
+    },
+  ],
+  "sparse": false,
+  "warnings": [],
+}
+`;

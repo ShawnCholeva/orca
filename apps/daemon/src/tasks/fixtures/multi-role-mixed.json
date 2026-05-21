@@ -1,0 +1,7 @@
+{
+  "name": "multi-role-mixed",
+  "goalDescription": "",
+  "successCriteria": [
+    "Design migration strategy; implement table migration; review diff; validate integration tests"
+  ]
+}

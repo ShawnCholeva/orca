@@ -1,0 +1,7 @@
+{
+  "name": "oversize-input",
+  "goalDescription": "",
+  "successCriteria": [
+    "Implement deterministic generation behavior with explicit guardrails and ensure the description remains detailed enough for downstream action while still respecting hard content caps by carrying a very long explanatory sequence that should be truncated by the rule implementation before persistence and before projection-level validation so that runtime behavior remains deterministic and bounded under stress conditions."
+  ]
+}

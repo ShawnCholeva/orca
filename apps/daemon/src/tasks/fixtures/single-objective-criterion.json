@@ -1,0 +1,7 @@
+{
+  "name": "single-objective-criterion",
+  "goalDescription": "",
+  "successCriteria": [
+    "Build a task generation endpoint"
+  ]
+}

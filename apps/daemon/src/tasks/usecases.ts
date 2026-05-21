@@ -9,6 +9,7 @@ import {
   TaskStatus,
   TaskRole,
   TaskOrigin,
+  TaskGenerationTrigger,
   TaskFieldKey,
   TaskStatusChangedReason,
   M7_TASK_MAX_TITLE_CHARS,
@@ -21,6 +22,7 @@ import {
   type DomainEvent,
 } from '@orca/contracts';
 import type { EventBus } from '../events.js';
+import { runGeneration, SchemaValidationError } from '../orchestrator/runner.js';
 import {
   insertTask,
   updateTaskRow,
@@ -43,6 +45,11 @@ import {
   resetPreparedStatements as resetProjectionStmts,
 } from './projection.js';
 import { taskFingerprint, taskGenerationRequestFingerprint } from './fingerprint.js';
+import { buildTaskGenerationInput } from './input.js';
+import {
+  TaskGenerationOutputSchema,
+  type TaskGenerator,
+} from './rules.js';
 
 export {
   listTasksByGoal,
@@ -742,4 +749,86 @@ export function markTaskGenerationFailed(
 
   for (const ev of toPublish) bus.publish(ev);
   return getTaskGenerationById(db, generationId)!;
+}
+
+// ── Deterministic task generation runner integration (M7-007) ───────────────
+
+export interface TaskGenerationCtx extends TaskCtx {
+  taskGenerator: TaskGenerator;
+}
+
+export interface RunTaskGenerationInput {
+  goalId: string;
+  trigger: TaskGenerationTrigger;
+  triggerSourceId: string | null;
+}
+
+export async function runTaskGeneration(
+  ctx: TaskGenerationCtx,
+  input: RunTaskGenerationInput
+): Promise<TaskGeneration> {
+  const generationInput = buildTaskGenerationInput({
+    db: ctx.db,
+    goalId: input.goalId,
+  });
+
+  const runResult = await runGeneration({
+    kind: 'task',
+    goalId: input.goalId,
+    trigger: input.trigger,
+    triggerSourceId: input.triggerSourceId,
+    providerId: ctx.taskGenerator.id,
+    providerVersion: ctx.taskGenerator.version,
+    inputFingerprint: generationInput.inputFingerprint,
+    ctx: {
+      db: ctx.db,
+      bus: ctx.bus,
+      now: ctx.now,
+      idFactory: ctx.idFactory,
+    },
+    execute: async (generationId) => {
+      const rawOutput = await ctx.taskGenerator.generate(generationInput);
+      const parsedOutput = TaskGenerationOutputSchema.safeParse(rawOutput);
+      if (!parsedOutput.success) {
+        throw new SchemaValidationError(parsedOutput.error.message);
+      }
+
+      const taskIds: string[] = [];
+      for (const candidate of parsedOutput.data.candidates) {
+        try {
+          const task = createTask(ctx, {
+            goalId: input.goalId,
+            origin: 'generator',
+            role: candidate.role,
+            title: candidate.title,
+            description: candidate.description,
+            sources: candidate.sources,
+            workspaceId: candidate.workspaceId,
+            generationId,
+          });
+          taskIds.push(task.id);
+        } catch (error) {
+          if (error instanceof DuplicateTaskFingerprintError) {
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      return {
+        taskIds,
+        sparse: parsedOutput.data.sparse,
+      };
+    },
+  });
+
+  if (runResult.generationId === null) {
+    throw new Error(`Task generation for goal ${input.goalId} was queued for re-evaluation`);
+  }
+
+  const generation = getTaskGenerationById(ctx.db, runResult.generationId);
+  if (!generation) {
+    throw new TaskGenerationNotFoundError(runResult.generationId);
+  }
+  return generation;
 }
