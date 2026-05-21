@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { sidecarMigrationsDir } from './sidecar-bootstrap.js';
 import { loadConfig } from './config.js';
 import { openDatabase } from './db.js';
@@ -15,8 +16,13 @@ import { reconcileStaleAssemblies } from './context/reconcile.js';
 import { sweepOrphanContextFiles } from './sessions/context-delivery.js';
 import { createDaemonContext } from './daemon-context.js';
 import { subscribeOrchestrationTriggers } from './orchestrator/triggers.js';
+import { reconcileInFlightGenerations } from './orchestrator/reconcile.js';
 
-async function main(): Promise<void> {
+export interface DaemonStartHandles {
+  close: () => Promise<void>;
+}
+
+export async function startDaemon(): Promise<DaemonStartHandles> {
   const config = loadConfig();
   const db = openDatabase(config);
 
@@ -41,6 +47,7 @@ async function main(): Promise<void> {
   reconcileSessionsOnBoot(db, eventBus, bootNow);
   reconcileStaleExtractions(db, eventBus, bootNow);
   reconcileStaleAssemblies(db, eventBus, bootNow);
+  await reconcileInFlightGenerations(db);
 
   // Wire M7 orchestration trigger subscriber (must be before HTTP listen).
   const daemonCtx = createDaemonContext(db, eventBus);
@@ -79,9 +86,24 @@ async function main(): Promise<void> {
   }
 
   registerShutdown(server, extractionRunner);
+
+  return {
+    close: async () => {
+      extractionRunner.stop();
+      await server.close();
+    },
+  };
 }
 
-main().catch((err) => {
-  console.error('[orca-daemon] fatal:', err);
-  process.exit(1);
-});
+function isMainEntrypoint(): boolean {
+  const entrypoint = process.argv[1];
+  if (!entrypoint) return false;
+  return import.meta.url === pathToFileURL(entrypoint).href;
+}
+
+if (isMainEntrypoint()) {
+  startDaemon().catch((err) => {
+    console.error('[orca-daemon] fatal:', err);
+    process.exit(1);
+  });
+}
