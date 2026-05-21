@@ -7,6 +7,8 @@ import type { TaskGenerator } from './tasks/rules.js';
 import { DeterministicTaskGenerator } from './tasks/rules.js';
 import type { RecommendationProvider } from './recommendations/provider.js';
 import { DeterministicRecommendationProvider } from './recommendations/provider.js';
+import type { ConflictDetector } from './conflicts/detectors.js';
+import { DeterministicConflictDetector } from './conflicts/detectors.js';
 
 /**
  * Shared dependency container for M7 daemon use cases.
@@ -18,6 +20,7 @@ export interface DaemonContext {
   contextAssembler: SessionPreparationAssembler;
   taskGenerator: TaskGenerator;
   recommendationProvider: RecommendationProvider;
+  conflictDetector: ConflictDetector;
   now: () => string;
   idFactory: () => string;
 }
@@ -29,6 +32,7 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
     contextAssembler: new DeterministicAssembler(),
     taskGenerator: new DeterministicTaskGenerator(),
     recommendationProvider: new DeterministicRecommendationProvider(),
+    conflictDetector: new DeterministicConflictDetector(),
     now: () => new Date().toISOString(),
     idFactory: randomUUID,
   };
