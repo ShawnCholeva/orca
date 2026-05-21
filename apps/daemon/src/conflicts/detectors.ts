@@ -559,3 +559,17 @@ export class DeterministicConflictDetector implements ConflictDetector {
     return deduped;
   }
 }
+
+// ── Fake detector for tests ────────────────────────────────────────────────────
+
+export class FakeConflictDetector implements ConflictDetector {
+  private _candidates: ConflictCandidate[] = [];
+
+  setFixtures(candidates: ConflictCandidate[]): void {
+    this._candidates = candidates;
+  }
+
+  run(_input: ConflictDetectorRunInput): ConflictCandidate[] {
+    return this._candidates;
+  }
+}

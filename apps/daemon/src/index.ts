@@ -13,6 +13,8 @@ import { ExtractionRunner } from './extractions/runner.js';
 import { DeterministicExtractor } from './extractions/deterministic-extractor.js';
 import { reconcileStaleAssemblies } from './context/reconcile.js';
 import { sweepOrphanContextFiles } from './sessions/context-delivery.js';
+import { createDaemonContext } from './daemon-context.js';
+import { subscribeOrchestrationTriggers } from './orchestrator/triggers.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -39,6 +41,10 @@ async function main(): Promise<void> {
   reconcileSessionsOnBoot(db, eventBus, bootNow);
   reconcileStaleExtractions(db, eventBus, bootNow);
   reconcileStaleAssemblies(db, eventBus, bootNow);
+
+  // Wire M7 orchestration trigger subscriber (must be before HTTP listen).
+  const daemonCtx = createDaemonContext(db, eventBus);
+  subscribeOrchestrationTriggers(daemonCtx);
 
   // Sweep orphan context files for sessions no longer in an active state (best-effort)
   const activeSessionIds = new Set(
