@@ -8,7 +8,8 @@ export const migrationFiles = [
   "0002_workspaces_refinements.sql",
   "0004_sessions.sql",
   "0005_memory.sql",
-  "0006_context.sql"
+  "0006_context.sql",
+  "m7-001-suggested-orchestration.sql"
 ] as const;
 
 export function runMigrations(

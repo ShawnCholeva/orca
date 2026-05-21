@@ -57,7 +57,8 @@ describe("runMigrations", () => {
       "0002_workspaces_refinements.sql",
       "0004_sessions.sql",
       "0005_memory.sql",
-      "0006_context.sql"
+      "0006_context.sql",
+      "m7-001-suggested-orchestration.sql"
     ]);
   });
 
@@ -128,7 +129,8 @@ describe("runMigrations", () => {
       "0002_workspaces_refinements.sql",
       "0004_sessions.sql",
       "0005_memory.sql",
-      "0006_context.sql"
+      "0006_context.sql",
+      "m7-001-suggested-orchestration.sql"
     ]);
 
     const goalCount = (
@@ -249,7 +251,8 @@ describe("M4-003 session tables migration", () => {
     expect(upgradeResult.applied).toEqual([
       "0004_sessions.sql",
       "0005_memory.sql",
-      "0006_context.sql"
+      "0006_context.sql",
+      "m7-001-suggested-orchestration.sql"
     ]);
 
     const tables = (
