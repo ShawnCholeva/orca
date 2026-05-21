@@ -1,4 +1,4 @@
-You are acting as a principal engineer decomposing Milestone 6 of an AI orchestration platform into executable implementation tasks for an AI-assisted engineering workflow.
+You are acting as a principal engineer decomposing Milestone 7 of an AI orchestration platform into executable implementation tasks for an AI-assisted engineering workflow.
 
 I have attached:
 
@@ -11,33 +11,35 @@ Milestone 2 implementation plan
 Milestone 3 implementation plan
 Milestone 4 implementation plan and validation notes
 Milestone 5 implementation plan and final validation notes
-Milestone 6 architecture and simplified execution plan: `docs/milestones/6.md`
+Milestone 6 implementation plan and final validation notes
+Milestone 7 architecture and simplified execution plan: `docs/milestones/7.md`
 
 Your task is to:
 
 generate bounded executable implementation tasks
 
-for Milestone 6.
+for Milestone 7.
 
-Milestone 6 is:
+Milestone 7 is:
 
-Context Assembly
+Suggested Orchestration
 
 The intended proof point is:
 
 ```text
-User opens a Goal and starts the new-session flow
-  -> chooses adapter, workspace, role, and short session objective
-  -> daemon reads bounded Goal/refinement/workspace/memory/decision/summary projections
-  -> daemon runs one internal session-preparation job boundary
-  -> deterministic assembler produces compact role-aware sections
-  -> daemon validates, redacts, caps, and persists package + assembly events atomically
-  -> daemon broadcasts committed events with ids and small metadata only
-  -> desktop shows context preview, source counts, status, warnings, and retry/regenerate
-  -> user starts a normal M4 PTY session with contextPackageId
-  -> adapter receives context through an explicit adapter-safe path or declares preview-only
-  -> session row stores contextPackageId
-  -> package, assembly metadata, and session association survive daemon restart
+Meaningful Goal activity occurs
+  -> daemon evaluates deterministic orchestration triggers
+  -> daemon gathers bounded Goal, task, workspace, session, memory, decision, summary, and context-package inputs
+  -> daemon runs explicit internal task/recommendation/conflict jobs only when needed
+  -> deterministic providers generate bounded tasks, recommendations, conflicts, and supervision records
+  -> daemon validates, deduplicates, supersedes, caps, and persists orchestration state atomically
+  -> daemon records content-free lifecycle events with ids, counts, statuses, and failure codes only
+  -> desktop shows Goal-scoped tasks, recommendations, and conflicts
+  -> user accepts, rejects, dismisses, modifies, or resolves suggestions
+  -> accepted recommendations can prefill existing M3/M4/M5/M6/M7 flows but never auto-launch work
+  -> validation recommendations appear after implementation-like activity
+  -> conservative conflicts are surfaced for human resolution
+  -> task, recommendation, conflict, and feedback state survives daemon restart
 ```
 
 The system is:
@@ -52,6 +54,7 @@ Goal-scoped
 Workspace-aware
 PTY/session-based from Milestone 4
 memory/decision/session-summary-aware from Milestone 5
+context-package-aware from Milestone 6
 SQLite-backed
 contract-driven
 
@@ -76,7 +79,7 @@ small-to-medium execution size
 clean architecture progression
 rapid feedback loops
 early persistence and idempotency validation
-safe context delivery
+safe suggestion-only behavior
 
 Avoid giant tasks.
 Avoid vague tasks.
@@ -88,26 +91,27 @@ Do NOT:
 
 redesign the architecture
 expand scope
-drift into Milestone 7 recommendations
-drift into task/work-unit generation
-drift into validation recommendations
-drift into conflict detection
 drift into Level 4 supervised execution
 drift into Level 5 autonomy
+introduce approval gates
+introduce automatic session launch
+introduce automatic validation execution
+introduce automatic task execution
+introduce agent task assignment or multi-agent scheduling
+introduce multi-step workflow planning
+introduce workflow engines, distributed queues, background workers, schedulers, or continuous daemon reasoning loops
 introduce cloud infrastructure
-introduce distributed queues, workers, schedulers, workflow engines, or automatic retry systems
-introduce AI provider SDKs, provider configuration UI, model selection, prompt libraries, prompt experiments, token-accurate accounting, or provider cost tracking
-introduce generic skill invocation APIs or public context-builder invocation APIs
-introduce prompt injection frameworks or generic adapter prompt routing
-invent unverified CLI flags for Claude Code, opencode, codex, or any other adapter
-build recommendations, tasks, workflows, conflict detection, command-center panels, analytics, autonomy controls, or provider/model settings
-build cross-Goal memory, workspace indexing, workspace scanning, file watching, knowledge graphs, embeddings, vector search, semantic search, or global search
-build memory consolidation, ranking/relevance engines, aging/decay systems, policy/governance, or audit engines
-build full transcript capture, full transcript extraction, transcript replay, transcript export, or transcript analytics
-read raw M4 output tails during M6 context assembly
-persist raw terminal output, assembler prompts, raw assembler input/output, raw model responses, or model reasoning in the event store
-write rendered context or large source text into domain event payloads
-add global context dashboards, context package history pages, diff UI, editable context UI, new top-level navigation, or deep-link routing
+introduce provider/model SDKs, provider configuration UI, model selection, prompt libraries, prompt experiments, token-accurate accounting, provider cost tracking, or prompt-management frameworks
+introduce generic skill invocation APIs, generic reasoning-job APIs, generic action execution APIs, or generic workflow APIs
+introduce public recommendation execution endpoints
+introduce cross-Goal recommendations or cross-Goal memory
+introduce workspace indexing, workspace scanning, file watching, knowledge graphs, embeddings, vector search, semantic search, or global search
+introduce memory consolidation, semantic ranking, relevance engines, aging/decay systems, analytics dashboards, policy/governance, or audit engines
+introduce full transcript processing, full transcript replay, transcript export, or transcript analytics
+read raw M4 output tails during M7 orchestration unless an existing M5 projection already exposes a bounded summary field
+persist raw terminal output, raw provider input/output, prompts, raw model responses, model reasoning, recommendation bodies, conflict bodies, feedback comments, task descriptions, acceptance criteria, validation steps, or large source text in domain event payloads
+write proposed action bodies or source memory/decision/summary text into domain event payloads
+add global task dashboards, global recommendation pages, command-center panels, recommendation analytics, dependency graph views, new top-level navigation, or deep-link routing
 add new top-level packages
 
 Preserve:
@@ -124,109 +128,156 @@ M2 plugin/skill registry behavior
 M3 refined Goals and attached Workspaces
 M4 PTY sessions, adapter behavior, lifecycle events, capped output tails, restart reconciliation, and embedded terminal behavior
 M5 Goal-scoped memory, decisions, session summaries, extraction events, and Goal detail memory/decision UI
+M6 bounded context packages, deterministic session preparation, context preview/status UI, contextPackageId session association, adapter delivery policy, and restart-safe context persistence
 post-commit-only event broadcasts
 SQLite as the internal storage boundary
 the existing WebSocket event channel for live refresh
 
 But optimize for:
 
-MVP execution speed, privacy, and operational clarity.
+MVP execution speed, privacy, operational clarity, and suggestion-only supervision.
 
-Milestone 6 Scope Must Match The Revised Plan
+Milestone 7 Scope Must Match The Revised Plan
 
-The task list must implement only the simplified M6 surface from `docs/milestones/6.md`.
+The task list must implement only the simplified M7 surface from `docs/milestones/7.md`.
 
 Include:
 
-contract schemas for context packages, context assemblies, context source refs, roles, statuses, failure codes, create/list/detail responses, M6 event literals, and `CreateSessionRequest` / session response extension with optional `contextPackageId`
-`context_packages` table
-`context_assemblies` table
-`sessions.context_package_id` column
-minimal indexes for Goal package reads, Goal assembly reads, active request idempotency, assembly reconciliation, and session package lookup
-compact source attribution stored as JSON on `context_packages`
-Goal-scoped context package create/list/detail use cases
-manual retry/regenerate through `POST /v1/goals/:goalId/context-packages` with optional `replacePackageId`
-immutable package rows with `status='ready'` only in M6
-assembly lifecycle states `pending`, `running`, `succeeded`, `failed`
-failure codes `invalid_input`, `invalid_output`, `output_too_large`, `goal_archived`, `source_missing`, `delivery_unavailable`, `internal_error`, `daemon_restart`
-boot reconciliation of stale `pending`/`running` context assemblies to failed with `daemon_restart`
-one internal `orca/session-preparation` skill descriptor for diagnostics only
-one daemon-local assembler interface
-one deterministic production assembler
-fake assembler support for tests
-bounded input builder that reads only Goal row, latest refinement fields, attached workspace metadata already known from M3, M5 memory rows, M5 decision rows, and M5 sibling session summaries
-static or unit test coverage proving M6 context assembly does not import/read raw M4 output tails or transcript modules
-deterministic memory, decision, and sibling-summary selection rules
-role-aware context for `architect`, `engineer`, `reviewer`, and `generalist`
-sectioned plaintext renderer
-adapter framing/helper logic where needed
-zod validation of assembler input/output and HTTP request/response shapes
-normalization, content caps, best-effort secret redaction, byte-budget enforcement, and advisory token estimate before persistence and adapter delivery
-hard cap defaults from the plan: 32 KiB rendered context, 4 KiB objective, 8 KiB per section, 30 memory items, 20 decisions, 5 sibling summaries, 256 chars failure message
-confirmation-required decisions pinned and labeled; fail with `output_too_large` if required decision material cannot fit
-idempotency by Goal, adapter, role, objective hash, workspace, source fingerprint, assembler version, and optional replacement package
+contract schemas for tasks, task generations, recommendations, recommendation generations, recommendation feedback, conflicts, source refs, proposed actions, roles, statuses, failure codes, M7 event literals, and `CreateSessionRequest` / session response and `CreateContextPackageRequest` / context package response extensions with optional `taskId` and `fromRecommendationId`
+`tasks` table
+`task_generations` table
+`recommendations` table
+`recommendation_generations` table
+`recommendation_feedback` table
+`conflicts` table
+`sessions.task_id` and `sessions.from_recommendation_id` columns
+`context_packages.task_id` and `context_packages.from_recommendation_id` columns
+minimal indexes for Goal-scoped task/recommendation/conflict reads, active generation idempotency, active task/recommendation/conflict deduplication, session task lookup, and context package task lookup
+Goal-scoped task create/list/update/split/generate use cases
+Goal-scoped recommendation generate/list/detail use cases
+recommendation accept/reject/dismiss/modify use cases
+conflict list/resolve/dismiss use cases
+manual regenerate/re-evaluate through `POST /v1/goals/:goalId/tasks/generate` and `POST /v1/goals/:goalId/recommendations/generate`
+generation lifecycle states `pending`, `running`, `succeeded`, `failed`
+task statuses `proposed`, `open`, `in_progress`, `blocked`, `done`, `cancelled`, `archived`
+recommendation statuses `proposed`, `accepted`, `rejected`, `dismissed`, `modified`, `superseded`
+conflict statuses `open`, `resolved`, `dismissed`
+failure codes `invalid_input`, `invalid_output`, `provider_error`, `daemon_restart`, `goal_archived`, `sparse_input`, `internal_error`
+boot reconciliation of stale `pending`/`running` task and recommendation generation rows to failed with `daemon_restart`
+internal `orca/recommendation-generation`, `orca/task-generation`, and `orca/conflict-detection` skill descriptors for diagnostics only
+one daemon-local `RecommendationProvider` interface
+one deterministic production recommendation provider
+fake recommendation provider support for tests
+one deterministic task generator
+one deterministic conflict detector set
+bounded input builders that read only existing Goal/refinement/workspace/session/memory/decision/session-summary/context-package projections and M7 task/recommendation/conflict rows
+static or unit test coverage proving M7 orchestration does not import/read raw M4 output tails or transcript modules
+deterministic task generation from Goal refinement and bounded M5/M6 evidence
+deterministic recommendation rules for `create_session`, `continue_session`, `review_output`, `refine_goal`, `split_task`, `run_validation`, `resolve_conflict`, `update_plan`, `ask_user`, `mark_complete`, and `pause_work`
+deterministic validation and review recommendation rules after implementation-like activity
+conservative conflict detectors for active workspace overlap, contradictory confirmed decisions, reviewer rejection, blockers, and unresolved task-blocking questions
+source attribution stored as compact JSON ids on task/recommendation/conflict rows
+zod validation of generator/provider input/output and HTTP request/response shapes
+normalization, content caps, best-effort secret redaction where persisted text is accepted, request fingerprinting, and duplicate/supersede behavior before persistence
+hard cap defaults from the plan: 256 char recommendation title, 4 KiB recommendation rationale, 4 KiB proposedAction JSON, 32 source refs per recommendation, 256 char task title, 8 KiB task description, 20 acceptance criteria, 20 validation steps, 4 KiB conflict resolution note, 2 KiB feedback note, 256 char failure message
+idempotency by Goal, trigger kind, trigger source id, provider/generator version, input fingerprint, active row state, and proposed action/task/conflict fingerprint as applicable
 events:
-`context.assembly.requested`
-`context.assembly.completed`
-`context.assembly.failed`
-`context.package.created`
-event payloads with ids/counts/status/byte sizes/failure codes only
-`POST /v1/goals/:goalId/context-packages`
-`GET /v1/goals/:goalId/context-packages`
-`GET /v1/context-packages/:id`
-`POST /v1/sessions` extension with optional `contextPackageId`
-session read responses and `session.created` including `contextPackageId` when present
-adapter delivery metadata:
-`mode: 'initial_input' | 'context_file' | 'preview_only'`
-shell/manual `initial_input` only where context remains visible and user-driven
-`context_file` only for adapters with verified safe startup support
-`preview_only` fallback for adapters without verified safe delivery
-no rendered context bytes in process args, environment variables, logs, or events
-session-scoped context files with mode `0600` where used
-Goal detail new-session controls for adapter/workspace/role/objective
-prepare/skip buttons
-context preview/status/source summary/budget usage/warnings
-retry/regenerate action
-session row context badge
+`task.generation.requested`
+`task.generated`
+`task.generation.failed`
+`task.created`
+`task.updated`
+`task.split`
+`task.status_changed`
+`task.associated_with_session`
+`task.associated_with_context_package`
+`recommendation.generation.requested`
+`recommendation.generated`
+`recommendation.generation.failed`
+`recommendation.accepted`
+`recommendation.rejected`
+`recommendation.dismissed`
+`recommendation.modified`
+`recommendation.superseded`
+`conflict.detected`
+`conflict.resolved`
+`conflict.dismissed`
+`user.feedback.recorded`
+event payloads with ids/counts/statuses/changed field keys/failure codes only
+`POST /v1/goals/:goalId/tasks/generate`
+`GET /v1/goals/:goalId/tasks`
+`POST /v1/goals/:goalId/tasks`
+`PATCH /v1/tasks/:id`
+`POST /v1/tasks/:id/split`
+`POST /v1/tasks/:id/associate-session`
+`POST /v1/goals/:goalId/recommendations/generate`
+`GET /v1/goals/:goalId/recommendations`
+`GET /v1/recommendations/:id`
+`POST /v1/recommendations/:id/accept`
+`POST /v1/recommendations/:id/reject`
+`POST /v1/recommendations/:id/dismiss`
+`PATCH /v1/recommendations/:id`
+`GET /v1/goals/:goalId/conflicts`
+`POST /v1/conflicts/:id/resolve`
+`POST /v1/sessions` extension with optional `taskId` and `fromRecommendationId`
+`POST /v1/goals/:goalId/context-packages` extension with optional `taskId` and `fromRecommendationId`
+session read responses and `session.created` including optional task/recommendation association ids when present
+context package read responses and `context.package.created` including optional task/recommendation association ids when present
+Goal detail Tasks panel
+Goal detail Recommendations panel
+Goal detail Conflicts banner/drawer
+desktop API wrappers for all new routes
+desktop accept/reject/dismiss/modify/resolve flows
+desktop accepted-recommendation prefill into existing M4 session creation and M6 context preparation flows without auto-launching
 desktop reconnect/refetch behavior using existing event subscription
-documentation of endpoints, event payload rules, database retention/caps, assembly policy, adapter-delivery policy, restart policy, and non-goals
+documentation of endpoints, event payload rules, database retention/caps, generation policy, trigger policy, feedback policy, conflict policy, restart policy, and non-goals
 
 Do not include:
 
-`POST /v1/context-packages/:id/regenerate`
-`GET /v1/sessions/:sessionId/context`
-inline `assembleContext` inside `POST /v1/sessions`
-package archive/update/delete endpoints
+`POST /v1/recommendations/:id/execute`
+`POST /v1/recommendations/:id/regenerate`
+`GET /v1/recommendations` cross-Goal list
+`GET /v1/tasks` cross-Goal list
+`POST /v1/skills/:id/invoke`
+`POST /v1/tasks/:id/archive` as a separate endpoint
 generic skill invocation endpoints
-generic context-builder invocation endpoints
-prompt injection endpoints
-recommendation endpoints
-task endpoints
-workflow endpoints
-conflict-detection endpoints
+generic reasoning job endpoints
+generic action execution endpoints
+generic workflow endpoints
+approval-gate endpoints
+workflow execution endpoints
+task assignment endpoints
+recommendation history/analytics endpoints
+provider/model configuration endpoints
+prompt template endpoints
 memory search endpoints
 embedding/vector endpoints
 cross-Goal memory endpoints
-provider/model configuration endpoints
-WebSocket commands for context preparation or session launch
+WebSocket commands for task/recommendation/conflict mutation
 raw terminal output events
 rendered context payload events
-source memory/decision/summary text events
-raw assembler input/output events
-assembler prompt events
+raw provider input/output events
+provider prompt/template events
 raw model response events
-recommendation events
-task events
-workflow events
+raw recommendation body events
+raw conflict body events
+raw task description/acceptance-criteria/validation-step events
+feedback comment events
 continuous reasoning events
 automatic session launch
-automatic context retry/backoff
-AI-backed assembler implementation
+automatic context preparation
+automatic validation command execution
+automatic task status transitions from session activity without user action
+automatic retry/backoff
+AI-backed recommendation provider implementation
 model provider integration
 background worker infrastructure
-context package source table
-global context UI
-package history/diff/editor UI
+task source join tables
+recommendation source join tables
+global task UI
+global recommendation UI
+recommendation history/diff/editor pages
+task board/Gantt/dependency graph UI
 
 Task Generation Rules
 
@@ -250,25 +301,33 @@ Tasks should generally target:
 1 focused implementation concern
 or 1 tightly related implementation cluster
 
-Use the revised M6 task sequence as the required backbone:
+Use the revised M7 task sequence as the required backbone:
 
-M6-000 - Baseline
-M6-001 - Contracts first
-M6-002 - SQLite migration
-M6-003 - Projection reads/writes
-M6-004 - Assembly state and events with fake output
-M6-005 - Boot reconciliation
-M6-006 - Bounded input builder
-M6-007 - Selection rules
-M6-008 - Deterministic assembler and renderer
-M6-009 - HTTP routes
-M6-010 - Session create link
-M6-011 - Adapter delivery
-M6-012 - Desktop API wrappers
-M6-013 - New-session context controls
-M6-014 - Preview, status, retry
-M6-015 - Session badge and restart UI
-M6-016 - End-to-end proof and regression
+M7-000 - Baseline Verification
+M7-001 - Contracts first
+M7-002 - SQLite migration
+M7-003 - Tasks projection and persistence
+M7-004 - Recommendations projection and persistence
+M7-005 - Conflicts projection and persistence
+M7-006 - Generation lifecycle model
+M7-007 - Deterministic task generator
+M7-008 - Deterministic recommendation provider and input builder
+M7-009 - Validation and review recommendation rules
+M7-010 - Conflict detectors
+M7-011 - Orchestrator triggers and runner
+M7-012 - Boot reconciliation
+M7-013 - Task HTTP routes
+M7-014 - Recommendation HTTP routes
+M7-015 - Conflict HTTP routes
+M7-016 - Session create extension
+M7-017 - Context package create extension
+M7-018 - Internal skill descriptors
+M7-019 - Desktop API wrappers
+M7-020 - Tasks panel UI
+M7-021 - Recommendations panel UI
+M7-022 - Conflicts banner UI
+M7-023 - Live refresh integration
+M7-024 - End-to-end proof, restart test, and full regression
 
 You may split a task only if it is too large for one focused session.
 You may combine adjacent tasks only if the combined scope remains clearly reviewable and does not delay validation.
@@ -279,7 +338,7 @@ For EACH task provide:
 
 1. Task ID
 
-Use the `M6-NNN` format from the revised task sequence.
+Use the `M7-NNN` format from the revised task sequence.
 
 2. Task Title
 
@@ -317,7 +376,7 @@ specific event ordering where relevant
 specific persistence rules where relevant
 specific lifecycle transition rules where relevant
 specific UI states where relevant
-specific adapter delivery rules where relevant
+specific accepted-recommendation prefill rules where relevant
 
 Avoid vague statements.
 
@@ -344,8 +403,10 @@ prerequisite tasks
 runtime dependencies
 architectural dependencies
 persistence dependencies
-M4 behavior dependencies
+M3 refinement/workspace dependencies
+M4 session behavior dependencies
 M5 projection dependencies
+M6 context package dependencies
 
 8. Acceptance Criteria
 
@@ -356,19 +417,23 @@ Examples:
 schema parses expected payload and rejects removed fields
 migration creates expected tables, columns, indexes, and foreign keys
 projection read returns rows after reopening the test database
-duplicate active package request returns the existing assembly/package
-failed assembly retry creates a new assembly row
+duplicate active generation request returns the existing generation row
+failed generation retry creates a new generation row
 event sequence is persisted in committed order
 broadcast occurs only after commit
-context package row, assembly row, and events commit atomically
-rendered context and source text are not written to the event store
-raw M4 output tails and full transcripts are not read by M6 context assembly
-confirmation-required decisions are present or assembly fails with `output_too_large`
-pending/running assembly rows become failed on daemon restart before HTTP/WS listen
-session creation without context preserves M4 behavior
-session creation with context stores and returns `contextPackageId`
-adapter delivery does not place rendered context bytes in argv/env/logs
-desktop refetches context packages and sessions after committed context events
+task/recommendation/conflict rows and events commit atomically
+recommendation superseding preserves accepted/rejected/dismissed audit history
+task splitting creates child rows and preserves parent linkage
+accepting a recommendation persists feedback and returns proposedAction without auto-launching work
+conflict resolution auto-dismisses the linked `resolve_conflict` recommendation
+raw M4 output tails and full transcripts are not read by M7 orchestration
+raw provider input/output, recommendation bodies, conflict bodies, task bodies, feedback notes, source text, and proposedAction bodies are not written to the event store
+pending/running generation rows become failed on daemon restart before HTTP/WS listen
+session creation without task/recommendation ids preserves M4 behavior
+session creation with task/recommendation ids stores and returns those ids
+context package creation without task/recommendation ids preserves M6 behavior
+context package creation with task/recommendation ids stores and returns those ids
+desktop refetches tasks, recommendations, conflicts, sessions, and context packages after committed M7 events
 
 Avoid subjective criteria.
 
@@ -385,7 +450,7 @@ full-suite checkpoints where required
 The implementing agent should know how to verify success.
 
 Use targeted tests inside each task.
-Run full `pnpm -r typecheck` and `pnpm -r test` at M6-010 and M6-016.
+Run full `pnpm -r typecheck` and `pnpm -r test` at M7-010 and M7-024.
 
 10. Risks / Notes
 
@@ -398,26 +463,27 @@ temporary shortcuts allowed
 privacy and event-payload traps
 restart/reconciliation traps
 desktop stale-state traps
-adapter delivery traps
+accepted-recommendation prefill traps
+false-positive conflict traps
+duplicate recommendation/task traps
 
 Pay special attention to:
 
-assembling context only from bounded Goal/refinement/workspace metadata and M5 memory/decision/session-summary projections
+generating suggestions only from bounded Goal/refinement/workspace/session/memory/decision/session-summary/context-package/task/recommendation/conflict projections
 not requiring full transcripts
-not reading raw M4 output tails during M6 context assembly
-not persisting raw terminal output, rendered context, source text, raw assembler input/output, prompts, or raw model responses in events
-not logging rendered context, source snippets, prompts, raw assembler output, or secrets
-zod-validating assembler input/output before persistence
-computing source fingerprints and request fingerprints consistently
+not reading raw M4 output tails during M7 orchestration
+not persisting raw terminal output, raw provider input/output, source text, raw recommendation/conflict/task bodies, proposedAction bodies, prompts, raw model responses, or feedback comments in events
+not logging provider inputs/outputs, source snippets, proposedAction bodies, raw model data, or secrets
+zod-validating generator/provider input/output before persistence
+computing input fingerprints, request fingerprints, task fingerprints, recommendation fingerprints, and conflict fingerprints consistently
 using content-free domain events
 committing projection rows and events in one transaction
 broadcasting only after commit
-making retry/regenerate explicit and non-duplicating
-leaving package rows immutable in M6
-pinning confirmation-required decisions and failing when required content cannot fit
-marking stale `pending`/`running` assemblies failed on boot
-handling sparse, truncated, failed, pending, running, completed, and preview-only states in UI
-preserving M1/M2/M3/M4/M5 regressions
+making regenerate/re-evaluate explicit and non-duplicating
+leaving accepted/rejected/dismissed recommendation rows immutable except audit-safe read metadata
+marking stale `pending`/`running` generations failed on boot
+handling sparse, failed, pending, running, generated, modified, accepted, rejected, dismissed, superseded, open-conflict, resolved-conflict, archived-source, and empty states in UI
+preserving M1/M2/M3/M4/M5/M6 regressions
 
 Task Sequencing Requirements
 
@@ -426,31 +492,30 @@ The task list should:
 start with baseline verification
 prove contracts before daemon and desktop code depends on them
 prove migration before projections use new tables/columns
-prove package and assembly projections before assembler/usecase work
-prove atomic fake assembly before deterministic input/selection complexity
-prove boot reconciliation before HTTP/UI can surface stale states
-prove bounded input before selection and rendering
-prove pure selection before deterministic assembler
-prove assembler/renderer before HTTP routes expose package creation
+prove task/recommendation/conflict projections before generation/usecase work
+prove generation lifecycle and idempotency before deterministic provider complexity
+prove deterministic task generation before task routes expose generation
+prove recommendation provider and rules before recommendation routes expose lifecycle actions
+prove conflict detectors before conflict routes expose resolution
+prove orchestrator triggers before boot reconciliation and HTTP/UI rely on background state
 prove HTTP routes before desktop wrappers
-prove session create link before adapter delivery
-prove adapter delivery before desktop start-session UX claims context delivery
-prove desktop read/actions before live refresh and badges
+prove session/context extension without regressing M4/M6 before accepted-recommendation UI claims prefill behavior
+prove desktop API wrappers before panels
+prove panels before live refresh
 run full regression before final documentation/review
 
 Preferred sequencing shape:
 
-baseline before new M6 code
+baseline before new M7 code
 contracts before daemon and desktop imports
 migration before projections
 projections before use cases
-fake assembler before deterministic assembler
-input builder before selection rules and renderer
+generation lifecycle before deterministic generators/providers
+input builders before rules and runner
 routes before desktop wrappers
-session link before adapter delivery
-desktop API wrappers before controls
-controls before preview/status/retry
-preview/status before session badges
+session/context extension before accepted-recommendation prefill UI
+desktop API wrappers before panels
+panels before live refresh
 full proof loop before final regression
 
 Deliverables
@@ -465,8 +530,9 @@ sequencing
 parallelizable tasks
 blocking tasks
 persistence gates
-adapter-delivery gates
-integration gates
+generation/idempotency gates
+accepted-recommendation integration gates
+desktop integration gates
 full-suite review gates
 
 2. Suggested Model Assignment
@@ -586,9 +652,9 @@ Zod schemas/contracts | GPT 5.4/Codex
 Unit tests | GPT 5.4/Codex
 Simple endpoints | GPT 5.4/Codex
 Bounded refactors | GPT 5.4/Codex or Sonnet
-Context input/selection fixtures | GPT 5.4/Codex
-Deterministic assembler fixtures | GPT 5.4/Codex
-Session create and adapter delivery integration | Sonnet 4.6
+Task/recommendation/conflict fixtures | GPT 5.4/Codex
+Deterministic provider/rule fixtures | GPT 5.4/Codex
+Session/context association integration | Sonnet 4.6
 Desktop state/live refresh | Sonnet 4.6
 UX/product feel | Human
 Final milestone acceptance | Human + GPT 5.5
@@ -599,8 +665,8 @@ Suggest:
 
 where architectural review should happen
 where persistence review should happen
-where integration testing should happen
-where adapter-delivery validation should happen
+where generation/idempotency testing should happen
+where accepted-recommendation integration should happen
 where desktop manual smoke testing should happen
 where final scope/non-goal validation should happen
 
@@ -608,13 +674,13 @@ before continuing further.
 
 Required Review Gates
 
-Gate 1: After M6-002, verify contracts, SQLite migration surface, session column, indexes, and M5-upgrade path before daemon context implementation.
-Gate 2: After M6-005, verify projection helpers, fake assembly use case, atomic transaction boundaries, content-free events, idempotency, and boot reconciliation.
-Gate 3: After M6-008, verify bounded input, no raw output-tail/transcript access, deterministic selection, assembler/renderer caps, redaction, source refs, and confirmation-required decision handling.
-Gate 4: After M6-010, run `pnpm -r typecheck` and `pnpm -r test`; review daemon API, event, persistence, idempotency, restart, privacy, session-create, and M1-M5 regression behavior.
-Gate 5: After M6-011, verify adapter delivery safety: no rendered context in argv/env/logs, `0600` context files where used, preview-only fallback when delivery is not verified, and no-context M4 session behavior unchanged.
-Gate 6: After M6-015, run desktop manual smoke with one refined Goal, one attached workspace, M5 memory/decisions/session summaries, context prepare, retry/regenerate, session start with package, preview-only adapter state, reload, and daemon restart.
-Gate 7: After M6-016, verify Definition of Done, final docs, and non-goals.
+Gate 1: After M7-002, verify contracts, SQLite migration surface, session/context package columns, indexes, and upgrade path from an M6 database before daemon orchestration implementation.
+Gate 2: After M7-006, verify projection helpers, generation lifecycle, request fingerprinting, active idempotency, transaction boundaries, and content-free events.
+Gate 3: After M7-010, run `pnpm -r typecheck` and `pnpm -r test`; verify bounded inputs, no raw output-tail/transcript access, deterministic task/recommendation/conflict rules, source refs, caps, superseding, and false-positive conflict handling.
+Gate 4: After M7-012, verify orchestrator trigger mapping, single-flight behavior, dirty-flag re-evaluation, boot reconciliation, daemon restart behavior, and broadcast-after-commit.
+Gate 5: After M7-017, verify daemon API, event, persistence, idempotency, restart, privacy, session-create, context-create, and M1-M6 regression behavior for association extensions.
+Gate 6: After M7-023, run desktop manual smoke with one refined Goal, one attached workspace, M5 memory/decisions/session summaries, an M6 context package, task generation, recommendation generation, accept/reject/dismiss/modify, context/session prefill, conflict detection/resolution, reload, and daemon restart.
+Gate 7: After M7-024, run `pnpm -r typecheck` and `pnpm -r test`; verify Definition of Done, final docs, and non-goals.
 
 Most Important Instruction
 
