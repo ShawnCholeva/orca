@@ -421,38 +421,41 @@ export function detectReviewerRejection(snapshot: ConflictSnapshot): ConflictCan
     }
   }
 
-  const candidates: ConflictCandidate[] = [];
-  for (const session of snapshot.sessions) {
-    if (session.role !== 'reviewer' || session.status !== 'failed') continue;
-    const summary = latestSummaryBySession.get(session.id);
-    if (!summary) continue;
-    const task = findTask(snapshot, session.taskId);
+  const latest = snapshot.sessions
+    .filter((session) => session.role === 'reviewer' && session.status === 'failed')
+    .map((session) => ({ session, summary: latestSummaryBySession.get(session.id) }))
+    .filter((item): item is { session: DetectorSession; summary: DetectorSummary } =>
+      item.summary !== undefined
+    )
+    .sort((a, b) => b.summary.createdAt.localeCompare(a.summary.createdAt))[0];
 
-    const sources: ConflictSourceRef[] = [
-      source('session', session.id, 'subject_a'),
-      source('session_summary', summary.id, 'context'),
-    ];
-    if (task) sources.push(source('task', task.id, 'context'));
+  if (!latest) return [];
 
-    candidates.push(compactCandidate({
+  const task = findTask(snapshot, latest.session.taskId);
+  const sources: ConflictSourceRef[] = [
+    source('session', latest.session.id, 'subject_a'),
+    source('session_summary', latest.summary.id, 'context'),
+  ];
+  if (task) sources.push(source('task', task.id, 'context'));
+
+  return [
+    compactCandidate({
       conflictType: 'reviewer_rejection',
       severity: 'warning',
       title: 'Reviewer reported rejection',
       description: 'A reviewer-role session ended in a rejected or failed state.',
       sources,
       recommendationSources: [
-        recSource('session', session.id, 'subject'),
-        recSource('session_summary', summary.id, 'evidence'),
+        recSource('session', latest.session.id, 'subject'),
+        recSource('session_summary', latest.summary.id, 'evidence'),
       ],
       sourceUpdatedAts: [
-        session.exitedAt ?? session.createdAt,
-        summary.createdAt,
+        latest.session.exitedAt ?? latest.session.createdAt,
+        latest.summary.createdAt,
         task?.updatedAt,
       ].filter((value): value is string => Boolean(value)),
-    }));
-  }
-
-  return candidates;
+    }),
+  ];
 }
 
 export function detectBlockerReported(snapshot: ConflictSnapshot): ConflictCandidate[] {
