@@ -8,7 +8,7 @@ import { listTasksByGoal } from '../tasks/projection.js';
 import { listMemoryByGoal } from '../memory/projection.js';
 import { listDecisionsByGoal } from '../decisions/projection.js';
 import { listConflictsByGoal } from '../conflicts/projection.js';
-import { listRecommendationsByGoal } from './projection.js';
+import { listActiveRecommendationsByGoal } from './projection.js';
 import { listRecentFeedbackByGoal } from './feedback.js';
 
 const FINGERPRINT_VERSION = 'm7-rec-input-v1';
@@ -356,18 +356,7 @@ export function buildRecommendationInput(
   const pkgRow = stmts.getLatestContextPackageId.get(goalId) as ContextPkgIdRow | undefined;
   const latestContextPackageId = pkgRow?.id ?? null;
 
-  // Fetch both proposed and modified so suppression checks cover both non-terminal statuses.
-  const proposedRecs = listRecommendationsByGoal(db, {
-    goalId,
-    status: 'proposed',
-    limit: MAX_ACTIVE_RECS,
-  }).recommendations;
-  const modifiedRecs = listRecommendationsByGoal(db, {
-    goalId,
-    status: 'modified',
-    limit: MAX_ACTIVE_RECS,
-  }).recommendations;
-  const activeRecsRaw = [...proposedRecs, ...modifiedRecs].slice(0, MAX_ACTIVE_RECS);
+  const activeRecsRaw = listActiveRecommendationsByGoal(db, goalId, MAX_ACTIVE_RECS);
   const activeRecommendations: ActiveRecommendationInput[] = activeRecsRaw.map((r) => ({
     id: r.id,
     type: r.type,

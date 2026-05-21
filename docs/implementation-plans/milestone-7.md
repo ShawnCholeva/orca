@@ -1362,28 +1362,28 @@ M7-002  Migration ───── [Review Gate 1] ───┐                  
 | M7-000 Baseline | Human | Run, observe, record. |
 | M7-001 Contracts | Codex | Schema/test boilerplate. |
 | M7-002 Migration | Codex | Mechanical DDL + tests. |
-| M7-003 Tasks Projection | Sonnet 4.6 | Domain logic + status guards. |
-| M7-004 Recommendations Projection | Sonnet 4.6 | Lifecycle nuance + idempotency. |
-| M7-005 Conflicts Projection | Sonnet 4.6 | Cross-projection auto-dismiss helper. |
-| M7-006 Generation Lifecycle | Sonnet 4.6 | Single-flight + dirty-flag. |
+| M7-003 Tasks Projection | Sonnet 4.6 (medium) | Domain logic + status guards. |
+| M7-004 Recommendations Projection | Sonnet 4.6 (high) | Lifecycle nuance + idempotency. |
+| M7-005 Conflicts Projection | Sonnet 4.6 (high) | Cross-projection auto-dismiss helper. |
+| M7-006 Generation Lifecycle | Sonnet 4.6 (high) | Single-flight + dirty-flag. |
 | M7-007 Task Generator | Codex | Deterministic rules, fixtures, and narrow runner glue. |
-| M7-008 Recommendation Provider | Sonnet 4.6 | Largest task; keep with the highest-efficiency implementation model. |
-| M7-009 Validation/Review Rules | Sonnet 4.6 | Subtle implementation-evidence detection. |
-| M7-010 Conflict Detectors | Sonnet 4.6 | Full-suite gate. |
-| M7-011 Orchestrator Triggers | Sonnet 4.6 | Trigger map + re-entrancy. |
+| M7-008 Recommendation Provider | Sonnet 4.6 (high) | Largest task; keep with the highest-efficiency implementation model. |
+| M7-009 Validation/Review Rules | Sonnet 4.6 (high) | Subtle implementation-evidence detection. |
+| M7-010 Conflict Detectors | Sonnet 4.6 (high) | Full-suite gate. |
+| M7-011 Orchestrator Triggers | Sonnet 4.6 (high) | Trigger map + re-entrancy. |
 | M7-012 Boot Reconciliation | Codex | Mirrors M6 pattern. |
 | M7-013 Task Routes | GPT 5.4 | API implementation. |
 | M7-014 Recommendation Routes | GPT 5.5 | Lifecycle idempotency. |
 | M7-015 Conflict Routes | Codex | Thin route layer after M7-005/M7-010 are solid. |
-| M7-016 Session Extension | Sonnet 4.6 | M4 regression risk. |
-| M7-017 Context Extension | Sonnet 4.6 | M6 regression risk. |
+| M7-016 Session Extension | Sonnet 4.6 (high) | M4 regression risk. |
+| M7-017 Context Extension | Sonnet 4.6 (high) | M6 regression risk. |
 | M7-018 Internal Skill Descriptors | Codex | Registration only. |
 | M7-019 Desktop API Wrappers | Codex | Boilerplate. |
 | M7-020 Tasks Panel UI | GPT 5.5 | UI implementation. |
-| M7-021 Recommendations Panel UI | Sonnet 4.6 | Per-kind prefill map; no-auto-launch. |
+| M7-021 Recommendations Panel UI | Sonnet 4.6 (medium) | Per-kind prefill map; no-auto-launch. |
 | M7-022 Conflicts Banner UI | GPT 5.4 | Banner + drawer. |
 | M7-023 Live Refresh | GPT 5.5 | Debounce + per-panel scope. |
-| M7-024 Proof + Regression | Sonnet 4.6 | Final gate; GPT 5.5 remains the Review Gate 7 reviewer. |
+| M7-024 Proof + Regression | Sonnet 4.6 (high) | Final gate; GPT 5.5 remains the Review Gate 7 reviewer. |
 
 **Architecture drift reviews.** GPT 5.5 at Review Gates 1, 2, 3, 4, 5, 7.
 **Final product judgment + manual smoke.** Human at Review Gate 6 and Review Gate 7.

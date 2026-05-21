@@ -441,6 +441,20 @@ export function listRecommendationGenerationsByGoal(
   return rows.map(rowToGeneration);
 }
 
+/** Returns proposed+modified (non-terminal active) recommendations for a goal. */
+export function listActiveRecommendationsByGoal(
+  db: Database.Database,
+  goalId: string,
+  limit = 20
+): Recommendation[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM recommendations WHERE goal_id = ? AND status IN ('proposed', 'modified') ORDER BY created_at DESC, id DESC LIMIT ?`
+    )
+    .all(goalId, limit) as RecommendationDbRow[];
+  return rows.map(rowToRecommendation);
+}
+
 /** Returns ids of currently proposed recommendations for a goal (for supersede logic). */
 export function listProposedRecommendationsByGoalAndFingerprints(
   db: Database.Database,
