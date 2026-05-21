@@ -134,6 +134,7 @@ import type { SessionPreparationAssembler } from './context/assembler.js';
 import { registerContextRoutes } from './context/routes.js';
 import { createDaemonContext, type DaemonContext } from './daemon-context.js';
 import { registerTaskRoutes } from './tasks/routes.js';
+import { registerRecommendationRoutes } from './recommendations/routes.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -595,6 +596,16 @@ export function createServer(
     db,
     bus: eventBus,
     taskGenerator: daemonContext.taskGenerator,
+    now: daemonContext.now,
+    idFactory: daemonContext.idFactory,
+  });
+
+  // ---- M7 Recommendation routes ----
+
+  registerRecommendationRoutes(server, {
+    db,
+    bus: eventBus,
+    recommendationProvider: daemonContext.recommendationProvider,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
   });
