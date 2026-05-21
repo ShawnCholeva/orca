@@ -327,6 +327,19 @@ export function insertSummary(db: Database.Database, row: SessionMemorySummary):
   );
 }
 
+export function listSummariesByGoal(
+  db: Database.Database,
+  goalId: string,
+  limit = 5
+): SessionMemorySummary[] {
+  const rows = db
+    .prepare(
+      `SELECT ${SUMMARY_COLS} FROM session_summaries WHERE goal_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`
+    )
+    .all(goalId, Math.min(limit, 50)) as SummaryRow[];
+  return rows.map(rowToSummary);
+}
+
 export function getLatestSummaryForSession(
   db: Database.Database,
   sessionId: string

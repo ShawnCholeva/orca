@@ -99,6 +99,19 @@ export function getFeedbackByRecommendationId(
   return rows.map(rowToFeedback);
 }
 
+export function listRecentFeedbackByGoal(
+  db: Database.Database,
+  goalId: string,
+  limit = 10
+): RecommendationFeedback[] {
+  const rows = db
+    .prepare(
+      'SELECT * FROM recommendation_feedback WHERE goal_id = ? ORDER BY created_at DESC LIMIT ?'
+    )
+    .all(goalId, Math.min(limit, 50)) as FeedbackDbRow[];
+  return rows.map(rowToFeedback);
+}
+
 export function getTerminalFeedbackByRecommendationId(
   db: Database.Database,
   recommendationId: string

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
-import { M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS, type DomainEvent } from '@orca/contracts';
+import { M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS, type DomainEvent, type M7FailureCode } from '@orca/contracts';
 import type { EventBus } from '../events.js';
 import { redactSecrets } from '../memory/normalize.js';
 import {
@@ -133,7 +133,7 @@ export class SchemaValidationError extends Error {
   }
 }
 
-function classifyError(err: unknown): { code: string; message: string } {
+function classifyError(err: unknown): { code: M7FailureCode; message: string } {
   if (err instanceof Error) {
     if ((err as { isSchemaValidationError?: boolean }).isSchemaValidationError) {
       return { code: 'invalid_output', message: err.message };

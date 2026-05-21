@@ -114,7 +114,7 @@ Meaningful Goal activity occurs
 - Do not "fix" pre-existing dirty files; record them.
 - If baseline fails, stop and resolve before proceeding — M7 must not absorb pre-existing breakage.
 
-**Suggested model:** Human + Sonnet 4.6 (run + record).
+**Suggested model:** Human.
 
 ---
 
@@ -166,7 +166,7 @@ Meaningful Goal activity occurs
 - Do not introduce `RecommendationCandidate` as a public contract type; it is provider-output-only and lives in the daemon.
 - Optional fields must use `.optional()` not `.nullable()` to keep M4/M6 wire shapes byte-identical when omitted.
 
-**Suggested model:** GPT 5.4 / Codex.
+**Suggested model:** Codex.
 
 ---
 
@@ -218,7 +218,7 @@ Meaningful Goal activity occurs
 - Partial unique indexes are SQLite-specific syntax; the project already uses them (M6); follow that pattern.
 - Do not add `ON DELETE` cascades; archived behavior is read-layer only.
 
-**Suggested model:** GPT 5.4 / Codex.
+**Suggested model:** Codex.
 
 **Review Gate 1:** After M7-002, verify contracts, SQLite migration surface, session/context package columns, indexes, and upgrade path from an M6 database before daemon orchestration implementation. Human + GPT 5.5.
 
@@ -495,7 +495,7 @@ Meaningful Goal activity occurs
 - Do not invoke this generator from anywhere except the runner.
 - The `sparse=true` empty result is **not** a failure; do not mark the generation `failed`.
 
-**Suggested model:** GPT 5.4 / Codex (rules + fixtures); Sonnet 4.6 (input builder + runner glue).
+**Suggested model:** Codex.
 
 ---
 
@@ -558,7 +558,7 @@ Meaningful Goal activity occurs
 - Memory/decision/summary bodies may appear in the input snapshot for rule consumption — they must not leak into events, logs, or persisted free-text fields beyond rule-constructed rationales (and rationales are built from typed fields with templated strings, not by inlining the body).
 - Fingerprint canonicalization must sort `proposedAction` keys recursively.
 
-**Suggested model:** Sonnet 4.6 (provider + input + persistence); GPT 5.4 / Codex (per-rule fixtures and snapshot tests).
+**Suggested model:** Sonnet 4.6.
 
 ---
 
@@ -659,7 +659,7 @@ Meaningful Goal activity occurs
 - Cross-TX cascade leakage: assert single-TX behavior via event-store offset comparison.
 - Do not re-emit `conflict.detected` on duplicate fingerprint while open.
 
-**Suggested model:** Sonnet 4.6 (detector wiring), GPT 5.4 / Codex (fixtures).
+**Suggested model:** Sonnet 4.6.
 
 **Review Gate 3:** After M7-010, run `pnpm -r typecheck` and `pnpm -r test`; verify bounded inputs, no raw output-tail/transcript access, deterministic task/recommendation/conflict rules, source refs, caps, superseding, and false-positive conflict handling. Human + GPT 5.5.
 
@@ -757,7 +757,7 @@ Meaningful Goal activity occurs
 - Reconciliation must be idempotent (running it twice produces no state change after first run).
 - Do not abort generation rows that succeeded mid-shutdown — only `pending`/`running`.
 
-**Suggested model:** GPT 5.4 / Codex.
+**Suggested model:** Codex.
 
 **Review Gate 4:** After M7-012, verify orchestrator trigger mapping, single-flight behavior, dirty-flag re-evaluation, boot reconciliation, daemon restart behavior, and broadcast-after-commit. Human + GPT 5.5.
 
@@ -814,7 +814,7 @@ Meaningful Goal activity occurs
 - `archive` is folded into `PATCH ... { status: 'archived' }`; no separate endpoint.
 - `POST /v1/tasks/:id/associate-context-package` is **not** in scope; association via context-package creation handles the reverse direction (M7-017).
 
-**Suggested model:** Sonnet 4.6.
+**Suggested model:** GPT 5.4.
 
 ---
 
@@ -859,7 +859,7 @@ Meaningful Goal activity occurs
 - Idempotency relies on DB-level partial unique constraint on `(recommendation_id, action) WHERE action IN ('accept','reject','dismiss')`; ensure the use case returns the existing rows rather than throwing on the constraint error.
 - Modify is non-terminal; tests assert subsequent accept works.
 
-**Suggested model:** Sonnet 4.6.
+**Suggested model:** GPT 5.5.
 
 ---
 
@@ -897,7 +897,7 @@ Meaningful Goal activity occurs
 - Cascade is the only "automatic" cross-projection lifecycle change — keep it documented in code.
 - Manual conflict creation endpoint deliberately omitted.
 
-**Suggested model:** Sonnet 4.6.
+**Suggested model:** Codex.
 
 ---
 
@@ -1015,7 +1015,7 @@ Meaningful Goal activity occurs
 **Risks / Notes.**
 - Do not introduce a public `POST /v1/skills/:id/invoke` route.
 
-**Suggested model:** GPT 5.4 / Codex.
+**Suggested model:** Codex.
 
 ---
 
@@ -1049,7 +1049,7 @@ Meaningful Goal activity occurs
 **Risks / Notes.**
 - Wrappers must reference `@orca/contracts` schemas, not redeclare.
 
-**Suggested model:** GPT 5.4 / Codex.
+**Suggested model:** Codex.
 
 ---
 
@@ -1094,7 +1094,7 @@ Meaningful Goal activity occurs
 - Do not introduce a global task dashboard.
 - Live refresh wired in M7-023.
 
-**Suggested model:** Sonnet 4.6.
+**Suggested model:** GPT 5.5.
 
 ---
 
@@ -1181,7 +1181,7 @@ Meaningful Goal activity occurs
 - Banner placement: above existing refinement panel.
 - Description text is rule-generated and capped; do not display raw memory/decision body in the drawer.
 
-**Suggested model:** Sonnet 4.6.
+**Suggested model:** GPT 5.4.
 
 ---
 
@@ -1221,7 +1221,7 @@ Meaningful Goal activity occurs
 - Do not introduce new WebSocket commands; only consume broadcast events.
 - A stale-state trap: ensure the panel always refetches on `*.generation.succeeded` / `*.generation.failed`.
 
-**Suggested model:** Sonnet 4.6.
+**Suggested model:** GPT 5.5.
 
 **Review Gate 6:** After M7-023, run desktop manual smoke with one refined Goal, one attached workspace, M5 memory/decisions/session summaries, an M6 context package, task generation, recommendation generation, accept/reject/dismiss/modify, context/session prefill, conflict detection/resolution, reload, and daemon restart. Human.
 
@@ -1273,7 +1273,7 @@ Meaningful Goal activity occurs
 - Do not absorb scope from earlier tasks.
 - Final task; treat as the definitive proof, not a catch-all.
 
-**Suggested model:** Sonnet 4.6 (test authoring); Human + GPT 5.5 (final acceptance).
+**Suggested model:** Sonnet 4.6.
 
 **Review Gate 7:** After M7-024, run `pnpm -r typecheck` and `pnpm -r test`; verify Definition of Done, final docs, and non-goals. Human + GPT 5.5.
 
@@ -1359,31 +1359,31 @@ M7-002  Migration ───── [Review Gate 1] ───┐                  
 
 | Task | Primary model | Notes |
 |---|---|---|
-| M7-000 Baseline | Human + Sonnet 4.6 | Run, observe, record. |
+| M7-000 Baseline | Human | Run, observe, record. |
 | M7-001 Contracts | Codex | Schema/test boilerplate. |
 | M7-002 Migration | Codex | Mechanical DDL + tests. |
 | M7-003 Tasks Projection | Sonnet 4.6 | Domain logic + status guards. |
 | M7-004 Recommendations Projection | Sonnet 4.6 | Lifecycle nuance + idempotency. |
 | M7-005 Conflicts Projection | Sonnet 4.6 | Cross-projection auto-dismiss helper. |
 | M7-006 Generation Lifecycle | Sonnet 4.6 | Single-flight + dirty-flag. |
-| M7-007 Task Generator | Codex (rules + fixtures); Sonnet 4.6 (input builder + runner glue) | |
-| M7-008 Recommendation Provider | Sonnet 4.6 (provider + persistence); Codex (per-rule fixtures) | Largest task; budget carefully. |
+| M7-007 Task Generator | Codex | Deterministic rules, fixtures, and narrow runner glue. |
+| M7-008 Recommendation Provider | Sonnet 4.6 | Largest task; keep with the highest-efficiency implementation model. |
 | M7-009 Validation/Review Rules | Sonnet 4.6 | Subtle implementation-evidence detection. |
-| M7-010 Conflict Detectors | Sonnet 4.6 (wiring); Codex (fixtures) | Full-suite gate. |
+| M7-010 Conflict Detectors | Sonnet 4.6 | Full-suite gate. |
 | M7-011 Orchestrator Triggers | Sonnet 4.6 | Trigger map + re-entrancy. |
 | M7-012 Boot Reconciliation | Codex | Mirrors M6 pattern. |
-| M7-013 Task Routes | Sonnet 4.6 | API implementation. |
-| M7-014 Recommendation Routes | Sonnet 4.6 | Lifecycle idempotency. |
-| M7-015 Conflict Routes | Sonnet 4.6 | Cross-projection cascade. |
+| M7-013 Task Routes | GPT 5.4 | API implementation. |
+| M7-014 Recommendation Routes | GPT 5.5 | Lifecycle idempotency. |
+| M7-015 Conflict Routes | Codex | Thin route layer after M7-005/M7-010 are solid. |
 | M7-016 Session Extension | Sonnet 4.6 | M4 regression risk. |
 | M7-017 Context Extension | Sonnet 4.6 | M6 regression risk. |
 | M7-018 Internal Skill Descriptors | Codex | Registration only. |
 | M7-019 Desktop API Wrappers | Codex | Boilerplate. |
-| M7-020 Tasks Panel UI | Sonnet 4.6 | UI implementation. |
+| M7-020 Tasks Panel UI | GPT 5.5 | UI implementation. |
 | M7-021 Recommendations Panel UI | Sonnet 4.6 | Per-kind prefill map; no-auto-launch. |
-| M7-022 Conflicts Banner UI | Sonnet 4.6 | Banner + drawer. |
-| M7-023 Live Refresh | Sonnet 4.6 | Debounce + per-panel scope. |
-| M7-024 Proof + Regression | Sonnet 4.6 (tests); Human + GPT 5.5 (acceptance) | Final gate. |
+| M7-022 Conflicts Banner UI | GPT 5.4 | Banner + drawer. |
+| M7-023 Live Refresh | GPT 5.5 | Debounce + per-panel scope. |
+| M7-024 Proof + Regression | Sonnet 4.6 | Final gate; GPT 5.5 remains the Review Gate 7 reviewer. |
 
 **Architecture drift reviews.** GPT 5.5 at Review Gates 1, 2, 3, 4, 5, 7.
 **Final product judgment + manual smoke.** Human at Review Gate 6 and Review Gate 7.
