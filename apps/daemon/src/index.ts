@@ -76,7 +76,11 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
 
   extractionRunner.start();
 
-  const server = createServer(config, { sessionOutputStore, extractionRunner });
+  const server = createServer(config, {
+    sessionOutputStore,
+    extractionRunner,
+    daemonContext: daemonCtx,
+  });
 
   try {
     await server.listen({ host: '127.0.0.1', port: config.port });

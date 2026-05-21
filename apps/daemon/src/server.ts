@@ -130,9 +130,10 @@ import {
   SessionNotFoundForExtractionError,
   SessionNotTerminalError,
 } from './extractions/usecases.js';
-import { DeterministicAssembler } from './context/assembler.js';
 import type { SessionPreparationAssembler } from './context/assembler.js';
 import { registerContextRoutes } from './context/routes.js';
+import { createDaemonContext, type DaemonContext } from './daemon-context.js';
+import { registerTaskRoutes } from './tasks/routes.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -163,10 +164,12 @@ export function createServer(
     sessionOutputStore?: SessionOutputStore;
     extractionRunner?: ExtractionRunner;
     assembler?: SessionPreparationAssembler;
+    daemonContext?: DaemonContext;
   }
 ): FastifyInstance {
   const startedAt = new Date().toISOString();
   const db = getDatabase();
+  const daemonContext = deps?.daemonContext ?? createDaemonContext(db, eventBus);
   const sessionOutputStore =
     deps?.sessionOutputStore ??
     createSessionOutputStore(db, { tailBytes: config.sessionOutputTailBytes });
@@ -174,7 +177,7 @@ export function createServer(
     deps?.sessionRuntime ??
     new SessionRuntime(new NodePtyManager(), config.sessionStopGraceMs, config.sessionWsBufferLimitBytes);
   const extractionRunner = deps?.extractionRunner;
-  const assembler = deps?.assembler ?? new DeterministicAssembler();
+  const assembler = deps?.assembler ?? daemonContext.contextAssembler;
 
   const server = Fastify({
     logger: {
@@ -585,6 +588,16 @@ export function createServer(
   // ---- M6 Context Package routes ----
 
   registerContextRoutes(server, { db, bus: eventBus, assembler, adapterRegistry });
+
+  // ---- M7 Task routes ----
+
+  registerTaskRoutes(server, {
+    db,
+    bus: eventBus,
+    taskGenerator: daemonContext.taskGenerator,
+    now: daemonContext.now,
+    idFactory: daemonContext.idFactory,
+  });
 
   server.get('/v1/adapters', async (): Promise<ListAdaptersResponse> => {
     const adapters = await adapterRegistry.list();
