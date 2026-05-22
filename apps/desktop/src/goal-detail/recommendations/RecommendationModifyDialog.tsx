@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
-  M7_RECOMMENDATION_MAX_RATIONALE_CHARS,
-  M7_RECOMMENDATION_MAX_TITLE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS,
   ProposedAction,
   RefinementFieldKey,
   type ProposedActionKind,
@@ -247,12 +247,12 @@ export function RecommendationModifyDialog({ recommendation, onSave, onClose }: 
 
     const trimmedTitle = title.trim();
     if (!trimmedTitle) { setError("Title is required."); return; }
-    if (trimmedTitle.length > M7_RECOMMENDATION_MAX_TITLE_CHARS) {
-      setError(`Title must be ${M7_RECOMMENDATION_MAX_TITLE_CHARS} characters or fewer.`);
+    if (trimmedTitle.length > ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS) {
+      setError(`Title must be ${ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS} characters or fewer.`);
       return;
     }
-    if (rationale.length > M7_RECOMMENDATION_MAX_RATIONALE_CHARS) {
-      setError(`Rationale must be ${M7_RECOMMENDATION_MAX_RATIONALE_CHARS} characters or fewer.`);
+    if (rationale.length > ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS) {
+      setError(`Rationale must be ${ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS} characters or fewer.`);
       return;
     }
 

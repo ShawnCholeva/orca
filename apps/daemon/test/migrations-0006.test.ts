@@ -26,13 +26,13 @@ function createConfig(dataDir: string): Config {
 }
 
 function freshDb(): Database.Database {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-m6-002-migration-'));
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-context-migration-'));
   tempDirs.push(dir);
   return openDatabase(createConfig(dir));
 }
 
 function createMigrationsDir(files: string[]): string {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-m6-002-migrations-'));
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-context-migrations-'));
   tempDirs.push(dir);
 
   const sourceDir = defaultMigrationsDir();
@@ -130,7 +130,7 @@ afterEach(() => {
   }
 });
 
-describe('M6-002 migration 0006_context.sql', () => {
+describe('context migration 0006_context.sql', () => {
   it('creates expected tables, columns, and indexes on a fresh database', () => {
     const db = freshDb();
     const result = runMigrations(db, defaultMigrationsDir());
@@ -142,7 +142,7 @@ describe('M6-002 migration 0006_context.sql', () => {
       '0005_memory.sql',
       '0006_context.sql',
       '0007_agents.sql',
-      'm7-001-suggested-orchestration.sql',
+      '0008_suggested_orchestration.sql',
     ]);
 
     const tables = (
@@ -192,7 +192,7 @@ describe('M6-002 migration 0006_context.sql', () => {
     expect(sessionContextIndex?.partial).toBe(1);
   });
 
-  it('upgrades an M5 fixture database to 0006 without data loss', () => {
+  it('upgrades a memory fixture database to context assembly without data loss', () => {
     const db = freshDb();
     const m5Dir = createMigrationsDir([
       '0001_init.sql',
@@ -208,7 +208,7 @@ describe('M6-002 migration 0006_context.sql', () => {
     seedSession(db, 'sess-upgrade', 'goal-upgrade', 'ws-upgrade');
 
     const upgrade = runMigrations(db, defaultMigrationsDir());
-    expect(upgrade.applied).toEqual(['0006_context.sql', '0007_agents.sql', 'm7-001-suggested-orchestration.sql']);
+    expect(upgrade.applied).toEqual(['0006_context.sql', '0007_agents.sql', '0008_suggested_orchestration.sql']);
 
     const counts = {
       goals: (db.prepare('SELECT count(*) AS cnt FROM goals').get() as { cnt: number }).cnt,

@@ -135,7 +135,7 @@ afterEach(() => {
 // ── Trigger map completeness ──────────────────────────────────────────────────
 
 describe('TRIGGER_MAP completeness', () => {
-  it('covers all event types listed in the M7-011 trigger table', () => {
+  it('covers all event types listed in the orchestration trigger table', () => {
     const expectedKeys = [
       'goal.refined',
       'session.exited',
@@ -152,8 +152,8 @@ describe('TRIGGER_MAP completeness', () => {
     }
   });
 
-  it('has no entry for M7 generation lifecycle events (re-entrancy guard)', () => {
-    const m7LifecycleEvents = [
+  it('has no entry for orchestration generation lifecycle events (re-entrancy guard)', () => {
+    const orchestrationLifecycleEvents = [
       'task.generation.requested',
       'task.generated',
       'task.generation.failed',
@@ -168,7 +168,7 @@ describe('TRIGGER_MAP completeness', () => {
       'conflict.resolved',
       'conflict.dismissed',
     ] as const;
-    for (const key of m7LifecycleEvents) {
+    for (const key of orchestrationLifecycleEvents) {
       expect(TRIGGER_MAP).not.toHaveProperty(key);
     }
   });

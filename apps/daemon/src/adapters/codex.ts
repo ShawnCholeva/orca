@@ -6,7 +6,7 @@ import type { ResolveFn } from "./resolve.js";
 export class CodexAdapter implements AgentAdapter {
   readonly id = "codex" as const;
   readonly title = "Codex";
-  // preview_only: no verified safe CLI surface for context-file delivery in M6
+  // preview_only: no verified safe CLI surface for context-file delivery yet.
   readonly contextDelivery: AdapterContextDelivery = { mode: 'preview_only', maxBytes: 32768 };
 
   private readonly resolveFn: ResolveFn;

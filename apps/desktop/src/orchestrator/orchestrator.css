@@ -1,0 +1,415 @@
+/* Orchestrator shell — tabbed top-level layout matching the operational theme
+   used by onboarding. */
+
+.orchestrator-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.orchestrator-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 24px 0;
+  border-bottom: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+
+.orchestrator-tab {
+  position: relative;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.orchestrator-tab:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.orchestrator-tab--active {
+  color: var(--text);
+}
+
+.orchestrator-tab--active::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+}
+
+/* ── Orchestrator tab content ─────────────────────── */
+
+.orchestrator-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  gap: 14px;
+  overflow: hidden;
+}
+
+.orchestrator-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.orchestrator-actions-meta {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.orchestrator-primary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.orchestrator-primary-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.orchestrator-primary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.orchestrator-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 14px;
+  overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  .orchestrator-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.orchestrator-chat-col {
+  display: flex;
+  min-height: 0;
+}
+
+.orchestrator-rail {
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.orchestrator-rail-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--hairline);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.orchestrator-rail-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 1.3px;
+  text-transform: uppercase;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.orchestrator-rail-count {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.orchestrator-rail-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.orchestrator-rail-empty {
+  padding: 18px 14px;
+  font-size: 12px;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.goal-card {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.goal-card:last-child {
+  border-bottom: none;
+}
+
+.goal-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.goal-card-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-card-status {
+  font-size: 9.5px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.goal-card-status--active {
+  color: var(--run);
+  background: var(--run-soft);
+}
+
+.goal-card-status--archived {
+  color: var(--text-3);
+  background: var(--panel-2);
+}
+
+.goal-card-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.goal-card-meta {
+  font-size: 10.5px;
+  color: var(--text-4);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.goal-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.goal-card-btn {
+  flex: 1;
+  height: 26px;
+  padding: 0 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.goal-card-btn:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--hairline-strong);
+}
+
+.goal-card-btn--primary {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+.goal-card-btn--primary:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.goal-card-btn--danger:hover:not(:disabled) {
+  color: var(--err);
+  border-color: var(--err);
+}
+
+.goal-card-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.goal-card-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.goal-card-form label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.goal-card-form input,
+.goal-card-form textarea {
+  background: var(--bg);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 12.5px;
+  color: var(--text);
+  font-family: inherit;
+  resize: vertical;
+}
+
+.goal-card-form input:focus,
+.goal-card-form textarea:focus {
+  outline: none;
+  border-color: var(--accent-line);
+}
+
+.goal-card-form .form-error {
+  background: var(--err-soft);
+  color: var(--err);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 11.5px;
+}
+
+/* ── Reasoning tab (Runtime Diagnostics for now) ── */
+
+.reasoning-pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 24px 28px;
+}
+
+.reasoning-card {
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 18px 20px;
+  max-width: 900px;
+}
+
+.reasoning-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.reasoning-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.reasoning-card-subtitle {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  margin: 14px 0 6px;
+}
+
+.reasoning-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.reasoning-error {
+  color: var(--err);
+  font-size: 12.5px;
+}
+
+.reasoning-action-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.reasoning-action-btn:hover:not(:disabled) {
+  background: var(--bg);
+  border-color: var(--accent-line);
+}
+
+.reasoning-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

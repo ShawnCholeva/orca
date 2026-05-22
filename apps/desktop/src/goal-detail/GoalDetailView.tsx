@@ -4,11 +4,11 @@ import { getGoalDetail, openEventStream } from "../api";
 import {
   feedbackRecommendationId,
   generationNoticeFromEvent,
-  M7_LIVE_REFRESH_DEBOUNCE_MS,
+  ORCHESTRATION_LIVE_REFRESH_DEBOUNCE_MS,
   recommendationEventMayTouchTask,
   type RecommendationDetailRefresh,
   type LiveGenerationNotice,
-} from "../events/m7-live-refresh";
+} from "../events/orchestration-live-refresh";
 import { WorkspaceListPanel } from "./WorkspaceListPanel";
 import { TasksPanel } from "./tasks/TasksPanel";
 import { SessionsPanel } from "./sessions/SessionsPanel";
@@ -115,7 +115,7 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
     debounceTimersRef.current.tasks = setTimeout(() => {
       debounceTimersRef.current.tasks = null;
       setTasksRefreshKey((k) => k + 1);
-    }, M7_LIVE_REFRESH_DEBOUNCE_MS);
+    }, ORCHESTRATION_LIVE_REFRESH_DEBOUNCE_MS);
   }, []);
 
   const scheduleRecommendationsRefresh = useCallback(() => {
@@ -125,7 +125,7 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
     debounceTimersRef.current.recommendations = setTimeout(() => {
       debounceTimersRef.current.recommendations = null;
       setRecommendationsRefreshKey((k) => k + 1);
-    }, M7_LIVE_REFRESH_DEBOUNCE_MS);
+    }, ORCHESTRATION_LIVE_REFRESH_DEBOUNCE_MS);
   }, []);
 
   const scheduleConflictsRefresh = useCallback(() => {
@@ -135,7 +135,7 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
     debounceTimersRef.current.conflicts = setTimeout(() => {
       debounceTimersRef.current.conflicts = null;
       setConflictsRefreshKey((k) => k + 1);
-    }, M7_LIVE_REFRESH_DEBOUNCE_MS);
+    }, ORCHESTRATION_LIVE_REFRESH_DEBOUNCE_MS);
   }, []);
 
   const scheduleRecommendationDetailRefresh = useCallback((recommendationId: string) => {
@@ -148,10 +148,10 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
         recommendationId,
         nonce: (current?.nonce ?? 0) + 1,
       }));
-    }, M7_LIVE_REFRESH_DEBOUNCE_MS);
+    }, ORCHESTRATION_LIVE_REFRESH_DEBOUNCE_MS);
   }, []);
 
-  const handleM7Event = useCallback(
+  const handleOrchestrationEvent = useCallback(
     (event: DomainEvent) => {
       if (event.type === "task.generation.requested") {
         setLiveTaskGeneration(generationNoticeFromEvent(event));
@@ -219,7 +219,7 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
         } else if (DECISION_EVENTS.has(event.type)) {
           setDecisionsRefreshKey((k) => k + 1);
         }
-        handleM7Event(event);
+        handleOrchestrationEvent(event);
       },
       onStatus(status) {
         if (status === "open") {
@@ -241,7 +241,7 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
     return () => stream.close();
   }, [
     goalId,
-    handleM7Event,
+    handleOrchestrationEvent,
     scheduleConflictsRefresh,
     scheduleRecommendationsRefresh,
     scheduleTasksRefresh,

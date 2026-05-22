@@ -12,13 +12,13 @@ import {
   TaskGenerationTrigger,
   TaskFieldKey,
   TaskStatusChangedReason,
-  M7_TASK_MAX_TITLE_CHARS,
-  M7_TASK_MAX_DESCRIPTION_CHARS,
-  M7_TASK_MAX_ACCEPTANCE_CRITERIA,
-  M7_TASK_MAX_VALIDATION_STEPS,
-  M7_TASK_MAX_ITEM_TEXT_CHARS,
-  M7_TASK_MAX_SOURCES,
-  M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS,
+  ORCHESTRATION_TASK_MAX_TITLE_CHARS,
+  ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS,
+  ORCHESTRATION_TASK_MAX_ACCEPTANCE_CRITERIA,
+  ORCHESTRATION_TASK_MAX_VALIDATION_STEPS,
+  ORCHESTRATION_TASK_MAX_ITEM_TEXT_CHARS,
+  ORCHESTRATION_TASK_MAX_SOURCES,
+  ORCHESTRATION_GENERATION_MAX_FAILURE_MESSAGE_CHARS,
   type DomainEvent,
 } from '@orca/contracts';
 import type { EventBus } from '../events.js';
@@ -173,30 +173,30 @@ function emitEvent(
 // ── Cap helpers ───────────────────────────────────────────────────────────────
 
 function capTitle(s: string): string {
-  return redactSecrets(s.trim().slice(0, M7_TASK_MAX_TITLE_CHARS));
+  return redactSecrets(s.trim().slice(0, ORCHESTRATION_TASK_MAX_TITLE_CHARS));
 }
 
 function capDescription(s: string): string {
-  return redactSecrets(s.trim().slice(0, M7_TASK_MAX_DESCRIPTION_CHARS));
+  return redactSecrets(s.trim().slice(0, ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS));
 }
 
 function capAcceptanceCriteria(items: TaskAcceptanceCriterion[]): TaskAcceptanceCriterion[] {
-  return items.slice(0, M7_TASK_MAX_ACCEPTANCE_CRITERIA).map((c) => ({
+  return items.slice(0, ORCHESTRATION_TASK_MAX_ACCEPTANCE_CRITERIA).map((c) => ({
     id: c.id,
-    text: redactSecrets(c.text.trim().slice(0, M7_TASK_MAX_ITEM_TEXT_CHARS)),
+    text: redactSecrets(c.text.trim().slice(0, ORCHESTRATION_TASK_MAX_ITEM_TEXT_CHARS)),
   }));
 }
 
 function capValidationSteps(items: TaskValidationStep[]): TaskValidationStep[] {
-  return items.slice(0, M7_TASK_MAX_VALIDATION_STEPS).map((v) => ({
+  return items.slice(0, ORCHESTRATION_TASK_MAX_VALIDATION_STEPS).map((v) => ({
     id: v.id,
-    text: redactSecrets(v.text.trim().slice(0, M7_TASK_MAX_ITEM_TEXT_CHARS)),
+    text: redactSecrets(v.text.trim().slice(0, ORCHESTRATION_TASK_MAX_ITEM_TEXT_CHARS)),
     kind: v.kind,
   }));
 }
 
 function capSources(items: TaskSourceRef[]): TaskSourceRef[] {
-  return items.slice(0, M7_TASK_MAX_SOURCES);
+  return items.slice(0, ORCHESTRATION_TASK_MAX_SOURCES);
 }
 
 function isSqliteUniqueError(err: unknown): boolean {
@@ -737,7 +737,7 @@ export function markTaskGenerationFailed(
   db.transaction(() => {
     markGenerationFailed(
       db, generationId, failureCode,
-      failureMessage ? failureMessage.slice(0, M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS) : null,
+      failureMessage ? failureMessage.slice(0, ORCHESTRATION_GENERATION_MAX_FAILURE_MESSAGE_CHARS) : null,
       now
     );
     toPublish.push(
@@ -751,7 +751,7 @@ export function markTaskGenerationFailed(
   return getTaskGenerationById(db, generationId)!;
 }
 
-// ── Deterministic task generation runner integration (M7-007) ───────────────
+// ── Deterministic task generation runner integration (orchestration) ───────────────
 
 export interface TaskGenerationCtx extends TaskCtx {
   taskGenerator: TaskGenerator;

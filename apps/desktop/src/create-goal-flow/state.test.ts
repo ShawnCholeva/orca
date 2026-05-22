@@ -8,7 +8,7 @@ import {
 
 const draft = {
   skillId: "guided-goal-refinement" as const,
-  title: "Ship M3",
+  title: "Ship guided goal flow",
   description: "The refined description",
   successCriteria: ["Detail view renders"],
   constraints: ["Deterministic only"],
@@ -55,18 +55,18 @@ describe("reducer — rough phase", () => {
 });
 
 describe("reducer — refining phase", () => {
-  const refining: FlowState = { phase: "refining", title: "Ship M3", description: "desc" };
+  const refining: FlowState = { phase: "refining", title: "Ship guided goal flow", description: "desc" };
 
   it("refineSucceeded → review with draft", () => {
     const s = dispatch(refining, { type: "refineSucceeded", draft });
-    expect(s).toEqual({ phase: "review", title: "Ship M3", description: "desc", draft });
+    expect(s).toEqual({ phase: "review", title: "Ship guided goal flow", description: "desc", draft });
   });
 
   it("refineFailed → rough preserving typed input with error", () => {
     const s = dispatch(refining, { type: "refineFailed", error: "network error" });
     expect(s).toMatchObject({
       phase: "rough",
-      title: "Ship M3",
+      title: "Ship guided goal flow",
       description: "desc",
       error: "network error",
     });

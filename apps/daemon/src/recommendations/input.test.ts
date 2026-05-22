@@ -137,7 +137,7 @@ describe('buildRecommendationInput', () => {
   });
 });
 
-describe('tail isolation: recommendations modules do not import M4 output tails', () => {
+describe('tail isolation: recommendations modules do not import session output tails', () => {
   it('no output-store import in recommendations, orchestrator, tasks, conflicts', () => {
     const fs = require('node:fs') as typeof import('node:fs');
     const pathMod = require('node:path') as typeof import('node:path');

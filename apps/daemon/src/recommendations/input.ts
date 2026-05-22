@@ -11,7 +11,7 @@ import { listConflictsByGoal } from '../conflicts/projection.js';
 import { listActiveRecommendationsByGoal } from './projection.js';
 import { listRecentFeedbackByGoal } from './feedback.js';
 
-const FINGERPRINT_VERSION = 'm7-rec-input-v1';
+const FINGERPRINT_VERSION = 'orchestration-recommendation-input-v1';
 
 // ── Body caps for rule consumption ─────────────────────────────────────────────
 // Bodies may be included in input for rule evaluation only.

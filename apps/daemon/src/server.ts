@@ -467,7 +467,7 @@ export function createServer(
     }
   });
 
-  // ---- M5 Memory routes ----
+  // ---- Memory routes ----
 
   server.get(
     '/v1/goals/:goalId/memory',
@@ -547,7 +547,7 @@ export function createServer(
     }
   );
 
-  // ---- M5 Decision routes ----
+  // ---- Decision routes ----
 
   server.get(
     '/v1/goals/:goalId/decisions',
@@ -619,11 +619,11 @@ export function createServer(
     }
   );
 
-  // ---- M6 Context Package routes ----
+  // ---- Context Package routes ----
 
   registerContextRoutes(server, { db, bus: eventBus, assembler, adapterRegistry });
 
-  // ---- M7 Task routes ----
+  // ---- Task orchestration routes ----
 
   registerTaskRoutes(server, {
     db,
@@ -633,7 +633,7 @@ export function createServer(
     idFactory: daemonContext.idFactory,
   });
 
-  // ---- M7 Recommendation routes ----
+  // ---- Recommendation orchestration routes ----
 
   registerRecommendationRoutes(server, {
     db,
@@ -643,7 +643,7 @@ export function createServer(
     idFactory: daemonContext.idFactory,
   });
 
-  // ---- M7 Conflict routes ----
+  // ---- Conflict orchestration routes ----
 
   registerConflictRoutes(server, {
     db,

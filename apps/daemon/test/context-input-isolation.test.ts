@@ -2,9 +2,9 @@
  * Tail isolation static check.
  *
  * Asserts that context assembly modules (input.ts, selection.ts, assembler.ts,
- * renderer.ts) do NOT import from the M4 output-tail/transcript modules.
+ * renderer.ts) do NOT import from session output-tail/transcript modules.
  * Fails fast if any future edit introduces such an import, enforcing the
- * M4 output-isolation rule at the code-organization level.
+ * session output-isolation rule at the code-organization level.
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -15,12 +15,12 @@ import { describe, expect, it } from 'vitest';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONTEXT_DIR = path.resolve(__dirname, '../src/context');
 
-// Files that must never import M4 output-tail or transcript modules.
+// Files that must never import session output-tail or transcript modules.
 // Files that do not exist yet (e.g., selection.ts, renderer.ts in later tasks)
 // are skipped automatically.
 const CHECKED_FILES = ['input.ts', 'selection.ts', 'assembler.ts', 'renderer.ts'];
 
-// Patterns matching forbidden M4 output-tail / transcript imports.
+// Patterns matching forbidden session output-tail / transcript imports.
 // Only match actual import/require statements (not comments or plain text).
 const BANNED_IMPORT_PATTERNS: RegExp[] = [
   /^import\b.*from\s+['"]\.\.\/sessions\/output-store/m,
@@ -36,9 +36,9 @@ describe('context module tail-isolation', () => {
   for (const filename of CHECKED_FILES) {
     const filePath = path.join(CONTEXT_DIR, filename);
 
-    it(`${filename} does not import M4 output-tail or transcript modules`, () => {
+    it(`${filename} does not import session output-tail or transcript modules`, () => {
       if (!existsSync(filePath)) {
-        // File not yet created (belongs to a later M6 task) — pass.
+        // File not yet created by the current context work - pass.
         return;
       }
 

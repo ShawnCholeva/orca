@@ -141,7 +141,7 @@ describe('buildSessionExtractionInput', () => {
 
   it('output exceeding cap returns only the last cap bytes with truncated=true', async () => {
     const cap = 128;
-    // Create 300 bytes of data across 3 chunks, all at offset 0 in M4 (no M4 truncation)
+    // Create 300 bytes of data across 3 chunks, all at offset 0 with no output-tail truncation.
     const chunk1 = Buffer.alloc(100, 0x41); // 'A' * 100
     const chunk2 = Buffer.alloc(100, 0x42); // 'B' * 100
     const chunk3 = Buffer.alloc(100, 0x43); // 'C' * 100
@@ -174,11 +174,11 @@ describe('buildSessionExtractionInput', () => {
     expect(result.outputTail.text).toBe('B'.repeat(28) + 'C'.repeat(100));
   });
 
-  it('M4 truncation (firstByteOffset > 0) sets truncated=true even when within cap', async () => {
+  it('output-tail truncation (firstByteOffset > 0) sets truncated=true even when within cap', async () => {
     const chunk = Buffer.from('hello world');
     const snapshot: SessionOutputSnapshot = {
       sessionId: SESSION_ID,
-      firstByteOffset: 50000, // M4 dropped bytes
+      firstByteOffset: 50000, // session output tail dropped earlier bytes
       nextSeq: 1,
       totalBytesKept: chunk.length,
       chunks: [

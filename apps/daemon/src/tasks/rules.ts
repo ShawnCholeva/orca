@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import {
-  M7_TASK_MAX_DESCRIPTION_CHARS,
-  M7_TASK_MAX_SOURCES,
-  M7_TASK_MAX_TITLE_CHARS,
+  ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS,
+  ORCHESTRATION_TASK_MAX_SOURCES,
+  ORCHESTRATION_TASK_MAX_TITLE_CHARS,
   TaskRole,
   TaskSourceRef,
   type TaskRole as TaskRoleType,
@@ -15,11 +15,11 @@ const TASK_TITLE_FROM_ITEM_MAX_CHARS = 80;
 
 const TaskCandidate = z
   .object({
-    title: z.string().trim().min(1).max(M7_TASK_MAX_TITLE_CHARS),
-    description: z.string().max(M7_TASK_MAX_DESCRIPTION_CHARS),
+    title: z.string().trim().min(1).max(ORCHESTRATION_TASK_MAX_TITLE_CHARS),
+    description: z.string().max(ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS),
     role: TaskRole,
     workspaceId: z.string().nullable(),
-    sources: z.array(TaskSourceRef).max(M7_TASK_MAX_SOURCES),
+    sources: z.array(TaskSourceRef).max(ORCHESTRATION_TASK_MAX_SOURCES),
   })
   .strict();
 
@@ -81,7 +81,7 @@ function toCandidate(
   reason: 'driver' | 'objective_only'
 ): TaskCandidate {
   const title = collapseWhitespace(unit).slice(0, TASK_TITLE_FROM_ITEM_MAX_CHARS);
-  const description = unit.slice(0, M7_TASK_MAX_DESCRIPTION_CHARS);
+  const description = unit.slice(0, ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS);
   const role = classifyRole(unit);
   const workspaceId = input.workspaces.length === 1 ? input.workspaces[0].id : null;
   const sources = input.refinement

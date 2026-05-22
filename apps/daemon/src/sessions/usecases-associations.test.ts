@@ -42,7 +42,7 @@ function createConfig(dataDir: string): Config {
 }
 
 function freshDb(): Database.Database {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7016-'));
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-association-'));
   tempDirs.push(dir);
   const db = openDatabase(createConfig(dir));
   runMigrations(db, defaultMigrationsDir());
@@ -129,10 +129,10 @@ afterEach(() => {
   }
 });
 
-describe('M7-016 — session create: no association (M4 regression)', () => {
+describe('session create: no task or recommendation association', () => {
   it('creates session without taskId/fromRecommendationId — byte-identical behavior', async () => {
     const db = freshDb();
-    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7016-ws-'));
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-association-ws-'));
     tempDirs.push(wsDir);
     seedGoal(db, 'g1');
     seedWorkspace(db, 'ws1', 'g1', wsDir);
@@ -168,10 +168,10 @@ describe('M7-016 — session create: no association (M4 regression)', () => {
   });
 });
 
-describe('M7-016 — session create: with taskId only', () => {
+describe('session create associations: with taskId only', () => {
   it('stores task_id, emits task.associated_with_session in same TX', async () => {
     const db = freshDb();
-    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7016-task-'));
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-association-task-'));
     tempDirs.push(wsDir);
     seedGoal(db, 'g1');
     seedWorkspace(db, 'ws1', 'g1', wsDir);
@@ -229,10 +229,10 @@ describe('M7-016 — session create: with taskId only', () => {
   });
 });
 
-describe('M7-016 — session create: with fromRecommendationId only', () => {
+describe('session create associations: with fromRecommendationId only', () => {
   it('stores from_recommendation_id, no task.associated_with_session event', async () => {
     const db = freshDb();
-    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7016-rec-'));
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-association-rec-'));
     tempDirs.push(wsDir);
     seedGoal(db, 'g1');
     seedWorkspace(db, 'ws1', 'g1', wsDir);
@@ -265,10 +265,10 @@ describe('M7-016 — session create: with fromRecommendationId only', () => {
   });
 });
 
-describe('M7-016 — session create: with both taskId and fromRecommendationId', () => {
+describe('session create associations: with both taskId and fromRecommendationId', () => {
   it('stores both, emits session.created with both fields and task.associated_with_session', async () => {
     const db = freshDb();
-    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7016-both-'));
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-association-both-'));
     tempDirs.push(wsDir);
     seedGoal(db, 'g1');
     seedWorkspace(db, 'ws1', 'g1', wsDir);
@@ -304,10 +304,10 @@ describe('M7-016 — session create: with both taskId and fromRecommendationId',
   });
 });
 
-describe('M7-016 — session create: validation errors', () => {
+describe('session create associations: validation errors', () => {
   it('task not found → TaskNotFoundError', async () => {
     const db = freshDb();
-    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7016-notask-'));
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-association-notask-'));
     tempDirs.push(wsDir);
     seedGoal(db, 'g1');
     seedWorkspace(db, 'ws1', 'g1', wsDir);
@@ -325,7 +325,7 @@ describe('M7-016 — session create: validation errors', () => {
 
   it('task belongs to different goal → AssociationGoalMismatchError', async () => {
     const db = freshDb();
-    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7016-taskmismatch-'));
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-association-taskmismatch-'));
     tempDirs.push(wsDir);
     seedGoal(db, 'g1');
     seedGoal(db, 'g2');
@@ -345,7 +345,7 @@ describe('M7-016 — session create: validation errors', () => {
 
   it('task is archived → ArchivedTargetError', async () => {
     const db = freshDb();
-    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7016-archived-'));
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-association-archived-'));
     tempDirs.push(wsDir);
     seedGoal(db, 'g1');
     seedWorkspace(db, 'ws1', 'g1', wsDir);
@@ -364,7 +364,7 @@ describe('M7-016 — session create: validation errors', () => {
 
   it('recommendation not found → RecommendationNotFoundError', async () => {
     const db = freshDb();
-    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7016-norec-'));
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-association-norec-'));
     tempDirs.push(wsDir);
     seedGoal(db, 'g1');
     seedWorkspace(db, 'ws1', 'g1', wsDir);
@@ -382,7 +382,7 @@ describe('M7-016 — session create: validation errors', () => {
 
   it('recommendation belongs to different goal → AssociationGoalMismatchError', async () => {
     const db = freshDb();
-    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7016-recmismatch-'));
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-association-recmismatch-'));
     tempDirs.push(wsDir);
     seedGoal(db, 'g1');
     seedGoal(db, 'g2');
@@ -402,7 +402,7 @@ describe('M7-016 — session create: validation errors', () => {
 
   it('recommendation in non-accepted state → InvalidRecommendationStateError', async () => {
     const db = freshDb();
-    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7016-recstate-'));
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-association-recstate-'));
     tempDirs.push(wsDir);
     seedGoal(db, 'g1');
     seedWorkspace(db, 'ws1', 'g1', wsDir);
@@ -423,7 +423,7 @@ describe('M7-016 — session create: validation errors', () => {
 
   it('validation failure emits no events and creates no session row', async () => {
     const db = freshDb();
-    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7016-norow-'));
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-association-norow-'));
     tempDirs.push(wsDir);
     seedGoal(db, 'g1');
     seedWorkspace(db, 'ws1', 'g1', wsDir);
@@ -448,7 +448,7 @@ describe('M7-016 — session create: validation errors', () => {
 
   it('both events persisted in same TX — task.associated_with_session row exists at session.created broadcast time', async () => {
     const db = freshDb();
-    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7016-atomic-'));
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-association-atomic-'));
     tempDirs.push(wsDir);
     seedGoal(db, 'g1');
     seedWorkspace(db, 'ws1', 'g1', wsDir);

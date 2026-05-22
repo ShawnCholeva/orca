@@ -27,13 +27,13 @@ beforeAll(() => {
 });
 
 const ORCA_ENV_KEYS = ['ORCA_DATA_DIR', 'ORCA_PORT', 'ORCA_LOG_LEVEL', 'ORCA_TOKEN'] as const;
-const TOKEN = 'm3-int-token';
+const TOKEN = 'goal-flow-int-token';
 const AUTH_HEADERS = { authorization: `Bearer ${TOKEN}` } as const;
 
 const tempDirs: string[] = [];
 
 function createTempDir(): string {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-m3-int-'));
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-goal-flow-int-'));
   tempDirs.push(dir);
   return dir;
 }
@@ -75,7 +75,7 @@ afterAll(() => {
   }
 });
 
-describe.sequential('M3-009 daemon integration: full M3 create-Goal loop', () => {
+describe.sequential('daemon integration: full guided goal and workspace loop', () => {
   it('inspect → refine → create-with-workspaces → detail → restart → detach', async () => {
     // ─── Fixture setup ───────────────────────────────────────────────────────
     const tmpDir = createTempDir();
@@ -159,7 +159,7 @@ Constraints:
         const resp = await fetch(`${url1}/v1/goals/refine`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-          body: JSON.stringify({ title: 'M3 Integration Goal', description: refineDescription }),
+          body: JSON.stringify({ title: 'Guided Goal Integration', description: refineDescription }),
         });
         expect(resp.status).toBe(200);
         const body = (await resp.json()) as RefineGoalResponse;

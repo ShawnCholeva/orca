@@ -1,10 +1,10 @@
 import { useState } from "react";
 import {
-  M7_TASK_MAX_ACCEPTANCE_CRITERIA,
-  M7_TASK_MAX_DESCRIPTION_CHARS,
-  M7_TASK_MAX_ITEM_TEXT_CHARS,
-  M7_TASK_MAX_TITLE_CHARS,
-  M7_TASK_MAX_VALIDATION_STEPS,
+  ORCHESTRATION_TASK_MAX_ACCEPTANCE_CRITERIA,
+  ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS,
+  ORCHESTRATION_TASK_MAX_ITEM_TEXT_CHARS,
+  ORCHESTRATION_TASK_MAX_TITLE_CHARS,
+  ORCHESTRATION_TASK_MAX_VALIDATION_STEPS,
   type Task,
   type TaskRole,
   type TaskStatus,
@@ -73,13 +73,13 @@ export function TaskEditDialog({ task, workspaces, onSave, onClose, initialStatu
     | { ok: false; error: string } {
     const trimmedTitle = title.trim();
     if (!trimmedTitle) return { ok: false, error: "Title is required." };
-    if (trimmedTitle.length > M7_TASK_MAX_TITLE_CHARS) {
-      return { ok: false, error: `Title must be ${M7_TASK_MAX_TITLE_CHARS} characters or fewer.` };
+    if (trimmedTitle.length > ORCHESTRATION_TASK_MAX_TITLE_CHARS) {
+      return { ok: false, error: `Title must be ${ORCHESTRATION_TASK_MAX_TITLE_CHARS} characters or fewer.` };
     }
-    if (description.length > M7_TASK_MAX_DESCRIPTION_CHARS) {
+    if (description.length > ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS) {
       return {
         ok: false,
-        error: `Description must be ${M7_TASK_MAX_DESCRIPTION_CHARS} characters or fewer.`,
+        error: `Description must be ${ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS} characters or fewer.`,
       };
     }
 
@@ -88,8 +88,8 @@ export function TaskEditDialog({ task, workspaces, onSave, onClose, initialStatu
     const dependencies = parseLines(dependenciesText);
 
     const itemError =
-      validateLineSet("Acceptance criteria", acceptanceCriteria, M7_TASK_MAX_ACCEPTANCE_CRITERIA) ??
-      validateLineSet("Validation steps", validationSteps, M7_TASK_MAX_VALIDATION_STEPS) ??
+      validateLineSet("Acceptance criteria", acceptanceCriteria, ORCHESTRATION_TASK_MAX_ACCEPTANCE_CRITERIA) ??
+      validateLineSet("Validation steps", validationSteps, ORCHESTRATION_TASK_MAX_VALIDATION_STEPS) ??
       validateLineSet("Dependencies", dependencies, 1000, false);
     if (itemError) return { ok: false, error: itemError };
 
@@ -119,7 +119,7 @@ export function TaskEditDialog({ task, workspaces, onSave, onClose, initialStatu
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            maxLength={M7_TASK_MAX_TITLE_CHARS}
+            maxLength={ORCHESTRATION_TASK_MAX_TITLE_CHARS}
             disabled={saving}
           />
 
@@ -128,7 +128,7 @@ export function TaskEditDialog({ task, workspaces, onSave, onClose, initialStatu
             id={`task-description-${task.id}`}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            maxLength={M7_TASK_MAX_DESCRIPTION_CHARS}
+            maxLength={ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS}
             rows={4}
             disabled={saving}
           />
@@ -192,7 +192,7 @@ export function TaskEditDialog({ task, workspaces, onSave, onClose, initialStatu
             id={`task-criteria-${task.id}`}
             value={criteriaText}
             onChange={(e) => setCriteriaText(e.target.value)}
-            maxLength={M7_TASK_MAX_ACCEPTANCE_CRITERIA * (M7_TASK_MAX_ITEM_TEXT_CHARS + 1)}
+            maxLength={ORCHESTRATION_TASK_MAX_ACCEPTANCE_CRITERIA * (ORCHESTRATION_TASK_MAX_ITEM_TEXT_CHARS + 1)}
             rows={3}
             disabled={saving}
           />
@@ -202,7 +202,7 @@ export function TaskEditDialog({ task, workspaces, onSave, onClose, initialStatu
             id={`task-validation-${task.id}`}
             value={validationText}
             onChange={(e) => setValidationText(e.target.value)}
-            maxLength={M7_TASK_MAX_VALIDATION_STEPS * (M7_TASK_MAX_ITEM_TEXT_CHARS + 1)}
+            maxLength={ORCHESTRATION_TASK_MAX_VALIDATION_STEPS * (ORCHESTRATION_TASK_MAX_ITEM_TEXT_CHARS + 1)}
             rows={3}
             disabled={saving}
           />
@@ -237,8 +237,8 @@ function validateLineSet(
   enforceItemCap = true,
 ): string | null {
   if (lines.length > maxCount) return `${label} must contain ${maxCount} items or fewer.`;
-  if (enforceItemCap && lines.some((line) => line.length > M7_TASK_MAX_ITEM_TEXT_CHARS)) {
-    return `${label} items must be ${M7_TASK_MAX_ITEM_TEXT_CHARS} characters or fewer.`;
+  if (enforceItemCap && lines.some((line) => line.length > ORCHESTRATION_TASK_MAX_ITEM_TEXT_CHARS)) {
+    return `${label} items must be ${ORCHESTRATION_TASK_MAX_ITEM_TEXT_CHARS} characters or fewer.`;
   }
   return null;
 }

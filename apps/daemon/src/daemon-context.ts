@@ -11,7 +11,7 @@ import type { ConflictDetector } from './conflicts/detectors.js';
 import { DeterministicConflictDetector } from './conflicts/detectors.js';
 
 /**
- * Shared dependency container for M7 daemon use cases.
+ * Shared dependency container for orchestration daemon use cases.
  * Production wiring via createDaemonContext(); tests inject fakes.
  */
 export interface DaemonContext {

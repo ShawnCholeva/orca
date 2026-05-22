@@ -18,7 +18,7 @@ export interface SessionSummaryEvidence {
  * (test/build/lint/diff/commit/pr/merge), OR a validation_result memory item
  * exists for the same session.
  *
- * Operates on M5-curated summary fields only — no raw session output or output tails.
+ * Operates on curated session-summary fields only — no raw session output or output tails.
  */
 export function detectImplementationEvidence(summary: SessionSummaryEvidence): boolean {
   if (summary.sessionStatus !== 'exited') return false;
@@ -29,7 +29,7 @@ export function detectImplementationEvidence(summary: SessionSummaryEvidence): b
  * Returns true when the session is a reviewer-role session that failed
  * (status='failed'), indicating the reviewer reported a rejection or failure.
  *
- * Uses M5 session status field only — no raw session output inspection.
+ * Uses session status only — no raw session output inspection.
  */
 export function detectReviewerRejection(summary: SessionSummaryEvidence): boolean {
   return summary.sessionRole === 'reviewer' && summary.sessionStatus === 'failed';

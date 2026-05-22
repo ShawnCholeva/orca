@@ -17,11 +17,15 @@ import { GoalDetailView } from "./goal-detail/GoalDetailView";
 import { OnboardingView } from "./onboarding/OnboardingView";
 import { Titlebar } from "./chrome/Titlebar";
 import { BootstrapErrorScreen } from "./chrome/BootstrapErrorScreen";
+import { OrcaChat } from "./orchestrator/OrcaChat";
+import "./orchestrator/orchestrator.css";
 import "./styles.css";
 
 type OnboardingState = "checking" | "needs-onboarding" | "complete" | "error";
 
 type AppMode = "list" | "detail";
+
+type OrchestratorTab = "orchestrator" | "reasoning";
 
 function toErrorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -42,6 +46,7 @@ export default function App() {
   const [detailRefreshKey, setDetailRefreshKey] = useState(0);
   const [showCreateFlow, setShowCreateFlow] = useState(false);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [activeTab, setActiveTab] = useState<OrchestratorTab>("orchestrator");
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
@@ -220,70 +225,107 @@ export default function App() {
           />
         </div>
       ) : (
-        <main className="main-content">
-          <section className="create-section">
-            <h2>New Goal</h2>
-            <p className="create-section-hint">
-              Create a structured Goal with guided refinement and workspace attachment.
-            </p>
+        <div className="orchestrator-shell">
+          <nav className="orchestrator-tabs" role="tablist" aria-label="Workspace views">
             <button
               type="button"
-              className="submit-button"
-              onClick={() => setShowCreateFlow(true)}
-              disabled={!connected}
+              role="tab"
+              aria-selected={activeTab === "orchestrator"}
+              className={`orchestrator-tab ${activeTab === "orchestrator" ? "orchestrator-tab--active" : ""}`}
+              onClick={() => setActiveTab("orchestrator")}
             >
-              Create Goal…
+              Orchestrator
             </button>
-          </section>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "reasoning"}
+              className={`orchestrator-tab ${activeTab === "reasoning" ? "orchestrator-tab--active" : ""}`}
+              onClick={() => setActiveTab("reasoning")}
+            >
+              Reasoning
+            </button>
+          </nav>
 
-          <section className="goals-section">
-            <h2>Goals</h2>
-            {goals.length === 0 ? (
-              <p className="empty-state">No goals yet. Create one to get started.</p>
-            ) : (
-              <ul className="goals-list">
-                {goals.map((goal) => (
-                  <GoalItem
-                    key={goal.id}
-                    goal={goal}
-                    onView={() => openGoalDetail(goal.id)}
-                  />
-                ))}
-              </ul>
-            )}
-          </section>
+          {activeTab === "orchestrator" ? (
+            <section className="orchestrator-pane" role="tabpanel" aria-label="Orchestrator">
+              <div className="orchestrator-actions">
+                <span className="orchestrator-actions-meta">
+                  {goals.length} goal{goals.length === 1 ? "" : "s"} · ask Orca to plan or delegate
+                </span>
+                <button
+                  type="button"
+                  className="orchestrator-primary-btn"
+                  onClick={() => setShowCreateFlow(true)}
+                  disabled={!connected}
+                >
+                  + New Goal
+                </button>
+              </div>
 
-          <section className="diagnostics-section">
-            <div className="diagnostics-header">
-              <h2>Runtime Diagnostics</h2>
-              <button
-                type="button"
-                className="goal-action-button"
-                onClick={loadDiagnostics}
-                disabled={diagnosticsLoading}
-              >
-                {diagnosticsLoading ? "Loading…" : "Refresh"}
-              </button>
-            </div>
-            {diagnosticsError && <p className="diagnostics-error">{diagnosticsError}</p>}
-            {!diagnosticsLoading && !diagnosticsError && diagnostics !== null && (
-              <>
-                <h3 className="diagnostics-subheading">Plugins ({diagnostics.plugins.length})</h3>
-                <ul className="diagnostics-list">
-                  {diagnostics.plugins.map((p) => (
-                    <li key={p.id}>{p.id} — {p.capabilities.join(", ")}</li>
-                  ))}
-                </ul>
-                <h3 className="diagnostics-subheading">Skills ({diagnostics.skills.length})</h3>
-                <ul className="diagnostics-list">
-                  {diagnostics.skills.map((s) => (
-                    <li key={s.id}>{s.id} — {s.extensionPoint} ({s.title})</li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </section>
-        </main>
+              <div className="orchestrator-body">
+                <div className="orchestrator-chat-col">
+                  <OrcaChat />
+                </div>
+
+                <aside className="orchestrator-rail" aria-label="Goals">
+                  <div className="orchestrator-rail-header">
+                    <span className="orchestrator-rail-title">Goals</span>
+                    <span className="orchestrator-rail-count mono">{goals.length}</span>
+                  </div>
+                  {goals.length === 0 ? (
+                    <p className="orchestrator-rail-empty">
+                      No goals yet. Click <strong>+ New Goal</strong> to start.
+                    </p>
+                  ) : (
+                    <ul className="orchestrator-rail-list">
+                      {goals.map((goal) => (
+                        <GoalCard
+                          key={goal.id}
+                          goal={goal}
+                          onView={() => openGoalDetail(goal.id)}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                </aside>
+              </div>
+            </section>
+          ) : (
+            <section className="reasoning-pane" role="tabpanel" aria-label="Reasoning">
+              <div className="reasoning-card">
+                <div className="reasoning-card-header">
+                  <h2 className="reasoning-card-title">Runtime Diagnostics</h2>
+                  <button
+                    type="button"
+                    className="reasoning-action-btn"
+                    onClick={loadDiagnostics}
+                    disabled={diagnosticsLoading}
+                  >
+                    {diagnosticsLoading ? "Loading…" : "Refresh"}
+                  </button>
+                </div>
+                {diagnosticsError && <p className="reasoning-error">{diagnosticsError}</p>}
+                {!diagnosticsLoading && !diagnosticsError && diagnostics !== null && (
+                  <>
+                    <h3 className="reasoning-card-subtitle">Plugins ({diagnostics.plugins.length})</h3>
+                    <ul className="reasoning-list">
+                      {diagnostics.plugins.map((p) => (
+                        <li key={p.id}>{p.id} — {p.capabilities.join(", ")}</li>
+                      ))}
+                    </ul>
+                    <h3 className="reasoning-card-subtitle">Skills ({diagnostics.skills.length})</h3>
+                    <ul className="reasoning-list">
+                      {diagnostics.skills.map((s) => (
+                        <li key={s.id}>{s.id} — {s.extensionPoint} ({s.title})</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            </section>
+          )}
+        </div>
       )}
 
       {showCreateFlow && (
@@ -298,8 +340,8 @@ export default function App() {
   );
 }
 
-function GoalItem({ goal, onView }: { goal: Goal; onView: () => void }) {
-  const MAX_DESC = 200;
+function GoalCard({ goal, onView }: { goal: Goal; onView: () => void }) {
+  const MAX_DESC = 140;
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(goal.title);
   const [editDescription, setEditDescription] = useState(goal.description);
@@ -353,40 +395,36 @@ function GoalItem({ goal, onView }: { goal: Goal; onView: () => void }) {
   }
 
   return (
-    <li className="goal-item">
+    <li className="goal-card">
       {editing ? (
-        <form onSubmit={saveEdit} className="create-form">
-          <div className="form-field">
-            <label htmlFor={`edit-title-${goal.id}`}>Title</label>
-            <input
-              id={`edit-title-${goal.id}`}
-              type="text"
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              maxLength={200}
-              required
-              disabled={busy}
-            />
-          </div>
-          <div className="form-field">
-            <label htmlFor={`edit-desc-${goal.id}`}>Description</label>
-            <textarea
-              id={`edit-desc-${goal.id}`}
-              value={editDescription}
-              onChange={(e) => setEditDescription(e.target.value)}
-              maxLength={4000}
-              rows={3}
-              disabled={busy}
-            />
-          </div>
+        <form onSubmit={saveEdit} className="goal-card-form">
+          <label htmlFor={`gc-title-${goal.id}`}>Title</label>
+          <input
+            id={`gc-title-${goal.id}`}
+            type="text"
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            maxLength={200}
+            required
+            disabled={busy}
+          />
+          <label htmlFor={`gc-desc-${goal.id}`}>Description</label>
+          <textarea
+            id={`gc-desc-${goal.id}`}
+            value={editDescription}
+            onChange={(e) => setEditDescription(e.target.value)}
+            maxLength={4000}
+            rows={3}
+            disabled={busy}
+          />
           {error && <div className="form-error">{error}</div>}
-          <div className="goal-actions">
-            <button type="submit" className="submit-button" disabled={busy}>
+          <div className="goal-card-actions">
+            <button type="submit" className="goal-card-btn goal-card-btn--primary" disabled={busy}>
               {busy ? "Saving…" : "Save"}
             </button>
             <button
               type="button"
-              className="goal-action-button"
+              className="goal-card-btn"
               onClick={() => setEditing(false)}
               disabled={busy}
             >
@@ -396,23 +434,21 @@ function GoalItem({ goal, onView }: { goal: Goal; onView: () => void }) {
         </form>
       ) : (
         <>
-          <div className="goal-header">
-            <span className="goal-title">{goal.title}</span>
-            <span className={`goal-status goal-status--${goal.status}`}>
+          <div className="goal-card-head">
+            <span className="goal-card-title">{goal.title}</span>
+            <span className={`goal-card-status goal-card-status--${goal.status}`}>
               {goal.status}
             </span>
           </div>
-          {truncated && <p className="goal-description">{truncated}</p>}
-          <div className="goal-meta">
-            <time dateTime={goal.createdAt}>
-              {new Date(goal.createdAt).toLocaleString()}
-            </time>
-          </div>
+          {truncated && <p className="goal-card-desc">{truncated}</p>}
+          <time className="goal-card-meta mono" dateTime={goal.createdAt}>
+            {new Date(goal.createdAt).toLocaleDateString()}
+          </time>
           {error && <div className="form-error">{error}</div>}
-          <div className="goal-actions">
+          <div className="goal-card-actions">
             <button
               type="button"
-              className="goal-action-button"
+              className="goal-card-btn goal-card-btn--primary"
               onClick={onView}
               disabled={busy}
             >
@@ -420,7 +456,7 @@ function GoalItem({ goal, onView }: { goal: Goal; onView: () => void }) {
             </button>
             <button
               type="button"
-              className="goal-action-button"
+              className="goal-card-btn"
               onClick={startEdit}
               disabled={busy}
             >
@@ -428,7 +464,7 @@ function GoalItem({ goal, onView }: { goal: Goal; onView: () => void }) {
             </button>
             <button
               type="button"
-              className="goal-action-button goal-action-button--danger"
+              className="goal-card-btn goal-card-btn--danger"
               onClick={handleArchive}
               disabled={busy}
             >
@@ -440,3 +476,4 @@ function GoalItem({ goal, onView }: { goal: Goal; onView: () => void }) {
     </li>
   );
 }
+

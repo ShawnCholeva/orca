@@ -50,10 +50,9 @@ import {
   ListGoalDecisionsResponse,
   ListGoalMemoryResponse,
   ListSessionsResponse,
-  M4SessionErrorCode,
-  M5DomainEventType,
-  M3ErrorCode,
-  M5Event,
+  GoalWorkspaceErrorCode,
+  MemoryDomainEventType,
+  MemoryEvent,
   MemoryCandidate,
   MemoryExtraction,
   MemoryExtractionCompletedEventPayload,
@@ -69,6 +68,7 @@ import {
   RefineGoalRequest,
   RefineGoalResponse,
   SessionDetail,
+  SessionErrorCode,
   SessionErrorFrame,
   SessionExtractionInput,
   SessionExtractionOutput,
@@ -95,7 +95,7 @@ const now = "2026-01-01T00:00:00.000Z";
 
 const goalFixture = Goal.parse({
   id: "goal-1",
-  title: "Launch M3",
+  title: "Launch workspace planning",
   description: "Ship refinement and workspace support",
   status: "active",
   autonomyLevel: 1,
@@ -118,7 +118,7 @@ const workspaceFixture = Workspace.parse({
 
 const guidedOutputFixture = GuidedRefinementOutput.parse({
   skillId: "guided-goal-refinement",
-  title: "Launch M3",
+  title: "Launch workspace planning",
   description: "Implement deterministic refinement",
   successCriteria: ["Goal detail shows refinement"],
   constraints: ["No AI calls"],
@@ -135,7 +135,7 @@ function expectRoundTrip<T>(
   expect(JSON.parse(JSON.stringify(parsed)) as T).toEqual(expected);
 }
 
-describe("M3 contracts", () => {
+describe("goal refinement and workspace contracts", () => {
   it("extends domain event type and skill extension point literals", () => {
     expect(DomainEventType.parse("goal.refined")).toBe("goal.refined");
     expect(DomainEventType.parse("workspace.attached")).toBe("workspace.attached");
@@ -257,9 +257,9 @@ describe("M3 contracts", () => {
     expect(() => GoalDetailResponse.parse({ ...detail, workspaces: [{ ...workspaceFixture, path: 1 }] })).toThrow();
   });
 
-  it("parses M3ErrorCode and rejects unknown literals", () => {
-    expect(M3ErrorCode.parse("workspace_duplicate")).toBe("workspace_duplicate");
-    expect(() => M3ErrorCode.parse("permission_denied")).toThrow();
+  it("parses GoalWorkspaceErrorCode and rejects unknown literals", () => {
+    expect(GoalWorkspaceErrorCode.parse("workspace_duplicate")).toBe("workspace_duplicate");
+    expect(() => GoalWorkspaceErrorCode.parse("permission_denied")).toThrow();
   });
 
   it("keeps existing Goal schema compatible", () => {
@@ -267,7 +267,7 @@ describe("M3 contracts", () => {
   });
 });
 
-describe("M4 contracts", () => {
+describe("session contracts", () => {
   const sessionSummaryFixture = SessionSummary.parse({
     id: "sess-1",
     goalId: "goal-1",
@@ -321,11 +321,11 @@ describe("M4 contracts", () => {
   it("parses session/adapters enums and rejects unknown literals", () => {
     expect(AdapterId.parse("codex")).toBe("codex");
     expect(SessionStatus.parse("running")).toBe("running");
-    expect(M4SessionErrorCode.parse("adapter_not_found")).toBe("adapter_not_found");
+    expect(SessionErrorCode.parse("adapter_not_found")).toBe("adapter_not_found");
 
     expect(() => AdapterId.parse("custom-adapter")).toThrow();
     expect(() => SessionStatus.parse("paused")).toThrow();
-    expect(() => M4SessionErrorCode.parse("permission_denied")).toThrow();
+    expect(() => SessionErrorCode.parse("permission_denied")).toThrow();
   });
 
   it("parses adapter schemas", () => {
@@ -565,10 +565,10 @@ describe("M4 contracts", () => {
   });
 });
 
-describe("M5 contracts", () => {
-  it("parses M5 enums and event union", () => {
-    expect(M5DomainEventType.parse("memory.item.promoted")).toBe("memory.item.promoted");
-    expect(() => M5DomainEventType.parse("memory.item.deleted")).toThrow();
+describe("memory contracts", () => {
+  it("parses memory event enums and event union", () => {
+    expect(MemoryDomainEventType.parse("memory.item.promoted")).toBe("memory.item.promoted");
+    expect(() => MemoryDomainEventType.parse("memory.item.deleted")).toThrow();
 
     const event = {
       type: "memory.item.archived" as const,
@@ -577,10 +577,10 @@ describe("M5 contracts", () => {
         goalId: "goal-1"
       }
     };
-    expectRoundTrip(M5Event.parse, event, event);
+    expectRoundTrip(MemoryEvent.parse, event, event);
   });
 
-  it("accepts valid M5 row shapes and list wrappers", () => {
+  it("accepts valid memory row shapes and list wrappers", () => {
     const memoryItem = {
       id: "mem-1",
       goalId: "goal-1",
@@ -604,7 +604,7 @@ describe("M5 contracts", () => {
       id: "dec-1",
       goalId: "goal-1",
       title: "Keep local-first",
-      decisionText: "Do not add cloud sync in M5.",
+      decisionText: "Do not add cloud sync to shared memory.",
       rationale: "Scope control",
       status: "proposed" as const,
       confirmationRequired: true,
@@ -638,7 +638,7 @@ describe("M5 contracts", () => {
       sessionId: "sess-1",
       trigger: "manual" as const,
       status: "succeeded" as const,
-      extractorVersion: "m5-deterministic-v1",
+      extractorVersion: "memory-deterministic-v1",
       sourceFingerprint: "abc123",
       sourceOffsetFirst: 0,
       sourceOffsetLast: 99,
@@ -678,7 +678,7 @@ describe("M5 contracts", () => {
     const input = {
       goal: {
         id: "goal-1",
-        title: "Ship M5",
+        title: "Ship shared memory",
         status: "active" as const,
         archived: false
       },
@@ -712,7 +712,7 @@ describe("M5 contracts", () => {
         byteOffsetLast: 12,
         truncated: false
       },
-      extractorVersion: "m5-deterministic-v1"
+      extractorVersion: "memory-deterministic-v1"
     };
     const memoryCandidate = {
       type: "validation_result" as const,
@@ -746,7 +746,7 @@ describe("M5 contracts", () => {
     expectRoundTrip(SessionExtractionOutput.parse, output, output);
   });
 
-  it("accepts all M5 event payload schemas", () => {
+  it("accepts all memory event payload schemas", () => {
     const payloads: Array<[parse: (input: unknown) => unknown, input: unknown]> = [
       [
         MemoryExtractionRequestedEventPayload.parse,
@@ -870,7 +870,7 @@ describe("M5 contracts", () => {
         sessionId: "sess-1",
         trigger: "manual",
         status: "failed",
-        extractorVersion: "m5-deterministic-v1",
+        extractorVersion: "memory-deterministic-v1",
         sourceFingerprint: "abc123",
         sourceOffsetFirst: null,
         sourceOffsetLast: null,
@@ -999,7 +999,7 @@ describe("M5 contracts", () => {
   });
 });
 
-describe("M6 contracts", () => {
+describe("Context package contracts", () => {
   const sourceFixture = {
     type: "memory_item" as const,
     id: "mem-1",
@@ -1027,7 +1027,7 @@ describe("M6 contracts", () => {
     sources: [sourceFixture],
     warnings: [],
     sourceFingerprint: "srcfp-1",
-    assemblerVersion: "m6-deterministic-v1",
+    assemblerVersion: "context-deterministic-v1",
     createdAt: now
   };
 
@@ -1041,7 +1041,7 @@ describe("M6 contracts", () => {
     role: "engineer" as const,
     objectiveHash: "obj-1",
     sourceFingerprint: "srcfp-1",
-    assemblerVersion: "m6-deterministic-v1",
+    assemblerVersion: "context-deterministic-v1",
     requestFingerprint: "reqfp-1",
     status: "succeeded" as const,
     trigger: "prepare" as const,
@@ -1134,7 +1134,7 @@ describe("M6 contracts", () => {
     }
   });
 
-  it("rejects oversized M6 fields and source/warning caps", () => {
+  it("rejects oversized context package fields and source/warning caps", () => {
     expect(() =>
       ContextPackage.parse({
         ...packageFixture,
@@ -1167,7 +1167,7 @@ describe("M6 contracts", () => {
     ).toThrow();
   });
 
-  it("rejects forbidden content fields on strict M6 event payloads", () => {
+  it("rejects forbidden content fields on strict context event payloads", () => {
     expect(() =>
       ContextPackageCreatedEventPayload.parse({
         packageId: "pkg-1",
@@ -1200,7 +1200,7 @@ describe("M6 contracts", () => {
     ).toThrow();
   });
 
-  it("rejects invalid M6 enum values", () => {
+  it("rejects invalid context enum values", () => {
     expect(() => ContextRole.parse("qa")).toThrow();
     expect(() => ContextAssemblyStatus.parse("queued")).toThrow();
     expect(() => ContextAssemblyFailureCode.parse("timeout")).toThrow();
@@ -1210,7 +1210,7 @@ describe("M6 contracts", () => {
     const input = {
       goal: {
         id: "goal-1",
-        title: "Ship M6",
+        title: "Ship context packages",
         status: "active" as const,
         archivedAt: null
       },
@@ -1231,7 +1231,7 @@ describe("M6 contracts", () => {
       },
       role: "reviewer" as const,
       adapterId: "shell-manual" as const,
-      objective: "Validate M6 contracts only",
+      objective: "Validate context package contracts only",
       memory: [
         {
           id: "mem-1",
@@ -1265,7 +1265,7 @@ describe("M6 contracts", () => {
           id: "sum-1",
           sessionId: "sess-2",
           headline: "Regression checks pass",
-          summaryText: "M5 loop remains green.",
+          summaryText: "Shared memory loop remains green.",
           truncated: false,
           createdAt: now
         }
@@ -1283,7 +1283,7 @@ describe("M6 contracts", () => {
         {
           kind: "objective" as const,
           title: "Objective",
-          body: "Validate bounded M6 contract surface.",
+          body: "Validate bounded context package contract surface.",
           markers: ["[G1]"]
         }
       ],

@@ -215,7 +215,7 @@ export function getSessionDetail(db: Database.Database, sessionId: string): Sess
   return rowToDetail(row);
 }
 
-// For later use in M4-008+. Updates status and any provided optional fields.
+// Updates status and any provided optional fields.
 // Fields not included in the `fields` object are left unchanged.
 export interface SetSessionStatusFields {
   failureReason?: string | null;

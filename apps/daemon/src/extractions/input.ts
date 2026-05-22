@@ -97,15 +97,15 @@ export async function buildSessionExtractionInput(
   }
 
   const cap = ctx.config.memoryExtractionMaxInputBytes;
-  const m4TailEnd = snapshot.firstByteOffset + snapshot.totalBytesKept;
+  const outputTailEnd = snapshot.firstByteOffset + snapshot.totalBytesKept;
 
-  // M4 rolling window may have dropped bytes from the front; M5 cap may further trim
-  const m4Truncated = snapshot.firstByteOffset > 0;
+  // The session output tail may have dropped bytes from the front; extraction cap may further trim.
+  const outputTailTruncated = snapshot.firstByteOffset > 0;
   const m5Capped = snapshot.totalBytesKept > cap;
-  const truncated = m4Truncated || m5Capped;
+  const truncated = outputTailTruncated || m5Capped;
 
-  const windowStart = m5Capped ? m4TailEnd - cap : snapshot.firstByteOffset;
-  const windowEnd = m4TailEnd;
+  const windowStart = m5Capped ? outputTailEnd - cap : snapshot.firstByteOffset;
+  const windowEnd = outputTailEnd;
 
   let text: string;
   let byteOffsetFirst: number;

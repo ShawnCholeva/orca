@@ -9,7 +9,7 @@ import type { Config } from '../config.js';
 import { closeDatabase, openDatabase } from '../db.js';
 import { EventBus } from '../events.js';
 import { defaultMigrationsDir, runMigrations } from '../migrations.js';
-import { M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS } from '@orca/contracts';
+import { ORCHESTRATION_GENERATION_MAX_FAILURE_MESSAGE_CHARS } from '@orca/contracts';
 import { createDaemonContext } from '../daemon-context.js';
 import { subscribeOrchestrationTriggers } from './triggers.js';
 import { resetRunnerState } from './runner.js';
@@ -271,7 +271,7 @@ describe('reconcileInFlightGenerations', () => {
     }
 
     expect((tgPending.failure_message ?? '').length).toBeLessThanOrEqual(
-      M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS
+      ORCHESTRATION_GENERATION_MAX_FAILURE_MESSAGE_CHARS
     );
   });
 

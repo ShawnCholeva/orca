@@ -12,7 +12,7 @@ const execFile = promisify(execFileCb);
 const tempDirs: string[] = [];
 
 async function makeTmpDir(): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "orca-m3-inspect-"));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "orca-workspace-inspect-"));
   tempDirs.push(dir);
   return dir;
 }

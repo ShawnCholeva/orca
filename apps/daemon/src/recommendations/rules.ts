@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import {
-  M7_RECOMMENDATION_MAX_TITLE_CHARS,
-  M7_RECOMMENDATION_MAX_RATIONALE_CHARS,
-  M7_RECOMMENDATION_MAX_SOURCES,
-  M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES,
+  ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_SOURCES,
+  ORCHESTRATION_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES,
   type RecommendationType,
   type ProposedAction,
   type RecommendationSourceRef,
@@ -42,11 +42,11 @@ export const RecommendationCandidateSchema = z
       'mark_complete',
       'pause_work',
     ]),
-    title: z.string().trim().min(1).max(M7_RECOMMENDATION_MAX_TITLE_CHARS),
-    rationale: z.string().max(M7_RECOMMENDATION_MAX_RATIONALE_CHARS),
+    title: z.string().trim().min(1).max(ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS),
+    rationale: z.string().max(ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS),
     proposedAction: z.unknown(), // validated by ProposedAction schema in provider
     confidence: z.number().min(0).max(1),
-    sources: z.array(z.unknown()).max(M7_RECOMMENDATION_MAX_SOURCES),
+    sources: z.array(z.unknown()).max(ORCHESTRATION_RECOMMENDATION_MAX_SOURCES),
     relatedTaskId: z.string().optional(),
     relatedSessionId: z.string().optional(),
     relatedContextPackageId: z.string().optional(),
@@ -70,15 +70,15 @@ export type RecommendationCandidate = {
 // ── Helper: cap text ───────────────────────────────────────────────────────────
 
 function capTitle(s: string): string {
-  return s.trim().slice(0, M7_RECOMMENDATION_MAX_TITLE_CHARS);
+  return s.trim().slice(0, ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS);
 }
 
 function capRationale(s: string): string {
-  return s.slice(0, M7_RECOMMENDATION_MAX_RATIONALE_CHARS);
+  return s.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS);
 }
 
 function capProposedActionJson(json: string): boolean {
-  return new TextEncoder().encode(json).length <= M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES;
+  return new TextEncoder().encode(json).length <= ORCHESTRATION_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES;
 }
 
 // ── Completion keywords for continue_session / mark_complete ───────────────────
@@ -136,7 +136,7 @@ export function refineGoalRule(input: RecommendationInput): RecommendationCandid
 
   const sources: RecommendationSourceRef[] = [];
   if (openQuestions.length > 0) {
-    for (const q of openQuestions.slice(0, M7_RECOMMENDATION_MAX_SOURCES - 1)) {
+    for (const q of openQuestions.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES - 1)) {
       sources.push({ type: 'memory_item', id: q.id, reason: 'open_question' });
     }
   }
@@ -148,7 +148,7 @@ export function refineGoalRule(input: RecommendationInput): RecommendationCandid
       rationale: capRationale(rationale),
       proposedAction,
       confidence,
-      sources: sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES),
+      sources: sources.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES),
     },
   ];
 }
@@ -227,7 +227,7 @@ export function createSessionRule(input: RecommendationInput): RecommendationCan
       ),
       proposedAction,
       confidence,
-      sources: sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES),
+      sources: sources.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES),
       relatedTaskId: task.id,
     });
   }
@@ -272,7 +272,7 @@ export function continueSessionRule(input: RecommendationInput): RecommendationC
       rationale: capRationale('An active session is associated with an in-progress task and has not completed.'),
       proposedAction,
       confidence: 0.75,
-      sources: sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES),
+      sources: sources.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES),
       relatedSessionId: session.id,
       ...(session.taskId ? { relatedTaskId: session.taskId } : {}),
     });
@@ -303,7 +303,7 @@ export function splitTaskRule(input: RecommendationInput): RecommendationCandida
 
     const suggestedChildren = criteriaCount >= 4
       ? task.acceptanceCriteria.slice(0, 10).map((c) => ({
-          title: c.text.slice(0, M7_RECOMMENDATION_MAX_TITLE_CHARS),
+          title: c.text.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS),
           role: task.role as 'architect' | 'engineer' | 'reviewer' | 'qa' | 'generalist' | undefined,
         }))
       : [
@@ -363,7 +363,7 @@ export function updatePlanRule(input: RecommendationInput): RecommendationCandid
 
       const sources: RecommendationSourceRef[] = [
         { type: 'task', id: task.id, reason: 'subject' },
-        ...linkedDecisions.slice(0, M7_RECOMMENDATION_MAX_SOURCES - 1).map((id) => ({
+        ...linkedDecisions.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES - 1).map((id) => ({
           type: 'decision' as const,
           id,
           reason: 'driver',
@@ -378,7 +378,7 @@ export function updatePlanRule(input: RecommendationInput): RecommendationCandid
         ),
         proposedAction,
         confidence: 0.6,
-        sources: sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES),
+        sources: sources.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES),
         relatedTaskId: task.id,
       });
     }
@@ -575,7 +575,7 @@ export function pauseWorkRule(input: RecommendationInput): RecommendationCandida
 
     const sources: RecommendationSourceRef[] = [
       { type: 'task', id: taskId, reason: 'subject' },
-      ...conflicts.slice(0, M7_RECOMMENDATION_MAX_SOURCES - 1).map((c) => ({
+      ...conflicts.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES - 1).map((c) => ({
         type: 'conflict' as const,
         id: c.id,
         reason: 'driver',
@@ -590,7 +590,7 @@ export function pauseWorkRule(input: RecommendationInput): RecommendationCandida
       ),
       proposedAction,
       confidence: 0.7,
-      sources: sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES),
+      sources: sources.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES),
       relatedTaskId: taskId,
     });
   }
@@ -700,7 +700,7 @@ export function runValidationRule(input: RecommendationInput): RecommendationCan
       ),
       proposedAction,
       confidence: 0.85,
-      sources: sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES),
+      sources: sources.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES),
       relatedSessionId: session.id,
       ...(session.taskId ? { relatedTaskId: session.taskId } : {}),
     });
@@ -735,7 +735,7 @@ function tryReviewOutputCandidate(
     rationale: capRationale(rationale),
     proposedAction,
     confidence: 0.8,
-    sources: sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES),
+    sources: sources.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES),
     relatedSessionId: anchorSession.id,
   };
 }
@@ -755,7 +755,7 @@ export function reviewOutputRule(input: RecommendationInput): RecommendationCand
       const sources: RecommendationSourceRef[] = [
         { type: 'session', id: anchorSession.id, reason: 'subject' },
         ...confirmRequired
-          .slice(0, M7_RECOMMENDATION_MAX_SOURCES - 1)
+          .slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES - 1)
           .map((d) => ({ type: 'decision' as const, id: d.id, reason: 'driver' })),
       ];
       const c = tryReviewOutputCandidate(
@@ -777,7 +777,7 @@ export function reviewOutputRule(input: RecommendationInput): RecommendationCand
       const sources: RecommendationSourceRef[] = [
         { type: 'session', id: anchorSession.id, reason: 'subject' },
         ...archNotes
-          .slice(0, M7_RECOMMENDATION_MAX_SOURCES - 1)
+          .slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES - 1)
           .map((m) => ({ type: 'memory_item' as const, id: m.id, reason: 'evidence' })),
       ];
       const c = tryReviewOutputCandidate(
@@ -837,7 +837,7 @@ export function reviewOutputRule(input: RecommendationInput): RecommendationCand
   return candidates;
 }
 
-// ── resolve_conflict (standalone; invoked by conflict detector M7-010) ─────────
+// ── resolve_conflict (standalone; invoked by conflict detector orchestration conflict detector) ─────────
 
 export interface ResolveConflictCandidateInput {
   conflictId: string;

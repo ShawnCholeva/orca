@@ -99,8 +99,8 @@ export function resetPreparedStatements(): void {
  * Throws GoalNotFoundError if the goal does not exist.
  * Returns goalArchivedAt so callers can check archived state without a second read.
  *
- * Does NOT read M4 output tails or transcript modules. Does NOT call git or scan
- * the filesystem. Uses only already-persisted M3 workspace metadata.
+ * Does NOT read session output tails or transcript modules. Does NOT call git or scan
+ * the filesystem. Uses only already-persisted workspace metadata.
  */
 export function buildContextAssemblyInput(
   deps: BuildContextInputDeps,

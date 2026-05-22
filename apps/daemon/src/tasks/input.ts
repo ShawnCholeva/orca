@@ -51,7 +51,7 @@ export interface BuildTaskGenerationInputParams {
 
 const ACTIVE_TASK_STATUSES: TaskStatus[] = ['proposed', 'open', 'in_progress', 'blocked'];
 const MAX_EXISTING_GENERATOR_TASKS = 20;
-const FINGERPRINT_VERSION = 'm7-task-input-v1';
+const FINGERPRINT_VERSION = 'orchestration-task-input-v1';
 
 let _db: Database.Database | null = null;
 let _selectGoal: Database.Statement<[string], GoalRow> | null = null;

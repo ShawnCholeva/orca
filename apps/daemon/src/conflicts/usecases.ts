@@ -4,13 +4,13 @@ import {
   Conflict,
   type ConflictSourceRef,
   type DomainEvent,
-  M7_RECOMMENDATION_MAX_TITLE_CHARS,
-  M7_RECOMMENDATION_MAX_RATIONALE_CHARS,
-  M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES,
-  M7_CONFLICT_MAX_DESCRIPTION_CHARS,
-  M7_CONFLICT_MAX_RESOLUTION_NOTE_CHARS,
-  M7_TASK_MAX_TITLE_CHARS,
-  M7_RECOMMENDATION_MAX_SOURCES,
+  ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES,
+  ORCHESTRATION_CONFLICT_MAX_DESCRIPTION_CHARS,
+  ORCHESTRATION_CONFLICT_MAX_RESOLUTION_NOTE_CHARS,
+  ORCHESTRATION_TASK_MAX_TITLE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_SOURCES,
 } from '@orca/contracts';
 import type { EventBus } from '../events.js';
 import { redactSecrets } from '../memory/normalize.js';
@@ -136,21 +136,21 @@ function emitEvent(
 const TERMINAL_STATUSES = new Set(['accepted', 'rejected', 'dismissed', 'superseded']);
 
 function capTitle(s: string): string {
-  return s.trim().slice(0, M7_TASK_MAX_TITLE_CHARS);
+  return s.trim().slice(0, ORCHESTRATION_TASK_MAX_TITLE_CHARS);
 }
 
 function capDescription(s: string): string {
-  return s.trim().slice(0, M7_CONFLICT_MAX_DESCRIPTION_CHARS);
+  return s.trim().slice(0, ORCHESTRATION_CONFLICT_MAX_DESCRIPTION_CHARS);
 }
 
 function capResolutionNote(note: string | undefined): string | null {
   return note
-    ? redactSecrets(note.trim().slice(0, M7_CONFLICT_MAX_RESOLUTION_NOTE_CHARS))
+    ? redactSecrets(note.trim().slice(0, ORCHESTRATION_CONFLICT_MAX_RESOLUTION_NOTE_CHARS))
     : null;
 }
 
 function capSources(sources: ConflictSourceRef[]): ConflictSourceRef[] {
-  return sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES);
+  return sources.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES);
 }
 
 const RESOLVE_CONFLICT_PROVIDER_ID = 'orca/conflict-detector-resolve-conflict';
@@ -265,20 +265,20 @@ function insertResolveConflictRecommendation(
     conflictTitle: input.conflictTitle,
     goalId: input.goalId,
   });
-  const title = redactSecrets(generated.title.trim().slice(0, M7_RECOMMENDATION_MAX_TITLE_CHARS));
+  const title = redactSecrets(generated.title.trim().slice(0, ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS));
   const rationale = redactSecrets(
-    generated.rationale.slice(0, M7_RECOMMENDATION_MAX_RATIONALE_CHARS)
+    generated.rationale.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS)
   );
   const proposedActionJson = JSON.stringify(generated.proposedAction);
-  if (new TextEncoder().encode(proposedActionJson).length > M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES) {
-    throw new Error('resolve_conflict proposedAction exceeded M7 cap');
+  if (new TextEncoder().encode(proposedActionJson).length > ORCHESTRATION_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES) {
+    throw new Error('resolve_conflict proposedAction exceeded orchestration cap');
   }
   const canonical = canonicalizeProposedActionJson(proposedActionJson);
 
   const sources = [
     ...generated.sources,
     ...input.candidate.recommendationSources,
-  ].slice(0, M7_RECOMMENDATION_MAX_SOURCES);
+  ].slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES);
 
   insertRecommendation(db, {
     id: input.id,
@@ -306,7 +306,7 @@ function insertResolveConflictRecommendation(
 // ── Auto-dismiss helper ───────────────────────────────────────────────────────
 
 /**
- * Auto-dismiss helper: the only automatic lifecycle transition in M7 (Section 12).
+ * Auto-dismiss helper: the only automatic lifecycle transition in orchestration.
  * MUST be called inside an existing database transaction.
  * Exported only for use by resolveConflict / dismissConflict and their tests.
  */
@@ -639,7 +639,7 @@ function applyConflictLifecycle(
         idFn
       )
     );
-    // Auto-dismiss linked resolve_conflict recommendation — sole automatic cascade in M7.
+    // Auto-dismiss linked resolve_conflict recommendation — sole automatic cascade in orchestration.
     toPublish.push(
       ...autoDismissResolveConflictRecommendation(db, stmts, id, conflict.goalId, now, idFn)
     );

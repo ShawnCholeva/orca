@@ -8,8 +8,8 @@ describe('conflictFingerprint', () => {
   });
 
   it('is deterministic', () => {
-    const a = conflictFingerprint('g1', 'blocker_reported', ['m1', 'm2', 'm3']);
-    const b = conflictFingerprint('g1', 'blocker_reported', ['m1', 'm2', 'm3']);
+    const a = conflictFingerprint('g1', 'blocker_reported', ['source-a', 'source-b', 'source-c']);
+    const b = conflictFingerprint('g1', 'blocker_reported', ['source-a', 'source-b', 'source-c']);
     expect(a).toBe(b);
   });
 

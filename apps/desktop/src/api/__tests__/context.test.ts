@@ -47,7 +47,7 @@ const pkg: ContextPackage = {
   role: "engineer",
   objective: "Summarize goal context before session start",
   status: "ready",
-  renderedContext: "## Goal\nShip milestone 6 safely.\n",
+  renderedContext: "## Goal\nShip context assembly safely.\n",
   renderedBytes: 34,
   estimatedTokens: 9,
   truncated: false,
@@ -73,7 +73,7 @@ const pkg: ContextPackage = {
   ],
   warnings: ["no_sibling_summaries"],
   sourceFingerprint: "source-fp-1",
-  assemblerVersion: "m6-deterministic-v1",
+  assemblerVersion: "context-deterministic-v1",
   createdAt: now,
 };
 
@@ -87,7 +87,7 @@ const assembly: ContextAssembly = {
   role: "engineer",
   objectiveHash: "obj-hash-1",
   sourceFingerprint: "source-fp-1",
-  assemblerVersion: "m6-deterministic-v1",
+  assemblerVersion: "context-deterministic-v1",
   requestFingerprint: "req-fp-1",
   status: "succeeded",
   trigger: "prepare",

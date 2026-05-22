@@ -1,6 +1,6 @@
 import type { DomainEvent, RecommendationType } from "@orca/contracts";
 
-export const M7_LIVE_REFRESH_DEBOUNCE_MS = 200;
+export const ORCHESTRATION_LIVE_REFRESH_DEBOUNCE_MS = 200;
 
 export type LiveGenerationNotice = {
   generationId: string;

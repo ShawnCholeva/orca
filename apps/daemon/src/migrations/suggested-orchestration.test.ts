@@ -56,9 +56,9 @@ afterEach(() => {
   }
 });
 
-describe("M7-001 migration schema", () => {
-  it("creates all M7 tables, columns, and indexes on a fresh DB", () => {
-    const dataDir = createTempDir("orca-m7-migration-fresh-");
+describe("suggested orchestration migration schema", () => {
+  it("creates all orchestration tables, columns, and indexes on a fresh DB", () => {
+    const dataDir = createTempDir("orca-orchestration-migration-fresh-");
     const db = openDatabase(createConfig(dataDir));
 
     runMigrations(db, defaultMigrationsDir());
@@ -108,14 +108,14 @@ describe("M7-001 migration schema", () => {
     expect(tableColumns(db, "context_packages")).toContain("from_recommendation_id");
   });
 
-  it("upgrades a recorded M6 fixture DB without mutating pre-existing row counts", () => {
+  it("upgrades a recorded context baseline fixture DB without mutating pre-existing row counts", () => {
     const fixturePath = fileURLToPath(
-      new URL("../../test-fixtures/m6-baseline.sqlite", import.meta.url)
+      new URL("../../test-fixtures/context-baseline.sqlite", import.meta.url)
     );
 
     expect(existsSync(fixturePath)).toBe(true);
 
-    const dataDir = createTempDir("orca-m7-migration-upgrade-");
+    const dataDir = createTempDir("orca-orchestration-migration-upgrade-");
     copyFileSync(fixturePath, path.join(dataDir, "orca.db"));
 
     const db = openDatabase(createConfig(dataDir));
@@ -133,7 +133,7 @@ describe("M7-001 migration schema", () => {
     };
 
     const result = runMigrations(db, defaultMigrationsDir());
-    expect(result.applied).toEqual(["0007_agents.sql", "m7-001-suggested-orchestration.sql"]);
+    expect(result.applied).toEqual(["0007_agents.sql", "0008_suggested_orchestration.sql"]);
 
     const postCounts = {
       goals: (db.prepare("SELECT count(*) AS cnt FROM goals").get() as { cnt: number }).cnt,

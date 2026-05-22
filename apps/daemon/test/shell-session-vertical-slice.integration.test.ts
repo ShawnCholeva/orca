@@ -35,7 +35,7 @@ const ORCA_ENV_KEYS = [
   'ORCA_TOKEN',
   'ORCA_SHELL',
 ] as const;
-const TOKEN = 'm4-011-token';
+const TOKEN = 'shell-session-token';
 const AUTH_HEADERS = { authorization: `Bearer ${TOKEN}` } as const;
 
 const tempDirs: string[] = [];
@@ -155,9 +155,9 @@ afterAll(() => {
   }
 });
 
-describe.sequential('M4-011 real shell vertical slice', () => {
+describe.sequential('real shell session vertical slice', () => {
   it('runs shell-manual through HTTP + WS, persists output, and preserves it after restart', async () => {
-    const rootDir = createTempDir('orca-m4-011-');
+    const rootDir = createTempDir('orca-shell-session-');
     const workspaceDir = path.join(rootDir, 'workspace');
     const dbDir = path.join(rootDir, 'daemon-db');
     mkdirSync(workspaceDir);
@@ -172,7 +172,7 @@ describe.sequential('M4-011 real shell vertical slice', () => {
       server1 = boot1.server;
 
       const goalResponse = await postJson(boot1.baseUrl, '/v1/goals', {
-        title: 'M4-011 Goal',
+        title: 'Shell Session Goal',
         description: 'real shell vertical slice',
         workspaces: [{ inputPath: workspaceDir }],
       });
@@ -281,7 +281,7 @@ describe.sequential('M4-011 real shell vertical slice', () => {
   });
 
   it('marks stale running sessions failed with daemon_restart before listen', async () => {
-    const rootDir = createTempDir('orca-m4-011-reconcile-');
+    const rootDir = createTempDir('orca-shell-session-reconcile-');
     const workspaceDir = path.join(rootDir, 'workspace');
     const dbDir = path.join(rootDir, 'daemon-db');
     mkdirSync(workspaceDir);
@@ -295,7 +295,7 @@ describe.sequential('M4-011 real shell vertical slice', () => {
       server1 = boot1.server;
 
       const goalResponse = await postJson(boot1.baseUrl, '/v1/goals', {
-        title: 'M4-011 Reconcile Goal',
+        title: 'Shell Session Reconcile Goal',
         workspaces: [{ inputPath: workspaceDir }],
       });
       const goalId = CreateGoalResponse.parse(await goalResponse.json()).goal.id;

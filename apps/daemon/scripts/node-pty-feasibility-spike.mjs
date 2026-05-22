@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// M4-001 node-pty feasibility spike (see notes/m4-001-pty-feasibility.md).
+// node-pty feasibility spike for validating local PTY support.
 
 import { spawn } from "node-pty";
 
@@ -25,18 +25,18 @@ const exitInfo = await new Promise((resolve) => {
 
 if (!observed.includes(SENTINEL)) {
   console.error(
-    `[m4-001-spike] FAIL: sentinel "${SENTINEL}" not observed in output`
+    `[node-pty-spike] FAIL: sentinel "${SENTINEL}" not observed in output`
   );
   process.exit(1);
 }
 if (exitInfo.exitCode !== 0) {
   console.error(
-    `[m4-001-spike] FAIL: exitCode=${exitInfo.exitCode} signal=${exitInfo.signal ?? "none"}`
+    `[node-pty-spike] FAIL: exitCode=${exitInfo.exitCode} signal=${exitInfo.signal ?? "none"}`
   );
   process.exit(1);
 }
 
 console.log(
-  `[m4-001-spike] OK: sentinel observed, exitCode=0, signal=${exitInfo.signal ?? "none"}`
+  `[node-pty-spike] OK: sentinel observed, exitCode=0, signal=${exitInfo.signal ?? "none"}`
 );
 process.exit(0);

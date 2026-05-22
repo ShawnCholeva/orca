@@ -12,7 +12,7 @@ const now = "2026-01-01T00:00:00.000Z";
 
 const draft = GuidedRefinementOutput.parse({
   skillId: "guided-goal-refinement",
-  title: "Ship M3",
+  title: "Ship guided goal flow",
   description: "Refine and attach workspace",
   successCriteria: ["detail view shows refinement"],
   constraints: ["deterministic only"],
@@ -21,7 +21,7 @@ const draft = GuidedRefinementOutput.parse({
 
 const goal = {
   id: "goal-1",
-  title: "Ship M3",
+  title: "Ship guided goal flow",
   description: "Refine and attach workspace",
   status: "active" as const,
   autonomyLevel: 1,
@@ -102,7 +102,7 @@ const extraction = {
   sessionId: "sess-1",
   trigger: "manual" as const,
   status: "pending" as const,
-  extractorVersion: "m5-deterministic-v1",
+  extractorVersion: "memory-deterministic-v1",
   sourceFingerprint: "fp-1",
   sourceOffsetFirst: 0,
   sourceOffsetLast: 120,
@@ -144,7 +144,7 @@ const task = {
   status: "open" as const,
   origin: "generator" as const,
   title: "Implement desktop wrappers",
-  description: "Add typed wrappers and tests for M7 endpoints.",
+  description: "Add typed wrappers and tests for task, recommendation, and conflict endpoints.",
   acceptanceCriteria: [{ id: "ac-1", text: "All wrappers parse responses" }],
   validationSteps: [{ id: "vs-1", text: "Run desktop tests", kind: "test" as const }],
   dependencies: [],
@@ -255,7 +255,7 @@ const contextPackage = {
   ],
   warnings: [],
   sourceFingerprint: "ctx-fp-1",
-  assemblerVersion: "m6-deterministic-v1",
+  assemblerVersion: "context-deterministic-v1",
   createdAt: now,
 };
 
@@ -269,7 +269,7 @@ const contextAssembly = {
   role: "engineer" as const,
   objectiveHash: "objective-hash",
   sourceFingerprint: "ctx-fp-1",
-  assemblerVersion: "m6-deterministic-v1",
+  assemblerVersion: "context-deterministic-v1",
   requestFingerprint: "asm-request-fp-1",
   status: "succeeded" as const,
   trigger: "prepare" as const,
@@ -302,7 +302,7 @@ describe("desktop api client", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(201, { goal }));
 
     const response = await api.createGoal({
-      title: "Ship M3",
+      title: "Ship guided goal flow",
       description: "Refine and attach workspace",
       refined: draft,
       workspaces: [{ inputPath: "/tmp/workspace", name: "workspace" }],
@@ -313,7 +313,7 @@ describe("desktop api client", () => {
     expect(url).toBe("http://127.0.0.1:8787/v1/goals");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({
-      title: "Ship M3",
+      title: "Ship guided goal flow",
       description: "Refine and attach workspace",
       refined: draft,
       workspaces: [{ inputPath: "/tmp/workspace", name: "workspace" }],
@@ -323,14 +323,14 @@ describe("desktop api client", () => {
   it("refineGoal posts payload and returns draft", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { draft }));
 
-    const response = await api.refineGoal({ title: "Ship M3", description: "desc" });
+    const response = await api.refineGoal({ title: "Ship guided goal flow", description: "desc" });
 
     expect(response.draft.skillId).toBe("guided-goal-refinement");
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("http://127.0.0.1:8787/v1/goals/refine");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({
-      title: "Ship M3",
+      title: "Ship guided goal flow",
       description: "desc",
     });
   });
@@ -945,7 +945,7 @@ describe("desktop api client", () => {
 
     const response = await api.createTask("goal-1", {
       title: "Implement desktop wrappers",
-      description: "Add typed wrappers and tests for M7 endpoints.",
+      description: "Add typed wrappers and tests for task, recommendation, and conflict endpoints.",
       role: "engineer",
       workspaceId: "ws-1",
       parentTaskId: null,

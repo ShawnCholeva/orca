@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  M7_CONFLICT_MAX_RESOLUTION_NOTE_CHARS,
+  ORCHESTRATION_CONFLICT_MAX_RESOLUTION_NOTE_CHARS,
   type Conflict,
 } from "@orca/contracts";
 import { toErrorMessage } from "../../api";
@@ -20,9 +20,9 @@ export function ConflictResolveDialog({ conflict, onResolve, onClose, initialNot
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    if (note.length > M7_CONFLICT_MAX_RESOLUTION_NOTE_CHARS) {
+    if (note.length > ORCHESTRATION_CONFLICT_MAX_RESOLUTION_NOTE_CHARS) {
       setError(
-        `Resolution note must be ${M7_CONFLICT_MAX_RESOLUTION_NOTE_CHARS} characters or fewer.`,
+        `Resolution note must be ${ORCHESTRATION_CONFLICT_MAX_RESOLUTION_NOTE_CHARS} characters or fewer.`,
       );
       return;
     }
@@ -58,7 +58,7 @@ export function ConflictResolveDialog({ conflict, onResolve, onClose, initialNot
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={5}
-            maxLength={M7_CONFLICT_MAX_RESOLUTION_NOTE_CHARS}
+            maxLength={ORCHESTRATION_CONFLICT_MAX_RESOLUTION_NOTE_CHARS}
             disabled={saving}
           />
 

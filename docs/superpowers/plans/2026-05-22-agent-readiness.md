@@ -8,12 +8,40 @@
 
 **Tech Stack:** TypeScript, Vitest, Fastify v5, Zod, better-sqlite3, Tauri v2 + React 18 (desktop), `child_process.execFile` for CLI probes. Spec at `docs/superpowers/specs/2026-05-22-agent-readiness-design.md`.
 
+## Model assignments
+
+| Task | Assigned model | Effort | Why |
+|---|---|---:|---|
+| 1 | Codex 5.3 | Low | Contract/schema work is mechanical and bounded. |
+| 2 | Codex 5.3 | Low | SQLite migration + focused migration test. |
+| 3 | GPT 5.4 | Medium | DB row mapping with JSON parsing and persistence edge cases. |
+| 4 | GPT 5.4 | Medium | Sanitization needs careful regex and byte truncation. |
+| 5 | GPT 5.5 | High | Child-process timeout, kill, and failure classification are brittle. |
+| 6 | Codex 5.3 | Low | Static mapping module and tests. |
+| 7 | GPT 5.5 | Medium | Phase hygiene and type-boundary sequencing. |
+| 8 | GPT 5.5 | High | Claude status parsing must avoid PII and command drift. |
+| 9 | GPT 5.4 | Medium | Codex classifier is straightforward but exit-code-sensitive. |
+| 10 | GPT 5.5 | High | OpenCode output parsing is CLI-format-sensitive. |
+| 11 | Opus 4.7 | High | Gemini auth modes and adapter registration have the most ambiguity. |
+| 12 | GPT 5.5 | High | Service concurrency, dedup, and persistence failure modes. |
+| 13 | GPT 5.4 | Medium | HTTP wiring with fake adapter injection. |
+| 14 | Codex 5.3 | Low | Desktop API wrappers and response parsing. |
+| 15 | Sonnet 4.6 | Medium | Small UI component and accessibility detail. |
+| 16 | Sonnet 4.6 | Medium | UI state rendering across readiness statuses. |
+| 17 | Sonnet 4.6 | High | React orchestration, cache behavior, and callback stability. |
+| 18 | Sonnet 4.6 | High | Onboarding flow wiring, persistence ordering, and Tauri opener. |
+| 19 | Sonnet 4.6 | Medium | App-shell banner and agent refresh behavior. |
+| 20 | Codex 5.3 | Low | Gated smoke tests with no product behavior changes. |
+
 ---
 
-## Task 1: Contracts — readiness types and schemas
+## Task 1: Contracts — readiness types, schemas, AdapterId update
+
+**Assigned model:** Codex 5.3  
+**Effort:** Low
 
 **Files:**
-- Modify: `packages/contracts/src/index.ts` (append a new section before the existing `Agent` schema; extend the `Agent` schema with an optional `readiness` field)
+- Modify: `packages/contracts/src/index.ts` (extend `AdapterId` enum, add readiness section, extend `Agent` schema)
 - Test: `packages/contracts/src/index.test.ts` (append cases)
 
 - [ ] **Step 1: Write failing tests**
@@ -22,6 +50,7 @@ Append to `packages/contracts/src/index.test.ts`:
 
 ```ts
 import {
+  AdapterId,
   AgentReadinessStatus,
   AuthStatus,
   CheckStep,
@@ -31,6 +60,12 @@ import {
   CheckReadinessOneResponse,
   Agent,
 } from "./index.js";
+
+describe("AdapterId now includes gemini-cli", () => {
+  it("accepts gemini-cli", () => {
+    expect(AdapterId.parse("gemini-cli")).toBe("gemini-cli");
+  });
+});
 
 describe("agent readiness contracts", () => {
   it("accepts every persisted status", () => {
@@ -144,7 +179,14 @@ Expected: tests fail because the new exports don't exist.
 
 - [ ] **Step 3: Add the contracts**
 
-In `packages/contracts/src/index.ts`, locate the existing `export const Agent = z.object({ ... })` block. **Replace** that single block with the readiness schemas + extended Agent below (paste this whole block in place of the original `Agent` + `ListAgentsResponse` + `UpdateAgentResponse` definitions):
+First, extend `AdapterId` (currently around line 357 of `packages/contracts/src/index.ts`):
+
+```ts
+export const AdapterId = z.enum(["shell-manual", "claude-code", "opencode", "codex", "gemini-cli"]);
+export type AdapterId = z.infer<typeof AdapterId>;
+```
+
+Then locate the existing `export const Agent = z.object({ ... })` block. **Replace** that single block with the readiness schemas + extended Agent below (paste this whole block in place of the original `Agent` + `ListAgentsResponse` + `UpdateAgentResponse` definitions):
 
 ```ts
 // ---------- agent readiness ----------
@@ -257,6 +299,9 @@ git commit -m "feat(contracts): add agent readiness schemas"
 
 ## Task 2: Migration `0009_agent_readiness.sql`
 
+**Assigned model:** Codex 5.3  
+**Effort:** Low
+
 **Files:**
 - Create: `apps/daemon/migrations/0009_agent_readiness.sql`
 - Modify: `apps/daemon/src/migrations.ts` (append filename to `migrationFiles` array)
@@ -357,6 +402,9 @@ git commit -m "feat(daemon): add 0009_agent_readiness migration"
 ---
 
 ## Task 3: Extend `agents.ts` row mapping + add `persistReadiness`
+
+**Assigned model:** GPT 5.4  
+**Effort:** Medium
 
 **Files:**
 - Modify: `apps/daemon/src/agents.ts`
@@ -467,17 +515,22 @@ Replace `rowToAgent` with:
 
 ```ts
 function rowToAgent(row: AgentRow): Agent {
-  const readiness =
-    row.readiness_status && row.readiness_status !== "unchecked"
-      ? AgentReadinessReport.parse({
-          agentId: row.id,
-          status: row.readiness_status,
-          steps: row.readiness_detail ? JSON.parse(row.readiness_detail) : [],
-          repair: row.readiness_repair ? JSON.parse(row.readiness_repair) : undefined,
-          checkedAt: row.readiness_checked_at!,
-          version: row.readiness_version ?? undefined,
-        })
-      : null;
+  let readiness: Agent["readiness"] = null;
+  if (row.readiness_status && row.readiness_status !== "unchecked" && row.readiness_checked_at) {
+    try {
+      readiness = AgentReadinessReport.parse({
+        agentId: row.id,
+        status: row.readiness_status,
+        steps: row.readiness_detail ? JSON.parse(row.readiness_detail) : [],
+        repair: row.readiness_repair ? JSON.parse(row.readiness_repair) : undefined,
+        checkedAt: row.readiness_checked_at,
+        version: row.readiness_version ?? undefined,
+      });
+    } catch {
+      // Partial/corrupt persisted readiness — treat as unchecked rather than crash listAgents.
+      readiness = null;
+    }
+  }
 
   return Agent.parse({
     id: row.id,
@@ -554,6 +607,9 @@ git commit -m "feat(daemon): persist readiness reports on agents"
 ---
 
 ## Task 4: Output sanitizer
+
+**Assigned model:** GPT 5.4  
+**Effort:** Medium
 
 **Files:**
 - Create: `apps/daemon/src/readiness/sanitize.ts`
@@ -676,8 +732,11 @@ export function sanitizeOutput(input: string | null | undefined): string {
     });
   }
   if (Buffer.byteLength(out, "utf8") > MAX_BYTES) {
-    const limit = MAX_BYTES - TRUNC_SUFFIX.length;
-    out = out.slice(0, limit) + TRUNC_SUFFIX;
+    const limitBytes = MAX_BYTES - Buffer.byteLength(TRUNC_SUFFIX, "utf8");
+    const buf = Buffer.from(out, "utf8").subarray(0, limitBytes);
+    // Decode with 'replacement' substitution so a half multi-byte char at the boundary
+    // becomes U+FFFD instead of producing invalid output.
+    out = new TextDecoder("utf-8", { fatal: false }).decode(buf) + TRUNC_SUFFIX;
   }
   return out;
 }
@@ -698,6 +757,9 @@ git commit -m "feat(daemon): add readiness output sanitizer"
 ---
 
 ## Task 5: Exec helper `runCheckCommand`
+
+**Assigned model:** GPT 5.5  
+**Effort:** High
 
 **Files:**
 - Create: `apps/daemon/src/readiness/exec.ts`
@@ -736,7 +798,16 @@ describe("runCheckCommand", () => {
   it("returns ENOENT-style failure for a missing binary", async () => {
     const res = await runCheckCommand("definitely-not-a-real-binary-orca-xyz", ["--version"]);
     expect(res.exitCode).toBeUndefined();
-    expect(res.spawnError).toBeDefined();
+    expect(res.failureKind).toBe("spawn");
+    expect(res.spawnError?.code).toBe("ENOENT");
+  });
+
+  it("classifies maxBuffer overflows distinctly", async () => {
+    const res = await runCheckCommand("node", [
+      "-e",
+      "process.stdout.write('x'.repeat(1024*1024))",
+    ]);
+    expect(res.failureKind).toBe("max_buffer");
   });
 
   it("honors an env allowlist (does not leak HOME by default)", async () => {
@@ -774,17 +845,21 @@ export interface RunCheckOptions {
   cwd?: string;
 }
 
+export type FailureKind = "spawn" | "timeout" | "max_buffer" | "exit";
+
 export interface RunCheckResult {
   exitCode?: number;
   stdout: string;
   stderr: string;
   durationMs: number;
   timedOut: boolean;
+  failureKind?: FailureKind;
   spawnError?: { code?: string; message: string };
 }
 
 const DEFAULT_TIMEOUT_MS = 5000;
 const MAX_BUFFER = 256 * 1024;
+const SIGKILL_GRACE_MS = 1000;
 
 export function runCheckCommand(
   command: string,
@@ -797,61 +872,84 @@ export function runCheckCommand(
     if (opts.env) Object.assign(env, opts.env);
 
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    let timedOutLocal = false;
-    let killTimer: NodeJS.Timeout | undefined;
+    let timedOut = false;
+    let childExited = false;
+    let softTimer: NodeJS.Timeout | undefined;
+    let sigkillTimer: NodeJS.Timeout | undefined;
 
+    // We manage timeout ourselves so we control SIGTERM → SIGKILL escalation.
     const child = execFile(
       command,
       args,
       {
-        timeout: timeoutMs,
         maxBuffer: MAX_BUFFER,
         cwd: opts.cwd ?? os.tmpdir(),
         env,
         windowsHide: true,
-        killSignal: "SIGTERM",
         shell: false,
       },
       (err, stdout, stderr) => {
-        if (killTimer) clearTimeout(killTimer);
+        if (sigkillTimer) clearTimeout(sigkillTimer);
+        if (softTimer) clearTimeout(softTimer);
         const durationMs = Date.now() - start;
+
         if (err && (err as NodeJS.ErrnoException).code === "ENOENT") {
           resolve({
             stdout: stdout?.toString() ?? "",
             stderr: stderr?.toString() ?? "",
             durationMs,
             timedOut: false,
+            failureKind: "spawn",
             spawnError: { code: "ENOENT", message: err.message },
           });
           return;
         }
-        const sigtermKilled =
-          !!err && (err as { killed?: boolean }).killed === true && (err as { signal?: string }).signal === "SIGTERM";
-        const timedOut = timedOutLocal || sigtermKilled;
-        const codeProp = (err as { code?: number | string } | null)?.code;
-        const exitCode = typeof codeProp === "number" ? codeProp : err ? undefined : 0;
+
+        const errCode = (err as { code?: number | string } | null)?.code;
+        if (errCode === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+          resolve({
+            stdout: stdout?.toString() ?? "",
+            stderr: stderr?.toString() ?? "",
+            durationMs,
+            timedOut: false,
+            failureKind: "max_buffer",
+            spawnError: { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER", message: (err as Error).message },
+          });
+          return;
+        }
+
+        const exitCode = typeof errCode === "number" ? errCode : err ? undefined : 0;
+        const failureKind: FailureKind | undefined = timedOut
+          ? "timeout"
+          : exitCode !== 0
+            ? "exit"
+            : undefined;
+
         resolve({
           exitCode,
           stdout: stdout?.toString() ?? "",
           stderr: stderr?.toString() ?? "",
           durationMs,
           timedOut,
+          failureKind,
         });
       },
     );
 
     // Close stdin so the child cannot block waiting for input.
     child.stdin?.end();
-
-    // Defense-in-depth: 1s after execFile's SIGTERM, force SIGKILL if still alive.
-    child.once("exit", (_code, signal) => {
-      if (signal === "SIGTERM") {
-        timedOutLocal = true;
-        killTimer = setTimeout(() => {
-          if (!child.killed) child.kill("SIGKILL");
-        }, 1000);
-      }
+    child.once("exit", () => {
+      childExited = true;
     });
+
+    // Soft timeout: SIGTERM first, then SIGKILL after the grace window.
+    softTimer = setTimeout(() => {
+      timedOut = true;
+      if (!childExited) child.kill("SIGTERM");
+      sigkillTimer = setTimeout(() => {
+        if (!childExited) child.kill("SIGKILL");
+      }, SIGKILL_GRACE_MS);
+    }, timeoutMs);
   });
 }
 ```
@@ -871,6 +969,9 @@ git commit -m "feat(daemon): add runCheckCommand exec helper with fixed policy"
 ---
 
 ## Task 6: Repair links module
+
+**Assigned model:** Codex 5.3  
+**Effort:** Low
 
 **Files:**
 - Create: `apps/daemon/src/readiness/repair-links.ts`
@@ -955,45 +1056,35 @@ git commit -m "feat(daemon): centralise readiness repair links"
 
 ---
 
-## Task 7: Extend `AgentAdapter` interface
+## Task 7: Adapter phase — overview & branch hygiene
 
-**Files:**
-- Modify: `apps/daemon/src/adapters/types.ts`
+**Assigned model:** GPT 5.5  
+**Effort:** Medium
 
-- [ ] **Step 1: Edit the interface**
+**Tasks 7 → 11 form one logical commit.** The typecheck breaks the moment we add the new abstract methods to the `AgentAdapter` interface, so we adopt an **adapter-first** strategy:
 
-Edit `apps/daemon/src/adapters/types.ts`. Add imports at the top and extend the interface:
+1. Tasks 8, 9, 10, 11a implement `checkInstalled`, `checkAuth`, `repairFor` on each adapter as **plain class methods** — without touching the interface yet. Each task's test imports the class directly, so the tests pass.
+2. Task 11b (final step) extends the `AgentAdapter` interface in `types.ts`. By that point every implementing class already has the methods, so the typecheck stays green.
+3. Tasks 8–11 produce **a single combined commit** at the end of Task 11b. Do not commit between Tasks 7 and the end of Task 11b.
 
-```ts
-import type { AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
+If you have to stop execution mid-phase, leave the worktree dirty rather than committing a half-state.
 
-export interface AgentAdapter {
-  id: AdapterId;
-  title: string;
-  contextDelivery: AdapterContextDelivery;
-  resolveSpawn(input: AdapterSpawnInput): Promise<AdapterSpawnResult>;
-  probeAvailability(): Promise<AdapterAvailability>;
+- [ ] **Step 1: Confirm starting state is clean**
 
-  checkInstalled(): Promise<CheckStep & { version?: string }>;
-  checkAuth(): Promise<CheckStep>;
-  repairFor(status: AgentReadinessStatus): RepairAction | undefined;
-}
-```
+Run: `git status` — expect a clean tree. Run: `cd apps/daemon && pnpm typecheck && pnpm test` — expect green.
 
-Existing adapter classes (`ClaudeCodeAdapter`, `CodexAdapter`, `OpenCodeAdapter`, `ShellManualAdapter`) will fail to typecheck until the next tasks. That's expected.
+If either fails, fix or stash before starting Task 8.
 
-- [ ] **Step 2: Confirm the typecheck regression**
+- [ ] **Step 2: No code changes in this task**
 
-Run: `cd apps/daemon && pnpm typecheck`
-Expected: errors for each adapter class that does not yet implement the three new methods.
-
-- [ ] **Step 3: Do not commit yet**
-
-This task's commit happens at the end of Task 11 (after every adapter implements the interface). Leave the working tree dirty.
+Proceed to Task 8.
 
 ---
 
 ## Task 8: Claude Code adapter checks
+
+**Assigned model:** GPT 5.5  
+**Effort:** High
 
 **Files:**
 - Modify: `apps/daemon/src/adapters/claude-code.ts`
@@ -1053,9 +1144,21 @@ describe("ClaudeCodeAdapter.checkAuth", () => {
     expect(step.detail).toBe("authenticated");
   });
 
-  it("classifies loggedIn=false JSON as needs_auth", async () => {
+  it("classifies loggedIn=false JSON as needs_auth (exit 1)", async () => {
     const run: RunCheckFn = vi.fn().mockResolvedValue({
       exitCode: 1,
+      stdout: JSON.stringify({ loggedIn: false }),
+      stderr: "",
+      durationMs: 5,
+      timedOut: false,
+    });
+    const step = await adapter(run).checkAuth();
+    expect(step.authStatus).toBe("needs_auth");
+  });
+
+  it("classifies loggedIn=false JSON as needs_auth even if exit code is unexpected (exit 0)", async () => {
+    const run: RunCheckFn = vi.fn().mockResolvedValue({
+      exitCode: 0,
       stdout: JSON.stringify({ loggedIn: false }),
       stderr: "",
       durationMs: 5,
@@ -1234,21 +1337,23 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     } catch {
       parsed = null;
     }
-    if (r.exitCode === 0 && parsed?.loggedIn === true) {
-      return {
-        name: "authenticated",
-        ok: true,
-        authStatus: "ready",
-        command: "claude auth status --json",
-        detail: "authenticated",
-      };
-    }
-    if (r.exitCode === 1 && parsed && parsed.loggedIn === false) {
+    // JSON drives the classification first; exit code is a tiebreaker only.
+    if (parsed && typeof parsed.loggedIn === "boolean") {
+      if (parsed.loggedIn === true) {
+        return {
+          name: "authenticated",
+          ok: true,
+          authStatus: "ready",
+          command: "claude auth status --json",
+          detail: "authenticated",
+        };
+      }
       return {
         name: "authenticated",
         ok: false,
         authStatus: "needs_auth",
         command: "claude auth status --json",
+        exitCode: r.exitCode,
         detail: "not signed in",
       };
     }
@@ -1302,6 +1407,9 @@ Other adapters are still failing typecheck. Continue to Task 9.
 ---
 
 ## Task 9: Codex adapter checks
+
+**Assigned model:** GPT 5.4  
+**Effort:** Medium
 
 **Files:**
 - Modify: `apps/daemon/src/adapters/codex.ts`
@@ -1551,6 +1659,9 @@ Continue to Task 10.
 
 ## Task 10: OpenCode adapter checks
 
+**Assigned model:** GPT 5.5  
+**Effort:** High
+
 **Files:**
 - Modify: `apps/daemon/src/adapters/opencode.ts`
 - Create: `apps/daemon/src/adapters/opencode.readiness.test.ts`
@@ -1586,16 +1697,32 @@ describe("OpenCodeAdapter.checkInstalled", () => {
 });
 
 describe("OpenCodeAdapter.checkAuth", () => {
-  it("≥1 provider line → ready with provider list in detail", async () => {
-    const stdout = "[1mProviders[0m\n  provider: anthropic\n  provider: openai\n";
+  it("positive credential count → ready without persisting provider names", async () => {
+    const stdout = [
+      "┌  Credentials ~/.local/share/opencode/auth.json",
+      "│",
+      "●  MiniMax Token Plan (minimaxi.com) api",
+      "│",
+      "●  OpenAI oauth",
+      "│",
+      "2 credentials",
+      "└",
+    ].join("\n");
     const run = vi.fn().mockResolvedValue({ exitCode: 0, stdout, stderr: "", durationMs: 1, timedOut: false });
     const step = await a(run).checkAuth();
     expect(step.authStatus).toBe("ready");
-    expect(step.detail).toBe("authenticated (anthropic, openai)");
+    expect(step.detail).toBe("authenticated (2 credentials)");
   });
 
-  it("zero provider lines → needs_auth", async () => {
-    const run = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "No credentials stored.", stderr: "", durationMs: 1, timedOut: false });
+  it("'0 credentials' footer or empty list → needs_auth", async () => {
+    const stdout = "No credentials stored\n0 credentials\n";
+    const run = vi.fn().mockResolvedValue({ exitCode: 0, stdout, stderr: "", durationMs: 1, timedOut: false });
+    const step = await a(run).checkAuth();
+    expect(step.authStatus).toBe("needs_auth");
+  });
+
+  it("empty stdout but exit 0 → needs_auth", async () => {
+    const run = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "", stderr: "", durationMs: 1, timedOut: false });
     const step = await a(run).checkAuth();
     expect(step.authStatus).toBe("needs_auth");
   });
@@ -1606,13 +1733,13 @@ describe("OpenCodeAdapter.checkAuth", () => {
     expect(step.authStatus).toBe("misconfigured");
   });
 
-  it("invokes opencode auth list with plugin-disable env", async () => {
-    const run = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "provider: anthropic", stderr: "", durationMs: 1, timedOut: false });
+  it("invokes opencode auth list with --pure to avoid plugin loading", async () => {
+    const run = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "1 credentials", stderr: "", durationMs: 1, timedOut: false });
     await a(run).checkAuth();
     expect(run).toHaveBeenCalledWith(
       "/usr/bin/opencode",
-      ["auth", "list"],
-      expect.objectContaining({ env: expect.objectContaining({ OPENCODE_DISABLE_PLUGINS: "1" }) }),
+      ["auth", "list", "--pure"],
+      expect.anything(),
     );
   });
 });
@@ -1656,7 +1783,12 @@ export type RunCheckFn = (
 ) => Promise<RunCheckResult>;
 
 const ANSI = /\[[0-9;]*[A-Za-z]/g;
-const PROVIDER_LINE = /^\s*provider:\s*([A-Za-z0-9_\-]+)\s*$/gim;
+// Current `opencode auth list` prints a TUI-like list plus a footer such as:
+//   └  3 credentials
+// Parse the count instead of provider labels; labels can contain spaces, domains,
+// and auth method suffixes and may include account/provider-identifying text.
+const CRED_COUNT = /^[\s│└┌─]*?(\d+)\s+credentials\s*$/im;
+const ZERO_CRED_FOOTER = /^[\s│└┌─]*?0\s+credentials\s*$/im;
 
 export class OpenCodeAdapter implements AgentAdapter {
   readonly id = "opencode" as const;
@@ -1720,9 +1852,7 @@ export class OpenCodeAdapter implements AgentAdapter {
         detail: "binary not found",
       };
     }
-    const r = await this.runFn(resolved.resolvedPath, ["auth", "list"], {
-      env: { OPENCODE_DISABLE_PLUGINS: "1" },
-    });
+    const r = await this.runFn(resolved.resolvedPath, ["auth", "list", "--pure"]);
     if (r.timedOut) {
       return {
         name: "authenticated",
@@ -1744,17 +1874,15 @@ export class OpenCodeAdapter implements AgentAdapter {
       };
     }
     const cleaned = r.stdout.replace(ANSI, "");
-    const providers: string[] = [];
-    for (const m of cleaned.matchAll(PROVIDER_LINE)) {
-      providers.push(m[1]!);
-    }
-    if (providers.length === 0) {
+    const countMatch = cleaned.match(CRED_COUNT);
+    const credentialCount = countMatch ? Number(countMatch[1]) : 0;
+    if (credentialCount <= 0 || ZERO_CRED_FOOTER.test(cleaned)) {
       return {
         name: "authenticated",
         ok: false,
         authStatus: "needs_auth",
         command: "opencode auth list",
-        detail: "no providers configured",
+        detail: "no credentials stored",
       };
     }
     return {
@@ -1762,7 +1890,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       ok: true,
       authStatus: "ready",
       command: "opencode auth list",
-      detail: `authenticated (${providers.join(", ")})`,
+      detail: `authenticated (${credentialCount} credentials)`,
     };
   }
 
@@ -1806,6 +1934,9 @@ ShellManualAdapter also implements `AgentAdapter`. It needs the three new method
 
 ## Task 11: Gemini adapter (new) + ShellManual stubs + commit Phase 1
 
+**Assigned model:** Opus 4.7  
+**Effort:** High
+
 **Files:**
 - Create: `apps/daemon/src/adapters/gemini.ts`
 - Create: `apps/daemon/src/adapters/gemini.readiness.test.ts`
@@ -1817,7 +1948,7 @@ Create `apps/daemon/src/adapters/gemini.readiness.test.ts`:
 
 ```ts
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { GeminiAdapter } from "./gemini.js";
@@ -1825,10 +1956,6 @@ import type { RunCheckFn } from "./gemini.js";
 
 const ok = (p: string) => () => Promise.resolve({ resolvedPath: p });
 const missing = () => Promise.resolve({ error: "not_found" as const, tried: ["gemini"] });
-
-function envFromFiles(home: string) {
-  return { HOME: home };
-}
 
 describe("GeminiAdapter.checkInstalled", () => {
   it("returns ok + version on exit 0", async () => {
@@ -1851,6 +1978,14 @@ describe("GeminiAdapter.checkAuth modes", () => {
     const step = await a.checkAuth();
     expect(step.authStatus).toBe("ready");
     expect(step.detail).toContain("gemini_api_key");
+  });
+
+  it("GOOGLE_API_KEY + GOOGLE_GENAI_USE_VERTEXAI=true → ready (vertex_api_key)", async () => {
+    const env = () => ({ GOOGLE_API_KEY: "AIza-redacted", GOOGLE_GENAI_USE_VERTEXAI: "true" });
+    const a = new GeminiAdapter(ok("/usr/bin/gemini"), vi.fn(), env, () => false);
+    const step = await a.checkAuth();
+    expect(step.authStatus).toBe("ready");
+    expect(step.detail).toContain("vertex_api_key");
   });
 
   it("GOOGLE_CLOUD_PROJECT + LOCATION + ADC file → ready (vertex_adc)", async () => {
@@ -2011,8 +2146,12 @@ export class GeminiAdapter implements AgentAdapter {
       }
     }
 
-    // 2. Vertex API key
-    if (nonEmpty(env["GOOGLE_API_KEY"]) && settings?.selectedAuthType === "vertex-ai") {
+    // 2. Vertex API key (express mode)
+    //    Gemini SDK + CLI use GOOGLE_API_KEY together with GOOGLE_GENAI_USE_VERTEXAI=true
+    //    to select Vertex AI in express mode. Settings.json is a secondary signal.
+    const usingVertexFromEnv =
+      isTruthyEnvFlag(env["GOOGLE_GENAI_USE_VERTEXAI"]) || settings?.selectedAuthType === "vertex-ai";
+    if (nonEmpty(env["GOOGLE_API_KEY"]) && usingVertexFromEnv) {
       return readyStep(cmd, "vertex_api_key");
     }
 
@@ -2096,6 +2235,12 @@ function nonEmpty(v: string | undefined): boolean {
   return typeof v === "string" && v.length > 0;
 }
 
+function isTruthyEnvFlag(v: string | undefined): boolean {
+  if (!v) return false;
+  const norm = v.trim().toLowerCase();
+  return norm === "1" || norm === "true" || norm === "yes";
+}
+
 function readyStep(command: string, method: string): CheckStep {
   return {
     name: "authenticated",
@@ -2106,6 +2251,8 @@ function readyStep(command: string, method: string): CheckStep {
   };
 }
 ```
+
+Before landing this task, verify the OAuth cache filename against the current Gemini CLI source. If `~/.gemini/oauth_creds.json` has drifted, update the constant and the `oauth-personal` test fixture in this task; do not silently fall back to a generic `settings.json exists` heuristic.
 
 - [ ] **Step 4: Add ShellManual no-op stubs**
 
@@ -2148,16 +2295,44 @@ If `registry/bootstrap.test.ts` asserts the set of registered adapters, update t
 Run: `cd apps/daemon && pnpm typecheck && pnpm test`
 Expected: typecheck clean (adapter interface fully implemented everywhere); all tests pass.
 
-- [ ] **Step 7: Commit Phase 1 (adapters + interface)**
+- [ ] **Step 7: Now extend the AgentAdapter interface (Task 7 deferred work)**
+
+Edit `apps/daemon/src/adapters/types.ts`. Add the import + extend the interface:
+
+```ts
+import type { AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
+
+export interface AgentAdapter {
+  id: AdapterId;
+  title: string;
+  contextDelivery: AdapterContextDelivery;
+  resolveSpawn(input: AdapterSpawnInput): Promise<AdapterSpawnResult>;
+  probeAvailability(): Promise<AdapterAvailability>;
+
+  checkInstalled(): Promise<CheckStep & { version?: string }>;
+  checkAuth(): Promise<CheckStep>;
+  repairFor(status: AgentReadinessStatus): RepairAction | undefined;
+}
+```
+
+Run: `cd apps/daemon && pnpm typecheck && pnpm test`
+Expected: green — every adapter already implements the three methods from Tasks 8–11.
+
+- [ ] **Step 8: Commit Phase 1 (adapters + interface)**
 
 ```bash
-git add apps/daemon/src/adapters apps/daemon/src/readiness
+git add apps/daemon/src/adapters apps/daemon/src/readiness apps/daemon/src/registry packages/contracts/src/index.ts packages/contracts/src/index.test.ts packages/contracts/dist
 git commit -m "feat(daemon): per-agent readiness checks (claude/codex/opencode/gemini)"
 ```
+
+Note: contracts dist may already be committed in Task 1. If `git status` shows nothing under `packages/contracts`, drop those paths from the `git add`.
 
 ---
 
 ## Task 12: ReadinessService
+
+**Assigned model:** GPT 5.5  
+**Effort:** High
 
 **Files:**
 - Create: `apps/daemon/src/readiness/service.ts`
@@ -2399,12 +2574,19 @@ export class ReadinessService {
     adapter: ReturnType<AdapterRegistry["get"]> & {},
     checkedAt: string,
   ): Promise<AgentReadinessReport> {
-    return Promise.race([
-      this.runChecks(agentId, adapter, checkedAt),
-      new Promise<AgentReadinessReport>((_, reject) =>
-        setTimeout(() => reject(new Error("agent budget exceeded")), AGENT_BUDGET_MS),
-      ),
-    ]);
+    let budgetTimer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        this.runChecks(agentId, adapter, checkedAt),
+        new Promise<AgentReadinessReport>((_, reject) => {
+          budgetTimer = setTimeout(() => reject(new Error("agent budget exceeded")), AGENT_BUDGET_MS);
+        }),
+      ]);
+    } finally {
+      // Note: budget timeout does not cancel adapter work — adapters do not yet accept
+      // AbortSignal. The losing branch continues and is GC'd when its promise settles.
+      if (budgetTimer) clearTimeout(budgetTimer);
+    }
   }
 
   private async runChecks(
@@ -2492,6 +2674,9 @@ git commit -m "feat(daemon): ReadinessService runs and persists checks"
 
 ## Task 13: HTTP routes + extend GET /v1/agents
 
+**Assigned model:** GPT 5.4  
+**Effort:** Medium
+
 **Files:**
 - Modify: `apps/daemon/src/server.ts`
 - Modify: `apps/daemon/src/server.test.ts`
@@ -2499,12 +2684,45 @@ git commit -m "feat(daemon): ReadinessService runs and persists checks"
 
 - [ ] **Step 1: Write the failing tests**
 
+**Critical:** route tests must **not** invoke real local CLIs. Inject a fake `AdapterRegistry` populated with mock adapters that return canned `CheckStep` results. The existing `startServer()` helper builds an `AdapterRegistry`; extend it to accept an override so tests can pass a fake.
+
 Append to `apps/daemon/src/server.test.ts`:
 
 ```ts
-describe("agent readiness routes", () => {
+import { AdapterRegistry } from "./adapters/registry.js";
+import type { AgentAdapter } from "./adapters/types.js";
+
+function fakeAdapter(id: string, ready: boolean): AgentAdapter {
+  return {
+    id: id as never,
+    title: id,
+    contextDelivery: { mode: "preview_only", maxBytes: 32768 },
+    async resolveSpawn() { throw new Error("unused"); },
+    async probeAvailability() { return { status: "available" as const }; },
+    async checkInstalled() {
+      return { name: "installed", ok: true, command: `${id} --version`, version: "1.0.0" };
+    },
+    async checkAuth() {
+      return ready
+        ? { name: "authenticated", ok: true, authStatus: "ready", command: `${id} auth`, detail: "authenticated" }
+        : { name: "authenticated", ok: false, authStatus: "needs_auth", command: `${id} auth`, detail: "not signed in" };
+    },
+    repairFor() { return undefined; },
+  };
+}
+
+function fakeRegistry(): AdapterRegistry {
+  const r = new AdapterRegistry();
+  r.register(fakeAdapter("claude-code", true));
+  r.register(fakeAdapter("codex", false));
+  r.register(fakeAdapter("opencode", true));
+  r.register(fakeAdapter("gemini-cli", false));
+  return r;
+}
+
+describe("agent readiness routes (with fake adapters)", () => {
   it("GET /v1/agents includes readiness field", async () => {
-    const { server, token } = await startServer();
+    const { server, token } = await startServer({ adapterRegistry: fakeRegistry() });
     const res = await server.inject({
       method: "GET",
       url: "/v1/agents",
@@ -2518,7 +2736,7 @@ describe("agent readiness routes", () => {
   });
 
   it("POST /v1/agents/readiness:check runs connected agents only", async () => {
-    const { server, token, db } = await startServer();
+    const { server, token, db } = await startServer({ adapterRegistry: fakeRegistry() });
     db.prepare(`UPDATE agents SET connected = 1 WHERE id = ?`).run("claude-code");
     const res = await server.inject({
       method: "POST",
@@ -2527,12 +2745,13 @@ describe("agent readiness routes", () => {
       payload: {},
     });
     expect(res.statusCode).toBe(200);
-    const body = res.json() as { reports: Array<{ agentId: string }> };
+    const body = res.json() as { reports: Array<{ agentId: string; status: string }> };
     expect(body.reports.map((r) => r.agentId)).toEqual(["claude-code"]);
+    expect(body.reports[0].status).toBe("ready");
   });
 
   it("POST /v1/agents/:id/readiness:check 404s on unknown id", async () => {
-    const { server, token } = await startServer();
+    const { server, token } = await startServer({ adapterRegistry: fakeRegistry() });
     const res = await server.inject({
       method: "POST",
       url: "/v1/agents/does-not-exist/readiness:check",
@@ -2542,7 +2761,7 @@ describe("agent readiness routes", () => {
   });
 
   it("POST /v1/agents/:id/readiness:check 400s on not-connected", async () => {
-    const { server, token, db } = await startServer();
+    const { server, token, db } = await startServer({ adapterRegistry: fakeRegistry() });
     db.prepare(`UPDATE agents SET connected = 0 WHERE id = ?`).run("codex");
     const res = await server.inject({
       method: "POST",
@@ -2553,7 +2772,7 @@ describe("agent readiness routes", () => {
   });
 
   it("POST /v1/agents/:id/readiness:check accepts empty body", async () => {
-    const { server, token, db } = await startServer();
+    const { server, token, db } = await startServer({ adapterRegistry: fakeRegistry() });
     db.prepare(`UPDATE agents SET connected = 1 WHERE id = ?`).run("claude-code");
     const res = await server.inject({
       method: "POST",
@@ -2565,7 +2784,9 @@ describe("agent readiness routes", () => {
 });
 ```
 
-`startServer()` is the existing helper in `server.test.ts`. If it doesn't currently expose `db`, extend it.
+`startServer()` is the existing helper in `server.test.ts`. Extend it to:
+1. Expose `db` on the returned object (if not already).
+2. Accept an optional `{ adapterRegistry?: AdapterRegistry }` argument; when provided, use it instead of the default registry — pass it through to wherever the server constructs `ReadinessService`.
 
 - [ ] **Step 2: Run the tests and confirm they fail**
 
@@ -2643,6 +2864,9 @@ git commit -m "feat(daemon): expose readiness check routes"
 ---
 
 ## Task 14: Desktop API client
+
+**Assigned model:** Codex 5.3  
+**Effort:** Low
 
 **Files:**
 - Modify: `apps/desktop/src/api.ts`
@@ -2762,6 +2986,9 @@ git commit -m "feat(desktop): readiness API client functions"
 
 ## Task 15: `RepairBlock` component
 
+**Assigned model:** Sonnet 4.6  
+**Effort:** Medium
+
 **Files:**
 - Create: `apps/desktop/src/onboarding/RepairBlock.tsx`
 - Create: `apps/desktop/src/onboarding/RepairBlock.test.tsx`
@@ -2785,7 +3012,7 @@ describe("RepairBlock", () => {
         onOpenUrl={vi.fn()}
       />,
     );
-    expect(screen.getByRole("code")).toHaveTextContent("codex login");
+    expect(screen.getByTestId("repair-command")).toHaveTextContent("codex login");
     fireEvent.click(screen.getByRole("button", { name: /copy/i }));
     expect(writeText).toHaveBeenCalledWith("codex login");
   });
@@ -2849,7 +3076,7 @@ export function RepairBlock({ repair, onOpenUrl }: RepairBlockProps) {
   if (repair.kind === "run_command" && repair.command) {
     return (
       <div className="repair-block">
-        <code role="code" aria-label={repair.label}>{repair.command}</code>
+        <code data-testid="repair-command" aria-label={repair.label}>{repair.command}</code>
         <button
           type="button"
           onClick={() => void navigator.clipboard.writeText(repair.command!)}
@@ -2881,6 +3108,9 @@ git commit -m "feat(desktop): RepairBlock component"
 ---
 
 ## Task 16: `ReadinessRow` component
+
+**Assigned model:** Sonnet 4.6  
+**Effort:** Medium
 
 **Files:**
 - Create: `apps/desktop/src/onboarding/ReadinessRow.tsx`
@@ -3105,6 +3335,9 @@ git commit -m "feat(desktop): ReadinessRow component"
 
 ## Task 17: `ReadinessPanel` component
 
+**Assigned model:** Sonnet 4.6  
+**Effort:** High
+
 **Files:**
 - Create: `apps/desktop/src/onboarding/ReadinessPanel.tsx`
 - Create: `apps/desktop/src/onboarding/ReadinessPanel.test.tsx`
@@ -3217,7 +3450,7 @@ Expected: fails.
 Create `apps/desktop/src/onboarding/ReadinessPanel.tsx`:
 
 ```tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Agent, AgentReadinessReport } from "@orca/contracts";
 import { ReadinessRow } from "./ReadinessRow";
 
@@ -3233,6 +3466,7 @@ interface ReadinessPanelProps {
 
 export function ReadinessPanel({ agents, runAll, runOne, onOpenUrl, onChange }: ReadinessPanelProps) {
   const connected = useMemo(() => agents.filter((a) => a.connected), [agents]);
+  const lastEmitted = useRef<{ readyCount: number; settled: boolean } | null>(null);
 
   const cacheFresh = connected.every(
     (a) => a.readiness && Date.now() - new Date(a.readiness.checkedAt).getTime() < CACHE_TTL_MS,
@@ -3276,7 +3510,11 @@ export function ReadinessPanel({ agents, runAll, runOne, onOpenUrl, onChange }: 
   const readyCount = Object.values(reports).filter((r) => r?.status === "ready").length;
 
   useEffect(() => {
-    onChange({ readyCount, settled });
+    const next = { readyCount, settled };
+    const prev = lastEmitted.current;
+    if (prev && prev.readyCount === next.readyCount && prev.settled === next.settled) return;
+    lastEmitted.current = next;
+    onChange(next);
   }, [readyCount, settled, onChange]);
 
   function handleRetry(id: string) {
@@ -3319,44 +3557,54 @@ git commit -m "feat(desktop): ReadinessPanel orchestrates per-agent checks"
 
 ## Task 18: Wire `ReadinessPanel` into `OnboardingView`
 
+**Assigned model:** Sonnet 4.6  
+**Effort:** High
+
 **Files:**
 - Modify: `apps/desktop/src/onboarding/OnboardingView.tsx`
 - Modify: `apps/desktop/src/onboarding/OnboardingView.test.tsx`
 
 - [ ] **Step 1: Update tests**
 
-Open `apps/desktop/src/onboarding/OnboardingView.test.tsx`. Add cases:
+Open `apps/desktop/src/onboarding/OnboardingView.test.tsx`. The existing file uses `createRoot`, `act`, `container`, and helper functions instead of Testing Library globals. Keep that style unless you deliberately convert the whole file. Extend the existing `vi.mock("../api", ...)` to include `runReadinessCheck` and `runReadinessCheckForAgent`, then add cases like:
 
 ```tsx
 it("step 2 mounts the readiness panel and disables Continue until ≥1 ready", async () => {
-  vi.mocked(runReadinessCheck).mockResolvedValue([
+  vi.mocked(api.runReadinessCheck).mockResolvedValue([
     { agentId: "claude-code", status: "needs_auth", steps: [], repair: { kind: "run_command", command: "claude auth login", label: "Sign in" }, checkedAt: "2026-05-22T00:00:00.000Z" },
   ]);
-  render(<OnboardingView onComplete={vi.fn()} />);
-  fireEvent.click(await screen.findByText(/Get started/));
-  // step 1 — pick claude-code (already selected in test fixture or via toggle)
-  fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-  await waitFor(() => expect(runReadinessCheck).toHaveBeenCalled());
-  const cont = screen.getByRole("button", { name: /continue/i });
-  expect(cont).toBeDisabled();
+  await render(vi.fn());
+  clickByText("Get started");
+  act(() => {
+    (container.querySelector('button[data-agent-id="claude-code"]') as HTMLButtonElement)
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  clickByText("Continue");
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  expect(api.runReadinessCheck).toHaveBeenCalled();
+  const cont = Array.from(container.querySelectorAll("button")).find(
+    (b) => b.textContent?.trim() === "Continue",
+  ) as HTMLButtonElement;
+  expect(cont.disabled).toBe(true);
 });
 
 it("when 0 ready and all settled, shows 'Continue anyway'", async () => {
-  vi.mocked(runReadinessCheck).mockResolvedValue([
+  vi.mocked(api.runReadinessCheck).mockResolvedValue([
     { agentId: "claude-code", status: "missing", steps: [], checkedAt: "2026-05-22T00:00:00.000Z" },
   ]);
   const onComplete = vi.fn();
-  render(<OnboardingView onComplete={onComplete} />);
-  fireEvent.click(await screen.findByText(/Get started/));
-  fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-  await waitFor(() => expect(runReadinessCheck).toHaveBeenCalled());
-  const anyway = await screen.findByRole("button", { name: /continue anyway/i });
-  fireEvent.click(anyway);
+  await render(onComplete);
+  clickByText("Get started");
+  act(() => {
+    (container.querySelector('button[data-agent-id="claude-code"]') as HTMLButtonElement)
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  clickByText("Continue");
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  clickByText("Continue anyway");
   expect(onComplete).toHaveBeenCalled();
 });
 ```
-
-The existing test file mocks the API module — extend the existing `vi.mock("../api", ...)` to include `runReadinessCheck` and `runReadinessCheckForAgent`.
 
 - [ ] **Step 2: Run and confirm fail**
 
@@ -3375,10 +3623,40 @@ import { ReadinessPanel } from "./ReadinessPanel";
 import { openExternal } from "../utils/openExternal"; // see Step 4 below
 ```
 
-Replace the existing step-2 effect that does the fake 800 ms delay with state for `readyCount`/`settled`:
+Replace the existing step-2 effect that does the fake 800 ms delay with state for `readyCount`/`settled` **and a connection-save gate**. Readiness must not run until `updateAgentConnection()` has persisted the selected rows, because the daemon endpoint checks only `connected = 1` agents.
 
 ```ts
 const [readinessState, setReadinessState] = useState({ readyCount: 0, settled: false });
+const [connectionsSaved, setConnectionsSaved] = useState(false);
+```
+
+Add this effect for step 2:
+
+```ts
+useEffect(() => {
+  if (step !== 2) return;
+  let cancelled = false;
+  setConnectionsSaved(false);
+  setReadinessState({ readyCount: 0, settled: false });
+  (async () => {
+    try {
+      const updated = await Promise.all(
+        agents.map((a) => updateAgentConnection(a.id, !!selected[a.id])),
+      );
+      if (cancelled) return;
+      setAgents(updated);
+      setConnectionsSaved(true);
+    } catch (err) {
+      if (cancelled) return;
+      setLoadError(err instanceof Error ? err.message : "Failed to save selections");
+      setStep(1);
+    }
+  })();
+  return () => { cancelled = true; };
+  // Run once when entering step 2. `agents` and `selected` are captured from the
+  // user's step-1 choices; including `agents` would loop after `setAgents(updated)`.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [step]);
 ```
 
 And replace the step-2 footer content with:
@@ -3420,9 +3698,9 @@ And replace the step-2 footer content with:
 Replace the body of step 2 (the `<SetupPanel />` call) with:
 
 ```tsx
-{step === 2 && (
+{step === 2 && connectionsSaved && (
   <ReadinessPanel
-    agents={agents.filter((a) => selected[a.id])}
+    agents={agents.filter((a) => selected[a.id] && a.connected)}
     runAll={runReadinessCheck}
     runOne={runReadinessCheckForAgent}
     onOpenUrl={openExternal}
@@ -3431,7 +3709,7 @@ Replace the body of step 2 (the `<SetupPanel />` call) with:
 )}
 ```
 
-Delete the now-unused `SetupPanel` function and the 800 ms `setTimeout`.
+Before `connectionsSaved`, render a small saving state (`Saving agent selections…`) rather than the old fake setup delay. Delete the now-unused `SetupPanel` function, the 800 ms `setTimeout`, and the now-unused `.setup-*` CSS rules in `onboarding.css`. Keep `.onboarding-prose--narrow`; it is still used.
 
 - [ ] **Step 4: Add `openExternal` helper**
 
@@ -3445,7 +3723,19 @@ export function openExternal(url: string): void {
 }
 ```
 
-If `@tauri-apps/plugin-opener` is not already in `apps/desktop/package.json`, add it: `cd apps/desktop && pnpm add @tauri-apps/plugin-opener@^2`. Verify the matching Rust plugin is registered in `src-tauri/Cargo.toml` (`tauri-plugin-opener`).
+If `@tauri-apps/plugin-opener` is not already in `apps/desktop/package.json`, add it: `cd apps/desktop && pnpm add @tauri-apps/plugin-opener@^2`. Also add the Rust side:
+
+```toml
+# apps/desktop/src-tauri/Cargo.toml
+tauri-plugin-opener = "2"
+```
+
+And register the plugin in `apps/desktop/src-tauri/src/lib.rs`:
+
+```rust
+tauri::Builder::default()
+    .plugin(tauri_plugin_opener::init())
+```
 
 - [ ] **Step 5: Run and confirm pass**
 
@@ -3455,13 +3745,16 @@ Expected: all desktop tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/desktop/src/onboarding/OnboardingView.tsx apps/desktop/src/onboarding/OnboardingView.test.tsx apps/desktop/src/utils/openExternal.ts apps/desktop/package.json apps/desktop/pnpm-lock.yaml
+git add apps/desktop/src/onboarding/OnboardingView.tsx apps/desktop/src/onboarding/OnboardingView.test.tsx apps/desktop/src/onboarding/onboarding.css apps/desktop/src/utils/openExternal.ts apps/desktop/package.json apps/desktop/pnpm-lock.yaml apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/Cargo.lock apps/desktop/src-tauri/src/lib.rs
 git commit -m "feat(desktop): replace onboarding fake delay with readiness check"
 ```
 
 ---
 
 ## Task 19: `NoReadyAgentsBanner` + mount in `App.tsx`
+
+**Assigned model:** Sonnet 4.6  
+**Effort:** Medium
 
 **Files:**
 - Create: `apps/desktop/src/chrome/NoReadyAgentsBanner.tsx`
@@ -3564,10 +3857,11 @@ export function NoReadyAgentsBanner({ agents, onDismiss }: NoReadyAgentsBannerPr
 
 - [ ] **Step 4: Mount in `App.tsx`**
 
-Edit `apps/desktop/src/App.tsx`. Add import:
+Edit `apps/desktop/src/App.tsx`. Add `Agent` as a type to the existing `@orca/contracts` import and add the banner import:
 
 ```ts
 import { NoReadyAgentsBanner } from "./chrome/NoReadyAgentsBanner";
+import type { Agent } from "@orca/contracts";
 ```
 
 Add an `agents` state next to existing state hooks:
@@ -3576,13 +3870,30 @@ Add an `agents` state next to existing state hooks:
 const [agents, setAgents] = useState<Agent[]>([]);
 ```
 
-In the existing health-poll `useEffect` (or wherever `listAgents()` is already called once after onboarding finishes), set the agents:
+Add a refresh helper and use it for both bootstrapping and post-onboarding refresh:
 
 ```ts
-listAgents().then(setAgents).catch(() => {});
+async function refreshAgents() {
+  try {
+    setAgents(await listAgents());
+  } catch {
+    // connection status banner communicates the problem
+  }
+}
 ```
 
-Refresh on `agent.connection_changed` events if the existing event stream exposes them; otherwise rely on a refresh-on-mount + periodic poll matching nearby patterns.
+In the existing bootstrap effect that decides `needs-onboarding` vs `complete`, call `setAgents(rows)` from the same `listAgents()` result. In `OnboardingView` completion, refresh before switching to complete:
+
+```tsx
+<OnboardingView
+  onComplete={async () => {
+    await refreshAgents();
+    setOnboardingState("complete");
+  }}
+/>
+```
+
+There is no current `agent.connection_changed` domain event. Do not invent one in this milestone; the banner refreshes on app bootstrap, after onboarding completion, and on any existing periodic agent refresh added here.
 
 Render the banner just below the existing `<Titlebar />`:
 
@@ -3605,6 +3916,9 @@ git commit -m "feat(desktop): NoReadyAgentsBanner for empty-ready state"
 ---
 
 ## Task 20: Gated real auth-status smoke tests
+
+**Assigned model:** Codex 5.3  
+**Effort:** Low
 
 **Files:**
 - Create: `apps/daemon/src/adapters/claude-code.auth-smoke.test.ts`

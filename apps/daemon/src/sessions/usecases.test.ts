@@ -777,7 +777,7 @@ describe('stopSession', () => {
     expect(() => stopSession(stopCtx, detail.id)).toThrow(SessionNotStoppableError);
   });
 
-  it('onTerminalState hook fires after M4 commit on natural exit', async () => {
+  it('onTerminalState hook fires after session commit on natural exit', async () => {
     const db = freshDb();
     const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-hook-exit-'));
     tempDirs.push(wsDir);
@@ -797,7 +797,7 @@ describe('stopSession', () => {
       sessionOutputStore: store,
       sessionRuntime: runtime,
       onTerminalState: (sid, gid) => {
-        // Hook must only be called after M4 tx commits: session status must already be terminal
+        // Hook must only be called after the session tx commits: status must already be terminal.
         const s = getSession(db, sid, store).session;
         expect(['exited', 'failed', 'stopped']).toContain(s.status);
         hookCalls.push({ sessionId: sid, goalId: gid });
@@ -812,7 +812,7 @@ describe('stopSession', () => {
     expect(hookCalls[0]!.sessionId).toBe(sessionId);
   });
 
-  it('onTerminalState hook fires after M4 commit on user-requested stop', async () => {
+  it('onTerminalState hook fires after session commit on user-requested stop', async () => {
     const db = freshDb();
     const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-hook-stop-'));
     tempDirs.push(wsDir);
@@ -841,7 +841,7 @@ describe('stopSession', () => {
     expect(hookCalls[0]).toBe(sessionId);
   });
 
-  it('onTerminalState hook fires after M4 commit on session.failed', async () => {
+  it('onTerminalState hook fires after session commit on session.failed', async () => {
     const db = freshDb();
     const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-hook-fail-'));
     tempDirs.push(wsDir);

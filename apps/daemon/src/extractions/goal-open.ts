@@ -43,7 +43,7 @@ export function tryEnqueueForTerminalSession(
     );
     runner.notify();
   } catch {
-    // Non-blocking: enqueue errors must not propagate to the M4 lifecycle path
+    // Non-blocking: enqueue errors must not propagate to the session lifecycle path.
   }
 }
 

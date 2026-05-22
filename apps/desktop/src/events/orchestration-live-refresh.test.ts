@@ -4,7 +4,7 @@ import {
   feedbackRecommendationId,
   generationNoticeFromEvent,
   recommendationEventMayTouchTask,
-} from "./m7-live-refresh";
+} from "./orchestration-live-refresh";
 
 const now = "2026-01-01T00:00:00.000Z";
 
@@ -19,7 +19,7 @@ function event(type: DomainEvent["type"], payload: Record<string, unknown>): Dom
   };
 }
 
-describe("M7 live-refresh event helpers", () => {
+describe("orchestration live-refresh event helpers", () => {
   it("extracts content-free generation banner state from requested events", () => {
     expect(
       generationNoticeFromEvent(

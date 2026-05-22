@@ -87,7 +87,7 @@ function extractionRow(overrides: Partial<MemoryExtraction> = {}): MemoryExtract
     sessionId: overrides.sessionId ?? 'sess-1',
     trigger: overrides.trigger ?? 'manual',
     status: overrides.status ?? 'pending',
-    extractorVersion: overrides.extractorVersion ?? 'm5-test-v1',
+    extractorVersion: overrides.extractorVersion ?? 'memory-test-v1',
     sourceFingerprint: overrides.sourceFingerprint ?? 'fp-1',
     sourceOffsetFirst: overrides.sourceOffsetFirst ?? 0,
     sourceOffsetLast: overrides.sourceOffsetLast ?? 10,

@@ -57,7 +57,7 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
   reconcileStaleAssemblies(db, eventBus, bootNow);
   await reconcileInFlightGenerations(db);
 
-  // Wire M7 orchestration trigger subscriber (must be before HTTP listen).
+  // Wire orchestration trigger subscriber (must be before HTTP listen).
   const daemonCtx = createDaemonContext(db, eventBus);
   subscribeOrchestrationTriggers(daemonCtx);
 

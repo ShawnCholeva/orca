@@ -44,7 +44,7 @@ import {
 } from './extractions/projection.js';
 
 // Populate the skill registry once for the file — mirrors the daemon boot sequence.
-// createGoal resolves quick-goal from the registry (M2-008).
+// createGoal resolves quick-goal from the registry.
 beforeAll(() => {
   bootstrapRegistries();
 });
@@ -442,7 +442,7 @@ describe('WebSocket /v1/events', () => {
   it('delivers goal.created event to subscriber within 250ms', async () => {
     const ws = await wsServer.injectWS('/v1/events?token=test-token');
 
-    // M2-008: each createGoal emits skill.invoked then goal.created — wait for goal.created.
+    // Each createGoal emits skill.invoked then goal.created — wait for goal.created.
     const messagePromise = new Promise<DomainEvent>((resolve) => {
       const handler = (data: Buffer | ArrayBuffer | Buffer[]) => {
         const event = DomainEvent.parse(JSON.parse(data.toString()));
@@ -551,7 +551,7 @@ describe('GET /v1/events (replay)', () => {
     });
     expect(all.statusCode).toBe(200);
     const body = ListEventsResponse.parse(JSON.parse(all.body));
-    // M2-008: each goal create emits skill.invoked + goal.created → 3 goals = 6 events
+    // Each goal create emits skill.invoked + goal.created → 3 goals = 6 events.
     expect(body.events).toHaveLength(6);
     expect(body.events.map((e) => e.type)).toEqual([
       'skill.invoked', 'goal.created',
@@ -584,7 +584,7 @@ describe('GET /v1/events (replay)', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = ListEventsResponse.parse(JSON.parse(res.body));
-    // M2-008: one goal = 2 events (skill.invoked + goal.created)
+    // One goal = 2 events (skill.invoked + goal.created).
     expect(body.events).toHaveLength(2);
     expect(body.nextSinceSeq).toBe(body.events[1]!.seq);
   });
@@ -614,11 +614,11 @@ describe('GET /v1/events (replay)', () => {
   });
 });
 
-describe('M3 routes', () => {
+describe('goal refinement and workspace routes', () => {
   let server: FastifyInstance;
   let wsDir!: string;
   let wsDir2!: string;
-  const m3Dirs: string[] = [];
+  const routeDirs: string[] = [];
 
   const DRAFT = {
     skillId: 'guided-goal-refinement' as const,
@@ -630,12 +630,12 @@ describe('M3 routes', () => {
   };
 
   beforeEach(() => {
-    const dbDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m3-srv-'));
-    m3Dirs.push(dbDir);
-    wsDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-m3-ws1-')));
-    m3Dirs.push(wsDir);
-    wsDir2 = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-m3-ws2-')));
-    m3Dirs.push(wsDir2);
+    const dbDir = mkdtempSync(path.join(os.tmpdir(), 'orca-goal-routes-'));
+    routeDirs.push(dbDir);
+    wsDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-goal-ws1-')));
+    routeDirs.push(wsDir);
+    wsDir2 = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-goal-ws2-')));
+    routeDirs.push(wsDir2);
 
     const config = createConfig(dbDir);
     const db = openDatabase(config);
@@ -646,7 +646,7 @@ describe('M3 routes', () => {
   afterEach(async () => {
     await server.close();
     closeDatabase();
-    for (const dir of m3Dirs.splice(0)) {
+    for (const dir of routeDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -726,7 +726,7 @@ describe('M3 routes', () => {
       payload: {
         title: 'g',
         refined: DRAFT,
-        workspaces: [{ inputPath: '/this/does/not/exist/ever/m3' }]
+        workspaces: [{ inputPath: '/this/does/not/exist/ever/goal-workspace' }]
       }
     });
     unsub();
@@ -973,7 +973,7 @@ describe('M3 routes', () => {
       method: 'POST',
       url: '/v1/workspaces/inspect',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { inputPath: '/does/not/exist/at/all/m3test' }
+      payload: { inputPath: '/does/not/exist/at/all/workspace-test' }
     });
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body) as { error: { code: string } };
@@ -1005,18 +1005,18 @@ describe('M3 routes', () => {
   });
 });
 
-describe('M4-006 session and adapter routes', () => {
+describe('session and adapter routes', () => {
   let server: FastifyInstance;
   let goalId: string;
   let workspaceId: string;
   let wsDir: string;
-  const m4Dirs: string[] = [];
+  const tempDirs: string[] = [];
 
   beforeEach(async () => {
-    const dbDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m4-srv-'));
-    m4Dirs.push(dbDir);
-    wsDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-m4-ws-')));
-    m4Dirs.push(wsDir);
+    const dbDir = mkdtempSync(path.join(os.tmpdir(), 'orca-session-srv-'));
+    tempDirs.push(dbDir);
+    wsDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-session-ws-')));
+    tempDirs.push(wsDir);
 
     const config = createConfig(dbDir);
     const db = openDatabase(config);
@@ -1028,7 +1028,7 @@ describe('M4-006 session and adapter routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'm4-goal' }
+      payload: { title: 'session-goal' }
     });
     goalId = (CreateGoalResponse.parse(JSON.parse(goalRes.body))).goal.id;
 
@@ -1045,7 +1045,7 @@ describe('M4-006 session and adapter routes', () => {
   afterEach(async () => {
     await server.close();
     closeDatabase();
-    for (const dir of m4Dirs.splice(0)) {
+    for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -1251,7 +1251,7 @@ describe('M4-006 session and adapter routes', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  // ---- M5 Memory routes ----
+  // ---- Memory routes ----
 
   async function createGoalForTest(): Promise<string> {
     const res = await server.inject({
@@ -1449,7 +1449,7 @@ describe('M4-006 session and adapter routes', () => {
     expect(memoryEvents[0]!.goalId).toBe(goalId);
   });
 
-  // ---- M5 Decision routes ----
+  // ---- Decision routes ----
 
   it('GET /v1/goals/:goalId/decisions returns empty list for new goal', async () => {
     const goalId = await createGoalForTest();
@@ -1646,7 +1646,7 @@ describe('M4-006 session and adapter routes', () => {
   });
 });
 
-describe('M5-011 summary and extract-memory routes', () => {
+describe('session summary and extract-memory routes', () => {
   let server: FastifyInstance;
   let goalId: string;
   let workspaceId: string;
@@ -1657,9 +1657,9 @@ describe('M5-011 summary and extract-memory routes', () => {
   const dirs: string[] = [];
 
   beforeEach(async () => {
-    const dbDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m5-011-srv-'));
+    const dbDir = mkdtempSync(path.join(os.tmpdir(), 'orca-memory-routes-srv-'));
     dirs.push(dbDir);
-    wsDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-m5-011-ws-')));
+    wsDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-memory-routes-ws-')));
     dirs.push(wsDir);
 
     const config = createConfig(dbDir);
@@ -1685,7 +1685,7 @@ describe('M5-011 summary and extract-memory routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'm5-011-goal' },
+      payload: { title: 'memory-routes-goal' },
     });
     goalId = CreateGoalResponse.parse(JSON.parse(goalRes.body)).goal.id;
 

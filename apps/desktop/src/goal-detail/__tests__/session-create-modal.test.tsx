@@ -130,7 +130,7 @@ function mockApi(overrides: Record<string, unknown> = {}) {
   }));
 }
 
-describe("CreateSessionDialog — M6-013 context controls", () => {
+describe("CreateSessionDialog - context controls", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
@@ -165,7 +165,7 @@ describe("CreateSessionDialog — M6-013 context controls", () => {
     expect(container.querySelector(".context-preview-panel")).toBeNull();
   });
 
-  it("Skip-context path calls createSession with M4-shaped request", async () => {
+  it("Skip-context path calls createSession with base session request", async () => {
     const createSession = vi.fn().mockResolvedValue({ session: sessionDetail });
     const startSession = vi.fn().mockResolvedValue({ session: { ...sessionDetail, status: "running" } });
     const onCreated = vi.fn();
@@ -204,7 +204,7 @@ describe("CreateSessionDialog — M6-013 context controls", () => {
     expect(callArg).not.toHaveProperty("contextPackageId");
   });
 
-  it("Skip-context path includes M7 association ids from recommendation prefill", async () => {
+  it("Skip-context path includes orchestration association ids from recommendation prefill", async () => {
     const createSession = vi.fn().mockResolvedValue({ session: sessionDetail });
     mockApi({ createSession });
     const { CreateSessionDialog } = await import("../sessions/CreateSessionDialog");
@@ -290,7 +290,7 @@ describe("CreateSessionDialog — M6-013 context controls", () => {
     expect(onContextPrepared).toHaveBeenCalledWith(contextResponse);
   });
 
-  it("Prepare-context path includes M7 association ids from recommendation prefill", async () => {
+  it("Prepare-context path includes orchestration association ids from recommendation prefill", async () => {
     const createContextPackage = vi.fn().mockResolvedValue(contextResponse);
     mockApi({ createContextPackage });
     const { CreateSessionDialog } = await import("../sessions/CreateSessionDialog");

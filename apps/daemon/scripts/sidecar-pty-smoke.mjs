@@ -12,7 +12,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const pkgRoot = path.resolve(here, "..");
 const sidecarDir = path.join(pkgRoot, "dist", "sidecar");
 const runtimeDir = path.join(sidecarDir, "runtime");
-const token = "m4-015-sidecar-smoke-token";
+const token = "sidecar-pty-smoke-token";
 const sentinel = "orca-sidecar-smoke";
 const isWindows = process.platform === "win32";
 
@@ -142,7 +142,7 @@ function collectOutput(detail) {
 }
 
 async function main() {
-  console.log("[m4-015] building sidecar...");
+  console.log("[sidecar-pty-smoke] building sidecar...");
   await execFileChecked(process.execPath, [path.join(here, "build-sidecar.mjs")], {
     cwd: pkgRoot,
   });
@@ -154,7 +154,7 @@ async function main() {
   if (!existsSync(binaryPath)) throw new Error(`missing sidecar binary: ${binaryPath}`);
   if (!existsSync(runtimeDir)) throw new Error(`missing sidecar runtime: ${runtimeDir}`);
 
-  const rootDir = mkdtempSync(path.join(os.tmpdir(), "orca-m4-015-"));
+  const rootDir = mkdtempSync(path.join(os.tmpdir(), "orca-sidecar-pty-smoke-"));
   const workspaceDir = path.join(rootDir, "workspace");
   const dataDir = path.join(rootDir, "daemon-data");
   mkdirSync(workspaceDir, { recursive: true });
@@ -190,7 +190,7 @@ async function main() {
     await waitForHealth(baseUrl, daemon);
 
     const { goal } = await requestJson(baseUrl, "POST", "/v1/goals", {
-      title: "M4-015 Sidecar Smoke",
+      title: "Sidecar PTY Smoke",
       description: "Bundled daemon PTY smoke",
       workspaces: [{ inputPath: workspaceDir }],
     });
@@ -252,10 +252,10 @@ async function main() {
       throw new Error("session output tail did not include smoke sentinel");
     }
 
-    console.log("[m4-015] sidecar PTY smoke passed");
+    console.log("[sidecar-pty-smoke] sidecar PTY smoke passed");
   } catch (error) {
     if (daemonOutput.stderr.length > 0) {
-      console.error("[m4-015] daemon stderr tail:");
+      console.error("[sidecar-pty-smoke] daemon stderr tail:");
       console.error(daemonOutput.stderr);
     }
     throw error;
@@ -272,6 +272,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("[m4-015] smoke failed:", error);
+  console.error("[sidecar-pty-smoke] smoke failed:", error);
   process.exit(1);
 });

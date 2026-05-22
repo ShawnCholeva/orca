@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
-import { M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS } from '@orca/contracts';
+import { ORCHESTRATION_GENERATION_MAX_FAILURE_MESSAGE_CHARS } from '@orca/contracts';
 import { redactSecrets } from '../memory/normalize.js';
 
 interface StaleGenerationRow {
@@ -16,11 +16,11 @@ interface ReconcileOptions {
 const BOOT_RECONCILED_MESSAGE = 'reconciled at boot';
 
 function capAndRedactFailureMessage(message: string): string {
-  return redactSecrets(message.slice(0, M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS));
+  return redactSecrets(message.slice(0, ORCHESTRATION_GENERATION_MAX_FAILURE_MESSAGE_CHARS));
 }
 
 /**
- * Marks stale M7 in-flight generation rows (pending/running) as failed with daemon_restart.
+ * Marks stale orchestration in-flight generation rows (pending/running) as failed with daemon_restart.
  * Event rows are appended in the same transaction as projection row updates.
  * Runs during daemon bootstrap before trigger subscription and HTTP listen.
  */

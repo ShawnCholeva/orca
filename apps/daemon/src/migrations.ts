@@ -3,6 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 
+const SUGGESTED_ORCHESTRATION_MIGRATION = "0008_suggested_orchestration.sql";
+
 export const migrationFiles = [
   "0001_init.sql",
   "0002_workspaces_refinements.sql",
@@ -10,7 +12,7 @@ export const migrationFiles = [
   "0005_memory.sql",
   "0006_context.sql",
   "0007_agents.sql",
-  "m7-001-suggested-orchestration.sql"
+  SUGGESTED_ORCHESTRATION_MIGRATION
 ] as const;
 
 export function runMigrations(
@@ -49,8 +51,18 @@ export function runMigrations(
   for (const file of files) {
     if (alreadyApplied.has(file)) continue;
 
-    const sql = readFileSync(path.join(dir, file), "utf-8");
     const now = new Date().toISOString();
+
+    if (
+      file === SUGGESTED_ORCHESTRATION_MIGRATION &&
+      suggestedOrchestrationSchemaExists(db)
+    ) {
+      insertMigration.run(file, now);
+      applied.push(file);
+      continue;
+    }
+
+    const sql = readFileSync(path.join(dir, file), "utf-8");
 
     db.transaction(() => {
       db.exec(sql);
@@ -61,6 +73,16 @@ export function runMigrations(
   }
 
   return { applied };
+}
+
+function suggestedOrchestrationSchemaExists(db: Database.Database): boolean {
+  const rows = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?)"
+    )
+    .all("tasks", "recommendations", "conflicts") as { name: string }[];
+
+  return new Set(rows.map((row) => row.name)).size === 3;
 }
 
 // Lazy: in CJS bundles `import.meta.url` is empty, so evaluating this at

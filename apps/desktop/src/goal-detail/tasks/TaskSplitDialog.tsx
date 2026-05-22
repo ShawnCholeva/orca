@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
-  M7_TASK_MAX_DESCRIPTION_CHARS,
-  M7_TASK_MAX_TITLE_CHARS,
+  ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS,
+  ORCHESTRATION_TASK_MAX_TITLE_CHARS,
   type Task,
   type TaskRole,
   type Workspace,
@@ -78,13 +78,13 @@ export function TaskSplitDialog({ task, workspaces, onSplit, onClose, initialChi
     if (parsed.some((child) => !child.title)) {
       return { ok: false, error: "Each child task needs a title." };
     }
-    if (parsed.some((child) => child.title.length > M7_TASK_MAX_TITLE_CHARS)) {
-      return { ok: false, error: `Child titles must be ${M7_TASK_MAX_TITLE_CHARS} characters or fewer.` };
+    if (parsed.some((child) => child.title.length > ORCHESTRATION_TASK_MAX_TITLE_CHARS)) {
+      return { ok: false, error: `Child titles must be ${ORCHESTRATION_TASK_MAX_TITLE_CHARS} characters or fewer.` };
     }
-    if (parsed.some((child) => child.description.length > M7_TASK_MAX_DESCRIPTION_CHARS)) {
+    if (parsed.some((child) => child.description.length > ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS)) {
       return {
         ok: false,
-        error: `Child descriptions must be ${M7_TASK_MAX_DESCRIPTION_CHARS} characters or fewer.`,
+        error: `Child descriptions must be ${ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS} characters or fewer.`,
       };
     }
 
@@ -141,7 +141,7 @@ export function TaskSplitDialog({ task, workspaces, onSplit, onClose, initialChi
                 type="text"
                 value={child.title}
                 onChange={(e) => updateChild(index, { title: e.target.value })}
-                maxLength={M7_TASK_MAX_TITLE_CHARS}
+                maxLength={ORCHESTRATION_TASK_MAX_TITLE_CHARS}
                 disabled={saving}
               />
 
@@ -150,7 +150,7 @@ export function TaskSplitDialog({ task, workspaces, onSplit, onClose, initialChi
                 id={`task-split-description-${index}`}
                 value={child.description}
                 onChange={(e) => updateChild(index, { description: e.target.value })}
-                maxLength={M7_TASK_MAX_DESCRIPTION_CHARS}
+                maxLength={ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS}
                 rows={2}
                 disabled={saving}
               />

@@ -116,7 +116,7 @@ function countRows(db: Database.Database, sql: string, ...params: unknown[]): nu
   return (db.prepare(sql).get(...params) as { count: number }).count;
 }
 
-describe.sequential('M6-016 context proof loop', () => {
+describe.sequential('context package proof loop', () => {
   let server: FastifyInstance | null = null;
   let db: Database.Database;
   let unsubscribe: (() => void) | null = null;
@@ -138,8 +138,8 @@ describe.sequential('M6-016 context proof loop', () => {
   });
 
   it('prepares context, links it to a session, delivers it, and survives restart', async () => {
-    const dataDir = mktemp('orca-m6-proof-db-');
-    const workspaceDir = realpathSync(mktemp('orca-m6-proof-ws-'));
+    const dataDir = mktemp('orca-context-proof-db-');
+    const workspaceDir = realpathSync(mktemp('orca-context-proof-ws-'));
     const config = createConfig(dataDir);
 
     db = openTestDb(config);
@@ -158,14 +158,14 @@ describe.sequential('M6-016 context proof loop', () => {
       url: '/v1/goals/refine',
       headers: AUTH,
       payload: {
-        title: 'M6 proof loop',
+        title: 'Context proof loop',
         description: [
           'Goals:',
           '- Prove context preparation survives restart',
           '',
           'Constraints:',
           '- Keep context local first',
-          '- Preserve M4 session behavior',
+          '- Preserve existing session behavior',
         ].join('\n'),
       },
     });
@@ -177,7 +177,7 @@ describe.sequential('M6-016 context proof loop', () => {
       url: '/v1/goals',
       headers: AUTH,
       payload: {
-        title: 'M6 proof loop',
+        title: 'Context proof loop',
         refined: draft,
         workspaces: [{ inputPath: workspaceDir }],
       },

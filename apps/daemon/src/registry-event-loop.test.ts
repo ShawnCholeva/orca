@@ -1,5 +1,5 @@
 /**
- * M2-014: End-to-end M2 fitness function integration suite.
+ * End-to-end registry and event-loop integration suite.
  * Locks the following invariants against regression:
  *   S1 Boot          — health reports registries: { plugins: 3, skills: 1 }
  *   S2 Registry      — GET /v1/plugins and GET /v1/skills return the expected built-ins
@@ -70,12 +70,12 @@ function assertEventOrder(db: Database.Database, goalId: string): void {
   expect(rows[1]!.goal_id).toBe(goalId);
 }
 
-describe.sequential('M2-014 — scenarios 1–6', () => {
+describe.sequential('registry/event-loop scenarios 1–6', () => {
   let server: FastifyInstance;
   let dir: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(path.join(os.tmpdir(), 'orca-m2-loop-'));
+    dir = mkdtempSync(path.join(os.tmpdir(), 'orca-registry-loop-'));
     server = bootServer(dir);
     await server.ready();
   });
@@ -134,7 +134,7 @@ describe.sequential('M2-014 — scenarios 1–6', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'M2 loop' }
+      payload: { title: 'registry loop' }
     });
 
     expect(res.statusCode).toBe(201);
@@ -228,9 +228,9 @@ describe.sequential('M2-014 — scenarios 1–6', () => {
   });
 });
 
-describe('M2-014 S7 — restart: event ordering survives DB close/reopen', () => {
+describe('registry/event-loop restart: event ordering survives DB close/reopen', () => {
   it('skill.invoked row immediately precedes goal.created after server restart', async () => {
-    const dataDir = mkdtempSync(path.join(os.tmpdir(), 'orca-m2-restart-'));
+    const dataDir = mkdtempSync(path.join(os.tmpdir(), 'orca-registry-restart-'));
 
     const server1 = bootServer(dataDir);
     await server1.ready();

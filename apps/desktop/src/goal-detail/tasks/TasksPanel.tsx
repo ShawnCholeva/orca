@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { SessionSummary, Task, TaskGeneration, TaskRole, TaskStatus, Workspace } from "@orca/contracts";
-import type { LiveGenerationNotice } from "../../events/m7-live-refresh";
+import type { LiveGenerationNotice } from "../../events/orchestration-live-refresh";
 import {
   generateTasks,
   listSessions,

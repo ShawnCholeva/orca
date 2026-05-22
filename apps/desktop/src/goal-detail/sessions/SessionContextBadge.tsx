@@ -1,6 +1,6 @@
 import type { AdapterId, ContextPackage, SessionSummary } from "@orca/contracts";
 
-// In M6, only shell-manual delivers context to the adapter; all others are preview_only.
+// Only shell-manual delivers context to the adapter; all others are preview_only.
 const PREVIEW_ONLY_ADAPTERS = new Set<AdapterId>(["claude-code", "opencode", "codex"]);
 
 type BadgeState = "ready" | "sparse" | "truncated" | "preview-only" | "failed" | "none";

@@ -151,10 +151,10 @@ describe("createGoal", () => {
   });
 });
 
-describe("createGoal — M2-008 event ordering and payload invariants", () => {
+describe("createGoal — event ordering and payload invariants", () => {
   it("skill.invoked has a strictly smaller seq than goal.created, both share the same goalId", async () => {
     const { db, ctx } = setup();
-    const goal = await createGoal({ title: "M2 ordering" }, ctx);
+    const goal = await createGoal({ title: "event ordering" }, ctx);
 
     const rows = db
       .prepare("SELECT seq, type, goal_id FROM events WHERE goal_id = ? ORDER BY seq ASC")
@@ -245,7 +245,7 @@ describe("createGoal — M2-008 event ordering and payload invariants", () => {
   });
 });
 
-describe("createGoal — M3-006 refined path", () => {
+describe("createGoal — refined goal path", () => {
   function makeRefined(overrides?: object) {
     return {
       skillId: "guided-goal-refinement" as const,
@@ -599,7 +599,7 @@ describe("createGoal — M3-006 refined path", () => {
     expect(publishSpy).not.toHaveBeenCalled();
   });
 
-  it("M2 minimal path response shape is preserved (same fields, 2 events)", async () => {
+  it("minimal create path response shape is preserved (same fields, 2 events)", async () => {
     const { db, ctx } = setup();
 
     const goal = await createGoal({ title: "Minimal", description: "no change" }, ctx);

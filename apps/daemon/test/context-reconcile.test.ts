@@ -227,20 +227,20 @@ describe('reconcileStaleAssemblies', () => {
     expect(p['failureCode']).toBe('daemon_restart');
   });
 
-  it('is wired after M4/M5 reconcilers and before HTTP listen', () => {
+  it('is wired after session and extraction reconcilers and before HTTP listen', () => {
     const source = readFileSync(path.join(process.cwd(), 'src/index.ts'), 'utf8');
 
     const migrations = source.indexOf('runMigrations(db, migrationsDir)');
-    const m4 = source.indexOf('reconcileSessionsOnBoot(db, eventBus, bootNow)');
-    const m5 = source.indexOf('reconcileStaleExtractions(db, eventBus, bootNow)');
-    const m6 = source.indexOf('reconcileStaleAssemblies(db, eventBus, bootNow)');
+    const sessionReconciler = source.indexOf('reconcileSessionsOnBoot(db, eventBus, bootNow)');
+    const extractionReconciler = source.indexOf('reconcileStaleExtractions(db, eventBus, bootNow)');
+    const assemblyReconciler = source.indexOf('reconcileStaleAssemblies(db, eventBus, bootNow)');
     const listen = source.indexOf('await server.listen');
 
     expect(migrations).toBeGreaterThanOrEqual(0);
-    expect(m4).toBeGreaterThan(migrations);
-    expect(m5).toBeGreaterThan(m4);
-    expect(m6).toBeGreaterThan(m5);
-    expect(listen).toBeGreaterThan(m6);
+    expect(sessionReconciler).toBeGreaterThan(migrations);
+    expect(extractionReconciler).toBeGreaterThan(sessionReconciler);
+    expect(assemblyReconciler).toBeGreaterThan(extractionReconciler);
+    expect(listen).toBeGreaterThan(assemblyReconciler);
   });
 
   it('works across multiple goals', () => {

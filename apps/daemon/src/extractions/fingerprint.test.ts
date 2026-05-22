@@ -7,7 +7,7 @@ describe('computeSourceFingerprint', () => {
       sessionId: 'sess-1',
       sourceOffsetFirst: 0,
       sourceOffsetLast: 1024,
-      extractorVersion: 'm5-deterministic-v1',
+      extractorVersion: 'memory-deterministic-v1',
     });
     expect(fp).toMatch(/^[0-9a-f]{64}$/);
   });

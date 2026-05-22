@@ -2,10 +2,10 @@ import { z } from 'zod';
 import {
   ProposedAction,
   RecommendationSourceRef,
-  M7_RECOMMENDATION_MAX_TITLE_CHARS,
-  M7_RECOMMENDATION_MAX_RATIONALE_CHARS,
-  M7_RECOMMENDATION_MAX_SOURCES,
-  M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES,
+  ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_SOURCES,
+  ORCHESTRATION_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES,
   type RecommendationType,
 } from '@orca/contracts';
 import type { RecommendationInput } from './input.js';
@@ -44,11 +44,11 @@ export const RecommendationProviderOutputSchema = z
             'mark_complete',
             'pause_work',
           ]),
-          title: z.string().trim().min(1).max(M7_RECOMMENDATION_MAX_TITLE_CHARS),
-          rationale: z.string().max(M7_RECOMMENDATION_MAX_RATIONALE_CHARS),
+          title: z.string().trim().min(1).max(ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS),
+          rationale: z.string().max(ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS),
           proposedAction: ProposedAction,
           confidence: z.number().min(0).max(1),
-          sources: z.array(RecommendationSourceRef).max(M7_RECOMMENDATION_MAX_SOURCES),
+          sources: z.array(RecommendationSourceRef).max(ORCHESTRATION_RECOMMENDATION_MAX_SOURCES),
           relatedTaskId: z.string().optional(),
           relatedSessionId: z.string().optional(),
           relatedContextPackageId: z.string().optional(),
@@ -72,10 +72,10 @@ export const RecommendationProviderOutputSchema = z
       }
       // proposedAction JSON size cap
       const actionJson = JSON.stringify(c.proposedAction);
-      if (new TextEncoder().encode(actionJson).length > M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES) {
+      if (new TextEncoder().encode(actionJson).length > ORCHESTRATION_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `candidates[${i}]: proposedAction exceeds ${M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES} bytes`,
+          message: `candidates[${i}]: proposedAction exceeds ${ORCHESTRATION_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES} bytes`,
         });
       }
     }

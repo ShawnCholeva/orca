@@ -13,8 +13,8 @@ const now = "2026-01-01T00:00:00.000Z";
 
 const goal = {
   id: "goal-1",
-  title: "Ship M3",
-  description: "Milestone 3 implementation",
+  title: "Ship guided goal flow",
+  description: "Guided goal implementation",
   status: "active" as const,
   autonomyLevel: 1,
   createdAt: now,
@@ -140,7 +140,7 @@ function makeEvent(
   };
 }
 
-function setupM5EventCapture() {
+function setupMemoryEventCapture() {
   let capturedOnEvent: ((e: DomainEvent) => void) = () => {};
   let capturedOnStatus: ((s: ConnectionStatus) => void) = () => {};
   const listGoalMemoryMock = vi.fn().mockResolvedValue([]);
@@ -179,7 +179,7 @@ function setupM5EventCapture() {
   };
 }
 
-function setupM7EventCapture() {
+function setupOrchestrationEventCapture() {
   let capturedOnEvent: ((e: DomainEvent) => void) = () => {};
   let capturedOnStatus: ((s: ConnectionStatus) => void) = () => {};
   const listTasksMock = vi.fn().mockResolvedValue({ tasks: [], generations: [] });
@@ -417,7 +417,7 @@ describe("GoalDetailView", () => {
   });
 });
 
-describe("GoalDetailView M5 live-refresh", () => {
+describe("GoalDetailView memory live-refresh", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
@@ -434,7 +434,7 @@ describe("GoalDetailView M5 live-refresh", () => {
   });
 
   it("memory.item.created triggers listGoalMemory refetch", async () => {
-    const { getOnEvent, listGoalMemoryMock } = setupM5EventCapture();
+    const { getOnEvent, listGoalMemoryMock } = setupMemoryEventCapture();
     const { GoalDetailView } = await import("./GoalDetailView");
 
     await act(async () => {
@@ -452,7 +452,7 @@ describe("GoalDetailView M5 live-refresh", () => {
   });
 
   it("decision.confirmed triggers listGoalDecisions refetch", async () => {
-    const { getOnEvent, listGoalDecisionsMock } = setupM5EventCapture();
+    const { getOnEvent, listGoalDecisionsMock } = setupMemoryEventCapture();
     const { GoalDetailView } = await import("./GoalDetailView");
 
     await act(async () => {
@@ -470,7 +470,7 @@ describe("GoalDetailView M5 live-refresh", () => {
   });
 
   it("memory.extraction.completed triggers both memory and decisions refetch", async () => {
-    const { getOnEvent, listGoalMemoryMock, listGoalDecisionsMock } = setupM5EventCapture();
+    const { getOnEvent, listGoalMemoryMock, listGoalDecisionsMock } = setupMemoryEventCapture();
     const { GoalDetailView } = await import("./GoalDetailView");
 
     await act(async () => {
@@ -490,7 +490,7 @@ describe("GoalDetailView M5 live-refresh", () => {
   });
 
   it("event for different goal does not trigger refetch", async () => {
-    const { getOnEvent, listGoalMemoryMock } = setupM5EventCapture();
+    const { getOnEvent, listGoalMemoryMock } = setupMemoryEventCapture();
     const { GoalDetailView } = await import("./GoalDetailView");
 
     await act(async () => {
@@ -508,7 +508,7 @@ describe("GoalDetailView M5 live-refresh", () => {
   });
 
   it("reconnect triggers memory and decisions refetch", async () => {
-    const { getOnStatus, listGoalMemoryMock, listGoalDecisionsMock } = setupM5EventCapture();
+    const { getOnStatus, listGoalMemoryMock, listGoalDecisionsMock } = setupMemoryEventCapture();
     const { GoalDetailView } = await import("./GoalDetailView");
 
     await act(async () => {
@@ -535,7 +535,7 @@ describe("GoalDetailView M5 live-refresh", () => {
   });
 });
 
-describe("GoalDetailView M7 live-refresh", () => {
+describe("GoalDetailView orchestration live-refresh", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
@@ -571,7 +571,7 @@ describe("GoalDetailView M7 live-refresh", () => {
   }
 
   it("debounces rapid task events and keeps recommendation scope untouched", async () => {
-    const { getOnEvent, listTasksMock, listRecommendationsMock } = setupM7EventCapture();
+    const { getOnEvent, listTasksMock, listRecommendationsMock } = setupOrchestrationEventCapture();
     await renderView();
 
     const taskCallsAfterMount = listTasksMock.mock.calls.length;
@@ -603,7 +603,7 @@ describe("GoalDetailView M7 live-refresh", () => {
   });
 
   it("updates task generation banner without list refetch until terminal event", async () => {
-    const { getOnEvent, listTasksMock } = setupM7EventCapture();
+    const { getOnEvent, listTasksMock } = setupOrchestrationEventCapture();
     await renderView();
 
     const taskCallsAfterMount = listTasksMock.mock.calls.length;
@@ -640,7 +640,7 @@ describe("GoalDetailView M7 live-refresh", () => {
   });
 
   it("recommendation lifecycle events refetch recommendations and task scope only when task-related", async () => {
-    const { getOnEvent, listTasksMock, listRecommendationsMock } = setupM7EventCapture();
+    const { getOnEvent, listTasksMock, listRecommendationsMock } = setupOrchestrationEventCapture();
     await renderView();
 
     const taskCallsAfterMount = listTasksMock.mock.calls.length;
@@ -667,7 +667,7 @@ describe("GoalDetailView M7 live-refresh", () => {
       listTasksMock,
       listRecommendationsMock,
       getRecommendationMock,
-    } = setupM7EventCapture();
+    } = setupOrchestrationEventCapture();
     await renderView();
 
     const taskCallsAfterMount = listTasksMock.mock.calls.length;
@@ -692,7 +692,7 @@ describe("GoalDetailView M7 live-refresh", () => {
 
   it("conflict events refetch only conflicts", async () => {
     const { getOnEvent, listTasksMock, listRecommendationsMock, listConflictsMock } =
-      setupM7EventCapture();
+      setupOrchestrationEventCapture();
     await renderView();
 
     const taskCallsAfterMount = listTasksMock.mock.calls.length;
@@ -716,9 +716,9 @@ describe("GoalDetailView M7 live-refresh", () => {
     expect(listRecommendationsMock).toHaveBeenCalledTimes(recommendationCallsAfterMount);
   });
 
-  it("reconnect refetches M7 panels for the active goal", async () => {
+  it("reconnect refetches orchestration panels for the active goal", async () => {
     const { getOnStatus, listTasksMock, listRecommendationsMock, listConflictsMock } =
-      setupM7EventCapture();
+      setupOrchestrationEventCapture();
     await renderView();
 
     await act(async () => {

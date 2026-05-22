@@ -20,7 +20,7 @@ interface TriggerEntry {
 //
 // Maps domain event types to orchestration actions.
 // Events absent from this map are silently ignored.
-// M7 generation lifecycle events are deliberately absent (re-entrancy guard).
+// orchestration generation lifecycle events are deliberately absent (re-entrancy guard).
 //
 // The payload-based entries (memory.extraction.completed, decision.created,
 // decision.updated, user.feedback.recorded) are handled in mapEventToAction
@@ -76,7 +76,7 @@ export const TRIGGER_MAP: Readonly<Partial<Record<DomainEventType, TriggerEntry>
     runTasksIfEmpty: false,
   },
   'conflict.detected': {
-    // Cascade already handled by M7-010 detectAndPersist; no further action.
+    // Cascade already handled by orchestration conflict detector detectAndPersist; no further action.
     triggerKind: 'conflict_detected',
     runRecs: false,
     runConflicts: false,

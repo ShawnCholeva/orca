@@ -10,7 +10,7 @@ import type {
 import type {
   LiveGenerationNotice,
   RecommendationDetailRefresh,
-} from "../../events/m7-live-refresh";
+} from "../../events/orchestration-live-refresh";
 import {
   acceptRecommendation,
   dismissRecommendation,

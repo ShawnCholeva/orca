@@ -5,12 +5,12 @@ import {
   RecommendationGeneration,
   RecommendationFeedback,
   RecommendationFieldKey,
-  M7_RECOMMENDATION_MAX_TITLE_CHARS,
-  M7_RECOMMENDATION_MAX_RATIONALE_CHARS,
-  M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES,
-  M7_FEEDBACK_MAX_NOTE_CHARS,
-  M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS,
-  M7_RECOMMENDATION_MAX_SOURCES,
+  ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES,
+  ORCHESTRATION_FEEDBACK_MAX_NOTE_CHARS,
+  ORCHESTRATION_GENERATION_MAX_FAILURE_MESSAGE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_SOURCES,
   type DomainEvent,
   type ProposedAction,
 } from '@orca/contracts';
@@ -152,7 +152,7 @@ function isSqliteUniqueError(err: unknown): boolean {
 }
 
 function capNote(note: string | undefined): string | null {
-  return note ? redactSecrets(note.trim().slice(0, M7_FEEDBACK_MAX_NOTE_CHARS)) : null;
+  return note ? redactSecrets(note.trim().slice(0, ORCHESTRATION_FEEDBACK_MAX_NOTE_CHARS)) : null;
 }
 
 // ── Shared terminal-feedback helper ───────────────────────────────────────────
@@ -350,12 +350,12 @@ export function modifyRecommendation(
   const changedFields: string[] = [];
 
   const newTitle = patch.title !== undefined
-    ? redactSecrets(patch.title.trim().slice(0, M7_RECOMMENDATION_MAX_TITLE_CHARS))
+    ? redactSecrets(patch.title.trim().slice(0, ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS))
     : rec.title;
   if (newTitle !== rec.title) changedFields.push('title');
 
   const newRationale = patch.rationale !== undefined
-    ? redactSecrets(patch.rationale.trim().slice(0, M7_RECOMMENDATION_MAX_RATIONALE_CHARS))
+    ? redactSecrets(patch.rationale.trim().slice(0, ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS))
     : rec.rationale;
   if (newRationale !== rec.rationale) changedFields.push('rationale');
 
@@ -618,7 +618,7 @@ export async function runRecommendationGeneration(
       const rawOutput = await ctx.recommendationProvider.generate(providerInput);
       const parsed = RecommendationProviderOutputSchema.safeParse(rawOutput);
       if (!parsed.success) {
-        throw new SchemaValidationError(parsed.error.message.slice(0, M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS));
+        throw new SchemaValidationError(parsed.error.message.slice(0, ORCHESTRATION_GENERATION_MAX_FAILURE_MESSAGE_CHARS));
       }
 
       const { candidates, sparse } = parsed.data;
@@ -677,12 +677,12 @@ export async function runRecommendationGeneration(
         }
 
         const id = idFn();
-        const title = redactSecrets(c.title.trim().slice(0, M7_RECOMMENDATION_MAX_TITLE_CHARS));
-        const rationale = redactSecrets(c.rationale.slice(0, M7_RECOMMENDATION_MAX_RATIONALE_CHARS));
+        const title = redactSecrets(c.title.trim().slice(0, ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS));
+        const rationale = redactSecrets(c.rationale.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS));
         const proposedActionJson = JSON.stringify(c.proposedAction);
-        const sourcesJson = JSON.stringify(c.sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES));
+        const sourcesJson = JSON.stringify(c.sources.slice(0, ORCHESTRATION_RECOMMENDATION_MAX_SOURCES));
 
-        if (new TextEncoder().encode(proposedActionJson).length > M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES) {
+        if (new TextEncoder().encode(proposedActionJson).length > ORCHESTRATION_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES) {
           continue;
         }
 
@@ -741,7 +741,7 @@ export function markRecommendationGenerationFailedUseCase(
   if (!gen) throw new RecommendationGenerationNotFoundError(generationId);
 
   const cappedMsg = failureMessage
-    ? redactSecrets(failureMessage.slice(0, M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS))
+    ? redactSecrets(failureMessage.slice(0, ORCHESTRATION_GENERATION_MAX_FAILURE_MESSAGE_CHARS))
     : null;
 
   const toPublish: DomainEvent[] = [];

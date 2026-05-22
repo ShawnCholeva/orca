@@ -42,7 +42,7 @@ function createConfig(dataDir: string): Config {
 }
 
 function freshDb(): Database.Database {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-m7017-'));
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-context-association-'));
   tempDirs.push(dir);
   const db = openDatabase(createConfig(dir));
   runMigrations(db, defaultMigrationsDir());
@@ -119,11 +119,11 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// M6 regression: no new fields → byte-identical behavior
+// Baseline regression: no new fields -> byte-identical behavior
 // ---------------------------------------------------------------------------
 
-describe('M7-017 — context package create: no association (M6 regression)', () => {
-  it('creates package without taskId/fromRecommendationId — byte-identical behavior', () => {
+describe('context package create associations: no association baseline', () => {
+  it('creates package without taskId/fromRecommendationId - byte-identical behavior', () => {
     const db = freshDb();
     seedGoal(db, 'g1');
 
@@ -161,7 +161,7 @@ describe('M7-017 — context package create: no association (M6 regression)', ()
 // With taskId only
 // ---------------------------------------------------------------------------
 
-describe('M7-017 — context package create: with taskId only', () => {
+describe('context package create associations: with taskId only', () => {
   it('stores task_id, emits task.associated_with_context_package in same TX', () => {
     const db = freshDb();
     seedGoal(db, 'g1');
@@ -218,7 +218,7 @@ describe('M7-017 — context package create: with taskId only', () => {
 // With fromRecommendationId only
 // ---------------------------------------------------------------------------
 
-describe('M7-017 — context package create: with fromRecommendationId only', () => {
+describe('context package create associations: with fromRecommendationId only', () => {
   it('stores from_recommendation_id, no task.associated_with_context_package event', () => {
     const db = freshDb();
     seedGoal(db, 'g1');
@@ -254,7 +254,7 @@ describe('M7-017 — context package create: with fromRecommendationId only', ()
 // With both taskId and fromRecommendationId
 // ---------------------------------------------------------------------------
 
-describe('M7-017 — context package create: with both taskId and fromRecommendationId', () => {
+describe('context package create associations: with both taskId and fromRecommendationId', () => {
   it('stores both, emits context.package.created with both and task.associated_with_context_package', () => {
     const db = freshDb();
     seedGoal(db, 'g1');
@@ -291,7 +291,7 @@ describe('M7-017 — context package create: with both taskId and fromRecommenda
 // Validation failures
 // ---------------------------------------------------------------------------
 
-describe('M7-017 — context package create: validation errors', () => {
+describe('context package create associations: validation errors', () => {
   it('task not found → TaskNotFoundError', () => {
     const db = freshDb();
     seedGoal(db, 'g1');

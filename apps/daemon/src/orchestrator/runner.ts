@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
-import { M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS, type DomainEvent, type M7FailureCode } from '@orca/contracts';
+import { ORCHESTRATION_GENERATION_MAX_FAILURE_MESSAGE_CHARS, type DomainEvent, type OrchestrationFailureCode } from '@orca/contracts';
 import type { EventBus } from '../events.js';
 import { redactSecrets } from '../memory/normalize.js';
 import {
@@ -103,7 +103,7 @@ let _reEvaluator: ((goalId: string) => void) | null = null;
 
 /**
  * Register a callback invoked when a Goal completes with a pending dirty flag.
- * Called by the orchestrator trigger system (M7-011) during daemon bootstrap.
+ * Called by the orchestrator trigger system  during daemon bootstrap.
  */
 export function setGoalReEvaluator(fn: (goalId: string) => void): void {
   _reEvaluator = fn;
@@ -165,7 +165,7 @@ export class SchemaValidationError extends Error {
   }
 }
 
-function classifyError(err: unknown): { code: M7FailureCode; message: string } {
+function classifyError(err: unknown): { code: OrchestrationFailureCode; message: string } {
   if (err instanceof Error) {
     if ((err as { isSchemaValidationError?: boolean }).isSchemaValidationError) {
       return { code: 'invalid_output', message: err.message };
@@ -176,7 +176,7 @@ function classifyError(err: unknown): { code: M7FailureCode; message: string } {
 }
 
 function capAndRedactMessage(msg: string): string {
-  return redactSecrets(msg.slice(0, M7_GENERATION_MAX_FAILURE_MESSAGE_CHARS));
+  return redactSecrets(msg.slice(0, ORCHESTRATION_GENERATION_MAX_FAILURE_MESSAGE_CHARS));
 }
 
 // ── runGeneration ─────────────────────────────────────────────────────────────

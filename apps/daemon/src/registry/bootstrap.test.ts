@@ -51,7 +51,7 @@ describe('bootstrapRegistries', () => {
     expect(list[1]?.extensionPoint).toBe('goal.create');
   });
 
-  it('registers M7 internal orchestration descriptors for diagnostics', () => {
+  it('registers internal orchestration descriptors for diagnostics', () => {
     const { plugins, skills, adapters } = makeRegistries();
 
     bootstrapRegistries({ plugins, skills, adapters });

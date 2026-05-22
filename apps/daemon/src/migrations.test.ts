@@ -59,7 +59,7 @@ describe("runMigrations", () => {
       "0005_memory.sql",
       "0006_context.sql",
       "0007_agents.sql",
-      "m7-001-suggested-orchestration.sql"
+      "0008_suggested_orchestration.sql"
     ]);
   });
 
@@ -68,6 +68,23 @@ describe("runMigrations", () => {
     runMigrations(db, defaultMigrationsDir());
     const result = runMigrations(db, defaultMigrationsDir());
     expect(result.applied).toEqual([]);
+  });
+
+  it("records suggested orchestration as applied when the schema already exists", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    db.prepare("DELETE FROM _migrations WHERE name = ?").run(
+      "0008_suggested_orchestration.sql"
+    );
+
+    const result = runMigrations(db, defaultMigrationsDir());
+
+    expect(result.applied).toEqual(["0008_suggested_orchestration.sql"]);
+    const rows = db
+      .prepare("SELECT name FROM _migrations WHERE name = ?")
+      .all("0008_suggested_orchestration.sql") as { name: string }[];
+    expect(rows).toHaveLength(1);
   });
 
   it("creates expected tables including refinements and workspaces", () => {
@@ -132,7 +149,7 @@ describe("runMigrations", () => {
       "0005_memory.sql",
       "0006_context.sql",
       "0007_agents.sql",
-      "m7-001-suggested-orchestration.sql"
+      "0008_suggested_orchestration.sql"
     ]);
 
     const goalCount = (
@@ -188,7 +205,7 @@ describe("runMigrations", () => {
   });
 });
 
-describe("M4-003 session tables migration", () => {
+describe("session tables migration", () => {
   function seedGoal(db: ReturnType<typeof freshDb>, id: string) {
     db.prepare(
       "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
@@ -244,9 +261,9 @@ describe("M4-003 session tables migration", () => {
 
   it("upgrades a DB with only 0001 and 0002 to the latest migration without error", () => {
     const db = freshDb();
-    const m3Dir = createMigrationsDir(["0001_init.sql", "0002_workspaces_refinements.sql"]);
+    const refinementWorkspaceDir = createMigrationsDir(["0001_init.sql", "0002_workspaces_refinements.sql"]);
 
-    const initialResult = runMigrations(db, m3Dir);
+    const initialResult = runMigrations(db, refinementWorkspaceDir);
     expect(initialResult.applied).toEqual(["0001_init.sql", "0002_workspaces_refinements.sql"]);
 
     const upgradeResult = runMigrations(db, defaultMigrationsDir());
@@ -255,7 +272,7 @@ describe("M4-003 session tables migration", () => {
       "0005_memory.sql",
       "0006_context.sql",
       "0007_agents.sql",
-      "m7-001-suggested-orchestration.sql"
+      "0008_suggested_orchestration.sql"
     ]);
 
     const tables = (
@@ -323,7 +340,7 @@ describe("M4-003 session tables migration", () => {
   });
 });
 
-describe("M5-002 memory tables migration", () => {
+describe("memory tables migration", () => {
   function seedGoal(db: ReturnType<typeof freshDb>, id: string) {
     db.prepare(
       "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
@@ -377,7 +394,7 @@ describe("M5-002 memory tables migration", () => {
     );
   }
 
-  it("creates all four M5 tables and required indexes", () => {
+  it("creates all four memory tables and required indexes", () => {
     const db = freshDb();
     runMigrations(db, defaultMigrationsDir());
 
@@ -417,7 +434,7 @@ describe("M5-002 memory tables migration", () => {
     expect(extractionIndexes).toContain("idx_extraction_active_fingerprint");
   });
 
-  it("enforces foreign keys on M5 tables", () => {
+  it("enforces foreign keys on memory tables", () => {
     const db = freshDb();
     runMigrations(db, defaultMigrationsDir());
 

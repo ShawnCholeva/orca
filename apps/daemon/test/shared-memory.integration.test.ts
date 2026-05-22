@@ -41,7 +41,7 @@ const ORCA_ENV_KEYS = [
   'ORCA_TOKEN',
   'ORCA_SHELL',
 ] as const;
-const TOKEN = 'm5-sm-token';
+const TOKEN = 'shared-memory-token';
 const AUTH = { authorization: `Bearer ${TOKEN}` } as const;
 const tempDirs: string[] = [];
 
@@ -168,9 +168,9 @@ const FIXTURE_OUTPUT: SessionExtractionOutput = {
   ],
 };
 
-describe.sequential('M5-012 daemon proof-loop integration', () => {
-  it('full M5 loop: seed → extraction → decisions → summary → restart → privacy', async () => {
-    const rootDir = mktemp('orca-m5-012-');
+describe.sequential('shared memory daemon proof-loop integration', () => {
+  it('full shared memory loop: seed → extraction → decisions → summary → restart → privacy', async () => {
+    const rootDir = mktemp('orca-shared-memory-proof-');
     const workspaceDir = path.join(rootDir, 'workspace');
     const dbDir = path.join(rootDir, 'daemon-db');
     mkdirSync(workspaceDir);
@@ -187,13 +187,13 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
       const { baseUrl, outputStore, extractor } = b1;
 
       const refineResp = await postJson(baseUrl, '/v1/goals/refine', {
-        title: 'M5-012 Integration Goal',
+        title: 'Shared Memory Integration Goal',
         description: [
-          'Validate the full M5 shared memory daemon loop.',
+          'Validate the full shared memory daemon loop.',
           '',
           'Constraints:',
           '- Must use file-backed SQLite for restart testing',
-          '- No real PTY needed for M5 extraction',
+          '- No real PTY needed for memory extraction',
           '',
           'Success criteria:',
           '- All memory rows survive daemon restart',
@@ -230,7 +230,7 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
       const createSessionResp = await postJson(baseUrl, `/v1/goals/${goalId}/sessions`, {
         workspaceId,
         adapterId: 'shell-manual',
-        title: 'M5 Integration Test Session',
+        title: 'Shared Memory Integration Test Session',
       });
       expect(createSessionResp.status).toBe(201);
       const { session } = CreateSessionResponse.parse(await createSessionResp.json());
@@ -300,7 +300,7 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
         ListGoalMemoryResponse.parse(await memAfterDupResp.json()).items.length
       ).toBe(memCountAfterFirstExtraction);
 
-      extractor.setError(sessionId, 'simulated extractor failure for M5-012 test');
+      extractor.setError(sessionId, 'simulated extractor failure for shared memory test');
       outputStore.appendChunk(sessionId, Buffer.from(' [extra bytes for new fingerprint]\n'));
 
       const failedPromise = waitForBusEvent(
@@ -395,9 +395,9 @@ describe.sequential('M5-012 daemon proof-loop integration', () => {
   });
 });
 
-describe.sequential('M5 privacy redaction integration', () => {
+describe.sequential('memory privacy redaction integration', () => {
   it('redacts obvious secrets in persisted summary, memory, and decision rows', async () => {
-    const rootDir = mktemp('orca-m5-redaction-');
+    const rootDir = mktemp('orca-memory-redaction-');
     const workspaceDir = path.join(rootDir, 'workspace');
     const dbDir = path.join(rootDir, 'daemon-db');
     mkdirSync(workspaceDir);
@@ -410,7 +410,7 @@ describe.sequential('M5 privacy redaction integration', () => {
       const { baseUrl, outputStore, extractor } = booted;
 
       const createGoalResp = await postJson(baseUrl, '/v1/goals', {
-        title: 'M5 redaction Goal',
+        title: 'Memory redaction Goal',
         workspaces: [{ inputPath: workspaceDir }],
       });
       expect(createGoalResp.status).toBe(201);
@@ -423,7 +423,7 @@ describe.sequential('M5 privacy redaction integration', () => {
       const createSessionResp = await postJson(baseUrl, `/v1/goals/${goal.id}/sessions`, {
         workspaceId: workspaces[0]!.id,
         adapterId: 'shell-manual',
-        title: 'M5 Redaction Test Session',
+        title: 'Memory Redaction Test Session',
       });
       expect(createSessionResp.status).toBe(201);
       const { session } = CreateSessionResponse.parse(await createSessionResp.json());

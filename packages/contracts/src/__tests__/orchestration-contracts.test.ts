@@ -28,16 +28,16 @@ import {
   ListRecommendationsResponse,
   ListTasksQuery,
   ListTasksResponse,
-  M7Event,
-  M7EventType,
-  M7FailureCode,
-  M7_FEEDBACK_MAX_NOTE_CHARS,
-  M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES,
-  M7_RECOMMENDATION_MAX_RATIONALE_CHARS,
-  M7_RECOMMENDATION_MAX_TITLE_CHARS,
-  M7_TASK_MAX_DESCRIPTION_CHARS,
-  M7_TASK_MAX_TITLE_CHARS,
-  M7_TASK_MAX_VALIDATION_STEPS,
+  OrchestrationEvent,
+  OrchestrationEventType,
+  OrchestrationFailureCode,
+  ORCHESTRATION_FEEDBACK_MAX_NOTE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES,
+  ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS,
+  ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS,
+  ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS,
+  ORCHESTRATION_TASK_MAX_TITLE_CHARS,
+  ORCHESTRATION_TASK_MAX_VALIDATION_STEPS,
   ModifyRecommendationRequest,
   ProposedAction,
   Recommendation,
@@ -94,7 +94,7 @@ function repeat(char: string, count: number): string {
   return char.repeat(count);
 }
 
-describe("M7 contracts", () => {
+describe("orchestration contracts", () => {
   it("accepts manual trigger only for task/recommendation generation requests", () => {
     expect(TaskGenerationRequest.parse({ trigger: "manual" })).toEqual({
       trigger: "manual"
@@ -109,33 +109,41 @@ describe("M7 contracts", () => {
     ).toThrow();
   });
 
-  it("keeps M6 session/context create request shapes compatible and accepts M7 extensions", () => {
-    const m6SessionRequest = {
+  it("keeps baseline session/context create request shapes compatible and accepts orchestration extensions", () => {
+    const baselineSessionRequest = {
       workspaceId: "ws-1",
       adapterId: "shell-manual"
     };
-    expect(CreateSessionRequest.parse(m6SessionRequest)).toEqual(m6SessionRequest);
+    expect(CreateSessionRequest.parse(baselineSessionRequest)).toEqual(
+      baselineSessionRequest
+    );
 
-    const m7SessionRequest = {
-      ...m6SessionRequest,
+    const orchestrationSessionRequest = {
+      ...baselineSessionRequest,
       taskId: "task-foreign-goal",
       fromRecommendationId: "rec-foreign-goal"
     };
-    expect(CreateSessionRequest.parse(m7SessionRequest)).toEqual(m7SessionRequest);
+    expect(CreateSessionRequest.parse(orchestrationSessionRequest)).toEqual(
+      orchestrationSessionRequest
+    );
 
-    const m6ContextRequest = {
+    const baselineContextRequest = {
       adapterId: "shell-manual",
       role: "engineer",
       objective: "Summarize context"
     };
-    expect(CreateContextPackageRequest.parse(m6ContextRequest)).toEqual(m6ContextRequest);
+    expect(CreateContextPackageRequest.parse(baselineContextRequest)).toEqual(
+      baselineContextRequest
+    );
 
-    const m7ContextRequest = {
-      ...m6ContextRequest,
+    const orchestrationContextRequest = {
+      ...baselineContextRequest,
       taskId: "task-foreign-goal",
       fromRecommendationId: "rec-foreign-goal"
     };
-    expect(CreateContextPackageRequest.parse(m7ContextRequest)).toEqual(m7ContextRequest);
+    expect(CreateContextPackageRequest.parse(orchestrationContextRequest)).toEqual(
+      orchestrationContextRequest
+    );
   });
 
   it("extends session/context read/event payloads with optional task/recommendation associations", () => {
@@ -195,7 +203,7 @@ describe("M7 contracts", () => {
       ],
       warnings: [],
       sourceFingerprint: "fp-1",
-      assemblerVersion: "m6",
+      assemblerVersion: "context-assembly",
       createdAt: now
     };
     expect(ContextPackage.parse(contextPackage)).toEqual(contextPackage);
@@ -269,8 +277,8 @@ describe("M7 contracts", () => {
     ).toThrow();
   });
 
-  it("parses and strictly validates all M7 event payload literals", () => {
-    const payloadByType: Record<(typeof M7EventType.options)[number], unknown> = {
+  it("parses and strictly validates all orchestration event payload literals", () => {
+    const payloadByType: Record<(typeof OrchestrationEventType.options)[number], unknown> = {
       "task.generation.requested": {
         generationId: "tg-1",
         goalId: "goal-1",
@@ -418,14 +426,14 @@ describe("M7 contracts", () => {
       "user.feedback.recorded": UserFeedbackRecordedPayload
     } as const;
 
-    for (const type of M7EventType.options) {
+    for (const type of OrchestrationEventType.options) {
       const payload = payloadByType[type];
-      const parsedEvent = M7Event.parse({ type, payload });
+      const parsedEvent = OrchestrationEvent.parse({ type, payload });
       expect(parsedEvent).toEqual({ type, payload });
       parserByType[type as keyof typeof parserByType].parse(payload);
 
       expect(() =>
-        M7Event.parse({
+        OrchestrationEvent.parse({
           type,
           payload: {
             ...(payload as Record<string, unknown>),
@@ -436,9 +444,9 @@ describe("M7 contracts", () => {
     }
   });
 
-  it("rejects M7 event payloads larger than 4 KiB serialized", () => {
+  it("rejects orchestration event payloads larger than 4 KiB serialized", () => {
     expect(() =>
-      M7Event.parse({
+      OrchestrationEvent.parse({
         type: "task.generated",
         payload: {
           generationId: "tg-1",
@@ -456,10 +464,10 @@ describe("M7 contracts", () => {
     expect(() => RecommendationStatus.parse("completed")).toThrow();
     expect(() => ConflictStatus.parse("archived")).toThrow();
     expect(() => GenerationLifecycleStatus.parse("done")).toThrow();
-    expect(() => M7FailureCode.parse("timeout")).toThrow();
+    expect(() => OrchestrationFailureCode.parse("timeout")).toThrow();
   });
 
-  it("parses M7 domain rows and endpoint payload wrappers", () => {
+  it("parses orchestration domain rows and endpoint payload wrappers", () => {
     const taskGeneration: TaskGeneration = {
       id: "tg-1",
       goalId: "goal-1",
@@ -682,15 +690,15 @@ describe("M7 contracts", () => {
       archivedAt: null
     };
     expect(() =>
-      Task.parse({ ...task, title: repeat("t", M7_TASK_MAX_TITLE_CHARS + 1) })
+      Task.parse({ ...task, title: repeat("t", ORCHESTRATION_TASK_MAX_TITLE_CHARS + 1) })
     ).toThrow();
     expect(() =>
-      Task.parse({ ...task, description: repeat("d", M7_TASK_MAX_DESCRIPTION_CHARS + 1) })
+      Task.parse({ ...task, description: repeat("d", ORCHESTRATION_TASK_MAX_DESCRIPTION_CHARS + 1) })
     ).toThrow();
     expect(() =>
       Task.parse({
         ...task,
-        validationSteps: Array.from({ length: M7_TASK_MAX_VALIDATION_STEPS + 1 }, (_, i) => ({
+        validationSteps: Array.from({ length: ORCHESTRATION_TASK_MAX_VALIDATION_STEPS + 1 }, (_, i) => ({
           id: `v-${i}`,
           text: "step",
           kind: "manual"
@@ -727,13 +735,13 @@ describe("M7 contracts", () => {
     expect(() =>
       Recommendation.parse({
         ...recommendation,
-        title: repeat("r", M7_RECOMMENDATION_MAX_TITLE_CHARS + 1)
+        title: repeat("r", ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS + 1)
       })
     ).toThrow();
     expect(() =>
       Recommendation.parse({
         ...recommendation,
-        rationale: repeat("x", M7_RECOMMENDATION_MAX_RATIONALE_CHARS + 1)
+        rationale: repeat("x", ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS + 1)
       })
     ).toThrow();
     expect(() =>
@@ -776,12 +784,12 @@ describe("M7 contracts", () => {
     expect(() =>
       RecommendationFeedback.parse({
         ...feedback,
-        note: repeat("n", M7_FEEDBACK_MAX_NOTE_CHARS + 1)
+        note: repeat("n", ORCHESTRATION_FEEDBACK_MAX_NOTE_CHARS + 1)
       })
     ).toThrow();
   });
 
-  it("includes required M7 source-ref literals and rejects unknown values", () => {
+  it("includes required orchestration source-ref literals and rejects unknown values", () => {
     expect(RecommendationSourceRefType.parse("context_package")).toBe("context_package");
     expect(TaskSourceRefType.parse("session_summary")).toBe("session_summary");
     expect(ConflictSourceRefType.parse("workspace")).toBe("workspace");

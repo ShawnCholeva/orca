@@ -1,0 +1,210 @@
+/* Orca chat — Goal Command Center hero.
+   Matches view-command.jsx prototype; tokens come from the operational theme
+   (same palette used in onboarding). */
+
+.orca-chat {
+  flex: 1;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.orca-chat-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.orca-chat-compose {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--hairline);
+  background: var(--panel-2);
+  flex-shrink: 0;
+}
+
+.orca-chat-input {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  background: var(--bg);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 10px;
+  padding: 8px 10px;
+  transition: border-color 120ms ease;
+}
+
+.orca-chat-input:focus-within {
+  border-color: var(--accent-line);
+}
+
+.orca-chat-input-icon {
+  color: var(--text-4);
+  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+
+.orca-chat-input textarea {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: none;
+  padding: 3px 0;
+}
+
+.orca-chat-input textarea::placeholder {
+  color: var(--text-4);
+}
+
+.orca-chat-input-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.orca-chat-send-hint {
+  font-size: 10px;
+  color: var(--text-4);
+  padding: 0 4px;
+}
+
+.orca-chat-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.orca-chat-send--primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.orca-chat-send--primary:hover {
+  background: var(--accent-hover);
+}
+
+.orca-chat-send--quiet {
+  background: transparent;
+  color: var(--text-4);
+}
+
+.orca-chat-send:disabled {
+  cursor: not-allowed;
+}
+
+/* ── Messages ─────────────────────────────────────── */
+
+.msg {
+  display: flex;
+  gap: 10px;
+  max-width: 88%;
+}
+
+.msg--user {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: 78%;
+  margin-left: auto;
+}
+
+.msg-meta {
+  font-size: 10px;
+  color: var(--text-4);
+}
+
+.msg--user .msg-meta {
+  padding-right: 4px;
+}
+
+.msg-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.msg--orca .msg-meta {
+  margin-bottom: 4px;
+}
+
+.msg-bubble {
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.msg-bubble--user {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--text);
+  border-radius: 12px 12px 4px 12px;
+}
+
+.msg-text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+/* ── Orca mark ────────────────────────────────────── */
+
+.orca-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2, #8B5CF6));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 4px 14px rgba(91, 140, 255, 0.30);
+  flex-shrink: 0;
+}
+
+/* ── Thinking row ─────────────────────────────────── */
+
+.thinking-bubble {
+  background: var(--panel-2);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.thinking-label {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.thinking-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.thinking-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}

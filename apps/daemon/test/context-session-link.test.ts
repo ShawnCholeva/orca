@@ -107,7 +107,7 @@ describe('context-session-link', () => {
   }
 
   // ---------------------------------------------------------------------------
-  // No-context path — must preserve M4 behavior
+  // No-context path: must preserve base session behavior.
   // ---------------------------------------------------------------------------
 
   describe('no-context session create', () => {
@@ -339,7 +339,7 @@ describe('context-session-link', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Archived goal — M4 behavior preserved
+  // Archived goal: base session behavior preserved.
   // ---------------------------------------------------------------------------
 
   describe('archived goal', () => {

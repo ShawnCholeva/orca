@@ -344,7 +344,7 @@ describe('sparse goal', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Oversized memory list (all returned; selection trims in M6-007)
+// Oversized memory list (all returned; context selection trims it)
 // ---------------------------------------------------------------------------
 
 describe('oversized memory list', () => {
