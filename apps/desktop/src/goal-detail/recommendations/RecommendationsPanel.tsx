@@ -110,11 +110,12 @@ export function RecommendationsPanel({
 
   useEffect(() => {
     if (recommendationDetailRefresh === null) return;
+    const recommendationId = recommendationDetailRefresh.recommendationId;
     let cancelled = false;
 
     async function loadRecommendationDetail() {
       try {
-        const body = await getRecommendation(recommendationDetailRefresh!.recommendationId);
+        const body = await getRecommendation(recommendationId);
         if (cancelled || body.recommendation.goalId !== goalId) return;
         setRecommendations((current) => {
           const existingIndex = current.findIndex((r) => r.id === body.recommendation.id);
