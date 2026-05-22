@@ -1,4 +1,4 @@
-import type { AdapterId } from "@orca/contracts";
+import type { AdapterId, AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
 
 export interface AdapterContextDelivery {
   mode: 'initial_input' | 'context_file' | 'preview_only';
@@ -33,6 +33,10 @@ export interface AgentAdapter {
   contextDelivery: AdapterContextDelivery;
   resolveSpawn(input: AdapterSpawnInput): Promise<AdapterSpawnResult>;
   probeAvailability(): Promise<AdapterAvailability>;
+
+  checkInstalled(): Promise<CheckStep & { version?: string }>;
+  checkAuth(): Promise<CheckStep>;
+  repairFor(status: AgentReadinessStatus): RepairAction | undefined;
 }
 
 /** Build the spawn env from a session input: PATH pass-through + ORCA_* session vars. */

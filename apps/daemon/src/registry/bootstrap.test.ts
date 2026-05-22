@@ -66,7 +66,7 @@ describe('bootstrapRegistries', () => {
     }
   });
 
-  it('registers all four agent adapters', () => {
+  it('registers all five agent adapters', () => {
     const { plugins, skills, adapters } = makeRegistries();
 
     bootstrapRegistries({ plugins, skills, adapters });
@@ -75,6 +75,7 @@ describe('bootstrapRegistries', () => {
     expect(adapters.get('claude-code')).toBeDefined();
     expect(adapters.get('opencode')).toBeDefined();
     expect(adapters.get('codex')).toBeDefined();
+    expect(adapters.get('gemini-cli')).toBeDefined();
   });
 
   it('registered adapters have correct ids', async () => {
@@ -84,7 +85,7 @@ describe('bootstrapRegistries', () => {
 
     const list = await adapters.list();
     const ids = list.map((a) => a.id).sort();
-    expect(ids).toEqual(['claude-code', 'codex', 'opencode', 'shell-manual']);
+    expect(ids).toEqual(['claude-code', 'codex', 'gemini-cli', 'opencode', 'shell-manual']);
   });
 
   it('freezes both plugin and skill registries after bootstrap', () => {

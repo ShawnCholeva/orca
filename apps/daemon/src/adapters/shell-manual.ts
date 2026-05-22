@@ -2,6 +2,7 @@ import type { AgentAdapter, AdapterSpawnInput, AdapterSpawnResult, AdapterAvaila
 import { buildSpawnEnv } from "./types.js";
 import { resolveBinary } from "./resolve.js";
 import type { ResolveFn } from "./resolve.js";
+import type { AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
 
 export class ShellManualAdapter implements AgentAdapter {
   readonly id = "shell-manual" as const;
@@ -31,6 +32,16 @@ export class ShellManualAdapter implements AgentAdapter {
       return { status: "unavailable", detail: `No shell found. Tried: ${result.tried.join(", ")}` };
     }
     return { status: "available" };
+  }
+
+  async checkInstalled() {
+    return { name: "installed" as const, ok: true, command: "shell" };
+  }
+  async checkAuth() {
+    return { name: "authenticated" as const, ok: true, authStatus: "ready" as const, command: "shell" };
+  }
+  repairFor() {
+    return undefined;
   }
 }
 

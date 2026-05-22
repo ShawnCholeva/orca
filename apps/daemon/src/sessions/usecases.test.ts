@@ -382,6 +382,15 @@ function makeStartRegistry(cwd: string): AdapterRegistry {
     async probeAvailability() {
       return { status: 'available' as const };
     },
+    async checkInstalled() {
+      return { name: 'installed' as const, ok: true, command: '' };
+    },
+    async checkAuth() {
+      return { name: 'authenticated' as const, ok: true, authStatus: 'ready' as const, command: '' };
+    },
+    repairFor() {
+      return undefined;
+    },
   });
   return registry;
 }

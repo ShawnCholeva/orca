@@ -85,6 +85,9 @@ describe("registry hardening", () => {
         contextDelivery: { mode: 'preview_only' as const, maxBytes: 32768 },
         resolveSpawn: async () => ({ command: '', args: [], env: {}, cwd: '' }),
         probeAvailability: async () => ({ status: 'unknown' as const }),
+        checkInstalled: async () => ({ name: 'installed' as const, ok: true, command: '' }),
+        checkAuth: async () => ({ name: 'authenticated' as const, ok: true, authStatus: 'ready' as const, command: '' }),
+        repairFor: () => undefined,
       })
     ).toThrowError("AdapterRegistry is frozen");
   });
@@ -97,6 +100,9 @@ describe("registry hardening", () => {
       contextDelivery: { mode: 'preview_only' as const, maxBytes: 32768 },
       resolveSpawn: async () => ({ command: '', args: [], env: {}, cwd: '' }),
       probeAvailability: async () => ({ status: 'unknown' as const }),
+      checkInstalled: async () => ({ name: 'installed' as const, ok: true, command: '' }),
+      checkAuth: async () => ({ name: 'authenticated' as const, ok: true, authStatus: 'ready' as const, command: '' }),
+      repairFor: () => undefined,
     });
 
     expect(() =>
@@ -106,6 +112,9 @@ describe("registry hardening", () => {
         contextDelivery: { mode: 'preview_only' as const, maxBytes: 32768 },
         resolveSpawn: async () => ({ command: '', args: [], env: {}, cwd: '' }),
         probeAvailability: async () => ({ status: 'unknown' as const }),
+        checkInstalled: async () => ({ name: 'installed' as const, ok: true, command: '' }),
+        checkAuth: async () => ({ name: 'authenticated' as const, ok: true, authStatus: 'ready' as const, command: '' }),
+        repairFor: () => undefined,
       })
     ).toThrowError("Duplicate adapter id: shell-manual");
   });

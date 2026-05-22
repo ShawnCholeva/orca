@@ -1051,7 +1051,7 @@ describe('session and adapter routes', () => {
   });
 
   // GET /v1/adapters
-  it('GET /v1/adapters returns all four adapters', async () => {
+  it('GET /v1/adapters returns all five adapters', async () => {
     const res = await server.inject({
       method: 'GET',
       url: '/v1/adapters',
@@ -1060,7 +1060,7 @@ describe('session and adapter routes', () => {
     expect(res.statusCode).toBe(200);
     const body = ListAdaptersResponse.parse(JSON.parse(res.body));
     expect(body.adapters.map((a) => a.id).sort()).toEqual(
-      ['claude-code', 'codex', 'opencode', 'shell-manual']
+      ['claude-code', 'codex', 'gemini-cli', 'opencode', 'shell-manual']
     );
   });
 
