@@ -94,6 +94,7 @@ function makeCtx(
     taskGenerator: opts?.generator ?? new FakeTaskGenerator({ candidates: [], sparse: true, warnings: [] }),
     recommendationProvider: opts?.provider ?? new FakeRecommendationProvider(),
     conflictDetector: opts?.detector ?? new FakeConflictDetector(),
+    readinessService: null as unknown as DaemonContext['readinessService'],
     now: nextNow,
     idFactory: nextId,
   };

@@ -626,6 +626,6 @@ describe("migration 0009 agent readiness", () => {
     for (const v of ["unchecked", "ready", "missing", "needs_auth", "misconfigured", "failed"]) {
       db.prepare(`UPDATE agents SET readiness_status = ? WHERE id = ?`).run(v, "claude-code");
     }
-    closeDatabase(db);
+    closeDatabase();
   });
 });

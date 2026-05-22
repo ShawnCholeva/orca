@@ -1,91 +1,84 @@
-  You are an autonomous engineer executing Task 1 of the Orca Agent Readiness
-  implementation plan.
-  
-  Repo
-  
-  - Repo root: /home/shawn/projects/orca (TypeScript monorepo, pnpm workspaces).
-  - Branch: main. Work directly on it (or in a worktree if your harness prefers).
-  - Stack: TypeScript, Vitest, Fastify v5, Zod, better-sqlite3, Tauri v2 + React 18.
-  - Test runners:
-    - Daemon: cd apps/daemon && pnpm test -- <file>
-    - Contracts: cd packages/contracts && pnpm test -- --run
-    - Desktop: cd apps/desktop && pnpm test -- <file>
-  - Typecheck: pnpm -r typecheck
-  
-  Inputs
- 
-  1. Implementation plan: docs/superpowers/plans/2026-05-22-agent-readiness.md
-  2. Design spec (background only — do not re-derive design):
-  docs/superpowers/specs/2026-05-22-agent-readiness-design.md
-  3. Project context: CLAUDE.md at repo root.
+You are an autonomous engineer executing the Wrap-up section of the Orca Agent
+Readiness implementation plan.
 
-  Your job
-  Inputs
+Repo
 
-  1. Implementation plan: docs/superpowers/plans/2026-05-22-agent-readiness.md
-  2. Design spec (background only — do not re-derive design):
-  docs/superpowers/specs/2026-05-22-agent-readiness-design.md
-  3. Project context: CLAUDE.md at repo root.
+- Repo root: /home/shawn/projects/orca (TypeScript monorepo, pnpm workspaces).
+- Branch: main. Work directly on it (or in a worktree if your harness prefers).
+- Stack: TypeScript, Vitest, Fastify v5, Zod, better-sqlite3, Tauri v2 + React 18.
+- Test runners:
+  - Daemon: cd apps/daemon && pnpm test -- <file>
+  - Contracts: cd packages/contracts && pnpm test -- --run
+  - Desktop: cd apps/desktop && pnpm test -- <file>
+- Typecheck: pnpm -r typecheck
 
-  Your job
+Inputs
 
-  Execute only Task 1 from the plan. Do not start the next task. Do not refactor
-  unrelated code. Do not change the plan.
+1. Implementation plan: docs/superpowers/plans/2026-05-22-agent-readiness.md
+2. Design spec (background only - do not re-derive design):
+   docs/superpowers/specs/2026-05-22-agent-readiness-design.md
+3. Project context: CLAUDE.md at repo root.
 
-  For Task 1:
+Your job
 
-  1. Read Task 1 in the plan file end-to-end before touching anything. Note its Files
-   list and every checkbox step in order.
-  2. Verify any prerequisite tasks (lower-numbered) are already done. If the tree is
-  not in the expected state — required files missing, prior tests not passing, types
-  from earlier tasks not exported — stop and report; do not paper over the gap.
-  3. Execute the checkbox steps in order. Each step is meant to take 2–5 minutes. Treat
-   the order as load-bearing:
-    - Write the failing test first.
-    - Run it and confirm it fails with the expected error.
-    - Implement.
-    - Run it and confirm it passes.
-    - Commit with the exact commit message the plan specifies.
-  4. Use the exact code shown in each step. The code blocks in the plan are not
-  pseudocode. If you find a real defect (compile error, missing import, wrong API), fix
-   the smallest thing needed to make the test pass and note the deviation in your
-  report. Do not silently rewrite.
-  5. Some tasks (Task 7, Tasks 8–10) intentionally do not commit — they leave the tree
-  dirty until a later task. Honor that. Do not invent commits.
-  6. Stay scoped. Files listed under "Files:" are the only ones you should
-  create/modify. Touching anything else requires a one-line justification in your
-  report.
+Execute only the Wrap-up section from the plan. There is no Task 21 in this plan.
+Do not start unrelated work. Do not refactor unrelated code. Do not change the
+plan or spec.
 
-  Verification gates
-  
-  Before claiming the task is complete, run every command the task names in its
-  checkbox steps and confirm the expected output. Specifically:
+For Wrap-up:
 
-  - Test commands must show the expected pass/fail at each step.
-  - Typecheck commands (if listed) must pass.
-  - The final commit (if the task commits) must be on branch with the message the plan
-  specifies, no --no-verify, no --amend.
+1. Read the Wrap-up section end-to-end before touching anything.
+2. Verify Task 20 is already committed with:
+   `test(daemon): gated real auth-status smoke tests`
+3. Run the exact automated verification command named in Wrap-up:
+   `pnpm -r typecheck && pnpm -r test`
+4. Perform the manual onboarding walkthrough from Wrap-up if your environment can
+   run the desktop app. If it cannot, stop after automated verification and report
+   the blocker clearly.
+5. Do not commit unless the Wrap-up section or the user explicitly asks for a
+   commit.
 
-  If a step's "Expected" output does not appear, stop and report. Do not retry blindly.
+Context from Tasks 1-20 (already done):
 
-  Out of scope
- 
-  - New features beyond what Task 1 describes.
-  - Refactors of unrelated code.
-  - Editing the plan or the spec.
-  - Pushing to remote.
-  - Skipping hooks or signing.
+- Readiness contracts are exported from packages/contracts/src/index.ts.
+- ClaudeCodeAdapter, CodexAdapter, OpenCodeAdapter, GeminiAdapter, and
+  ShellManualAdapter exist and are registered.
+- ReadinessService persists reports and daemon readiness endpoints exist.
+- Desktop onboarding renders real readiness rows with retry and continue-anyway
+  behavior.
+- NoReadyAgentsBanner is mounted after onboarding when zero connected agents are
+  ready.
+- Task 20 added gated real auth-status smoke tests for Claude, Codex, and
+  OpenCode.
 
-  Report at the end
-  
-  When Task 1 is done (or you stopped), report in this exact shape:
+Verification gates
 
-  Task: 1
-  Status: completed | blocked | partial
-  Commit SHA: <sha or "none — task does not commit per plan">
-  Files changed: <list>
-  Tests run: <command + result>
-  Deviations from the plan: <none, or short list with reasons>
-  Next task suggested: {N+1} | none — blocked by <reason>
+Before claiming Wrap-up is complete, run every command the Wrap-up names and
+confirm the expected output. Specifically:
 
-  Be terse. The plan is the source of truth — don't restate it back at me.
+- `pnpm -r typecheck && pnpm -r test` must pass.
+- Manual walkthrough steps must be reported as passed, skipped, or blocked with
+  concrete reasons.
+- If a verification command fails, stop and report. Do not paper over the gap.
+
+- Run /code-review, if there are issues found fix them.
+
+Out of scope
+
+- New features beyond the Wrap-up section.
+- Refactors of unrelated code.
+- Editing the plan or the spec.
+- Pushing to remote.
+- Skipping hooks or signing.
+
+Report at the end
+
+When Wrap-up is done (or you stopped), report in this exact shape:
+
+Task: Wrap-up
+Status: completed | blocked | partial
+Commit SHA: none - wrap-up does not commit per plan
+Files changed: <list>
+Tests run: <command + result>
+Deviations from the plan: <none, or short list with reasons>
+Next task suggested: none - plan complete | none - blocked by <reason>

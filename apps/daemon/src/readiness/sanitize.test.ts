@@ -12,10 +12,17 @@ describe("sanitizeOutput", () => {
   });
 
   it("truncates output to 4 KB", () => {
-    const big = "a".repeat(5000);
+    const big = "word ".repeat(1000);
     const out = sanitizeOutput(big);
     expect(out.length).toBeLessThanOrEqual(4096);
     expect(out.endsWith("…[truncated]")).toBe(true);
+  });
+
+  it("redacts secrets before truncating long output", () => {
+    const token = `sk-ant-api03-${"A".repeat(64)}`;
+    const out = sanitizeOutput(`${"pad ".repeat(1017)}${token}`);
+    expect(out).toContain("<redacted>");
+    expect(out).not.toContain("sk-ant-api03");
   });
 
   it("redacts Anthropic sk- keys", () => {

@@ -143,6 +143,7 @@ describe('context migration 0006_context.sql', () => {
       '0006_context.sql',
       '0007_agents.sql',
       '0008_suggested_orchestration.sql',
+      '0009_agent_readiness.sql',
     ]);
 
     const tables = (
@@ -208,7 +209,12 @@ describe('context migration 0006_context.sql', () => {
     seedSession(db, 'sess-upgrade', 'goal-upgrade', 'ws-upgrade');
 
     const upgrade = runMigrations(db, defaultMigrationsDir());
-    expect(upgrade.applied).toEqual(['0006_context.sql', '0007_agents.sql', '0008_suggested_orchestration.sql']);
+    expect(upgrade.applied).toEqual([
+      '0006_context.sql',
+      '0007_agents.sql',
+      '0008_suggested_orchestration.sql',
+      '0009_agent_readiness.sql',
+    ]);
 
     const counts = {
       goals: (db.prepare('SELECT count(*) AS cnt FROM goals').get() as { cnt: number }).cnt,

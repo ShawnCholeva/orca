@@ -21,19 +21,19 @@ const TRUNC_SUFFIX = "…[truncated]";
 export function sanitizeOutput(input: string | null | undefined): string {
   if (!input) return "";
   let out = input.replace(ANSI, "");
-  if (Buffer.byteLength(out, "utf8") > MAX_BYTES) {
-    const limitBytes = MAX_BYTES - Buffer.byteLength(TRUNC_SUFFIX, "utf8");
-    const buf = Buffer.from(out, "utf8").subarray(0, limitBytes);
-    // Decode with 'replacement' substitution so a half multi-byte char at the boundary
-    // becomes U+FFFD instead of producing invalid output.
-    out = new TextDecoder("utf-8", { fatal: false }).decode(buf) + TRUNC_SUFFIX;
-  }
   for (const rx of REDACTIONS) {
     out = out.replace(rx, (match, p1) => {
       // Preserve the leading delimiter for URL-param patterns so the URL stays readable.
       if (p1 && (p1 === "?" || p1 === "&" || p1 === "#")) return `${p1}<redacted>`;
       return "<redacted>";
     });
+  }
+  if (Buffer.byteLength(out, "utf8") > MAX_BYTES) {
+    const limitBytes = MAX_BYTES - Buffer.byteLength(TRUNC_SUFFIX, "utf8");
+    const buf = Buffer.from(out, "utf8").subarray(0, limitBytes);
+    // Decode with 'replacement' substitution so a half multi-byte char at the boundary
+    // becomes U+FFFD instead of producing invalid output.
+    out = new TextDecoder("utf-8", { fatal: false }).decode(buf) + TRUNC_SUFFIX;
   }
   return out;
 }
