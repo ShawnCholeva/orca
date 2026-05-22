@@ -7,6 +7,7 @@ import { SessionsPanel } from "./sessions/SessionsPanel";
 import { MemoryPanel } from "./memory/MemoryPanel";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { RecommendationsPanel } from "./recommendations/RecommendationsPanel";
+import { ConflictsBanner } from "./conflicts/ConflictsBanner";
 
 const MEMORY_ITEM_EVENTS = new Set<DomainEventType>([
   "memory.item.created",
@@ -125,6 +126,8 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
         {goal.description && (
           <p className="goal-detail-description">{goal.description}</p>
         )}
+
+        <ConflictsBanner goalId={goalId} />
 
         {refinement && (
           <section className="goal-detail-section goal-refinement" aria-label="Refinement">
