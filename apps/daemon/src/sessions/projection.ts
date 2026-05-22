@@ -7,6 +7,8 @@ interface SessionRow {
   workspace_id: string;
   adapter_id: string;
   context_package_id: string | null;
+  task_id: string | null;
+  from_recommendation_id: string | null;
   role: string | null;
   instruction: string | null;
   title: string;
@@ -40,6 +42,8 @@ export interface InsertSessionRow {
   workspaceId: string;
   adapterId: string;
   contextPackageId?: string | null;
+  taskId?: string | null;
+  fromRecommendationId?: string | null;
   role?: string | null;
   instruction?: string | null;
   title: string;
@@ -47,7 +51,8 @@ export interface InsertSessionRow {
   createdAt: string;
 }
 
-const SESSION_COLS = `s.id, s.goal_id, s.workspace_id, s.adapter_id, s.context_package_id, s.role, s.instruction, s.title, s.status, s.pid,
+const SESSION_COLS = `s.id, s.goal_id, s.workspace_id, s.adapter_id, s.context_package_id, s.task_id, s.from_recommendation_id,
+  s.role, s.instruction, s.title, s.status, s.pid,
   s.command, s.args_json, s.cwd, s.terminal_cols, s.terminal_rows, s.exit_code, s.exit_signal,
   s.failure_reason, s.failure_detail, s.created_at, s.started_at, s.exited_at, s.archived_at,
   latest_extraction.id AS latest_extraction_id,
@@ -85,6 +90,8 @@ function rowToSummary(row: SessionRow): SessionSummary {
     workspaceId: row.workspace_id,
     adapterId: row.adapter_id,
     contextPackageId: row.context_package_id,
+    taskId: row.task_id,
+    fromRecommendationId: row.from_recommendation_id,
     role: row.role,
     title: row.title,
     status: row.status,
@@ -112,6 +119,8 @@ function rowToDetail(row: SessionRow): SessionDetail {
     workspaceId: row.workspace_id,
     adapterId: row.adapter_id,
     contextPackageId: row.context_package_id,
+    taskId: row.task_id,
+    fromRecommendationId: row.from_recommendation_id,
     role: row.role,
     title: row.title,
     status: row.status,
@@ -156,8 +165,8 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
     _db = db;
     _stmts = {
       insertSession: db.prepare(
-        `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, context_package_id, role, instruction, title, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, context_package_id, task_id, from_recommendation_id, role, instruction, title, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ),
       listByGoal: db.prepare(
         `SELECT ${SESSION_COLS} ${SESSION_FROM} WHERE s.goal_id = ? ORDER BY s.created_at DESC, s.id ASC`
@@ -183,6 +192,8 @@ export function insertSession(db: Database.Database, row: InsertSessionRow): voi
     row.workspaceId,
     row.adapterId,
     row.contextPackageId ?? null,
+    row.taskId ?? null,
+    row.fromRecommendationId ?? null,
     row.role ?? null,
     row.instruction ?? null,
     row.title,

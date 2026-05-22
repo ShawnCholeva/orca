@@ -74,15 +74,20 @@ import { skillRegistry } from './registry/skill-registry.js';
 import { adapterRegistry } from './adapters/registry.js';
 import {
   AdapterNotFoundError,
+  ArchivedTargetError,
+  AssociationGoalMismatchError,
   CommandNotFoundError,
   ContextPackageMismatchError,
   ContextPackageNotFoundError,
   GoalArchivedError,
   GoalNotFoundError,
+  InvalidRecommendationStateError,
+  RecommendationNotFoundError,
   SessionNotFoundError,
   SessionNotStoppableError,
   SessionWrongStateError,
   SpawnFailedError,
+  TaskNotFoundError,
   WorkspaceNotAttachedError,
   WorkspaceNotFoundError,
   WorkspaceUnavailableError,
@@ -663,6 +668,24 @@ export function createServer(
         error instanceof WorkspaceUnavailableError ||
         error instanceof AdapterNotFoundError
       ) {
+        reply.status(422);
+        return apiError(error.code, error.message);
+      }
+      if (
+        error instanceof TaskNotFoundError ||
+        error instanceof RecommendationNotFoundError
+      ) {
+        reply.status(404);
+        return apiError(error.code, error.message);
+      }
+      if (
+        error instanceof InvalidRecommendationStateError ||
+        error instanceof ArchivedTargetError
+      ) {
+        reply.status(409);
+        return apiError(error.code, error.message);
+      }
+      if (error instanceof AssociationGoalMismatchError) {
         reply.status(422);
         return apiError(error.code, error.message);
       }

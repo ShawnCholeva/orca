@@ -102,3 +102,44 @@ export class DeliveryUnavailableError extends SessionError {
     this.name = 'DeliveryUnavailableError';
   }
 }
+
+export class InvalidRecommendationStateError extends SessionError {
+  constructor(recommendationId: string, status: string) {
+    super(
+      'invalid_recommendation_state',
+      `Recommendation ${recommendationId} is in state '${status}', expected 'accepted'`
+    );
+    this.name = 'InvalidRecommendationStateError';
+  }
+}
+
+export class ArchivedTargetError extends SessionError {
+  constructor(taskId: string) {
+    super('archived_target', `Task ${taskId} is archived`);
+    this.name = 'ArchivedTargetError';
+  }
+}
+
+export class TaskNotFoundError extends SessionError {
+  constructor(taskId: string) {
+    super('task_not_found', `Task not found: ${taskId}`);
+    this.name = 'TaskNotFoundError';
+  }
+}
+
+export class RecommendationNotFoundError extends SessionError {
+  constructor(recommendationId: string) {
+    super('recommendation_not_found', `Recommendation not found: ${recommendationId}`);
+    this.name = 'RecommendationNotFoundError';
+  }
+}
+
+export class AssociationGoalMismatchError extends SessionError {
+  constructor(entityType: string, entityId: string, entityGoalId: string, sessionGoalId: string) {
+    super(
+      'association_goal_mismatch',
+      `${entityType} ${entityId} belongs to goal ${entityGoalId}, not session goal ${sessionGoalId}`
+    );
+    this.name = 'AssociationGoalMismatchError';
+  }
+}
