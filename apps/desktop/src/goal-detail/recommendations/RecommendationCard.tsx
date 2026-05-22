@@ -5,6 +5,7 @@ import type {
   RecommendationSourceRef,
   RecommendationSourceRefType,
 } from "@orca/contracts";
+import { TERMINAL_RECOMMENDATION_STATUSES } from "./RecommendationsPanel";
 
 type Props = {
   recommendation: Recommendation;
@@ -30,7 +31,7 @@ export function RecommendationCard({
   const confidenceLabel = getConfidenceLabel(confidence);
   const actionSummary = summarizeAction(proposedAction);
   const sourceSummary = summarizeSources(sources);
-  const isTerminal = status === "accepted" || status === "rejected" || status === "dismissed" || status === "superseded";
+  const isTerminal = TERMINAL_RECOMMENDATION_STATUSES.has(status as "accepted" | "rejected" | "dismissed" | "superseded");
 
   function closeOverflow() {
     setOverflowOpen(false);

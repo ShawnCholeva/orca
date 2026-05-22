@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ProposedAction,
   Recommendation,
@@ -20,6 +20,13 @@ import {
 import { RecommendationCard } from "./RecommendationCard";
 import { RecommendationDetails } from "./RecommendationDetails";
 import { RecommendationModifyDialog } from "./RecommendationModifyDialog";
+
+export const TERMINAL_RECOMMENDATION_STATUSES = new Set([
+  "accepted",
+  "rejected",
+  "dismissed",
+  "superseded",
+] as const);
 
 export type CreateSessionPrefill = {
   adapterId: string;
@@ -72,6 +79,7 @@ export function RecommendationsPanel({
   const [modifyRec, setModifyRec] = useState<Recommendation | null>(null);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [pauseToast, setPauseToast] = useState<string | null>(null);
+  const pauseToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -93,8 +101,8 @@ export function RecommendationsPanel({
 
   const active = recommendations.filter((r) => r.status === "proposed");
   const modified = recommendations.filter((r) => r.status === "modified");
-  const history = recommendations.filter(
-    (r) => r.status === "accepted" || r.status === "rejected" || r.status === "dismissed" || r.status === "superseded",
+  const history = recommendations.filter((r) =>
+    TERMINAL_RECOMMENDATION_STATUSES.has(r.status as "accepted" | "rejected" | "dismissed" | "superseded"),
   );
 
   const latestGeneration = generations[0] ?? null;
@@ -196,9 +204,20 @@ export function RecommendationsPanel({
   }
 
   function showPauseToast() {
+    if (pauseToastTimerRef.current !== null) {
+      clearTimeout(pauseToastTimerRef.current);
+    }
     setPauseToast("Work paused. Review open tasks and sessions before continuing.");
-    setTimeout(() => setPauseToast(null), 5000);
+    pauseToastTimerRef.current = setTimeout(() => setPauseToast(null), 5000);
   }
+
+  useEffect(() => {
+    return () => {
+      if (pauseToastTimerRef.current !== null) {
+        clearTimeout(pauseToastTimerRef.current);
+      }
+    };
+  }, []);
 
   async function handleReject(rec: Recommendation) {
     setActionError(null);

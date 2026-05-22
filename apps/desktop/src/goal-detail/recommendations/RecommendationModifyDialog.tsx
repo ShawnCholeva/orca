@@ -27,6 +27,115 @@ const ALL_KINDS: ProposedActionKind[] = [
   "pause_work",
 ];
 
+type FieldState = {
+  adapterId: string;
+  sessionWorkspaceId: string;
+  sessionRole: string;
+  sessionObjective: string;
+  contextPackageId: string;
+  sessionId: string;
+  reviewerRole: "reviewer" | "qa";
+  missingFieldsText: string;
+  splitTaskId: string;
+  suggestedChildrenText: string;
+  validationRole: "reviewer" | "qa";
+  validationTaskId: string;
+  validationSessionId: string;
+  validationObjective: string;
+  conflictId: string;
+  resolutionNote: string;
+  updateTaskId: string;
+  suggestedStatus: string;
+  addCriteriaText: string;
+  askQuestion: string;
+  markCompleteTaskId: string;
+  pauseReason: string;
+  relatedTaskIdsText: string;
+};
+
+const EMPTY_FIELDS: FieldState = {
+  adapterId: "",
+  sessionWorkspaceId: "",
+  sessionRole: "engineer",
+  sessionObjective: "",
+  contextPackageId: "",
+  sessionId: "",
+  reviewerRole: "reviewer",
+  missingFieldsText: "",
+  splitTaskId: "",
+  suggestedChildrenText: "",
+  validationRole: "reviewer",
+  validationTaskId: "",
+  validationSessionId: "",
+  validationObjective: "",
+  conflictId: "",
+  resolutionNote: "",
+  updateTaskId: "",
+  suggestedStatus: "",
+  addCriteriaText: "",
+  askQuestion: "",
+  markCompleteTaskId: "",
+  pauseReason: "",
+  relatedTaskIdsText: "",
+};
+
+function initFieldState(action: ProposedAction): FieldState {
+  switch (action.kind) {
+    case "create_session":
+      return {
+        ...EMPTY_FIELDS,
+        adapterId: action.adapterId,
+        sessionWorkspaceId: action.workspaceId ?? "",
+        sessionRole: action.role,
+        sessionObjective: action.objective,
+        contextPackageId: action.contextPackageId ?? "",
+      };
+    case "continue_session":
+      return { ...EMPTY_FIELDS, sessionId: action.sessionId };
+    case "review_output":
+      return { ...EMPTY_FIELDS, sessionId: action.sessionId, reviewerRole: action.reviewerRole ?? "reviewer" };
+    case "refine_goal":
+      return { ...EMPTY_FIELDS, missingFieldsText: action.missingFields.join("\n") };
+    case "split_task":
+      return {
+        ...EMPTY_FIELDS,
+        splitTaskId: action.taskId,
+        suggestedChildrenText: action.suggestedChildren.map((c) => c.title).join("\n"),
+      };
+    case "run_validation":
+      return {
+        ...EMPTY_FIELDS,
+        validationRole: action.suggestedRole,
+        validationObjective: action.objective,
+        validationTaskId: action.taskId ?? "",
+        validationSessionId: action.sessionId ?? "",
+      };
+    case "resolve_conflict":
+      return {
+        ...EMPTY_FIELDS,
+        conflictId: action.conflictId,
+        resolutionNote: action.suggestedResolutionNote ?? "",
+      };
+    case "update_plan":
+      return {
+        ...EMPTY_FIELDS,
+        updateTaskId: action.taskId,
+        suggestedStatus: action.suggestedStatus ?? "",
+        addCriteriaText: (action.addAcceptanceCriteria ?? []).join("\n"),
+      };
+    case "ask_user":
+      return { ...EMPTY_FIELDS, askQuestion: action.question };
+    case "mark_complete":
+      return { ...EMPTY_FIELDS, markCompleteTaskId: action.taskId };
+    case "pause_work":
+      return {
+        ...EMPTY_FIELDS,
+        pauseReason: action.reason,
+        relatedTaskIdsText: action.relatedTaskIds.join("\n"),
+      };
+  }
+}
+
 type Props = {
   recommendation: Recommendation;
   onSave: (patch: ModifyRecommendationRequest) => Promise<void>;
@@ -37,86 +146,13 @@ export function RecommendationModifyDialog({ recommendation, onSave, onClose }: 
   const [title, setTitle] = useState(recommendation.title);
   const [rationale, setRationale] = useState(recommendation.rationale);
   const [kind, setKind] = useState<ProposedActionKind>(recommendation.proposedAction.kind);
+  const [fields, setFields] = useState<FieldState>(() => initFieldState(recommendation.proposedAction));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Per-kind fields, initialized from existing action
-  const existingAction = recommendation.proposedAction;
-  const [adapterId, setAdapterId] = useState(existingAction.kind === "create_session" ? existingAction.adapterId : "");
-  const [sessionWorkspaceId, setSessionWorkspaceId] = useState(
-    existingAction.kind === "create_session" ? (existingAction.workspaceId ?? "") : "",
-  );
-  const [sessionRole, setSessionRole] = useState<string>(
-    existingAction.kind === "create_session" ? existingAction.role : "engineer",
-  );
-  const [sessionObjective, setSessionObjective] = useState(
-    existingAction.kind === "create_session" ? existingAction.objective : "",
-  );
-  const [contextPackageId, setContextPackageId] = useState(
-    existingAction.kind === "create_session" ? (existingAction.contextPackageId ?? "") : "",
-  );
-  const [sessionId, setSessionId] = useState(
-    existingAction.kind === "continue_session"
-      ? existingAction.sessionId
-      : existingAction.kind === "review_output"
-        ? existingAction.sessionId
-        : "",
-  );
-  const [reviewerRole, setReviewerRole] = useState<"reviewer" | "qa">(
-    existingAction.kind === "review_output" ? (existingAction.reviewerRole ?? "reviewer") : "reviewer",
-  );
-  const [missingFieldsText, setMissingFieldsText] = useState(
-    existingAction.kind === "refine_goal" ? existingAction.missingFields.join("\n") : "",
-  );
-  const [splitTaskId, setSplitTaskId] = useState(
-    existingAction.kind === "split_task" ? existingAction.taskId : "",
-  );
-  const [suggestedChildrenText, setSuggestedChildrenText] = useState(
-    existingAction.kind === "split_task"
-      ? existingAction.suggestedChildren.map((c) => c.title).join("\n")
-      : "",
-  );
-  const [validationRole, setValidationRole] = useState<"reviewer" | "qa">(
-    existingAction.kind === "run_validation" ? existingAction.suggestedRole : "reviewer",
-  );
-  const [validationTaskId, setValidationTaskId] = useState(
-    existingAction.kind === "run_validation" ? (existingAction.taskId ?? "") : "",
-  );
-  const [validationSessionId, setValidationSessionId] = useState(
-    existingAction.kind === "run_validation" ? (existingAction.sessionId ?? "") : "",
-  );
-  const [validationObjective, setValidationObjective] = useState(
-    existingAction.kind === "run_validation" ? existingAction.objective : "",
-  );
-  const [conflictId, setConflictId] = useState(
-    existingAction.kind === "resolve_conflict" ? existingAction.conflictId : "",
-  );
-  const [resolutionNote, setResolutionNote] = useState(
-    existingAction.kind === "resolve_conflict" ? (existingAction.suggestedResolutionNote ?? "") : "",
-  );
-  const [updateTaskId, setUpdateTaskId] = useState(
-    existingAction.kind === "update_plan" ? existingAction.taskId : "",
-  );
-  const [suggestedStatus, setSuggestedStatus] = useState(
-    existingAction.kind === "update_plan" ? (existingAction.suggestedStatus ?? "") : "",
-  );
-  const [addCriteriaText, setAddCriteriaText] = useState(
-    existingAction.kind === "update_plan"
-      ? (existingAction.addAcceptanceCriteria ?? []).join("\n")
-      : "",
-  );
-  const [askQuestion, setAskQuestion] = useState(
-    existingAction.kind === "ask_user" ? existingAction.question : "",
-  );
-  const [markCompleteTaskId, setMarkCompleteTaskId] = useState(
-    existingAction.kind === "mark_complete" ? existingAction.taskId : "",
-  );
-  const [pauseReason, setPauseReason] = useState(
-    existingAction.kind === "pause_work" ? existingAction.reason : "",
-  );
-  const [relatedTaskIdsText, setRelatedTaskIdsText] = useState(
-    existingAction.kind === "pause_work" ? existingAction.relatedTaskIds.join("\n") : "",
-  );
+  function setField<K extends keyof FieldState>(key: K, value: FieldState[K]) {
+    setFields((prev) => ({ ...prev, [key]: value }));
+  }
 
   function buildProposedAction(): { ok: true; action: typeof ProposedAction._type } | { ok: false; error: string } {
     let raw: unknown;
@@ -124,81 +160,77 @@ export function RecommendationModifyDialog({ recommendation, onSave, onClose }: 
       case "create_session":
         raw = {
           kind,
-          adapterId: adapterId.trim(),
-          workspaceId: sessionWorkspaceId.trim() || undefined,
-          role: sessionRole,
-          objective: sessionObjective.trim(),
-          contextPackageId: contextPackageId.trim() || undefined,
+          adapterId: fields.adapterId.trim(),
+          workspaceId: fields.sessionWorkspaceId.trim() || undefined,
+          role: fields.sessionRole,
+          objective: fields.sessionObjective.trim(),
+          contextPackageId: fields.contextPackageId.trim() || undefined,
         };
         break;
       case "continue_session":
-        raw = { kind, sessionId: sessionId.trim() };
+        raw = { kind, sessionId: fields.sessionId.trim() };
         break;
       case "review_output":
-        raw = {
-          kind,
-          sessionId: sessionId.trim(),
-          reviewerRole: reviewerRole || undefined,
-        };
+        raw = { kind, sessionId: fields.sessionId.trim(), reviewerRole: fields.reviewerRole || undefined };
         break;
       case "refine_goal": {
-        const fields = missingFieldsText
+        const missingFields = fields.missingFieldsText
           .split(/[\n,]/)
           .map((f) => f.trim())
           .filter(Boolean);
-        raw = { kind, missingFields: fields };
+        raw = { kind, missingFields };
         break;
       }
       case "split_task": {
-        const children = suggestedChildrenText
+        const children = fields.suggestedChildrenText
           .split(/\r?\n/)
           .map((t) => t.trim())
           .filter(Boolean)
-          .map((title) => ({ title }));
-        raw = { kind, taskId: splitTaskId.trim(), suggestedChildren: children };
+          .map((t) => ({ title: t }));
+        raw = { kind, taskId: fields.splitTaskId.trim(), suggestedChildren: children };
         break;
       }
       case "run_validation":
         raw = {
           kind,
-          suggestedRole: validationRole,
-          objective: validationObjective.trim(),
-          taskId: validationTaskId.trim() || undefined,
-          sessionId: validationSessionId.trim() || undefined,
+          suggestedRole: fields.validationRole,
+          objective: fields.validationObjective.trim(),
+          taskId: fields.validationTaskId.trim() || undefined,
+          sessionId: fields.validationSessionId.trim() || undefined,
         };
         break;
       case "resolve_conflict":
         raw = {
           kind,
-          conflictId: conflictId.trim(),
-          suggestedResolutionNote: resolutionNote.trim() || undefined,
+          conflictId: fields.conflictId.trim(),
+          suggestedResolutionNote: fields.resolutionNote.trim() || undefined,
         };
         break;
       case "update_plan": {
-        const criteria = addCriteriaText
+        const criteria = fields.addCriteriaText
           .split(/\r?\n/)
           .map((t) => t.trim())
           .filter(Boolean);
         raw = {
           kind,
-          taskId: updateTaskId.trim(),
-          suggestedStatus: suggestedStatus || undefined,
+          taskId: fields.updateTaskId.trim(),
+          suggestedStatus: fields.suggestedStatus || undefined,
           addAcceptanceCriteria: criteria.length > 0 ? criteria : undefined,
         };
         break;
       }
       case "ask_user":
-        raw = { kind, question: askQuestion.trim() };
+        raw = { kind, question: fields.askQuestion.trim() };
         break;
       case "mark_complete":
-        raw = { kind, taskId: markCompleteTaskId.trim() };
+        raw = { kind, taskId: fields.markCompleteTaskId.trim() };
         break;
       case "pause_work": {
-        const ids = relatedTaskIdsText
+        const ids = fields.relatedTaskIdsText
           .split(/\r?\n/)
           .map((t) => t.trim())
           .filter(Boolean);
-        raw = { kind, reason: pauseReason.trim(), relatedTaskIds: ids };
+        raw = { kind, reason: fields.pauseReason.trim(), relatedTaskIds: ids };
         break;
       }
     }
@@ -247,6 +279,7 @@ export function RecommendationModifyDialog({ recommendation, onSave, onClose }: 
       await onSave(patch);
     } catch (err) {
       setError(toErrorMessage(err, "Modify failed."));
+    } finally {
       setSaving(false);
     }
   }
@@ -288,33 +321,7 @@ export function RecommendationModifyDialog({ recommendation, onSave, onClose }: 
             ))}
           </select>
 
-          <PerKindFields
-            kind={kind}
-            saving={saving}
-            adapterId={adapterId} setAdapterId={setAdapterId}
-            sessionWorkspaceId={sessionWorkspaceId} setSessionWorkspaceId={setSessionWorkspaceId}
-            sessionRole={sessionRole} setSessionRole={setSessionRole}
-            sessionObjective={sessionObjective} setSessionObjective={setSessionObjective}
-            contextPackageId={contextPackageId} setContextPackageId={setContextPackageId}
-            sessionId={sessionId} setSessionId={setSessionId}
-            reviewerRole={reviewerRole} setReviewerRole={setReviewerRole}
-            missingFieldsText={missingFieldsText} setMissingFieldsText={setMissingFieldsText}
-            splitTaskId={splitTaskId} setSplitTaskId={setSplitTaskId}
-            suggestedChildrenText={suggestedChildrenText} setSuggestedChildrenText={setSuggestedChildrenText}
-            validationRole={validationRole} setValidationRole={setValidationRole}
-            validationTaskId={validationTaskId} setValidationTaskId={setValidationTaskId}
-            validationSessionId={validationSessionId} setValidationSessionId={setValidationSessionId}
-            validationObjective={validationObjective} setValidationObjective={setValidationObjective}
-            conflictId={conflictId} setConflictId={setConflictId}
-            resolutionNote={resolutionNote} setResolutionNote={setResolutionNote}
-            updateTaskId={updateTaskId} setUpdateTaskId={setUpdateTaskId}
-            suggestedStatus={suggestedStatus} setSuggestedStatus={setSuggestedStatus}
-            addCriteriaText={addCriteriaText} setAddCriteriaText={setAddCriteriaText}
-            askQuestion={askQuestion} setAskQuestion={setAskQuestion}
-            markCompleteTaskId={markCompleteTaskId} setMarkCompleteTaskId={setMarkCompleteTaskId}
-            pauseReason={pauseReason} setPauseReason={setPauseReason}
-            relatedTaskIdsText={relatedTaskIdsText} setRelatedTaskIdsText={setRelatedTaskIdsText}
-          />
+          <PerKindFields kind={kind} saving={saving} fields={fields} setField={setField} />
 
           {error && <p className="form-error task-dialog-error">{error}</p>}
 
@@ -332,53 +339,32 @@ export function RecommendationModifyDialog({ recommendation, onSave, onClose }: 
   );
 }
 
+type SetField = <K extends keyof FieldState>(key: K, value: FieldState[K]) => void;
+
 type PerKindFieldsProps = {
   kind: ProposedActionKind;
   saving: boolean;
-  adapterId: string; setAdapterId: (v: string) => void;
-  sessionWorkspaceId: string; setSessionWorkspaceId: (v: string) => void;
-  sessionRole: string; setSessionRole: (v: string) => void;
-  sessionObjective: string; setSessionObjective: (v: string) => void;
-  contextPackageId: string; setContextPackageId: (v: string) => void;
-  sessionId: string; setSessionId: (v: string) => void;
-  reviewerRole: "reviewer" | "qa"; setReviewerRole: (v: "reviewer" | "qa") => void;
-  missingFieldsText: string; setMissingFieldsText: (v: string) => void;
-  splitTaskId: string; setSplitTaskId: (v: string) => void;
-  suggestedChildrenText: string; setSuggestedChildrenText: (v: string) => void;
-  validationRole: "reviewer" | "qa"; setValidationRole: (v: "reviewer" | "qa") => void;
-  validationTaskId: string; setValidationTaskId: (v: string) => void;
-  validationSessionId: string; setValidationSessionId: (v: string) => void;
-  validationObjective: string; setValidationObjective: (v: string) => void;
-  conflictId: string; setConflictId: (v: string) => void;
-  resolutionNote: string; setResolutionNote: (v: string) => void;
-  updateTaskId: string; setUpdateTaskId: (v: string) => void;
-  suggestedStatus: string; setSuggestedStatus: (v: string) => void;
-  addCriteriaText: string; setAddCriteriaText: (v: string) => void;
-  askQuestion: string; setAskQuestion: (v: string) => void;
-  markCompleteTaskId: string; setMarkCompleteTaskId: (v: string) => void;
-  pauseReason: string; setPauseReason: (v: string) => void;
-  relatedTaskIdsText: string; setRelatedTaskIdsText: (v: string) => void;
+  fields: FieldState;
+  setField: SetField;
 };
 
-function PerKindFields(p: PerKindFieldsProps) {
-  const { kind, saving } = p;
-
+function PerKindFields({ kind, saving, fields, setField }: PerKindFieldsProps) {
   switch (kind) {
     case "create_session":
       return (
         <>
           <label htmlFor="rec-modify-adapter-id">Adapter ID</label>
-          <input id="rec-modify-adapter-id" type="text" value={p.adapterId} onChange={(e) => p.setAdapterId(e.target.value)} disabled={saving} />
+          <input id="rec-modify-adapter-id" type="text" value={fields.adapterId} onChange={(e) => setField("adapterId", e.target.value)} disabled={saving} />
           <label htmlFor="rec-modify-session-ws">Workspace ID (optional)</label>
-          <input id="rec-modify-session-ws" type="text" value={p.sessionWorkspaceId} onChange={(e) => p.setSessionWorkspaceId(e.target.value)} disabled={saving} />
+          <input id="rec-modify-session-ws" type="text" value={fields.sessionWorkspaceId} onChange={(e) => setField("sessionWorkspaceId", e.target.value)} disabled={saving} />
           <label htmlFor="rec-modify-session-role">Role</label>
-          <select id="rec-modify-session-role" value={p.sessionRole} onChange={(e) => p.setSessionRole(e.target.value)} disabled={saving}>
+          <select id="rec-modify-session-role" value={fields.sessionRole} onChange={(e) => setField("sessionRole", e.target.value)} disabled={saving}>
             {TASK_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
           <label htmlFor="rec-modify-session-obj">Objective</label>
-          <textarea id="rec-modify-session-obj" value={p.sessionObjective} onChange={(e) => p.setSessionObjective(e.target.value)} rows={2} disabled={saving} />
+          <textarea id="rec-modify-session-obj" value={fields.sessionObjective} onChange={(e) => setField("sessionObjective", e.target.value)} rows={2} disabled={saving} />
           <label htmlFor="rec-modify-ctx-pkg">Context Package ID (optional)</label>
-          <input id="rec-modify-ctx-pkg" type="text" value={p.contextPackageId} onChange={(e) => p.setContextPackageId(e.target.value)} disabled={saving} />
+          <input id="rec-modify-ctx-pkg" type="text" value={fields.contextPackageId} onChange={(e) => setField("contextPackageId", e.target.value)} disabled={saving} />
         </>
       );
 
@@ -387,11 +373,11 @@ function PerKindFields(p: PerKindFieldsProps) {
       return (
         <>
           <label htmlFor="rec-modify-session-id">Session ID</label>
-          <input id="rec-modify-session-id" type="text" value={p.sessionId} onChange={(e) => p.setSessionId(e.target.value)} disabled={saving} />
+          <input id="rec-modify-session-id" type="text" value={fields.sessionId} onChange={(e) => setField("sessionId", e.target.value)} disabled={saving} />
           {kind === "review_output" && (
             <>
               <label htmlFor="rec-modify-reviewer-role">Reviewer Role (optional)</label>
-              <select id="rec-modify-reviewer-role" value={p.reviewerRole} onChange={(e) => p.setReviewerRole(e.target.value as "reviewer" | "qa")} disabled={saving}>
+              <select id="rec-modify-reviewer-role" value={fields.reviewerRole} onChange={(e) => setField("reviewerRole", e.target.value as "reviewer" | "qa")} disabled={saving}>
                 {REVIEWER_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </>
@@ -407,8 +393,8 @@ function PerKindFields(p: PerKindFieldsProps) {
           </label>
           <textarea
             id="rec-modify-missing-fields"
-            value={p.missingFieldsText}
-            onChange={(e) => p.setMissingFieldsText(e.target.value)}
+            value={fields.missingFieldsText}
+            onChange={(e) => setField("missingFieldsText", e.target.value)}
             rows={3}
             disabled={saving}
           />
@@ -419,9 +405,9 @@ function PerKindFields(p: PerKindFieldsProps) {
       return (
         <>
           <label htmlFor="rec-modify-split-task-id">Task ID</label>
-          <input id="rec-modify-split-task-id" type="text" value={p.splitTaskId} onChange={(e) => p.setSplitTaskId(e.target.value)} disabled={saving} />
+          <input id="rec-modify-split-task-id" type="text" value={fields.splitTaskId} onChange={(e) => setField("splitTaskId", e.target.value)} disabled={saving} />
           <label htmlFor="rec-modify-children">Suggested Child Titles (one per line)</label>
-          <textarea id="rec-modify-children" value={p.suggestedChildrenText} onChange={(e) => p.setSuggestedChildrenText(e.target.value)} rows={3} disabled={saving} />
+          <textarea id="rec-modify-children" value={fields.suggestedChildrenText} onChange={(e) => setField("suggestedChildrenText", e.target.value)} rows={3} disabled={saving} />
         </>
       );
 
@@ -429,15 +415,15 @@ function PerKindFields(p: PerKindFieldsProps) {
       return (
         <>
           <label htmlFor="rec-modify-val-role">Suggested Role</label>
-          <select id="rec-modify-val-role" value={p.validationRole} onChange={(e) => p.setValidationRole(e.target.value as "reviewer" | "qa")} disabled={saving}>
+          <select id="rec-modify-val-role" value={fields.validationRole} onChange={(e) => setField("validationRole", e.target.value as "reviewer" | "qa")} disabled={saving}>
             {REVIEWER_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
           <label htmlFor="rec-modify-val-obj">Objective</label>
-          <textarea id="rec-modify-val-obj" value={p.validationObjective} onChange={(e) => p.setValidationObjective(e.target.value)} rows={2} disabled={saving} />
+          <textarea id="rec-modify-val-obj" value={fields.validationObjective} onChange={(e) => setField("validationObjective", e.target.value)} rows={2} disabled={saving} />
           <label htmlFor="rec-modify-val-task">Task ID (optional)</label>
-          <input id="rec-modify-val-task" type="text" value={p.validationTaskId} onChange={(e) => p.setValidationTaskId(e.target.value)} disabled={saving} />
+          <input id="rec-modify-val-task" type="text" value={fields.validationTaskId} onChange={(e) => setField("validationTaskId", e.target.value)} disabled={saving} />
           <label htmlFor="rec-modify-val-session">Session ID (optional)</label>
-          <input id="rec-modify-val-session" type="text" value={p.validationSessionId} onChange={(e) => p.setValidationSessionId(e.target.value)} disabled={saving} />
+          <input id="rec-modify-val-session" type="text" value={fields.validationSessionId} onChange={(e) => setField("validationSessionId", e.target.value)} disabled={saving} />
         </>
       );
 
@@ -445,9 +431,9 @@ function PerKindFields(p: PerKindFieldsProps) {
       return (
         <>
           <label htmlFor="rec-modify-conflict-id">Conflict ID</label>
-          <input id="rec-modify-conflict-id" type="text" value={p.conflictId} onChange={(e) => p.setConflictId(e.target.value)} disabled={saving} />
+          <input id="rec-modify-conflict-id" type="text" value={fields.conflictId} onChange={(e) => setField("conflictId", e.target.value)} disabled={saving} />
           <label htmlFor="rec-modify-res-note">Resolution Note (optional)</label>
-          <textarea id="rec-modify-res-note" value={p.resolutionNote} onChange={(e) => p.setResolutionNote(e.target.value)} rows={2} disabled={saving} />
+          <textarea id="rec-modify-res-note" value={fields.resolutionNote} onChange={(e) => setField("resolutionNote", e.target.value)} rows={2} disabled={saving} />
         </>
       );
 
@@ -455,14 +441,14 @@ function PerKindFields(p: PerKindFieldsProps) {
       return (
         <>
           <label htmlFor="rec-modify-update-task-id">Task ID</label>
-          <input id="rec-modify-update-task-id" type="text" value={p.updateTaskId} onChange={(e) => p.setUpdateTaskId(e.target.value)} disabled={saving} />
+          <input id="rec-modify-update-task-id" type="text" value={fields.updateTaskId} onChange={(e) => setField("updateTaskId", e.target.value)} disabled={saving} />
           <label htmlFor="rec-modify-suggested-status">Suggested Status (optional)</label>
-          <select id="rec-modify-suggested-status" value={p.suggestedStatus} onChange={(e) => p.setSuggestedStatus(e.target.value)} disabled={saving}>
+          <select id="rec-modify-suggested-status" value={fields.suggestedStatus} onChange={(e) => setField("suggestedStatus", e.target.value)} disabled={saving}>
             <option value="">— none —</option>
             {TASK_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}
           </select>
           <label htmlFor="rec-modify-add-criteria">Add Acceptance Criteria (one per line, optional)</label>
-          <textarea id="rec-modify-add-criteria" value={p.addCriteriaText} onChange={(e) => p.setAddCriteriaText(e.target.value)} rows={3} disabled={saving} />
+          <textarea id="rec-modify-add-criteria" value={fields.addCriteriaText} onChange={(e) => setField("addCriteriaText", e.target.value)} rows={3} disabled={saving} />
         </>
       );
 
@@ -470,7 +456,7 @@ function PerKindFields(p: PerKindFieldsProps) {
       return (
         <>
           <label htmlFor="rec-modify-question">Question</label>
-          <textarea id="rec-modify-question" value={p.askQuestion} onChange={(e) => p.setAskQuestion(e.target.value)} rows={2} disabled={saving} />
+          <textarea id="rec-modify-question" value={fields.askQuestion} onChange={(e) => setField("askQuestion", e.target.value)} rows={2} disabled={saving} />
         </>
       );
 
@@ -478,7 +464,7 @@ function PerKindFields(p: PerKindFieldsProps) {
       return (
         <>
           <label htmlFor="rec-modify-mark-task-id">Task ID</label>
-          <input id="rec-modify-mark-task-id" type="text" value={p.markCompleteTaskId} onChange={(e) => p.setMarkCompleteTaskId(e.target.value)} disabled={saving} />
+          <input id="rec-modify-mark-task-id" type="text" value={fields.markCompleteTaskId} onChange={(e) => setField("markCompleteTaskId", e.target.value)} disabled={saving} />
         </>
       );
 
@@ -486,9 +472,9 @@ function PerKindFields(p: PerKindFieldsProps) {
       return (
         <>
           <label htmlFor="rec-modify-pause-reason">Reason</label>
-          <textarea id="rec-modify-pause-reason" value={p.pauseReason} onChange={(e) => p.setPauseReason(e.target.value)} rows={2} disabled={saving} />
+          <textarea id="rec-modify-pause-reason" value={fields.pauseReason} onChange={(e) => setField("pauseReason", e.target.value)} rows={2} disabled={saving} />
           <label htmlFor="rec-modify-related-tasks">Related Task IDs (one per line)</label>
-          <textarea id="rec-modify-related-tasks" value={p.relatedTaskIdsText} onChange={(e) => p.setRelatedTaskIdsText(e.target.value)} rows={2} disabled={saving} />
+          <textarea id="rec-modify-related-tasks" value={fields.relatedTaskIdsText} onChange={(e) => setField("relatedTaskIdsText", e.target.value)} rows={2} disabled={saving} />
         </>
       );
   }
