@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from "react";
-import { Goal, DomainEventType, type PluginSummary, type SkillSummary } from "@orca/contracts";
+import { Goal, DomainEventType, type Agent, type PluginSummary, type SkillSummary } from "@orca/contracts";
 import {
   fetchHealth,
   listAgents,
@@ -17,6 +17,7 @@ import { GoalDetailView } from "./goal-detail/GoalDetailView";
 import { OnboardingView } from "./onboarding/OnboardingView";
 import { Titlebar } from "./chrome/Titlebar";
 import { BootstrapErrorScreen } from "./chrome/BootstrapErrorScreen";
+import { NoReadyAgentsBanner } from "./chrome/NoReadyAgentsBanner";
 import { OrcaChat } from "./orchestrator/OrcaChat";
 import "./orchestrator/orchestrator.css";
 import "./styles.css";
@@ -50,6 +51,7 @@ export default function App() {
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
 
   async function loadDiagnostics() {
     if (diagnosticsLoading) return;
@@ -71,6 +73,14 @@ export default function App() {
       setGoals(res.goals);
     } catch {
       // connection status banner communicates the problem to the user
+    }
+  }
+
+  async function refreshAgents() {
+    try {
+      setAgents(await listAgents());
+    } catch {
+      // connection status banner communicates the problem
     }
   }
 
@@ -98,6 +108,7 @@ export default function App() {
     listAgents()
       .then((rows) => {
         if (cancelled) return;
+        setAgents(rows);
         const anyConnected = rows.some((a) => a.connected);
         setOnboardingState(anyConnected ? "complete" : "needs-onboarding");
         setBootstrapError(null);
@@ -194,7 +205,12 @@ export default function App() {
     return (
       <div className="app-shell">
         <Titlebar />
-        <OnboardingView onComplete={() => setOnboardingState("complete")} />
+        <OnboardingView
+          onComplete={async () => {
+            await refreshAgents();
+            setOnboardingState("complete");
+          }}
+        />
       </div>
     );
   }
@@ -202,6 +218,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <Titlebar />
+      {onboardingState === "complete" && <NoReadyAgentsBanner agents={agents} />}
       <div className="app">
       <header className="status-header">
         <h1 className="app-title">Orca</h1>
@@ -476,4 +493,3 @@ function GoalCard({ goal, onView }: { goal: Goal; onView: () => void }) {
     </li>
   );
 }
-
