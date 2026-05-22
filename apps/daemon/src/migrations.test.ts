@@ -59,7 +59,8 @@ describe("runMigrations", () => {
       "0005_memory.sql",
       "0006_context.sql",
       "0007_agents.sql",
-      "0008_suggested_orchestration.sql"
+      "0008_suggested_orchestration.sql",
+      "0009_agent_readiness.sql"
     ]);
   });
 
@@ -149,7 +150,8 @@ describe("runMigrations", () => {
       "0005_memory.sql",
       "0006_context.sql",
       "0007_agents.sql",
-      "0008_suggested_orchestration.sql"
+      "0008_suggested_orchestration.sql",
+      "0009_agent_readiness.sql"
     ]);
 
     const goalCount = (
@@ -272,7 +274,8 @@ describe("session tables migration", () => {
       "0005_memory.sql",
       "0006_context.sql",
       "0007_agents.sql",
-      "0008_suggested_orchestration.sql"
+      "0008_suggested_orchestration.sql",
+      "0009_agent_readiness.sql"
     ]);
 
     const tables = (
@@ -571,5 +574,58 @@ describe("memory tables migration", () => {
       null,
       null
     );
+  });
+});
+
+describe("migration 0009 agent readiness", () => {
+  it("adds readiness columns to agents and enforces status CHECK", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "orca-mig-9-"));
+    tempDirs.push(dir);
+    const db = openDatabase(createConfig(dir));
+    runMigrations(db, defaultMigrationsDir());
+
+    const cols = db.prepare(`PRAGMA table_info(agents)`).all() as Array<{ name: string }>;
+    const names = cols.map((c) => c.name);
+    for (const expected of [
+      "readiness_status",
+      "readiness_checked_at",
+      "readiness_detail",
+      "readiness_repair",
+      "readiness_version",
+    ]) {
+      expect(names).toContain(expected);
+    }
+
+    db.prepare(
+      `INSERT INTO agents (id, name, short_label, description, swatch, recommended, connected, sort_order, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "claude-code",
+      "Claude Code",
+      "CC",
+      "test",
+      "#000000",
+      1,
+      0,
+      1,
+      "2026-05-22T00:00:00.000Z",
+      "2026-05-22T00:00:00.000Z",
+    );
+
+    // CHECK constraint rejects junk
+    expect(() =>
+      db
+        .prepare(`UPDATE agents SET readiness_status = 'bogus' WHERE id = ?`)
+        .run("claude-code"),
+    ).toThrow();
+
+    // NULL allowed
+    db.prepare(`UPDATE agents SET readiness_status = NULL WHERE id = ?`).run("claude-code");
+
+    // every legal value accepted
+    for (const v of ["unchecked", "ready", "missing", "needs_auth", "misconfigured", "failed"]) {
+      db.prepare(`UPDATE agents SET readiness_status = ? WHERE id = ?`).run(v, "claude-code");
+    }
+    closeDatabase(db);
   });
 });

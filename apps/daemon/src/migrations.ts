@@ -12,7 +12,8 @@ export const migrationFiles = [
   "0005_memory.sql",
   "0006_context.sql",
   "0007_agents.sql",
-  SUGGESTED_ORCHESTRATION_MIGRATION
+  SUGGESTED_ORCHESTRATION_MIGRATION,
+  "0009_agent_readiness.sql"
 ] as const;
 
 export function runMigrations(
