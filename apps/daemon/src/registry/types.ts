@@ -7,16 +7,36 @@ export interface PluginDescriptor {
   capabilities: PluginCapability[];
 }
 
-export type SkillExtensionPoint = "goal.create" | "goal.refine";
+export type SkillExtensionPoint =
+  | "goal.create"
+  | "goal.refine"
+  | "orchestration.recommendation-generation"
+  | "orchestration.task-generation"
+  | "orchestration.conflict-detection";
+export type PublicSkillExtensionPoint = "goal.create" | "goal.refine";
+
+export type SkillCategory = "public" | "internal";
+export type SkillInvocation = "http" | "daemon-internal";
 
 export interface SkillDescriptor<TInput = unknown, TOutput = unknown> {
   id: string;
   pluginId: string;
   extensionPoint: SkillExtensionPoint;
+  version?: string;
+  category?: SkillCategory;
+  invocation?: SkillInvocation;
   title: string;
   description: string;
   invoke(input: TInput, ctx: SkillContext): TOutput;
 }
+
+export type PublicSkillDescriptor<TInput = unknown, TOutput = unknown> = SkillDescriptor<
+  TInput,
+  TOutput
+> & {
+  extensionPoint: PublicSkillExtensionPoint;
+  category?: "public";
+};
 
 export interface SkillContext {
   now(): string;

@@ -8,6 +8,9 @@ export const quickGoalSkill: SkillDescriptor<
   id: "quick-goal",
   pluginId: "orca.default-skills",
   extensionPoint: "goal.create",
+  version: "0.1.0",
+  category: "public",
+  invocation: "http",
   title: "Quick Goal",
   description: "Deterministic normalization of Goal creation input. No AI.",
 

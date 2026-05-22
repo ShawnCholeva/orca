@@ -79,6 +79,9 @@ export const guidedGoalRefinementSkill: SkillDescriptor<
   id: SKILL_ID,
   pluginId: "orca.default-skills",
   extensionPoint: "goal.refine",
+  version: "0.1.0",
+  category: "public",
+  invocation: "http",
   title: "Guided Goal Refinement",
   description:
     "Deterministic structuring of a rough Goal into success criteria, constraints, and assumptions.",

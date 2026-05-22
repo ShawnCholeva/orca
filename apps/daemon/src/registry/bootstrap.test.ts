@@ -37,18 +37,33 @@ describe('bootstrapRegistries', () => {
     expect(plugins.byId('orca.shell-manual')?.capabilities).toEqual(['agent.adapter']);
   });
 
-  it('registers exactly 2 skills with correct ids and extensionPoints', () => {
+  it('registers exactly 2 public skills with correct ids and extensionPoints', () => {
     const { plugins, skills, adapters } = makeRegistries();
 
     bootstrapRegistries({ plugins, skills, adapters });
 
-    const list = skills.list();
+    const list = skills.listPublic();
     expect(list).toHaveLength(2);
-    // list() returns sorted by id
+    // listPublic() returns sorted by id
     expect(list[0]?.id).toBe('guided-goal-refinement');
     expect(list[0]?.extensionPoint).toBe('goal.refine');
     expect(list[1]?.id).toBe('quick-goal');
     expect(list[1]?.extensionPoint).toBe('goal.create');
+  });
+
+  it('registers M7 internal orchestration descriptors for diagnostics', () => {
+    const { plugins, skills, adapters } = makeRegistries();
+
+    bootstrapRegistries({ plugins, skills, adapters });
+
+    const expected = ['orca/recommendation-generation', 'orca/task-generation', 'orca/conflict-detection'] as const;
+    for (const id of expected) {
+      const descriptor = skills.byId(id);
+      expect(descriptor).toBeDefined();
+      expect(descriptor?.version).toBe('0.1.0');
+      expect(descriptor?.category).toBe('internal');
+      expect(descriptor?.invocation).toBe('daemon-internal');
+    }
   });
 
   it('registers all four agent adapters', () => {

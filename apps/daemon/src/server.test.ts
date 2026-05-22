@@ -143,6 +143,17 @@ describe('server routes', () => {
     ]);
   });
 
+  it('POST /v1/skills/orca/recommendation-generation/invoke returns 404', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/skills/orca/recommendation-generation/invoke',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: {}
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
   it('POST /v1/goals returns 201 with a valid Goal payload', async () => {
     const response = await server.inject({
       method: 'POST',

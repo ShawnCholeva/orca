@@ -217,7 +217,7 @@ export function createServer(
     startedAt,
     registries: {
       plugins: pluginRegistry.list().length,
-      skills: skillRegistry.list().length
+      skills: skillRegistry.listPublic().length
     }
   }));
 
@@ -233,7 +233,7 @@ export function createServer(
   });
 
   server.get('/v1/skills', async (): Promise<ListSkillsResponse> => {
-    const skills = skillRegistry.list().map((skill) => ({
+    const skills = skillRegistry.listPublic().map((skill) => ({
       id: skill.id,
       pluginId: skill.pluginId,
       extensionPoint: skill.extensionPoint,

@@ -5,6 +5,9 @@ import { PluginRegistry, pluginRegistry } from './plugin-registry.js';
 import { SkillRegistry, skillRegistry } from './skill-registry.js';
 import { quickGoalSkill } from '../skills/quick-goal.js';
 import { guidedGoalRefinementSkill } from '../skills/guided-goal-refinement.js';
+import { internalRecommendationGenerationSkill } from '../skills/internal-recommendation-generation.js';
+import { internalTaskGenerationSkill } from '../skills/internal-task-generation.js';
+import { internalConflictDetectionSkill } from '../skills/internal-conflict-detection.js';
 import { AdapterRegistry, adapterRegistry } from '../adapters/registry.js';
 import { ShellManualAdapter } from '../adapters/shell-manual.js';
 import { ClaudeCodeAdapter } from '../adapters/claude-code.js';
@@ -42,6 +45,9 @@ export function bootstrapRegistries(registries?: {
 
     skills.register(quickGoalSkill);
     skills.register(guidedGoalRefinementSkill);
+    skills.register(internalRecommendationGenerationSkill);
+    skills.register(internalTaskGenerationSkill);
+    skills.register(internalConflictDetectionSkill);
 
     adapters.register(new ShellManualAdapter());
     adapters.register(new ClaudeCodeAdapter());

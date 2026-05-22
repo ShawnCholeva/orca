@@ -1,4 +1,13 @@
-import type { SkillDescriptor, SkillExtensionPoint } from "./types.js";
+import type {
+  PublicSkillDescriptor,
+  PublicSkillExtensionPoint,
+  SkillDescriptor,
+} from "./types.js";
+
+function isPublicSkill(skill: SkillDescriptor): skill is PublicSkillDescriptor {
+  if (skill.category === "internal") return false;
+  return skill.extensionPoint === "goal.create" || skill.extensionPoint === "goal.refine";
+}
 
 export class SkillRegistry {
   private readonly skills = new Map<string, SkillDescriptor>();
@@ -24,12 +33,16 @@ export class SkillRegistry {
     return [...this.skills.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
 
+  listPublic(): PublicSkillDescriptor[] {
+    return this.list().filter(isPublicSkill);
+  }
+
   byId(id: string): SkillDescriptor | undefined {
     return this.skills.get(id);
   }
 
-  byExtensionPoint(extensionPoint: SkillExtensionPoint): SkillDescriptor[] {
-    return this.list().filter((skill) => skill.extensionPoint === extensionPoint);
+  byExtensionPoint(extensionPoint: PublicSkillExtensionPoint): PublicSkillDescriptor[] {
+    return this.listPublic().filter((skill) => skill.extensionPoint === extensionPoint);
   }
 }
 
