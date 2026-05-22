@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { AdapterRegistry } from './adapters/registry.js';
+import type { AgentAdapter } from './adapters/types.js';
 import {
   ArchiveGoalResponse,
   CreateGoalResponse,
@@ -31,6 +33,9 @@ import { closeDatabase, openDatabase } from './db.js';
 import { defaultMigrationsDir, runMigrations } from './migrations.js';
 import { bootstrapRegistries } from './registry/bootstrap.js';
 import { eventBus } from './events.js';
+import { createDaemonContext } from './daemon-context.js';
+import { ReadinessService } from './readiness/service.js';
+import { seedAgents } from './agents.js';
 import { setSessionStatus } from './sessions/projection.js';
 import { createSessionOutputStore, type SessionOutputStore } from './sessions/output-store.js';
 import { DETERMINISTIC_EXTRACTOR_VERSION } from './extractions/deterministic-extractor.js';
@@ -64,6 +69,32 @@ function createConfig(dataDir: string): Config {
     memoryExtractionMaxInputBytes: 131072,
     memoryExtractionTimeoutMs: 15000,
     getAuthToken: () => 'test-token'
+  };
+}
+
+async function startServer(opts?: { adapterRegistry?: AdapterRegistry }): Promise<{
+  server: FastifyInstance;
+  token: string;
+  db: ReturnType<typeof openDatabase>;
+  dataDir: string;
+}> {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-server-test-'));
+
+  const config = createConfig(dir);
+  const db = openDatabase(config);
+  runMigrations(db, defaultMigrationsDir());
+  seedAgents(db);
+  const daemonContext = createDaemonContext(db, eventBus);
+  if (opts?.adapterRegistry) {
+    daemonContext.readinessService = new ReadinessService(db, opts.adapterRegistry);
+  }
+  const server = createServer(config, { daemonContext });
+
+  return {
+    server,
+    token: config.getAuthToken(),
+    db,
+    dataDir: dir,
   };
 }
 
@@ -414,6 +445,112 @@ describe('server routes', () => {
   it('GET /v1/events (replay) without Authorization returns 401', async () => {
     const response = await server.inject({ method: 'GET', url: '/v1/events?sinceSeq=0' });
     expect(response.statusCode).toBe(401);
+  });
+});
+
+function fakeAdapter(id: string, ready: boolean): AgentAdapter {
+  return {
+    id: id as never,
+    title: id,
+    contextDelivery: { mode: 'preview_only', maxBytes: 32768 },
+    async resolveSpawn() { throw new Error('unused'); },
+    async probeAvailability() { return { status: 'available' as const }; },
+    async checkInstalled() {
+      return { name: 'installed', ok: true, command: `${id} --version`, version: '1.0.0' };
+    },
+    async checkAuth() {
+      return ready
+        ? { name: 'authenticated', ok: true, authStatus: 'ready', command: `${id} auth`, detail: 'authenticated' }
+        : { name: 'authenticated', ok: false, authStatus: 'needs_auth', command: `${id} auth`, detail: 'not signed in' };
+    },
+    repairFor() { return undefined; },
+  };
+}
+
+function fakeRegistry(): AdapterRegistry {
+  const r = new AdapterRegistry();
+  r.register(fakeAdapter('claude-code', true));
+  r.register(fakeAdapter('codex', false));
+  r.register(fakeAdapter('opencode', true));
+  r.register(fakeAdapter('gemini-cli', false));
+  return r;
+}
+
+describe('agent readiness routes (with fake adapters)', () => {
+  it('GET /v1/agents includes readiness field', async () => {
+    const { server, token, dataDir } = await startServer({ adapterRegistry: fakeRegistry() });
+    const res = await server.inject({
+      method: 'GET',
+      url: '/v1/agents',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { agents: Array<{ id: string; readiness: unknown }> };
+    for (const a of body.agents) {
+      expect(a).toHaveProperty('readiness');
+    }
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('POST /v1/agents/readiness:check runs connected agents only', async () => {
+    const { server, token, db, dataDir } = await startServer({ adapterRegistry: fakeRegistry() });
+    db.prepare(`UPDATE agents SET connected = 1 WHERE id = ?`).run('claude-code');
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/agents/readiness:check',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { reports: Array<{ agentId: string; status: string }> };
+    expect(body.reports.map((r) => r.agentId)).toEqual(['claude-code']);
+    expect(body.reports[0].status).toBe('ready');
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('POST /v1/agents/:id/readiness:check 404s on unknown id', async () => {
+    const { server, token, dataDir } = await startServer({ adapterRegistry: fakeRegistry() });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/agents/does-not-exist/readiness:check',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode).toBe(404);
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('POST /v1/agents/:id/readiness:check 400s on not-connected', async () => {
+    const { server, token, db, dataDir } = await startServer({ adapterRegistry: fakeRegistry() });
+    db.prepare(`UPDATE agents SET connected = 0 WHERE id = ?`).run('codex');
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/agents/codex/readiness:check',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode).toBe(400);
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('POST /v1/agents/:id/readiness:check accepts empty body', async () => {
+    const { server, token, db, dataDir } = await startServer({ adapterRegistry: fakeRegistry() });
+    db.prepare(`UPDATE agents SET connected = 1 WHERE id = ?`).run('claude-code');
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/agents/claude-code/readiness:check',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode).toBe(200);
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
   });
 });
 

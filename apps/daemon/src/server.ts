@@ -48,7 +48,9 @@ import {
   type UpdateGoalResponse,
   type ArchiveGoalResponse,
   type GoalMemoryItem,
-  type GoalDecision
+  type GoalDecision,
+  CheckReadinessAllResponse,
+  CheckReadinessOneResponse
 } from '@orca/contracts';
 import type { Config } from './config.js';
 import { getDatabase } from './db.js';
@@ -145,6 +147,7 @@ import { createDaemonContext, type DaemonContext } from './daemon-context.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
+import { NotConnectedError, UnknownAgentError } from './readiness/service.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -270,6 +273,41 @@ export function createServer(
       throw err;
     }
   });
+
+  server.post('/v1/agents/readiness:check', async () => {
+    const reports = await daemonContext.readinessService.checkSelected();
+    return CheckReadinessAllResponse.parse({ reports });
+  });
+
+  server.post<{ Params: { id: string } }>(
+    '/v1/agents/:id/readiness:check',
+    async (request, reply) => {
+      const { id } = request.params;
+      try {
+        const agent = listAgents(db).find((candidate) => candidate.id === id);
+        if (!agent) {
+          reply.code(404);
+          return { error: 'not_found' };
+        }
+        if (!agent.connected) {
+          reply.code(400);
+          return { error: 'not_connected' };
+        }
+        const report = await daemonContext.readinessService.checkAgent(id);
+        return CheckReadinessOneResponse.parse({ report });
+      } catch (err) {
+        if (err instanceof UnknownAgentError) {
+          reply.code(404);
+          return { error: 'not_found' };
+        }
+        if (err instanceof NotConnectedError) {
+          reply.code(400);
+          return { error: 'not_connected' };
+        }
+        throw err;
+      }
+    }
+  );
 
   function apiError(code: string, message: string): { error: { code: string; message: string } } {
     return { error: { code, message } };

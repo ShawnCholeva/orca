@@ -9,6 +9,8 @@ import type { RecommendationProvider } from './recommendations/provider.js';
 import { DeterministicRecommendationProvider } from './recommendations/provider.js';
 import type { ConflictDetector } from './conflicts/detectors.js';
 import { DeterministicConflictDetector } from './conflicts/detectors.js';
+import { ReadinessService } from './readiness/service.js';
+import { adapterRegistry } from './adapters/registry.js';
 
 /**
  * Shared dependency container for orchestration daemon use cases.
@@ -21,6 +23,7 @@ export interface DaemonContext {
   taskGenerator: TaskGenerator;
   recommendationProvider: RecommendationProvider;
   conflictDetector: ConflictDetector;
+  readinessService: ReadinessService;
   now: () => string;
   idFactory: () => string;
 }
@@ -33,6 +36,7 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
     taskGenerator: new DeterministicTaskGenerator(),
     recommendationProvider: new DeterministicRecommendationProvider(),
     conflictDetector: new DeterministicConflictDetector(),
+    readinessService: new ReadinessService(db, adapterRegistry),
     now: () => new Date().toISOString(),
     idFactory: randomUUID,
   };
