@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { SessionSummary, Task, TaskGeneration, TaskRole, TaskStatus, Workspace } from "@orca/contracts";
+import type { LiveGenerationNotice } from "../../events/m7-live-refresh";
 import {
   generateTasks,
   listSessions,
@@ -29,9 +30,10 @@ type Props = {
   goalId: string;
   workspaces: Workspace[];
   refreshKey?: number;
+  liveGeneration?: LiveGenerationNotice | null;
 };
 
-export function TasksPanel({ goalId, workspaces, refreshKey = 0 }: Props) {
+export function TasksPanel({ goalId, workspaces, refreshKey = 0, liveGeneration = null }: Props) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [generations, setGenerations] = useState<TaskGeneration[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -90,8 +92,13 @@ export function TasksPanel({ goalId, workspaces, refreshKey = 0 }: Props) {
   });
 
   const latestGeneration = generations[0] ?? null;
+  const visibleLiveGeneration =
+    liveGeneration !== null && latestGeneration?.id !== liveGeneration.generationId
+      ? liveGeneration
+      : null;
   const generateDisabled =
     generating ||
+    visibleLiveGeneration?.status === "pending" ||
     latestGeneration?.status === "pending" ||
     latestGeneration?.status === "running";
 
@@ -152,6 +159,7 @@ export function TasksPanel({ goalId, workspaces, refreshKey = 0 }: Props) {
         </button>
       </div>
 
+      {visibleLiveGeneration && <LiveTaskGenerationBanner generation={visibleLiveGeneration} />}
       {latestGeneration && <TaskGenerationBanner generation={latestGeneration} />}
 
       {actionError && (
@@ -352,6 +360,15 @@ function TaskGenerationBanner({ generation }: { generation: TaskGeneration }) {
       <span className="task-generation-status">{generation.status}</span>
       <span>{formatDateTime(time)}</span>
       {detail && <span>{detail}</span>}
+    </div>
+  );
+}
+
+function LiveTaskGenerationBanner({ generation }: { generation: LiveGenerationNotice }) {
+  return (
+    <div className={`task-generation-banner task-generation-banner--${generation.status}`}>
+      <span className="task-generation-status">{generation.status}</span>
+      <span>{formatDateTime(generation.noticedAt)}</span>
     </div>
   );
 }

@@ -7,10 +7,15 @@ import type {
   TaskRole,
   TaskStatus,
 } from "@orca/contracts";
+import type {
+  LiveGenerationNotice,
+  RecommendationDetailRefresh,
+} from "../../events/m7-live-refresh";
 import {
   acceptRecommendation,
   dismissRecommendation,
   generateRecommendations,
+  getRecommendation,
   listRecommendations,
   modifyRecommendation,
   rejectRecommendation,
@@ -54,11 +59,15 @@ type Props = {
   onOpenTaskSplit?: (taskId: string, suggestedChildren: Array<{ title: string; role?: TaskRole }>) => void;
   onOpenConflictResolve?: (conflictId: string, suggestedNote?: string) => void;
   onAskUser?: (question: string) => void;
+  liveGeneration?: LiveGenerationNotice | null;
+  recommendationDetailRefresh?: RecommendationDetailRefresh | null;
 };
 
 export function RecommendationsPanel({
   goalId,
   refreshKey = 0,
+  liveGeneration = null,
+  recommendationDetailRefresh = null,
   onOpenCreateSession,
   onNavigateToSession,
   onOpenRefinement,
@@ -99,6 +108,35 @@ export function RecommendationsPanel({
     void load();
   }, [load, refreshKey]);
 
+  useEffect(() => {
+    if (recommendationDetailRefresh === null) return;
+    let cancelled = false;
+
+    async function loadRecommendationDetail() {
+      try {
+        const body = await getRecommendation(recommendationDetailRefresh!.recommendationId);
+        if (cancelled || body.recommendation.goalId !== goalId) return;
+        setRecommendations((current) => {
+          const existingIndex = current.findIndex((r) => r.id === body.recommendation.id);
+          if (existingIndex === -1) return [body.recommendation, ...current];
+          const next = [...current];
+          next[existingIndex] = body.recommendation;
+          return next;
+        });
+      } catch (err) {
+        if (!cancelled) {
+          setError(toErrorMessage(err, "Failed to refresh recommendation."));
+        }
+      }
+    }
+
+    void loadRecommendationDetail();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [goalId, recommendationDetailRefresh]);
+
   const active = recommendations.filter((r) => r.status === "proposed");
   const modified = recommendations.filter((r) => r.status === "modified");
   const history = recommendations.filter((r) =>
@@ -106,8 +144,13 @@ export function RecommendationsPanel({
   );
 
   const latestGeneration = generations[0] ?? null;
+  const visibleLiveGeneration =
+    liveGeneration !== null && latestGeneration?.id !== liveGeneration.generationId
+      ? liveGeneration
+      : null;
   const generateDisabled =
     generating ||
+    visibleLiveGeneration?.status === "pending" ||
     latestGeneration?.status === "pending" ||
     latestGeneration?.status === "running";
 
@@ -262,6 +305,7 @@ export function RecommendationsPanel({
         </button>
       </div>
 
+      {visibleLiveGeneration && <LiveGenerationBanner generation={visibleLiveGeneration} />}
       {latestGeneration && <GenerationBanner generation={latestGeneration} />}
 
       {actionError && (
@@ -421,6 +465,17 @@ function GenerationBanner({ generation }: { generation: RecommendationGeneration
       <span className="recommendation-generation-status">{generation.status}</span>
       <span>{formatDateTime(time)}</span>
       {detail && <span>{detail}</span>}
+    </div>
+  );
+}
+
+function LiveGenerationBanner({ generation }: { generation: LiveGenerationNotice }) {
+  return (
+    <div
+      className={`recommendation-generation-banner recommendation-generation-banner--${generation.status}`}
+    >
+      <span className="recommendation-generation-status">{generation.status}</span>
+      <span>{formatDateTime(generation.noticedAt)}</span>
     </div>
   );
 }

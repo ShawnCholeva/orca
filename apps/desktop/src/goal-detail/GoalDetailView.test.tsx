@@ -71,6 +71,36 @@ function makeBaseApiMock(overrides: Record<string, unknown> = {}) {
     generateTasks: vi.fn(),
     patchTask: vi.fn(),
     splitTask: vi.fn(),
+    listRecommendations: vi.fn().mockResolvedValue({ recommendations: [], generations: [] }),
+    getRecommendation: vi.fn().mockResolvedValue({
+      recommendation: {
+        id: "rec-1",
+        goalId: "goal-1",
+        type: "update_plan",
+        status: "proposed",
+        source: "deterministic_provider",
+        title: "Update plan",
+        rationale: "Keep the task plan current.",
+        proposedAction: { kind: "update_plan", taskId: "task-1" },
+        confidence: 0.8,
+        sources: [],
+        relatedTaskId: "task-1",
+        relatedSessionId: null,
+        relatedContextPackageId: null,
+        relatedConflictId: null,
+        generationId: null,
+        fingerprint: "rec-fp",
+        supersededById: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      feedback: [],
+    }),
+    generateRecommendations: vi.fn(),
+    acceptRecommendation: vi.fn(),
+    rejectRecommendation: vi.fn(),
+    dismissRecommendation: vi.fn(),
+    modifyRecommendation: vi.fn(),
     listGoalMemory: vi.fn().mockResolvedValue([]),
     listGoalDecisions: vi.fn().mockResolvedValue([]),
     stopSession: vi.fn(),
@@ -98,13 +128,14 @@ function mockDetail(detail: GoalDetailResponse) {
 function makeEvent(
   type: DomainEvent["type"],
   goalId: string = "goal-1",
+  payload: Record<string, unknown> = {},
 ): DomainEvent {
   return {
     seq: 1,
     id: "evt-1",
     type,
     goalId,
-    payload: {},
+    payload,
     createdAt: now,
   };
 }
@@ -145,6 +176,74 @@ function setupM5EventCapture() {
     getOnStatus: () => capturedOnStatus,
     listGoalMemoryMock,
     listGoalDecisionsMock,
+  };
+}
+
+function setupM7EventCapture() {
+  let capturedOnEvent: ((e: DomainEvent) => void) = () => {};
+  let capturedOnStatus: ((s: ConnectionStatus) => void) = () => {};
+  const listTasksMock = vi.fn().mockResolvedValue({ tasks: [], generations: [] });
+  const listRecommendationsMock = vi.fn().mockResolvedValue({ recommendations: [], generations: [] });
+  const getRecommendationMock = vi.fn().mockResolvedValue({
+    recommendation: {
+      id: "rec-1",
+      goalId: "goal-1",
+      type: "update_plan",
+      status: "modified",
+      source: "deterministic_provider",
+      title: "Updated recommendation",
+      rationale: "Plan changed.",
+      proposedAction: { kind: "update_plan", taskId: "task-1" },
+      confidence: 0.8,
+      sources: [],
+      relatedTaskId: "task-1",
+      relatedSessionId: null,
+      relatedContextPackageId: null,
+      relatedConflictId: null,
+      generationId: null,
+      fingerprint: "rec-fp",
+      supersededById: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+    feedback: [],
+  });
+  const listConflictsMock = vi.fn().mockResolvedValue({ conflicts: [] });
+
+  vi.doMock("../api", () => ({
+    getGoalDetail: vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [] }),
+    ...makeBaseApiMock({
+      listTasks: listTasksMock,
+      listRecommendations: listRecommendationsMock,
+      getRecommendation: getRecommendationMock,
+      listConflicts: listConflictsMock,
+      openEventStream: vi.fn().mockImplementation(
+        (handlers: { onEvent: (e: DomainEvent) => void; onStatus: (s: ConnectionStatus) => void }) => {
+          capturedOnEvent = handlers.onEvent;
+          capturedOnStatus = handlers.onStatus;
+          return { close: vi.fn() };
+        },
+      ),
+    }),
+  }));
+
+  vi.doMock("./sessions/SessionsPanel", () => ({
+    SessionsPanel: () => <div className="sessions-panel" />,
+  }));
+
+  vi.doMock("./sessions/SessionTerminalView", () => ({
+    SessionTerminalView: ({ sessionId }: { sessionId: string }) => (
+      <div className="session-terminal" data-session-id={sessionId} />
+    ),
+  }));
+
+  return {
+    getOnEvent: () => capturedOnEvent,
+    getOnStatus: () => capturedOnStatus,
+    listTasksMock,
+    listRecommendationsMock,
+    getRecommendationMock,
+    listConflictsMock,
   };
 }
 
@@ -362,5 +461,208 @@ describe("GoalDetailView M5 live-refresh", () => {
 
     expect(listGoalMemoryMock.mock.calls.length).toBeGreaterThan(memoryCalls);
     expect(listGoalDecisionsMock.mock.calls.length).toBeGreaterThan(decisionCalls);
+  });
+});
+
+describe("GoalDetailView M7 live-refresh", () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    vi.resetModules();
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+    document.body.removeChild(container);
+  });
+
+  async function renderView() {
+    const { GoalDetailView } = await import("./GoalDetailView");
+    await act(async () => {
+      createRoot(container).render(
+        <GoalDetailView goalId="goal-1" onBack={vi.fn()} refreshKey={0} />,
+      );
+    });
+  }
+
+  async function advanceRefresh(ms: number) {
+    await act(async () => {
+      vi.advanceTimersByTime(ms);
+    });
+    await act(async () => {});
+  }
+
+  it("debounces rapid task events and keeps recommendation scope untouched", async () => {
+    const { getOnEvent, listTasksMock, listRecommendationsMock } = setupM7EventCapture();
+    await renderView();
+
+    const taskCallsAfterMount = listTasksMock.mock.calls.length;
+    const recommendationCallsAfterMount = listRecommendationsMock.mock.calls.length;
+
+    await act(async () => {
+      for (let i = 0; i < 10; i += 1) {
+        getOnEvent()(
+          makeEvent("task.created", "goal-1", {
+            taskId: `task-${i}`,
+            goalId: "goal-1",
+            status: "open",
+            role: "engineer",
+            workspaceId: null,
+            origin: "manual",
+            generationId: null,
+          }),
+        );
+      }
+    });
+
+    expect(listTasksMock).toHaveBeenCalledTimes(taskCallsAfterMount);
+    await advanceRefresh(199);
+    expect(listTasksMock).toHaveBeenCalledTimes(taskCallsAfterMount);
+    await advanceRefresh(1);
+
+    expect(listTasksMock).toHaveBeenCalledTimes(taskCallsAfterMount + 1);
+    expect(listRecommendationsMock).toHaveBeenCalledTimes(recommendationCallsAfterMount);
+  });
+
+  it("updates task generation banner without list refetch until terminal event", async () => {
+    const { getOnEvent, listTasksMock } = setupM7EventCapture();
+    await renderView();
+
+    const taskCallsAfterMount = listTasksMock.mock.calls.length;
+
+    await act(async () => {
+      getOnEvent()(
+        makeEvent("task.generation.requested", "goal-1", {
+          generationId: "task-gen-1",
+          goalId: "goal-1",
+          trigger: "manual",
+          triggerSourceId: null,
+        }),
+      );
+    });
+
+    expect(container.querySelector(".task-generation-banner--pending")).toBeTruthy();
+    await advanceRefresh(200);
+    expect(listTasksMock).toHaveBeenCalledTimes(taskCallsAfterMount);
+
+    await act(async () => {
+      getOnEvent()(
+        makeEvent("task.generated", "goal-1", {
+          generationId: "task-gen-1",
+          goalId: "goal-1",
+          taskIds: ["task-1"],
+          count: 1,
+          sparse: false,
+        }),
+      );
+    });
+    await advanceRefresh(200);
+
+    expect(listTasksMock).toHaveBeenCalledTimes(taskCallsAfterMount + 1);
+  });
+
+  it("recommendation lifecycle events refetch recommendations and task scope only when task-related", async () => {
+    const { getOnEvent, listTasksMock, listRecommendationsMock } = setupM7EventCapture();
+    await renderView();
+
+    const taskCallsAfterMount = listTasksMock.mock.calls.length;
+    const recommendationCallsAfterMount = listRecommendationsMock.mock.calls.length;
+
+    await act(async () => {
+      getOnEvent()(
+        makeEvent("recommendation.accepted", "goal-1", {
+          recommendationId: "rec-1",
+          goalId: "goal-1",
+          type: "update_plan",
+        }),
+      );
+    });
+    await advanceRefresh(200);
+
+    expect(listRecommendationsMock).toHaveBeenCalledTimes(recommendationCallsAfterMount + 1);
+    expect(listTasksMock).toHaveBeenCalledTimes(taskCallsAfterMount + 1);
+  });
+
+  it("user feedback event refetches only the affected recommendation detail", async () => {
+    const {
+      getOnEvent,
+      listTasksMock,
+      listRecommendationsMock,
+      getRecommendationMock,
+    } = setupM7EventCapture();
+    await renderView();
+
+    const taskCallsAfterMount = listTasksMock.mock.calls.length;
+    const recommendationCallsAfterMount = listRecommendationsMock.mock.calls.length;
+
+    await act(async () => {
+      getOnEvent()(
+        makeEvent("user.feedback.recorded", "goal-1", {
+          feedbackId: "fb-1",
+          goalId: "goal-1",
+          recommendationId: "rec-1",
+          action: "modify",
+        }),
+      );
+    });
+    await advanceRefresh(200);
+
+    expect(getRecommendationMock).toHaveBeenCalledWith("rec-1");
+    expect(listRecommendationsMock).toHaveBeenCalledTimes(recommendationCallsAfterMount);
+    expect(listTasksMock).toHaveBeenCalledTimes(taskCallsAfterMount);
+  });
+
+  it("conflict events refetch only conflicts", async () => {
+    const { getOnEvent, listTasksMock, listRecommendationsMock, listConflictsMock } =
+      setupM7EventCapture();
+    await renderView();
+
+    const taskCallsAfterMount = listTasksMock.mock.calls.length;
+    const recommendationCallsAfterMount = listRecommendationsMock.mock.calls.length;
+    const conflictCallsAfterMount = listConflictsMock.mock.calls.length;
+
+    await act(async () => {
+      getOnEvent()(
+        makeEvent("conflict.detected", "goal-1", {
+          conflictId: "conflict-1",
+          goalId: "goal-1",
+          conflictType: "workspace_overlap",
+          severity: "warning",
+        }),
+      );
+    });
+    await advanceRefresh(200);
+
+    expect(listConflictsMock).toHaveBeenCalledTimes(conflictCallsAfterMount + 1);
+    expect(listTasksMock).toHaveBeenCalledTimes(taskCallsAfterMount);
+    expect(listRecommendationsMock).toHaveBeenCalledTimes(recommendationCallsAfterMount);
+  });
+
+  it("reconnect refetches M7 panels for the active goal", async () => {
+    const { getOnStatus, listTasksMock, listRecommendationsMock, listConflictsMock } =
+      setupM7EventCapture();
+    await renderView();
+
+    await act(async () => {
+      getOnStatus()("open");
+    });
+
+    const taskCallsAfterFirstOpen = listTasksMock.mock.calls.length;
+    const recommendationCallsAfterFirstOpen = listRecommendationsMock.mock.calls.length;
+    const conflictCallsAfterFirstOpen = listConflictsMock.mock.calls.length;
+
+    await act(async () => {
+      getOnStatus()("open");
+    });
+    await advanceRefresh(200);
+
+    expect(listTasksMock).toHaveBeenCalledTimes(taskCallsAfterFirstOpen + 1);
+    expect(listRecommendationsMock).toHaveBeenCalledTimes(recommendationCallsAfterFirstOpen + 1);
+    expect(listConflictsMock).toHaveBeenCalledTimes(conflictCallsAfterFirstOpen + 1);
   });
 });

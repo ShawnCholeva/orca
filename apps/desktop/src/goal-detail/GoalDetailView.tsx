@@ -1,6 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { GoalDetailResponse, DomainEventType } from "@orca/contracts";
+import type { DomainEvent, GoalDetailResponse, DomainEventType } from "@orca/contracts";
 import { getGoalDetail, openEventStream } from "../api";
+import {
+  feedbackRecommendationId,
+  generationNoticeFromEvent,
+  M7_LIVE_REFRESH_DEBOUNCE_MS,
+  recommendationEventMayTouchTask,
+  type RecommendationDetailRefresh,
+  type LiveGenerationNotice,
+} from "../events/m7-live-refresh";
 import { WorkspaceListPanel } from "./WorkspaceListPanel";
 import { TasksPanel } from "./tasks/TasksPanel";
 import { SessionsPanel } from "./sessions/SessionsPanel";
@@ -33,11 +41,31 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
   const [detail, setDetail] = useState<GoalDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [tasksRefreshKey, setTasksRefreshKey] = useState(0);
+  const [recommendationsRefreshKey, setRecommendationsRefreshKey] = useState(0);
+  const [conflictsRefreshKey, setConflictsRefreshKey] = useState(0);
+  const [recommendationDetailRefresh, setRecommendationDetailRefresh] =
+    useState<RecommendationDetailRefresh | null>(null);
+  const [liveTaskGeneration, setLiveTaskGeneration] =
+    useState<LiveGenerationNotice | null>(null);
+  const [liveRecommendationGeneration, setLiveRecommendationGeneration] =
+    useState<LiveGenerationNotice | null>(null);
   const [memoryRefreshKey, setMemoryRefreshKey] = useState(0);
   const [decisionsRefreshKey, setDecisionsRefreshKey] = useState(0);
   const [summaryRefreshKey, setSummaryRefreshKey] = useState(0);
   const [sessionsRefreshKey, setSessionsRefreshKey] = useState(0);
   const hasConnectedRef = useRef(false);
+  const debounceTimersRef = useRef<{
+    tasks: ReturnType<typeof setTimeout> | null;
+    recommendations: ReturnType<typeof setTimeout> | null;
+    conflicts: ReturnType<typeof setTimeout> | null;
+    recommendationDetail: ReturnType<typeof setTimeout> | null;
+  }>({
+    tasks: null,
+    recommendations: null,
+    conflicts: null,
+    recommendationDetail: null,
+  });
 
   const loadDetail = useCallback(async () => {
     setLoading(true);
@@ -57,6 +85,112 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
   }, [loadDetail, refreshKey]);
 
   useEffect(() => {
+    const timers = debounceTimersRef.current;
+    return () => {
+      for (const timer of Object.values(timers)) {
+        if (timer !== null) clearTimeout(timer);
+      }
+    };
+  }, []);
+
+  const scheduleTasksRefresh = useCallback(() => {
+    if (debounceTimersRef.current.tasks !== null) {
+      clearTimeout(debounceTimersRef.current.tasks);
+    }
+    debounceTimersRef.current.tasks = setTimeout(() => {
+      debounceTimersRef.current.tasks = null;
+      setTasksRefreshKey((k) => k + 1);
+    }, M7_LIVE_REFRESH_DEBOUNCE_MS);
+  }, []);
+
+  const scheduleRecommendationsRefresh = useCallback(() => {
+    if (debounceTimersRef.current.recommendations !== null) {
+      clearTimeout(debounceTimersRef.current.recommendations);
+    }
+    debounceTimersRef.current.recommendations = setTimeout(() => {
+      debounceTimersRef.current.recommendations = null;
+      setRecommendationsRefreshKey((k) => k + 1);
+    }, M7_LIVE_REFRESH_DEBOUNCE_MS);
+  }, []);
+
+  const scheduleConflictsRefresh = useCallback(() => {
+    if (debounceTimersRef.current.conflicts !== null) {
+      clearTimeout(debounceTimersRef.current.conflicts);
+    }
+    debounceTimersRef.current.conflicts = setTimeout(() => {
+      debounceTimersRef.current.conflicts = null;
+      setConflictsRefreshKey((k) => k + 1);
+    }, M7_LIVE_REFRESH_DEBOUNCE_MS);
+  }, []);
+
+  const scheduleRecommendationDetailRefresh = useCallback((recommendationId: string) => {
+    if (debounceTimersRef.current.recommendationDetail !== null) {
+      clearTimeout(debounceTimersRef.current.recommendationDetail);
+    }
+    debounceTimersRef.current.recommendationDetail = setTimeout(() => {
+      debounceTimersRef.current.recommendationDetail = null;
+      setRecommendationDetailRefresh((current) => ({
+        recommendationId,
+        nonce: (current?.nonce ?? 0) + 1,
+      }));
+    }, M7_LIVE_REFRESH_DEBOUNCE_MS);
+  }, []);
+
+  const handleM7Event = useCallback(
+    (event: DomainEvent) => {
+      if (event.type === "task.generation.requested") {
+        setLiveTaskGeneration(generationNoticeFromEvent(event));
+        return;
+      }
+      if (event.type === "task.generated" || event.type === "task.generation.failed") {
+        setLiveTaskGeneration(null);
+        scheduleTasksRefresh();
+        return;
+      }
+      if (event.type.startsWith("task.")) {
+        scheduleTasksRefresh();
+        return;
+      }
+
+      if (event.type === "recommendation.generation.requested") {
+        setLiveRecommendationGeneration(generationNoticeFromEvent(event));
+        return;
+      }
+      if (
+        event.type === "recommendation.generated" ||
+        event.type === "recommendation.generation.failed"
+      ) {
+        setLiveRecommendationGeneration(null);
+        scheduleRecommendationsRefresh();
+        return;
+      }
+      if (event.type.startsWith("recommendation.")) {
+        scheduleRecommendationsRefresh();
+        if (recommendationEventMayTouchTask(event)) {
+          scheduleTasksRefresh();
+        }
+        return;
+      }
+
+      if (event.type.startsWith("conflict.")) {
+        scheduleConflictsRefresh();
+        return;
+      }
+
+      const recommendationId = feedbackRecommendationId(event);
+      if (recommendationId !== null) {
+        scheduleRecommendationDetailRefresh(recommendationId);
+      }
+    },
+    [
+      scheduleConflictsRefresh,
+      scheduleRecommendationDetailRefresh,
+      scheduleRecommendationsRefresh,
+      scheduleTasksRefresh,
+    ],
+  );
+
+  useEffect(() => {
     hasConnectedRef.current = false;
     const stream = openEventStream({
       onEvent(event) {
@@ -70,6 +204,7 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
         } else if (DECISION_EVENTS.has(event.type)) {
           setDecisionsRefreshKey((k) => k + 1);
         }
+        handleM7Event(event);
       },
       onStatus(status) {
         if (status === "open") {
@@ -78,13 +213,24 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
             setDecisionsRefreshKey((k) => k + 1);
             setSummaryRefreshKey((k) => k + 1);
             setSessionsRefreshKey((k) => k + 1);
+            setLiveTaskGeneration(null);
+            setLiveRecommendationGeneration(null);
+            scheduleTasksRefresh();
+            scheduleRecommendationsRefresh();
+            scheduleConflictsRefresh();
           }
           hasConnectedRef.current = true;
         }
       },
     });
     return () => stream.close();
-  }, [goalId]);
+  }, [
+    goalId,
+    handleM7Event,
+    scheduleConflictsRefresh,
+    scheduleRecommendationsRefresh,
+    scheduleTasksRefresh,
+  ]);
 
   if (loading && !detail) {
     return (
@@ -127,7 +273,7 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           <p className="goal-detail-description">{goal.description}</p>
         )}
 
-        <ConflictsBanner goalId={goalId} />
+        <ConflictsBanner goalId={goalId} refreshKey={conflictsRefreshKey} />
 
         {refinement && (
           <section className="goal-detail-section goal-refinement" aria-label="Refinement">
@@ -174,7 +320,12 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           onChanged={() => void loadDetail()}
         />
 
-        <TasksPanel goalId={goalId} workspaces={workspaces} />
+        <TasksPanel
+          goalId={goalId}
+          workspaces={workspaces}
+          refreshKey={tasksRefreshKey}
+          liveGeneration={liveTaskGeneration}
+        />
 
         <SessionsPanel
           goalId={goalId}
@@ -183,7 +334,12 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           summaryRefreshKey={summaryRefreshKey}
         />
 
-        <RecommendationsPanel goalId={goalId} />
+        <RecommendationsPanel
+          goalId={goalId}
+          refreshKey={recommendationsRefreshKey}
+          liveGeneration={liveRecommendationGeneration}
+          recommendationDetailRefresh={recommendationDetailRefresh}
+        />
 
         <MemoryPanel goalId={goalId} refreshKey={memoryRefreshKey} />
 
