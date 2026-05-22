@@ -104,11 +104,11 @@ describe("runMigrations", () => {
     expect(indices).toContain("idx_workspaces_goal_attached");
   });
 
-  it("upgrades an M1-only database to 0002 without losing rows", () => {
+  it("upgrades a base-schema database to 0002 without losing rows", () => {
     const db = freshDb();
-    const m1OnlyMigrations = createMigrationsDir(["0001_init.sql"]);
+    const baseSchemaMigrations = createMigrationsDir(["0001_init.sql"]);
 
-    runMigrations(db, m1OnlyMigrations);
+    runMigrations(db, baseSchemaMigrations);
 
     db.prepare(
       "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"

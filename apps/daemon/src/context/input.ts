@@ -94,7 +94,7 @@ export function resetPreparedStatements(): void {
 }
 
 /**
- * Builds ContextAssemblyInput from bounded M1/M3/M5 projection reads.
+ * Builds ContextAssemblyInput from bounded persisted projection reads.
  *
  * Throws GoalNotFoundError if the goal does not exist.
  * Returns goalArchivedAt so callers can check archived state without a second read.

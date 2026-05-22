@@ -189,7 +189,7 @@ describe("createGoal — M2-008 event ordering and payload invariants", () => {
     expect(payload.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it("goal.created payload is { title, description } — unchanged from M1", async () => {
+  it("goal.created payload remains limited to title and description", async () => {
     const { db, ctx } = setup();
     const goal = await createGoal({ title: "Payload invariant", description: "keep me" }, ctx);
 

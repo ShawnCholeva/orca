@@ -20,7 +20,7 @@ import { defaultMigrationsDir, migrationFiles, runMigrations } from '../src/migr
 import { createServer } from '../src/server.js';
 import { bootstrapRegistries } from '../src/registry/bootstrap.js';
 
-// Boot the skill registry once per file — mirrors the daemon index.ts boot sequence (M2-008).
+// Boot the skill registry once per file to mirror the daemon index.ts boot sequence.
 beforeAll(() => {
   bootstrapRegistries();
 });
@@ -35,10 +35,10 @@ interface BootResult {
 
 const tempDirs: string[] = [];
 
-const AUTH_HEADERS = { authorization: 'Bearer m1-017-token' } as const;
+const AUTH_HEADERS = { authorization: 'Bearer daemon-integration-token' } as const;
 
 function createTempDir(): string {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-m1-017-'));
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-daemon-integration-'));
   tempDirs.push(dir);
   return dir;
 }
@@ -50,7 +50,7 @@ function resetOrcaEnvForTest(dataDir: string): void {
 
   process.env.ORCA_DATA_DIR = dataDir;
   process.env.ORCA_LOG_LEVEL = 'silent';
-  process.env.ORCA_TOKEN = 'm1-017-token';
+  process.env.ORCA_TOKEN = 'daemon-integration-token';
 }
 
 async function boot(dataDir: string): Promise<BootResult> {
@@ -94,7 +94,7 @@ afterEach(() => {
   }
 });
 
-describe.sequential('M1-017 daemon integration loop', () => {
+describe.sequential('daemon integration loop', () => {
   it('Boot: health endpoint returns ok', async () => {
     const dir = createTempDir();
     const { server, baseUrl } = await boot(dir);
@@ -135,7 +135,7 @@ describe.sequential('M1-017 daemon integration loop', () => {
       const response = await fetch(`${baseUrl}/v1/goals`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        body: JSON.stringify({ title: 'M1-017 Goal', description: 'integration' })
+        body: JSON.stringify({ title: 'Daemon integration Goal', description: 'integration' })
       });
 
       expect(response.status).toBe(201);
@@ -147,7 +147,7 @@ describe.sequential('M1-017 daemon integration loop', () => {
       const goalCount =
         (db.prepare('SELECT count(*) AS cnt FROM goals').get() as { cnt: number }).cnt;
 
-      // M2-008: skill.invoked + goal.created = 2 events per createGoal
+      // The skill invocation event is committed before goal.created for every createGoal.
       expect(eventCount).toBe(2);
       expect(goalCount).toBe(1);
 
@@ -168,7 +168,7 @@ describe.sequential('M1-017 daemon integration loop', () => {
     const { server, baseUrl } = await boot(dir);
 
     const ws = new WebSocket(
-      `${baseUrl.replace('http://', 'ws://')}/v1/events?token=m1-017-token`
+      `${baseUrl.replace('http://', 'ws://')}/v1/events?token=daemon-integration-token`
     );
 
     try {
@@ -177,7 +177,7 @@ describe.sequential('M1-017 daemon integration loop', () => {
         ws.once('error', reject);
       });
 
-      // M2-008: first message is skill.invoked; listen on all messages until goal.created arrives.
+      // The first message is skill.invoked; listen until goal.created arrives.
       const eventPromise = new Promise<unknown>((resolve, reject) => {
         const handler = (data: Buffer | string) => {
           try {

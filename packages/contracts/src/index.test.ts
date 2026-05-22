@@ -185,11 +185,11 @@ describe("M3 contracts", () => {
     expect(() => GuidedRefinementOutput.parse({ ...guidedOutputFixture, skillId: "quick-goal" })).toThrow();
   });
 
-  it("keeps M1/M2 create request body valid and supports additive M3 fields", () => {
+  it("keeps legacy create request body valid and supports refined workspace fields", () => {
     expectRoundTrip(CreateGoalRequest.parse, { title: "Legacy create", description: "" }, { title: "Legacy create", description: "" });
 
     const request = {
-      title: "M3 create",
+      title: "Refined create",
       description: "",
       refined: guidedOutputFixture,
       workspaces: [{ inputPath: "/tmp/ws", name: "workspace" }]
@@ -1006,7 +1006,7 @@ describe("M6 contracts", () => {
     sourceSessionId: "sess-1",
     label: "Constraint: local-first",
     reason: "required" as const,
-    marker: "[M1]"
+    marker: "[S1]"
   };
 
   const packageFixture = {

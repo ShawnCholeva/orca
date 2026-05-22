@@ -186,7 +186,7 @@ export function requestContextPackage(
   const objectiveHash = sha256(normalizedObjective);
   const assemblerVersion = ctx.assembler.version;
 
-  // Build real assembler input and compute real source fingerprint from M1/M3/M5 projections.
+  // Build real assembler input and compute real source fingerprint from persisted projections.
   // Throws GoalNotFoundError if the goal does not exist.
   const { input: assemblyInput, sourceFingerprint, goalArchivedAt } = buildContextAssemblyInput(
     { db: ctx.db, assemblerVersion },
@@ -278,7 +278,7 @@ export function requestContextPackage(
       emitEvent(stmts, 'context.assembly.requested', goalId, { assemblyId, goalId, adapterId, role }, now)
     );
 
-    // Invoke assembler synchronously with the real input built from M1/M3/M5 projections.
+    // Invoke assembler synchronously with the real input built from persisted projections.
     let output: ContextAssemblyOutput | null = null;
     let failureCode: ContextAssemblyFailureCode = 'internal_error';
     let failureMessage = 'unknown assembler error';

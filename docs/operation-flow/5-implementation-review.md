@@ -6,17 +6,21 @@ In the `docs/` directory, review the relevant source material before judging the
 - `docs/MVP.md` - MVP scope for Levels 1-3
 - `docs/TECHNICAL.md` - target architecture
 - `docs/LEVEL_4.md` - future supervised execution boundaries
-- `docs/milestones/6.md` - simplified Milestone 6 scope and guardrails
-- `docs/implementation-plans/milestone-6.md` - executable Milestone 6 task plan
+- `docs/milestones/6.md` - inherited Milestone 6 scope and context-package guardrails
+- `docs/implementation-plans/milestone-6.md` - inherited Milestone 6 task plan and baseline behavior
 - `docs/implementation-plans/notes/m6-000-baseline.md` - M6 baseline verification record
-- any M6 completion notes appended to `docs/implementation-plans/milestone-6.md`
+- `docs/implementation-plans/notes/milestone-6-final.md` - M6 final regression and completion record
 - `docs/milestones/7.md` - simplified Milestone 7 scope and guardrails
 - `docs/implementation-plans/milestone-7.md` - executable Milestone 7 task plan
-- `docs/implementation-plans/notes/m7-000-baseline.md` - M7 baseline verification record, if present
+- `docs/implementation-plans/notes/m7-000-baseline.md` - M7 baseline verification record
+- `docs/implementation-plans/notes/m7-gate-*.md` - completed M7 review gate records
+- `docs/implementation-plans/notes/m7-024-final.md` - final M7 proof, regression, and Definition of Done record, if present
 - any M7 completion notes appended to `docs/implementation-plans/milestone-7.md`
 - the current implementation state in the repository
 
-Your task is to review the Milestone 7 implementation quality and detect architecture drift.
+Your task is to perform the Review Gate 7 / final Milestone 7 implementation review. Review the completed implementation against the M7 proof point, Definition of Done, prior gate records, M1-M6 regression baseline, and current repository state. Detect architecture drift, privacy regressions, missing validation, and product-scope leakage.
+
+Do not assume the milestone is complete because a final note exists. Treat missing or stale completion notes, skipped full-suite commands, unrecorded manual smoke claims, or unresolved review-gate deviations as review findings.
 
 Milestone 7 is:
 
@@ -496,10 +500,15 @@ Check that:
   - new events
   - new tables/columns
   - non-goals reaffirmed
+- `docs/implementation-plans/notes/m7-024-final.md` exists for a completed final review candidate and records:
+  - the exact commands run
+  - pass/fail summaries
+  - Definition of Done checklist results
+  - any skipped/manual-only validation and why
 - documentation describes endpoint behavior, event payload rules, caps, deterministic generation policy, suggestion-only policy, restart policy, retry/idempotency policy, and non-goals
 - completion notes do not claim a manual smoke or restart behavior that was not actually run
 - baseline notes from M7-000 exist and show a green M1/M2/M3/M4/M5/M6 starting point
-- review gates were honored or deviations are explicitly recorded
+- review gate notes exist for each completed gate or deviations are explicitly recorded
 
 ### 14. Test And Validation Coverage
 
