@@ -168,7 +168,6 @@ export function requestContextPackage(
 
   const { goalId, adapterId, workspaceId, role, objective, replacePackageId, trigger, taskId, fromRecommendationId } = input;
 
-  // Validate task association upfront (mirrors M7-016 session extension).
   if (taskId !== undefined) {
     const task = getTaskById(ctx.db, taskId);
     if (!task) throw new TaskNotFoundError(taskId);

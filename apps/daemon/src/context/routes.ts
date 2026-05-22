@@ -123,15 +123,15 @@ export function registerContextRoutes(server: FastifyInstance, deps: ContextRout
     } catch (error) {
       if (error instanceof TaskNotFoundError || error instanceof RecommendationNotFoundError) {
         reply.status(404);
-        return apiError((error as TaskNotFoundError).code, error.message);
+        return apiError(error.code, error.message);
       }
       if (error instanceof InvalidRecommendationStateError || error instanceof ArchivedTargetError) {
         reply.status(409);
-        return apiError((error as ArchivedTargetError).code, error.message);
+        return apiError(error.code, error.message);
       }
       if (error instanceof AssociationGoalMismatchError) {
         reply.status(422);
-        return apiError((error as AssociationGoalMismatchError).code, error.message);
+        return apiError(error.code, error.message);
       }
       throw error;
     }
