@@ -8,11 +8,11 @@
 
 Onboarding's "Connect your agents" step currently treats selection as the end-state: toggling an agent flips a `connected` boolean in SQLite. Step 2 of onboarding ("Preparing your workspace") is a fake 800 ms delay. The user is dropped into the main app without any proof the selected agents are actually installed, authenticated, or usable. The first session attempt is where breakage shows up — long after onboarding, with no repair affordance in context.
 
-We need an explicit readiness pipeline that runs *during* onboarding so the user leaves with a verified set of agents — or with clear, actionable repair steps for the ones that need attention.
+We need an explicit readiness pipeline that runs *during* onboarding so the user leaves with agents that are **installed and authenticated/configured** — or with clear, actionable repair steps for the ones that need attention. "Ready" in this milestone means "we have local evidence the agent is installed and its credentials look usable." It does **not** mean we have proven the agent can complete a model call; smoke prompts are deferred to a follow-up.
 
 ## Goals
 
-- After onboarding, every selected agent has a persisted readiness status backed by real checks (install + auth).
+- After onboarding, every selected agent has a persisted readiness status backed by real checks (install + auth/config).
 - Failure surfaces with a copyable command or install link; the user can resolve and retry without leaving onboarding.
 - The app does not load behind the user with zero ready agents unless the user has explicitly opted into that state ("Continue anyway").
 - Implementation is small enough to ship in a single milestone and does not couple to future capability/routing work.
@@ -30,12 +30,13 @@ We need an explicit readiness pipeline that runs *during* onboarding so the user
 | Decision | Value |
 |---|---|
 | When checks run | Onboarding step 2 + user-triggered Retry only |
-| Check depth | `--version` (install) + provider-specific auth status command |
+| Check depth | `--version` (install) + provider-specific typed auth probe (no model call) |
+| `ready` means | "installed and authenticated/configured" — never "smoke-tested model call" |
 | Failure UX | Inline copyable repair command + Retry; block app entry until ≥1 agent ready OR user clicks "Continue anyway" |
 | Repair execution | User runs commands in their own terminal; Orca never executes them |
-| Persistence | Extend existing `agents` table with `readiness_*` columns |
+| Persistence | Extend existing `agents` table with `readiness_*` columns (CHECK constraint on status) |
 | Capabilities | Out of scope |
-| Gemini adapter | In scope — create `GeminiAdapter` alongside the readiness work |
+| Gemini adapter | In scope — mode-specific (API key / Vertex API key / Vertex ADC / OAuth); configuration-detected only |
 
 ## Architecture
 
@@ -60,7 +61,9 @@ OnboardingView (step 2)
 - `apps/daemon/src/adapters/gemini.ts` — new `GeminiAdapter`.
 - `apps/daemon/src/readiness/types.ts` — `CheckStep`, `RepairAction`, `AgentReadinessReport`, status enum.
 - `apps/daemon/src/readiness/service.ts` — `ReadinessService` class.
-- `apps/daemon/src/readiness/exec.ts` — `runCheckCommand()` wrapper around `execFile` with timeout/truncation.
+- `apps/daemon/src/readiness/exec.ts` — `runCheckCommand()` wrapper around `execFile` (fixed exec policy; see below).
+- `apps/daemon/src/readiness/sanitize.ts` — output sanitizer (redaction set + ANSI strip + truncate).
+- `apps/daemon/src/readiness/sanitize.test.ts` — per-pattern positive/negative tests for every redaction rule.
 - `apps/daemon/src/readiness/repair-links.ts` — centralized install URLs.
 - `apps/daemon/src/readiness/service.test.ts` — service unit tests.
 - `apps/daemon/src/adapters/{claude-code,codex,opencode,gemini}.ts` — implement `checkInstalled`, `checkAuth`, `repairFor`; add `*.readiness.test.ts` next to each.
@@ -78,6 +81,9 @@ OnboardingView (step 2)
 - `apps/desktop/src/onboarding/ReadinessRow.tsx` — new; per-agent row.
 - `apps/desktop/src/onboarding/RepairBlock.tsx` — new; renders copyable command or install link.
 - `apps/desktop/src/api.ts` — `runReadinessCheck()`, `runReadinessCheckForAgent(id)`.
+- `apps/desktop/src/shell/NoReadyAgentsBanner.tsx` — new; persistent banner shown in main app when 0 connected agents are `ready` (driven by `GET /v1/agents` payload).
+- `apps/desktop/src/shell/AppShell.tsx` (or equivalent main-shell container) — mounts the banner.
+- `apps/desktop/src/shell/NoReadyAgentsBanner.test.tsx` — banner visibility + dismissal tests.
 
 ## Data model
 
@@ -97,13 +103,19 @@ export type AgentReadinessStatus =
 ### Check step + repair + report
 
 ```ts
+// Adapter-level typed result of an auth probe. This is the contract between
+// adapters and the service. `detail` is display-only and never used for
+// classification.
+export type AuthStatus = "ready" | "needs_auth" | "misconfigured";
+
 export interface CheckStep {
   name: "installed" | "authenticated";
   ok: boolean;
-  command: string;          // argv joined for display, e.g. "claude auth status"
+  authStatus?: AuthStatus;  // present on `authenticated` steps only
+  command: string;          // argv joined for display, e.g. "claude auth status --json"
   exitCode?: number;
-  detail?: string;          // short, human-readable summary
-  errorOutput?: string;     // stderr, truncated to 4 KB, secrets redacted
+  detail?: string;          // short, human-readable summary (display-only)
+  errorOutput?: string;     // sanitized stderr summary, truncated to 4 KB; never raw stdout from a successful auth check
 }
 
 export interface RepairAction {
@@ -111,6 +123,7 @@ export interface RepairAction {
   command?: string;         // copyable shell command (run_command)
   url?: string;             // install link (install_url)
   label: string;            // button text, e.g. "Sign in to Claude Code"
+  requiresAppRestart?: boolean; // true for env-var-only auth fixes (see Risks)
 }
 
 export interface AgentReadinessReport {
@@ -126,14 +139,17 @@ export interface AgentReadinessReport {
 ### Migration `0009_agent_readiness.sql`
 
 ```sql
-ALTER TABLE agents ADD COLUMN readiness_status     TEXT;
+ALTER TABLE agents ADD COLUMN readiness_status     TEXT
+  CHECK (readiness_status IS NULL OR readiness_status IN (
+    'unchecked','ready','missing','needs_auth','misconfigured','failed'
+  ));
 ALTER TABLE agents ADD COLUMN readiness_checked_at TEXT;
 ALTER TABLE agents ADD COLUMN readiness_detail     TEXT;  -- JSON: CheckStep[]
 ALTER TABLE agents ADD COLUMN readiness_repair     TEXT;  -- JSON: RepairAction | null
 ALTER TABLE agents ADD COLUMN readiness_version    TEXT;
 ```
 
-All columns are nullable; existing rows survive the migration with `readiness_status = NULL`. The contract surfaces this as `readiness: null`, which the UI treats as `unchecked`.
+`checking` is intentionally **not** in the CHECK list — it is a UI-only transient and is never persisted. All columns are nullable; existing rows survive the migration with `readiness_status = NULL`. The contract surfaces this as `readiness: null`, which the UI treats as `unchecked`.
 
 ## Adapter contract
 
@@ -148,32 +164,48 @@ export interface AgentAdapter {
 
   // new
   checkInstalled(): Promise<CheckStep & { version?: string }>;
-  checkAuth(): Promise<CheckStep>;
+  checkAuth(): Promise<CheckStep>;       // CheckStep.authStatus is the contract
   repairFor(status: AgentReadinessStatus): RepairAction | undefined;
 }
 ```
 
-Each adapter encapsulates its own argv. The service never inspects strings — it only reads `ok` and `detail` from steps.
+Each adapter encapsulates its own argv **and** its own classification logic. The service only reads `CheckStep.ok` and `CheckStep.authStatus` (a typed enum). `CheckStep.detail` is display-only and is **never** parsed by the service.
 
 ### Per-agent commands
 
-| Agent | install | auth | repair (needs_auth) | repair (missing) |
+| Agent | install | auth probe | repair (needs_auth) | repair (missing) |
 |---|---|---|---|---|
-| claude-code | `claude --version` | `claude auth status` (exit 0 = ok, exit 1 = needs_auth) | `claude auth login` | install URL |
-| codex | `codex --version` | `codex login status` (exit 0 = ok) | `codex login` | install URL |
-| gemini-cli | `gemini --version` | heuristic: env `GEMINI_API_KEY` OR `GOOGLE_CLOUD_PROJECT` OR `~/.gemini/settings.json` exists | `gemini` (launches login) | install URL |
-| opencode | `opencode --version` | `opencode auth list`; parse stdout — ≥1 provider = ok, empty = needs_auth | `opencode auth login` | install URL |
+| claude-code | `claude --version` | `claude auth status --json`; parse JSON; `loggedIn === true` → `ready` | `claude auth login` | install URL |
+| codex | `codex --version` | `codex login status`; exit 0 → `ready` | `codex login` | install URL |
+| gemini-cli | `gemini --version` | **mode-specific** (see below) | `gemini` (launches login) | install URL |
+| opencode | `opencode --version` | `opencode auth list`; ANSI-stripped parse for explicit credential count | `opencode auth login` | install URL |
 
 Install URLs live in `repair-links.ts` so updates are auditable and tested.
 
-### Classification table (per adapter `checkAuth`)
+### Gemini classification (replaces prior heuristic)
 
-| Adapter | exit 0 | exit non-zero | stderr matches `/not authenticated|not logged in|please log in|sign in/i` | other |
-|---|---|---|---|---|
-| claude-code | `ok: true` | `ok: false, detail: "needs_auth"` | n/a | `ok: false, detail: "misconfigured"` |
-| codex | `ok: true` | `ok: false, detail: "needs_auth"` | n/a | same |
-| gemini-cli | heuristic ok → `ok: true` | n/a (no command) | n/a | `ok: false, detail: "needs_auth"` |
-| opencode | stdout has ≥1 provider → `ok: true` | `ok: false, detail: "misconfigured"` | parse failure → `needs_auth` | same |
+Gemini CLI supports three auth modes; the adapter probes them in priority order and emits the first match:
+
+1. **Gemini API key** — `process.env.GEMINI_API_KEY` non-empty → `ready` (auth method: `gemini_api_key`).
+2. **Vertex AI API key** — `process.env.GOOGLE_API_KEY` non-empty AND Gemini config explicitly selects Vertex (read `~/.gemini/settings.json` `selectedAuthType === "vertex-ai"`) → `ready` (auth method: `vertex_api_key`).
+3. **Vertex AI ADC / service account** — `process.env.GOOGLE_CLOUD_PROJECT || GOOGLE_CLOUD_PROJECT_ID` AND `GOOGLE_CLOUD_LOCATION` AND (`GOOGLE_APPLICATION_CREDENTIALS` file exists OR `~/.config/gcloud/application_default_credentials.json` exists) → `ready` (auth method: `vertex_adc`).
+4. **OAuth (Google login)** — `~/.gemini/settings.json` exists, `selectedAuthType === "oauth-personal"`, AND the OAuth credential cache file referenced by the CLI is present → `ready` (auth method: `oauth`).
+5. Otherwise → `needs_auth`.
+
+`detail` notes which mode was matched. When `ready`, Gemini's row body explicitly reads "**configuration detected; not smoke-tested**" so the user is not misled about the depth of verification.
+
+### Classification rules (per adapter `checkAuth`)
+
+Each adapter returns `CheckStep.authStatus` directly. The service does not pattern-match strings.
+
+| Adapter | `authStatus: ready` | `authStatus: needs_auth` | `authStatus: misconfigured` |
+|---|---|---|---|
+| claude-code | `--json` parsed, `loggedIn === true` | exit 1 + parsed JSON or stderr indicating "not logged in" | any other exit code, JSON parse failure, timeout, missing field |
+| codex | exit 0 | exit non-zero AND (stdout/stderr matches `/not (logged in\|authenticated)/i` OR documented login-required pattern) | exit non-zero without that pattern (keychain, parse error, backend error) |
+| gemini-cli | any of the 5 modes above resolves cleanly | none of the 5 modes match | any mode partially matches but a referenced credential file fails to stat / parse |
+| opencode | ANSI-stripped stdout parses to ≥1 explicit `provider:` line | parser succeeds and count is 0 | exit non-zero, parser fails, or output unrecognized |
+
+OpenCode env-only credentials (`ANTHROPIC_API_KEY` etc. set in the user's shell or project `.env` but not stored via `opencode auth login`) are **not** counted as `ready` in this milestone. Rationale: the Orca daemon may not inherit those env vars, so "ready" would be a lie at session-spawn time. This is called out in Risks as a known limitation.
 
 ## ReadinessService
 
@@ -186,16 +218,22 @@ export class ReadinessService {
   ) {}
 
   async checkAgent(agentId: string): Promise<AgentReadinessReport> {
-    // dedup in-flight calls
-    // run checkInstalled; if !ok → status = missing
-    // else run checkAuth; classify auth.detail → ready | needs_auth | misconfigured
-    // persistReadiness(); return report
+    // 1. Dedup in-flight calls via Map<agentId, Promise<Report>>.
+    // 2. Run checkInstalled; if !ok → status = missing, skip auth.
+    // 3. Otherwise run checkAuth; map auth.authStatus → status
+    //    ("ready" | "needs_auth" | "misconfigured").
+    // 4. Call adapter.repairFor(status) for the repair action.
+    // 5. persistReadiness() is called for EVERY terminal status, including
+    //    "failed" reports (see Error handling).
+    // 6. Return report.
   }
 
   async checkSelected(): Promise<AgentReadinessReport[]> {
     // listAgents(db).filter(connected)
     // Promise.allSettled(map checkAgent)
-    // failed promises → failedReport(id, reason)
+    // Rejected promises → failedReport(id, reason); these are also persisted
+    // via persistReadiness() before being returned, so GET /v1/agents never
+    // shows a stale report after a check completes.
   }
 }
 ```
@@ -209,8 +247,26 @@ export class ReadinessService {
 ### Timeouts and budgets
 
 - Per-command timeout: 5 s (hard, via `execFile` `timeout` option).
-- Per-agent total budget: 12 s. If exceeded, the agent's report becomes `status: failed` with a generic Retry action.
+- Per-agent total budget: 12 s. If exceeded, the agent's report becomes `status: failed` with a generic Retry action and is persisted.
 - Whole-pipeline timeout: none. The UI can be cancelled by navigating away.
+
+### `runCheckCommand` (`readiness/exec.ts`) execution policy
+
+All adapter probes go through one helper. Policy is fixed, not adapter-tunable:
+
+| Setting | Value |
+|---|---|
+| Invocation | `child_process.execFile` (never `spawn` with `shell: true`) |
+| `stdio` | stdin closed (`'ignore'`); stdout/stderr piped |
+| `cwd` | OS temp dir (`os.tmpdir()`); never the user's project or HOME |
+| `env` | `PATH` only by default; explicit allowlist for Gemini/Vertex env vars when classifying Gemini auth (read directly from `process.env`, not forwarded into the subprocess) |
+| `timeout` | 5000 ms |
+| `maxBuffer` | 256 KB per stream; on overflow the child is killed and step is `failed` |
+| `killSignal` | `SIGTERM`; if the process is still alive 1 s later we send `SIGKILL` |
+| `windowsHide` | `true` |
+| `shell` | `false` (always) |
+
+**OpenCode special-case:** `runCheckCommand` for opencode passes `OPENCODE_DISABLE_PLUGINS=1` (or equivalent — adapter constant) and uses `--pure` if/when that flag exists, to avoid loading user plugins or running default startup hooks during a readiness probe.
 
 ### Persistence helper
 
@@ -247,7 +303,7 @@ function persistReadiness(db, report) {
 
 Validation rules:
 - `POST /v1/agents/:id/readiness:check` returns 404 for unknown ids and 400 if the agent exists but is not `connected`.
-- Request bodies for both POSTs are empty objects; Zod rejects extra fields.
+- Request bodies for both POSTs are optional. Zod accepts `undefined` or `{}` (empty object); a non-empty body is rejected with 400. This avoids Fastify/Zod plumbing tripping on no-body POSTs from `fetch(url, { method: "POST" })`.
 
 ## Onboarding UX
 
@@ -290,7 +346,7 @@ Setting up agents
 ### Continue rules
 
 - ≥1 agent `ready` → `Continue` enabled.
-- All checks settled and zero `ready` → `Continue` hidden, `Continue anyway` shown as secondary. Calling `onComplete` proceeds with no ready agents and the main app surfaces a persistent banner.
+- All checks settled and zero `ready` → `Continue` hidden, `Continue anyway` shown as secondary. Calling `onComplete` proceeds with no ready agents and the main app shell mounts `NoReadyAgentsBanner` (see Desktop file list). The banner reads `GET /v1/agents` on mount and stays visible until ≥1 connected agent has `readiness.status === "ready"`.
 - During checks → both disabled; footer reads `Checking N agents…`.
 
 ### Retry behavior
@@ -315,18 +371,38 @@ Setting up agents
 
 | Surface | Behavior |
 |---|---|
-| `ENOENT` from `execFile` | `checkInstalled` returns `ok: false`. Status → `missing`. |
+| `ENOENT` from `execFile` | `checkInstalled` returns `ok: false`. Status → `missing`. Persisted. |
 | Per-command timeout (5 s) | Step `ok: false`, `detail: "timeout after 5s"`. |
-| Per-agent budget exceeded (12 s) | Report `status: failed`, generic Retry action. |
-| Unhandled throw in adapter | Caught by `Promise.allSettled`; `failedReport(id, reason)` with truncated reason. |
+| `maxBuffer` exceeded | Child killed; step `ok: false`, `detail: "output truncated"`. |
+| Per-agent budget exceeded (12 s) | Report `status: failed`, generic Retry action. Persisted. |
+| Unhandled throw in adapter | Caught by `Promise.allSettled`; `failedReport(id, reason)` built with sanitized truncated reason. **Persisted via `persistReadiness()` before being returned**, so `GET /v1/agents` never shows a stale prior report after a completed-but-failed check. |
 | Migration failure on startup | Daemon exits via existing migration runner's error path. |
 | Stale persisted report | Next check overwrites unconditionally. |
 
-### Output sanitization
+### Output sanitization & PII
 
-- stderr/stdout truncated to 4 KB before persisting to `readiness_detail`.
-- Defense-in-depth secret redaction before persistence: regex `/sk-[A-Za-z0-9_-]{16,}|[A-Za-z0-9]{32,}@/` replaced with `<redacted>`. Auth status commands are chosen because they don't print secrets, but the redaction guards against future CLI changes.
-- Repair commands are static strings owned by adapter classes. No interpolation from user input.
+**Rule 1 — Never persist raw stdout from a successful auth check.** `claude auth status --json` and Gemini's settings files contain account-identifying data (email, org id, project id). On success, `errorOutput` is omitted entirely and `detail` carries only normalized facts: `"authenticated (gemini_api_key)"`, `"authenticated"`, or `"authenticated (anthropic, openai)"` for OpenCode (provider names only, no per-account info).
+
+**Rule 2 — Sanitize stderr/output on failure** before persisting to `readiness_detail`:
+- Truncate to 4 KB.
+- Strip ANSI escapes.
+- Run the redaction set below before the truncation.
+
+**Redaction set** (applied in order; each match replaced with `<redacted>`):
+- `sk-[A-Za-z0-9_\-]{16,}` (Anthropic & generic)
+- `sk-ant-[A-Za-z0-9_\-]{16,}`
+- `ghp_[A-Za-z0-9]{20,}`, `gho_[A-Za-z0-9]{20,}`, `ghs_[A-Za-z0-9]{20,}` (GitHub)
+- `ya29\.[A-Za-z0-9_\-]+` (Google OAuth tokens)
+- `AIza[A-Za-z0-9_\-]{20,}` (Google API keys)
+- `Bearer\s+[A-Za-z0-9_\-\.]+` (any bearer token)
+- `-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+PRIVATE KEY-----`
+- URL query/fragment auth params: `(\?|&|#)(?:access_token|id_token|api_key|token|key|password)=[^\s&#]+`
+- Email addresses: `[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`
+- Generic high-entropy 32+ char tokens: `\b[A-Za-z0-9_\-]{32,}\b` (last to avoid swallowing earlier matches)
+
+The redactor lives in `readiness/sanitize.ts`, has unit tests for every pattern above (positive + negative), and is the **only** sanitizer called from `runCheckCommand`.
+
+**Rule 3 — Repair commands** are static strings owned by adapter classes. No interpolation from user input.
 
 ## Testing
 
@@ -367,14 +443,30 @@ Setting up agents
   - `Continue` disabled until ≥1 `ready`; `Continue anyway` appears only when 0 ready and all checks settled.
   - Copy button copies exact `report.repair.command`.
   - Cached <60 s reports → "Last checked" shown, no auto-recheck.
+  - Gemini `ready` row body includes the qualifier "configuration detected; not smoke-tested".
+  - `RepairAction.requiresAppRestart === true` shows "Restart Orca after running this" copy and disables Retry with a tooltip.
+
+### Main-shell tests
+
+- `NoReadyAgentsBanner.test.tsx`: visible when `GET /v1/agents` returns 0 connected agents with `readiness.status === "ready"`; hidden when ≥1 is ready; dismissable but re-appears on next app launch while the condition holds.
 
 ### Real smoke tests (gated)
 
 - `*.real-smoke.test.ts` for each adapter, gated on `ORCA_RUN_REAL_SMOKE=1`. Spawns the actual CLI's `--version`. Mirrors existing `claude-code.smoke.test.ts` convention. CI skips by default.
+- **Auth-status smoke tests** (also gated): run each adapter's real auth probe (`claude auth status --json`, `codex login status`, `opencode auth list`) — no login required. Assertions:
+  - Process exits within the 5 s timeout.
+  - Output is non-crashing (no segfault / Node uncaught exception text).
+  - The adapter classifies the result into one of the three `AuthStatus` values without throwing.
+  - Sanitizer reduces any returned output to ≤4 KB and contains no patterns from the redaction set.
+  These tests catch CLI vendor drift (exit-code changes, `--json` schema changes) that the unit tests' mocks would miss.
 
 ## Risks & open questions
 
-- **Auth command convention drift.** Codex/Claude can change exit-code semantics between releases. Mitigation: classification table is per-adapter and easy to revise; real-smoke tests catch breakage when run.
-- **Gemini auth is heuristic-only.** Without a smoke prompt we can't actually prove Gemini works. We accept false-positive `ready` for Gemini until a smoke check is added in a follow-up.
+- **Auth command convention drift.** Codex/Claude can change exit-code or JSON schema semantics between releases. Mitigation: per-adapter classification owned by the adapter class; gated auth-status smoke tests catch drift when run.
+- **Gemini is configuration-detected, not smoke-tested.** Even with mode-specific checks (API key / Vertex API key / Vertex ADC / OAuth), we can still mark Gemini `ready` when credentials are present-but-invalid. Gemini rows explicitly carry the qualifier "configuration detected; not smoke-tested" so the UX never overstates verification depth. A real model-call smoke is the planned follow-up.
+- **Env-var-only auth and daemon PATH/env.** A user can repair Gemini or OpenCode by exporting `GEMINI_API_KEY` / provider keys in their shell, but the **already-running Orca daemon** will not pick those up. Two consequences:
+  1. `RepairAction.requiresAppRestart = true` for env-based fixes; the UI tells the user "Restart Orca after running this" and Retry is grayed with a tooltip until restart.
+  2. OpenCode env-only credentials (provider keys not stored via `opencode auth login`) are explicitly **not** counted as `ready` in this milestone. They will be reported as `needs_auth` with a repair pointing at `opencode auth login`.
 - **Continue anyway escape hatch.** Could be over-used. Tracked via telemetry event `readiness.continue_anyway` so we can measure adoption and decide whether to tighten the gate later.
 - **PATH differences inside Tauri.** If the desktop app runs with a stripped PATH, `claude` may not resolve even when it's on the user's shell PATH. Existing `resolveBinary` already accepts `ORCA_*_BIN` overrides — readiness UX surfaces this as `missing` with the install link; we may later add a "set custom binary path" affordance.
+- **`failed` persistence semantics.** `failed` reports (timeout, unhandled throw, budget exceeded) are persisted just like other statuses, so `GET /v1/agents` is always consistent with the most recent attempt. The trade-off: a transient failure (network blip during a CLI's auth probe) overwrites a previously-`ready` state. Users recover via Retry. We do not keep history.
