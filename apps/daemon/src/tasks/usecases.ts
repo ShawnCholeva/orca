@@ -22,6 +22,7 @@ import {
   type DomainEvent,
 } from '@orca/contracts';
 import type { EventBus } from '../events.js';
+import { redactSecrets } from '../memory/normalize.js';
 import { runGeneration, SchemaValidationError } from '../orchestrator/runner.js';
 import {
   insertTask,
@@ -49,6 +50,7 @@ import { buildTaskGenerationInput } from './input.js';
 import {
   TaskGenerationOutputSchema,
   type TaskGenerator,
+  type TaskCandidate,
 } from './rules.js';
 
 export {
@@ -171,24 +173,24 @@ function emitEvent(
 // ── Cap helpers ───────────────────────────────────────────────────────────────
 
 function capTitle(s: string): string {
-  return s.trim().slice(0, M7_TASK_MAX_TITLE_CHARS);
+  return redactSecrets(s.trim().slice(0, M7_TASK_MAX_TITLE_CHARS));
 }
 
 function capDescription(s: string): string {
-  return s.trim().slice(0, M7_TASK_MAX_DESCRIPTION_CHARS);
+  return redactSecrets(s.trim().slice(0, M7_TASK_MAX_DESCRIPTION_CHARS));
 }
 
 function capAcceptanceCriteria(items: TaskAcceptanceCriterion[]): TaskAcceptanceCriterion[] {
   return items.slice(0, M7_TASK_MAX_ACCEPTANCE_CRITERIA).map((c) => ({
     id: c.id,
-    text: c.text.trim().slice(0, M7_TASK_MAX_ITEM_TEXT_CHARS),
+    text: redactSecrets(c.text.trim().slice(0, M7_TASK_MAX_ITEM_TEXT_CHARS)),
   }));
 }
 
 function capValidationSteps(items: TaskValidationStep[]): TaskValidationStep[] {
   return items.slice(0, M7_TASK_MAX_VALIDATION_STEPS).map((v) => ({
     id: v.id,
-    text: v.text.trim().slice(0, M7_TASK_MAX_ITEM_TEXT_CHARS),
+    text: redactSecrets(v.text.trim().slice(0, M7_TASK_MAX_ITEM_TEXT_CHARS)),
     kind: v.kind,
   }));
 }
@@ -644,6 +646,7 @@ export function insertPendingTaskGeneration(
 
   const id = idFn();
 
+  const toPublish: DomainEvent[] = [];
   const { generation, isNew } = insertOrGetPendingGeneration(db, {
     id,
     goalId: input.goalId,
@@ -654,20 +657,17 @@ export function insertPendingTaskGeneration(
     inputFingerprint: input.inputFingerprint,
     requestFingerprint,
     requestedAt: now,
+  }, () => {
+    toPublish.push(
+      emitEvent(stmts, 'task.generation.requested', input.goalId, {
+        generationId: id,
+        goalId: input.goalId,
+        trigger: input.trigger,
+        triggerSourceId: input.triggerSourceId,
+      }, now, idFn)
+    );
   });
-
   if (isNew) {
-    const toPublish: DomainEvent[] = [];
-    db.transaction(() => {
-      toPublish.push(
-        emitEvent(stmts, 'task.generation.requested', input.goalId, {
-          generationId: generation.id,
-          goalId: input.goalId,
-          trigger: input.trigger,
-          triggerSourceId: input.triggerSourceId,
-        }, now, idFn)
-      );
-    })();
     for (const ev of toPublish) bus.publish(ev);
   }
 
@@ -786,29 +786,67 @@ export async function runTaskGeneration(
       now: ctx.now,
       idFactory: ctx.idFactory,
     },
-    execute: async (generationId) => {
+    execute: async () => {
       const rawOutput = await ctx.taskGenerator.generate(generationInput);
       const parsedOutput = TaskGenerationOutputSchema.safeParse(rawOutput);
       if (!parsedOutput.success) {
         throw new SchemaValidationError(parsedOutput.error.message);
       }
 
+      return {
+        taskIds: [],
+        sparse: parsedOutput.data.sparse,
+        data: parsedOutput.data.candidates,
+      };
+    },
+    commitSuccess: (generationId, output, commitNow) => {
+      const candidates = (output.data ?? []) as TaskCandidate[];
+      const stmts = ensureStmts(ctx.db);
       const taskIds: string[] = [];
-      for (const candidate of parsedOutput.data.candidates) {
+      const events: DomainEvent[] = [];
+      const idFn = ctx.idFactory ?? randomUUID;
+
+      for (const candidate of candidates) {
         try {
-          const task = createTask(ctx, {
+          const taskId = idFn();
+          const title = capTitle(candidate.title);
+          const description = capDescription(candidate.description);
+          const sources = capSources(candidate.sources);
+          const fp = taskFingerprint(input.goalId, title, candidate.role);
+          insertTask(ctx.db, {
+            id: taskId,
             goalId: input.goalId,
-            origin: 'generator',
-            role: candidate.role,
-            title: candidate.title,
-            description: candidate.description,
-            sources: candidate.sources,
+            parentTaskId: null,
             workspaceId: candidate.workspaceId,
+            role: candidate.role,
+            status: 'proposed',
+            origin: 'generator',
+            title,
+            description,
+            acceptanceCriteriaJson: '[]',
+            validationStepsJson: '[]',
+            dependenciesJson: '[]',
+            sourcesJson: JSON.stringify(sources),
             generationId,
+            fingerprint: fp,
+            createdAt: commitNow,
+            updatedAt: commitNow,
+            archivedAt: null,
           });
-          taskIds.push(task.id);
+          events.push(
+            emitEvent(stmts, 'task.created', input.goalId, {
+              taskId,
+              goalId: input.goalId,
+              status: 'proposed',
+              role: candidate.role,
+              workspaceId: candidate.workspaceId,
+              origin: 'generator',
+              generationId,
+            }, commitNow, idFn)
+          );
+          taskIds.push(taskId);
         } catch (error) {
-          if (error instanceof DuplicateTaskFingerprintError) {
+          if (error instanceof DuplicateTaskFingerprintError || isSqliteUniqueError(error)) {
             continue;
           }
           throw error;
@@ -817,7 +855,8 @@ export async function runTaskGeneration(
 
       return {
         taskIds,
-        sparse: parsedOutput.data.sparse,
+        sparse: output.sparse,
+        events,
       };
     },
   });

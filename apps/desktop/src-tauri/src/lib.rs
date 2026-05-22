@@ -5,6 +5,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
 use serde::Serialize;
+use tauri::image::Image;
 use tauri::{AppHandle, Manager, RunEvent, State};
 use uuid::Uuid;
 
@@ -155,14 +156,22 @@ pub fn run() {
                 token: token.clone(),
             };
 
-            let child = match bundled_sidecar_path() {
-                Some(sidecar) => {
-                    eprintln!("[orca] launching sidecar: {}", sidecar.display());
-                    spawn_sidecar(app.handle(), sidecar, port, &token)
-                }
-                None => {
-                    eprintln!("[orca] no sidecar found; falling back to pnpm dev");
-                    spawn_dev(port, &token)
+            // Debug builds (`tauri dev`) always use the live `pnpm dev` fallback
+            // so daemon TS changes hot-reload via tsx-watch. Release builds use
+            // the bundled SEA sidecar.
+            let child = if cfg!(debug_assertions) {
+                eprintln!("[orca] debug build — running daemon via pnpm dev (hot reload)");
+                spawn_dev(port, &token)
+            } else {
+                match bundled_sidecar_path() {
+                    Some(sidecar) => {
+                        eprintln!("[orca] launching sidecar: {}", sidecar.display());
+                        spawn_sidecar(app.handle(), sidecar, port, &token)
+                    }
+                    None => {
+                        eprintln!("[orca] no sidecar found; falling back to pnpm dev");
+                        spawn_dev(port, &token)
+                    }
                 }
             }
             .expect("failed to spawn daemon");
@@ -171,6 +180,13 @@ pub fn run() {
                 endpoint,
                 child: Mutex::new(Some(child)),
             });
+
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(icon) = Image::from_bytes(include_bytes!("../icons/icon.png")) {
+                    let _ = window.set_icon(icon);
+                }
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())

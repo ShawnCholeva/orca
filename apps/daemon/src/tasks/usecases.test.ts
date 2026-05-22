@@ -211,6 +211,26 @@ describe('createTask', () => {
     expect(payload.origin).toBeDefined();
   });
 
+  it('redacts obvious secrets from persisted task free text', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+
+    const task = createTask(makeCtx(db), {
+      goalId: 'g1',
+      origin: 'user',
+      role: 'engineer',
+      title: 'Rotate token=supersecret',
+      description: 'authorization: bearer live-secret',
+      acceptanceCriteria: [{ id: 'ac1', text: 'api_key=abc123 is removed' }],
+      validationSteps: [{ id: 'vs1', text: 'password=hunter2 is removed', kind: 'manual' }],
+    });
+
+    expect(task.title).not.toContain('supersecret');
+    expect(task.description).not.toContain('live-secret');
+    expect(task.acceptanceCriteria[0].text).not.toContain('abc123');
+    expect(task.validationSteps[0].text).not.toContain('hunter2');
+  });
+
   it('duplicate generator-origin fingerprint throws DuplicateTaskFingerprintError', () => {
     const db = freshDb();
     seedGoal(db, 'g1');
@@ -306,6 +326,26 @@ describe('updateTask', () => {
     expect('description' in payload).toBe(false);
     expect('title' in payload).toBe(false);
     expect(payload.changedFields).toContain('description');
+  });
+
+  it('redacts obvious secrets when patching task free text', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    const task = createTask(makeCtx(db), {
+      goalId: 'g1', origin: 'user', role: 'engineer', title: 'X', description: '',
+    });
+
+    const { task: updated } = updateTask(makeCtx(db), task.id, {
+      title: 'Rotate token=supersecret',
+      description: 'authorization: bearer live-secret',
+      acceptanceCriteria: [{ id: 'ac1', text: 'api_key=abc123 is removed' }],
+      validationSteps: [{ id: 'vs1', text: 'password=hunter2 is removed', kind: 'manual' }],
+    });
+
+    expect(updated.title).not.toContain('supersecret');
+    expect(updated.description).not.toContain('live-secret');
+    expect(updated.acceptanceCriteria[0].text).not.toContain('abc123');
+    expect(updated.validationSteps[0].text).not.toContain('hunter2');
   });
 
   it('emits task.status_changed when status changes', () => {
@@ -418,6 +458,30 @@ describe('splitTask', () => {
 
     const createEvents = published.filter((e) => e.type === 'task.created');
     expect(createEvents).toHaveLength(2);
+  });
+
+  it('redacts obvious secrets from split child free text', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    const parent = createTask(makeCtx(db), {
+      goalId: 'g1', origin: 'user', role: 'engineer', title: 'Parent', description: '',
+    });
+
+    const { children } = splitTask(makeCtx(db), {
+      parentTaskId: parent.id,
+      children: [{
+        role: 'engineer',
+        title: 'Child token=supersecret',
+        description: 'authorization: bearer live-secret',
+        acceptanceCriteria: [{ id: 'ac1', text: 'api_key=abc123 is removed' }],
+        validationSteps: [{ id: 'vs1', text: 'password=hunter2 is removed', kind: 'manual' }],
+      }],
+    });
+
+    expect(children[0].title).not.toContain('supersecret');
+    expect(children[0].description).not.toContain('live-secret');
+    expect(children[0].acceptanceCriteria[0].text).not.toContain('abc123');
+    expect(children[0].validationSteps[0].text).not.toContain('hunter2');
   });
 
   it('optionally moves parent to blocked', () => {
@@ -672,6 +736,48 @@ describe('runTaskGeneration', () => {
     expect(created.length).toBeGreaterThan(0);
     expect(created.every((row) => row.origin === 'generator')).toBe(true);
     expect(created.every((row) => row.generation_id === generation.id)).toBe(true);
+  });
+
+  it('rolls back generated tasks if the generation success event cannot commit', async () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedRefinement(db, 'g1', ['Implement task generator']);
+
+    const origPrepare = db.prepare.bind(db);
+    vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      const stmt = origPrepare(sql);
+      if (sql.includes('INSERT INTO events')) {
+        const origRun = stmt.run.bind(stmt);
+        vi.spyOn(stmt, 'run').mockImplementation((...args: unknown[]) => {
+          if (args[1] === 'task.generated') {
+            throw new Error('simulated task.generated insert failure');
+          }
+          return origRun(...args);
+        });
+      }
+      return stmt;
+    });
+    resetPreparedStatements();
+
+    const generation = await runTaskGeneration(
+      {
+        ...makeCtx(db),
+        taskGenerator: new DeterministicTaskGenerator(),
+      },
+      {
+        goalId: 'g1',
+        trigger: 'manual',
+        triggerSourceId: null,
+      }
+    );
+
+    const terminal = await waitForTaskGenerationTerminal(db, generation.id);
+    expect(terminal.status).toBe('failed');
+
+    const taskCount = (
+      db.prepare('SELECT count(*) AS cnt FROM tasks WHERE goal_id = ?').get('g1') as { cnt: number }
+    ).cnt;
+    expect(taskCount).toBe(0);
   });
 
   it('creates a new generation after snapshot changes, without duplicating tasks', async () => {

@@ -9,6 +9,7 @@ export const migrationFiles = [
   "0004_sessions.sql",
   "0005_memory.sql",
   "0006_context.sql",
+  "0007_agents.sql",
   "m7-001-suggested-orchestration.sql"
 ] as const;
 

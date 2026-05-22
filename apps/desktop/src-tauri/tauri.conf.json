@@ -14,8 +14,10 @@
       {
         "label": "main",
         "title": "Orca",
-        "width": 800,
-        "height": 600
+        "width": 1200,
+        "height": 800,
+        "decorations": false,
+        "backgroundColor": "#0B1020"
       }
     ],
     "security": {
@@ -25,7 +27,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": [],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "externalBin": ["../../daemon/dist/sidecar/orca-daemon"],
     "resources": {
       "../../daemon/dist/sidecar/runtime": "runtime"

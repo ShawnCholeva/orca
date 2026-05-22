@@ -6,9 +6,16 @@ import { ConflictResolveDialog } from "./ConflictResolveDialog";
 type Props = {
   goalId: string;
   refreshKey?: number;
+  resolvePrefill?: { conflictId: string; suggestedNote?: string } | null;
+  onResolvePrefillConsumed?: () => void;
 };
 
-export function ConflictsBanner({ goalId, refreshKey = 0 }: Props) {
+export function ConflictsBanner({
+  goalId,
+  refreshKey = 0,
+  resolvePrefill = null,
+  onResolvePrefillConsumed,
+}: Props) {
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -16,6 +23,7 @@ export function ConflictsBanner({ goalId, refreshKey = 0 }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [busyConflictId, setBusyConflictId] = useState<string | null>(null);
   const [resolveTarget, setResolveTarget] = useState<Conflict | null>(null);
+  const [resolvePrefillNote, setResolvePrefillNote] = useState<string | undefined>(undefined);
 
   const openConflicts = conflicts.filter((conflict) => conflict.status === "open");
 
@@ -50,6 +58,16 @@ export function ConflictsBanner({ goalId, refreshKey = 0 }: Props) {
     void load("initial");
   }, [load, refreshKey]);
 
+  useEffect(() => {
+    if (!resolvePrefill) return;
+    const conflict = conflicts.find((item) => item.id === resolvePrefill.conflictId);
+    if (!conflict) return;
+    setDrawerOpen(true);
+    setResolveTarget(conflict);
+    setResolvePrefillNote(resolvePrefill.suggestedNote);
+    onResolvePrefillConsumed?.();
+  }, [conflicts, onResolvePrefillConsumed, resolvePrefill]);
+
   async function reloadAfterMutation() {
     const nextConflicts = await load("refresh");
     const nextOpenCount = nextConflicts.filter((conflict) => conflict.status === "open").length;
@@ -81,6 +99,7 @@ export function ConflictsBanner({ goalId, refreshKey = 0 }: Props) {
         note,
       });
       setResolveTarget(null);
+      setResolvePrefillNote(undefined);
       await reloadAfterMutation();
     } finally {
       setBusyConflictId(null);
@@ -180,7 +199,7 @@ export function ConflictsBanner({ goalId, refreshKey = 0 }: Props) {
                     <button
                       type="button"
                       className="goal-action-button"
-                      onClick={() => setResolveTarget(conflict)}
+                      onClick={() => { setResolvePrefillNote(undefined); setResolveTarget(conflict); }}
                       disabled={busy}
                     >
                       Resolve
@@ -205,7 +224,8 @@ export function ConflictsBanner({ goalId, refreshKey = 0 }: Props) {
         <ConflictResolveDialog
           conflict={resolveTarget}
           onResolve={handleResolve}
-          onClose={() => setResolveTarget(null)}
+          onClose={() => { setResolveTarget(null); setResolvePrefillNote(undefined); }}
+          initialNote={resolvePrefillNote}
         />
       )}
     </>

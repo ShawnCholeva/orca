@@ -30,17 +30,19 @@ type Props = {
   workspaces: Workspace[];
   onSave: (patch: TaskEditSaveData) => Promise<void>;
   onClose: () => void;
+  initialStatus?: TaskStatus;
+  addAcceptanceCriteria?: string[];
 };
 
-export function TaskEditDialog({ task, workspaces, onSave, onClose }: Props) {
+export function TaskEditDialog({ task, workspaces, onSave, onClose, initialStatus, addAcceptanceCriteria = [] }: Props) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [role, setRole] = useState<TaskRole>(task.role);
-  const [status, setStatus] = useState<TaskStatus>(task.status);
+  const [status, setStatus] = useState<TaskStatus>(initialStatus ?? task.status);
   const [workspaceId, setWorkspaceId] = useState(task.workspaceId ?? "");
   const [dependenciesText, setDependenciesText] = useState(task.dependencies.join("\n"));
   const [criteriaText, setCriteriaText] = useState(
-    task.acceptanceCriteria.map((item) => item.text).join("\n"),
+    [...task.acceptanceCriteria.map((item) => item.text), ...addAcceptanceCriteria].join("\n"),
   );
   const [validationText, setValidationText] = useState(
     task.validationSteps.map((item) => item.text).join("\n"),

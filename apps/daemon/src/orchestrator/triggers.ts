@@ -58,9 +58,8 @@ export const TRIGGER_MAP: Readonly<Partial<Record<DomainEventType, TriggerEntry>
     runTasksIfEmpty: false,
   },
   'context.package.created': {
-    // Informational only — no orchestration action.
     triggerKind: 'context_package_created',
-    runRecs: false,
+    runRecs: true,
     runConflicts: false,
     runTasksIfEmpty: false,
   },

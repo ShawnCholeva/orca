@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import type { Workspace } from "@orca/contracts";
 import { useSessionsPanel } from "./state";
 import { SessionListItem } from "./SessionListItem";
@@ -6,6 +6,7 @@ import { SessionSummaryPanel } from "./SessionSummaryPanel";
 import { SessionContextPanel } from "./SessionContextPanel";
 import { CreateSessionDialog } from "./CreateSessionDialog";
 import { SessionTerminalView } from "./SessionTerminalView";
+import type { CreateSessionPrefill } from "../recommendations/RecommendationsPanel";
 
 const TERMINAL_SESSION_STATUSES = new Set(["exited", "failed", "stopped"]);
 
@@ -14,10 +15,19 @@ type Props = {
   workspaces: Workspace[];
   sessionsRefreshKey?: number;
   summaryRefreshKey?: number;
+  createSessionPrefill?: CreateSessionPrefill | null;
+  onCreateSessionPrefillConsumed?: () => void;
 };
 
-export function SessionsPanel({ goalId, workspaces, sessionsRefreshKey = 0, summaryRefreshKey = 0 }: Props) {
-  const [showCreate, setShowCreate] = useState(false);
+export function SessionsPanel({
+  goalId,
+  workspaces,
+  sessionsRefreshKey = 0,
+  summaryRefreshKey = 0,
+  createSessionPrefill = null,
+  onCreateSessionPrefillConsumed,
+}: Props) {
+  const [showCreate, setShowCreate] = useState(createSessionPrefill !== null);
   const [contextPreviewForSession, setContextPreviewForSession] = useState<string | null>(null);
 
   const {
@@ -61,8 +71,20 @@ export function SessionsPanel({ goalId, workspaces, sessionsRefreshKey = 0, summ
 
   function handleCreated(sessionId: string) {
     setShowCreate(false);
+    onCreateSessionPrefillConsumed?.();
     selectSession(sessionId);
   }
+
+  function handleCloseCreate() {
+    setShowCreate(false);
+    onCreateSessionPrefillConsumed?.();
+  }
+
+  useEffect(() => {
+    if (createSessionPrefill !== null) {
+      setShowCreate(true);
+    }
+  }, [createSessionPrefill]);
 
   const selectedPkg = selectedSession?.contextPackageId
     ? (packages.get(selectedSession.contextPackageId) ?? null)
@@ -99,10 +121,12 @@ export function SessionsPanel({ goalId, workspaces, sessionsRefreshKey = 0, summ
 
       {showCreate && (
         <CreateSessionDialog
+          key={createSessionPrefill?.fromRecommendationId ?? "manual"}
           goalId={goalId}
           workspaces={workspaces}
           onCreated={handleCreated}
-          onClose={() => setShowCreate(false)}
+          onClose={handleCloseCreate}
+          prefill={createSessionPrefill}
         />
       )}
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { DomainEvent, GoalDetailResponse, DomainEventType } from "@orca/contracts";
+import type { DomainEvent, GoalDetailResponse, DomainEventType, RefinementFieldKey, TaskRole, TaskStatus } from "@orca/contracts";
 import { getGoalDetail, openEventStream } from "../api";
 import {
   feedbackRecommendationId,
@@ -14,7 +14,7 @@ import { TasksPanel } from "./tasks/TasksPanel";
 import { SessionsPanel } from "./sessions/SessionsPanel";
 import { MemoryPanel } from "./memory/MemoryPanel";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
-import { RecommendationsPanel } from "./recommendations/RecommendationsPanel";
+import { RecommendationsPanel, type CreateSessionPrefill } from "./recommendations/RecommendationsPanel";
 import { ConflictsBanner } from "./conflicts/ConflictsBanner";
 
 const MEMORY_ITEM_EVENTS = new Set<DomainEventType>([
@@ -54,6 +54,21 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
   const [decisionsRefreshKey, setDecisionsRefreshKey] = useState(0);
   const [summaryRefreshKey, setSummaryRefreshKey] = useState(0);
   const [sessionsRefreshKey, setSessionsRefreshKey] = useState(0);
+  const [createSessionPrefill, setCreateSessionPrefill] =
+    useState<CreateSessionPrefill | null>(null);
+  const [taskEditPrefill, setTaskEditPrefill] = useState<{
+    taskId: string;
+    suggestedStatus?: TaskStatus;
+    addAcceptanceCriteria?: string[];
+  } | null>(null);
+  const [taskSplitPrefill, setTaskSplitPrefill] = useState<{
+    taskId: string;
+    suggestedChildren: Array<{ title: string; role?: TaskRole }>;
+  } | null>(null);
+  const [conflictResolvePrefill, setConflictResolvePrefill] =
+    useState<{ conflictId: string; suggestedNote?: string } | null>(null);
+  const [refinementPrompt, setRefinementPrompt] = useState<RefinementFieldKey[] | null>(null);
+  const [userQuestion, setUserQuestion] = useState<string | null>(null);
   const hasConnectedRef = useRef(false);
   const debounceTimersRef = useRef<{
     tasks: ReturnType<typeof setTimeout> | null;
@@ -273,7 +288,30 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           <p className="goal-detail-description">{goal.description}</p>
         )}
 
-        <ConflictsBanner goalId={goalId} refreshKey={conflictsRefreshKey} />
+        <ConflictsBanner
+          goalId={goalId}
+          refreshKey={conflictsRefreshKey}
+          resolvePrefill={conflictResolvePrefill}
+          onResolvePrefillConsumed={() => setConflictResolvePrefill(null)}
+        />
+
+        {refinementPrompt && (
+          <div className="recommendation-prefill-notice" role="status">
+            Refine goal: {refinementPrompt.join(", ")}
+            <button type="button" className="goal-action-button" onClick={() => setRefinementPrompt(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {userQuestion && (
+          <div className="recommendation-prefill-notice" role="status">
+            {userQuestion}
+            <button type="button" className="goal-action-button" onClick={() => setUserQuestion(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {refinement && (
           <section className="goal-detail-section goal-refinement" aria-label="Refinement">
@@ -325,6 +363,12 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           workspaces={workspaces}
           refreshKey={tasksRefreshKey}
           liveGeneration={liveTaskGeneration}
+          editPrefill={taskEditPrefill}
+          splitPrefill={taskSplitPrefill}
+          onTaskPrefillConsumed={() => {
+            setTaskEditPrefill(null);
+            setTaskSplitPrefill(null);
+          }}
         />
 
         <SessionsPanel
@@ -332,6 +376,8 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           workspaces={workspaces}
           sessionsRefreshKey={sessionsRefreshKey}
           summaryRefreshKey={summaryRefreshKey}
+          createSessionPrefill={createSessionPrefill}
+          onCreateSessionPrefillConsumed={() => setCreateSessionPrefill(null)}
         />
 
         <RecommendationsPanel
@@ -339,6 +385,18 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           refreshKey={recommendationsRefreshKey}
           liveGeneration={liveRecommendationGeneration}
           recommendationDetailRefresh={recommendationDetailRefresh}
+          onOpenCreateSession={setCreateSessionPrefill}
+          onOpenRefinement={setRefinementPrompt}
+          onOpenTaskEdit={(taskId, suggestedStatus, addAcceptanceCriteria) =>
+            setTaskEditPrefill({ taskId, suggestedStatus, addAcceptanceCriteria })
+          }
+          onOpenTaskSplit={(taskId, suggestedChildren) =>
+            setTaskSplitPrefill({ taskId, suggestedChildren })
+          }
+          onOpenConflictResolve={(conflictId, suggestedNote) =>
+            setConflictResolvePrefill({ conflictId, suggestedNote })
+          }
+          onAskUser={setUserQuestion}
         />
 
         <MemoryPanel goalId={goalId} refreshKey={memoryRefreshKey} />

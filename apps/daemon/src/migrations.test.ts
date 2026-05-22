@@ -58,6 +58,7 @@ describe("runMigrations", () => {
       "0004_sessions.sql",
       "0005_memory.sql",
       "0006_context.sql",
+      "0007_agents.sql",
       "m7-001-suggested-orchestration.sql"
     ]);
   });
@@ -130,6 +131,7 @@ describe("runMigrations", () => {
       "0004_sessions.sql",
       "0005_memory.sql",
       "0006_context.sql",
+      "0007_agents.sql",
       "m7-001-suggested-orchestration.sql"
     ]);
 
@@ -252,6 +254,7 @@ describe("M4-003 session tables migration", () => {
       "0004_sessions.sql",
       "0005_memory.sql",
       "0006_context.sql",
+      "0007_agents.sql",
       "m7-001-suggested-orchestration.sql"
     ]);
 

@@ -3,8 +3,20 @@
 ## Commit SHA
 
 ```
-(recorded after commit — see git log)
+pending — Review Gate 7 remediation changes are currently uncommitted in the working tree.
 ```
+
+## Commands Run
+
+- `pnpm --filter @orca/daemon test -- src/tasks/usecases.test.ts src/recommendations/usecases.test.ts src/orchestrator/triggers.test.ts src/conflicts/usecases.test.ts`
+- `pnpm --filter @orca/contracts test -- src/__tests__/m7-contracts.test.ts`
+- `pnpm --filter @orca/desktop test -- src/goal-detail/GoalDetailView.test.tsx src/goal-detail/__tests__/session-create-modal.test.tsx src/goal-detail/recommendations/RecommendationsPanel.test.tsx src/goal-detail/tasks/TasksPanel.test.tsx src/goal-detail/conflicts/ConflictsBanner.test.tsx`
+- `pnpm -r typecheck`
+- `pnpm -r test`
+
+## Review Gate 7 Remediation Summary
+
+The final implementation review found and remediated transaction atomicity, task redaction, context-package trigger, desktop prefill, event payload cap, conflict-linked generation lifecycle, and documentation-record issues. No Level 4/Level 5, autonomous execution, generic action execution, provider/model configuration, prompt-management, embedding/vector, cross-Goal recommendation, or extra storage surface was introduced.
 
 ## Typecheck Summary
 
@@ -14,10 +26,10 @@ All 3 packages passed (`packages/contracts`, `apps/daemon`, `apps/desktop`). Zer
 
 | Package | Files | Tests | Outcome |
 |---------|-------|-------|---------|
-| packages/contracts | 1 passed | 36 passed | green |
-| apps/desktop | 14 passed | 182 passed | green |
-| apps/daemon | 89 passed / 4 skipped | 1133 passed / 5 skipped | green |
-| **Total** | **104 passed / 4 skipped** | **1351 passed / 5 skipped** | **green** |
+| packages/contracts | 2 passed | 47 passed | green |
+| apps/desktop | 18 passed | 255 passed | green |
+| apps/daemon | 89 passed / 4 skipped | 1138 passed / 5 skipped | green |
+| **Total** | **109 passed / 4 skipped** | **1440 passed / 5 skipped** | **green** |
 
 Skipped tests are pre-existing smoke tests requiring live PTY/adapter processes (flagged `.skip`).
 
@@ -106,7 +118,7 @@ Skipped tests are pre-existing smoke tests requiring live PTY/adapter processes 
     - [x] `DeterministicRecommendationProvider` registered via `DaemonContext`
     - [x] Fake provider used in tests only
 
-13. **M7 storage uses 5 new tables + 4 column adds. No extra tables.**
+13. **M7 storage uses 6 new tables + 4 column adds. No extra tables.**
     - [x] `tasks`, `task_generations`, `recommendations`, `recommendation_generations`, `recommendation_feedback`, `conflicts`
     - [x] `sessions.task_id`, `sessions.from_recommendation_id`, `context_packages.task_id`, `context_packages.from_recommendation_id`
     - [x] No source-reverse-index, workflow, approval-gate, embedding, or provider-config tables
@@ -121,7 +133,7 @@ Skipped tests are pre-existing smoke tests requiring live PTY/adapter processes 
 
 16. **M1–M6 behavior remains green.**
     - [x] All named regression anchors PASS
-    - [x] `pnpm -r typecheck` and `pnpm -r test` pass (1133 tests)
+    - [x] `pnpm -r typecheck` and `pnpm -r test` pass (1440 tests)
     - [x] M4 session lifecycle, M5 memory/decision flows, M6 context preparation unchanged
 
 17. **No excluded surface introduced.**
@@ -155,3 +167,9 @@ The following excluded endpoints do NOT exist (verified by absence from route re
 - The no-auto-launch assertion tracks `session.created` event count before and after `POST /v1/recommendations/:id/accept` to prove zero automatic downstream calls.
 - The workspace_overlap conflict is triggered via direct `detectAndPersist` call (the test spec permits "trigger evaluation directly") after inserting two `running` sessions on the same workspace.
 - Restart reconciliation uses direct DB insert of a `pending` generation row and `reconcileInFlightGenerations` to simulate a crash mid-generation without needing to kill a real process.
+
+## Gate Note Deviations
+
+- `docs/implementation-plans/notes/m7-gate-1.md` exists.
+- Separate gate notes for gates 2-6 are not present; evidence is consolidated here and in `docs/implementation-plans/milestone-7.md`.
+- A human desktop manual smoke record is not present in this note; desktop behavior is covered by automated component/API tests unless a separate manual smoke note is added.

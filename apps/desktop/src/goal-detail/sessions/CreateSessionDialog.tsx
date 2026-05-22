@@ -2,6 +2,7 @@ import { useState, useEffect, FormEvent } from "react";
 import type { AdapterSummary, ContextAssembly, ContextPackage, ContextRole, CreateContextPackageResponse, Workspace } from "@orca/contracts";
 import { listAdapters, createSession, startSession, createContextPackage, ApiError, toErrorMessage } from "../../api";
 import { ContextPreviewPanel } from "../context-preview-panel";
+import type { CreateSessionPrefill } from "../recommendations/RecommendationsPanel";
 
 const CONTEXT_ROLES: { value: ContextRole; label: string }[] = [
   { value: "architect", label: "Architect" },
@@ -31,17 +32,18 @@ type Props = {
   onCreated(sessionId: string): void;
   onClose(): void;
   onContextPrepared?: (response: CreateContextPackageResponse) => void;
+  prefill?: CreateSessionPrefill | null;
 };
 
-export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose, onContextPrepared }: Props) {
+export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose, onContextPrepared, prefill = null }: Props) {
   const [adapters, setAdapters] = useState<AdapterSummary[]>([]);
   const [adaptersLoading, setAdaptersLoading] = useState(true);
   const [adaptersError, setAdaptersError] = useState<string | null>(null);
 
-  const [workspaceId, setWorkspaceId] = useState(workspaces[0]?.id ?? "");
-  const [adapterId, setAdapterId] = useState("");
-  const [contextRole, setContextRole] = useState<ContextRole | "">("");
-  const [objective, setObjective] = useState("");
+  const [workspaceId, setWorkspaceId] = useState(prefill?.workspaceId ?? workspaces[0]?.id ?? "");
+  const [adapterId, setAdapterId] = useState(prefill?.adapterId ?? "");
+  const [contextRole, setContextRole] = useState<ContextRole | "">((prefill?.role as ContextRole | undefined) ?? "");
+  const [objective, setObjective] = useState(prefill?.objective ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +55,7 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose, on
     listAdapters()
       .then((res) => {
         setAdapters(res.adapters);
-        if (res.adapters.length > 0) {
+        if (!prefill?.adapterId && res.adapters.length > 0) {
           setAdapterId(res.adapters[0]!.id);
         }
       })
@@ -79,6 +81,8 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose, on
         role: contextRole,
         objective: objective.trim(),
         workspaceId: workspaceId || undefined,
+        taskId: prefill?.taskId,
+        fromRecommendationId: prefill?.fromRecommendationId,
         replacePackageId,
       });
       setContextAssembly(response.assembly);
@@ -104,6 +108,8 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose, on
         role: contextRole || undefined,
         instruction: objective.trim() || undefined,
         contextPackageId,
+        taskId: prefill?.taskId,
+        fromRecommendationId: prefill?.fromRecommendationId,
       });
       await startSession(session.id, { terminalCols: 80, terminalRows: 24 });
       onCreated(session.id);
@@ -128,6 +134,8 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose, on
         adapterId: adapterId as Parameters<typeof createSession>[1]["adapterId"],
         role: contextRole || undefined,
         instruction: objective.trim() || undefined,
+        taskId: prefill?.taskId,
+        fromRecommendationId: prefill?.fromRecommendationId,
       });
       await startSession(session.id, { terminalCols: 80, terminalRows: 24 });
       onCreated(session.id);

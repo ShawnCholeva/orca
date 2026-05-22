@@ -30,6 +30,9 @@ import {
   type ListPluginsResponse,
   type ListSessionsResponse,
   type ListSkillsResponse,
+  type ListAgentsResponse,
+  type UpdateAgentResponse,
+  UpdateAgentRequest,
   type ListAdaptersResponse,
   RefineGoalRequest,
   type RefineGoalResponse,
@@ -71,6 +74,7 @@ import {
 } from './workspaces/usecases.js';
 import { pluginRegistry } from './registry/plugin-registry.js';
 import { skillRegistry } from './registry/skill-registry.js';
+import { AgentNotFoundError, listAgents, setAgentConnected } from './agents.js';
 import { adapterRegistry } from './adapters/registry.js';
 import {
   AdapterNotFoundError,
@@ -242,6 +246,29 @@ export function createServer(
     }));
 
     return { skills };
+  });
+
+  server.get('/v1/agents', async (): Promise<ListAgentsResponse> => {
+    return { agents: listAgents(db) };
+  });
+
+  server.patch('/v1/agents/:id', async (request, reply): Promise<UpdateAgentResponse | { error: unknown; issues?: unknown }> => {
+    const parsed = UpdateAgentRequest.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'validation_failed', issues: parsed.error.issues };
+    }
+    const { id } = request.params as { id: string };
+    try {
+      const agent = setAgentConnected(db, id, parsed.data.connected);
+      return { agent };
+    } catch (err) {
+      if (err instanceof AgentNotFoundError) {
+        reply.status(404);
+        return { error: apiError('agent_not_found', err.message).error };
+      }
+      throw err;
+    }
   });
 
   function apiError(code: string, message: string): { error: { code: string; message: string } } {

@@ -326,7 +326,8 @@ export interface InsertTaskGenerationInput {
 /** Returns { generation, isNew }. isNew=false when active fingerprint already exists. */
 export function insertOrGetPendingGeneration(
   db: Database.Database,
-  input: InsertTaskGenerationInput
+  input: InsertTaskGenerationInput,
+  onInserted?: () => void
 ): { generation: TaskGeneration; isNew: boolean } {
   const stmts = ensureStmts(db);
 
@@ -341,6 +342,7 @@ export function insertOrGetPendingGeneration(
     );
     if (result.changes > 0) {
       isNew = true;
+      onInserted?.();
       generation = rowToGeneration(stmts.getGenerationById.get(input.id) as TaskGenerationDbRow);
     } else {
       const existing = stmts.getActiveGenerationByFp.get(input.goalId, input.requestFingerprint) as TaskGenerationDbRow;

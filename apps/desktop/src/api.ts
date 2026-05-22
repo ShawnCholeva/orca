@@ -1,6 +1,9 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   AcceptRecommendationResponse,
+  Agent,
+  ListAgentsResponse,
+  UpdateAgentResponse,
   ArchiveGoalResponse,
   AssociateTaskSessionRequest,
   AssociateTaskSessionResponse,
@@ -304,6 +307,36 @@ export async function listSkills(): Promise<SkillSummary[]> {
   }
   const body = await parseResponse(res, ListSkillsResponse);
   return body.skills;
+}
+
+export async function listAgents(): Promise<Agent[]> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/agents`, {
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    throw new ApiError(`List agents failed (${res.status})`);
+  }
+  const body = await parseResponse(res, ListAgentsResponse);
+  return body.agents;
+}
+
+export async function updateAgentConnection(id: string, connected: boolean): Promise<Agent> {
+  const { baseUrl, token } = await loadConfig();
+  const body = await requestJson<UpdateAgentResponse>(
+    `${baseUrl}/v1/agents/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify({ connected }),
+    },
+    UpdateAgentResponse,
+    `Update agent ${id} failed`,
+  );
+  return body.agent;
 }
 
 export async function createGoal(

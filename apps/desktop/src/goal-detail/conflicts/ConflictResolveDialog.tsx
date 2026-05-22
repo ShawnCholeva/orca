@@ -9,10 +9,11 @@ type Props = {
   conflict: Conflict;
   onResolve: (note?: string) => Promise<void>;
   onClose: () => void;
+  initialNote?: string;
 };
 
-export function ConflictResolveDialog({ conflict, onResolve, onClose }: Props) {
-  const [note, setNote] = useState(conflict.resolutionNote ?? "");
+export function ConflictResolveDialog({ conflict, onResolve, onClose, initialNote }: Props) {
+  const [note, setNote] = useState(initialNote ?? conflict.resolutionNote ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

@@ -2,7 +2,7 @@
 
 **Source milestone:** `docs/milestones/7.md`
 **Builds on:** `docs/implementation-plans/milestone-6.md` (M6 must be complete and green).
-**Status:** Ready for AI-assisted execution.
+**Status:** Completed.
 **Scope guard:** Tasks below MUST NOT introduce Level 4 supervised execution, Level 5 autonomy, approval gates, automatic session launch, automatic context preparation, automatic validation command execution, automatic task status transitions from session activity without user action, automatic retry/backoff, AI-backed recommendation provider implementations, model provider/SDK integration, provider/model configuration UI, prompt template libraries, prompt experiments, token-accurate accounting, provider cost tracking, generic skill invocation endpoints, generic reasoning-job endpoints, generic action execution endpoints, generic workflow endpoints, public `POST /v1/recommendations/:id/execute`, `POST /v1/recommendations/:id/regenerate`, cross-Goal recommendation/task list endpoints, `POST /v1/skills/:id/invoke`, `POST /v1/tasks/:id/archive` as a separate endpoint, recommendation history/diff/editor pages, task board/Gantt/dependency graph UI, global task or recommendation dashboards, command-center panels, recommendation analytics, multi-step workflow planning, workflow engines, distributed queues, background workers, schedulers, continuous reasoning loops, cloud infrastructure, multi-agent scheduling, agent task assignment endpoints, cross-Goal memory, workspace indexing/scanning, file watching, knowledge graphs, embeddings, vector search, semantic search, global search, memory consolidation, semantic ranking, relevance engines, aging/decay systems, analytics dashboards, policy/governance, audit engines, full transcript capture/replay/export/analytics, raw M4 output-tail reads during M7 orchestration, persistence of raw terminal output / raw provider input/output / prompts / raw model responses / model reasoning / recommendation bodies / conflict bodies / feedback comments / task descriptions / acceptance criteria / validation steps / proposedAction bodies / source memory/decision/summary text in domain event payloads, source reverse-index join tables (sources are stored as compact JSON on the respective rows), WebSocket commands for task/recommendation/conflict mutation, rendered context payload events, raw provider prompt/template events, feedback comment events, continuous reasoning events, manual conflict creation endpoint, external PM integrations, or new top-level packages. Any task requiring such code is out of scope for M7.
 
 ### Inherited constraints from M1 / M2 / M3 / M4 / M5 / M6
@@ -1403,3 +1403,27 @@ M7-002  Migration ───── [Review Gate 1] ───┐                  
 | 7 | M7-024 | Human + GPT 5.5 + full-suite `pnpm -r typecheck && pnpm -r test` | Definition of Done, final docs, non-goals. |
 
 ---
+
+## Completion Record
+
+**Final commit SHA:** pending; remediation changes are currently uncommitted in the working tree.
+
+**Review Gate 7 remediation, 2026-05-22.** Final implementation review findings were corrected for:
+
+- generation request and success transaction atomicity;
+- task free-text best-effort secret redaction;
+- context-package trigger recommendation evaluation;
+- desktop accepted-recommendation prefill wiring into session, context, task, and conflict flows;
+- M7 event payload 4 KiB contract enforcement;
+- conflict-linked recommendation generation lifecycle event completeness;
+- stale completion documentation.
+
+**Commands run during remediation:**
+
+- `pnpm --filter @orca/daemon test -- src/tasks/usecases.test.ts src/recommendations/usecases.test.ts src/orchestrator/triggers.test.ts src/conflicts/usecases.test.ts`
+- `pnpm --filter @orca/contracts test -- src/__tests__/m7-contracts.test.ts`
+- `pnpm --filter @orca/desktop test -- src/goal-detail/GoalDetailView.test.tsx src/goal-detail/__tests__/session-create-modal.test.tsx src/goal-detail/recommendations/RecommendationsPanel.test.tsx src/goal-detail/tasks/TasksPanel.test.tsx src/goal-detail/conflicts/ConflictsBanner.test.tsx`
+- `pnpm -r typecheck`
+- `pnpm -r test`
+
+**Review gate note status:** `m7-gate-1.md` exists. Gates 2-6 were not captured as separate note files; their evidence is consolidated in `docs/implementation-plans/notes/m7-024-final.md` and this completion record. Gate 6 desktop manual smoke is not independently recorded beyond automated desktop coverage unless a human smoke note is added later.

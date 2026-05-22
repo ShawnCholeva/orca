@@ -301,16 +301,19 @@ describe('detectAndPersist', () => {
       .prepare('SELECT seq, type, payload FROM events ORDER BY seq ASC')
       .all() as { seq: number; type: string; payload: string }[];
     expect(eventRows.map((row) => row.type)).toEqual([
+      'recommendation.generation.requested',
       'conflict.detected',
       'recommendation.generated',
     ]);
     expect(eventRows[1]!.seq).toBe(eventRows[0]!.seq + 1);
-    expect(JSON.parse(eventRows[0]!.payload)).not.toHaveProperty('description');
-    expect(JSON.parse(eventRows[1]!.payload)).toMatchObject({
+    expect(eventRows[2]!.seq).toBe(eventRows[1]!.seq + 1);
+    expect(JSON.parse(eventRows[1]!.payload)).not.toHaveProperty('description');
+    expect(JSON.parse(eventRows[2]!.payload)).toMatchObject({
       recommendationIds: result.recommendationIds,
       count: 1,
     });
     expect(published.map((event) => event.type)).toEqual([
+      'recommendation.generation.requested',
       'conflict.detected',
       'recommendation.generated',
     ]);

@@ -339,7 +339,8 @@ export interface InsertRecommendationGenerationInput {
 /** Returns { generation, isNew }. isNew=false when active fingerprint already exists. */
 export function insertOrGetPendingRecommendationGeneration(
   db: Database.Database,
-  input: InsertRecommendationGenerationInput
+  input: InsertRecommendationGenerationInput,
+  onInserted?: () => void
 ): { generation: RecommendationGeneration; isNew: boolean } {
   const stmts = ensureStmts(db);
 
@@ -360,6 +361,7 @@ export function insertOrGetPendingRecommendationGeneration(
     );
     if (result.changes > 0) {
       isNew = true;
+      onInserted?.();
       generation = rowToGeneration(stmts.getGenerationById.get(input.id) as RecommendationGenerationDbRow);
     } else {
       const existing = stmts.getActiveGenerationByFp.get(
@@ -470,4 +472,3 @@ export function listProposedRecommendationsByGoalAndFingerprints(
     .all(goalId, ...fingerprints) as RecommendationDbRow[];
   return rows.map(rowToRecommendation);
 }
-

@@ -18,7 +18,7 @@ import type { EventBus } from '../events.js';
 import { redactSecrets } from '../memory/normalize.js';
 import { runGeneration } from '../orchestrator/runner.js';
 import { buildRecommendationInput } from './input.js';
-import type { RecommendationProvider } from './provider.js';
+import type { RecommendationProvider, RecommendationProviderOutput } from './provider.js';
 import { RecommendationProviderOutputSchema } from './provider.js';
 import { listProposedRecommendationsByGoalAndFingerprints } from './projection.js';
 import {
@@ -494,6 +494,7 @@ export function insertPendingRecommendationGeneration(
 
   const id = idFn();
 
+  const toPublish: DomainEvent[] = [];
   const { generation, isNew } = insertOrGetPendingRecommendationGeneration(db, {
     id,
     goalId: input.goalId,
@@ -504,20 +505,17 @@ export function insertPendingRecommendationGeneration(
     inputFingerprint: input.inputFingerprint,
     requestFingerprint,
     requestedAt: now,
+  }, () => {
+    toPublish.push(
+      emitEvent(stmts, 'recommendation.generation.requested', input.goalId, {
+        generationId: id,
+        goalId: input.goalId,
+        trigger: input.trigger,
+        triggerSourceId: input.triggerSourceId,
+      }, now, idFn)
+    );
   });
-
   if (isNew) {
-    const toPublish: DomainEvent[] = [];
-    db.transaction(() => {
-      toPublish.push(
-        emitEvent(stmts, 'recommendation.generation.requested', input.goalId, {
-          generationId: generation.id,
-          goalId: input.goalId,
-          trigger: input.trigger,
-          triggerSourceId: input.triggerSourceId,
-        }, now, idFn)
-      );
-    })();
     for (const ev of toPublish) bus.publish(ev);
   }
 
@@ -616,7 +614,7 @@ export async function runRecommendationGeneration(
     providerVersion: ctx.recommendationProvider.version,
     inputFingerprint: providerInput.inputFingerprint,
     ctx: { db, bus, now: ctx.now, idFactory: ctx.idFactory },
-    execute: async (generationId) => {
+    execute: async () => {
       const rawOutput = await ctx.recommendationProvider.generate(providerInput);
       const parsed = RecommendationProviderOutputSchema.safeParse(rawOutput);
       if (!parsed.success) {
@@ -638,77 +636,81 @@ export async function runRecommendationGeneration(
         candidateFps.map((cf) => cf.fingerprint)
       );
 
+      return {
+        recommendationIds: [],
+        supersededIds: [],
+        sparse,
+        data: { candidateFps, existingProposed },
+      };
+    },
+    commitSuccess: (generationId, output, insertNow) => {
+      const { candidateFps, existingProposed } = output.data as {
+        candidateFps: Array<{
+          candidate: RecommendationProviderOutput['candidates'][number];
+          fingerprint: string;
+        }>;
+        existingProposed: ReturnType<typeof listProposedRecommendationsByGoalAndFingerprints>;
+      };
       const existingFpSet = new Set(existingProposed.map((r) => r.fingerprint));
-
-      const insertNow = ctx.now?.() ?? new Date().toISOString();
       const stmts = ensureStmts(db);
       const recommendationIds: string[] = [];
       const supersededIds: string[] = [];
-      const toPublish: DomainEvent[] = [];
+      const events: DomainEvent[] = [];
 
-      // All inserts + supersedes in ONE transaction
-      db.transaction(() => {
-        // Supersede existing proposed rows that match new candidate fingerprints
-        for (const existing of existingProposed) {
-          if (existing.status !== 'proposed') continue;
-          updateRecommendationSupersededRow(db, existing.id, null, 'duplicate', insertNow, insertNow);
-          toPublish.push(
-            emitEvent(stmts, 'recommendation.superseded', input.goalId, {
-              recommendationId: existing.id,
-              goalId: input.goalId,
-              bySupersedingId: null,
-              reason: 'duplicate',
-            }, insertNow, idFn)
-          );
-          supersededIds.push(existing.id);
-        }
-
-        // Insert new recommendation rows (skip if fingerprint already proposed and not superseded)
-        for (const { candidate: c, fingerprint } of candidateFps) {
-          if (existingFpSet.has(fingerprint)) {
-            // We just superseded the existing row — still insert the replacement
-          }
-
-          const id = idFn();
-          const title = redactSecrets(c.title.trim().slice(0, M7_RECOMMENDATION_MAX_TITLE_CHARS));
-          const rationale = redactSecrets(c.rationale.slice(0, M7_RECOMMENDATION_MAX_RATIONALE_CHARS));
-          const proposedActionJson = JSON.stringify(c.proposedAction);
-          const sourcesJson = JSON.stringify(c.sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES));
-
-          // Validate proposedAction byte size
-          if (new TextEncoder().encode(proposedActionJson).length > M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES) {
-            continue;
-          }
-
-          insertRecommendation(db, {
-            id,
+      for (const existing of existingProposed) {
+        if (existing.status !== 'proposed') continue;
+        updateRecommendationSupersededRow(db, existing.id, null, 'duplicate', insertNow, insertNow);
+        events.push(
+          emitEvent(stmts, 'recommendation.superseded', input.goalId, {
+            recommendationId: existing.id,
             goalId: input.goalId,
-            generationId,
-            type: c.type,
-            status: 'proposed',
-            source: 'deterministic_provider',
-            title,
-            rationale,
-            proposedActionJson,
-            confidence: c.confidence,
-            sourcesJson,
-            relatedTaskId: c.relatedTaskId ?? null,
-            relatedSessionId: c.relatedSessionId ?? null,
-            relatedContextPkgId: c.relatedContextPackageId ?? null,
-            relatedConflictId: c.relatedConflictId ?? null,
-            fingerprint,
-            supersededById: null,
-            createdAt: insertNow,
-            updatedAt: insertNow,
-          });
-          recommendationIds.push(id);
+            bySupersedingId: null,
+            reason: 'duplicate',
+          }, insertNow, idFn)
+        );
+        supersededIds.push(existing.id);
+      }
+
+      for (const { candidate: c, fingerprint } of candidateFps) {
+        if (existingFpSet.has(fingerprint)) {
+          // We just superseded the existing row — still insert the replacement.
         }
-      })();
 
-      // Broadcast supersede events after TX commits
-      for (const ev of toPublish) bus.publish(ev);
+        const id = idFn();
+        const title = redactSecrets(c.title.trim().slice(0, M7_RECOMMENDATION_MAX_TITLE_CHARS));
+        const rationale = redactSecrets(c.rationale.slice(0, M7_RECOMMENDATION_MAX_RATIONALE_CHARS));
+        const proposedActionJson = JSON.stringify(c.proposedAction);
+        const sourcesJson = JSON.stringify(c.sources.slice(0, M7_RECOMMENDATION_MAX_SOURCES));
 
-      return { recommendationIds, supersededIds, sparse };
+        if (new TextEncoder().encode(proposedActionJson).length > M7_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES) {
+          continue;
+        }
+
+        insertRecommendation(db, {
+          id,
+          goalId: input.goalId,
+          generationId,
+          type: c.type,
+          status: 'proposed',
+          source: 'deterministic_provider',
+          title,
+          rationale,
+          proposedActionJson,
+          confidence: c.confidence,
+          sourcesJson,
+          relatedTaskId: c.relatedTaskId ?? null,
+          relatedSessionId: c.relatedSessionId ?? null,
+          relatedContextPkgId: c.relatedContextPackageId ?? null,
+          relatedConflictId: c.relatedConflictId ?? null,
+          fingerprint,
+          supersededById: null,
+          createdAt: insertNow,
+          updatedAt: insertNow,
+        });
+        recommendationIds.push(id);
+      }
+
+      return { recommendationIds, supersededIds, sparse: output.sparse, events };
     },
   });
 

@@ -24,6 +24,32 @@ export interface RunGenerationCtx {
   idFactory?: () => string;
 }
 
+export interface RunTaskGenerationOutput {
+  taskIds: string[];
+  sparse: boolean;
+  data?: unknown;
+}
+
+export interface RunRecommendationGenerationOutput {
+  recommendationIds: string[];
+  supersededIds: string[];
+  sparse: boolean;
+  data?: unknown;
+}
+
+export interface RunTaskGenerationCommitResult {
+  taskIds: string[];
+  sparse: boolean;
+  events?: DomainEvent[];
+}
+
+export interface RunRecommendationGenerationCommitResult {
+  recommendationIds: string[];
+  supersededIds: string[];
+  sparse: boolean;
+  events?: DomainEvent[];
+}
+
 export interface RunTaskGenerationOpts {
   kind: 'task';
   goalId: string;
@@ -33,7 +59,12 @@ export interface RunTaskGenerationOpts {
   providerVersion: string;
   inputFingerprint: string;
   ctx: RunGenerationCtx;
-  execute: (generationId: string) => Promise<{ taskIds: string[]; sparse: boolean }>;
+  execute: (generationId: string) => Promise<RunTaskGenerationOutput>;
+  commitSuccess?: (
+    generationId: string,
+    output: RunTaskGenerationOutput,
+    now: string
+  ) => RunTaskGenerationCommitResult;
 }
 
 export interface RunRecommendationGenerationOpts {
@@ -45,11 +76,12 @@ export interface RunRecommendationGenerationOpts {
   providerVersion: string;
   inputFingerprint: string;
   ctx: RunGenerationCtx;
-  execute: (generationId: string) => Promise<{
-    recommendationIds: string[];
-    supersededIds: string[];
-    sparse: boolean;
-  }>;
+  execute: (generationId: string) => Promise<RunRecommendationGenerationOutput>;
+  commitSuccess?: (
+    generationId: string,
+    output: RunRecommendationGenerationOutput,
+    now: string
+  ) => RunRecommendationGenerationCommitResult;
 }
 
 export type RunGenerationOpts = RunTaskGenerationOpts | RunRecommendationGenerationOpts;
@@ -185,8 +217,22 @@ export async function runGeneration(opts: RunGenerationOpts): Promise<RunGenerat
   let generationId: string;
   let isNew: boolean;
   let generationStatus: string;
+  const toPublishRequested: DomainEvent[] = [];
 
   const newId = idFn();
+  const requestedType: DomainEvent['type'] = opts.kind === 'task'
+    ? 'task.generation.requested'
+    : 'recommendation.generation.requested';
+  const emitRequested = () => {
+    toPublishRequested.push(
+      emitEvent(db, requestedType, goalId, {
+        generationId: newId,
+        goalId,
+        trigger,
+        triggerSourceId,
+      }, now, idFn)
+    );
+  };
 
   if (opts.kind === 'task') {
     const { generation, isNew: _isNew } = insertOrGetPendingGeneration(db, {
@@ -199,7 +245,7 @@ export async function runGeneration(opts: RunGenerationOpts): Promise<RunGenerat
       inputFingerprint,
       requestFingerprint,
       requestedAt: now,
-    });
+    }, emitRequested);
     generationId = generation.id;
     isNew = _isNew;
     generationStatus = generation.status;
@@ -214,7 +260,7 @@ export async function runGeneration(opts: RunGenerationOpts): Promise<RunGenerat
       inputFingerprint,
       requestFingerprint,
       requestedAt: now,
-    });
+    }, emitRequested);
     generationId = generation.id;
     isNew = _isNew;
     generationStatus = generation.status;
@@ -224,22 +270,6 @@ export async function runGeneration(opts: RunGenerationOpts): Promise<RunGenerat
     return { generationId, status: generationStatus, isNew: false, dirtyQueued: false };
   }
 
-  // Emit requested event (separate TX from row insert, consistent with use-case layer pattern).
-  const requestedType: DomainEvent['type'] = opts.kind === 'task'
-    ? 'task.generation.requested'
-    : 'recommendation.generation.requested';
-
-  const toPublishRequested: DomainEvent[] = [];
-  db.transaction(() => {
-    toPublishRequested.push(
-      emitEvent(db, requestedType, goalId, {
-        generationId,
-        goalId,
-        trigger,
-        triggerSourceId,
-      }, now, idFn)
-    );
-  })();
   for (const ev of toPublishRequested) bus.publish(ev);
 
   // Capture opts.kind for use inside the async closure (TypeScript narrowing).
@@ -265,35 +295,48 @@ export async function runGeneration(opts: RunGenerationOpts): Promise<RunGenerat
       const toPublishSuccess: DomainEvent[] = [];
 
       if (kind === 'task') {
-        const taskOutput = (output as { taskIds: string[]; sparse: boolean });
+        const taskOutput = output as RunTaskGenerationOutput;
         db.transaction(() => {
-          markGenerationSucceeded(db, generationId, taskOutput.taskIds, taskOutput.sparse, successNow);
+          const committed = opts.kind === 'task' && opts.commitSuccess
+            ? opts.commitSuccess(generationId, taskOutput, successNow)
+            : { taskIds: taskOutput.taskIds, sparse: taskOutput.sparse, events: [] };
+          toPublishSuccess.push(...(committed.events ?? []));
+          markGenerationSucceeded(db, generationId, committed.taskIds, committed.sparse, successNow);
           toPublishSuccess.push(
             emitEvent(db, 'task.generated', goalId, {
               generationId,
               goalId,
-              taskIds: taskOutput.taskIds,
-              count: taskOutput.taskIds.length,
-              sparse: taskOutput.sparse,
+              taskIds: committed.taskIds,
+              count: committed.taskIds.length,
+              sparse: committed.sparse,
             }, successNow, idFn)
           );
         })();
       } else {
-        const recOutput = (output as { recommendationIds: string[]; supersededIds: string[]; sparse: boolean });
+        const recOutput = output as RunRecommendationGenerationOutput;
         db.transaction(() => {
+          const committed = opts.kind === 'recommendation' && opts.commitSuccess
+            ? opts.commitSuccess(generationId, recOutput, successNow)
+            : {
+                recommendationIds: recOutput.recommendationIds,
+                supersededIds: recOutput.supersededIds,
+                sparse: recOutput.sparse,
+                events: [],
+              };
+          toPublishSuccess.push(...(committed.events ?? []));
           markRecommendationGenerationSucceeded(
             db, generationId,
-            recOutput.recommendationIds, recOutput.supersededIds,
-            recOutput.sparse, successNow
+            committed.recommendationIds, committed.supersededIds,
+            committed.sparse, successNow
           );
           toPublishSuccess.push(
             emitEvent(db, 'recommendation.generated', goalId, {
               generationId,
               goalId,
-              recommendationIds: recOutput.recommendationIds,
-              supersededIds: recOutput.supersededIds,
-              count: recOutput.recommendationIds.length,
-              sparse: recOutput.sparse,
+              recommendationIds: committed.recommendationIds,
+              supersededIds: committed.supersededIds,
+              count: committed.recommendationIds.length,
+              sparse: committed.sparse,
             }, successNow, idFn)
           );
         })();

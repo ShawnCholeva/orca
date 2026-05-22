@@ -188,20 +188,20 @@ describe('static import safety', () => {
   });
 });
 
-// ── context.package.created: informational only ───────────────────────────────
+// ── context.package.created: triggers recommendation generation ───────────────
 
 describe('context.package.created', () => {
-  it('produces no recommendation generation row', async () => {
+  it('creates a recommendation generation row', async () => {
     const db = freshDb();
     const bus = new EventBus();
     const ctx = makeCtx(db, bus);
     seedGoal(db, 'g1');
     subscribeOrchestrationTriggers(ctx);
 
-    const unexpectedEvent = waitForEvent(
+    const requestedEvent = waitForEvent(
       bus,
       (e) => e.type === 'recommendation.generation.requested',
-      200
+      2000
     );
 
     const ev: DomainEvent = {
@@ -212,12 +212,12 @@ describe('context.package.created', () => {
     };
     bus.publish(ev);
 
-    await expect(unexpectedEvent).rejects.toThrow('waitForEvent timeout');
+    await requestedEvent;
 
     const rows = db.prepare(
       `SELECT id FROM recommendation_generations WHERE goal_id = 'g1'`
     ).all() as { id: string }[];
-    expect(rows).toHaveLength(0);
+    expect(rows).toHaveLength(1);
   });
 });
 

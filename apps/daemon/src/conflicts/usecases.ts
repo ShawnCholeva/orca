@@ -201,7 +201,7 @@ function shouldInsertCandidate(
   return true;
 }
 
-function insertSucceededRecommendationGeneration(
+function insertConflictRecommendationGeneration(
   db: Database.Database,
   input: {
     id: string;
@@ -226,7 +226,7 @@ function insertSucceededRecommendationGeneration(
       (id, goal_id, trigger, trigger_source_id, provider_id, provider_version,
        input_fingerprint, request_fingerprint, status, failure_code, failure_message,
        recommendation_ids_json, superseded_ids_json, sparse, requested_at, started_at, finished_at)
-    VALUES (?, ?, 'conflict_detected', ?, ?, ?, ?, ?, 'succeeded', NULL, NULL, ?, '[]', 0, ?, ?, ?)
+    VALUES (?, ?, 'conflict_detected', ?, ?, ?, ?, ?, 'pending', NULL, NULL, '[]', '[]', 0, ?, NULL, NULL)
   `).run(
     input.id,
     input.goalId,
@@ -235,11 +235,17 @@ function insertSucceededRecommendationGeneration(
     RESOLVE_CONFLICT_PROVIDER_VERSION,
     input.inputFingerprint,
     requestFingerprint,
-    JSON.stringify([input.recommendationId]),
-    input.now,
-    input.now,
     input.now
   );
+  db.prepare(
+    "UPDATE recommendation_generations SET status = 'running', started_at = ? WHERE id = ?"
+  ).run(input.now, input.id);
+  db.prepare(`
+    UPDATE recommendation_generations
+    SET status = 'succeeded', recommendation_ids_json = ?, superseded_ids_json = '[]',
+      sparse = 0, finished_at = ?
+    WHERE id = ?
+  `).run(JSON.stringify([input.recommendationId]), input.now, input.id);
 }
 
 function insertResolveConflictRecommendation(
@@ -517,7 +523,7 @@ export function detectAndPersist(
       const recommendationId = idFn();
       const generationId = idFn();
 
-      insertSucceededRecommendationGeneration(db, {
+      insertConflictRecommendationGeneration(db, {
         id: generationId,
         goalId: input.goalId,
         triggerSourceId: conflictId,
@@ -539,6 +545,21 @@ export function detectAndPersist(
       conflictIds.push(conflictId);
       recommendationIds.push(recommendationId);
 
+      toPublish.push(
+        emitEvent(
+          stmts,
+          'recommendation.generation.requested',
+          input.goalId,
+          {
+            generationId,
+            goalId: input.goalId,
+            trigger: 'conflict_detected',
+            triggerSourceId: conflictId,
+          },
+          now,
+          idFn
+        )
+      );
       toPublish.push(
         emitEvent(
           stmts,

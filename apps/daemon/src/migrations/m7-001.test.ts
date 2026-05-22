@@ -133,7 +133,7 @@ describe("M7-001 migration schema", () => {
     };
 
     const result = runMigrations(db, defaultMigrationsDir());
-    expect(result.applied).toEqual(["m7-001-suggested-orchestration.sql"]);
+    expect(result.applied).toEqual(["0007_agents.sql", "m7-001-suggested-orchestration.sql"]);
 
     const postCounts = {
       goals: (db.prepare("SELECT count(*) AS cnt FROM goals").get() as { cnt: number }).cnt,

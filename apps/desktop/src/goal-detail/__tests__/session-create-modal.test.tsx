@@ -204,6 +204,40 @@ describe("CreateSessionDialog — M6-013 context controls", () => {
     expect(callArg).not.toHaveProperty("contextPackageId");
   });
 
+  it("Skip-context path includes M7 association ids from recommendation prefill", async () => {
+    const createSession = vi.fn().mockResolvedValue({ session: sessionDetail });
+    mockApi({ createSession });
+    const { CreateSessionDialog } = await import("../sessions/CreateSessionDialog");
+
+    await act(async () => {
+      createRoot(container).render(
+        <CreateSessionDialog
+          goalId="goal-1"
+          workspaces={[workspace]}
+          onCreated={vi.fn()}
+          onClose={vi.fn()}
+          prefill={{
+            adapterId: "shell-manual",
+            role: "engineer",
+            objective: "Validate implementation",
+            taskId: "task-1",
+            fromRecommendationId: "rec-1",
+          }}
+        />,
+      );
+    });
+
+    const form = container.querySelector<HTMLFormElement>(".create-form");
+    await act(async () => {
+      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    expect(createSession).toHaveBeenCalledWith("goal-1", expect.objectContaining({
+      taskId: "task-1",
+      fromRecommendationId: "rec-1",
+    }));
+  });
+
   it("Prepare-context path calls createContextPackage with role, objective, adapterId, workspaceId", async () => {
     const createContextPackage = vi.fn().mockResolvedValue(contextResponse);
     const onContextPrepared = vi.fn();
@@ -254,6 +288,42 @@ describe("CreateSessionDialog — M6-013 context controls", () => {
     const callArg = createContextPackage.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(typeof callArg["objective"]).toBe("string");
     expect(onContextPrepared).toHaveBeenCalledWith(contextResponse);
+  });
+
+  it("Prepare-context path includes M7 association ids from recommendation prefill", async () => {
+    const createContextPackage = vi.fn().mockResolvedValue(contextResponse);
+    mockApi({ createContextPackage });
+    const { CreateSessionDialog } = await import("../sessions/CreateSessionDialog");
+
+    await act(async () => {
+      createRoot(container).render(
+        <CreateSessionDialog
+          goalId="goal-1"
+          workspaces={[workspace]}
+          onCreated={vi.fn()}
+          onClose={vi.fn()}
+          prefill={{
+            adapterId: "shell-manual",
+            role: "engineer",
+            objective: "Prepare validation context",
+            taskId: "task-1",
+            fromRecommendationId: "rec-1",
+          }}
+        />,
+      );
+    });
+
+    const prepareBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent === "Prepare context",
+    );
+    await act(async () => {
+      prepareBtn?.click();
+    });
+
+    expect(createContextPackage).toHaveBeenCalledWith("goal-1", expect.objectContaining({
+      taskId: "task-1",
+      fromRecommendationId: "rec-1",
+    }));
   });
 
   it("Prepare-context button disabled when role missing", async () => {

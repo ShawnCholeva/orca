@@ -23,10 +23,12 @@ import {
   InvalidRecommendationStatusError,
   resetPreparedStatements,
   insertRecommendation,
+  runRecommendationGeneration,
   type RecommendationCtx,
 } from './usecases.js';
 import { getFeedbackByRecommendationId } from './feedback.js';
 import { recommendationFingerprint } from './fingerprint.js';
+import { FakeRecommendationProvider } from './provider.js';
 
 const tempDirs: string[] = [];
 const NOW = '2026-01-01T00:00:00.000Z';
@@ -564,5 +566,61 @@ describe('recommendation generation lifecycle', () => {
     const { isNew, generation: retry } = insertPendingRecommendationGeneration(ctx, input);
     expect(isNew).toBe(true);
     expect(retry.id).not.toBe(generation.id);
+  });
+
+  it('rolls back generated recommendations if the generation success event cannot commit', async () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+
+    const provider = new FakeRecommendationProvider();
+    provider.setFixtures([
+      {
+        type: 'ask_user',
+        title: 'Ask for input',
+        rationale: 'Need human input.',
+        proposedAction: { kind: 'ask_user', question: 'Proceed?' },
+        confidence: 0.8,
+        sources: [{ type: 'goal', id: 'g1', reason: 'sparse_input' }],
+      },
+    ]);
+
+    const origPrepare = db.prepare.bind(db);
+    vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      const stmt = origPrepare(sql);
+      if (sql.includes('INSERT INTO events')) {
+        const origRun = stmt.run.bind(stmt);
+        vi.spyOn(stmt, 'run').mockImplementation((...args: unknown[]) => {
+          if (args[1] === 'recommendation.generated') {
+            throw new Error('simulated recommendation.generated insert failure');
+          }
+          return origRun(...args);
+        });
+      }
+      return stmt;
+    });
+    resetPreparedStatements();
+
+    const generation = await runRecommendationGeneration(
+      {
+        ...makeCtx(db),
+        recommendationProvider: provider,
+      },
+      {
+        goalId: 'g1',
+        trigger: 'manual',
+        triggerSourceId: null,
+      }
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const row = db
+      .prepare('SELECT status, failure_code FROM recommendation_generations WHERE id = ?')
+      .get(generation.id) as { status: string; failure_code: string | null };
+    expect(row.status).toBe('failed');
+
+    const recCount = (
+      db.prepare('SELECT count(*) AS cnt FROM recommendations WHERE goal_id = ?').get('g1') as { cnt: number }
+    ).cnt;
+    expect(recCount).toBe(0);
   });
 });

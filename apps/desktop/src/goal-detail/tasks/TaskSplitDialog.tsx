@@ -22,17 +22,27 @@ type Props = {
   workspaces: Workspace[];
   onSplit: (body: SplitTaskRequest) => Promise<void>;
   onClose: () => void;
+  initialChildren?: Array<{ title: string; role?: TaskRole }>;
 };
 
-export function TaskSplitDialog({ task, workspaces, onSplit, onClose }: Props) {
-  const [children, setChildren] = useState<ChildDraft[]>([
-    {
-      title: "",
-      description: "",
-      role: task.role,
-      workspaceId: task.workspaceId ?? "",
-    },
-  ]);
+export function TaskSplitDialog({ task, workspaces, onSplit, onClose, initialChildren = [] }: Props) {
+  const [children, setChildren] = useState<ChildDraft[]>(
+    initialChildren.length > 0
+      ? initialChildren.map((child) => ({
+          title: child.title,
+          description: "",
+          role: child.role ?? task.role,
+          workspaceId: task.workspaceId ?? "",
+        }))
+      : [
+          {
+            title: "",
+            description: "",
+            role: task.role,
+            workspaceId: task.workspaceId ?? "",
+          },
+        ],
+  );
   const [setParentStatus, setSetParentStatus] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

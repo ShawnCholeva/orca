@@ -436,6 +436,21 @@ describe("M7 contracts", () => {
     }
   });
 
+  it("rejects M7 event payloads larger than 4 KiB serialized", () => {
+    expect(() =>
+      M7Event.parse({
+        type: "task.generated",
+        payload: {
+          generationId: "tg-1",
+          goalId: "goal-1",
+          taskIds: Array.from({ length: 900 }, (_, i) => `task-${i}-${"x".repeat(12)}`),
+          count: 900,
+          sparse: false
+        }
+      })
+    ).toThrow();
+  });
+
   it("rejects unknown enum values for statuses and failure codes", () => {
     expect(() => TaskStatus.parse("paused")).toThrow();
     expect(() => RecommendationStatus.parse("completed")).toThrow();

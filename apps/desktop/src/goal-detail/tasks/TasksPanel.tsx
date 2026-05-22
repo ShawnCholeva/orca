@@ -31,9 +31,27 @@ type Props = {
   workspaces: Workspace[];
   refreshKey?: number;
   liveGeneration?: LiveGenerationNotice | null;
+  editPrefill?: {
+    taskId: string;
+    suggestedStatus?: TaskStatus;
+    addAcceptanceCriteria?: string[];
+  } | null;
+  splitPrefill?: {
+    taskId: string;
+    suggestedChildren: Array<{ title: string; role?: TaskRole }>;
+  } | null;
+  onTaskPrefillConsumed?: () => void;
 };
 
-export function TasksPanel({ goalId, workspaces, refreshKey = 0, liveGeneration = null }: Props) {
+export function TasksPanel({
+  goalId,
+  workspaces,
+  refreshKey = 0,
+  liveGeneration = null,
+  editPrefill = null,
+  splitPrefill = null,
+  onTaskPrefillConsumed,
+}: Props) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [generations, setGenerations] = useState<TaskGeneration[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -46,6 +64,8 @@ export function TasksPanel({ goalId, workspaces, refreshKey = 0, liveGeneration 
   const [workspaceFilter, setWorkspaceFilter] = useState<string | "all">("all");
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [splitTarget, setSplitTarget] = useState<Task | null>(null);
+  const [editPrefillState, setEditPrefillState] = useState<Props["editPrefill"]>(null);
+  const [splitPrefillState, setSplitPrefillState] = useState<Props["splitPrefill"]>(null);
 
   const workspaceById = useMemo(
     () => new Map(workspaces.map((workspace) => [workspace.id, workspace])),
@@ -73,6 +93,24 @@ export function TasksPanel({ goalId, workspaces, refreshKey = 0, liveGeneration 
   useEffect(() => {
     void load();
   }, [load, refreshKey]);
+
+  useEffect(() => {
+    if (!editPrefill) return;
+    const task = tasks.find((item) => item.id === editPrefill.taskId);
+    if (!task) return;
+    setEditTask(task);
+    setEditPrefillState(editPrefill);
+    onTaskPrefillConsumed?.();
+  }, [editPrefill, onTaskPrefillConsumed, tasks]);
+
+  useEffect(() => {
+    if (!splitPrefill) return;
+    const task = tasks.find((item) => item.id === splitPrefill.taskId);
+    if (!task) return;
+    setSplitTarget(task);
+    setSplitPrefillState(splitPrefill);
+    onTaskPrefillConsumed?.();
+  }, [onTaskPrefillConsumed, splitPrefill, tasks]);
 
   const sessionCountByTaskId = useMemo(() => {
     const counts = new Map<string, number>();
@@ -239,7 +277,9 @@ export function TasksPanel({ goalId, workspaces, refreshKey = 0, liveGeneration 
           task={editTask}
           workspaces={workspaces}
           onSave={(patch) => handlePatch(editTask.id, patch, true)}
-          onClose={() => setEditTask(null)}
+          onClose={() => { setEditTask(null); setEditPrefillState(null); }}
+          initialStatus={editPrefillState?.suggestedStatus}
+          addAcceptanceCriteria={editPrefillState?.addAcceptanceCriteria}
         />
       )}
 
@@ -248,7 +288,8 @@ export function TasksPanel({ goalId, workspaces, refreshKey = 0, liveGeneration 
           task={splitTarget}
           workspaces={workspaces}
           onSplit={(body) => handleSplit(splitTarget.id, body, true)}
-          onClose={() => setSplitTarget(null)}
+          onClose={() => { setSplitTarget(null); setSplitPrefillState(null); }}
+          initialChildren={splitPrefillState?.suggestedChildren}
         />
       )}
     </section>

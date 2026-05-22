@@ -178,7 +178,7 @@ export function RecommendationsPanel({
     try {
       const resp = await acceptRecommendation(rec.id, {});
       await load();
-      dispatchPrefill(rec.id, resp.proposedAction);
+      dispatchPrefill(rec.id, resp.proposedAction, rec.relatedTaskId ?? undefined);
     } catch (err) {
       setActionError(toErrorMessage(err, "Accept failed."));
     } finally {
@@ -186,7 +186,7 @@ export function RecommendationsPanel({
     }
   }
 
-  function dispatchPrefill(recommendationId: string, action: ProposedAction) {
+  function dispatchPrefill(recommendationId: string, action: ProposedAction, relatedTaskId?: string) {
     switch (action.kind) {
       case "create_session":
         onOpenCreateSession?.({
@@ -196,7 +196,7 @@ export function RecommendationsPanel({
           objective: action.objective,
           contextPackageId: action.contextPackageId,
           contextRequest: action.contextRequest,
-          taskId: undefined,
+          taskId: relatedTaskId,
           fromRecommendationId: recommendationId,
         });
         break;
@@ -222,6 +222,7 @@ export function RecommendationsPanel({
           adapterId: "shell-manual",
           role: action.suggestedRole,
           objective: action.objective,
+          taskId: action.taskId,
           fromRecommendationId: recommendationId,
         });
         break;

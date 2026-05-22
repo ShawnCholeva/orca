@@ -4,6 +4,7 @@ import { loadConfig } from './config.js';
 import { openDatabase } from './db.js';
 import { eventBus } from './events.js';
 import { defaultMigrationsDir, runMigrations } from './migrations.js';
+import { seedAgents } from './agents.js';
 import { bootstrapRegistries } from './registry/bootstrap.js';
 import { createServer } from './server.js';
 import { registerShutdown } from './shutdown.js';
@@ -32,6 +33,13 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
     runMigrations(db, migrationsDir);
   } catch (err) {
     console.error('[orca-daemon] Migration failed — aborting startup:', err);
+    process.exit(1);
+  }
+
+  try {
+    seedAgents(db);
+  } catch (err) {
+    console.error('[orca-daemon] Agent seed failed — aborting startup:', err);
     process.exit(1);
   }
 

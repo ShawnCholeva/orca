@@ -1348,6 +1348,7 @@ export const M7_CONFLICT_MAX_DESCRIPTION_CHARS = 1024;
 export const M7_CONFLICT_MAX_RESOLUTION_NOTE_CHARS = 4 * 1024;
 export const M7_FEEDBACK_MAX_NOTE_CHARS = 2 * 1024;
 export const M7_SOURCE_REF_MAX_REASON_CHARS = 128;
+export const M7_EVENT_MAX_PAYLOAD_BYTES = 4 * 1024;
 
 export const GenerationLifecycleStatus = z.enum([
   "pending",
@@ -2249,7 +2250,15 @@ export const M7Event = z.discriminatedUnion("type", [
       payload: UserFeedbackRecordedPayload
     })
     .strict()
-]);
+]).superRefine((event, ctx) => {
+  if (!hasMaxSerializedBytes(event.payload, M7_EVENT_MAX_PAYLOAD_BYTES)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["payload"],
+      message: `M7 event payload must be at most ${M7_EVENT_MAX_PAYLOAD_BYTES} bytes when serialized`
+    });
+  }
+});
 export type M7Event = z.infer<typeof M7Event>;
 
 export const TaskGenerationRequest = z
@@ -2731,3 +2740,32 @@ export const ListEventsResponse = z.object({
   nextSinceSeq: z.number().int().nonnegative()
 });
 export type ListEventsResponse = z.infer<typeof ListEventsResponse>;
+
+export const Agent = z.object({
+  id: z.string(),
+  name: z.string(),
+  shortLabel: z.string(),
+  description: z.string(),
+  swatch: z.string(),
+  recommended: z.boolean(),
+  connected: z.boolean(),
+  sortOrder: z.number().int(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+export type Agent = z.infer<typeof Agent>;
+
+export const ListAgentsResponse = z.object({
+  agents: z.array(Agent)
+});
+export type ListAgentsResponse = z.infer<typeof ListAgentsResponse>;
+
+export const UpdateAgentRequest = z.object({
+  connected: z.boolean()
+});
+export type UpdateAgentRequest = z.infer<typeof UpdateAgentRequest>;
+
+export const UpdateAgentResponse = z.object({
+  agent: Agent
+});
+export type UpdateAgentResponse = z.infer<typeof UpdateAgentResponse>;

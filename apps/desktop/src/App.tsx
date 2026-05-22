@@ -2,6 +2,7 @@ import { useState, useEffect, FormEvent } from "react";
 import { Goal, DomainEventType, type PluginSummary, type SkillSummary } from "@orca/contracts";
 import {
   fetchHealth,
+  listAgents,
   listGoals,
   listPlugins,
   listSkills,
@@ -13,7 +14,12 @@ import {
 } from "./api";
 import { CreateGoalFlow } from "./create-goal-flow/CreateGoalFlow";
 import { GoalDetailView } from "./goal-detail/GoalDetailView";
+import { OnboardingView } from "./onboarding/OnboardingView";
+import { Titlebar } from "./chrome/Titlebar";
+import { BootstrapErrorScreen } from "./chrome/BootstrapErrorScreen";
 import "./styles.css";
+
+type OnboardingState = "checking" | "needs-onboarding" | "complete" | "error";
 
 type AppMode = "list" | "detail";
 
@@ -27,6 +33,8 @@ const DETAIL_REFETCH_EVENTS = new Set<DomainEventType>(["goal.refined", "workspa
 const GOAL_LIST_EVENTS = new Set<DomainEventType>(["goal.created", "goal.updated", "goal.archived"]);
 
 export default function App() {
+  const [onboardingState, setOnboardingState] = useState<OnboardingState>("checking");
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("connecting");
   const [mode, setMode] = useState<AppMode>("list");
@@ -76,6 +84,33 @@ export default function App() {
     const id = setInterval(checkHealth, 5000);
     return () => clearInterval(id);
   }, []);
+
+  // Decide whether to show onboarding by looking at the agents table — if any
+  // agent has connected=true, the user has been through it before.
+  useEffect(() => {
+    if (connectionStatus !== "open" || onboardingState !== "checking") return;
+    let cancelled = false;
+    listAgents()
+      .then((rows) => {
+        if (cancelled) return;
+        const anyConnected = rows.some((a) => a.connected);
+        setOnboardingState(anyConnected ? "complete" : "needs-onboarding");
+        setBootstrapError(null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setBootstrapError(
+          err instanceof Error ? err.message : "Failed to load agents from the daemon.",
+        );
+        setOnboardingState("error");
+      });
+    return () => { cancelled = true; };
+  }, [connectionStatus, onboardingState]);
+
+  function retryBootstrap() {
+    setBootstrapError(null);
+    setOnboardingState("checking");
+  }
 
   useEffect(() => {
     loadGoals();
@@ -128,8 +163,41 @@ export default function App() {
     closed: "Disconnected",
   } satisfies Record<ConnectionStatus, string>;
 
+  if (onboardingState === "checking") {
+    return (
+      <div className="app-shell">
+        <Titlebar />
+        <div className="app-bootstrapping" />
+      </div>
+    );
+  }
+
+  if (onboardingState === "error") {
+    return (
+      <div className="app-shell">
+        <Titlebar />
+        <BootstrapErrorScreen
+          message={bootstrapError ?? "Something went wrong while starting Orca."}
+          connectionStatus={connectionStatus}
+          onRetry={retryBootstrap}
+        />
+      </div>
+    );
+  }
+
+  if (onboardingState === "needs-onboarding") {
+    return (
+      <div className="app-shell">
+        <Titlebar />
+        <OnboardingView onComplete={() => setOnboardingState("complete")} />
+      </div>
+    );
+  }
+
   return (
-    <div className="app">
+    <div className="app-shell">
+      <Titlebar />
+      <div className="app">
       <header className="status-header">
         <h1 className="app-title">Orca</h1>
         <div className={`connection-indicator connection-indicator--${connectionStatus}`}>
@@ -225,6 +293,7 @@ export default function App() {
           onDone={handleCreateFlowDone}
         />
       )}
+      </div>
     </div>
   );
 }
