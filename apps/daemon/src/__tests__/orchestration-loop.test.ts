@@ -1,11 +1,11 @@
 /**
- * M7 end-to-end proof loop integration test.
+ * Orchestration proof loop integration test.
  *
  * Exercises: task generation → recommendation generation → recommendation
  * accept (suggestion-only assertion) → workspace-overlap conflict detection →
  * conflict resolution with auto-dismiss → daemon-restart reconciliation.
  *
- * All state (tasks, recommendations, conflicts, feedback) is verified to survive
+ * All state (tasks, recommendations, conflicts, feedback) verified to survive
  * daemon restart.
  */
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
@@ -65,6 +65,39 @@ beforeAll(() => {
 
 const AUTH = { authorization: 'Bearer test-token' } as const;
 const NOW = '2026-05-21T10:00:00.000Z';
+
+const ORCHESTRATION_EVENT_TYPES = new Set([
+  'task.generation.requested',
+  'task.generated',
+  'task.generation.failed',
+  'task.created',
+  'task.updated',
+  'task.split',
+  'task.status_changed',
+  'task.associated_with_session',
+  'task.associated_with_context_package',
+  'recommendation.generation.requested',
+  'recommendation.generated',
+  'recommendation.generation.failed',
+  'recommendation.accepted',
+  'recommendation.rejected',
+  'recommendation.dismissed',
+  'recommendation.modified',
+  'recommendation.superseded',
+  'conflict.detected',
+  'conflict.resolved',
+  'conflict.dismissed',
+  'user.feedback.recorded',
+]);
+
+const FORBIDDEN_BODY_STRINGS = [
+  'Goals:',
+  'Content-free test',
+  'Test content-free events',
+  'recommendation rationale',
+  'description',
+  'acceptance_criteria',
+];
 
 const tempDirs: string[] = [];
 
@@ -183,7 +216,7 @@ function seedRunningSession(
   `).run(sessionId, goalId, workspaceId, now, now);
 }
 
-describe.sequential('M7 proof loop', () => {
+describe.sequential('orchestration proof loop', () => {
   let server: FastifyInstance | null = null;
   let db: Database.Database;
   let unsubscribe: (() => void) | null = null;
@@ -205,8 +238,8 @@ describe.sequential('M7 proof loop', () => {
   });
 
   it('end-to-end: task generation → recommendation → accept (no auto-launch) → conflict + auto-dismiss → restart reconciliation', async () => {
-    const dataDir = mktemp('orca-m7-proof-db-');
-    const workspaceDir = mktemp('orca-m7-proof-ws-');
+    const dataDir = mktemp('orca-proof-db-');
+    const workspaceDir = mktemp('orca-proof-ws-');
     const config = createConfig(dataDir);
 
     // ── Boot ─────────────────────────────────────────────────────────────────
@@ -225,10 +258,10 @@ describe.sequential('M7 proof loop', () => {
       url: '/v1/goals/refine',
       headers: AUTH,
       payload: {
-        title: 'M7 proof loop',
+        title: 'Orchestration proof loop',
         description: [
           'Goals:',
-          '- Implement M7 suggested orchestration',
+          '- Implement suggested orchestration',
           '',
           'Constraints:',
           '- Local first',
@@ -244,7 +277,7 @@ describe.sequential('M7 proof loop', () => {
       url: '/v1/goals',
       headers: AUTH,
       payload: {
-        title: 'M7 proof loop',
+        title: 'Orchestration proof loop',
         refined: draft,
         workspaces: [{ inputPath: workspaceDir }],
       },
@@ -266,7 +299,7 @@ describe.sequential('M7 proof loop', () => {
       payload: { trigger: 'manual' },
     });
     expect(taskGenRes.statusCode, taskGenRes.body).toBe(202);
-    const taskGenBody = TaskGenerationResponse.parse(JSON.parse(taskGenRes.body));
+    TaskGenerationResponse.parse(JSON.parse(taskGenRes.body));
 
     // Wait for async generation to complete
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -282,15 +315,10 @@ describe.sequential('M7 proof loop', () => {
 
     // Verify sources reference the refinement
     const firstTask = taskListBody.tasks[0]!;
-    const hasSources = firstTask.sources.length > 0;
-    if (hasSources) {
-      expect(firstTask.sources.some((s) => s.type === 'refinement')).toBe(true);
-    }
+    expect(firstTask.sources.some((s) => s.type === 'refinement')).toBe(true);
 
     // ── Step 3: Seed engineer session with implementation evidence ────────────
-    const { sessionId: engSessionId, summaryId } = seedEngineerSession(
-      db, goalId, workspaceId, 'eng-session-proof-1', NOW
-    );
+    seedEngineerSession(db, goalId, workspaceId, 'eng-session-proof-1', NOW);
 
     // ── Step 4: Trigger recommendation generation ─────────────────────────────
     const recGenRes = await server.inject({
@@ -320,10 +348,6 @@ describe.sequential('M7 proof loop', () => {
     const recSourceTypes = runValidationRec.sources.map((s) => s.type);
     expect(recSourceTypes).toContain('session');
     // Sparse must be false (we have input data)
-    const recGenRow = db.prepare(
-      "SELECT sparse FROM recommendation_generations WHERE id = ?"
-    ).get(taskGenBody.generation.id) as { sparse: number } | undefined;
-    // Check the actual recommendation generation rows
     const recGenRows = db.prepare(
       "SELECT sparse FROM recommendation_generations WHERE goal_id = ? ORDER BY requested_at DESC LIMIT 1"
     ).get(goalId) as { sparse: number } | undefined;
@@ -491,7 +515,7 @@ describe.sequential('M7 proof loop', () => {
     // Event must not contain failure message body text
     expect(JSON.stringify(failedPayload).length).toBeLessThanOrEqual(4096);
 
-    // ── Verify all M7 rows survive restart ────────────────────────────────────
+    // ── Verify all rows survive restart ───────────────────────────────────────
     expect(
       countRows(db, "SELECT COUNT(*) AS count FROM tasks WHERE goal_id = ?", goalId)
     ).toBeGreaterThanOrEqual(1);
@@ -546,9 +570,9 @@ describe.sequential('M7 proof loop', () => {
     expect(postRestartConflicts.conflicts.some((c) => c.id === conflictId)).toBe(true);
   });
 
-  it('content-free events: no body text in M7 events', async () => {
-    const dataDir = mktemp('orca-m7-event-db-');
-    const workspaceDir = mktemp('orca-m7-event-ws-');
+  it('content-free events: no body text in orchestration events', async () => {
+    const dataDir = mktemp('orca-event-db-');
+    const workspaceDir = mktemp('orca-event-ws-');
     const config = createConfig(dataDir);
 
     db = openTestDb(config);
@@ -557,34 +581,10 @@ describe.sequential('M7 proof loop', () => {
       sessionOutputStore: createSessionOutputStore(db, { tailBytes: config.sessionOutputTailBytes }),
     });
 
-    const m7Events: DomainEvent[] = [];
-    const M7_EVENT_PREFIX_SET = new Set([
-      'task.generation.requested',
-      'task.generated',
-      'task.generation.failed',
-      'task.created',
-      'task.updated',
-      'task.split',
-      'task.status_changed',
-      'task.associated_with_session',
-      'task.associated_with_context_package',
-      'recommendation.generation.requested',
-      'recommendation.generated',
-      'recommendation.generation.failed',
-      'recommendation.accepted',
-      'recommendation.rejected',
-      'recommendation.dismissed',
-      'recommendation.modified',
-      'recommendation.superseded',
-      'conflict.detected',
-      'conflict.resolved',
-      'conflict.dismissed',
-      'user.feedback.recorded',
-    ]);
-
+    const orchEvents: DomainEvent[] = [];
     unsubscribe = eventBus.subscribe((event) => {
-      if (M7_EVENT_PREFIX_SET.has(event.type)) {
-        m7Events.push(event);
+      if (ORCHESTRATION_EVENT_TYPES.has(event.type)) {
+        orchEvents.push(event);
       }
     });
 
@@ -625,33 +625,25 @@ describe.sequential('M7 proof loop', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    // Assert all captured M7 events are content-free and within 4 KiB
-    for (const event of m7Events) {
+    // Assert all captured orchestration events are content-free and within 4 KiB
+    for (const event of orchEvents) {
       const payloadStr = JSON.stringify(event.payload);
       expect(
         payloadStr.length,
         `Event "${event.type}" payload exceeds 4 KiB: ${payloadStr.length} bytes`
       ).toBeLessThanOrEqual(4096);
 
-      const forbidden = [
-        'Goals:',
-        'Content-free test',
-        'Test content-free events',
-        'recommendation rationale',
-        'description',
-        'acceptance_criteria',
-      ];
-      for (const text of forbidden) {
+      for (const text of FORBIDDEN_BODY_STRINGS) {
         expect(payloadStr, `Event "${event.type}" must not contain body text: "${text}"`).not.toContain(text);
       }
     }
 
-    expect(m7Events.length, 'Expected ≥ 1 M7 event').toBeGreaterThanOrEqual(1);
+    expect(orchEvents.length, 'Expected ≥ 1 orchestration event').toBeGreaterThanOrEqual(1);
   });
 
   it('no-auto-launch: accepted recommendation does not call downstream endpoints', async () => {
-    const dataDir = mktemp('orca-m7-noauto-db-');
-    const workspaceDir = mktemp('orca-m7-noauto-ws-');
+    const dataDir = mktemp('orca-noauto-db-');
+    const workspaceDir = mktemp('orca-noauto-ws-');
     const config = createConfig(dataDir);
 
     db = openTestDb(config);

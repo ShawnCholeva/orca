@@ -23,7 +23,7 @@ Skipped tests are pre-existing smoke tests requiring live PTY/adapter processes 
 
 ## New Test File
 
-`apps/daemon/src/__tests__/m7-loop.test.ts` — 3 tests:
+`apps/daemon/src/__tests__/orchestration-loop.test.ts` — 3 tests:
 
 1. **End-to-end proof loop**: Goal creation → task generation → recommendation generation → accept (no-auto-launch assertion) → workspace_overlap conflict detection → conflict resolution with auto-dismiss → daemon restart reconciliation.
 2. **Content-free events**: Asserts all M7 events are ≤ 4 KiB and contain no body text.
@@ -65,17 +65,17 @@ Skipped tests are pre-existing smoke tests requiring live PTY/adapter processes 
 4. **User feedback persisted as supervision signal.**
    - [x] Every accept/reject/dismiss/modify writes `recommendation_feedback` row
    - [x] `user.feedback.recorded` event emits with no body content
-   - [x] Rows survive restart (verified in m7-loop.test.ts)
+   - [x] Rows survive restart (verified in orchestration-loop.test.ts)
 
 5. **Accepted recommendations prefill existing flows without auto-launching.**
    - [x] Per-kind prefill map in desktop client (M7-021)
    - [x] User must still confirm via existing flows
    - [x] No `execute action` endpoint exists
-   - [x] Verified in m7-loop.test.ts (no-auto-launch test)
+   - [x] Verified in orchestration-loop.test.ts (no-auto-launch test)
 
 6. **Validation recommendations appear after implementation evidence.**
    - [x] `run_validation` rule fires for engineer-role sessions with M5 summary containing implementation keywords
-   - [x] Verified in m7-loop.test.ts (engineer session + summary seeding)
+   - [x] Verified in orchestration-loop.test.ts (engineer session + summary seeding)
 
 7. **Conservative conflicts detected and visible.**
    - [x] Five rule families: `workspace_overlap`, `contradictory_decisions`, `reviewer_rejection`, `blocker_reported`, `unresolved_question`
@@ -99,7 +99,7 @@ Skipped tests are pre-existing smoke tests requiring live PTY/adapter processes 
 
 11. **Event payloads remain content-free.**
     - [x] No event carries rendered context, rationale, proposed-action body, or body text
-    - [x] 4 KiB per-event cap enforced in m7-loop.test.ts (content-free events test)
+    - [x] 4 KiB per-event cap enforced in orchestration-loop.test.ts (content-free events test)
     - [x] Event payload content-free rule tested per event type
 
 12. **Deterministic provider is the only production provider.**
@@ -133,7 +133,7 @@ Skipped tests are pre-existing smoke tests requiring live PTY/adapter processes 
     - [x] No AI-backed provider
 
 18. **Section 15 final proof loop (M7-024) demonstrates end-to-end behavior.**
-    - [x] `apps/daemon/src/__tests__/m7-loop.test.ts` passes
+    - [x] `apps/daemon/src/__tests__/orchestration-loop.test.ts` passes
     - [x] Conflict detection + auto-dismiss verified
     - [x] Mid-generation restart recovery verified
     - [x] Green full regression at `pnpm -r typecheck && pnpm -r test`
@@ -151,7 +151,7 @@ The following excluded endpoints do NOT exist (verified by absence from route re
 
 ## Technical Notes
 
-- The `m7-loop.test.ts` uses direct DB seeding for engineer sessions and session summaries (following the M6 proof-loop pattern) to avoid PTY complexity while proving the full orchestration chain.
+- The `orchestration-loop.test.ts` uses direct DB seeding for engineer sessions and session summaries (following the M6 proof-loop pattern) to avoid PTY complexity while proving the full orchestration chain.
 - The no-auto-launch assertion tracks `session.created` event count before and after `POST /v1/recommendations/:id/accept` to prove zero automatic downstream calls.
 - The workspace_overlap conflict is triggered via direct `detectAndPersist` call (the test spec permits "trigger evaluation directly") after inserting two `running` sessions on the same workspace.
 - Restart reconciliation uses direct DB insert of a `pending` generation row and `reconcileInFlightGenerations` to simulate a crash mid-generation without needing to kill a real process.

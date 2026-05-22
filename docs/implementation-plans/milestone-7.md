@@ -1232,7 +1232,7 @@ Meaningful Goal activity occurs
 **Purpose.** Final proof loop, restart-safety verification, full regression, and documentation completion. Final M7 deliverable.
 
 **Scope.**
-- IS: integration test `apps/daemon/src/__tests__/m7-loop.test.ts` exercising the full proof point; restart test; full `pnpm -r typecheck` and `pnpm -r test`; documentation completion (this file + README/CHANGELOG entries if any); final notes record in `docs/implementation-plans/notes/m7-024-final.md`.
+- IS: integration test `apps/daemon/src/__tests__/orchestration-loop.test.ts` exercising the full proof point; restart test; full `pnpm -r typecheck` and `pnpm -r test`; documentation completion (this file + README/CHANGELOG entries if any); final notes record in `docs/implementation-plans/notes/m7-024-final.md`.
 - IS NOT: new features, scope absorption from earlier tasks, new architecture.
 
 **Requirements.**
@@ -1252,7 +1252,7 @@ Meaningful Goal activity occurs
 - Record final commit SHA + test summary in `docs/implementation-plans/notes/m7-024-final.md`.
 
 **Affected Areas.**
-- `apps/daemon/src/__tests__/m7-loop.test.ts` (new).
+- `apps/daemon/src/__tests__/orchestration-loop.test.ts` (new).
 - `docs/implementation-plans/notes/m7-024-final.md` (new).
 - Any minor doc updates required by the proof.
 
