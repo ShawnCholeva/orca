@@ -13,6 +13,13 @@ import type { SessionPreparationAssembler } from './assembler.js';
 import { requestContextPackage } from './usecases.js';
 import { getContextPackageById, listContextPackagesByGoal } from './projection.js';
 import { getWorkspaceByIdAndGoal } from '../workspaces/projection.js';
+import {
+  ArchivedTargetError,
+  AssociationGoalMismatchError,
+  InvalidRecommendationStateError,
+  RecommendationNotFoundError,
+  TaskNotFoundError,
+} from '../sessions/errors.js';
 
 export interface ContextRouteDeps {
   db: Database.Database;
@@ -46,7 +53,7 @@ export function registerContextRoutes(server: FastifyInstance, deps: ContextRout
       return { error: 'validation_failed', issues: parsed.error.issues };
     }
 
-    const { adapterId, role, objective, workspaceId, replacePackageId } = parsed.data;
+    const { adapterId, role, objective, workspaceId, replacePackageId, taskId, fromRecommendationId } = parsed.data;
 
     const goalRow = stmtGetGoal.get(goalId);
     if (!goalRow) {
@@ -90,26 +97,44 @@ export function registerContextRoutes(server: FastifyInstance, deps: ContextRout
       trigger = triggerRow?.status === 'failed' ? 'retry' : 'prepare';
     }
 
-    const result = requestContextPackage(
-      { db, bus, assembler },
-      {
-        goalId,
-        adapterId,
-        workspaceId: workspaceId ?? null,
-        role,
-        objective,
-        replacePackageId: replacePackageId ?? null,
-        trigger,
-      }
-    );
+    try {
+      const result = requestContextPackage(
+        { db, bus, assembler },
+        {
+          goalId,
+          adapterId,
+          workspaceId: workspaceId ?? null,
+          role,
+          objective,
+          replacePackageId: replacePackageId ?? null,
+          trigger,
+          taskId,
+          fromRecommendationId,
+        }
+      );
 
-    const httpStatus = result.reused || result.assembly.status === 'failed' ? 200 : 201;
-    reply.status(httpStatus);
-    return CreateContextPackageResponse.parse({
-      package: result.package,
-      assembly: result.assembly,
-      reused: result.reused,
-    });
+      const httpStatus = result.reused || result.assembly.status === 'failed' ? 200 : 201;
+      reply.status(httpStatus);
+      return CreateContextPackageResponse.parse({
+        package: result.package,
+        assembly: result.assembly,
+        reused: result.reused,
+      });
+    } catch (error) {
+      if (error instanceof TaskNotFoundError || error instanceof RecommendationNotFoundError) {
+        reply.status(404);
+        return apiError((error as TaskNotFoundError).code, error.message);
+      }
+      if (error instanceof InvalidRecommendationStateError || error instanceof ArchivedTargetError) {
+        reply.status(409);
+        return apiError((error as ArchivedTargetError).code, error.message);
+      }
+      if (error instanceof AssociationGoalMismatchError) {
+        reply.status(422);
+        return apiError((error as AssociationGoalMismatchError).code, error.message);
+      }
+      throw error;
+    }
   });
 
   server.get('/v1/goals/:goalId/context-packages', async (request, reply) => {

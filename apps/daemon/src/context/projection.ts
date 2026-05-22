@@ -28,6 +28,8 @@ interface ContextPackageDbRow {
   source_fingerprint: string;
   assembler_version: string;
   created_at: string;
+  task_id: string | null;
+  from_recommendation_id: string | null;
 }
 
 interface ContextAssemblyDbRow {
@@ -94,6 +96,8 @@ function rowToContextPackage(row: ContextPackageDbRow): ContextPackage {
     sourceFingerprint: row.source_fingerprint,
     assemblerVersion: row.assembler_version,
     createdAt: row.created_at,
+    taskId: row.task_id ?? null,
+    fromRecommendationId: row.from_recommendation_id ?? null,
   });
 }
 
@@ -122,7 +126,8 @@ function rowToContextAssembly(row: ContextAssemblyDbRow): ContextAssembly {
 
 const PKG_COLS = `id, goal_id, supersedes_package_id, adapter_id, workspace_id, role, objective, status,
   rendered_context, rendered_bytes, estimated_tokens, truncated, sparse, source_count,
-  sources_json, warnings_json, source_fingerprint, assembler_version, created_at`;
+  sources_json, warnings_json, source_fingerprint, assembler_version, created_at,
+  task_id, from_recommendation_id`;
 
 const ASM_COLS = `id, goal_id, package_id, replace_package_id, adapter_id, workspace_id, role,
   objective_hash, source_fingerprint, assembler_version, request_fingerprint,
@@ -148,8 +153,9 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
         `INSERT INTO context_packages (
           id, goal_id, supersedes_package_id, adapter_id, workspace_id, role, objective, status,
           rendered_context, rendered_bytes, estimated_tokens, truncated, sparse, source_count,
-          sources_json, warnings_json, source_fingerprint, assembler_version, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          sources_json, warnings_json, source_fingerprint, assembler_version, created_at,
+          task_id, from_recommendation_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ),
       insertAsm: db.prepare(
         `INSERT INTO context_assemblies (
@@ -206,6 +212,8 @@ export interface InsertContextPackageInput {
   sourceFingerprint: string;
   assemblerVersion: string;
   createdAt: string;
+  taskId?: string | null;
+  fromRecommendationId?: string | null;
 }
 
 export interface InsertContextAssemblyInput {
@@ -250,7 +258,9 @@ export function insertContextPackage(db: Database.Database, input: InsertContext
     JSON.stringify(input.warnings),
     input.sourceFingerprint,
     input.assemblerVersion,
-    input.createdAt
+    input.createdAt,
+    input.taskId ?? null,
+    input.fromRecommendationId ?? null
   );
 }
 

@@ -21,6 +21,15 @@ import {
 } from './projection.js';
 import { buildContextAssemblyInput } from './input.js';
 import { renderToCanonical } from './renderer.js';
+import { getTaskById } from '../tasks/projection.js';
+import { getRecommendationById } from '../recommendations/projection.js';
+import {
+  ArchivedTargetError,
+  AssociationGoalMismatchError,
+  InvalidRecommendationStateError,
+  RecommendationNotFoundError,
+  TaskNotFoundError,
+} from '../sessions/errors.js';
 
 export interface RequestContextPackageCtx {
   db: Database.Database;
@@ -38,6 +47,8 @@ export interface RequestContextPackageInput {
   objective: string;
   replacePackageId: string | null;
   trigger: string;
+  taskId?: string;
+  fromRecommendationId?: string;
 }
 
 export interface RequestContextPackageResult {
@@ -155,7 +166,22 @@ export function requestContextPackage(
   const idFactory = ctx.idFactory ?? randomUUID;
   const stmts = ensureStmts(ctx.db);
 
-  const { goalId, adapterId, workspaceId, role, objective, replacePackageId, trigger } = input;
+  const { goalId, adapterId, workspaceId, role, objective, replacePackageId, trigger, taskId, fromRecommendationId } = input;
+
+  // Validate task association upfront (mirrors M7-016 session extension).
+  if (taskId !== undefined) {
+    const task = getTaskById(ctx.db, taskId);
+    if (!task) throw new TaskNotFoundError(taskId);
+    if (task.goalId !== goalId) throw new AssociationGoalMismatchError('Task', taskId, task.goalId, goalId);
+    if (task.archivedAt !== null) throw new ArchivedTargetError(taskId);
+  }
+
+  if (fromRecommendationId !== undefined) {
+    const rec = getRecommendationById(ctx.db, fromRecommendationId);
+    if (!rec) throw new RecommendationNotFoundError(fromRecommendationId);
+    if (rec.goalId !== goalId) throw new AssociationGoalMismatchError('Recommendation', fromRecommendationId, rec.goalId, goalId);
+    if (rec.status !== 'accepted') throw new InvalidRecommendationStateError(fromRecommendationId, rec.status);
+  }
 
   const normalizedObjective = objective.trim();
   const objectiveHash = sha256(normalizedObjective);
@@ -321,6 +347,8 @@ export function requestContextPackage(
       sourceFingerprint,
       assemblerVersion,
       createdAt,
+      taskId: taskId ?? null,
+      fromRecommendationId: fromRecommendationId ?? null,
     });
 
     // Transition pending → running → succeeded within the same transaction.
@@ -337,16 +365,29 @@ export function requestContextPackage(
         truncated: output.truncated,
       }, now)
     );
-    toPublish.push(
-      emitEvent(stmts, 'context.package.created', goalId, {
-        packageId,
-        goalId,
-        adapterId,
-        role,
-        sourceCount: output.sources.length,
-        renderedBytes,
-      }, now)
-    );
+
+    const pkgCreatedPayload: Record<string, unknown> = {
+      packageId,
+      goalId,
+      adapterId,
+      role,
+      sourceCount: output.sources.length,
+      renderedBytes,
+    };
+    if (taskId !== undefined) pkgCreatedPayload.taskId = taskId;
+    if (fromRecommendationId !== undefined) pkgCreatedPayload.fromRecommendationId = fromRecommendationId;
+
+    toPublish.push(emitEvent(stmts, 'context.package.created', goalId, pkgCreatedPayload, now));
+
+    if (taskId !== undefined) {
+      toPublish.push(
+        emitEvent(stmts, 'task.associated_with_context_package', goalId, {
+          taskId,
+          goalId,
+          contextPackageId: packageId,
+        }, now)
+      );
+    }
 
     resultPackage = ContextPackage.parse({
       id: packageId,
@@ -368,6 +409,8 @@ export function requestContextPackage(
       sourceFingerprint,
       assemblerVersion,
       createdAt,
+      taskId: taskId ?? null,
+      fromRecommendationId: fromRecommendationId ?? null,
     });
 
     resultAssembly = ContextAssembly.parse({
