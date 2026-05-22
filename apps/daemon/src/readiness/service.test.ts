@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import type Database from "better-sqlite3";
 import { openDatabase, closeDatabase } from "../db.js";
 import { runMigrations, defaultMigrationsDir } from "../migrations.js";
@@ -9,7 +9,7 @@ import { seedAgents, setAgentConnected, listAgents } from "../agents.js";
 import { AdapterRegistry } from "../adapters/registry.js";
 import type { AgentAdapter } from "../adapters/types.js";
 import { ReadinessService, UnknownAgentError } from "./service.js";
-import type { AgentReadinessStatus, CheckStep } from "@orca/contracts";
+import { AgentReadinessReport, type AgentReadinessStatus, type CheckStep } from "@orca/contracts";
 
 function makeAdapter(id: string, opts: {
   install: CheckStep & { version?: string };
@@ -104,6 +104,25 @@ describe("ReadinessService.checkAgent", () => {
     expect(report.status).toBe("failed");
     const row = listAgents(db).find((a) => a.id === "opencode")!;
     expect(row.readiness?.status).toBe("failed");
+  });
+
+  it("adapter throws without failed repair → report remains contract-valid", async () => {
+    const registry = new AdapterRegistry();
+    registry.register({
+      ...makeAdapter("opencode", {
+        install: { name: "installed", ok: true, command: "opencode --version" },
+        auth: { name: "authenticated", ok: true, authStatus: "ready", command: "opencode auth list" },
+        throws: true,
+      }),
+      repairFor() {
+        return undefined;
+      },
+    });
+    setAgentConnected(db, "opencode", true);
+    const svc = new ReadinessService(db, registry, () => "2026-05-22T00:00:00.000Z");
+    const report = await svc.checkAgent("opencode");
+    expect(() => AgentReadinessReport.parse(report)).not.toThrow();
+    expect(report.repair).toBeUndefined();
   });
 
   it("unknown agent throws UnknownAgentError", async () => {

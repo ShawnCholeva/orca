@@ -124,9 +124,7 @@ export class ReadinessService {
     const checkedAt = this.clock();
     const message = reason instanceof Error ? reason.message : String(reason);
     const adapter = this.registry.get(agentId);
-    const repair =
-      adapter?.repairFor("failed") ??
-      { kind: "run_command" as const, command: "", label: "Retry" };
+    const repair = adapter?.repairFor("failed");
 
     const report: AgentReadinessReport = {
       agentId,
