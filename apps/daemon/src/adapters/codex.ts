@@ -7,9 +7,10 @@ import type {
 } from "./types.js";
 import { buildSpawnEnv } from "./types.js";
 import { resolveBinary, type ResolveFn } from "./resolve.js";
-import { runCheckCommand, type RunCheckResult } from "../readiness/exec.js";
+import { runCheckCommand, inheritCredEnv, type RunCheckResult } from "../readiness/exec.js";
 import { sanitizeOutput } from "../readiness/sanitize.js";
 import { installUrlFor, signInCommandFor } from "../readiness/repair-links.js";
+import { parseVersion } from "../readiness/version.js";
 import type { AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
 
 export type RunCheckFn = (
@@ -18,7 +19,8 @@ export type RunCheckFn = (
   opts?: { timeoutMs?: number; env?: Record<string, string> },
 ) => Promise<RunCheckResult>;
 
-const NOT_LOGGED_IN = /\bnot (logged in|authenticated)\b|please (log|sign) in/i;
+const NOT_LOGGED_IN =
+  /\bnot (?:yet |currently )?(?:logged in|signed in|authenticated)\b|\b(?:please (?:log|sign) in|login required|authentication required|unauthorized)\b/i;
 
 export class CodexAdapter implements AgentAdapter {
   readonly id = "codex" as const;
@@ -57,8 +59,8 @@ export class CodexAdapter implements AgentAdapter {
     if ("error" in resolved) {
       return { name: "installed", ok: false, command: "codex --version", detail: "codex not found on PATH" };
     }
-    const r = await this.runFn(resolved.resolvedPath, ["--version"]);
-    const version = parseVersion(r.stdout);
+    const r = await this.runFn(resolved.resolvedPath, ["--version"], { env: inheritCredEnv() });
+    const version = parseVersion(r.stdout, "codex");
     if (r.exitCode === 0) {
       return { name: "installed", ok: true, command: "codex --version", version, detail: version };
     }
@@ -68,6 +70,7 @@ export class CodexAdapter implements AgentAdapter {
       command: "codex --version",
       exitCode: r.exitCode,
       errorOutput: sanitizeOutput(r.stderr || r.stdout),
+      detail: "codex --version failed",
     };
   }
 
@@ -82,7 +85,7 @@ export class CodexAdapter implements AgentAdapter {
         detail: "binary not found",
       };
     }
-    const r = await this.runFn(resolved.resolvedPath, ["login", "status"], {});
+    const r = await this.runFn(resolved.resolvedPath, ["login", "status"], { env: inheritCredEnv() });
     if (r.timedOut) {
       return {
         name: "authenticated",
@@ -92,7 +95,18 @@ export class CodexAdapter implements AgentAdapter {
         detail: "timeout",
       };
     }
+    const combined = `${r.stdout}\n${r.stderr}`;
     if (r.exitCode === 0) {
+      // Some CLIs exit 0 even when not signed in; check stdout for negative markers.
+      if (NOT_LOGGED_IN.test(combined)) {
+        return {
+          name: "authenticated",
+          ok: false,
+          authStatus: "needs_auth",
+          command: "codex login status",
+          detail: "not signed in",
+        };
+      }
       return {
         name: "authenticated",
         ok: true,
@@ -101,7 +115,6 @@ export class CodexAdapter implements AgentAdapter {
         detail: "authenticated",
       };
     }
-    const combined = `${r.stdout}\n${r.stderr}`;
     if (NOT_LOGGED_IN.test(combined)) {
       return {
         name: "authenticated",
@@ -141,9 +154,4 @@ export class CodexAdapter implements AgentAdapter {
 function candidates(): string[] {
   const override = process.env["ORCA_CODEX_BIN"];
   return override ? [override] : ["codex"];
-}
-
-function parseVersion(stdout: string): string | undefined {
-  const m = stdout.match(/(\d+\.\d+(?:\.\d+)?)/);
-  return m ? m[1] : undefined;
 }

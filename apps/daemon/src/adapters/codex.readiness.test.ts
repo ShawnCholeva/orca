@@ -63,6 +63,24 @@ describe("CodexAdapter.checkAuth", () => {
     await a(run).checkAuth();
     expect(run).toHaveBeenCalledWith("/usr/bin/codex", ["login", "status"], expect.anything());
   });
+
+  it("exit 0 with 'not logged in' stdout → needs_auth (not ready)", async () => {
+    const run = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "You are not logged in.", stderr: "", durationMs: 1, timedOut: false });
+    const step = await a(run).checkAuth();
+    expect(step.authStatus).toBe("needs_auth");
+  });
+
+  it("widened regex matches 'not yet authenticated'", async () => {
+    const run = vi.fn().mockResolvedValue({ exitCode: 1, stdout: "", stderr: "You are not yet authenticated", durationMs: 1, timedOut: false });
+    const step = await a(run).checkAuth();
+    expect(step.authStatus).toBe("needs_auth");
+  });
+
+  it("widened regex matches 'not signed in'", async () => {
+    const run = vi.fn().mockResolvedValue({ exitCode: 1, stdout: "", stderr: "you are not signed in", durationMs: 1, timedOut: false });
+    const step = await a(run).checkAuth();
+    expect(step.authStatus).toBe("needs_auth");
+  });
 });
 
 describe("CodexAdapter.repairFor", () => {

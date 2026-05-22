@@ -35,12 +35,31 @@ export class ShellManualAdapter implements AgentAdapter {
   }
 
   async checkInstalled() {
-    return { name: "installed" as const, ok: true, command: "shell" };
+    const result = await this.resolveFn(shellCandidates());
+    if ("error" in result) {
+      return {
+        name: "installed" as const,
+        ok: false,
+        command: "shell",
+        detail: `No shell binary found. Tried: ${result.tried.join(", ")}`,
+      };
+    }
+    return { name: "installed" as const, ok: true, command: "shell", detail: result.resolvedPath };
   }
-  async checkAuth() {
+  async checkAuth(): Promise<CheckStep> {
+    const result = await this.resolveFn(shellCandidates());
+    if ("error" in result) {
+      return {
+        name: "authenticated" as const,
+        ok: false,
+        authStatus: "misconfigured" as const,
+        command: "shell",
+        detail: "no shell binary",
+      };
+    }
     return { name: "authenticated" as const, ok: true, authStatus: "ready" as const, command: "shell" };
   }
-  repairFor() {
+  repairFor(_status: AgentReadinessStatus): RepairAction | undefined {
     return undefined;
   }
 }

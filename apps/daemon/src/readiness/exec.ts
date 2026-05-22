@@ -23,6 +23,27 @@ const DEFAULT_TIMEOUT_MS = 5000;
 const MAX_BUFFER = 256 * 1024;
 const SIGKILL_GRACE_MS = 1000;
 
+// Env vars adapter check probes need to locate per-user credential stores
+// (~/.claude, ~/.codex, ~/.gemini, ~/.config/gcloud, %APPDATA%, etc.).
+const CRED_ENV_KEYS = [
+  "HOME",
+  "USERPROFILE",
+  "XDG_CONFIG_HOME",
+  "XDG_CACHE_HOME",
+  "XDG_DATA_HOME",
+  "APPDATA",
+  "LOCALAPPDATA",
+] as const;
+
+export function inheritCredEnv(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of CRED_ENV_KEYS) {
+    const v = process.env[k];
+    if (v) out[k] = v;
+  }
+  return out;
+}
+
 export function runCheckCommand(
   command: string,
   args: string[],

@@ -69,6 +69,19 @@ describe("OpenCodeAdapter.checkAuth", () => {
       expect.anything(),
     );
   });
+
+  it("uses last-match semantics so early lines containing 'N credentials' don't win", async () => {
+    const stdout = [
+      "Found 1 credentials cache file",
+      "│  some.label 2 credentials provider",
+      "└",
+      "3 credentials",
+    ].join("\n");
+    const run = vi.fn().mockResolvedValue({ exitCode: 0, stdout, stderr: "", durationMs: 1, timedOut: false });
+    const step = await a(run).checkAuth();
+    expect(step.authStatus).toBe("ready");
+    expect(step.detail).toBe("authenticated (3 credentials)");
+  });
 });
 
 describe("OpenCodeAdapter.repairFor", () => {

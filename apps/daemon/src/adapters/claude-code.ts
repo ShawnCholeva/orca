@@ -7,9 +7,10 @@ import type {
 } from "./types.js";
 import { buildSpawnEnv } from "./types.js";
 import { resolveBinary, type ResolveFn } from "./resolve.js";
-import { runCheckCommand, type RunCheckResult } from "../readiness/exec.js";
+import { runCheckCommand, inheritCredEnv, type RunCheckResult } from "../readiness/exec.js";
 import { sanitizeOutput } from "../readiness/sanitize.js";
 import { installUrlFor, signInCommandFor } from "../readiness/repair-links.js";
+import { parseVersion } from "../readiness/version.js";
 import type { AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
 
 export type RunCheckFn = (
@@ -62,8 +63,8 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         detail: "claude not found on PATH",
       };
     }
-    const r = await this.runFn(resolved.resolvedPath, ["--version"]);
-    const version = parseVersion(r.stdout);
+    const r = await this.runFn(resolved.resolvedPath, ["--version"], { env: inheritCredEnv() });
+    const version = parseVersion(r.stdout, "claude");
     if (r.exitCode === 0) {
       return { name: "installed", ok: true, command: "claude --version", version, detail: version };
     }
@@ -88,7 +89,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         detail: "binary not found",
       };
     }
-    const r = await this.runFn(resolved.resolvedPath, ["auth", "status", "--json"], {});
+    const r = await this.runFn(resolved.resolvedPath, ["auth", "status", "--json"], { env: inheritCredEnv() });
     if (r.timedOut) {
       return {
         name: "authenticated",
@@ -98,12 +99,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         detail: "timeout",
       };
     }
-    let parsed: { loggedIn?: boolean } | null = null;
-    try {
-      parsed = JSON.parse(r.stdout) as { loggedIn?: boolean };
-    } catch {
-      parsed = null;
-    }
+    const parsed = extractJsonObject<{ loggedIn?: boolean }>(r.stdout);
     // JSON drives the classification first; exit code is a tiebreaker only.
     if (parsed && typeof parsed.loggedIn === "boolean") {
       if (parsed.loggedIn === true) {
@@ -156,7 +152,20 @@ function candidates(): string[] {
   return override ? [override] : ["claude"];
 }
 
-function parseVersion(stdout: string): string | undefined {
-  const m = stdout.match(/(\d+\.\d+(?:\.\d+)?)/);
-  return m ? m[1] : undefined;
+// Tolerate banner/warning lines around the JSON object some CLIs emit on stdout.
+function extractJsonObject<T>(stdout: string): T | null {
+  try {
+    return JSON.parse(stdout) as T;
+  } catch {
+    const first = stdout.indexOf("{");
+    const last = stdout.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+      try {
+        return JSON.parse(stdout.slice(first, last + 1)) as T;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
 }

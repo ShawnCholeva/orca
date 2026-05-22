@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { runCheckCommand } from "./exec.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { runCheckCommand, inheritCredEnv } from "./exec.js";
 
 describe("runCheckCommand", () => {
   it("returns exit 0 and stdout for a trivial command", async () => {
@@ -50,5 +50,31 @@ describe("runCheckCommand", () => {
       { env: { ORCA_TEST: "1" } },
     );
     expect(res.stdout.trim()).toBe("1");
+  });
+});
+
+describe("inheritCredEnv", () => {
+  const saved: Record<string, string | undefined> = {};
+  const keys = ["HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"];
+  for (const k of keys) saved[k] = process.env[k];
+
+  afterEach(() => {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  it("returns only credential-locating env vars that are actually set", () => {
+    for (const k of keys) delete process.env[k];
+    process.env["HOME"] = "/home/x";
+    process.env["XDG_CONFIG_HOME"] = "/home/x/.config";
+    const env = inheritCredEnv();
+    expect(env).toEqual({ HOME: "/home/x", XDG_CONFIG_HOME: "/home/x/.config" });
+  });
+
+  it("returns empty when no cred env vars are set", () => {
+    for (const k of keys) delete process.env[k];
+    expect(inheritCredEnv()).toEqual({});
   });
 });

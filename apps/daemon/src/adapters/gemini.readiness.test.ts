@@ -83,4 +83,42 @@ describe("GeminiAdapter.repairFor", () => {
   it("needs_auth includes requiresAppRestart for env-based fixes", () => {
     expect(a.repairFor("needs_auth")).toMatchObject({ requiresAppRestart: true });
   });
+
+  it("misconfigured uses install_url (no interactive REPL command)", () => {
+    expect(a.repairFor("misconfigured")).toMatchObject({ kind: "install_url" });
+  });
+});
+
+describe("GeminiAdapter.checkAuth — Vertex ADC without explicit LOCATION", () => {
+  it("project + ADC file is enough; LOCATION defaults to us-central1", async () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "g-adc-noloc-"));
+    const cred = path.join(tmp, "adc.json");
+    writeFileSync(cred, "{}");
+    const env = () => ({
+      GOOGLE_CLOUD_PROJECT: "proj",
+      GOOGLE_APPLICATION_CREDENTIALS: cred,
+    });
+    const adapter = new GeminiAdapter(ok("/usr/bin/gemini"), vi.fn(), env, (p) => p === cred);
+    const step = await adapter.checkAuth();
+    expect(step.authStatus).toBe("ready");
+    expect(step.detail).toContain("vertex_adc");
+  });
+});
+
+describe("GeminiAdapter.checkAuth — settings outranks stale env", () => {
+  it("settings.selectedAuthType=oauth-personal with valid cache wins over GEMINI_API_KEY", async () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "g-oauth-"));
+    mkdirSync(path.join(tmp, ".gemini"));
+    const settings = path.join(tmp, ".gemini", "settings.json");
+    writeFileSync(settings, JSON.stringify({ selectedAuthType: "oauth-personal" }));
+    const oauthCache = path.join(tmp, ".gemini", "oauth_creds.json");
+    writeFileSync(oauthCache, "{}");
+    const env = () => ({ HOME: tmp, GEMINI_API_KEY: "stale-value" });
+    const exists = (p: string) => p === settings || p === oauthCache;
+    const read = (p: string) => (p === settings ? JSON.stringify({ selectedAuthType: "oauth-personal" }) : "");
+    const adapter = new GeminiAdapter(ok("/usr/bin/gemini"), vi.fn(), env, exists, read);
+    const step = await adapter.checkAuth();
+    expect(step.authStatus).toBe("ready");
+    expect(step.detail).toContain("oauth");
+  });
 });

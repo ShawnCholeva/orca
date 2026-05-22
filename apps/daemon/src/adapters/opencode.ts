@@ -7,9 +7,10 @@ import type {
 } from "./types.js";
 import { buildSpawnEnv } from "./types.js";
 import { resolveBinary, type ResolveFn } from "./resolve.js";
-import { runCheckCommand, type RunCheckResult } from "../readiness/exec.js";
+import { runCheckCommand, inheritCredEnv, type RunCheckResult } from "../readiness/exec.js";
 import { sanitizeOutput } from "../readiness/sanitize.js";
 import { installUrlFor, signInCommandFor } from "../readiness/repair-links.js";
+import { parseVersion } from "../readiness/version.js";
 import type { AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
 
 export type RunCheckFn = (
@@ -19,12 +20,18 @@ export type RunCheckFn = (
 ) => Promise<RunCheckResult>;
 
 const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
-// Current `opencode auth list` prints a TUI-like list plus a footer such as:
+// `opencode auth list --pure` prints a TUI-like list plus a footer like:
 //   └  3 credentials
-// Parse the count instead of provider labels; labels can contain spaces, domains,
-// and auth method suffixes and may include account/provider-identifying text.
-const CRED_COUNT = /^[\s│└┌─]*?(\d+)\s+credentials\s*$/im;
-const ZERO_CRED_FOOTER = /^[\s│└┌─]*?0\s+credentials\s*$/im;
+// Take the LAST line matching "N credentials"; the footer count line always
+// trails the provider list, so anchoring on "last match" survives label text
+// that happens to contain a digit-prefixed word.
+const CRED_COUNT_GLOBAL = /(?:^|\n)[\s│└┌─]*(\d+)\s+credentials\s*(?=\n|$)/gi;
+
+function lastCredCount(cleaned: string): number | null {
+  const all = [...cleaned.matchAll(CRED_COUNT_GLOBAL)];
+  if (all.length === 0) return null;
+  return Number(all[all.length - 1][1]);
+}
 
 export class OpenCodeAdapter implements AgentAdapter {
   readonly id = "opencode" as const;
@@ -63,8 +70,8 @@ export class OpenCodeAdapter implements AgentAdapter {
     if ("error" in resolved) {
       return { name: "installed", ok: false, command: "opencode --version", detail: "opencode not found on PATH" };
     }
-    const r = await this.runFn(resolved.resolvedPath, ["--version"]);
-    const version = parseVersion(r.stdout);
+    const r = await this.runFn(resolved.resolvedPath, ["--version"], { env: inheritCredEnv() });
+    const version = parseVersion(r.stdout, "opencode");
     if (r.exitCode === 0) {
       return { name: "installed", ok: true, command: "opencode --version", version, detail: version };
     }
@@ -74,6 +81,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       command: "opencode --version",
       exitCode: r.exitCode,
       errorOutput: sanitizeOutput(r.stderr || r.stdout),
+      detail: "opencode --version failed",
     };
   }
 
@@ -88,7 +96,7 @@ export class OpenCodeAdapter implements AgentAdapter {
         detail: "binary not found",
       };
     }
-    const r = await this.runFn(resolved.resolvedPath, ["auth", "list", "--pure"], {});
+    const r = await this.runFn(resolved.resolvedPath, ["auth", "list", "--pure"], { env: inheritCredEnv() });
     if (r.timedOut) {
       return {
         name: "authenticated",
@@ -110,9 +118,8 @@ export class OpenCodeAdapter implements AgentAdapter {
       };
     }
     const cleaned = r.stdout.replace(ANSI, "");
-    const countMatch = cleaned.match(CRED_COUNT);
-    const credentialCount = countMatch ? Number(countMatch[1]) : 0;
-    if (credentialCount <= 0 || ZERO_CRED_FOOTER.test(cleaned)) {
+    const credentialCount = lastCredCount(cleaned);
+    if (credentialCount === null || credentialCount <= 0) {
       return {
         name: "authenticated",
         ok: false,
@@ -149,9 +156,4 @@ export class OpenCodeAdapter implements AgentAdapter {
 function candidates(): string[] {
   const override = process.env["ORCA_OPENCODE_BIN"];
   return override ? [override] : ["opencode"];
-}
-
-function parseVersion(stdout: string): string | undefined {
-  const m = stdout.match(/(\d+\.\d+(?:\.\d+)?)/);
-  return m ? m[1] : undefined;
 }

@@ -10,9 +10,10 @@ import type {
 } from "./types.js";
 import { buildSpawnEnv } from "./types.js";
 import { resolveBinary, type ResolveFn } from "./resolve.js";
-import { runCheckCommand, type RunCheckResult } from "../readiness/exec.js";
+import { runCheckCommand, inheritCredEnv, type RunCheckResult } from "../readiness/exec.js";
 import { sanitizeOutput } from "../readiness/sanitize.js";
 import { installUrlFor, signInCommandFor } from "../readiness/repair-links.js";
+import { parseVersion } from "../readiness/version.js";
 import type { AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
 
 export type RunCheckFn = (
@@ -65,8 +66,8 @@ export class GeminiAdapter implements AgentAdapter {
     if ("error" in resolved) {
       return { name: "installed", ok: false, command: "gemini --version", detail: "gemini not found on PATH" };
     }
-    const r = await this.runFn(resolved.resolvedPath, ["--version"]);
-    const version = parseVersion(r.stdout);
+    const r = await this.runFn(resolved.resolvedPath, ["--version"], { env: inheritCredEnv() });
+    const version = parseVersion(r.stdout, "gemini");
     if (r.exitCode === 0) {
       return { name: "installed", ok: true, command: "gemini --version", version, detail: version };
     }
@@ -76,6 +77,7 @@ export class GeminiAdapter implements AgentAdapter {
       command: "gemini --version",
       exitCode: r.exitCode,
       errorOutput: sanitizeOutput(r.stderr || r.stdout),
+      detail: "gemini --version failed",
     };
   }
 
@@ -85,12 +87,7 @@ export class GeminiAdapter implements AgentAdapter {
     const home = env["HOME"] ?? os.homedir();
     const settingsPath = path.join(home, ".gemini", "settings.json");
 
-    // 1. Gemini API key
-    if (nonEmpty(env["GEMINI_API_KEY"])) {
-      return readyStep(cmd, "gemini_api_key");
-    }
-
-    // Parse settings if present (used by modes 2 + 4)
+    // Parse settings first so an explicit selectedAuthType outranks a stale env var.
     let settings: { selectedAuthType?: string } | null = null;
     if (this.existsFn(settingsPath)) {
       try {
@@ -99,22 +96,32 @@ export class GeminiAdapter implements AgentAdapter {
         settings = null;
       }
     }
+    const settingsMode = settings?.selectedAuthType;
+
+    // 1. Gemini API key — unless settings explicitly selects a different mode.
+    if (
+      nonEmpty(env["GEMINI_API_KEY"]) &&
+      (!settingsMode || settingsMode === "gemini-api-key")
+    ) {
+      return readyStep(cmd, "gemini_api_key");
+    }
 
     // 2. Vertex API key (express mode)
     //    Gemini SDK + CLI use GOOGLE_API_KEY together with GOOGLE_GENAI_USE_VERTEXAI=true
     //    to select Vertex AI in express mode. Settings.json is a secondary signal.
     const usingVertexFromEnv =
-      isTruthyEnvFlag(env["GOOGLE_GENAI_USE_VERTEXAI"]) || settings?.selectedAuthType === "vertex-ai";
+      isTruthyEnvFlag(env["GOOGLE_GENAI_USE_VERTEXAI"]) || settingsMode === "vertex-ai";
     if (nonEmpty(env["GOOGLE_API_KEY"]) && usingVertexFromEnv) {
       return readyStep(cmd, "vertex_api_key");
     }
 
-    // 3. Vertex ADC / service account
+    // 3. Vertex ADC / service account.
+    //    GOOGLE_CLOUD_LOCATION defaults to us-central1 in the Vertex SDK/Gemini CLI;
+    //    only GOOGLE_CLOUD_PROJECT + credentials are strictly required.
     const project = env["GOOGLE_CLOUD_PROJECT"] ?? env["GOOGLE_CLOUD_PROJECT_ID"];
-    const location = env["GOOGLE_CLOUD_LOCATION"];
     const credEnv = env["GOOGLE_APPLICATION_CREDENTIALS"];
     const adcDefault = path.join(home, ".config", "gcloud", "application_default_credentials.json");
-    if (project && location) {
+    if (project) {
       const credPath = credEnv ?? (this.existsFn(adcDefault) ? adcDefault : null);
       if (credPath && this.existsFn(credPath)) {
         return readyStep(cmd, "vertex_adc");
@@ -164,12 +171,22 @@ export class GeminiAdapter implements AgentAdapter {
     }
     if (status === "needs_auth") {
       const command = signInCommandFor("gemini-cli");
+      // Running `gemini` enters an interactive auth flow before opening the REPL.
+      // The user must exit the REPL (Ctrl-D) once signed in, hence requiresAppRestart.
       return command
-        ? { kind: "run_command", command, label: "Sign in to Gemini CLI", requiresAppRestart: true }
+        ? {
+            kind: "run_command",
+            command,
+            label: "Sign in to Gemini CLI (exit REPL when done)",
+            requiresAppRestart: true,
+          }
         : undefined;
     }
     if (status === "misconfigured" || status === "failed") {
-      return { kind: "run_command", command: "gemini", label: "Retry after fixing config", requiresAppRestart: true };
+      const url = installUrlFor("gemini-cli");
+      return url
+        ? { kind: "install_url", url, label: "Review Gemini CLI auth setup", requiresAppRestart: true }
+        : undefined;
     }
     return undefined;
   }
@@ -178,11 +195,6 @@ export class GeminiAdapter implements AgentAdapter {
 function candidates(): string[] {
   const override = process.env["ORCA_GEMINI_CLI_BIN"];
   return override ? [override] : ["gemini"];
-}
-
-function parseVersion(stdout: string): string | undefined {
-  const m = stdout.match(/(\d+\.\d+(?:\.\d+)?)/);
-  return m ? m[1] : undefined;
 }
 
 function nonEmpty(v: string | undefined): boolean {

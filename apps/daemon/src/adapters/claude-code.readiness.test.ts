@@ -108,6 +108,38 @@ describe("ClaudeCodeAdapter.checkAuth", () => {
     await adapter(run).checkAuth();
     expect(run).toHaveBeenCalledWith("/usr/bin/claude", ["auth", "status", "--json"], expect.anything());
   });
+
+  it("passes cred env vars (HOME etc.) to the child", async () => {
+    const prevHome = process.env["HOME"];
+    process.env["HOME"] = "/home/test-user";
+    try {
+      const run = vi.fn().mockResolvedValue({
+        exitCode: 0,
+        stdout: '{"loggedIn":true}',
+        stderr: "",
+        durationMs: 1,
+        timedOut: false,
+      });
+      await adapter(run).checkAuth();
+      const opts = run.mock.calls[0][2] as { env?: Record<string, string> };
+      expect(opts?.env?.["HOME"]).toBe("/home/test-user");
+    } finally {
+      if (prevHome === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = prevHome;
+    }
+  });
+
+  it("parses JSON when a banner precedes the object", async () => {
+    const run = vi.fn().mockResolvedValue({
+      exitCode: 0,
+      stdout: 'Update available: 1.2.4\n{"loggedIn":true,"account":"user@example.com"}\n',
+      stderr: "",
+      durationMs: 1,
+      timedOut: false,
+    });
+    const step = await adapter(run).checkAuth();
+    expect(step.authStatus).toBe("ready");
+  });
 });
 
 describe("ClaudeCodeAdapter.repairFor", () => {
