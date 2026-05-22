@@ -117,6 +117,169 @@ const extraction = {
   finishedAt: null,
 };
 
+const taskGeneration = {
+  id: "tg-1",
+  goalId: "goal-1",
+  trigger: "manual" as const,
+  triggerSourceId: null,
+  generatorId: "orca-task-generator",
+  generatorVersion: "1.0.0",
+  inputFingerprint: "input-fp-1",
+  requestFingerprint: "request-fp-1",
+  status: "succeeded" as const,
+  failureCode: null,
+  failureMessage: null,
+  sparse: false,
+  requestedAt: now,
+  startedAt: now,
+  finishedAt: now,
+};
+
+const task = {
+  id: "task-1",
+  goalId: "goal-1",
+  parentTaskId: null,
+  workspaceId: "ws-1",
+  role: "engineer" as const,
+  status: "open" as const,
+  origin: "generator" as const,
+  title: "Implement desktop wrappers",
+  description: "Add typed wrappers and tests for M7 endpoints.",
+  acceptanceCriteria: [{ id: "ac-1", text: "All wrappers parse responses" }],
+  validationSteps: [{ id: "vs-1", text: "Run desktop tests", kind: "test" as const }],
+  dependencies: [],
+  sources: [{ type: "refinement" as const, id: "ref-1", reason: "Derived from refinement" }],
+  generationId: "tg-1",
+  fingerprint: "task-fp-1",
+  createdAt: now,
+  updatedAt: now,
+  archivedAt: null,
+};
+
+const recommendationGeneration = {
+  id: "rg-1",
+  goalId: "goal-1",
+  trigger: "manual" as const,
+  triggerSourceId: "manual",
+  providerId: "orca-recommendation-provider",
+  providerVersion: "1.0.0",
+  inputFingerprint: "input-fp-rec-1",
+  requestFingerprint: "request-fp-rec-1",
+  status: "succeeded" as const,
+  failureCode: null,
+  failureMessage: null,
+  sparse: false,
+  requestedAt: now,
+  startedAt: now,
+  finishedAt: now,
+};
+
+const recommendation = {
+  id: "rec-1",
+  goalId: "goal-1",
+  type: "run_validation" as const,
+  status: "proposed" as const,
+  source: "deterministic_provider" as const,
+  title: "Run validation pass",
+  rationale: "Implementation-like activity was detected.",
+  proposedAction: {
+    kind: "run_validation" as const,
+    taskId: "task-1",
+    suggestedRole: "reviewer" as const,
+    objective: "Run tests and review output",
+  },
+  confidence: 0.82,
+  sources: [{ type: "task" as const, id: "task-1", reason: "Task moved to in_progress" }],
+  relatedTaskId: "task-1",
+  relatedSessionId: null,
+  relatedContextPackageId: null,
+  relatedConflictId: null,
+  generationId: "rg-1",
+  fingerprint: "rec-fp-1",
+  supersededById: null,
+  createdAt: now,
+  updatedAt: now,
+};
+
+const recommendationFeedback = {
+  id: "rf-1",
+  goalId: "goal-1",
+  recommendationId: "rec-1",
+  action: "accept" as const,
+  note: "Looks good",
+  modifiedPayloadJson: null,
+  createdAt: now,
+};
+
+const conflict = {
+  id: "conf-1",
+  goalId: "goal-1",
+  conflictType: "workspace_overlap" as const,
+  severity: "warning" as const,
+  status: "open" as const,
+  title: "Workspace overlap",
+  description: "Two active tasks target the same workspace.",
+  sources: [{ type: "workspace" as const, id: "ws-1", role: "context" as const }],
+  fingerprint: "conf-fp-1",
+  resolutionNote: null,
+  detectedAt: now,
+  resolvedAt: null,
+};
+
+const contextPackage = {
+  id: "pkg-1",
+  goalId: "goal-1",
+  supersedesPackageId: null,
+  adapterId: "shell-manual" as const,
+  workspaceId: "ws-1",
+  taskId: "task-1",
+  fromRecommendationId: "rec-1",
+  role: "engineer" as const,
+  objective: "Implement wrapper and verify",
+  status: "ready" as const,
+  renderedContext: "bounded context",
+  renderedBytes: 15,
+  estimatedTokens: 4,
+  truncated: false,
+  sparse: false,
+  sourceCount: 1,
+  sources: [
+    {
+      type: "goal" as const,
+      id: "goal-1",
+      sourceSessionId: null,
+      label: "Goal",
+      reason: "required" as const,
+      marker: "goal",
+    },
+  ],
+  warnings: [],
+  sourceFingerprint: "ctx-fp-1",
+  assemblerVersion: "m6-deterministic-v1",
+  createdAt: now,
+};
+
+const contextAssembly = {
+  id: "asm-1",
+  goalId: "goal-1",
+  packageId: "pkg-1",
+  replacePackageId: null,
+  adapterId: "shell-manual" as const,
+  workspaceId: "ws-1",
+  role: "engineer" as const,
+  objectiveHash: "objective-hash",
+  sourceFingerprint: "ctx-fp-1",
+  assemblerVersion: "m6-deterministic-v1",
+  requestFingerprint: "asm-request-fp-1",
+  status: "succeeded" as const,
+  trigger: "prepare" as const,
+  failureCode: null,
+  failureMessage: null,
+  requestedAt: now,
+  startedAt: now,
+  finishedAt: now,
+};
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -433,6 +596,56 @@ describe("desktop api client", () => {
     });
   });
 
+  it("createSession includes task and recommendation association fields when provided", async () => {
+    const session = {
+      id: "sess-linked-1",
+      goalId: "goal-1",
+      workspaceId: "ws-1",
+      adapterId: "shell-manual" as AdapterId,
+      contextPackageId: "pkg-1",
+      taskId: "task-1",
+      fromRecommendationId: "rec-1",
+      role: null,
+      title: "shell-manual session",
+      status: "created" as const,
+      createdAt: now,
+      startedAt: null,
+      exitedAt: null,
+      instruction: null,
+      pid: null,
+      command: null,
+      args: null,
+      cwd: null,
+      terminalCols: null,
+      terminalRows: null,
+      exitCode: null,
+      exitSignal: null,
+      failureReason: null,
+      failureDetail: null,
+      archivedAt: null,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { session }));
+
+    const response = await api.createSession("goal-1", {
+      workspaceId: "ws-1",
+      adapterId: "shell-manual",
+      contextPackageId: "pkg-1",
+      taskId: "task-1",
+      fromRecommendationId: "rec-1",
+    });
+
+    expect(response.session.taskId).toBe("task-1");
+    expect(response.session.fromRecommendationId).toBe("rec-1");
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      workspaceId: "ws-1",
+      adapterId: "shell-manual",
+      contextPackageId: "pkg-1",
+      taskId: "task-1",
+      fromRecommendationId: "rec-1",
+    });
+  });
+
   it("startSession posts to session start endpoint", async () => {
     const session = {
       id: "sess-1",
@@ -657,6 +870,313 @@ describe("desktop api client", () => {
     ).rejects.toMatchObject({
       name: "ApiError",
       code: "workspace_unavailable",
+    });
+  });
+
+  it("createContextPackage includes task and recommendation association fields when provided", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(201, {
+        package: contextPackage,
+        assembly: contextAssembly,
+        reused: false,
+      }),
+    );
+
+    const response = await api.createContextPackage("goal-1", {
+      adapterId: "shell-manual",
+      role: "engineer",
+      objective: "Implement wrapper and verify",
+      workspaceId: "ws-1",
+      taskId: "task-1",
+      fromRecommendationId: "rec-1",
+    });
+
+    expect(response.package?.taskId).toBe("task-1");
+    expect(response.package?.fromRecommendationId).toBe("rec-1");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/context-packages");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      adapterId: "shell-manual",
+      role: "engineer",
+      objective: "Implement wrapper and verify",
+      workspaceId: "ws-1",
+      taskId: "task-1",
+      fromRecommendationId: "rec-1",
+    });
+  });
+
+  it("generateTasks posts manual trigger and parses response", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(202, { generation: taskGeneration }));
+
+    const response = await api.generateTasks("goal-1");
+
+    expect(response.generation.id).toBe("tg-1");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/tasks/generate");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ trigger: "manual" });
+  });
+
+  it("listTasks serializes query and parses task list response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { tasks: [task], generations: [taskGeneration] }),
+    );
+
+    const response = await api.listTasks("goal-1", {
+      status: "open",
+      workspaceId: "ws-1",
+      role: "engineer",
+      parentTaskId: "task-parent",
+      includeArchived: true,
+      limit: 10,
+      cursor: "cursor-1",
+    });
+
+    expect(response.tasks).toHaveLength(1);
+    expect(response.generations).toHaveLength(1);
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(
+      "http://127.0.0.1:8787/v1/goals/goal-1/tasks?status=open&workspaceId=ws-1&role=engineer&parentTaskId=task-parent&includeArchived=true&limit=10&cursor=cursor-1",
+    );
+  });
+
+  it("createTask posts payload and parses response", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { task }));
+
+    const response = await api.createTask("goal-1", {
+      title: "Implement desktop wrappers",
+      description: "Add typed wrappers and tests for M7 endpoints.",
+      role: "engineer",
+      workspaceId: "ws-1",
+      parentTaskId: null,
+      acceptanceCriteria: ["All wrappers parse responses"],
+      validationSteps: [{ text: "Run desktop tests", kind: "test" }],
+      dependencies: [],
+      sources: [{ type: "refinement", id: "ref-1", reason: "Derived from refinement" }],
+    });
+
+    expect(response.task.id).toBe("task-1");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/tasks");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      title: "Implement desktop wrappers",
+      role: "engineer",
+      workspaceId: "ws-1",
+    });
+  });
+
+  it("patchTask maps 409 to ApiError with code", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(409, {
+        error: { code: "invalid_task_status", message: "Task status transition is not allowed" },
+      }),
+    );
+
+    await expect(api.patchTask("task-1", { status: "done" })).rejects.toMatchObject({
+      name: "ApiError",
+      code: "invalid_task_status",
+      message: "Task status transition is not allowed",
+    });
+  });
+
+  it("splitTask posts payload and parses response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        parentTask: { ...task, status: "blocked" },
+        childTasks: [{ ...task, id: "task-2", parentTaskId: "task-1", status: "open" }],
+      }),
+    );
+
+    const response = await api.splitTask("task-1", {
+      children: [
+        {
+          title: "Write wrapper tests",
+          description: "",
+          role: "qa",
+          acceptanceCriteria: [],
+          validationSteps: [],
+          dependencies: [],
+          sources: [],
+        },
+      ],
+      setParentStatus: "blocked",
+    });
+
+    expect(response.parentTask.status).toBe("blocked");
+    expect(response.childTasks[0]?.parentTaskId).toBe("task-1");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/tasks/task-1/split");
+    expect(init?.method).toBe("POST");
+  });
+
+  it("associateTaskWithSession posts session id and parses response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        task: { ...task, status: "in_progress" },
+      }),
+    );
+
+    const response = await api.associateTaskWithSession("task-1", "sess-1");
+
+    expect(response.task.status).toBe("in_progress");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/tasks/task-1/associate-session");
+    expect(JSON.parse(String(init?.body))).toEqual({ sessionId: "sess-1" });
+  });
+
+  it("generateRecommendations posts manual trigger and parses response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(202, { generation: recommendationGeneration }),
+    );
+
+    const response = await api.generateRecommendations("goal-1");
+
+    expect(response.generation.id).toBe("rg-1");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/recommendations/generate");
+    expect(JSON.parse(String(init?.body))).toEqual({ trigger: "manual" });
+  });
+
+  it("listRecommendations serializes query and parses response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        recommendations: [recommendation],
+        generations: [recommendationGeneration],
+      }),
+    );
+
+    const response = await api.listRecommendations("goal-1", {
+      status: "proposed",
+      type: "run_validation",
+      relatedTaskId: "task-1",
+      includeGenerations: false,
+      limit: 20,
+      cursor: "rec-cursor-1",
+    });
+
+    expect(response.recommendations).toHaveLength(1);
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(
+      "http://127.0.0.1:8787/v1/goals/goal-1/recommendations?status=proposed&type=run_validation&relatedTaskId=task-1&limit=20&cursor=rec-cursor-1&includeGenerations=false",
+    );
+  });
+
+  it("getRecommendation maps 404 to ApiError with code", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(404, {
+        error: { code: "recommendation_not_found", message: "Recommendation not found: rec-404" },
+      }),
+    );
+
+    await expect(api.getRecommendation("rec-404")).rejects.toMatchObject({
+      name: "ApiError",
+      code: "recommendation_not_found",
+    });
+  });
+
+  it("acceptRecommendation posts feedback and parses proposedAction response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        recommendation: { ...recommendation, status: "accepted" },
+        proposedAction: recommendation.proposedAction,
+        feedback: recommendationFeedback,
+      }),
+    );
+
+    const response = await api.acceptRecommendation("rec-1", { note: "Proceed" });
+
+    expect(response.recommendation.status).toBe("accepted");
+    expect(response.proposedAction.kind).toBe("run_validation");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/recommendations/rec-1/accept");
+    expect(JSON.parse(String(init?.body))).toEqual({ note: "Proceed" });
+  });
+
+  it("rejectRecommendation maps 409 to ApiError with code", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(409, {
+        error: { code: "invalid_recommendation_status", message: "Recommendation is terminal" },
+      }),
+    );
+
+    await expect(api.rejectRecommendation("rec-1", { note: "Not needed" })).rejects.toMatchObject({
+      name: "ApiError",
+      code: "invalid_recommendation_status",
+    });
+  });
+
+  it("dismissRecommendation posts feedback and parses response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        recommendation: { ...recommendation, status: "dismissed" },
+        feedback: { ...recommendationFeedback, action: "dismiss" },
+      }),
+    );
+
+    const response = await api.dismissRecommendation("rec-1", { note: "Later" });
+
+    expect(response.recommendation.status).toBe("dismissed");
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/recommendations/rec-1/dismiss");
+  });
+
+  it("modifyRecommendation patches and parses response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        recommendation: {
+          ...recommendation,
+          status: "modified",
+          source: "user_modified",
+          title: "Run full validation pass",
+        },
+        feedback: {
+          ...recommendationFeedback,
+          action: "modify",
+          modifiedPayloadJson: JSON.stringify(recommendation.proposedAction),
+        },
+      }),
+    );
+
+    const response = await api.modifyRecommendation("rec-1", {
+      title: "Run full validation pass",
+    });
+
+    expect(response.recommendation.status).toBe("modified");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/recommendations/rec-1");
+    expect(init?.method).toBe("PATCH");
+  });
+
+  it("listConflicts serializes query and parses response", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { conflicts: [conflict] }));
+
+    const response = await api.listConflicts("goal-1", {
+      status: "open",
+      severity: "warning",
+      limit: 5,
+      cursor: "conf-cursor-1",
+    });
+
+    expect(response.conflicts).toHaveLength(1);
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(
+      "http://127.0.0.1:8787/v1/goals/goal-1/conflicts?status=open&severity=warning&limit=5&cursor=conf-cursor-1",
+    );
+  });
+
+  it("resolveConflict posts request and maps 404 to ApiError with code", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(404, {
+        error: { code: "conflict_not_found", message: "Conflict not found: conf-404" },
+      }),
+    );
+
+    await expect(
+      api.resolveConflict("conf-404", { resolution: "resolved", note: "Handled manually" }),
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      code: "conflict_not_found",
     });
   });
 });

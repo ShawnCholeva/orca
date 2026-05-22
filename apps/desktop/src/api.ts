@@ -1,5 +1,9 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
+  AcceptRecommendationResponse,
+  ArchiveGoalResponse,
+  AssociateTaskSessionRequest,
+  AssociateTaskSessionResponse,
   AttachWorkspaceRequest,
   AttachWorkspaceResponse,
   CreateContextPackageRequest,
@@ -10,8 +14,12 @@ import {
   CreateGoalResponse,
   CreateSessionRequest,
   CreateSessionResponse,
+  CreateTaskRequest,
+  CreateTaskResponse,
+  DismissRecommendationResponse,
   DomainEvent,
   ExtractSessionMemoryResponse,
+  GetRecommendationResponse,
   GetContextPackageResponse,
   GetSessionResponse,
   GetSessionMemorySummaryResponse,
@@ -21,6 +29,8 @@ import {
   HealthResponse,
   InspectWorkspaceRequest,
   InspectWorkspaceResponse,
+  ListConflictsQuery,
+  ListConflictsResponse,
   ListAdaptersResponse,
   ListContextPackagesQuery,
   ListContextPackagesResponse,
@@ -28,22 +38,39 @@ import {
   ListGoalMemoryResponse,
   ListGoalsResponse,
   ListPluginsResponse,
+  ListRecommendationsQuery,
+  ListRecommendationsResponse,
   ListSessionsResponse,
   ListSkillsResponse,
+  ListTasksQuery,
+  ListTasksResponse,
   MemoryExtraction,
+  ModifyRecommendationRequest,
+  ModifyRecommendationResponse,
   PatchGoalDecisionRequest,
   PatchGoalMemoryRequest,
+  RecommendationFeedbackRequest,
+  RecommendationGenerationRequest,
+  RecommendationGenerationResponse,
+  RejectRecommendationResponse,
   RefineGoalRequest,
   RefineGoalResponse,
+  ResolveConflictRequest,
+  ResolveConflictResponse,
   SessionErrorFrame,
   SessionMemorySummary,
   SessionOutputFrame,
+  SplitTaskRequest,
+  SplitTaskResponse,
   StartSessionRequest,
   StartSessionResponse,
   StopSessionResponse,
+  TaskGenerationRequest,
+  TaskGenerationResponse,
+  UpdateTaskRequest,
+  UpdateTaskResponse,
   UpdateGoalRequest,
   UpdateGoalResponse,
-  ArchiveGoalResponse,
   type PluginSummary,
   type SessionErrorFrame as SessionErrorFrameData,
   type SessionInputFrame as SessionInputFrameData,
@@ -52,6 +79,36 @@ import {
   type SessionSubscribeFrame as SessionSubscribeFrameData,
   type SessionUnsubscribeFrame as SessionUnsubscribeFrameData,
   type SkillSummary,
+} from "@orca/contracts";
+
+export type {
+  AcceptRecommendationResponse,
+  AssociateTaskSessionResponse,
+  Conflict,
+  CreateTaskRequest,
+  CreateTaskResponse,
+  DismissRecommendationResponse,
+  GetRecommendationResponse,
+  ListConflictsQuery,
+  ListConflictsResponse,
+  ListRecommendationsQuery,
+  ListRecommendationsResponse,
+  ListTasksQuery,
+  ListTasksResponse,
+  ModifyRecommendationRequest,
+  ModifyRecommendationResponse,
+  Recommendation,
+  RecommendationFeedbackRequest,
+  RecommendationGenerationResponse,
+  RejectRecommendationResponse,
+  ResolveConflictRequest,
+  ResolveConflictResponse,
+  SplitTaskRequest,
+  SplitTaskResponse,
+  Task,
+  TaskGenerationResponse,
+  UpdateTaskRequest,
+  UpdateTaskResponse,
 } from "@orca/contracts";
 
 interface Config {
@@ -581,6 +638,335 @@ export async function createContextPackage(
     },
     CreateContextPackageResponse,
     "Create context package failed",
+  );
+}
+
+export async function generateTasks(
+  goalId: string,
+): Promise<TaskGenerationResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/tasks/generate`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(TaskGenerationRequest.parse({ trigger: "manual" })),
+    },
+    TaskGenerationResponse,
+    "Generate tasks failed",
+  );
+}
+
+export async function listTasks(
+  goalId: string,
+  query?: ListTasksQuery,
+): Promise<ListTasksResponse> {
+  const { baseUrl, token } = await loadConfig();
+  const parsed = ListTasksQuery.parse(query ?? {});
+  const url = new URL(`${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/tasks`);
+  if (parsed.status !== undefined) {
+    url.searchParams.set("status", parsed.status);
+  }
+  if (parsed.workspaceId !== undefined) {
+    url.searchParams.set("workspaceId", parsed.workspaceId);
+  }
+  if (parsed.role !== undefined) {
+    url.searchParams.set("role", parsed.role);
+  }
+  if (parsed.parentTaskId !== undefined) {
+    url.searchParams.set("parentTaskId", parsed.parentTaskId);
+  }
+  if (query?.includeArchived !== undefined) {
+    url.searchParams.set("includeArchived", String(parsed.includeArchived));
+  }
+  if (query?.limit !== undefined) {
+    url.searchParams.set("limit", String(parsed.limit));
+  }
+  if (parsed.cursor !== undefined) {
+    url.searchParams.set("cursor", parsed.cursor);
+  }
+
+  return requestJson(
+    url.toString(),
+    { headers: authHeaders(token) },
+    ListTasksResponse,
+    "List tasks failed",
+  );
+}
+
+export async function createTask(
+  goalId: string,
+  body: CreateTaskRequest,
+): Promise<CreateTaskResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/tasks`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(CreateTaskRequest.parse(body)),
+    },
+    CreateTaskResponse,
+    "Create task failed",
+  );
+}
+
+export async function patchTask(
+  id: string,
+  patch: UpdateTaskRequest,
+): Promise<UpdateTaskResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/tasks/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(UpdateTaskRequest.parse(patch)),
+    },
+    UpdateTaskResponse,
+    "Patch task failed",
+  );
+}
+
+export async function splitTask(
+  id: string,
+  body: SplitTaskRequest,
+): Promise<SplitTaskResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/tasks/${encodeURIComponent(id)}/split`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(SplitTaskRequest.parse(body)),
+    },
+    SplitTaskResponse,
+    "Split task failed",
+  );
+}
+
+export async function associateTaskWithSession(
+  id: string,
+  sessionId: string,
+): Promise<AssociateTaskSessionResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/tasks/${encodeURIComponent(id)}/associate-session`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(AssociateTaskSessionRequest.parse({ sessionId })),
+    },
+    AssociateTaskSessionResponse,
+    "Associate task with session failed",
+  );
+}
+
+export async function generateRecommendations(
+  goalId: string,
+): Promise<RecommendationGenerationResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/recommendations/generate`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(RecommendationGenerationRequest.parse({ trigger: "manual" })),
+    },
+    RecommendationGenerationResponse,
+    "Generate recommendations failed",
+  );
+}
+
+export async function listRecommendations(
+  goalId: string,
+  query?: ListRecommendationsQuery,
+): Promise<ListRecommendationsResponse> {
+  const { baseUrl, token } = await loadConfig();
+  const parsed = ListRecommendationsQuery.parse(query ?? {});
+  const url = new URL(`${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/recommendations`);
+  if (parsed.status !== undefined) {
+    url.searchParams.set("status", parsed.status);
+  }
+  if (parsed.type !== undefined) {
+    url.searchParams.set("type", parsed.type);
+  }
+  if (parsed.relatedTaskId !== undefined) {
+    url.searchParams.set("relatedTaskId", parsed.relatedTaskId);
+  }
+  if (query?.limit !== undefined) {
+    url.searchParams.set("limit", String(parsed.limit));
+  }
+  if (parsed.cursor !== undefined) {
+    url.searchParams.set("cursor", parsed.cursor);
+  }
+  if (query?.includeGenerations !== undefined) {
+    url.searchParams.set("includeGenerations", String(parsed.includeGenerations));
+  }
+
+  return requestJson(
+    url.toString(),
+    { headers: authHeaders(token) },
+    ListRecommendationsResponse,
+    "List recommendations failed",
+  );
+}
+
+export async function getRecommendation(
+  id: string,
+): Promise<GetRecommendationResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/recommendations/${encodeURIComponent(id)}`,
+    { headers: authHeaders(token) },
+    GetRecommendationResponse,
+    "Get recommendation failed",
+  );
+}
+
+export async function acceptRecommendation(
+  id: string,
+  body: RecommendationFeedbackRequest,
+): Promise<AcceptRecommendationResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/recommendations/${encodeURIComponent(id)}/accept`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(RecommendationFeedbackRequest.parse(body)),
+    },
+    AcceptRecommendationResponse,
+    "Accept recommendation failed",
+  );
+}
+
+export async function rejectRecommendation(
+  id: string,
+  body: RecommendationFeedbackRequest,
+): Promise<RejectRecommendationResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/recommendations/${encodeURIComponent(id)}/reject`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(RecommendationFeedbackRequest.parse(body)),
+    },
+    RejectRecommendationResponse,
+    "Reject recommendation failed",
+  );
+}
+
+export async function dismissRecommendation(
+  id: string,
+  body: RecommendationFeedbackRequest,
+): Promise<DismissRecommendationResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/recommendations/${encodeURIComponent(id)}/dismiss`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(RecommendationFeedbackRequest.parse(body)),
+    },
+    DismissRecommendationResponse,
+    "Dismiss recommendation failed",
+  );
+}
+
+export async function modifyRecommendation(
+  id: string,
+  patch: ModifyRecommendationRequest,
+): Promise<ModifyRecommendationResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/recommendations/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(ModifyRecommendationRequest.parse(patch)),
+    },
+    ModifyRecommendationResponse,
+    "Modify recommendation failed",
+  );
+}
+
+export async function listConflicts(
+  goalId: string,
+  query?: ListConflictsQuery,
+): Promise<ListConflictsResponse> {
+  const { baseUrl, token } = await loadConfig();
+  const parsed = ListConflictsQuery.parse(query ?? {});
+  const url = new URL(`${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/conflicts`);
+  if (query?.status !== undefined) {
+    url.searchParams.set("status", parsed.status);
+  }
+  if (parsed.severity !== undefined) {
+    url.searchParams.set("severity", parsed.severity);
+  }
+  if (query?.limit !== undefined) {
+    url.searchParams.set("limit", String(parsed.limit));
+  }
+  if (parsed.cursor !== undefined) {
+    url.searchParams.set("cursor", parsed.cursor);
+  }
+
+  return requestJson(
+    url.toString(),
+    { headers: authHeaders(token) },
+    ListConflictsResponse,
+    "List conflicts failed",
+  );
+}
+
+export async function resolveConflict(
+  id: string,
+  body: ResolveConflictRequest,
+): Promise<ResolveConflictResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/conflicts/${encodeURIComponent(id)}/resolve`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(ResolveConflictRequest.parse(body)),
+    },
+    ResolveConflictResponse,
+    "Resolve conflict failed",
   );
 }
 
