@@ -2,9 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   AdapterId,
+  Agent,
+  AgentReadinessReport,
+  AgentReadinessStatus,
   AdapterSummary,
+  AuthStatus,
   AttachWorkspaceRequest,
   AttachWorkspaceResponse,
+  CheckReadinessAllResponse,
+  CheckReadinessOneResponse,
+  CheckStep,
   CreateGoalDecisionRequest,
   CreateGoalMemoryRequest,
   CreateContextPackageRequest,
@@ -65,6 +72,7 @@ import {
   MemoryItemUpdatedEventPayload,
   PatchGoalDecisionRequest,
   PatchGoalMemoryRequest,
+  RepairAction,
   RefineGoalRequest,
   RefineGoalResponse,
   SessionDetail,
@@ -264,6 +272,116 @@ describe("goal refinement and workspace contracts", () => {
 
   it("keeps existing Goal schema compatible", () => {
     expectRoundTrip(Goal.parse, goalFixture, goalFixture);
+  });
+});
+
+describe("AdapterId now includes gemini-cli", () => {
+  it("accepts gemini-cli", () => {
+    expect(AdapterId.parse("gemini-cli")).toBe("gemini-cli");
+  });
+});
+
+describe("agent readiness contracts", () => {
+  it("accepts every persisted status", () => {
+    for (const s of ["unchecked", "ready", "missing", "needs_auth", "misconfigured", "failed"] as const) {
+      expect(AgentReadinessStatus.parse(s)).toBe(s);
+    }
+  });
+
+  it("rejects the transient 'checking' status (UI-only)", () => {
+    expect(() => AgentReadinessStatus.parse("checking")).toThrow();
+  });
+
+  it("AuthStatus is a closed union of three values", () => {
+    for (const s of ["ready", "needs_auth", "misconfigured"] as const) {
+      expect(AuthStatus.parse(s)).toBe(s);
+    }
+    expect(() => AuthStatus.parse("ok")).toThrow();
+  });
+
+  it("CheckStep validates a minimal install step", () => {
+    expect(
+      CheckStep.parse({ name: "installed", ok: true, command: "claude --version" })
+    ).toMatchObject({ name: "installed", ok: true });
+  });
+
+  it("CheckStep requires authStatus only on authenticated steps", () => {
+    // install step with no authStatus passes
+    expect(CheckStep.parse({ name: "installed", ok: false, command: "claude --version" })).toBeDefined();
+    // auth step with authStatus passes
+    expect(
+      CheckStep.parse({
+        name: "authenticated",
+        ok: true,
+        authStatus: "ready",
+        command: "claude auth status --json"
+      })
+    ).toBeDefined();
+  });
+
+  it("RepairAction.run_command requires `command`", () => {
+    expect(() =>
+      RepairAction.parse({ kind: "run_command", label: "Sign in" })
+    ).toThrow();
+    expect(
+      RepairAction.parse({ kind: "run_command", command: "claude auth login", label: "Sign in" })
+    ).toBeDefined();
+  });
+
+  it("RepairAction.install_url requires `url`", () => {
+    expect(() => RepairAction.parse({ kind: "install_url", label: "Install" })).toThrow();
+    expect(
+      RepairAction.parse({ kind: "install_url", url: "https://example.invalid", label: "Install" })
+    ).toBeDefined();
+  });
+
+  it("AgentReadinessReport round-trips", () => {
+    const r = {
+      agentId: "claude-code",
+      status: "ready" as const,
+      steps: [
+        { name: "installed" as const, ok: true, command: "claude --version" },
+        { name: "authenticated" as const, ok: true, authStatus: "ready" as const, command: "claude auth status --json" }
+      ],
+      checkedAt: "2026-05-22T00:00:00.000Z",
+      version: "1.2.3"
+    };
+    expect(AgentReadinessReport.parse(r)).toEqual(r);
+  });
+
+  it("CheckReadinessAllResponse wraps an array of reports", () => {
+    expect(CheckReadinessAllResponse.parse({ reports: [] })).toEqual({ reports: [] });
+  });
+
+  it("CheckReadinessOneResponse wraps a single report", () => {
+    const report = {
+      agentId: "codex",
+      status: "needs_auth" as const,
+      steps: [
+        { name: "installed" as const, ok: true, command: "codex --version" },
+        { name: "authenticated" as const, ok: false, authStatus: "needs_auth" as const, command: "codex login status" }
+      ],
+      repair: { kind: "run_command" as const, command: "codex login", label: "Sign in to Codex" },
+      checkedAt: "2026-05-22T00:00:00.000Z"
+    };
+    expect(CheckReadinessOneResponse.parse({ report })).toEqual({ report });
+  });
+
+  it("Agent schema accepts an optional readiness field", () => {
+    const base = {
+      id: "claude-code",
+      name: "Claude Code",
+      shortLabel: "x",
+      description: "x",
+      swatch: "#000",
+      recommended: true,
+      connected: true,
+      sortOrder: 10,
+      createdAt: "2026-05-22T00:00:00.000Z",
+      updatedAt: "2026-05-22T00:00:00.000Z"
+    };
+    expect(Agent.parse(base)).toBeDefined();
+    expect(Agent.parse({ ...base, readiness: null })).toBeDefined();
   });
 });
 

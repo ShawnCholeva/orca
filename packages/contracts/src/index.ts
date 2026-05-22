@@ -354,7 +354,7 @@ export const SessionFailureReason = z.enum([
 ]);
 export type SessionFailureReason = z.infer<typeof SessionFailureReason>;
 
-export const AdapterId = z.enum(["shell-manual", "claude-code", "opencode", "codex"]);
+export const AdapterId = z.enum(["shell-manual", "claude-code", "opencode", "codex", "gemini-cli"]);
 export type AdapterId = z.infer<typeof AdapterId>;
 
 export const ContextRole = z.enum([
@@ -2741,6 +2741,62 @@ export const ListEventsResponse = z.object({
 });
 export type ListEventsResponse = z.infer<typeof ListEventsResponse>;
 
+// ---------- agent readiness ----------
+
+export const AgentReadinessStatus = z.enum([
+  "unchecked",
+  "ready",
+  "missing",
+  "needs_auth",
+  "misconfigured",
+  "failed"
+]);
+export type AgentReadinessStatus = z.infer<typeof AgentReadinessStatus>;
+
+export const AuthStatus = z.enum(["ready", "needs_auth", "misconfigured"]);
+export type AuthStatus = z.infer<typeof AuthStatus>;
+
+export const CheckStep = z.object({
+  name: z.enum(["installed", "authenticated"]),
+  ok: z.boolean(),
+  authStatus: AuthStatus.optional(),
+  command: z.string(),
+  exitCode: z.number().int().optional(),
+  detail: z.string().optional(),
+  errorOutput: z.string().optional()
+});
+export type CheckStep = z.infer<typeof CheckStep>;
+
+export const RepairAction = z
+  .object({
+    kind: z.enum(["run_command", "install_url"]),
+    command: z.string().optional(),
+    url: z.string().url().optional(),
+    label: z.string(),
+    requiresAppRestart: z.boolean().optional()
+  })
+  .superRefine((v, ctx) => {
+    if (v.kind === "run_command" && !v.command) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "run_command requires command" });
+    }
+    if (v.kind === "install_url" && !v.url) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "install_url requires url" });
+    }
+  });
+export type RepairAction = z.infer<typeof RepairAction>;
+
+export const AgentReadinessReport = z.object({
+  agentId: z.string(),
+  status: AgentReadinessStatus,
+  steps: z.array(CheckStep),
+  repair: RepairAction.optional(),
+  checkedAt: z.string().datetime(),
+  version: z.string().optional()
+});
+export type AgentReadinessReport = z.infer<typeof AgentReadinessReport>;
+
+// ---------- agents ----------
+
 export const Agent = z.object({
   id: z.string(),
   name: z.string(),
@@ -2751,7 +2807,8 @@ export const Agent = z.object({
   connected: z.boolean(),
   sortOrder: z.number().int(),
   createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime()
+  updatedAt: z.string().datetime(),
+  readiness: AgentReadinessReport.nullish()
 });
 export type Agent = z.infer<typeof Agent>;
 
@@ -2769,3 +2826,11 @@ export const UpdateAgentResponse = z.object({
   agent: Agent
 });
 export type UpdateAgentResponse = z.infer<typeof UpdateAgentResponse>;
+
+export const CheckReadinessAllResponse = z.object({
+  reports: z.array(AgentReadinessReport)
+});
+export type CheckReadinessAllResponse = z.infer<typeof CheckReadinessAllResponse>;
+
+export const CheckReadinessOneResponse = z.object({ report: AgentReadinessReport });
+export type CheckReadinessOneResponse = z.infer<typeof CheckReadinessOneResponse>;
