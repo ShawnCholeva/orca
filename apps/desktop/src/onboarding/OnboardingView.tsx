@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Agent } from "@orca/contracts";
-import { listAgents, updateAgentConnection } from "../api";
+import { listAgents, updateAgentConnection, runReadinessCheck, runReadinessCheckForAgent } from "../api";
+import { ReadinessPanel } from "./ReadinessPanel";
+import { openExternal } from "../utils/openExternal";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -29,7 +31,8 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [, setSaving] = useState(false);
+  const [readinessState, setReadinessState] = useState({ readyCount: 0, settled: false });
+  const [connectionsSaved, setConnectionsSaved] = useState(false);
   const { theme } = useTheme();
   const mode = theme.mode;
 
@@ -71,33 +74,27 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
   useEffect(() => {
     if (step !== 2) return;
     let cancelled = false;
-    setSaving(true);
+    setConnectionsSaved(false);
+    setReadinessState({ readyCount: 0, settled: false });
     (async () => {
       try {
-        // Persist every agent's connection state (covers both newly-selected
-        // and newly-deselected agents on re-onboarding).
-        await Promise.all(
-          agents.map((a) =>
-            updateAgentConnection(a.id, !!selected[a.id]).catch((err) => {
-              throw err;
-            }),
-          ),
+        const updated = await Promise.all(
+          agents.map((a) => updateAgentConnection(a.id, !!selected[a.id])),
         );
         if (cancelled) return;
-        const ids = agents.filter((a) => selected[a.id]).map((a) => a.id);
-        // Brief settle delay so the "Preparing your workspace" screen reads
-        // as deliberate setup rather than a flicker.
-        setTimeout(() => { if (!cancelled) onComplete(ids); }, 800);
+        setAgents(updated);
+        setConnectionsSaved(true);
       } catch (err) {
         if (cancelled) return;
         setLoadError(err instanceof Error ? err.message : "Failed to save selections");
         setStep(1);
-      } finally {
-        if (!cancelled) setSaving(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [step, agents, selected, onComplete]);
+    // Run once when entering step 2. `agents` and `selected` are captured from the
+    // user's step-1 choices; including `agents` would loop after `setAgents(updated)`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   return (
     <div className="onboarding-root" data-testid="onboarding-root">
@@ -190,7 +187,20 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
               <AgentGrid agents={agents} selected={selected} onToggle={toggle} />
             </div>
           )}
-          {step === 2 && <SetupPanel />}
+          {step === 2 && !connectionsSaved && (
+            <div className="agent-grid-center">
+              <span className="mono onboarding-footer-meta">Saving agent selections…</span>
+            </div>
+          )}
+          {step === 2 && connectionsSaved && (
+            <ReadinessPanel
+              agents={agents.filter((a) => selected[a.id] && a.connected)}
+              runAll={runReadinessCheck}
+              runOne={runReadinessCheckForAgent}
+              onOpenUrl={openExternal}
+              onChange={setReadinessState}
+            />
+          )}
         </div>
 
         <footer className="onboarding-footer">
@@ -232,9 +242,35 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
             </button>
           )}
           {step === 2 && (
-            <span className="mono onboarding-footer-meta">
-              Please wait — this only happens once
-            </span>
+            <>
+              <button
+                type="button"
+                className="ob-btn ob-btn--quiet"
+                onClick={() => setStep(1)}
+              >
+                <ChevronLeftIcon />
+                Back
+              </button>
+              <div style={{ flex: 1 }} />
+              {readinessState.settled && readinessState.readyCount === 0 && (
+                <button
+                  type="button"
+                  className="ob-btn ob-btn--secondary"
+                  onClick={() => onComplete(agents.filter((a) => selected[a.id]).map((a) => a.id))}
+                >
+                  Continue anyway
+                </button>
+              )}
+              <button
+                type="button"
+                className="ob-btn ob-btn--primary"
+                onClick={() => onComplete(agents.filter((a) => selected[a.id]).map((a) => a.id))}
+                disabled={!readinessState.settled || readinessState.readyCount === 0}
+              >
+                Continue
+                <ArrowRightIcon />
+              </button>
+            </>
           )}
         </footer>
       </main>
@@ -346,11 +382,3 @@ function AgentCard({
   );
 }
 
-function SetupPanel() {
-  return (
-    <div className="setup-panel">
-      <div className="setup-spinner" aria-hidden="true" />
-      <span className="mono setup-status">Initializing Orca</span>
-    </div>
-  );
-}

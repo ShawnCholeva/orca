@@ -32,6 +32,8 @@ const SEED_AGENTS: Agent[] = [
 vi.mock("../api", () => ({
   listAgents: vi.fn(),
   updateAgentConnection: vi.fn(),
+  runReadinessCheck: vi.fn(),
+  runReadinessCheckForAgent: vi.fn(),
 }));
 
 import * as api from "../api";
@@ -48,6 +50,13 @@ describe("OnboardingView", () => {
       connected,
       updatedAt: NOW,
     }));
+    vi.mocked(api.runReadinessCheck).mockResolvedValue([]);
+    vi.mocked(api.runReadinessCheckForAgent).mockResolvedValue({
+      agentId: "claude-code",
+      status: "ready",
+      steps: [],
+      checkedAt: NOW,
+    });
   });
 
   afterEach(() => {
@@ -122,6 +131,10 @@ describe("OnboardingView", () => {
   });
 
   it("persists selections via updateAgentConnection then calls onComplete", async () => {
+    vi.mocked(api.runReadinessCheck).mockResolvedValue([
+      { agentId: "claude-code", status: "ready", steps: [], checkedAt: NOW, version: "1.0.0" },
+      { agentId: "codex", status: "ready", steps: [], checkedAt: NOW, version: "1.0.0" },
+    ]);
     const onComplete = vi.fn();
     await render(onComplete);
     clickByText("Get started");
@@ -137,9 +150,9 @@ describe("OnboardingView", () => {
     clickByText("Continue");
     expect(container.textContent).toContain("Preparing your workspace");
 
-    // Flush the parallel PATCH calls.
-    await act(async () => { await Promise.resolve(); });
-    await act(async () => { await Promise.resolve(); });
+    // Flush the parallel PATCH calls then ReadinessPanel initialization.
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
     expect(api.updateAgentConnection).toHaveBeenCalledTimes(SEED_AGENTS.length);
     expect(api.updateAgentConnection).toHaveBeenCalledWith("claude-code", true);
@@ -147,9 +160,52 @@ describe("OnboardingView", () => {
     expect(api.updateAgentConnection).toHaveBeenCalledWith("gemini-cli", false);
     expect(api.updateAgentConnection).toHaveBeenCalledWith("opencode", false);
 
-    // Wait out the 800ms settle timer.
-    await new Promise((r) => setTimeout(r, 900));
+    // Continue is now enabled since readyCount > 0.
+    const continueBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Continue",
+    ) as HTMLButtonElement;
+    expect(continueBtn.disabled).toBe(false);
+    act(() => { continueBtn.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(onComplete.mock.calls[0][0]).toEqual(["claude-code", "codex"]);
+  });
+
+  it("step 2 mounts the readiness panel and disables Continue until ≥1 ready", async () => {
+    vi.mocked(api.runReadinessCheck).mockResolvedValue([
+      { agentId: "claude-code", status: "needs_auth", steps: [], repair: { kind: "run_command", command: "claude auth login", label: "Sign in" }, checkedAt: "2026-05-22T00:00:00.000Z" },
+    ]);
+    await render(vi.fn());
+    clickByText("Get started");
+    act(() => {
+      (container.querySelector('button[data-agent-id="claude-code"]') as HTMLButtonElement)
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    clickByText("Continue");
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(api.runReadinessCheck).toHaveBeenCalled();
+    const cont = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Continue",
+    ) as HTMLButtonElement;
+    expect(cont.disabled).toBe(true);
+  });
+
+  it("when 0 ready and all settled, shows 'Continue anyway'", async () => {
+    vi.mocked(api.runReadinessCheck).mockResolvedValue([
+      { agentId: "claude-code", status: "missing", steps: [], checkedAt: "2026-05-22T00:00:00.000Z" },
+    ]);
+    const onComplete = vi.fn();
+    await render(onComplete);
+    clickByText("Get started");
+    act(() => {
+      (container.querySelector('button[data-agent-id="claude-code"]') as HTMLButtonElement)
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    clickByText("Continue");
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    clickByText("Continue anyway");
+    expect(onComplete).toHaveBeenCalled();
   });
 });

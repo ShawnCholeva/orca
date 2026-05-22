@@ -228,6 +228,16 @@
   background: rgba(255,255,255,0.07);
 }
 
+.ob-btn--secondary {
+  background: rgba(255,255,255,0.08);
+  color: var(--text);
+  border-color: var(--hairline-strong);
+}
+
+.ob-btn--secondary:hover:not(:disabled) {
+  background: rgba(255,255,255,0.12);
+}
+
 .ob-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -398,30 +408,3 @@
   white-space: nowrap;
 }
 
-/* ── Setup spinner ────────────────────────────────────── */
-.setup-panel {
-  min-height: 480px;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 18px;
-  padding: 40px;
-}
-
-.setup-spinner {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  border: 3px solid var(--hairline-strong);
-  border-top-color: var(--accent);
-  animation: orca-spin 0.9s linear infinite;
-}
-
-.setup-status {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.7rem;
-  letter-spacing: 0.4px;
-  color: var(--text-2);
-}

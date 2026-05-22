@@ -147,6 +147,7 @@ fn shutdown_daemon(child: &mut Child) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![get_daemon_endpoint])
         .setup(|app| {
             let port = pick_free_port();
