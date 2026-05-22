@@ -1179,4 +1179,48 @@ describe("desktop api client", () => {
       code: "conflict_not_found",
     });
   });
+
+  describe("readiness api", () => {
+    it("runReadinessCheck POSTs and returns reports", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            reports: [
+              {
+                agentId: "claude-code",
+                status: "ready",
+                steps: [],
+                checkedAt: "2026-05-22T00:00:00.000Z",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+      const reports = await api.runReadinessCheck();
+      expect(reports).toHaveLength(1);
+      expect(reports[0].status).toBe("ready");
+    });
+
+    it("runReadinessCheckForAgent POSTs to per-agent endpoint", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            report: {
+              agentId: "codex",
+              status: "needs_auth",
+              steps: [],
+              repair: { kind: "run_command", command: "codex login", label: "Sign in" },
+              checkedAt: "2026-05-22T00:00:00.000Z",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+      const report = await api.runReadinessCheckForAgent("codex");
+      expect(report.status).toBe("needs_auth");
+      const call = fetchMock.mock.calls[0][0];
+      expect(call).toContain("/v1/agents/codex/readiness:check");
+    });
+  });
 });

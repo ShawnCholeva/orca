@@ -9,6 +9,8 @@ import {
   AssociateTaskSessionResponse,
   AttachWorkspaceRequest,
   AttachWorkspaceResponse,
+  CheckReadinessAllResponse,
+  CheckReadinessOneResponse,
   CreateContextPackageRequest,
   CreateContextPackageResponse,
   CreateGoalDecisionRequest,
@@ -74,6 +76,7 @@ import {
   UpdateTaskResponse,
   UpdateGoalRequest,
   UpdateGoalResponse,
+  type AgentReadinessReport,
   type PluginSummary,
   type SessionErrorFrame as SessionErrorFrameData,
   type SessionInputFrame as SessionInputFrameData,
@@ -337,6 +340,30 @@ export async function updateAgentConnection(id: string, connected: boolean): Pro
     `Update agent ${id} failed`,
   );
   return body.agent;
+}
+
+export async function runReadinessCheck(): Promise<AgentReadinessReport[]> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/agents/readiness:check`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...authHeaders(token) },
+    body: "{}",
+  });
+  if (!res.ok) throw new ApiError(`Readiness check failed (${res.status})`);
+  const body = await parseResponse(res, CheckReadinessAllResponse);
+  return body.reports;
+}
+
+export async function runReadinessCheckForAgent(id: string): Promise<AgentReadinessReport> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/agents/${encodeURIComponent(id)}/readiness:check`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...authHeaders(token) },
+    body: "{}",
+  });
+  if (!res.ok) throw new ApiError(`Readiness check for ${id} failed (${res.status})`);
+  const body = await parseResponse(res, CheckReadinessOneResponse);
+  return body.report;
 }
 
 export async function createGoal(
