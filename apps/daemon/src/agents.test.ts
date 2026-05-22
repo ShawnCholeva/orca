@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
+import type { AgentReadinessReport } from "@orca/contracts";
 
 import type { Config } from "./config.js";
 import { closeDatabase, openDatabase } from "./db.js";
@@ -11,6 +12,7 @@ import {
   AgentNotFoundError,
   hasConnectedAgents,
   listAgents,
+  persistReadiness,
   seedAgents,
   setAgentConnected,
 } from "./agents.js";
@@ -112,5 +114,64 @@ describe("agents", () => {
     expect(hasConnectedAgents(db)).toBe(true);
     setAgentConnected(db, "codex", false);
     expect(hasConnectedAgents(db)).toBe(false);
+  });
+});
+
+describe("agents readiness columns", () => {
+  function setup() {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "orca-agents-"));
+    tempDirs.push(dir);
+    const db = openDatabase(createConfig(dir));
+    runMigrations(db, defaultMigrationsDir());
+    seedAgents(db);
+    return { db };
+  }
+
+  it("listAgents surfaces readiness as null when never checked", () => {
+    const { db } = setup(); // setup helper used elsewhere in this file
+    const agents = listAgents(db);
+    for (const a of agents) {
+      expect(a.readiness).toBeNull();
+    }
+  });
+
+  it("persistReadiness writes and listAgents reads back the full report", () => {
+    const { db } = setup();
+    const report: AgentReadinessReport = {
+      agentId: "claude-code",
+      status: "ready",
+      steps: [
+        { name: "installed", ok: true, command: "claude --version" },
+        { name: "authenticated", ok: true, authStatus: "ready", command: "claude auth status --json" },
+      ],
+      checkedAt: "2026-05-22T00:00:00.000Z",
+      version: "1.2.3",
+    };
+    persistReadiness(db, report);
+    const row = listAgents(db).find((a) => a.id === "claude-code")!;
+    expect(row.readiness).toEqual(report);
+  });
+
+  it("persistReadiness overwrites a prior report", () => {
+    const { db } = setup();
+    persistReadiness(db, {
+      agentId: "claude-code",
+      status: "ready",
+      steps: [{ name: "installed", ok: true, command: "claude --version" }],
+      checkedAt: "2026-05-22T00:00:00.000Z",
+    });
+    persistReadiness(db, {
+      agentId: "claude-code",
+      status: "needs_auth",
+      steps: [
+        { name: "installed", ok: true, command: "claude --version" },
+        { name: "authenticated", ok: false, authStatus: "needs_auth", command: "claude auth status --json" },
+      ],
+      repair: { kind: "run_command", command: "claude auth login", label: "Sign in to Claude Code" },
+      checkedAt: "2026-05-22T00:01:00.000Z",
+    });
+    const row = listAgents(db).find((a) => a.id === "claude-code")!;
+    expect(row.readiness?.status).toBe("needs_auth");
+    expect(row.readiness?.repair?.command).toBe("claude auth login");
   });
 });

@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { Agent } from "@orca/contracts";
+import { Agent, AgentReadinessReport, type AgentReadinessReport as Report } from "@orca/contracts";
 
 interface AgentRow {
   id: string;
@@ -12,9 +12,31 @@ interface AgentRow {
   sort_order: number;
   created_at: string;
   updated_at: string;
+  readiness_status: string | null;
+  readiness_checked_at: string | null;
+  readiness_detail: string | null;
+  readiness_repair: string | null;
+  readiness_version: string | null;
 }
 
 function rowToAgent(row: AgentRow): Agent {
+  let readiness: Agent["readiness"] = null;
+  if (row.readiness_status && row.readiness_status !== "unchecked" && row.readiness_checked_at) {
+    try {
+      readiness = AgentReadinessReport.parse({
+        agentId: row.id,
+        status: row.readiness_status,
+        steps: row.readiness_detail ? JSON.parse(row.readiness_detail) : [],
+        repair: row.readiness_repair ? JSON.parse(row.readiness_repair) : undefined,
+        checkedAt: row.readiness_checked_at,
+        version: row.readiness_version ?? undefined,
+      });
+    } catch {
+      // Partial/corrupt persisted readiness - treat as unchecked rather than crash listAgents.
+      readiness = null;
+    }
+  }
+
   return Agent.parse({
     id: row.id,
     name: row.name,
@@ -26,6 +48,7 @@ function rowToAgent(row: AgentRow): Agent {
     sortOrder: row.sort_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    readiness,
   });
 }
 
@@ -128,7 +151,9 @@ export function seedAgents(db: Database.Database, now: string = new Date().toISO
 export function listAgents(db: Database.Database): Agent[] {
   const rows = db
     .prepare(
-      `SELECT id, name, short_label, description, swatch, recommended, connected, sort_order, created_at, updated_at
+      `SELECT id, name, short_label, description, swatch, recommended, connected, sort_order,
+              created_at, updated_at,
+              readiness_status, readiness_checked_at, readiness_detail, readiness_repair, readiness_version
          FROM agents
         ORDER BY sort_order ASC, name ASC`,
     )
@@ -153,7 +178,9 @@ export function setAgentConnected(
 
   const updated = db
     .prepare(
-      `SELECT id, name, short_label, description, swatch, recommended, connected, sort_order, created_at, updated_at
+      `SELECT id, name, short_label, description, swatch, recommended, connected, sort_order,
+              created_at, updated_at,
+              readiness_status, readiness_checked_at, readiness_detail, readiness_repair, readiness_version
          FROM agents WHERE id = ?`,
     )
     .get(id) as AgentRow;
@@ -165,4 +192,29 @@ export function hasConnectedAgents(db: Database.Database): boolean {
     .prepare(`SELECT COUNT(*) AS n FROM agents WHERE connected = 1`)
     .get() as { n: number };
   return row.n > 0;
+}
+
+export function persistReadiness(
+  db: Database.Database,
+  report: Report,
+  now: string = new Date().toISOString(),
+): void {
+  db.prepare(
+    `UPDATE agents
+        SET readiness_status     = @status,
+            readiness_checked_at = @checkedAt,
+            readiness_detail     = @detail,
+            readiness_repair     = @repair,
+            readiness_version    = @version,
+            updated_at           = @now
+      WHERE id = @id`,
+  ).run({
+    status: report.status,
+    checkedAt: report.checkedAt,
+    detail: JSON.stringify(report.steps),
+    repair: report.repair ? JSON.stringify(report.repair) : null,
+    version: report.version ?? null,
+    now,
+    id: report.agentId,
+  });
 }
