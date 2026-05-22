@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { GoalDetailResponse, DomainEventType } from "@orca/contracts";
 import { getGoalDetail, openEventStream } from "../api";
 import { WorkspaceListPanel } from "./WorkspaceListPanel";
+import { TasksPanel } from "./tasks/TasksPanel";
 import { SessionsPanel } from "./sessions/SessionsPanel";
 import { MemoryPanel } from "./memory/MemoryPanel";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
@@ -168,6 +169,8 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           workspaces={workspaces}
           onChanged={() => void loadDetail()}
         />
+
+        <TasksPanel goalId={goalId} workspaces={workspaces} />
 
         <SessionsPanel
           goalId={goalId}
