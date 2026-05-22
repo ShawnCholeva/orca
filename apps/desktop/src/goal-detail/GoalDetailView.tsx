@@ -6,6 +6,7 @@ import { TasksPanel } from "./tasks/TasksPanel";
 import { SessionsPanel } from "./sessions/SessionsPanel";
 import { MemoryPanel } from "./memory/MemoryPanel";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
+import { RecommendationsPanel } from "./recommendations/RecommendationsPanel";
 
 const MEMORY_ITEM_EVENTS = new Set<DomainEventType>([
   "memory.item.created",
@@ -178,6 +179,8 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           sessionsRefreshKey={sessionsRefreshKey}
           summaryRefreshKey={summaryRefreshKey}
         />
+
+        <RecommendationsPanel goalId={goalId} />
 
         <MemoryPanel goalId={goalId} refreshKey={memoryRefreshKey} />
 
