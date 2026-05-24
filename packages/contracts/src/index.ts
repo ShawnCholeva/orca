@@ -1,4 +1,12 @@
 import { z } from "zod";
+import {
+  ModelProviderId,
+  OperatorKind,
+  OrchestratorModelChoice,
+  WorkflowArtifactType
+} from "./workflows/index.js";
+
+export * from "./workflows/index.js";
 
 const UTF8_ENCODER = new TextEncoder();
 
@@ -19,6 +27,9 @@ export const Goal = z.object({
   description: z.string(),
   status: GoalStatus,
   autonomyLevel: z.number().int().default(1),
+  orchestratorProvider: ModelProviderId.nullable().optional(),
+  orchestratorModel: z.string().nullable().optional(),
+  activeWorkflowRunId: z.string().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   archivedAt: z.string().datetime().nullable()
@@ -50,7 +61,8 @@ export const CreateGoalRequest = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(4000).default(""),
   refined: GuidedRefinementOutput.optional(),
-  workspaces: z.array(WorkspaceAttachmentInput).optional()
+  workspaces: z.array(WorkspaceAttachmentInput).optional(),
+  orchestratorModel: OrchestratorModelChoice.optional()
 });
 export type CreateGoalRequest = z.infer<typeof CreateGoalRequest>;
 
@@ -146,7 +158,38 @@ export const DomainEventType = z.enum([
   "conflict.detected",
   "conflict.resolved",
   "conflict.dismissed",
-  "user.feedback.recorded"
+  "user.feedback.recorded",
+  "goal.orchestrator_model_changed",
+  "workflow.template.created",
+  "workflow.template.updated",
+  "workflow.template.duplicated",
+  "workflow.run.started",
+  "workflow.run.paused",
+  "workflow.run.blocked",
+  "workflow.run.completed",
+  "workflow.run.failed",
+  "workflow.run.cancelled",
+  "workflow.step.started",
+  "workflow.step.completed",
+  "workflow.step.blocked",
+  "workflow.step.skipped",
+  "workflow.step.failed",
+  "workflow.artifact.created",
+  "workflow.guardrail.evaluated",
+  "workflow.operator.selected",
+  "workflow.decision.requested",
+  "workflow.decision.recorded",
+  "workflow.user.input.requested",
+  "workflow.user.input.submitted",
+  "workflow.recommendation.created",
+  "workflow.recommendation.accepted",
+  "workflow.recommendation.rejected",
+  "workflow.task.dag.created",
+  "workflow.task.dag.updated",
+  "workflow.validation.run",
+  "workflow.validation.passed",
+  "workflow.validation.failed",
+  "workflow.validation.skipped"
 ]);
 export type DomainEventType = z.infer<typeof DomainEventType>;
 
@@ -458,6 +501,7 @@ export const SessionSummary = z.object({
   contextPackageId: z.string().nullable().optional(),
   taskId: z.string().nullable().optional(),
   fromRecommendationId: z.string().nullable().optional(),
+  workflowStepRunId: z.string().nullable().optional(),
   role: z.string().nullable(),
   title: z.string(),
   status: SessionStatus,
@@ -507,6 +551,7 @@ export const CreateSessionRequest = z
     contextPackageId: z.string().min(1).optional(),
     taskId: z.string().min(1).optional(),
     fromRecommendationId: z.string().min(1).optional(),
+    workflowStepRunId: z.string().min(1).optional(),
     role: z.string().trim().max(100).optional(),
     instruction: z.string().max(4000).optional(),
     title: z.string().trim().min(1).max(200).optional()
@@ -1136,6 +1181,7 @@ export const ContextPackage = z
     workspaceId: z.string().nullable().optional(),
     taskId: z.string().nullable().optional(),
     fromRecommendationId: z.string().nullable().optional(),
+    workflowStepRunId: z.string().nullable().optional(),
     role: ContextRole,
     objective: z.string().max(CONTEXT_PACKAGE_MAX_OBJECTIVE_CHARS),
     status: ContextPackageStatus,
@@ -1197,7 +1243,8 @@ export const CreateContextPackageRequest = z
     workspaceId: z.string().min(1).optional(),
     replacePackageId: z.string().min(1).optional(),
     taskId: z.string().min(1).optional(),
-    fromRecommendationId: z.string().min(1).optional()
+    fromRecommendationId: z.string().min(1).optional(),
+    workflowStepRunId: z.string().min(1).optional()
   })
   .strict();
 export type CreateContextPackageRequest = z.infer<typeof CreateContextPackageRequest>;
@@ -1482,6 +1529,7 @@ export const Task = z
     dependencies: z.array(z.string().min(1)),
     sources: z.array(TaskSourceRef).max(ORCHESTRATION_TASK_MAX_SOURCES),
     generationId: z.string().nullable(),
+    workflowStepRunId: z.string().nullable().optional(),
     fingerprint: z.string(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
@@ -1528,7 +1576,12 @@ export const RecommendationType = z.enum([
   "update_plan",
   "ask_user",
   "mark_complete",
-  "pause_work"
+  "pause_work",
+  "advance_workflow_step",
+  "launch_workflow_session",
+  "complete_workflow_run",
+  "mark_artifact_satisfied",
+  "request_user_input"
 ]);
 export type RecommendationType = z.infer<typeof RecommendationType>;
 
@@ -1711,6 +1764,44 @@ export const ProposedAction = z
         reason: z.string().trim().min(1).max(1024),
         relatedTaskIds: z.array(z.string().min(1)).max(20)
       })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("advance_workflow_step"),
+        workflowRunId: z.string().min(1),
+        workflowStepRunId: z.string().min(1),
+        toStepTemplateId: z.string().min(1).max(100)
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("launch_workflow_session"),
+        workflowStepRunId: z.string().min(1),
+        operatorId: z.string().min(1).max(100),
+        operatorKind: OperatorKind,
+        objective: z.string().trim().min(1).max(CONTEXT_PACKAGE_MAX_OBJECTIVE_CHARS)
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("complete_workflow_run"),
+        workflowRunId: z.string().min(1),
+        workflowStepRunId: z.string().min(1)
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("mark_artifact_satisfied"),
+        workflowStepRunId: z.string().min(1),
+        artifactType: WorkflowArtifactType
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("request_user_input"),
+        workflowStepRunId: z.string().min(1),
+        question: z.string().trim().min(1).max(1024)
+      })
       .strict()
   ])
   .superRefine((value, ctx) => {
@@ -1761,6 +1852,7 @@ export const Recommendation = z
     relatedContextPackageId: z.string().nullable(),
     relatedConflictId: z.string().nullable(),
     generationId: z.string().nullable(),
+    workflowStepRunId: z.string().nullable().optional(),
     fingerprint: z.string(),
     supersededById: z.string().nullable(),
     createdAt: z.string().datetime(),
@@ -2320,7 +2412,8 @@ export const CreateTaskRequest = z
       .max(ORCHESTRATION_TASK_MAX_VALIDATION_STEPS)
       .default([]),
     dependencies: z.array(z.string().min(1)).default([]),
-    sources: z.array(TaskSourceRef).max(ORCHESTRATION_TASK_MAX_SOURCES).default([])
+    sources: z.array(TaskSourceRef).max(ORCHESTRATION_TASK_MAX_SOURCES).default([]),
+    workflowStepRunId: z.string().min(1).optional()
   })
   .strict();
 export type CreateTaskRequest = z.infer<typeof CreateTaskRequest>;
