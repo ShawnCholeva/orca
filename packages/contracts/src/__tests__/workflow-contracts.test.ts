@@ -586,6 +586,15 @@ describe("workflow contracts", () => {
     ).toThrow();
 
     expect(() =>
+      WorkflowTaskDagCreatedEventPayload.parse({
+        workflowRunId: "run-1",
+        stepRunId: "step-run-1",
+        taskIds: Array.from({ length: 50 }, (_, i) => `task-${i}-${repeat("x", 100)}`),
+        count: 50
+      })
+    ).toThrow();
+
+    expect(() =>
       WorkflowEvent.parse({
         type: "workflow.task.dag.created",
         payload: {

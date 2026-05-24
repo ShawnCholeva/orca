@@ -37,6 +37,17 @@ const BoundedString = (maxBytes: number, label: string) =>
     `${label} must be at most ${maxBytes} bytes`
   );
 
+function WorkflowEventPayload<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<T> {
+  return schema.superRefine((payload, ctx) => {
+    if (!hasMaxSerializedBytes(payload, WORKFLOW_EVENT_MAX_PAYLOAD_BYTES)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `workflow event payload must be at most ${WORKFLOW_EVENT_MAX_PAYLOAD_BYTES} bytes when serialized`
+      });
+    }
+  });
+}
+
 export const WorkflowStepGateType = z.enum([
   "automated",
   "human-approval",
@@ -622,76 +633,94 @@ const WorkflowRunLifecyclePayload = z
   })
   .strict();
 
-export const GoalOrchestratorModelChangedEventPayload = z
-  .object({
+export const GoalOrchestratorModelChangedEventPayload = WorkflowEventPayload(
+  z.object({
     providerId: ModelProviderId,
     modelId: z.string().min(1).max(80)
   })
-  .strict();
+    .strict()
+);
 export type GoalOrchestratorModelChangedEventPayload = z.infer<
   typeof GoalOrchestratorModelChangedEventPayload
 >;
 
-export const WorkflowTemplateCreatedEventPayload = z
+const WorkflowTemplateVersionEventPayload = z
   .object({
     templateId: Id100,
     version: z.number().int().nonnegative()
   })
   .strict();
+export const WorkflowTemplateCreatedEventPayload = WorkflowEventPayload(
+  WorkflowTemplateVersionEventPayload
+);
 export type WorkflowTemplateCreatedEventPayload = z.infer<
   typeof WorkflowTemplateCreatedEventPayload
 >;
 
 export const WorkflowTemplateUpdatedEventPayload =
-  WorkflowTemplateCreatedEventPayload;
+  WorkflowEventPayload(WorkflowTemplateVersionEventPayload);
 export type WorkflowTemplateUpdatedEventPayload = z.infer<
   typeof WorkflowTemplateUpdatedEventPayload
 >;
 
-export const WorkflowTemplateDuplicatedEventPayload = z
-  .object({
+export const WorkflowTemplateDuplicatedEventPayload = WorkflowEventPayload(
+  z.object({
     templateId: Id100,
     sourceTemplateId: Id100
   })
-  .strict();
+    .strict()
+);
 export type WorkflowTemplateDuplicatedEventPayload = z.infer<
   typeof WorkflowTemplateDuplicatedEventPayload
 >;
 
-export const WorkflowRunStartedEventPayload = WorkflowRunLifecyclePayload;
+export const WorkflowRunStartedEventPayload = WorkflowEventPayload(
+  WorkflowRunLifecyclePayload
+);
 export type WorkflowRunStartedEventPayload = z.infer<
   typeof WorkflowRunStartedEventPayload
 >;
-export const WorkflowRunPausedEventPayload = WorkflowRunLifecyclePayload;
+export const WorkflowRunPausedEventPayload = WorkflowEventPayload(
+  WorkflowRunLifecyclePayload
+);
 export type WorkflowRunPausedEventPayload = z.infer<
   typeof WorkflowRunPausedEventPayload
 >;
-export const WorkflowRunBlockedEventPayload = WorkflowRunLifecyclePayload;
+export const WorkflowRunBlockedEventPayload = WorkflowEventPayload(
+  WorkflowRunLifecyclePayload
+);
 export type WorkflowRunBlockedEventPayload = z.infer<
   typeof WorkflowRunBlockedEventPayload
 >;
-export const WorkflowRunCompletedEventPayload = WorkflowRunLifecyclePayload;
+export const WorkflowRunCompletedEventPayload = WorkflowEventPayload(
+  WorkflowRunLifecyclePayload
+);
 export type WorkflowRunCompletedEventPayload = z.infer<
   typeof WorkflowRunCompletedEventPayload
 >;
-export const WorkflowRunFailedEventPayload = WorkflowRunLifecyclePayload;
+export const WorkflowRunFailedEventPayload = WorkflowEventPayload(
+  WorkflowRunLifecyclePayload
+);
 export type WorkflowRunFailedEventPayload = z.infer<
   typeof WorkflowRunFailedEventPayload
 >;
-export const WorkflowRunCancelledEventPayload = WorkflowRunLifecyclePayload;
+export const WorkflowRunCancelledEventPayload = WorkflowEventPayload(
+  WorkflowRunLifecyclePayload
+);
 export type WorkflowRunCancelledEventPayload = z.infer<
   typeof WorkflowRunCancelledEventPayload
 >;
 
-export const WorkflowStepStartedEventPayload = z
-  .object({
+export const WorkflowStepStartedEventPayload = WorkflowEventPayload(
+  z.object({
     goalId: Id,
     workflowRunId: Id,
     stepRunId: Id,
     stepTemplateId: Id100,
     ordinal: z.number().int().nonnegative()
   })
-  .strict();
+    .strict()
+);
 export type WorkflowStepStartedEventPayload = z.infer<
   typeof WorkflowStepStartedEventPayload
 >;
@@ -707,25 +736,33 @@ const WorkflowStepTerminalPayload = z
   })
   .strict();
 
-export const WorkflowStepCompletedEventPayload = WorkflowStepTerminalPayload;
+export const WorkflowStepCompletedEventPayload = WorkflowEventPayload(
+  WorkflowStepTerminalPayload
+);
 export type WorkflowStepCompletedEventPayload = z.infer<
   typeof WorkflowStepCompletedEventPayload
 >;
-export const WorkflowStepBlockedEventPayload = WorkflowStepTerminalPayload;
+export const WorkflowStepBlockedEventPayload = WorkflowEventPayload(
+  WorkflowStepTerminalPayload
+);
 export type WorkflowStepBlockedEventPayload = z.infer<
   typeof WorkflowStepBlockedEventPayload
 >;
-export const WorkflowStepSkippedEventPayload = WorkflowStepTerminalPayload;
+export const WorkflowStepSkippedEventPayload = WorkflowEventPayload(
+  WorkflowStepTerminalPayload
+);
 export type WorkflowStepSkippedEventPayload = z.infer<
   typeof WorkflowStepSkippedEventPayload
 >;
-export const WorkflowStepFailedEventPayload = WorkflowStepTerminalPayload;
+export const WorkflowStepFailedEventPayload = WorkflowEventPayload(
+  WorkflowStepTerminalPayload
+);
 export type WorkflowStepFailedEventPayload = z.infer<
   typeof WorkflowStepFailedEventPayload
 >;
 
-export const WorkflowArtifactCreatedEventPayload = z
-  .object({
+export const WorkflowArtifactCreatedEventPayload = WorkflowEventPayload(
+  z.object({
     artifactId: Id,
     goalId: Id,
     workflowRunId: z.string().nullable(),
@@ -733,13 +770,14 @@ export const WorkflowArtifactCreatedEventPayload = z
     type: WorkflowArtifactType,
     bodyBytes: z.number().int().nonnegative().max(WORKFLOW_ARTIFACT_MAX_BODY_BYTES)
   })
-  .strict();
+    .strict()
+);
 export type WorkflowArtifactCreatedEventPayload = z.infer<
   typeof WorkflowArtifactCreatedEventPayload
 >;
 
-export const WorkflowGuardrailEvaluatedEventPayload = z
-  .object({
+export const WorkflowGuardrailEvaluatedEventPayload = WorkflowEventPayload(
+  z.object({
     guardrailEvaluationId: Id,
     goalId: Id,
     workflowRunId: Id,
@@ -748,13 +786,14 @@ export const WorkflowGuardrailEvaluatedEventPayload = z
     guardrailKind: GuardrailKind,
     result: GuardrailEvaluationResult
   })
-  .strict();
+    .strict()
+);
 export type WorkflowGuardrailEvaluatedEventPayload = z.infer<
   typeof WorkflowGuardrailEvaluatedEventPayload
 >;
 
-export const WorkflowOperatorSelectedEventPayload = z
-  .object({
+export const WorkflowOperatorSelectedEventPayload = WorkflowEventPayload(
+  z.object({
     decisionId: Id,
     goalId: Id,
     workflowRunId: Id,
@@ -764,25 +803,27 @@ export const WorkflowOperatorSelectedEventPayload = z
     source: z.enum(["llm", "fallback"]),
     requiresApproval: z.boolean()
   })
-  .strict();
+    .strict()
+);
 export type WorkflowOperatorSelectedEventPayload = z.infer<
   typeof WorkflowOperatorSelectedEventPayload
 >;
 
-export const WorkflowDecisionRequestedEventPayload = z
-  .object({
+export const WorkflowDecisionRequestedEventPayload = WorkflowEventPayload(
+  z.object({
     goalId: Id,
     workflowRunId: Id,
     stepRunId: Id,
     stepTemplateId: Id100
   })
-  .strict();
+    .strict()
+);
 export type WorkflowDecisionRequestedEventPayload = z.infer<
   typeof WorkflowDecisionRequestedEventPayload
 >;
 
-export const WorkflowDecisionRecordedEventPayload = z
-  .object({
+export const WorkflowDecisionRecordedEventPayload = WorkflowEventPayload(
+  z.object({
     decisionId: Id,
     goalId: Id,
     workflowRunId: Id,
@@ -790,26 +831,28 @@ export const WorkflowDecisionRecordedEventPayload = z
     decisionType: WorkflowDecisionType,
     influencedByCount: z.number().int().nonnegative().max(WORKFLOW_DECISION_MAX_INFLUENCES)
   })
-  .strict();
+    .strict()
+);
 export type WorkflowDecisionRecordedEventPayload = z.infer<
   typeof WorkflowDecisionRecordedEventPayload
 >;
 
-export const WorkflowUserInputRequestedEventPayload = z
-  .object({
+export const WorkflowUserInputRequestedEventPayload = WorkflowEventPayload(
+  z.object({
     goalId: Id,
     workflowRunId: Id,
     stepRunId: Id,
     decisionId: z.string().min(1).optional(),
     recommendationId: z.string().min(1).optional()
   })
-  .strict();
+    .strict()
+);
 export type WorkflowUserInputRequestedEventPayload = z.infer<
   typeof WorkflowUserInputRequestedEventPayload
 >;
 
-export const WorkflowUserInputSubmittedEventPayload = z
-  .object({
+export const WorkflowUserInputSubmittedEventPayload = WorkflowEventPayload(
+  z.object({
     goalId: Id,
     workflowRunId: Id,
     stepRunId: Id,
@@ -817,12 +860,13 @@ export const WorkflowUserInputSubmittedEventPayload = z
     artifactIds: z.array(Id).max(10).optional(),
     satisfiedExitCriteriaCount: z.number().int().nonnegative().max(20).optional()
   })
-  .strict();
+    .strict()
+);
 export type WorkflowUserInputSubmittedEventPayload = z.infer<
   typeof WorkflowUserInputSubmittedEventPayload
 >;
 
-export const WorkflowRecommendationCreatedEventPayload = z
+const WorkflowRecommendationCreatedEventPayloadBase = z
   .object({
     recommendationId: Id,
     goalId: Id,
@@ -832,40 +876,51 @@ export const WorkflowRecommendationCreatedEventPayload = z
     decisionId: z.string().min(1).optional()
   })
   .strict();
+export const WorkflowRecommendationCreatedEventPayload = WorkflowEventPayload(
+  WorkflowRecommendationCreatedEventPayloadBase
+);
 export type WorkflowRecommendationCreatedEventPayload = z.infer<
   typeof WorkflowRecommendationCreatedEventPayload
 >;
 
 export const WorkflowRecommendationAcceptedEventPayload =
-  WorkflowRecommendationCreatedEventPayload.omit({ decisionId: true }).extend({
-    workflowRunId: Id.optional(),
-    stepRunId: Id.optional()
-  });
+  WorkflowEventPayload(
+    WorkflowRecommendationCreatedEventPayloadBase.omit({ decisionId: true }).extend({
+      workflowRunId: Id.optional(),
+      stepRunId: Id.optional()
+    })
+  );
 export type WorkflowRecommendationAcceptedEventPayload = z.infer<
   typeof WorkflowRecommendationAcceptedEventPayload
 >;
 
 export const WorkflowRecommendationRejectedEventPayload =
-  WorkflowRecommendationAcceptedEventPayload;
+  WorkflowEventPayload(
+    WorkflowRecommendationCreatedEventPayloadBase.omit({ decisionId: true }).extend({
+      workflowRunId: Id.optional(),
+      stepRunId: Id.optional()
+    })
+  );
 export type WorkflowRecommendationRejectedEventPayload = z.infer<
   typeof WorkflowRecommendationRejectedEventPayload
 >;
 
-export const WorkflowTaskDagCreatedEventPayload = z
-  .object({
+export const WorkflowTaskDagCreatedEventPayload = WorkflowEventPayload(
+  z.object({
     goalId: Id.optional(),
     workflowRunId: Id,
     stepRunId: Id,
     taskIds: z.array(Id).max(50),
     count: z.number().int().nonnegative().max(50)
   })
-  .strict();
+    .strict()
+);
 export type WorkflowTaskDagCreatedEventPayload = z.infer<
   typeof WorkflowTaskDagCreatedEventPayload
 >;
 
-export const WorkflowTaskDagUpdatedEventPayload = z
-  .object({
+export const WorkflowTaskDagUpdatedEventPayload = WorkflowEventPayload(
+  z.object({
     goalId: Id.optional(),
     workflowRunId: Id,
     stepRunId: Id,
@@ -873,7 +928,8 @@ export const WorkflowTaskDagUpdatedEventPayload = z
     count: z.number().int().nonnegative().max(50),
     changedFields: z.array(z.string().min(1).max(80)).max(20)
   })
-  .strict();
+    .strict()
+);
 export type WorkflowTaskDagUpdatedEventPayload = z.infer<
   typeof WorkflowTaskDagUpdatedEventPayload
 >;
@@ -890,19 +946,27 @@ const WorkflowValidationEventPayloadBase = z
   })
   .strict();
 
-export const WorkflowValidationRunEventPayload = WorkflowValidationEventPayloadBase;
+export const WorkflowValidationRunEventPayload = WorkflowEventPayload(
+  WorkflowValidationEventPayloadBase
+);
 export type WorkflowValidationRunEventPayload = z.infer<
   typeof WorkflowValidationRunEventPayload
 >;
-export const WorkflowValidationPassedEventPayload = WorkflowValidationEventPayloadBase;
+export const WorkflowValidationPassedEventPayload = WorkflowEventPayload(
+  WorkflowValidationEventPayloadBase
+);
 export type WorkflowValidationPassedEventPayload = z.infer<
   typeof WorkflowValidationPassedEventPayload
 >;
-export const WorkflowValidationFailedEventPayload = WorkflowValidationEventPayloadBase;
+export const WorkflowValidationFailedEventPayload = WorkflowEventPayload(
+  WorkflowValidationEventPayloadBase
+);
 export type WorkflowValidationFailedEventPayload = z.infer<
   typeof WorkflowValidationFailedEventPayload
 >;
-export const WorkflowValidationSkippedEventPayload = WorkflowValidationEventPayloadBase;
+export const WorkflowValidationSkippedEventPayload = WorkflowEventPayload(
+  WorkflowValidationEventPayloadBase
+);
 export type WorkflowValidationSkippedEventPayload = z.infer<
   typeof WorkflowValidationSkippedEventPayload
 >;
