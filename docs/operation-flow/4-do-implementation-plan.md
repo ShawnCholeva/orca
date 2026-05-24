@@ -1,4 +1,4 @@
-You are implementing a bounded Milestone 7 task for the Orca orchestration platform from the generated implementation task list in `docs/implementation-plans/milestone-7.md`.
+You are implementing a bounded Milestone 8 task for the Orca orchestration platform from the generated implementation task list in `docs/implementation-plans/milestone-8.md`.
 
 Follow the assigned implementation task exactly.
 
@@ -20,402 +20,380 @@ fast validation
 deterministic behavior
 privacy-preserving orchestration
 content-free events
-suggestion-only supervision
-preserving future Level 4/Level 5 extensibility
+explicit user supervision
+bounded LLM-provider usage
+preserving future ACP/A2A and Level 5 extensibility
 
 Current task:
 
-M7-024
+M8-001
 
 Prerequisite:
 
-Milestone 6 must be complete and green before any M7 task begins. M7-000 baseline verification must already be complete and recorded before any implementation task after M7-000 begins. If the baseline is not recorded, stop and run M7-000 first.
+Milestone 7 must be complete and green before any M8 task begins. M8-000 baseline verification must be complete and recorded before any implementation task after M8-000 begins. If the M8 baseline is not recorded in `docs/implementation-plans/notes/m8-000-baseline.md`, stop and run M8-000 first.
 
 Important architectural constraints:
 
 local-first
 event-driven
 Goal-scoped
-Workspace-aware
+Workspace-aware where existing M3/M7 surfaces are read
 daemon owns state
 SQLite remains the internal storage boundary
-existing M1/M2/M3/M4/M5/M6 wire shapes remain valid unless the assigned M7 task explicitly extends them
+existing M1/M2/M3/M4/M5/M6/M7 wire shapes remain byte-identical unless the assigned M8 task explicitly extends them
 M1 Goal creation and live event behavior must remain valid
-M2 plugin and skill registry behavior must remain valid
+M2 plugin, skill, and adapter registry behavior must remain valid
 M3 refined Goal and workspace behavior must remain valid
 M4 PTY sessions, adapters, lifecycle events, capped output tails, restart reconciliation, and embedded terminal behavior must remain valid
 M5 Goal-scoped memory, decisions, session summaries, extraction events, and Goal detail memory/decision UI must remain valid
 M6 bounded context packages, deterministic session preparation, context preview/status UI, contextPackageId session association, adapter delivery policy, and restart-safe context persistence must remain valid
+M7 tasks, recommendations, conflicts, feedback, suggestion-only acceptance flows, and Goal detail orchestration UI must remain valid
 daemon write paths that emit events must persist events and projection rows atomically
 event bus broadcasts happen only after COMMIT succeeds
-M7 is suggestion-only: it may recommend, prefill, associate, record feedback, and surface conflicts, but it must not execute work automatically
-M7 rows are Goal-scoped
-M7 source attribution is compact JSON on the owning row
-M7 must use bounded projection reads, not workspace scans, transcripts, or raw M4 output tails
-M7 events are control-plane signals with ids/counts/statuses/changed-field keys/failure codes only
-M7 events must not include recommendation rationale text, task title/description/acceptance criteria/validation steps, conflict description/resolution note, feedback notes, proposedAction bodies, rendered context, raw source text, memory content, decision text, summary text, raw terminal output, prompts, raw provider input/output, raw model responses, or model reasoning
+M8 workflow rows are Goal-scoped
+workflow templates are global; Engineering built-in is locked/read-only through routes
+M8 source attribution and influenced-by data are compact JSON on owning rows
+M8 must use bounded projection reads, not workspace scans, transcripts, or raw M4 output tails
+M8 events are control-plane signals with ids/counts/statuses/changed-field keys/byte sizes/failure codes only
+M8 events must not include workflow artifact bodies, decision reason text, operator-selection rationale, guardrail evaluation messages, recommendation rationale text, proposedAction bodies, rendered context, raw source text, memory content, decision text, summary text, raw terminal output, prompts, raw provider input/output, raw model responses, model reasoning, tokens beyond allowed metadata, secrets, workspace file contents, or adapter context-file paths
+workflow decision rows may store bounded, redacted reason text because decision transparency is an explicit M8 product requirement
 terminal output remains outside the general event store
 terminal input and resize remain outside domain events
+LLM prompts and raw responses are never persisted
 
-Milestone 7 proof point:
+Milestone 8 proof point:
 
-Meaningful Goal activity occurs
-daemon evaluates deterministic orchestration triggers
-daemon gathers bounded Goal, task, workspace, session, memory, decision, summary, and context-package inputs
-daemon runs explicit internal task/recommendation/conflict jobs only when needed
-deterministic providers generate bounded tasks, recommendations, conflicts, and supervision records
-daemon validates, deduplicates, supersedes, caps, and persists orchestration state atomically
-daemon records content-free lifecycle events with ids, counts, statuses, and failure codes only
-desktop shows Goal-scoped tasks, recommendations, and conflicts
-user accepts, rejects, dismisses, modifies, or resolves suggestions
-accepted recommendations can prefill existing M3/M4/M5/M6/M7 flows but never auto-launch work
-validation recommendations appear after implementation-like activity
-conservative conflicts are surfaced for human resolution
-task, recommendation, conflict, and feedback state survives daemon restart
+User creates a Goal and selects an Orchestrator LLM provider/model
+daemon stores provider and model on the Goal
+user starts an Engineering workflow run from Orchestrator chat
+daemon creates workflow_run and first workflow_step_run atomically
+orchestrator emits intake question via OperatorSelector using the Goal's Orchestrator LLM
+user answers; goal_brief artifact persists; exit criteria satisfy; advance recommendation is produced
+user accepts advance recommendations; daemon advances run through Research, PRD, and Issue Breakdown
+Issue Breakdown writes M7 tasks with origin='generator' linked to the workflow step run
+Execution recommends launch through M7 recommendation lifecycle
+user accepts launch; existing M4/M6 prefill flow runs
+session completion writes M5 summary
+QA and Review steps consume implementation_result and qa_report artifacts
+Done step writes final_summary and memory_update artifacts
+every orchestrator decision writes a bounded/redacted workflow_decisions row with influenced-by source refs
+Workflows tab shows locked Engineering template and custom templates
+Orchestrator chat shows current run state, current step, artifacts, next action, and why-this-action decision trace
+all state survives daemon restart; in-flight LLM calls reconcile to failure
 
-Milestone 7 included surface:
+Milestone 8 included surface:
 
-contract schemas for tasks, task generations, recommendations, recommendation generations, recommendation feedback, conflicts, source refs, proposed actions, roles, statuses, failure codes, trigger kinds, M7 event literals, and HTTP request/response payloads
-CreateSessionRequest extension with optional taskId and fromRecommendationId
-session read response extension with optional taskId and fromRecommendationId
-session.created event extension with optional taskId and fromRecommendationId
-CreateContextPackageRequest extension with optional taskId and fromRecommendationId
-context package read response extension with optional taskId and fromRecommendationId
-context.package.created event extension with optional taskId and fromRecommendationId
-tasks table
-task_generations table
-recommendations table
-recommendation_generations table
-recommendation_feedback table
-conflicts table
-sessions.task_id column
-sessions.from_recommendation_id column
-context_packages.task_id column
-context_packages.from_recommendation_id column
-minimal indexes for Goal task/recommendation/conflict reads, active generation idempotency, active task/recommendation/conflict dedupe, session task lookup, context package task lookup, and terminal feedback idempotency
-Goal-scoped task create/list/update/split/generate use cases
-Goal-scoped recommendation generate/list/detail use cases
-recommendation accept/reject/dismiss/modify use cases
-conflict list/resolve/dismiss use cases
-manual regenerate/re-evaluate through POST /v1/goals/:goalId/tasks/generate and POST /v1/goals/:goalId/recommendations/generate
-generation lifecycle states: pending, running, succeeded, failed
-task statuses: proposed, open, in_progress, blocked, done, cancelled, archived
-recommendation statuses: proposed, accepted, rejected, dismissed, modified, superseded
-conflict statuses: open, resolved, dismissed
-failure codes: invalid_input, invalid_output, provider_error, daemon_restart, goal_archived, sparse_input, internal_error
-boot reconciliation of stale pending/running task and recommendation generation rows to failed with daemon_restart
-internal orca/recommendation-generation, orca/task-generation, and orca/conflict-detection skill descriptors for diagnostics only
-one daemon-local RecommendationProvider interface
-one deterministic production recommendation provider
-fake recommendation provider support for tests
-one deterministic task generator
-one deterministic conflict detector set
-bounded input builders that read only existing Goal/refinement/workspace/session/memory/decision/session-summary/context-package projections and M7 task/recommendation/conflict rows
-static or unit test coverage proving M7 orchestration does not import/read raw M4 output tails or transcript modules
-deterministic task generation from Goal refinement and bounded M5/M6 evidence
-deterministic recommendation rules for create_session, continue_session, review_output, refine_goal, split_task, run_validation, resolve_conflict, update_plan, ask_user, mark_complete, and pause_work
-deterministic validation and review recommendation rules after implementation-like activity
-conservative conflict detectors for active workspace overlap, contradictory confirmed decisions, reviewer rejection, blockers, and unresolved task-blocking questions
-source attribution stored as compact JSON ids on task/recommendation/conflict rows
-zod validation of generator/provider input/output and HTTP request/response shapes
-normalization, content caps, best-effort secret redaction where persisted text is accepted, request fingerprinting, duplicate prevention, and supersede behavior before persistence
-hard cap defaults: 256 char recommendation title, 4 KiB recommendation rationale, 4 KiB proposedAction JSON, 32 source refs per recommendation, 256 char task title, 8 KiB task description, 20 acceptance criteria, 20 validation steps, 1 KiB conflict description, 4 KiB conflict resolution note, 2 KiB feedback note, 256 char failure message, 4 KiB serialized event payload
-idempotency by Goal, trigger kind, trigger source id, provider/generator version, input fingerprint, active row state, and proposed action/task/conflict fingerprint as applicable
-Goal detail task panel
-Goal detail recommendations panel
-Goal detail conflicts banner/drawer
-desktop accept/reject/dismiss/modify controls
-desktop prefill into existing M3 refinement, M4 session creation, M6 context preparation, and M7 task flows without automatic downstream submission
-desktop reconnect/refetch behavior using existing event subscription
-documentation of endpoints, event payload rules, caps, generation policy, suggestion-only policy, restart policy, retry/idempotency policy, and non-goals
+contract schemas for workflow templates, steps, guardrails, runs, step runs, artifacts, decisions, influenced-by refs, operators, provider info, model choices, request/response payloads, M8 event literals, and optional extensions on existing M1-M7 contracts
+optional CreateGoalRequest/Goal orchestratorProvider and orchestratorModel fields
+optional workflowRunId, workflowStepRunId, workflowArtifactId fields on existing M7 task/recommendation, M4 session, and M6 context-package writes where explicitly assigned
+workflow_templates table
+workflow_runs table
+workflow_step_runs table
+workflow_artifacts table
+workflow_decisions table
+workflow_guardrail_evaluations table
+workflow_llm_calls table
+goals.orchestrator_provider column
+goals.orchestrator_model column
+goals.active_workflow_run_id column
+sessions.workflow_step_run_id column
+context_packages.workflow_step_run_id column
+tasks.workflow_step_run_id column
+recommendations.workflow_step_run_id column
+minimal indexes for Goal/run/status reads, active run uniqueness, step-run idempotency, artifact reads, decision reads/idempotency, guardrail evaluation reads, and LLM call metadata reads
+ModelProvider interface and provider error taxonomy
+Anthropic, OpenAI, and Google Gemini provider implementations behind the same interface
+ModelProviderRegistry wired through DaemonContext
+GET /v1/model-providers
+PATCH /v1/goals/:goalId/orchestrator-model
+provider/model validation at Goal create and update boundaries
+workflow template projection, create/update/duplicate/list/detail use cases and routes
+locked Engineering built-in template seed with eight linear steps and built-in guardrails
+workflow run lifecycle use cases and routes: start, pause, resume, cancel, complete, block, list, detail
+workflow step-run lifecycle and exit-criteria bookkeeping
+workflow artifact projection, create/list/detail use cases and routes
+guardrail evaluation engine with deterministic allow/deny/require_approval results
+operator registry combining M2/M4 agent readiness, M8 model providers, and human operator
+GET /v1/operators?goalId=
+operator selection service with bounded structured prompt, zod response parsing, guardrail filtering, and deterministic fallback
+workflow_llm_calls metadata rows for provider/model/status/latency/token metadata/failure code only
+decision trace projection and writes with bounded/redacted reason text and influenced-by refs
+orchestrator decision service for request input, request artifact, select operator, advance step, block run, and complete run decisions
+M7 recommendation type extensions for advance_workflow_step, launch_workflow_session, complete_workflow_run, mark_artifact_satisfied, and request_user_input
+M7 accept-flow reuse for workflow recommendations; no generic execute endpoint
+Issue Breakdown writer that creates M7 tasks linked to workflow_step_run_id and validates dependencies through existing M7 rules
+consolidated HTTP route registration and zod boundary validation
+content-free M8 event emission audit
+per-step deterministic Engineering rules from Intake through Done
+daemon boot reconciliation for in-flight LLM calls and orphan workflow step runs
+Workflows desktop tab for templates, template detail, duplication, and custom-template editing
+Orchestrator chat provider picker, start-workflow CTA, current-run banner, and workflow recommendation controls
+Goal detail workflow panel with run state, current step, artifacts, decisions, and workflow events refetch behavior
+end-to-end Engineering workflow proof-loop integration test
+milestone documentation pass
 
-Milestone 7 excluded surface:
+Milestone 8 excluded surface:
 
-Level 4 supervised execution
 Level 5 autonomy
-approval gates
-automatic session launch
-automatic context preparation
+auto-launching agents without explicit user approval
+automatic session launch outside accepted M7 recommendation flow
+automatic context preparation outside existing approved/prefill flow
 automatic validation command execution
-automatic task status transitions from session activity without user action
-automatic retry/backoff
-automatic recommendation execution
-AI-backed recommendation provider implementations
-model provider SDKs
-provider/model configuration UI
-prompt template libraries
-prompt experiments
-token-accurate accounting
-provider cost tracking
+workflow step mutation through WebSocket commands
+per-goal workflow template overrides
+workflow templates editable per goal
+visual DAG workflow builders
+branching or parallel workflow steps in the MVP
+cross-Goal workflows
+external GitHub/Jira/PM sync
+advanced policy languages
+metrics dashboards
+self-adapting workflows
+agent performance optimization
+embedding/vector ranking
+semantic search
+cross-Goal knowledge systems
+raw model prompt/response logging
+raw transcript/output-tail reads during workflow orchestration
+persistence of provider prompts or responses in domain events
+prompt template editors as a product surface
+prompt-management platform
 generic skill invocation endpoints
 generic reasoning-job endpoints
 generic action execution endpoints
-generic workflow endpoints
-POST /v1/recommendations/:id/execute
-POST /v1/recommendations/:id/regenerate
-GET /v1/recommendations as a cross-Goal list
-POST /v1/skills/:id/invoke
-POST /v1/tasks/:id/archive as a separate endpoint
-manual conflict creation endpoint
-recommendation history/diff/editor pages
-task board/Gantt/dependency graph UI
-global task or recommendation dashboards
-command-center panels
-recommendation analytics
-multi-step workflow planning
-workflow engines
-distributed queues
-background workers
-schedulers
-continuous reasoning loops
-cloud infrastructure
 multi-agent scheduling
-agent task assignment endpoints
-cross-Goal memory
-cross-Goal recommendations
-workspace indexing/scanning/file watching
-knowledge graphs
-embeddings
-vector search
-semantic search
-global search
-memory consolidation
-semantic ranking
-relevance engines
-aging/decay systems
-analytics dashboards
-policy/governance systems
-audit engines
-full transcript capture/replay/export/analytics
-raw M4 output-tail reads during M7 orchestration
-source reverse-index join tables
-WebSocket commands for task/recommendation/conflict mutation
-rendered context payload events
-raw provider prompt/template events
-feedback comment events
-continuous reasoning events
-external PM integrations
+distributed queues
+background schedulers
+continuous autonomous reasoning loops
 new top-level packages
+ACP/A2A routes as Orca internal workflow API
+token-accurate accounting
+provider cost dashboards
+recommendation analytics dashboards
+global workflow dashboards
+full transcript capture/replay/export/analytics
+source reverse-index join tables
+workspace indexing/scanning/file watching
+git library additions such as simple-git, isomorphic-git, nodegit, or dugite
+file watcher additions such as chokidar or fs.watch
 
 Implementation instructions:
 
 Analyze the current repository structure first.
-Read the specific M7 task before editing.
+Read the specific M8 task before editing.
 Check task dependencies and do not skip prerequisite validation.
-Honor the mandatory review gates before continuing past gated tasks.
+Honor the mandatory full-suite gates before continuing past gated tasks.
 Implement incrementally.
 Keep files small and readable.
 Use TypeScript strict typing.
-Use zod validation where wire contracts, provider/generator output, or request/response parsing require it.
+Use zod validation where wire contracts, provider output, model output, or request/response parsing require it.
 Avoid unnecessary abstractions.
 Prefer deterministic/simple logic.
-Preserve existing M1/M2/M3/M4/M5/M6 behavior unless the M7 task explicitly changes it.
+Preserve existing M1/M2/M3/M4/M5/M6/M7 behavior unless the M8 task explicitly changes it.
 Keep public API changes limited to the task's declared endpoints/contracts.
-Keep generation daemon-local in M7.
-Keep deterministic providers conservative; unsupported synthesis is not allowed.
-Keep the DaemonContext seam explicit; add dependencies to context instead of using module globals.
-Do not add AI provider SDKs, prompt management, model calls, provider config, or model selection.
-Do not add git libraries such as simple-git, isomorphic-git, nodegit, or dugite.
-Do not add file watchers such as chokidar or fs.watch.
+Keep M8 use cases wired through the explicit DaemonContext seam.
+Do not introduce a DI framework, container, decorators, module-global runtime dependencies, or hidden singleton services.
+Register adapters, skills, providers, and built-in workflow templates before the HTTP listener accepts connections.
+Do not add unassigned provider SDKs or model configuration surfaces.
 Do not invent unverified CLI flags for Claude Code, opencode, codex, or any other adapter.
-Do not log recommendation rationale, task description, acceptance criteria, validation steps, conflict description, conflict resolution note, feedback notes, proposedAction bodies, rendered context, raw source text, memory content, decision text, summary text, prompts, raw responses, tokens, secrets, workspace file contents, or adapter context-file paths.
+Do not log artifact bodies, decision rationale, operator-selection reason, guardrail evaluation messages, recommendation rationale, proposedAction bodies, rendered context, raw source text, memory content, decision text, summary text, prompts, raw responses, secrets, workspace file contents, or adapter context-file paths.
 Use content-free event payloads and REST projection reads for detailed state.
 Ensure the assigned task validation steps pass.
 
-M7 event set:
+M8 event set:
 
-task.generation.requested
-task.generated
-task.generation.failed
-task.created
-task.updated
-task.split
-task.status_changed
-task.associated_with_session
-task.associated_with_context_package
-recommendation.generation.requested
-recommendation.generated
-recommendation.generation.failed
-recommendation.accepted
-recommendation.rejected
-recommendation.dismissed
-recommendation.modified
-recommendation.superseded
-conflict.detected
-conflict.resolved
-conflict.dismissed
-user.feedback.recorded
+goal.orchestrator_model_changed
+workflow.template.created
+workflow.template.updated
+workflow.template.duplicated
+workflow.run.started
+workflow.run.paused
+workflow.run.blocked
+workflow.run.completed
+workflow.run.failed
+workflow.run.cancelled
+workflow.step.started
+workflow.step.completed
+workflow.step.blocked
+workflow.step.skipped
+workflow.step.failed
+workflow.artifact.created
+workflow.guardrail.evaluated
+workflow.operator.selected
+workflow.decision.requested
+workflow.decision.recorded
+workflow.user.input.requested
+workflow.user.input.submitted
+workflow.recommendation.created
+workflow.recommendation.accepted
+workflow.recommendation.rejected
+workflow.task.dag.created
+workflow.task.dag.updated
+workflow.validation.run
+workflow.validation.passed
+workflow.validation.failed
+workflow.validation.skipped
 
-No other M7 orchestration events are allowed unless the assigned task explicitly amends the milestone plan.
+No other M8 workflow or Goal-extension events are allowed unless the assigned task explicitly amends the milestone plan.
 
-M7 table/column set:
+M8 table/column set:
 
-tasks
-task_generations
-recommendations
-recommendation_generations
-recommendation_feedback
-conflicts
-sessions.task_id
-sessions.from_recommendation_id
-context_packages.task_id
-context_packages.from_recommendation_id
+workflow_templates
+workflow_runs
+workflow_step_runs
+workflow_artifacts
+workflow_decisions
+workflow_guardrail_evaluations
+workflow_llm_calls
+goals.orchestrator_provider
+goals.orchestrator_model
+goals.active_workflow_run_id
+sessions.workflow_step_run_id
+context_packages.workflow_step_run_id
+tasks.workflow_step_run_id
+recommendations.workflow_step_run_id
 
-No other M7 persistence tables or columns are allowed unless the assigned task explicitly amends the milestone plan.
+No other M8 persistence tables or columns are allowed unless the assigned task explicitly amends the milestone plan.
 
-Generation lifecycle rules:
+Workflow lifecycle rules:
 
-pending -> running -> succeeded is the normal path.
-pending -> running -> failed is the failure path.
-Failed rows are terminal.
-Retry is explicit through POST /v1/goals/:goalId/tasks/generate or POST /v1/goals/:goalId/recommendations/generate.
-Retry after failure creates a new generation row for the current request fingerprint.
-If an active pending/running/succeeded generation already exists for the current request fingerprint, generate/retry returns that row and does not duplicate work.
-Boot reconciliation marks stale pending/running task and recommendation generations failed with daemon_restart before HTTP/WS listen.
-The runner is in-process and bounded. Do not add queues, schedulers, workers, or automatic backoff.
+Only one active/paused/blocked workflow run per Goal is allowed.
+Starting a run creates workflow_run and initial workflow_step_run in one transaction.
+Runs store template_version_at_start so historical runs read the captured template version.
+Built-in Engineering template uses id `orca/engineering` and is locked through route-level checks.
+Editing a custom template increments version on save.
+workflow_step_run fingerprint is sha256(workflow_run_id + ':' + step_template_id + ':' + attempt).
+Decision idempotency uses workflow_run_id, optional step_run_id, decision_type, and input_fingerprint.
+Paused, blocked, completed, failed, and cancelled run transitions emit content-free workflow.run events.
+Step start/pass/block/fail/skip transitions emit content-free workflow.step events.
+Artifacts are persisted with capped body text but events carry ids, types, counts, and byte sizes only.
 
-Idempotency rules:
+LLM and provider rules:
 
-Generation request fingerprint = sha256(goalId + ':' + triggerKind + ':' + (triggerSourceId ?? '') + ':' + providerOrGeneratorId + ':' + providerOrGeneratorVersion + ':' + inputFingerprint).
+Every LLM call goes through ModelProvider.complete(request).
+The request carries structured prompt data only in memory.
+Provider responses are parsed against zod schemas before any decision persists.
+Failed parse maps to failure_code `invalid_output`.
+Network/provider failures map to failure_code `provider_error`.
+workflow_llm_calls rows contain metadata only: provider_id, provider_version, model, status, usage token counts if available, latency_ms, failure_code, and redacted failure_message.
+workflow_llm_calls rows must not contain prompt, response, chain-of-thought, raw request, raw response, rendered context, artifact bodies, or source text columns.
+In-flight workflow_llm_calls reconcile to failed with daemon_restart at boot.
+If the selected provider/model is unavailable or returns invalid output, operator selection falls back deterministically where the task plan allows it.
 
-Task fingerprint = sha256(goalId + ':' + canonicalTitle + ':' + role) for generator-origin tasks. Manual tasks bypass the active-fingerprint unique index.
+Suggestion-only and acceptance rules:
 
-Recommendation fingerprint = sha256(goalId + ':' + type + ':' + canonicalProposedActionJson).
-
-Conflict fingerprint = sha256(goalId + ':' + conflictType + ':' + sortedSourceIds).
-
-Failed generation rows are terminal and excluded from active idempotency so retry can create a new row.
-
-Input fingerprint rule:
-
-Input fingerprints must be deterministic over the bounded projection snapshot:
-goal id
-refinement id/version
-sorted workspace ids/dirty flags
-sorted task ids/statuses/updated_at
-sorted memory item ids/updated_at
-sorted decision ids/status/updated_at
-sorted recent session summary ids/updated_at
-latest context package id
-sorted active recommendation ids/status
-sorted active conflict ids/status
-trigger discriminator
-
-Input rules:
-
-Read only existing projections:
-Goal row
-latest Goal refinement fields
-attached workspace metadata
-session row/lifecycle/status fields
-M5 Goal memory
-M5 Goal decisions
-M5 sibling session summaries
-M6 context package id and small metadata
-M7 task rows
-M7 recommendation rows
-M7 conflict rows
-M7 feedback rows
-
-Do not scan workspace files.
-Do not call git.
-Do not require or create full transcripts.
-Do not read M4 output tails.
-Do not import M4 output-tail or transcript modules under apps/daemon/src/orchestrator, apps/daemon/src/recommendations, apps/daemon/src/tasks, or apps/daemon/src/conflicts.
-Apply best-effort redaction before persistence for text accepted at API boundaries.
-Validate provider/generator input/output with zod.
-Normalize and cap text before persistence.
+The orchestrator may produce WorkflowDecision rows and M7 recommendation rows.
+No downstream M3/M4/M5/M6/M7 flow may run before the user accepts the corresponding M7 recommendation, except workflow-internal transitions explicitly allowed by the M8 plan.
+Accepting launch_workflow_session returns proposedAction for desktop prefill and must not auto-start a session by itself.
+Accepting advance_workflow_step may execute only the approved workflow-internal step transition.
+Accepting complete_workflow_run may execute only the approved workflow-internal run completion after final-step criteria are satisfied.
+There is no generic execute-action endpoint.
+There are no WebSocket commands for workflow mutation.
+Desktop reacts to workflow.* events by refetching REST projections, not by patching detailed state from event payloads.
 
 HTTP/API rules:
 
-POST /v1/goals/:goalId/tasks/generate triggers in-process task generation with request { "trigger": "manual" }.
-GET /v1/goals/:goalId/tasks lists Goal-scoped tasks and latest task generation rows.
-POST /v1/goals/:goalId/tasks creates a user task.
-PATCH /v1/tasks/:id updates allowed task fields and status.
-POST /v1/tasks/:id/split creates child tasks.
-POST /v1/tasks/:id/associate-session associates an existing session.
-POST /v1/goals/:goalId/recommendations/generate triggers in-process recommendation generation with request { "trigger": "manual" }.
-GET /v1/goals/:goalId/recommendations lists Goal-scoped recommendations and latest recommendation generation rows.
-GET /v1/recommendations/:id returns one recommendation detail.
-POST /v1/recommendations/:id/accept records accept feedback and returns the proposedAction for prefill only.
-POST /v1/recommendations/:id/reject records reject feedback.
-POST /v1/recommendations/:id/dismiss records dismiss feedback.
-PATCH /v1/recommendations/:id modifies a non-terminal recommendation and records modify feedback.
-GET /v1/goals/:goalId/conflicts lists Goal-scoped conflicts.
-POST /v1/conflicts/:id/resolve resolves or dismisses a conflict.
-POST /v1/sessions accepts optional taskId and fromRecommendationId only.
-POST /v1/goals/:goalId/context-packages accepts optional taskId and fromRecommendationId only.
-No WebSocket commands are added in M7.
-Desktop reacts to M7 events by refetching REST projections, not by patching detailed state from event payloads.
+GET /v1/workflow-templates
+GET /v1/workflow-templates/:id
+POST /v1/workflow-templates
+PATCH /v1/workflow-templates/:id
+POST /v1/workflow-templates/:id/duplicate
+POST /v1/goals/:goalId/workflow-runs
+GET /v1/goals/:goalId/workflow-runs
+GET /v1/goals/:goalId/workflow-runs/:id
+POST /v1/goals/:goalId/workflow-runs/:id/pause
+POST /v1/goals/:goalId/workflow-runs/:id/resume
+POST /v1/goals/:goalId/workflow-runs/:id/cancel
+POST /v1/goals/:goalId/workflow-runs/:id/next-decision
+GET /v1/goals/:goalId/workflow-runs/:id/decisions
+GET /v1/goals/:goalId/workflow-runs/:runId/artifacts
+GET /v1/goals/:goalId/workflow-step-runs/:id
+POST /v1/goals/:goalId/workflow-step-runs/:id/submit-input
+POST /v1/goals/:goalId/workflow-artifacts
+GET /v1/goals/:goalId/workflow-artifacts
+GET /v1/goals/:goalId/workflow-artifacts/:id
+GET /v1/goals/:goalId/workflow-decisions/:id
+GET /v1/operators?goalId=
+GET /v1/model-providers
+PATCH /v1/goals/:goalId/orchestrator-model
 
-Recommendation acceptance rules:
+All M8 reads under `/v1/goals/:goalId/...` must verify the row belongs to that Goal and return 404 on mismatch.
+All M8 request bodies must be validated with zod at the HTTP boundary.
+Existing M1-M7 endpoints must not change response shape except for optional M8 fields explicitly assigned by the current task.
 
-Accepting a recommendation updates recommendation state and feedback only.
-Accepting a recommendation does not automatically call M3, M4, M5, M6, or M7 downstream endpoints.
-Desktop may open an existing downstream flow with prefilled fields.
-The user must still submit the existing downstream flow.
-There is no generic execute-action endpoint.
-Per-kind prefill mapping belongs in the desktop client and must stay explicit.
+Content caps and privacy defaults:
 
-Conflict rules:
+workflow template name <= 100 chars
+workflow template description <= 2 KiB
+step purpose <= 1 KiB
+guardrail label <= 100 chars
+guardrail config JSON <= 2 KiB
+artifact title <= 256 chars
+artifact body <= 64 KiB
+decision reason <= 1 KiB
+operator-selection rationale <= 2 KiB
+influenced-by entries <= 32 per decision
+operator-selection alternatives considered <= 8
+event payload <= 4 KiB serialized
+failure message <= 256 chars after redaction
 
-Conflict detection is deterministic and conservative.
-Allowed detector families are active workspace overlap, contradictory confirmed decisions, reviewer rejection, blocker reported, and unresolved question.
-Each detected conflict emits conflict.detected and creates a linked resolve_conflict recommendation in one transaction.
-Resolving or dismissing a conflict auto-dismisses the linked resolve_conflict recommendation in the same transaction.
-There is no manual conflict creation endpoint.
+Apply best-effort redaction before persistence for user/provider accepted free text at API boundaries and provider failure messages.
 
 Review gates:
 
-Gate 1: After M7-002, verify contracts, SQLite migration surface, session/context columns, indexes, and upgrade path from an M6 database.
-Gate 2: After M7-006, verify projection helpers, generation lifecycle, request fingerprinting, active idempotency, transaction boundaries, and content-free events.
-Gate 3: After M7-010, verify bounded inputs, no raw output-tail/transcript access, deterministic rules, source refs, caps, superseding, false-positive conflict handling, and run full-suite pnpm -r typecheck and pnpm -r test.
-Gate 4: After M7-012, verify orchestrator trigger mapping, single-flight behavior, dirty-flag re-evaluation, boot reconciliation, restart behavior, and broadcast-after-commit.
-Gate 5: After M7-017, verify daemon API, events, persistence, idempotency, restart, privacy, session-create, context-create, and M1-M6 regression behavior for association extensions.
-Gate 6: After M7-023, run desktop manual smoke with one refined Goal, one attached workspace, M5 memory/decisions/session summaries, an M6 context package, task generation, recommendation generation, accept/reject/dismiss/modify, context/session prefill, conflict detection/resolution, reload, and daemon restart.
-Gate 7: After M7-024, verify final proof loop, final docs, M7 Definition of Done, non-goals, and run full-suite pnpm -r typecheck and pnpm -r test.
+Gate 1: M8-000 records the M1-M7 baseline in `docs/implementation-plans/notes/m8-000-baseline.md`.
+Gate 2: After M8-010, run full-suite `pnpm -r typecheck` and `pnpm -r test`; record green SHA in `docs/implementation-plans/notes/m8-010-gate.md`.
+Gate 3: After M8-018, run full-suite `pnpm -r typecheck` and `pnpm -r test`; record green SHA in `docs/implementation-plans/notes/m8-018-gate.md`.
+Gate 4: After M8-025, verify the end-to-end Engineering workflow proof loop, restart sub-test, and full-suite `pnpm -r typecheck` and `pnpm -r test` are green; record green SHA in `docs/implementation-plans/notes/m8-025-gate.md`.
+Gate 5: After M8-026, verify final documentation, M8 acceptance mapping, non-goals, and any configured markdown lint are green.
 
 Full-suite gates:
 
-After M7-010: pnpm -r typecheck and pnpm -r test must be green.
-After M7-024: pnpm -r typecheck and pnpm -r test must be green.
+After M8-010: pnpm -r typecheck and pnpm -r test must be green.
+After M8-018: pnpm -r typecheck and pnpm -r test must be green.
+After M8-025: pnpm -r typecheck and pnpm -r test must be green.
 
-Baseline validation for M7-000:
+Baseline validation for M8-000:
 
 Run pnpm install --frozen-lockfile.
 Run pnpm -r typecheck.
 Run pnpm -r test.
 Record git rev-parse HEAD.
 Record final test summary line counts.
-Record pre-existing dirty paths from git status without attributing them to M7.
-Confirm named M1-M6 regression anchors pass:
+Record pre-existing dirty paths from git status without attributing them to M8.
+Confirm named M1-M7 regression anchors pass:
 M1 Goal CRUD plus live events.
 M2 plugin/skill registry.
 M3 Goal-with-workspaces integration.
 M4 session lifecycle integration.
 M5 daemon proof-loop integration.
 M6 daemon proof-loop integration.
+M7 orchestration-loop integration.
 
 Before finishing:
 
 verify all acceptance criteria
 verify validation steps
 verify task dependencies and review gates
-verify M1/M2/M3/M4/M5/M6 baseline behavior still works where relevant
-verify no excluded M7 surface was introduced
+verify M1/M2/M3/M4/M5/M6/M7 baseline behavior still works where relevant
+verify no excluded M8 surface was introduced
 verify events are content-free and <= 4 KiB serialized
 verify projection rows and events commit atomically
 verify broadcasts happen only after commit
-verify retry/idempotency behavior does not duplicate active generations
-verify stale pending/running generations reconcile on boot where applicable
-verify M7 orchestration does not read raw M4 output tails or transcript modules
-verify recommendation acceptance never auto-launches or auto-executes downstream work
+verify workflow rows and direct-id reads are Goal-scoped
+verify LLM prompts/raw responses are not persisted, emitted, or logged
+verify workflow_llm_calls contains metadata only
+verify M8 workflow orchestration does not read raw M4 output tails or transcript modules
+verify recommendation acceptance never auto-launches external work or bypasses user approval
+verify built-in Engineering template cannot be mutated through custom-template routes
+verify ACP/A2A compatibility remains protocol-neutral and internal only
 explain what was implemented
 explain any deviations
 explain any technical concerns
 
 After finishing:
 
+update 4-do-implementation-plan.md to prepare for the next step
 Commit changes
 Run `/simplify`, then commit again if any changes made
 Output changes from a product perspective
