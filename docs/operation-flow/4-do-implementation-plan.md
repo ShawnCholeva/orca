@@ -395,7 +395,7 @@ After finishing:
 
 update 4-do-implementation-plan.md to prepare for the next step
 Commit changes
-Run `/simplify`, then commit again if any changes made
+Run `/code-review`, then commit again if any changes made
 Output changes from a product perspective
 
 Do not implement unrelated future milestone functionality.
