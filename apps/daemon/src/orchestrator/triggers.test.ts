@@ -97,6 +97,7 @@ function makeCtx(
     readinessService: null as unknown as DaemonContext['readinessService'],
     modelProviderRegistry: null as unknown as DaemonContext['modelProviderRegistry'],
     operatorRegistry: null as unknown as DaemonContext['operatorRegistry'],
+    operatorSelector: null as unknown as DaemonContext['operatorSelector'],
     now: nextNow,
     idFactory: nextId,
   };

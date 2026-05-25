@@ -16,6 +16,7 @@ import { createAnthropicProvider } from './llm/anthropic.js';
 import { createOpenAIProvider } from './llm/openai.js';
 import { createGeminiProvider } from './llm/gemini.js';
 import { OperatorRegistry } from './workflows/operators/registry.js';
+import { OperatorSelector } from './workflows/operators/selector.js';
 
 /**
  * Shared dependency container for orchestration daemon use cases.
@@ -31,6 +32,7 @@ export interface DaemonContext {
   readinessService: ReadinessService;
   modelProviderRegistry: ModelProviderRegistry;
   operatorRegistry: OperatorRegistry;
+  operatorSelector: OperatorSelector;
   now: () => string;
   idFactory: () => string;
 }
@@ -46,6 +48,11 @@ function createDefaultModelProviderRegistry(): ModelProviderRegistry {
 export function createDaemonContext(db: Database.Database, bus: EventBus): DaemonContext {
   const readinessService = new ReadinessService(db, adapterRegistry);
   const modelProviderRegistry = createDefaultModelProviderRegistry();
+  const operatorRegistry = new OperatorRegistry(
+    adapterRegistry,
+    modelProviderRegistry,
+    readinessService
+  );
   return {
     db,
     bus,
@@ -55,7 +62,8 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
     conflictDetector: new DeterministicConflictDetector(),
     readinessService,
     modelProviderRegistry,
-    operatorRegistry: new OperatorRegistry(adapterRegistry, modelProviderRegistry, readinessService),
+    operatorRegistry,
+    operatorSelector: new OperatorSelector(modelProviderRegistry, operatorRegistry),
     now: () => new Date().toISOString(),
     idFactory: randomUUID,
   };
