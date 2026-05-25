@@ -1,0 +1,127 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import type Database from "better-sqlite3";
+import type { Config } from "../../config.js";
+import { closeDatabase, openDatabase } from "../../db.js";
+import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
+import { getTemplateById, resetPreparedStatements } from "./projection.js";
+import {
+  ENGINEERING_ID,
+  ENGINEERING_VERSION,
+  seedEngineeringTemplate,
+} from "./seed-engineering.js";
+
+const tempDirs: string[] = [];
+const NOW = "2026-01-01T00:00:00.000Z";
+
+function createConfig(dataDir: string): Config {
+  return {
+    dataDir,
+    port: 8787,
+    logLevel: "silent",
+    sessionOutputTailBytes: 1024 * 1024,
+    sessionStopGraceMs: 5000,
+    sessionWsBufferLimitBytes: 1024 * 1024,
+    memoryExtractionMaxInputBytes: 131072,
+    memoryExtractionTimeoutMs: 15000,
+    getAuthToken: () => "test-token",
+  };
+}
+
+function setup(): Database.Database {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "orca-wf-seed-engineering-"));
+  tempDirs.push(dir);
+  const db = openDatabase(createConfig(dir));
+  runMigrations(db, defaultMigrationsDir());
+  return db;
+}
+
+afterEach(() => {
+  closeDatabase();
+  resetPreparedStatements();
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe("seedEngineeringTemplate", () => {
+  it("inserts the built-in Engineering template on first run", () => {
+    const db = setup();
+
+    seedEngineeringTemplate(db, () => NOW);
+
+    const template = getTemplateById(db, ENGINEERING_ID);
+    expect(template).toBeTruthy();
+    expect(template?.version).toBe(ENGINEERING_VERSION);
+    expect(template?.isBuiltIn).toBe(true);
+    expect(template?.isLocked).toBe(true);
+    expect(template?.steps.map((step) => step.id)).toEqual([
+      "intake",
+      "research",
+      "prd",
+      "issue_breakdown",
+      "execution",
+      "qa",
+      "review",
+      "done",
+    ]);
+    expect(template?.guardrails).toHaveLength(6);
+  });
+
+  it("is a no-op when the same version already exists", () => {
+    const db = setup();
+
+    seedEngineeringTemplate(db, () => NOW);
+    const createdAt = getTemplateById(db, ENGINEERING_ID)?.updatedAt;
+
+    seedEngineeringTemplate(db, () => "2026-02-01T00:00:00.000Z");
+
+    const template = getTemplateById(db, ENGINEERING_ID);
+    expect(template?.version).toBe(ENGINEERING_VERSION);
+    expect(template?.updatedAt).toBe(createdAt);
+  });
+
+  it("updates an older Engineering row to the current built-in version", () => {
+    const db = setup();
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      ENGINEERING_ID,
+      "Engineering",
+      "old",
+      ENGINEERING_VERSION - 1,
+      0,
+      0,
+      JSON.stringify([
+        {
+          id: "old",
+          ordinal: 0,
+          name: "Old",
+          purpose: "old",
+          requiredInputs: [],
+          requiredOutputs: ["goal_brief"],
+          gateType: "human-input",
+          recommendedCapabilities: [],
+          validationExpectations: [],
+          exitCriteria: ["old"],
+          recommendedOperatorIds: [],
+        },
+      ]),
+      JSON.stringify([]),
+      NOW,
+      NOW
+    );
+
+    seedEngineeringTemplate(db, () => "2026-03-01T00:00:00.000Z");
+
+    const template = getTemplateById(db, ENGINEERING_ID);
+    expect(template?.version).toBe(ENGINEERING_VERSION);
+    expect(template?.isBuiltIn).toBe(true);
+    expect(template?.isLocked).toBe(true);
+    expect(template?.updatedAt).toBe("2026-03-01T00:00:00.000Z");
+    expect(template?.steps).toHaveLength(8);
+    expect(template?.guardrails).toHaveLength(6);
+  });
+});

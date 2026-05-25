@@ -18,6 +18,7 @@ import { sweepOrphanContextFiles } from './sessions/context-delivery.js';
 import { createDaemonContext } from './daemon-context.js';
 import { subscribeOrchestrationTriggers } from './orchestrator/triggers.js';
 import { reconcileInFlightGenerations } from './orchestrator/reconcile.js';
+import { seedEngineeringTemplate } from './workflows/templates/seed-engineering.js';
 
 export interface DaemonStartHandles {
   close: () => Promise<void>;
@@ -47,6 +48,13 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
     bootstrapRegistries();
   } catch (err) {
     console.error('[orca-daemon] Registry bootstrap failed — aborting startup:', err);
+    process.exit(1);
+  }
+
+  try {
+    seedEngineeringTemplate(db, () => new Date().toISOString());
+  } catch (err) {
+    console.error('[orca-daemon] Workflow template seed failed — aborting startup:', err);
     process.exit(1);
   }
 
