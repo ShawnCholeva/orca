@@ -137,7 +137,8 @@ describe("suggested orchestration migration schema", () => {
       "0007_agents.sql",
       "0008_suggested_orchestration.sql",
       "0009_agent_readiness.sql",
-      "0010_workflows.sql"
+      "0010_workflows.sql",
+      "0011_workflow_recommendation_types.sql"
     ]);
 
     const postCounts = {

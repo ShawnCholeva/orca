@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 
 const SUGGESTED_ORCHESTRATION_MIGRATION = "0008_suggested_orchestration.sql";
+const WORKFLOW_RECOMMENDATION_TYPES_MIGRATION =
+  "0011_workflow_recommendation_types.sql";
 
 export const migrationFiles = [
   "0001_init.sql",
@@ -14,7 +16,8 @@ export const migrationFiles = [
   "0007_agents.sql",
   SUGGESTED_ORCHESTRATION_MIGRATION,
   "0009_agent_readiness.sql",
-  "0010_workflows.sql"
+  "0010_workflows.sql",
+  WORKFLOW_RECOMMENDATION_TYPES_MIGRATION
 ] as const;
 
 export function runMigrations(
@@ -65,6 +68,21 @@ export function runMigrations(
     }
 
     const sql = readFileSync(path.join(dir, file), "utf-8");
+
+    if (file === WORKFLOW_RECOMMENDATION_TYPES_MIGRATION) {
+      const foreignKeys = db.pragma("foreign_keys", { simple: true }) as number;
+      db.pragma("foreign_keys = OFF");
+      try {
+        db.transaction(() => {
+          db.exec(sql);
+          insertMigration.run(file, now);
+        })();
+      } finally {
+        db.pragma(`foreign_keys = ${foreignKeys ? "ON" : "OFF"}`);
+      }
+      applied.push(file);
+      continue;
+    }
 
     db.transaction(() => {
       db.exec(sql);

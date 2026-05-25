@@ -61,7 +61,8 @@ describe("runMigrations", () => {
       "0007_agents.sql",
       "0008_suggested_orchestration.sql",
       "0009_agent_readiness.sql",
-      "0010_workflows.sql"
+      "0010_workflows.sql",
+      "0011_workflow_recommendation_types.sql"
     ]);
   });
 
@@ -153,7 +154,8 @@ describe("runMigrations", () => {
       "0007_agents.sql",
       "0008_suggested_orchestration.sql",
       "0009_agent_readiness.sql",
-      "0010_workflows.sql"
+      "0010_workflows.sql",
+      "0011_workflow_recommendation_types.sql"
     ]);
 
     const goalCount = (
@@ -278,7 +280,8 @@ describe("session tables migration", () => {
       "0007_agents.sql",
       "0008_suggested_orchestration.sql",
       "0009_agent_readiness.sql",
-      "0010_workflows.sql"
+      "0010_workflows.sql",
+      "0011_workflow_recommendation_types.sql"
     ]);
 
     const tables = (
@@ -761,7 +764,10 @@ describe("migration 0010 workflows", () => {
     ]);
 
     const upgrade = runMigrations(db, defaultMigrationsDir());
-    expect(upgrade.applied).toEqual(["0010_workflows.sql"]);
+    expect(upgrade.applied).toEqual([
+      "0010_workflows.sql",
+      "0011_workflow_recommendation_types.sql"
+    ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
     expect(rerun.applied).toEqual([]);
@@ -804,5 +810,32 @@ describe("migration 0010 workflows", () => {
         null
       );
     }).toThrow(/FOREIGN KEY constraint failed/);
+  });
+
+  it("allows workflow recommendation types after migrations", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    db.prepare(
+      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES ('goal-1', 'Goal', 'desc', 'active', 1, ?, ?, NULL)"
+    ).run("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+
+    db.prepare(
+      `INSERT INTO recommendations
+        (id, goal_id, generation_id, type, status, source, title, rationale,
+         proposed_action_json, confidence, sources_json, related_task_id,
+         related_session_id, related_context_pkg_id, related_conflict_id,
+         fingerprint, superseded_by_id, superseded_reason, created_at, updated_at,
+         resolved_at, workflow_step_run_id)
+       VALUES ('rec-1', 'goal-1', NULL, 'advance_workflow_step', 'proposed',
+         'deterministic_provider', 'Advance', 'ok',
+         '{"kind":"advance_workflow_step","workflowRunId":"run-1","workflowStepRunId":"step-1","toStepTemplateId":"qa"}',
+         0.8, '[]', NULL, NULL, NULL, NULL, 'fp-1', NULL, NULL, ?, ?, NULL, NULL)`
+    ).run("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+
+    const row = db
+      .prepare("SELECT type FROM recommendations WHERE id = 'rec-1'")
+      .get() as { type: string };
+    expect(row.type).toBe("advance_workflow_step");
   });
 });
