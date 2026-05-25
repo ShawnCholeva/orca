@@ -38,7 +38,12 @@ const WORKFLOW_EVENT_TYPE_VALUES = [
   "workflow.validation.run",
   "workflow.validation.passed",
   "workflow.validation.failed",
-  "workflow.validation.skipped"
+  "workflow.validation.skipped",
+  "workflow.transport.attempt_started",
+  "workflow.transport.attempt_finished",
+  "workflow.transport.fallback",
+  "workflow.worker.state_changed",
+  "workflow.human_review.requested"
 ] as const;
 
 const WORKFLOW_EVENT_TYPES = new Set<string>(WORKFLOW_EVENT_TYPE_VALUES);

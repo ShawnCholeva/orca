@@ -37,6 +37,11 @@ const payloadByType: Record<(typeof WorkflowEventType.options)[number], Record<s
   "workflow.validation.passed": { goalId: "goal-1", workflowRunId: "run-1", validationId: "validation-1" },
   "workflow.validation.failed": { goalId: "goal-1", workflowRunId: "run-1", failureCode: "test_failed" },
   "workflow.validation.skipped": { goalId: "goal-1", workflowRunId: "run-1", validationId: "validation-1" },
+  "workflow.transport.attempt_started": { goalId: "goal-1", workflowRunId: "run-1", stepRunId: "step-1", attemptId: "attempt-1", providerId: "orca/openai", transport: "one_shot", status: "running" },
+  "workflow.transport.attempt_finished": { goalId: "goal-1", workflowRunId: "run-1", stepRunId: "step-1", attemptId: "attempt-1", providerId: "orca/openai", transport: "one_shot", status: "failed", failureReason: "one_shot_unavailable" },
+  "workflow.transport.fallback": { goalId: "goal-1", workflowRunId: "run-1", stepRunId: "step-1", attemptId: "attempt-1", providerId: "orca/openai", transport: "one_shot", status: "fallback", failureReason: "one_shot_unavailable" },
+  "workflow.worker.state_changed": { goalId: "goal-1", workflowRunId: "run-1", stepRunId: "step-1", attemptId: "attempt-2", workerId: "worker-1", providerId: "orca/openai", transport: "hidden_interactive", status: "ready" },
+  "workflow.human_review.requested": { goalId: "goal-1", workflowRunId: "run-1", stepRunId: "step-1", attemptId: "attempt-3", providerId: "orca/openai", transport: "human_review", status: "pending" },
 };
 
 const FORBIDDEN_KEYS = new Set([
