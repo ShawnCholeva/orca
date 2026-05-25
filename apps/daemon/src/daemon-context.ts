@@ -17,6 +17,7 @@ import { createOpenAIProvider } from './llm/openai.js';
 import { createGeminiProvider } from './llm/gemini.js';
 import { OperatorRegistry } from './workflows/operators/registry.js';
 import { OperatorSelector } from './workflows/operators/selector.js';
+import { OrchestrationTransportBroker } from './workflows/orchestration-transport/broker.js';
 
 /**
  * Shared dependency container for orchestration daemon use cases.
@@ -32,6 +33,7 @@ export interface DaemonContext {
   readinessService: ReadinessService;
   modelProviderRegistry: ModelProviderRegistry;
   operatorRegistry: OperatorRegistry;
+  orchestrationTransportBroker: OrchestrationTransportBroker;
   operatorSelector: OperatorSelector;
   now: () => string;
   idFactory: () => string;
@@ -53,6 +55,14 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
     modelProviderRegistry,
     readinessService
   );
+  const now = () => new Date().toISOString();
+  const idFactory = randomUUID;
+  const orchestrationTransportBroker = new OrchestrationTransportBroker({
+    db,
+    bus,
+    now,
+    idFactory,
+  });
   return {
     db,
     bus,
@@ -63,8 +73,13 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
     readinessService,
     modelProviderRegistry,
     operatorRegistry,
-    operatorSelector: new OperatorSelector(modelProviderRegistry, operatorRegistry),
-    now: () => new Date().toISOString(),
-    idFactory: randomUUID,
+    orchestrationTransportBroker,
+    operatorSelector: new OperatorSelector(
+      modelProviderRegistry,
+      operatorRegistry,
+      orchestrationTransportBroker
+    ),
+    now,
+    idFactory,
   };
 }

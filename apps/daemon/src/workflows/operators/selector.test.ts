@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { Config } from "../../config.js";
 import { closeDatabase, openDatabase } from "../../db.js";
+import { EventBus } from "../../events.js";
 import type {
   ModelCompletionRequest,
   ModelCompletionResponse,
@@ -19,6 +20,7 @@ import type {
 } from "../../llm/types.js";
 import { ModelProviderRegistry } from "../../llm/registry.js";
 import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
+import { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { OperatorRegistry } from "./registry.js";
 import { OperatorSelector, type SelectorInput } from "./selector.js";
 
@@ -167,6 +169,7 @@ function makeProvider(responses: unknown[]): { provider: ModelProvider; seenProm
 }
 
 function makeSelector(
+  db: Database.Database,
   operators: OperatorDescriptor[],
   responses: unknown[] = []
 ): { selector: OperatorSelector; seenPrompts: string[] } {
@@ -178,8 +181,17 @@ function makeSelector(
       return operators;
     },
   } as unknown as OperatorRegistry;
+  const broker = new OrchestrationTransportBroker({
+    db,
+    bus: new EventBus(),
+    now: () => NOW,
+    idFactory: (() => {
+      let seq = 0;
+      return () => `broker-id-${++seq}`;
+    })(),
+  });
   return {
-    selector: new OperatorSelector(providers, registry),
+    selector: new OperatorSelector(providers, registry, broker),
     seenPrompts,
   };
 }
@@ -188,6 +200,14 @@ function llmRows(db: Database.Database): Array<Record<string, unknown>> {
   return db
     .prepare(
       "SELECT provider_id, provider_version, model, status, usage_tokens_input, usage_tokens_output, latency_ms, failure_code, failure_message FROM workflow_llm_calls ORDER BY created_at ASC"
+    )
+    .all() as Array<Record<string, unknown>>;
+}
+
+function attemptRows(db: Database.Database): Array<Record<string, unknown>> {
+  return db
+    .prepare(
+      "SELECT provider_id, model, transport, status, failure_reason, raw_text_length, latency_ms FROM orchestration_transport_attempts ORDER BY created_at ASC, id ASC"
     )
     .all() as Array<Record<string, unknown>>;
 }
@@ -202,7 +222,7 @@ afterEach(() => {
 describe("OperatorSelector", () => {
   it("returns an LLM selection and records metadata-only call state", async () => {
     const db = setupDb();
-    const { selector: operatorSelector } = makeSelector(READY_OPERATORS, [
+    const { selector: operatorSelector } = makeSelector(db, READY_OPERATORS, [
       selection("agent:codex", "agent"),
     ]);
 
@@ -224,11 +244,22 @@ describe("OperatorSelector", () => {
         failure_message: null,
       },
     ]);
+    expect(attemptRows(db)).toMatchObject([
+      {
+        provider_id: "orca/openai",
+        model: "gpt-5.1-mini",
+        transport: "one_shot",
+        status: "succeeded",
+        failure_reason: null,
+        raw_text_length: expect.any(Number),
+        latency_ms: 7,
+      },
+    ]);
   });
 
   it("retries once for an invalid operator id, then falls back deterministically", async () => {
     const db = setupDb();
-    const { selector: operatorSelector, seenPrompts } = makeSelector(READY_OPERATORS, [
+    const { selector: operatorSelector, seenPrompts } = makeSelector(db, READY_OPERATORS, [
       selection("agent:missing", "agent"),
       selection("agent:still-missing", "agent"),
     ]);
@@ -246,7 +277,7 @@ describe("OperatorSelector", () => {
 
   it("goes straight to fallback when no orchestrator model is configured", async () => {
     const db = setupDb();
-    const { selector: operatorSelector } = makeSelector(READY_OPERATORS, [
+    const { selector: operatorSelector } = makeSelector(db, READY_OPERATORS, [
       selection("agent:codex", "agent"),
     ]);
 
@@ -265,7 +296,7 @@ describe("OperatorSelector", () => {
 
   it("records invalid_output when provider output fails schema validation", async () => {
     const db = setupDb();
-    const { selector: operatorSelector } = makeSelector(READY_OPERATORS, [
+    const { selector: operatorSelector } = makeSelector(db, READY_OPERATORS, [
       { operatorId: "agent:codex" },
     ]);
 
@@ -279,11 +310,18 @@ describe("OperatorSelector", () => {
         failure_code: "invalid_output",
       },
     ]);
+    expect(attemptRows(db)).toMatchObject([
+      {
+        transport: "one_shot",
+        status: "failed",
+        failure_reason: "one_shot_parse_failed",
+      },
+    ]);
   });
 
   it("throws when no operators are ready", async () => {
     const db = setupDb();
-    const { selector: operatorSelector } = makeSelector([]);
+    const { selector: operatorSelector } = makeSelector(db, []);
 
     await expect(operatorSelector.select(db, () => NOW, baseInput())).rejects.toThrow(
       "no_ready_operators"
@@ -292,7 +330,7 @@ describe("OperatorSelector", () => {
 
   it("excludes guardrail-denied operators from LLM and fallback selections", async () => {
     const db = setupDb();
-    const { selector: operatorSelector } = makeSelector(READY_OPERATORS, [
+    const { selector: operatorSelector } = makeSelector(db, READY_OPERATORS, [
       selection("agent:codex", "agent"),
       selection("agent:codex", "agent"),
     ]);

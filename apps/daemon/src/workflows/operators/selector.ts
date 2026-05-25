@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type Database from "better-sqlite3";
 import {
+  OrchestrationRequest,
   OperatorSelection,
   WORKFLOW_FAILURE_MAX_MESSAGE_CHARS,
   type ModelProviderId,
@@ -14,6 +15,7 @@ import { ProviderError, type ModelCompletionResponse, type ModelProvider } from 
 import { ModelProviderRegistry } from "../../llm/registry.js";
 import { redactSecrets } from "../../memory/normalize.js";
 import { evaluateGuardrail, type GuardrailContext } from "../guardrails/evaluator.js";
+import { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { OperatorRegistry } from "./registry.js";
 
 export interface SelectorInput {
@@ -45,7 +47,8 @@ type GuardrailCheck = {
 export class OperatorSelector {
   constructor(
     private readonly providers: ModelProviderRegistry,
-    private readonly operators: OperatorRegistry
+    private readonly operators: OperatorRegistry,
+    private readonly orchestrationTransportBroker: OrchestrationTransportBroker
   ) {}
 
   async select(
@@ -128,47 +131,81 @@ export class OperatorSelector {
   ): Promise<{ selection: OperatorSelectionT; llmCallId: string }> {
     const llmCallId = randomUUID();
     insertRunningLlmCall(db, now(), llmCallId, provider, input);
+    const completionRequest = {
+      model: input.orchestratorModel!,
+      systemPrompt: [
+        "You select the best operator for a workflow step.",
+        "Choose exactly one operator from readyOperators.",
+        "Return only structured JSON matching OperatorSelection.",
+        "Prefer operators whose capabilities match recommendedCapabilities.",
+        "Prefer cheaper operators when several would suffice.",
+      ].join("\n"),
+      userPrompt: JSON.stringify({
+        stepName: input.stepName,
+        stepPurpose: input.stepPurpose.slice(0, 1024),
+        recommendedCapabilities: input.recommendedCapabilities.slice(0, 20),
+        recommendedOperatorIds: input.recommendedOperatorIds.slice(0, 10),
+        excludedOperatorIds: excludedOperatorIds.slice(0, 8),
+        readyOperators: readyOperators.slice(0, 20).map((operator) => ({
+          id: operator.id,
+          kind: operator.kind,
+          capabilities: operator.capabilities.slice(0, 20),
+        })),
+      }),
+      responseSchemaName: "OperatorSelection",
+      responseSchema: OperatorSelection,
+      maxOutputTokens: 512,
+      temperature: 0,
+      callMetadata: {
+        goalId: input.goalId,
+        workflowRunId: input.workflowRunId,
+        stepRunId: input.stepRunId,
+      },
+    } as const;
 
-    try {
-      const response = await provider.complete<unknown>({
-        model: input.orchestratorModel!,
-        systemPrompt: [
-          "You select the best operator for a workflow step.",
-          "Choose exactly one operator from readyOperators.",
-          "Return only structured JSON matching OperatorSelection.",
-          "Prefer operators whose capabilities match recommendedCapabilities.",
-          "Prefer cheaper operators when several would suffice.",
-        ].join("\n"),
-        userPrompt: JSON.stringify({
-          stepName: input.stepName,
-          stepPurpose: input.stepPurpose.slice(0, 1024),
-          recommendedCapabilities: input.recommendedCapabilities.slice(0, 20),
-          recommendedOperatorIds: input.recommendedOperatorIds.slice(0, 10),
-          excludedOperatorIds: excludedOperatorIds.slice(0, 8),
-          readyOperators: readyOperators.slice(0, 20).map((operator) => ({
-            id: operator.id,
-            kind: operator.kind,
-            capabilities: operator.capabilities.slice(0, 20),
-          })),
-        }),
-        responseSchemaName: "OperatorSelection",
-        responseSchema: OperatorSelection,
-        maxOutputTokens: 512,
-        temperature: 0,
-        callMetadata: {
-          goalId: input.goalId,
-          workflowRunId: input.workflowRunId,
-          stepRunId: input.stepRunId,
-        },
-      });
+    const orchestrationRequest = OrchestrationRequest.parse({
+      kind: "select_operator",
+      goalId: input.goalId,
+      workflowRunId: input.workflowRunId,
+      stepRunId: input.stepRunId,
+      providerId: provider.id,
+      modelId: input.orchestratorModel,
+      payload: {
+        stepName: input.stepName,
+        stepPurpose: input.stepPurpose.slice(0, 1024),
+        recommendedCapabilities: input.recommendedCapabilities.slice(0, 20),
+        recommendedOperatorIds: input.recommendedOperatorIds.slice(0, 10),
+        excludedOperatorIds: excludedOperatorIds.slice(0, 8),
+        readyOperators: readyOperators.slice(0, 20).map((operator) => ({
+          id: operator.id,
+          kind: operator.kind,
+          capabilities: operator.capabilities.slice(0, 20),
+        })),
+      },
+    });
 
-      const selection = sanitizeSelection(response.parsed);
-      updateSucceededLlmCall(db, llmCallId, response);
-      return { selection, llmCallId };
-    } catch (err) {
-      updateFailedLlmCall(db, llmCallId, err);
-      throw err;
+    const result = await this.orchestrationTransportBroker.propose(orchestrationRequest, {
+      runSdkOneShot: async () => {
+        try {
+          const response = await provider.complete<unknown>(completionRequest);
+          const selection = sanitizeSelection(response.parsed);
+          updateSucceededLlmCall(db, llmCallId, response);
+          return {
+            parsed: selection,
+            rawTextLength: response.rawTextLength,
+            latencyMs: response.latencyMs,
+          };
+        } catch (err) {
+          updateFailedLlmCall(db, llmCallId, err);
+          throw err;
+        }
+      },
+    });
+
+    if (result.status === "proposed") {
+      return { selection: result.parsed as OperatorSelectionT, llmCallId };
     }
+    throw new ProviderError("provider_error", "broker did not return a proposal");
   }
 
   private validateAgainstRegistry(

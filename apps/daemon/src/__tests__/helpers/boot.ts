@@ -27,6 +27,7 @@ import { seedAgents } from "../../agents.js";
 import { seedEngineeringTemplate } from "../../workflows/templates/seed-engineering.js";
 import { reconcileWorkflowsOnBoot } from "../../workflows/reconcile.js";
 import { OperatorSelector } from "../../workflows/operators/selector.js";
+import { OrchestrationTransportBroker } from "../../workflows/orchestration-transport/broker.js";
 
 const PROVIDER_MODELS: Record<
   ModelProviderId,
@@ -222,11 +223,23 @@ function buildDaemonContext(
     },
   } as unknown as DaemonContext["operatorRegistry"];
 
+  const orchestrationTransportBroker = new OrchestrationTransportBroker({
+    db,
+    bus: eventBus,
+    now,
+    idFactory,
+  });
+
   return {
     ...base,
     modelProviderRegistry,
     operatorRegistry,
-    operatorSelector: new OperatorSelector(modelProviderRegistry, operatorRegistry),
+    orchestrationTransportBroker,
+    operatorSelector: new OperatorSelector(
+      modelProviderRegistry,
+      operatorRegistry,
+      orchestrationTransportBroker
+    ),
     now,
     idFactory,
   };
