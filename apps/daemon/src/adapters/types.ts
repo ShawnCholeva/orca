@@ -30,6 +30,8 @@ export type AdapterAvailability =
 export interface AgentAdapter {
   id: AdapterId;
   title: string;
+  supportsRepoEditing?: boolean;
+  supportsTerminal?: boolean;
   contextDelivery: AdapterContextDelivery;
   resolveSpawn(input: AdapterSpawnInput): Promise<AdapterSpawnResult>;
   probeAvailability(): Promise<AdapterAvailability>;

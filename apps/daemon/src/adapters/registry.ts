@@ -24,6 +24,10 @@ export class AdapterRegistry {
     return this.adapters.get(id);
   }
 
+  listAgentAdapters(): AgentAdapter[] {
+    return [...this.adapters.values()];
+  }
+
   /** Probe and cache availability lazily; probes are parallelized on a cold cache. */
   async list(): Promise<AdapterSummary[]> {
     const adapterList = [...this.adapters.values()];

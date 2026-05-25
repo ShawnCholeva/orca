@@ -96,6 +96,7 @@ function makeCtx(
     conflictDetector: opts?.detector ?? new FakeConflictDetector(),
     readinessService: null as unknown as DaemonContext['readinessService'],
     modelProviderRegistry: null as unknown as DaemonContext['modelProviderRegistry'],
+    operatorRegistry: null as unknown as DaemonContext['operatorRegistry'],
     now: nextNow,
     idFactory: nextId,
   };

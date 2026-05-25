@@ -22,6 +22,7 @@ import {
   ListGoalDecisionsResponse,
   ListGoalsResponse,
   ListModelProvidersResponse,
+  ListOperatorsResponse,
   ListPluginsResponse,
   ListSessionsResponse,
   ListSkillsResponse,
@@ -74,7 +75,10 @@ function createConfig(dataDir: string): Config {
   };
 }
 
-async function startServer(opts?: { adapterRegistry?: AdapterRegistry }): Promise<{
+async function startServer(opts?: {
+  adapterRegistry?: AdapterRegistry;
+  operatorRegistry?: ReturnType<typeof createDaemonContext>['operatorRegistry'];
+}): Promise<{
   server: FastifyInstance;
   token: string;
   db: ReturnType<typeof openDatabase>;
@@ -89,6 +93,9 @@ async function startServer(opts?: { adapterRegistry?: AdapterRegistry }): Promis
   const daemonContext = createDaemonContext(db, eventBus);
   if (opts?.adapterRegistry) {
     daemonContext.readinessService = new ReadinessService(db, opts.adapterRegistry);
+  }
+  if (opts?.operatorRegistry) {
+    daemonContext.operatorRegistry = opts.operatorRegistry;
   }
   const server = createServer(config, { daemonContext });
 
@@ -406,6 +413,73 @@ describe('server routes', () => {
       'orca/anthropic',
       'orca/google-gemini',
       'orca/openai',
+    ]);
+  });
+
+  it('GET /v1/operators requires a Goal and returns operator descriptors', async () => {
+    await server.close();
+    closeDatabase();
+
+    const { server: operatorServer, dataDir } = await startServer({
+      operatorRegistry: {
+        async list(goalId: string) {
+          expect(goalId).toBeTruthy();
+          return [
+            {
+              id: 'human',
+              kind: 'human',
+              displayName: 'Human (you)',
+              capabilities: ['judgment', 'qa', 'approval'],
+              ready: true,
+              supportsRepoEditing: true,
+              supportsTerminal: true,
+            },
+          ];
+        },
+      } as unknown as ReturnType<typeof createDaemonContext>['operatorRegistry'],
+    });
+    server = operatorServer;
+    tempDirs.push(dataDir);
+
+    const missing = await server.inject({
+      method: 'GET',
+      url: '/v1/operators',
+      headers: AUTH_HEADERS,
+    });
+    expect(missing.statusCode).toBe(400);
+
+    const created = await server.inject({
+      method: 'POST',
+      url: '/v1/goals',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'operators', description: '' },
+    });
+    expect(created.statusCode).toBe(201);
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/operators?goalId=goal-operators',
+      headers: AUTH_HEADERS,
+    });
+    expect(response.statusCode).toBe(404);
+
+    const body = CreateGoalResponse.parse(JSON.parse(created.body));
+    const ok = await server.inject({
+      method: 'GET',
+      url: `/v1/operators?goalId=${body.goal.id}`,
+      headers: AUTH_HEADERS,
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ListOperatorsResponse.parse(JSON.parse(ok.body)).operators).toEqual([
+      {
+        id: 'human',
+        kind: 'human',
+        displayName: 'Human (you)',
+        capabilities: ['judgment', 'qa', 'approval'],
+        ready: true,
+        supportsRepoEditing: true,
+        supportsTerminal: true,
+      },
     ]);
   });
 

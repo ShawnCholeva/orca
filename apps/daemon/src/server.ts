@@ -4,6 +4,7 @@ import path from 'node:path';
 import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
+import { z } from 'zod';
 import {
   AttachWorkspaceRequest,
   type AttachWorkspaceResponse,
@@ -29,6 +30,7 @@ import {
   type ListGoalsResponse,
   type ListPluginsResponse,
   type ListModelProvidersResponse,
+  ListOperatorsResponse,
   type ListSessionsResponse,
   type ListSkillsResponse,
   type ListAgentsResponse,
@@ -249,6 +251,27 @@ export function createServer(
   server.get('/v1/model-providers', async (): Promise<ListModelProvidersResponse> => {
     const providers = await daemonContext.modelProviderRegistry.describe();
     return { providers };
+  });
+
+  const ListOperatorsQuery = z
+    .object({
+      goalId: z.string().min(1),
+    })
+    .strict();
+
+  server.get('/v1/operators', async (request, reply): Promise<ListOperatorsResponse | { error: unknown; issues?: unknown }> => {
+    const parsed = ListOperatorsQuery.safeParse(request.query);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'validation_failed', issues: parsed.error.issues };
+    }
+    if (!getGoalById(db, parsed.data.goalId)) {
+      reply.status(404);
+      return apiError('goal_not_found', `Goal not found: ${parsed.data.goalId}`);
+    }
+
+    const operators = await daemonContext.operatorRegistry.list(parsed.data.goalId);
+    return ListOperatorsResponse.parse({ operators });
   });
 
   server.get('/v1/skills', async (): Promise<ListSkillsResponse> => {
