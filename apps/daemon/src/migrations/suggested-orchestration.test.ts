@@ -136,7 +136,8 @@ describe("suggested orchestration migration schema", () => {
     expect(result.applied).toEqual([
       "0007_agents.sql",
       "0008_suggested_orchestration.sql",
-      "0009_agent_readiness.sql"
+      "0009_agent_readiness.sql",
+      "0010_workflows.sql"
     ]);
 
     const postCounts = {

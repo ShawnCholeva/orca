@@ -13,7 +13,8 @@ export const migrationFiles = [
   "0006_context.sql",
   "0007_agents.sql",
   SUGGESTED_ORCHESTRATION_MIGRATION,
-  "0009_agent_readiness.sql"
+  "0009_agent_readiness.sql",
+  "0010_workflows.sql"
 ] as const;
 
 export function runMigrations(

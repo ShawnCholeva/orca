@@ -60,7 +60,8 @@ describe("runMigrations", () => {
       "0006_context.sql",
       "0007_agents.sql",
       "0008_suggested_orchestration.sql",
-      "0009_agent_readiness.sql"
+      "0009_agent_readiness.sql",
+      "0010_workflows.sql"
     ]);
   });
 
@@ -151,7 +152,8 @@ describe("runMigrations", () => {
       "0006_context.sql",
       "0007_agents.sql",
       "0008_suggested_orchestration.sql",
-      "0009_agent_readiness.sql"
+      "0009_agent_readiness.sql",
+      "0010_workflows.sql"
     ]);
 
     const goalCount = (
@@ -275,7 +277,8 @@ describe("session tables migration", () => {
       "0006_context.sql",
       "0007_agents.sql",
       "0008_suggested_orchestration.sql",
-      "0009_agent_readiness.sql"
+      "0009_agent_readiness.sql",
+      "0010_workflows.sql"
     ]);
 
     const tables = (
@@ -627,5 +630,179 @@ describe("migration 0009 agent readiness", () => {
       db.prepare(`UPDATE agents SET readiness_status = ? WHERE id = ?`).run(v, "claude-code");
     }
     closeDatabase();
+  });
+});
+
+describe("migration 0010 workflows", () => {
+  it("creates workflow tables and expected indices", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    const tables = (
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+        .all() as { name: string }[]
+    ).map((row) => row.name);
+
+    for (const expected of [
+      "workflow_templates",
+      "workflow_runs",
+      "workflow_step_runs",
+      "workflow_artifacts",
+      "workflow_decisions",
+      "workflow_guardrail_evaluations",
+      "workflow_llm_calls"
+    ]) {
+      expect(tables).toContain(expected);
+    }
+
+    const indices = (
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
+        .all() as { name: string }[]
+    ).map((row) => row.name);
+
+    for (const expected of [
+      "idx_workflow_templates_built_in",
+      "idx_workflow_runs_goal_status",
+      "idx_workflow_runs_active_per_goal",
+      "idx_workflow_step_runs_fp",
+      "idx_workflow_step_runs_goal",
+      "idx_workflow_step_runs_run_ordinal",
+      "idx_workflow_artifacts_goal_type",
+      "idx_workflow_artifacts_run_step",
+      "idx_workflow_decisions_run_created",
+      "idx_workflow_decisions_goal_created",
+      "idx_workflow_decisions_step",
+      "idx_workflow_decisions_fp_window",
+      "idx_workflow_guardrail_eval_run",
+      "idx_workflow_guardrail_eval_goal",
+      "idx_workflow_llm_calls_provider_created",
+      "idx_workflow_llm_calls_goal_created"
+    ]) {
+      expect(indices).toContain(expected);
+    }
+  });
+
+  it("adds goal/session/context/task/recommendation workflow columns", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    const goalsCols = (
+      db.prepare("PRAGMA table_info(goals)").all() as { name: string }[]
+    ).map((column) => column.name);
+    expect(goalsCols).toContain("orchestrator_provider");
+    expect(goalsCols).toContain("orchestrator_model");
+    expect(goalsCols).toContain("active_workflow_run_id");
+
+    const sessionsCols = (
+      db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]
+    ).map((column) => column.name);
+    expect(sessionsCols).toContain("workflow_step_run_id");
+
+    const contextCols = (
+      db.prepare("PRAGMA table_info(context_packages)").all() as { name: string }[]
+    ).map((column) => column.name);
+    expect(contextCols).toContain("workflow_step_run_id");
+
+    const taskCols = (
+      db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]
+    ).map((column) => column.name);
+    expect(taskCols).toContain("workflow_step_run_id");
+
+    const recCols = (
+      db.prepare("PRAGMA table_info(recommendations)").all() as { name: string }[]
+    ).map((column) => column.name);
+    expect(recCols).toContain("workflow_step_run_id");
+  });
+
+  it("keeps goal_id on all goal-scoped workflow tables", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    for (const table of [
+      "workflow_runs",
+      "workflow_step_runs",
+      "workflow_artifacts",
+      "workflow_decisions",
+      "workflow_guardrail_evaluations",
+      "workflow_llm_calls"
+    ]) {
+      const cols = (
+        db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+      ).map((column) => column.name);
+      expect(cols).toContain("goal_id");
+    }
+  });
+
+  it("upgrades from 0009 to 0010 and then re-run is a no-op", () => {
+    const db = freshDb();
+    const dir0009 = createMigrationsDir([
+      "0001_init.sql",
+      "0002_workspaces_refinements.sql",
+      "0004_sessions.sql",
+      "0005_memory.sql",
+      "0006_context.sql",
+      "0007_agents.sql",
+      "0008_suggested_orchestration.sql",
+      "0009_agent_readiness.sql"
+    ]);
+
+    const before = runMigrations(db, dir0009);
+    expect(before.applied).toEqual([
+      "0001_init.sql",
+      "0002_workspaces_refinements.sql",
+      "0004_sessions.sql",
+      "0005_memory.sql",
+      "0006_context.sql",
+      "0007_agents.sql",
+      "0008_suggested_orchestration.sql",
+      "0009_agent_readiness.sql"
+    ]);
+
+    const upgrade = runMigrations(db, defaultMigrationsDir());
+    expect(upgrade.applied).toEqual(["0010_workflows.sql"]);
+
+    const rerun = runMigrations(db, defaultMigrationsDir());
+    expect(rerun.applied).toEqual([]);
+  });
+
+  it("keeps foreign keys enabled and enforces workflow FK constraints", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    const foreignKeys = db.pragma("foreign_keys", { simple: true }) as number;
+    expect(foreignKeys).toBe(1);
+
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "orca/engineering",
+      "Engineering",
+      "",
+      1,
+      1,
+      1,
+      "[]",
+      "[]",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z"
+    );
+
+    expect(() => {
+      db.prepare(
+        "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(
+        "run-1",
+        "missing-goal",
+        "orca/engineering",
+        1,
+        "active",
+        null,
+        null,
+        "2026-01-01T00:00:00.000Z",
+        null
+      );
+    }).toThrow(/FOREIGN KEY constraint failed/);
   });
 });
