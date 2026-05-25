@@ -28,6 +28,10 @@ export const WORKFLOW_DECISION_MAX_INFLUENCES = 32;
 export const WORKFLOW_OPERATOR_SELECTION_MAX_ALTERNATIVES = 8;
 export const WORKFLOW_EVENT_MAX_PAYLOAD_BYTES = 4096;
 export const WORKFLOW_FAILURE_MAX_MESSAGE_CHARS = 256;
+export const ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES = 65536;
+export const ORCHESTRATION_DIAGNOSTICS_MAX_BYTES = 4096;
+export const ORCHESTRATION_HUMAN_REVIEW_MAX_SUMMARY_BYTES = 4096;
+export const ORCHESTRATION_WORKER_OUTPUT_TAIL_MAX_BYTES = 4096;
 
 const Id100 = z.string().min(1).max(100);
 const Id = z.string().min(1);
@@ -100,6 +104,72 @@ export const ModelProviderId = z.enum([
   "orca/google-gemini"
 ]);
 export type ModelProviderId = z.infer<typeof ModelProviderId>;
+
+export function getModelProviderDisplayName(providerId: ModelProviderId): string {
+  switch (providerId) {
+    case "orca/anthropic":
+      return "Claude";
+    case "orca/openai":
+      return "OpenAI";
+    case "orca/google-gemini":
+      return "Gemini";
+  }
+}
+
+export const OrchestrationTransport = z.enum([
+  "one_shot",
+  "hidden_interactive",
+  "human_review"
+]);
+export type OrchestrationTransport = z.infer<typeof OrchestrationTransport>;
+
+export const OrchestrationDecisionKind = z.enum([
+  "select_operator",
+  "score_transition",
+  "evaluate_exit_criteria",
+  "repair_artifact",
+  "run_audit"
+]);
+export type OrchestrationDecisionKind = z.infer<typeof OrchestrationDecisionKind>;
+
+export const OrchestrationWorkerState = z.enum([
+  "starting",
+  "ready",
+  "awaiting_input",
+  "producing_decision",
+  "hung",
+  "auth_required",
+  "failed",
+  "stopped"
+]);
+export type OrchestrationWorkerState = z.infer<typeof OrchestrationWorkerState>;
+
+export const OrchestrationTransportFailureReason = z.enum([
+  "one_shot_unavailable",
+  "one_shot_parse_failed",
+  "one_shot_rate_limited",
+  "interactive_spawn_failed",
+  "interactive_hung",
+  "interactive_auth_lost",
+  "interactive_output_invalid",
+  "daemon_restart",
+  "proposal_rejected"
+]);
+export type OrchestrationTransportFailureReason = z.infer<
+  typeof OrchestrationTransportFailureReason
+>;
+
+export const OrchestrationTransportAttemptStatus = z.enum([
+  "pending",
+  "running",
+  "succeeded",
+  "rejected",
+  "failed",
+  "fallback"
+]);
+export type OrchestrationTransportAttemptStatus = z.infer<
+  typeof OrchestrationTransportAttemptStatus
+>;
 
 export const WorkflowDecisionType = z.enum([
   "start_workflow",
@@ -404,6 +474,159 @@ export const WorkflowLlmCall = z
   .strict();
 export type WorkflowLlmCall = z.infer<typeof WorkflowLlmCall>;
 
+export const OrchestrationRequest = z
+  .object({
+    kind: OrchestrationDecisionKind,
+    goalId: Id,
+    workflowRunId: Id,
+    stepRunId: z.string().min(1).nullable(),
+    providerId: ModelProviderId,
+    modelId: z.string().min(1).max(80),
+    attemptId: z.string().min(1).optional(),
+    payload: z
+      .unknown()
+      .refine(
+        (value) => hasMaxSerializedBytes(value, ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES),
+        `orchestration request payload must be at most ${ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES} bytes`
+      )
+  })
+  .strict();
+export type OrchestrationRequest = z.infer<typeof OrchestrationRequest>;
+
+export const OrchestrationProposalEnvelope = z
+  .object({
+    orcaProposalVersion: z.literal(1),
+    kind: OrchestrationDecisionKind,
+    payload: z.unknown()
+  })
+  .strict();
+export type OrchestrationProposalEnvelope = z.infer<
+  typeof OrchestrationProposalEnvelope
+>;
+
+export const OrchestrationTransportAttempt = z
+  .object({
+    id: Id,
+    goalId: Id,
+    workflowRunId: Id,
+    stepRunId: z.string().min(1).nullable(),
+    kind: OrchestrationDecisionKind,
+    providerId: ModelProviderId,
+    modelId: z.string().min(1).max(80),
+    transport: OrchestrationTransport,
+    status: OrchestrationTransportAttemptStatus,
+    failureReason: OrchestrationTransportFailureReason.nullable(),
+    failureMessage: z.string().max(WORKFLOW_FAILURE_MAX_MESSAGE_CHARS).nullable(),
+    diagnostics: BoundedString(
+      ORCHESTRATION_DIAGNOSTICS_MAX_BYTES,
+      "diagnostics"
+    ).nullable(),
+    workerId: z.string().min(1).nullable(),
+    startedAt: z.string().datetime().nullable(),
+    finishedAt: z.string().datetime().nullable(),
+    createdAt: z.string().datetime()
+  })
+  .strict();
+export type OrchestrationTransportAttempt = z.infer<
+  typeof OrchestrationTransportAttempt
+>;
+
+export const WorkerHookCapabilities = z
+  .object({
+    providerId: ModelProviderId,
+    supportsPromptHooks: z.boolean(),
+    supportsStopHooks: z.boolean(),
+    supportsStateHooks: z.boolean(),
+    detectedAt: z.string().datetime()
+  })
+  .strict();
+export type WorkerHookCapabilities = z.infer<typeof WorkerHookCapabilities>;
+
+export const WorkerHookTrace = z
+  .object({
+    id: Id,
+    workerId: Id,
+    hookName: z.string().min(1).max(80),
+    status: z.enum(["skipped", "succeeded", "failed"]),
+    summary: z.string().max(WORKFLOW_FAILURE_MAX_MESSAGE_CHARS).nullable(),
+    startedAt: z.string().datetime().nullable(),
+    finishedAt: z.string().datetime().nullable()
+  })
+  .strict();
+export type WorkerHookTrace = z.infer<typeof WorkerHookTrace>;
+
+export const OrchestrationWorkerSummary = z
+  .object({
+    id: Id,
+    providerId: ModelProviderId,
+    modelId: z.string().min(1).max(80),
+    state: OrchestrationWorkerState,
+    currentGoalId: z.string().min(1).nullable(),
+    currentWorkflowRunId: z.string().min(1).nullable(),
+    currentAttemptId: z.string().min(1).nullable(),
+    failureReason: OrchestrationTransportFailureReason.nullable(),
+    failureMessage: z.string().max(WORKFLOW_FAILURE_MAX_MESSAGE_CHARS).nullable(),
+    healthCheckedAt: z.string().datetime().nullable(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime()
+  })
+  .strict();
+export type OrchestrationWorkerSummary = z.infer<
+  typeof OrchestrationWorkerSummary
+>;
+
+export const OrchestrationWorkerDetail = OrchestrationWorkerSummary.extend({
+  hookCapabilities: WorkerHookCapabilities.nullable(),
+  hookTraces: z.array(WorkerHookTrace).max(50),
+  outputTail: BoundedString(
+    ORCHESTRATION_WORKER_OUTPUT_TAIL_MAX_BYTES,
+    "outputTail"
+  ).nullable()
+}).strict();
+export type OrchestrationWorkerDetail = z.infer<
+  typeof OrchestrationWorkerDetail
+>;
+
+const HumanReviewChoice = z
+  .object({
+    id: Id100,
+    label: z.string().min(1).max(120),
+    description: z.string().max(512).nullable(),
+    proposal: OrchestrationProposalEnvelope
+  })
+  .strict();
+
+export const HumanReviewPayload = z
+  .object({
+    id: Id,
+    goalId: Id,
+    workflowRunId: Id,
+    stepRunId: z.string().min(1).nullable(),
+    attemptId: Id,
+    kind: OrchestrationDecisionKind,
+    providerId: ModelProviderId,
+    modelId: z.string().min(1).max(80),
+    title: z.string().min(1).max(120),
+    summary: BoundedString(
+      ORCHESTRATION_HUMAN_REVIEW_MAX_SUMMARY_BYTES,
+      "summary"
+    ),
+    choices: z.array(HumanReviewChoice).min(1).max(20),
+    createdAt: z.string().datetime()
+  })
+  .strict();
+export type HumanReviewPayload = z.infer<typeof HumanReviewPayload>;
+
+export const SubmitHumanReviewDecisionRequest = z
+  .object({
+    choiceId: Id100.optional(),
+    proposal: OrchestrationProposalEnvelope
+  })
+  .strict();
+export type SubmitHumanReviewDecisionRequest = z.infer<
+  typeof SubmitHumanReviewDecisionRequest
+>;
+
 const CreateWorkflowStepTemplate = WorkflowStepTemplate.omit({
   ordinal: true
 })
@@ -603,6 +826,33 @@ export const ListModelProvidersResponse = z
   .strict();
 export type ListModelProvidersResponse = z.infer<
   typeof ListModelProvidersResponse
+>;
+
+export const ListOrchestrationAttemptsResponse = z
+  .object({
+    attempts: z.array(OrchestrationTransportAttempt)
+  })
+  .strict();
+export type ListOrchestrationAttemptsResponse = z.infer<
+  typeof ListOrchestrationAttemptsResponse
+>;
+
+export const ListOrchestrationWorkersResponse = z
+  .object({
+    workers: z.array(OrchestrationWorkerSummary)
+  })
+  .strict();
+export type ListOrchestrationWorkersResponse = z.infer<
+  typeof ListOrchestrationWorkersResponse
+>;
+
+export const GetOrchestrationWorkerResponse = z
+  .object({
+    worker: OrchestrationWorkerDetail
+  })
+  .strict();
+export type GetOrchestrationWorkerResponse = z.infer<
+  typeof GetOrchestrationWorkerResponse
 >;
 
 export const UpdateGoalOrchestratorModelRequest = OrchestratorModelChoice;
@@ -971,7 +1221,91 @@ export type WorkflowValidationSkippedEventPayload = z.infer<
   typeof WorkflowValidationSkippedEventPayload
 >;
 
-export const WorkflowEventType = z.enum([
+export const WorkflowTransportAttemptStartedEventPayload = WorkflowEventPayload(
+  z.object({
+    goalId: Id,
+    workflowRunId: Id,
+    stepRunId: z.string().min(1).nullable(),
+    attemptId: Id,
+    providerId: ModelProviderId,
+    transport: OrchestrationTransport,
+    status: OrchestrationTransportAttemptStatus
+  })
+    .strict()
+);
+export type WorkflowTransportAttemptStartedEventPayload = z.infer<
+  typeof WorkflowTransportAttemptStartedEventPayload
+>;
+
+export const WorkflowTransportAttemptFinishedEventPayload = WorkflowEventPayload(
+  z.object({
+    goalId: Id,
+    workflowRunId: Id,
+    stepRunId: z.string().min(1).nullable(),
+    attemptId: Id,
+    providerId: ModelProviderId,
+    transport: OrchestrationTransport,
+    status: OrchestrationTransportAttemptStatus,
+    failureReason: OrchestrationTransportFailureReason.optional()
+  })
+    .strict()
+);
+export type WorkflowTransportAttemptFinishedEventPayload = z.infer<
+  typeof WorkflowTransportAttemptFinishedEventPayload
+>;
+
+export const WorkflowTransportFallbackEventPayload = WorkflowEventPayload(
+  z.object({
+    goalId: Id,
+    workflowRunId: Id,
+    stepRunId: z.string().min(1).nullable(),
+    attemptId: Id,
+    providerId: ModelProviderId,
+    transport: OrchestrationTransport,
+    status: z.literal("fallback"),
+    failureReason: OrchestrationTransportFailureReason
+  })
+    .strict()
+);
+export type WorkflowTransportFallbackEventPayload = z.infer<
+  typeof WorkflowTransportFallbackEventPayload
+>;
+
+export const WorkflowWorkerStateChangedEventPayload = WorkflowEventPayload(
+  z.object({
+    goalId: Id,
+    workflowRunId: Id,
+    stepRunId: z.string().min(1).nullable(),
+    attemptId: z.string().min(1).optional(),
+    workerId: Id,
+    providerId: ModelProviderId,
+    transport: z.literal("hidden_interactive"),
+    status: OrchestrationWorkerState,
+    failureReason: OrchestrationTransportFailureReason.optional()
+  })
+    .strict()
+);
+export type WorkflowWorkerStateChangedEventPayload = z.infer<
+  typeof WorkflowWorkerStateChangedEventPayload
+>;
+
+export const WorkflowHumanReviewRequestedEventPayload = WorkflowEventPayload(
+  z.object({
+    goalId: Id,
+    workflowRunId: Id,
+    stepRunId: z.string().min(1).nullable(),
+    attemptId: Id,
+    providerId: ModelProviderId,
+    transport: z.literal("human_review"),
+    status: OrchestrationTransportAttemptStatus
+  })
+    .strict()
+);
+export type WorkflowHumanReviewRequestedEventPayload = z.infer<
+  typeof WorkflowHumanReviewRequestedEventPayload
+>;
+
+const M8_WORKFLOW_EVENT_TYPES = [
   "workflow.template.created",
   "workflow.template.updated",
   "workflow.template.duplicated",
@@ -1002,14 +1336,34 @@ export const WorkflowEventType = z.enum([
   "workflow.validation.passed",
   "workflow.validation.failed",
   "workflow.validation.skipped"
+] as const;
+
+const M9_WORKFLOW_EVENT_TYPES = [
+  "workflow.transport.attempt_started",
+  "workflow.transport.attempt_finished",
+  "workflow.transport.fallback",
+  "workflow.worker.state_changed",
+  "workflow.human_review.requested"
+] as const;
+
+export const WorkflowEventType = z.enum([
+  ...M8_WORKFLOW_EVENT_TYPES,
+  ...M9_WORKFLOW_EVENT_TYPES
 ]);
 export type WorkflowEventType = z.infer<typeof WorkflowEventType>;
 
 export const M8EventType = z.enum([
   "goal.orchestrator_model_changed",
-  ...WorkflowEventType.options
+  ...M8_WORKFLOW_EVENT_TYPES
 ]);
 export type M8EventType = z.infer<typeof M8EventType>;
+
+export const M9EventType = z.enum([
+  "goal.orchestrator_model_changed",
+  ...M8_WORKFLOW_EVENT_TYPES,
+  ...M9_WORKFLOW_EVENT_TYPES
+]);
+export type M9EventType = z.infer<typeof M9EventType>;
 
 export const WorkflowEvent = z
   .discriminatedUnion("type", [
@@ -1042,7 +1396,12 @@ export const WorkflowEvent = z
     z.object({ type: z.literal("workflow.validation.run"), payload: WorkflowValidationRunEventPayload }).strict(),
     z.object({ type: z.literal("workflow.validation.passed"), payload: WorkflowValidationPassedEventPayload }).strict(),
     z.object({ type: z.literal("workflow.validation.failed"), payload: WorkflowValidationFailedEventPayload }).strict(),
-    z.object({ type: z.literal("workflow.validation.skipped"), payload: WorkflowValidationSkippedEventPayload }).strict()
+    z.object({ type: z.literal("workflow.validation.skipped"), payload: WorkflowValidationSkippedEventPayload }).strict(),
+    z.object({ type: z.literal("workflow.transport.attempt_started"), payload: WorkflowTransportAttemptStartedEventPayload }).strict(),
+    z.object({ type: z.literal("workflow.transport.attempt_finished"), payload: WorkflowTransportAttemptFinishedEventPayload }).strict(),
+    z.object({ type: z.literal("workflow.transport.fallback"), payload: WorkflowTransportFallbackEventPayload }).strict(),
+    z.object({ type: z.literal("workflow.worker.state_changed"), payload: WorkflowWorkerStateChangedEventPayload }).strict(),
+    z.object({ type: z.literal("workflow.human_review.requested"), payload: WorkflowHumanReviewRequestedEventPayload }).strict()
   ])
   .superRefine((event, ctx) => {
     if (!hasMaxSerializedBytes(event.payload, WORKFLOW_EVENT_MAX_PAYLOAD_BYTES)) {

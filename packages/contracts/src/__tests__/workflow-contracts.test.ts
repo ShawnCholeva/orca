@@ -7,14 +7,30 @@ import {
   CreateSessionRequest,
   CreateTaskRequest,
   DomainEventType,
+  getModelProviderDisplayName,
   Goal,
+  GetOrchestrationWorkerResponse,
+  HumanReviewPayload,
+  ListOrchestrationAttemptsResponse,
+  ListOrchestrationWorkersResponse,
   M8EventType,
+  M9EventType,
   ModelProviderInfo,
   NextOrchestratorDecisionResponse,
   OperatorDescriptor,
+  OrchestrationDecisionKind,
+  OrchestrationProposalEnvelope,
+  OrchestrationRequest,
+  OrchestrationTransport,
+  OrchestrationTransportAttempt,
+  OrchestrationTransportAttemptStatus,
+  OrchestrationTransportFailureReason,
+  OrchestrationWorkerDetail,
+  OrchestrationWorkerState,
   ProposedAction,
   Recommendation,
   RecommendationType,
+  SubmitHumanReviewDecisionRequest,
   Task,
   WorkflowArtifact,
   WorkflowArtifactCreatedEventPayload,
@@ -26,6 +42,7 @@ import {
   WorkflowGuardrailConfig,
   WorkflowGuardrailEvaluatedEventPayload,
   WorkflowGuardrailEvaluation,
+  WorkflowHumanReviewRequestedEventPayload,
   WorkflowLlmCall,
   WorkflowOperatorSelectedEventPayload,
   WorkflowRecommendationAcceptedEventPayload,
@@ -50,12 +67,16 @@ import {
   WorkflowTemplateCreatedEventPayload,
   WorkflowTemplateDuplicatedEventPayload,
   WorkflowTemplateUpdatedEventPayload,
+  WorkflowTransportAttemptFinishedEventPayload,
+  WorkflowTransportAttemptStartedEventPayload,
+  WorkflowTransportFallbackEventPayload,
   WorkflowUserInputRequestedEventPayload,
   WorkflowUserInputSubmittedEventPayload,
   WorkflowValidationFailedEventPayload,
   WorkflowValidationPassedEventPayload,
   WorkflowValidationRunEventPayload,
   WorkflowValidationSkippedEventPayload,
+  WorkflowWorkerStateChangedEventPayload,
   WORKFLOW_ARTIFACT_MAX_BODY_BYTES,
   WORKFLOW_EVENT_MAX_PAYLOAD_BYTES,
   WORKFLOW_GUARDRAIL_MAX_CONFIG_BYTES
@@ -238,6 +259,164 @@ describe("workflow contracts", () => {
         recommendationIds: ["rec-1"]
       })
     ).toEqual({ decision, recommendationIds: ["rec-1"] });
+  });
+
+  it("parses M9 transport, worker, attempt, proposal, and human-review contracts", () => {
+    expect(OrchestrationTransport.options).toEqual([
+      "one_shot",
+      "hidden_interactive",
+      "human_review"
+    ]);
+    expect(OrchestrationDecisionKind.options).toContain("select_operator");
+    expect(OrchestrationWorkerState.options).toEqual([
+      "starting",
+      "ready",
+      "awaiting_input",
+      "producing_decision",
+      "hung",
+      "auth_required",
+      "failed",
+      "stopped"
+    ]);
+    expect(OrchestrationTransportFailureReason.options).toContain(
+      "interactive_output_invalid"
+    );
+    expect(OrchestrationTransportAttemptStatus.options).toEqual([
+      "pending",
+      "running",
+      "succeeded",
+      "rejected",
+      "failed",
+      "fallback"
+    ]);
+
+    const proposal = {
+      orcaProposalVersion: 1,
+      kind: "select_operator" as const,
+      payload: decision.operatorSelectionJson
+    };
+    expect(OrchestrationProposalEnvelope.parse(proposal)).toEqual(proposal);
+    expect(() =>
+      OrchestrationProposalEnvelope.parse({
+        orcaProposalVersion: 2,
+        kind: "select_operator",
+        payload: {}
+      })
+    ).toThrow();
+
+    const request = {
+      kind: "select_operator" as const,
+      goalId: "goal-1",
+      workflowRunId: "run-1",
+      stepRunId: "step-run-1",
+      providerId: "orca/openai" as const,
+      modelId: "gpt-5",
+      attemptId: "attempt-1",
+      payload: { readyOperatorIds: ["human"] }
+    };
+    expect(OrchestrationRequest.parse(request)).toEqual(request);
+
+    const attempt = {
+      id: "attempt-1",
+      goalId: "goal-1",
+      workflowRunId: "run-1",
+      stepRunId: "step-run-1",
+      kind: "select_operator" as const,
+      providerId: "orca/openai" as const,
+      modelId: "gpt-5",
+      transport: "one_shot" as const,
+      status: "failed" as const,
+      failureReason: "one_shot_parse_failed" as const,
+      failureMessage: "invalid envelope",
+      diagnostics: "redacted diagnostic summary",
+      workerId: null,
+      startedAt: now,
+      finishedAt: now,
+      createdAt: now
+    };
+    expect(OrchestrationTransportAttempt.parse(attempt)).toEqual(attempt);
+    expect(ListOrchestrationAttemptsResponse.parse({ attempts: [attempt] })).toEqual({
+      attempts: [attempt]
+    });
+
+    const worker = {
+      id: "worker-1",
+      providerId: "orca/openai" as const,
+      modelId: "gpt-5",
+      state: "ready" as const,
+      currentGoalId: "goal-1",
+      currentWorkflowRunId: "run-1",
+      currentAttemptId: "attempt-2",
+      failureReason: null,
+      failureMessage: null,
+      healthCheckedAt: now,
+      createdAt: now,
+      updatedAt: now
+    };
+    const workerDetail = {
+      ...worker,
+      hookCapabilities: {
+        providerId: "orca/openai" as const,
+        supportsPromptHooks: true,
+        supportsStopHooks: true,
+        supportsStateHooks: false,
+        detectedAt: now
+      },
+      hookTraces: [
+        {
+          id: "trace-1",
+          workerId: "worker-1",
+          hookName: "prompt",
+          status: "succeeded" as const,
+          summary: "hook accepted redacted payload",
+          startedAt: now,
+          finishedAt: now
+        }
+      ],
+      outputTail: "redacted output tail"
+    };
+    expect(OrchestrationWorkerDetail.parse(workerDetail)).toEqual(workerDetail);
+    expect(ListOrchestrationWorkersResponse.parse({ workers: [worker] })).toEqual({
+      workers: [worker]
+    });
+    expect(GetOrchestrationWorkerResponse.parse({ worker: workerDetail })).toEqual({
+      worker: workerDetail
+    });
+
+    const humanReview = {
+      id: "review-1",
+      goalId: "goal-1",
+      workflowRunId: "run-1",
+      stepRunId: "step-run-1",
+      attemptId: "attempt-3",
+      kind: "select_operator" as const,
+      providerId: "orca/openai" as const,
+      modelId: "gpt-5",
+      title: "Choose an operator",
+      summary: "Automated transports could not produce a valid proposal.",
+      choices: [
+        {
+          id: "human",
+          label: "Human",
+          description: "Continue with explicit human supervision.",
+          proposal
+        }
+      ],
+      createdAt: now
+    };
+    expect(HumanReviewPayload.parse(humanReview)).toEqual(humanReview);
+    expect(
+      SubmitHumanReviewDecisionRequest.parse({
+        choiceId: "human",
+        proposal
+      })
+    ).toEqual({ choiceId: "human", proposal });
+  });
+
+  it("maps model provider ids to stable product display names", () => {
+    expect(getModelProviderDisplayName("orca/anthropic")).toBe("Claude");
+    expect(getModelProviderDisplayName("orca/openai")).toBe("OpenAI");
+    expect(getModelProviderDisplayName("orca/google-gemini")).toBe("Gemini");
   });
 
   it("extends existing M1-M7 contracts only with optional M8 fields", () => {
@@ -500,6 +679,54 @@ describe("workflow contracts", () => {
         goalId: "goal-1",
         workflowRunId: "run-1",
         validationId: "validation-1"
+      },
+      "workflow.transport.attempt_started": {
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepRunId: "step-run-1",
+        attemptId: "attempt-1",
+        providerId: "orca/openai",
+        transport: "one_shot",
+        status: "running"
+      },
+      "workflow.transport.attempt_finished": {
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepRunId: "step-run-1",
+        attemptId: "attempt-1",
+        providerId: "orca/openai",
+        transport: "one_shot",
+        status: "failed",
+        failureReason: "one_shot_parse_failed"
+      },
+      "workflow.transport.fallback": {
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepRunId: "step-run-1",
+        attemptId: "attempt-1",
+        providerId: "orca/openai",
+        transport: "one_shot",
+        status: "fallback",
+        failureReason: "one_shot_parse_failed"
+      },
+      "workflow.worker.state_changed": {
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepRunId: "step-run-1",
+        attemptId: "attempt-2",
+        workerId: "worker-1",
+        providerId: "orca/openai",
+        transport: "hidden_interactive",
+        status: "ready"
+      },
+      "workflow.human_review.requested": {
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepRunId: "step-run-1",
+        attemptId: "attempt-3",
+        providerId: "orca/openai",
+        transport: "human_review",
+        status: "pending"
       }
     };
 
@@ -536,7 +763,12 @@ describe("workflow contracts", () => {
       "workflow.validation.run": WorkflowValidationRunEventPayload,
       "workflow.validation.passed": WorkflowValidationPassedEventPayload,
       "workflow.validation.failed": WorkflowValidationFailedEventPayload,
-      "workflow.validation.skipped": WorkflowValidationSkippedEventPayload
+      "workflow.validation.skipped": WorkflowValidationSkippedEventPayload,
+      "workflow.transport.attempt_started": WorkflowTransportAttemptStartedEventPayload,
+      "workflow.transport.attempt_finished": WorkflowTransportAttemptFinishedEventPayload,
+      "workflow.transport.fallback": WorkflowTransportFallbackEventPayload,
+      "workflow.worker.state_changed": WorkflowWorkerStateChangedEventPayload,
+      "workflow.human_review.requested": WorkflowHumanReviewRequestedEventPayload
     };
 
     for (const type of WorkflowEventType.options) {
@@ -557,7 +789,14 @@ describe("workflow contracts", () => {
     expect(M8EventType.parse("goal.orchestrator_model_changed")).toBe(
       "goal.orchestrator_model_changed"
     );
+    expect(() => M8EventType.parse("workflow.transport.attempt_started")).toThrow();
+    expect(M9EventType.parse("workflow.transport.attempt_started")).toBe(
+      "workflow.transport.attempt_started"
+    );
     expect(DomainEventType.parse("workflow.run.started")).toBe("workflow.run.started");
+    expect(DomainEventType.parse("workflow.human_review.requested")).toBe(
+      "workflow.human_review.requested"
+    );
   });
 
   it("rejects oversized capped workflow fields", () => {

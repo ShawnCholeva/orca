@@ -189,7 +189,12 @@ export const DomainEventType = z.enum([
   "workflow.validation.run",
   "workflow.validation.passed",
   "workflow.validation.failed",
-  "workflow.validation.skipped"
+  "workflow.validation.skipped",
+  "workflow.transport.attempt_started",
+  "workflow.transport.attempt_finished",
+  "workflow.transport.fallback",
+  "workflow.worker.state_changed",
+  "workflow.human_review.requested"
 ]);
 export type DomainEventType = z.infer<typeof DomainEventType>;
 
