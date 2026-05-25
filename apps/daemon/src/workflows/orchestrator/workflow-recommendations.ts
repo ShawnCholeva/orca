@@ -121,6 +121,22 @@ export function createRecommendationForWorkflowInTx(
     idFactory
   );
   options.stagedEvents?.push(event);
+  if (input.type === "request_user_input") {
+    options.stagedEvents?.push(
+      appendWorkflowEvent(
+        db,
+        "workflow.user.input.requested",
+        {
+          goalId: input.goalId,
+          workflowRunId: input.workflowRunId,
+          stepRunId: input.stepRunId,
+          recommendationId: id,
+        },
+        createdAt,
+        idFactory
+      )
+    );
+  }
 
   return id;
 }
