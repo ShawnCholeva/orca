@@ -146,6 +146,7 @@ describe('context migration 0006_context.sql', () => {
       '0009_agent_readiness.sql',
       '0010_workflows.sql',
       '0011_workflow_recommendation_types.sql',
+      '0012_orchestration_transport.sql',
     ]);
 
     const tables = (
@@ -218,6 +219,7 @@ describe('context migration 0006_context.sql', () => {
       '0009_agent_readiness.sql',
       '0010_workflows.sql',
       '0011_workflow_recommendation_types.sql',
+      '0012_orchestration_transport.sql',
     ]);
 
     const counts = {

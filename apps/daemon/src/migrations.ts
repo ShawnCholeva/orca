@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 const SUGGESTED_ORCHESTRATION_MIGRATION = "0008_suggested_orchestration.sql";
 const WORKFLOW_RECOMMENDATION_TYPES_MIGRATION =
   "0011_workflow_recommendation_types.sql";
+const ORCHESTRATION_TRANSPORT_MIGRATION = "0012_orchestration_transport.sql";
 
 export const migrationFiles = [
   "0001_init.sql",
@@ -17,7 +18,8 @@ export const migrationFiles = [
   SUGGESTED_ORCHESTRATION_MIGRATION,
   "0009_agent_readiness.sql",
   "0010_workflows.sql",
-  WORKFLOW_RECOMMENDATION_TYPES_MIGRATION
+  WORKFLOW_RECOMMENDATION_TYPES_MIGRATION,
+  ORCHESTRATION_TRANSPORT_MIGRATION
 ] as const;
 
 export function runMigrations(

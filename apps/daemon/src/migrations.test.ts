@@ -62,7 +62,8 @@ describe("runMigrations", () => {
       "0008_suggested_orchestration.sql",
       "0009_agent_readiness.sql",
       "0010_workflows.sql",
-      "0011_workflow_recommendation_types.sql"
+      "0011_workflow_recommendation_types.sql",
+      "0012_orchestration_transport.sql"
     ]);
   });
 
@@ -155,7 +156,8 @@ describe("runMigrations", () => {
       "0008_suggested_orchestration.sql",
       "0009_agent_readiness.sql",
       "0010_workflows.sql",
-      "0011_workflow_recommendation_types.sql"
+      "0011_workflow_recommendation_types.sql",
+      "0012_orchestration_transport.sql"
     ]);
 
     const goalCount = (
@@ -281,7 +283,8 @@ describe("session tables migration", () => {
       "0008_suggested_orchestration.sql",
       "0009_agent_readiness.sql",
       "0010_workflows.sql",
-      "0011_workflow_recommendation_types.sql"
+      "0011_workflow_recommendation_types.sql",
+      "0012_orchestration_transport.sql"
     ]);
 
     const tables = (
@@ -738,7 +741,7 @@ describe("migration 0010 workflows", () => {
     }
   });
 
-  it("upgrades from 0009 to 0010 and then re-run is a no-op", () => {
+  it("upgrades from 0009 to latest and then re-run is a no-op", () => {
     const db = freshDb();
     const dir0009 = createMigrationsDir([
       "0001_init.sql",
@@ -766,7 +769,8 @@ describe("migration 0010 workflows", () => {
     const upgrade = runMigrations(db, defaultMigrationsDir());
     expect(upgrade.applied).toEqual([
       "0010_workflows.sql",
-      "0011_workflow_recommendation_types.sql"
+      "0011_workflow_recommendation_types.sql",
+      "0012_orchestration_transport.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -837,5 +841,461 @@ describe("migration 0010 workflows", () => {
       .prepare("SELECT type FROM recommendations WHERE id = 'rec-1'")
       .get() as { type: string };
     expect(row.type).toBe("advance_workflow_step");
+  });
+});
+
+describe("migration 0012 orchestration transport", () => {
+  function seedGoal(db: ReturnType<typeof freshDb>, id: string) {
+    db.prepare(
+      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(id, "Transport Goal", "", "active", 1, "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z", null);
+  }
+
+  function seedWorkflowGraph(
+    db: ReturnType<typeof freshDb>,
+    goalId: string,
+    workflowRunId: string,
+    stepRunId: string
+  ) {
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "orca/transport-test",
+      "Transport Test",
+      "",
+      1,
+      1,
+      1,
+      "[]",
+      "[]",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z"
+    );
+
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      workflowRunId,
+      goalId,
+      "orca/transport-test",
+      1,
+      "active",
+      null,
+      null,
+      "2026-01-01T00:00:00.000Z",
+      null
+    );
+
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      stepRunId,
+      goalId,
+      workflowRunId,
+      "step-1",
+      1,
+      1,
+      "pending",
+      "[]",
+      "[]",
+      null,
+      null,
+      null,
+      "fp-step-1"
+    );
+  }
+
+  it("creates orchestration tables and required indexes", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    const tables = (
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+        .all() as { name: string }[]
+    ).map((row) => row.name);
+
+    for (const expected of [
+      "orchestration_workers",
+      "orchestration_worker_output_chunks",
+      "orchestration_transport_attempts",
+      "orchestration_worker_hook_traces",
+      "orchestration_human_reviews"
+    ]) {
+      expect(tables).toContain(expected);
+    }
+
+    const indices = (
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
+        .all() as { name: string }[]
+    ).map((row) => row.name);
+
+    for (const expected of [
+      "idx_orchestration_workers_provider_model_state",
+      "idx_orchestration_workers_state_health",
+      "idx_orchestration_workers_goal_run_step",
+      "idx_orchestration_worker_output_written",
+      "idx_orchestration_attempts_goal_created",
+      "idx_orchestration_attempts_run_created",
+      "idx_orchestration_attempts_step_created",
+      "idx_orchestration_attempts_worker_created",
+      "idx_orchestration_attempts_active_reconcile",
+      "idx_orchestration_hook_traces_attempt_created",
+      "idx_orchestration_hook_traces_worker_created",
+      "idx_orchestration_human_reviews_goal_created",
+      "idx_orchestration_human_reviews_run_created",
+      "idx_orchestration_human_reviews_step_created",
+      "idx_orchestration_human_reviews_attempt",
+      "idx_orchestration_human_reviews_status_created"
+    ]) {
+      expect(indices).toContain(expected);
+    }
+  });
+
+  it("enforces orchestration CHECK constraints", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+    seedGoal(db, "goal-check");
+    seedWorkflowGraph(db, "goal-check", "run-check", "step-check");
+
+    db.prepare(
+      "INSERT INTO orchestration_workers (id, provider_id, model, adapter_id, state, pid, command, args_json, cwd, current_goal_id, current_workflow_run_id, current_step_run_id, last_health_at, last_output_at, failure_reason, failure_detail, created_at, started_at, stopped_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "worker-check",
+      "orca/openai",
+      "gpt-5",
+      "codex",
+      "ready",
+      null,
+      null,
+      null,
+      null,
+      "goal-check",
+      "run-check",
+      "step-check",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:00.000Z",
+      null,
+      null
+    );
+
+    expect(() => {
+      db.prepare(
+        "INSERT INTO orchestration_workers (id, provider_id, model, adapter_id, state, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run("worker-bad-state", "orca/openai", "gpt-5", "codex", "invalid", "2026-01-01T00:00:00.000Z");
+    }).toThrow(/CHECK constraint failed/);
+
+    expect(() => {
+      db.prepare(
+        "INSERT INTO orchestration_transport_attempts (id, goal_id, workflow_run_id, step_run_id, decision_id, provider_id, model, transport, worker_id, status, failure_reason, failure_message, raw_text_length, latency_ms, input_fingerprint, created_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(
+        "attempt-bad-transport",
+        "goal-check",
+        "run-check",
+        "step-check",
+        null,
+        "orca/openai",
+        "gpt-5",
+        "invalid_transport",
+        "worker-check",
+        "pending",
+        null,
+        null,
+        null,
+        null,
+        "fp-attempt",
+        "2026-01-01T00:00:00.000Z",
+        null
+      );
+    }).toThrow(/CHECK constraint failed/);
+
+    db.prepare(
+      "INSERT INTO orchestration_transport_attempts (id, goal_id, workflow_run_id, step_run_id, decision_id, provider_id, model, transport, worker_id, status, failure_reason, failure_message, raw_text_length, latency_ms, input_fingerprint, created_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "attempt-check",
+      "goal-check",
+      "run-check",
+      "step-check",
+      null,
+      "orca/openai",
+      "gpt-5",
+      "one_shot",
+      "worker-check",
+      "pending",
+      null,
+      null,
+      null,
+      null,
+      "fp-attempt-check",
+      "2026-01-01T00:00:00.000Z",
+      null
+    );
+
+    expect(() => {
+      db.prepare(
+        "INSERT INTO orchestration_transport_attempts (id, goal_id, workflow_run_id, step_run_id, decision_id, provider_id, model, transport, worker_id, status, failure_reason, failure_message, raw_text_length, latency_ms, input_fingerprint, created_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(
+        "attempt-bad-status",
+        "goal-check",
+        "run-check",
+        "step-check",
+        null,
+        "orca/openai",
+        "gpt-5",
+        "one_shot",
+        "worker-check",
+        "invalid_status",
+        null,
+        null,
+        null,
+        null,
+        "fp-attempt-bad-status",
+        "2026-01-01T00:00:00.000Z",
+        null
+      );
+    }).toThrow(/CHECK constraint failed/);
+
+    expect(() => {
+      db.prepare(
+        "INSERT INTO orchestration_worker_hook_traces (id, attempt_id, worker_id, provider_id, hook_event_name, hook_status, summary, failure_reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(
+        "trace-bad-status",
+        "attempt-check",
+        "worker-check",
+        "orca/openai",
+        "before-submit",
+        "invalid_status",
+        "summary",
+        null,
+        "2026-01-01T00:00:00.000Z"
+      );
+    }).toThrow(/CHECK constraint failed/);
+
+    expect(() => {
+      db.prepare(
+        "INSERT INTO orchestration_human_reviews (id, goal_id, workflow_run_id, step_run_id, attempt_id, decision_kind, payload_json, status, submitted_proposal_json, created_at, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(
+        "review-bad-status",
+        "goal-check",
+        "run-check",
+        "step-check",
+        "attempt-check",
+        "select_operator",
+        "{}",
+        "invalid_status",
+        null,
+        "2026-01-01T00:00:00.000Z",
+        null
+      );
+    }).toThrow(/CHECK constraint failed/);
+  });
+
+  it("enforces orchestration foreign keys and cascades", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+    seedGoal(db, "goal-fk");
+    seedWorkflowGraph(db, "goal-fk", "run-fk", "step-fk");
+
+    db.prepare(
+      "INSERT INTO orchestration_workers (id, provider_id, model, adapter_id, state, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("worker-fk", "orca/openai", "gpt-5", "codex", "ready", "2026-01-01T00:00:00.000Z");
+
+    db.prepare(
+      "INSERT INTO orchestration_worker_output_chunks (worker_id, seq, byte_offset, byte_length, written_at, data) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("worker-fk", 1, 0, 4, "2026-01-01T00:00:00.000Z", Buffer.from("test"));
+
+    db.prepare(
+      "INSERT INTO orchestration_transport_attempts (id, goal_id, workflow_run_id, step_run_id, decision_id, provider_id, model, transport, worker_id, status, failure_reason, failure_message, raw_text_length, latency_ms, input_fingerprint, created_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "attempt-fk",
+      "goal-fk",
+      "run-fk",
+      "step-fk",
+      null,
+      "orca/openai",
+      "gpt-5",
+      "hidden_interactive",
+      "worker-fk",
+      "running",
+      null,
+      null,
+      null,
+      null,
+      "fp-attempt-fk",
+      "2026-01-01T00:00:00.000Z",
+      null
+    );
+
+    db.prepare(
+      "INSERT INTO orchestration_worker_hook_traces (id, attempt_id, worker_id, provider_id, hook_event_name, hook_status, summary, failure_reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "trace-fk",
+      "attempt-fk",
+      "worker-fk",
+      "orca/openai",
+      "after-submit",
+      "started",
+      "summary",
+      null,
+      "2026-01-01T00:00:00.000Z"
+    );
+
+    db.prepare(
+      "INSERT INTO orchestration_human_reviews (id, goal_id, workflow_run_id, step_run_id, attempt_id, decision_kind, payload_json, status, submitted_proposal_json, created_at, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "review-fk",
+      "goal-fk",
+      "run-fk",
+      "step-fk",
+      "attempt-fk",
+      "select_operator",
+      "{}",
+      "pending",
+      null,
+      "2026-01-01T00:00:00.000Z",
+      null
+    );
+
+    expect(() => {
+      db.prepare(
+        "INSERT INTO orchestration_transport_attempts (id, goal_id, workflow_run_id, step_run_id, decision_id, provider_id, model, transport, worker_id, status, failure_reason, failure_message, raw_text_length, latency_ms, input_fingerprint, created_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(
+        "attempt-missing-goal",
+        "goal-missing",
+        null,
+        null,
+        null,
+        "orca/openai",
+        "gpt-5",
+        "one_shot",
+        null,
+        "pending",
+        null,
+        null,
+        null,
+        null,
+        "fp-attempt-missing-goal",
+        "2026-01-01T00:00:00.000Z",
+        null
+      );
+    }).toThrow(/FOREIGN KEY constraint failed/);
+
+    expect(() => {
+      db.prepare(
+        "INSERT INTO orchestration_human_reviews (id, goal_id, workflow_run_id, step_run_id, attempt_id, decision_kind, payload_json, status, submitted_proposal_json, created_at, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(
+        "review-missing-attempt",
+        "goal-fk",
+        "run-fk",
+        "step-fk",
+        "attempt-missing",
+        "select_operator",
+        "{}",
+        "pending",
+        null,
+        "2026-01-01T00:00:00.000Z",
+        null
+      );
+    }).toThrow(/FOREIGN KEY constraint failed/);
+
+    db.prepare("UPDATE orchestration_transport_attempts SET worker_id = NULL WHERE id = ?").run(
+      "attempt-fk"
+    );
+    db.prepare("DELETE FROM orchestration_workers WHERE id = ?").run("worker-fk");
+
+    const outputCount = (
+      db
+        .prepare("SELECT count(*) AS cnt FROM orchestration_worker_output_chunks WHERE worker_id = ?")
+        .get("worker-fk") as { cnt: number }
+    ).cnt;
+    expect(outputCount).toBe(0);
+
+    db.prepare(
+      "INSERT INTO orchestration_workers (id, provider_id, model, adapter_id, state, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("worker-fk-2", "orca/openai", "gpt-5", "codex", "ready", "2026-01-01T00:00:00.000Z");
+
+    db.prepare(
+      "INSERT INTO orchestration_transport_attempts (id, goal_id, workflow_run_id, step_run_id, decision_id, provider_id, model, transport, worker_id, status, failure_reason, failure_message, raw_text_length, latency_ms, input_fingerprint, created_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "attempt-cascade",
+      "goal-fk",
+      "run-fk",
+      "step-fk",
+      null,
+      "orca/openai",
+      "gpt-5",
+      "hidden_interactive",
+      null,
+      "running",
+      null,
+      null,
+      null,
+      null,
+      "fp-attempt-cascade",
+      "2026-01-01T00:00:00.000Z",
+      null
+    );
+
+    db.prepare(
+      "INSERT INTO orchestration_worker_hook_traces (id, attempt_id, worker_id, provider_id, hook_event_name, hook_status, summary, failure_reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "trace-cascade",
+      "attempt-cascade",
+      "worker-fk-2",
+      "orca/openai",
+      "after-submit",
+      "started",
+      "summary",
+      null,
+      "2026-01-01T00:00:00.000Z"
+    );
+
+    db.prepare("DELETE FROM orchestration_transport_attempts WHERE id = ?").run("attempt-cascade");
+    const traceCount = (
+      db
+        .prepare("SELECT count(*) AS cnt FROM orchestration_worker_hook_traces WHERE id = ?")
+        .get("trace-cascade") as { cnt: number }
+    ).cnt;
+    expect(traceCount).toBe(0);
+  });
+
+  it("upgrades from M8 schema and registers 0012 exactly once", () => {
+    const db = freshDb();
+    const m8Dir = createMigrationsDir([
+      "0001_init.sql",
+      "0002_workspaces_refinements.sql",
+      "0004_sessions.sql",
+      "0005_memory.sql",
+      "0006_context.sql",
+      "0007_agents.sql",
+      "0008_suggested_orchestration.sql",
+      "0009_agent_readiness.sql",
+      "0010_workflows.sql",
+      "0011_workflow_recommendation_types.sql"
+    ]);
+
+    const baseline = runMigrations(db, m8Dir);
+    expect(baseline.applied).toEqual([
+      "0001_init.sql",
+      "0002_workspaces_refinements.sql",
+      "0004_sessions.sql",
+      "0005_memory.sql",
+      "0006_context.sql",
+      "0007_agents.sql",
+      "0008_suggested_orchestration.sql",
+      "0009_agent_readiness.sql",
+      "0010_workflows.sql",
+      "0011_workflow_recommendation_types.sql"
+    ]);
+
+    const upgrade = runMigrations(db, defaultMigrationsDir());
+    expect(upgrade.applied).toEqual(["0012_orchestration_transport.sql"]);
+
+    const rerun = runMigrations(db, defaultMigrationsDir());
+    expect(rerun.applied).toEqual([]);
   });
 });
