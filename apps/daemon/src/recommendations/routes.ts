@@ -30,6 +30,7 @@ import {
   RecommendationNotFoundError,
   rejectRecommendation,
   runRecommendationGeneration,
+  WorkflowRecommendationActionError,
 } from './usecases.js';
 
 export interface RecommendationRouteDeps {
@@ -222,6 +223,10 @@ export function registerRecommendationRoutes(
         return apiError(error.code, error.message);
       }
       if (error instanceof InvalidRecommendationStatusError) {
+        reply.status(409);
+        return apiError(error.code, error.message);
+      }
+      if (error instanceof WorkflowRecommendationActionError) {
         reply.status(409);
         return apiError(error.code, error.message);
       }

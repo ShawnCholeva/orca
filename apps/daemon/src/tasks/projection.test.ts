@@ -65,6 +65,7 @@ const BASE_TASK = {
   dependenciesJson: '[]',
   sourcesJson: '[]',
   generationId: null,
+  workflowStepRunId: null,
   fingerprint: 'fp-abc',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',

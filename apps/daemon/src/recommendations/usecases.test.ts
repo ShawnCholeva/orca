@@ -68,19 +68,22 @@ function seedGoal(db: Database.Database, id: string): void {
 function seedRec(db: Database.Database, opts: {
   id?: string;
   goalId: string;
+  type?: string;
   status?: string;
   proposedActionJson?: string;
   fingerprint?: string;
+  workflowStepRunId?: string | null;
 }) {
   const id = opts.id ?? 'rec-1';
   const goalId = opts.goalId;
+  const type = opts.type ?? 'ask_user';
   const paJson = opts.proposedActionJson ?? PROPOSED_ACTION_JSON;
-  const fp = opts.fingerprint ?? recommendationFingerprint(goalId, 'ask_user', paJson);
+  const fp = opts.fingerprint ?? recommendationFingerprint(goalId, type, paJson);
   insertRecommendation(db, {
     id,
     goalId,
     generationId: null,
-    type: 'ask_user',
+    type,
     status: opts.status ?? 'proposed',
     source: 'deterministic_provider',
     title: 'Test',
@@ -94,9 +97,78 @@ function seedRec(db: Database.Database, opts: {
     relatedConflictId: null,
     fingerprint: fp,
     supersededById: null,
+    workflowStepRunId: opts.workflowStepRunId ?? null,
     createdAt: NOW,
     updatedAt: NOW,
   });
+}
+
+function seedWorkflow(db: Database.Database, goalId: string, opts?: {
+  finalStep?: boolean;
+  outstanding?: string[];
+  currentStepId?: string;
+}): void {
+  const currentStepId = opts?.currentStepId ?? 'execution';
+  const steps = opts?.finalStep
+    ? [
+        {
+          id: currentStepId,
+          ordinal: 0,
+          name: 'Done',
+          purpose: 'Finalize',
+          requiredInputs: [],
+          requiredOutputs: [],
+          gateType: 'automated',
+          recommendedCapabilities: [],
+          validationExpectations: [],
+          exitCriteria: [],
+          recommendedOperatorIds: [],
+        },
+      ]
+    : [
+        {
+          id: currentStepId,
+          ordinal: 0,
+          name: 'Execution',
+          purpose: 'Implement',
+          requiredInputs: [],
+          requiredOutputs: [],
+          gateType: 'automated',
+          recommendedCapabilities: [],
+          validationExpectations: [],
+          exitCriteria: [],
+          recommendedOperatorIds: [],
+        },
+        {
+          id: 'qa',
+          ordinal: 1,
+          name: 'QA',
+          purpose: 'Validate',
+          requiredInputs: [],
+          requiredOutputs: [],
+          gateType: 'automated',
+          recommendedCapabilities: [],
+          validationExpectations: [],
+          exitCriteria: [],
+          recommendedOperatorIds: [],
+        },
+      ];
+  db.prepare(
+    `INSERT INTO workflow_templates
+      (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at)
+     VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, ?, '[]', ?, ?)`
+  ).run(JSON.stringify(steps), NOW, NOW);
+  db.prepare(
+    `INSERT INTO workflow_runs
+      (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at)
+     VALUES ('run-1', ?, 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)`
+  ).run(goalId, NOW);
+  db.prepare(
+    `INSERT INTO workflow_step_runs
+      (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status,
+       satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint)
+     VALUES ('step-1', ?, 'run-1', ?, 0, 1, 'active', '[]', ?, NULL, ?, NULL, 'fp-1')`
+  ).run(goalId, currentStepId, JSON.stringify(opts?.outstanding ?? []), NOW);
 }
 
 let bus: EventBus;
@@ -213,6 +285,92 @@ describe('acceptRecommendation', () => {
     seedGoal(db, 'g1');
     seedRec(db, { goalId: 'g1', status: 'rejected' });
     expect(() => acceptRecommendation(makeCtx(db), 'rec-1')).toThrow(InvalidRecommendationStatusError);
+  });
+
+  it('accepting advance_workflow_step advances the workflow step run', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedWorkflow(db, 'g1', { finalStep: false, outstanding: [] });
+    seedRec(db, {
+      goalId: 'g1',
+      type: 'advance_workflow_step',
+      workflowStepRunId: 'step-1',
+      proposedActionJson: JSON.stringify({
+        kind: 'advance_workflow_step',
+        workflowRunId: 'run-1',
+        workflowStepRunId: 'step-1',
+        toStepTemplateId: 'qa',
+      }),
+    });
+
+    acceptRecommendation(makeCtx(db), 'rec-1');
+
+    const run = db
+      .prepare("SELECT current_step_run_id, status FROM workflow_runs WHERE id='run-1'")
+      .get() as { current_step_run_id: string | null; status: string };
+    expect(run.status).toBe('active');
+    expect(run.current_step_run_id).not.toBe('step-1');
+    const currentStep = db
+      .prepare('SELECT status FROM workflow_step_runs WHERE id = ?')
+      .get(run.current_step_run_id) as { status: string };
+    expect(currentStep.status).toBe('active');
+  });
+
+  it('accepting complete_workflow_run completes the final step and run', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedWorkflow(db, 'g1', { finalStep: true, outstanding: [] });
+    seedRec(db, {
+      goalId: 'g1',
+      type: 'complete_workflow_run',
+      workflowStepRunId: 'step-1',
+      proposedActionJson: JSON.stringify({
+        kind: 'complete_workflow_run',
+        workflowRunId: 'run-1',
+        workflowStepRunId: 'step-1',
+      }),
+    });
+
+    acceptRecommendation(makeCtx(db), 'rec-1');
+
+    const run = db
+      .prepare("SELECT status, current_step_run_id FROM workflow_runs WHERE id='run-1'")
+      .get() as { status: string; current_step_run_id: string | null };
+    expect(run.status).toBe('completed');
+    expect(run.current_step_run_id).toBeNull();
+    const step = db
+      .prepare("SELECT status FROM workflow_step_runs WHERE id='step-1'")
+      .get() as { status: string };
+    expect(step.status).toBe('passed');
+  });
+
+  it('accepting mark_artifact_satisfied records matching exit criteria', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedWorkflow(db, 'g1', { finalStep: true, outstanding: ['goal_brief'] });
+    seedRec(db, {
+      goalId: 'g1',
+      type: 'mark_artifact_satisfied',
+      workflowStepRunId: 'step-1',
+      proposedActionJson: JSON.stringify({
+        kind: 'mark_artifact_satisfied',
+        workflowStepRunId: 'step-1',
+        artifactType: 'goal_brief',
+      }),
+    });
+
+    acceptRecommendation(makeCtx(db), 'rec-1');
+
+    const row = db
+      .prepare(
+        "SELECT satisfied_exit_criteria_json, outstanding_exit_criteria_json FROM workflow_step_runs WHERE id='step-1'"
+      )
+      .get() as {
+      satisfied_exit_criteria_json: string;
+      outstanding_exit_criteria_json: string;
+    };
+    expect(JSON.parse(row.satisfied_exit_criteria_json)).toContain('goal_brief');
+    expect(JSON.parse(row.outstanding_exit_criteria_json)).toEqual([]);
   });
 });
 

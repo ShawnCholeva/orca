@@ -103,6 +103,22 @@ export class CrossGoalAssociationError extends Error {
   }
 }
 
+export class DependencyTaskNotFoundError extends Error {
+  readonly code = 'dependency_task_not_found' as const;
+  constructor(public readonly taskId: string) {
+    super(`Dependency task not found: ${taskId}`);
+    this.name = 'DependencyTaskNotFoundError';
+  }
+}
+
+export class DependencyTaskGoalMismatchError extends Error {
+  readonly code = 'dependency_task_not_found' as const;
+  constructor(public readonly taskId: string, public readonly goalId: string) {
+    super(`Dependency task ${taskId} does not belong to goal ${goalId}`);
+    this.name = 'DependencyTaskGoalMismatchError';
+  }
+}
+
 export class TaskGenerationNotFoundError extends Error {
   readonly code = 'task_generation_not_found' as const;
   constructor(public readonly generationId: string) {
@@ -207,6 +223,24 @@ function isSqliteUniqueError(err: unknown): boolean {
   );
 }
 
+export function ensureDependenciesBelongToGoal(
+  db: Database.Database,
+  goalId: string,
+  dependencyIds: string[]
+): void {
+  if (dependencyIds.length === 0) return;
+  const tasks = getTasksByIds(db, dependencyIds);
+  if (tasks.length !== dependencyIds.length) {
+    const existingIds = new Set(tasks.map((task) => task.id));
+    const missingId = dependencyIds.find((id) => !existingIds.has(id));
+    if (missingId) throw new DependencyTaskNotFoundError(missingId);
+  }
+  const crossGoalTask = tasks.find((task) => task.goalId !== goalId);
+  if (crossGoalTask) {
+    throw new DependencyTaskGoalMismatchError(crossGoalTask.id, goalId);
+  }
+}
+
 // ── Create task ───────────────────────────────────────────────────────────────
 
 export interface CreateTaskInput {
@@ -222,13 +256,22 @@ export interface CreateTaskInput {
   workspaceId?: string | null;
   parentTaskId?: string | null;
   generationId?: string | null;
+  workflowStepRunId?: string | null;
   status?: TaskStatus;
 }
 
-export function createTask(ctx: TaskCtx, input: CreateTaskInput): Task {
-  const { db, bus } = ctx;
-  const now = ctx.now?.() ?? new Date().toISOString();
-  const idFn = ctx.idFactory ?? randomUUID;
+export interface CreateTaskInTxOptions {
+  idFactory?: () => string;
+  stagedEvents?: DomainEvent[];
+}
+
+export function createTaskInTx(
+  db: Database.Database,
+  now: string,
+  input: CreateTaskInput,
+  options: CreateTaskInTxOptions = {}
+): Task {
+  const idFn = options.idFactory ?? randomUUID;
   const stmts = ensureStmts(db);
 
   const title = capTitle(input.title);
@@ -242,42 +285,39 @@ export function createTask(ctx: TaskCtx, input: CreateTaskInput): Task {
   const id = idFn();
   const status = input.status ?? (input.origin === 'user' ? 'open' : 'proposed');
 
-  const toPublish: DomainEvent[] = [];
-
   try {
-    db.transaction(() => {
-      insertTask(db, {
-        id,
+    insertTask(db, {
+      id,
+      goalId: input.goalId,
+      parentTaskId: input.parentTaskId ?? null,
+      workspaceId: input.workspaceId ?? null,
+      role: input.role,
+      status,
+      origin: input.origin,
+      title,
+      description,
+      acceptanceCriteriaJson: JSON.stringify(acceptanceCriteria),
+      validationStepsJson: JSON.stringify(validationSteps),
+      dependenciesJson: JSON.stringify(dependencies),
+      sourcesJson: JSON.stringify(sources),
+      generationId: input.generationId ?? null,
+      workflowStepRunId: input.workflowStepRunId ?? null,
+      fingerprint: fp,
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null,
+    });
+    options.stagedEvents?.push(
+      emitEvent(stmts, 'task.created', input.goalId, {
+        taskId: id,
         goalId: input.goalId,
-        parentTaskId: input.parentTaskId ?? null,
-        workspaceId: input.workspaceId ?? null,
-        role: input.role,
         status,
+        role: input.role,
+        workspaceId: input.workspaceId ?? null,
         origin: input.origin,
-        title,
-        description,
-        acceptanceCriteriaJson: JSON.stringify(acceptanceCriteria),
-        validationStepsJson: JSON.stringify(validationSteps),
-        dependenciesJson: JSON.stringify(dependencies),
-        sourcesJson: JSON.stringify(sources),
         generationId: input.generationId ?? null,
-        fingerprint: fp,
-        createdAt: now,
-        updatedAt: now,
-        archivedAt: null,
-      });
-      toPublish.push(
-        emitEvent(stmts, 'task.created', input.goalId, {
-          taskId: id,
-          goalId: input.goalId,
-          status,
-          role: input.role,
-          workspaceId: input.workspaceId ?? null,
-          origin: input.origin,
-          generationId: input.generationId ?? null,
-        }, now, idFn)
-      );
-    })();
+      }, now, idFn)
+    );
   } catch (err) {
     if (input.origin === 'generator' && isSqliteUniqueError(err)) {
       throw new DuplicateTaskFingerprintError(fp);
@@ -285,8 +325,22 @@ export function createTask(ctx: TaskCtx, input: CreateTaskInput): Task {
     throw err;
   }
 
-  for (const ev of toPublish) bus.publish(ev);
   return getTaskById(db, id)!;
+}
+
+export function createTask(ctx: TaskCtx, input: CreateTaskInput): Task {
+  const { db, bus } = ctx;
+  const now = ctx.now?.() ?? new Date().toISOString();
+  const stagedEvents: DomainEvent[] = [];
+  const task = db.transaction(() =>
+    createTaskInTx(db, now, input, {
+      idFactory: ctx.idFactory,
+      stagedEvents,
+    })
+  )();
+
+  for (const ev of stagedEvents) bus.publish(ev);
+  return task;
 }
 
 // ── Update task ───────────────────────────────────────────────────────────────
@@ -473,6 +527,7 @@ export function splitTask(
         dependenciesJson: JSON.stringify(deps),
         sourcesJson: JSON.stringify(sources),
         generationId: null,
+        workflowStepRunId: null,
         fingerprint: fp,
         createdAt: now,
         updatedAt: now,
@@ -828,6 +883,7 @@ export async function runTaskGeneration(
             dependenciesJson: '[]',
             sourcesJson: JSON.stringify(sources),
             generationId,
+            workflowStepRunId: null,
             fingerprint: fp,
             createdAt: commitNow,
             updatedAt: commitNow,

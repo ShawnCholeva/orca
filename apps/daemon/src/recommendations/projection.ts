@@ -28,6 +28,7 @@ interface RecommendationDbRow {
   created_at: string;
   updated_at: string;
   resolved_at: string | null;
+  workflow_step_run_id: string | null;
 }
 
 interface RecommendationGenerationDbRow {
@@ -69,6 +70,7 @@ function rowToRecommendation(row: RecommendationDbRow): Recommendation {
     relatedConflictId: row.related_conflict_id,
     fingerprint: row.fingerprint,
     supersededById: row.superseded_by_id,
+    workflowStepRunId: row.workflow_step_run_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -118,8 +120,8 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
           (id, goal_id, generation_id, type, status, source, title, rationale,
            proposed_action_json, confidence, sources_json, related_task_id,
            related_session_id, related_context_pkg_id, related_conflict_id,
-           fingerprint, superseded_by_id, superseded_reason, created_at, updated_at, resolved_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           fingerprint, superseded_by_id, superseded_reason, created_at, updated_at, resolved_at, workflow_step_run_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `),
       updateStatus: db.prepare(
         'UPDATE recommendations SET status = ?, resolved_at = ?, updated_at = ? WHERE id = ?'
@@ -183,6 +185,7 @@ export interface InsertRecommendationInput {
   relatedConflictId: string | null;
   fingerprint: string;
   supersededById: string | null;
+  workflowStepRunId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -209,7 +212,8 @@ export function insertRecommendation(db: Database.Database, input: InsertRecomme
     null,
     input.createdAt,
     input.updatedAt,
-    null
+    null,
+    input.workflowStepRunId ?? null
   );
 }
 

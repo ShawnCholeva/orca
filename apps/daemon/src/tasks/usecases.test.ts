@@ -10,6 +10,8 @@ import { defaultMigrationsDir, runMigrations } from '../migrations.js';
 import { EventBus } from '../events.js';
 import {
   createTask,
+  createTaskInTx,
+  ensureDependenciesBelongToGoal,
   updateTask,
   splitTask,
   associateTaskWithSession,
@@ -24,6 +26,8 @@ import {
   InvalidStatusTransitionError,
   TaskNotFoundError,
   CrossGoalAssociationError,
+  DependencyTaskGoalMismatchError,
+  DependencyTaskNotFoundError,
   resetPreparedStatements,
   type TaskCtx,
 } from './usecases.js';
@@ -89,6 +93,26 @@ function seedContextPackage(db: Database.Database, id: string, goalId: string): 
       source_count, sources_json, warnings_json, source_fingerprint, assembler_version, created_at)
      VALUES (?, ?, 'shell-manual', 'engineer', 'obj', 'ready', '', 0, 0, 0, 0, 0, '[]', '[]', 'fp', '0.1.0', '2026-01-01T00:00:00.000Z')`
   ).run(id, goalId);
+}
+
+function seedWorkflowStepRun(db: Database.Database, goalId: string, stepRunId = 'step-1'): void {
+  const now = '2026-01-01T00:00:00.000Z';
+  db.prepare(
+    `INSERT INTO workflow_templates
+      (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at)
+     VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, '[]', '[]', ?, ?)`
+  ).run(now, now);
+  db.prepare(
+    `INSERT INTO workflow_runs
+      (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at)
+     VALUES ('run-1', ?, 'orca/engineering', 1, 'active', ?, NULL, ?, NULL)`
+  ).run(goalId, stepRunId, now);
+  db.prepare(
+    `INSERT INTO workflow_step_runs
+      (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status,
+       satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint)
+     VALUES (?, ?, 'run-1', 'execution', 0, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1')`
+  ).run(stepRunId, goalId, now);
 }
 
 let bus: EventBus;
@@ -256,6 +280,56 @@ describe('createTask', () => {
       goalId: 'g1', origin: 'user', role: 'engineer', title: 'Same', description: '',
     });
     expect(t1.id).not.toBe(t2.id);
+  });
+
+  it('createTaskInTx supports workflow_step_run_id inside caller transaction', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedWorkflowStepRun(db, 'g1', 'step-1');
+    const staged: DomainEvent[] = [];
+    const task = db.transaction(() =>
+      createTaskInTx(
+        db,
+        '2026-01-01T00:00:00.000Z',
+        {
+          goalId: 'g1',
+          origin: 'generator',
+          role: 'engineer',
+          title: 'Workflow task',
+          description: '',
+          workflowStepRunId: 'step-1',
+        },
+        {
+          idFactory: () => 'task-in-tx',
+          stagedEvents: staged,
+        }
+      )
+    )();
+
+    expect(task.id).toBe('task-in-tx');
+    expect(task.workflowStepRunId).toBe('step-1');
+    expect(staged).toHaveLength(1);
+    expect(staged[0].type).toBe('task.created');
+  });
+
+  it('ensureDependenciesBelongToGoal validates missing and cross-goal dependencies', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedGoal(db, 'g2');
+    const dep = createTask(makeCtx(db), {
+      goalId: 'g2',
+      origin: 'user',
+      role: 'engineer',
+      title: 'dep',
+      description: '',
+    });
+
+    expect(() => ensureDependenciesBelongToGoal(db, 'g1', ['missing'])).toThrow(
+      DependencyTaskNotFoundError
+    );
+    expect(() => ensureDependenciesBelongToGoal(db, 'g1', [dep.id])).toThrow(
+      DependencyTaskGoalMismatchError
+    );
   });
 
   it('atomicity: event insert failure rolls back task row', () => {

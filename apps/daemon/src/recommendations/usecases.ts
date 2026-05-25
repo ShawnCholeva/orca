@@ -17,6 +17,13 @@ import {
 import type { EventBus } from '../events.js';
 import { redactSecrets } from '../memory/normalize.js';
 import { runGeneration } from '../orchestrator/runner.js';
+import { appendWorkflowEvent } from '../workflows/events.js';
+import { getWorkflowRunById } from '../workflows/runs/projection.js';
+import {
+  advanceToNextStep,
+  recordExitCriteriaSatisfaction,
+} from '../workflows/steps/usecases.js';
+import { getTemplateById } from '../workflows/templates/projection.js';
 import { buildRecommendationInput } from './input.js';
 import type { RecommendationProvider, RecommendationProviderOutput } from './provider.js';
 import { RecommendationProviderOutputSchema } from './provider.js';
@@ -97,6 +104,32 @@ export class RecommendationGenerationNotFoundError extends Error {
   }
 }
 
+export class WorkflowRecommendationActionError extends Error {
+  readonly code = 'workflow_recommendation_action_invalid' as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorkflowRecommendationActionError';
+  }
+}
+
+interface WorkflowStepRunRow {
+  id: string;
+  workflow_run_id: string;
+  step_template_id: string;
+  ordinal: number;
+  status: string;
+  outstanding_exit_criteria_json: string;
+}
+
+const WORKFLOW_RECOMMENDATION_TYPES = new Set([
+  'advance_workflow_step',
+  'launch_workflow_session',
+  'complete_workflow_run',
+  'mark_artifact_satisfied',
+  'request_user_input',
+]);
+
 // ── Prepared statement cache for event inserts ────────────────────────────────
 
 let _db: Database.Database | null = null;
@@ -155,6 +188,152 @@ function capNote(note: string | undefined): string | null {
   return note ? redactSecrets(note.trim().slice(0, ORCHESTRATION_FEEDBACK_MAX_NOTE_CHARS)) : null;
 }
 
+function parseOutstandingCriteria(raw: string): string[] {
+  const parsed = JSON.parse(raw) as unknown;
+  return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [];
+}
+
+function readStepRunRow(db: Database.Database, stepRunId: string): WorkflowStepRunRow | null {
+  return db
+    .prepare(
+      'SELECT id, workflow_run_id, step_template_id, ordinal, status, outstanding_exit_criteria_json FROM workflow_step_runs WHERE id = ?'
+    )
+    .get(stepRunId) as WorkflowStepRunRow | undefined ?? null;
+}
+
+function resolveWorkflowRunId(db: Database.Database, rec: Recommendation): string | null {
+  const action = rec.proposedAction;
+  if (
+    action.kind === 'advance_workflow_step' ||
+    action.kind === 'complete_workflow_run'
+  ) {
+    return action.workflowRunId;
+  }
+  const stepRunId =
+    rec.workflowStepRunId ??
+    ('workflowStepRunId' in action ? action.workflowStepRunId : null);
+  if (!stepRunId) return null;
+  const row = db
+    .prepare('SELECT workflow_run_id FROM workflow_step_runs WHERE id = ?')
+    .get(stepRunId) as { workflow_run_id: string } | undefined;
+  return row?.workflow_run_id ?? null;
+}
+
+function appendWorkflowRecommendationStatusEvent(
+  db: Database.Database,
+  rec: Recommendation,
+  status: 'accepted' | 'rejected',
+  now: string,
+  idFn: () => string,
+  toPublish: DomainEvent[]
+): void {
+  if (!WORKFLOW_RECOMMENDATION_TYPES.has(rec.type)) return;
+  const workflowRunId = resolveWorkflowRunId(db, rec);
+  const type =
+    status === 'accepted'
+      ? 'workflow.recommendation.accepted'
+      : 'workflow.recommendation.rejected';
+  toPublish.push(
+    appendWorkflowEvent(
+      db,
+      type,
+      {
+        recommendationId: rec.id,
+        goalId: rec.goalId,
+        workflowRunId,
+        stepRunId: rec.workflowStepRunId ?? null,
+        type: rec.type,
+        status,
+      },
+      now,
+      idFn
+    )
+  );
+}
+
+function assertFinalStepReadyForCompletion(
+  db: Database.Database,
+  workflowRunId: string,
+  stepRunId: string
+): void {
+  const run = getWorkflowRunById(db, workflowRunId);
+  if (!run) {
+    throw new WorkflowRecommendationActionError(`Workflow run not found: ${workflowRunId}`);
+  }
+  if (run.status !== 'active') {
+    throw new WorkflowRecommendationActionError(`Workflow run is not active: ${workflowRunId}`);
+  }
+  if (run.currentStepRunId !== stepRunId) {
+    throw new WorkflowRecommendationActionError(
+      `Workflow run ${workflowRunId} is no longer on step ${stepRunId}`
+    );
+  }
+
+  const stepRun = readStepRunRow(db, stepRunId);
+  if (!stepRun || stepRun.workflow_run_id !== workflowRunId) {
+    throw new WorkflowRecommendationActionError(`Workflow step run not found: ${stepRunId}`);
+  }
+  if (stepRun.status !== 'active') {
+    throw new WorkflowRecommendationActionError(`Workflow step run is not active: ${stepRunId}`);
+  }
+  if (parseOutstandingCriteria(stepRun.outstanding_exit_criteria_json).length > 0) {
+    throw new WorkflowRecommendationActionError(
+      `Workflow step run ${stepRunId} still has outstanding exit criteria`
+    );
+  }
+
+  const template = getTemplateById(db, run.templateId);
+  if (!template) {
+    throw new WorkflowRecommendationActionError(`Workflow template not found: ${run.templateId}`);
+  }
+  const nextStep = template.steps.find((step) => step.ordinal === stepRun.ordinal + 1);
+  if (nextStep) {
+    throw new WorkflowRecommendationActionError(
+      `Workflow run ${workflowRunId} is not at its final step`
+    );
+  }
+}
+
+function applyWorkflowAcceptSideEffectsInTx(
+  db: Database.Database,
+  now: string,
+  idFn: () => string,
+  rec: Recommendation,
+  stagedEvents: DomainEvent[]
+): void {
+  if (!WORKFLOW_RECOMMENDATION_TYPES.has(rec.type)) return;
+
+  const action = rec.proposedAction;
+  switch (action.kind) {
+    case 'advance_workflow_step': {
+      advanceToNextStep(db, () => now, action.workflowStepRunId, {
+        idFactory: idFn,
+        stagedEvents,
+      });
+      return;
+    }
+    case 'complete_workflow_run': {
+      assertFinalStepReadyForCompletion(db, action.workflowRunId, action.workflowStepRunId);
+      advanceToNextStep(db, () => now, action.workflowStepRunId, {
+        idFactory: idFn,
+        stagedEvents,
+      });
+      return;
+    }
+    case 'mark_artifact_satisfied': {
+      recordExitCriteriaSatisfaction(db, () => now, action.workflowStepRunId, [
+        action.artifactType,
+      ]);
+      return;
+    }
+    case 'launch_workflow_session':
+    case 'request_user_input':
+      return;
+    default:
+      return;
+  }
+}
+
 // ── Shared terminal-feedback helper ───────────────────────────────────────────
 
 type TerminalAction = 'accept' | 'reject' | 'dismiss';
@@ -193,6 +372,9 @@ function recordTerminalFeedback(
         createdAt: now,
       });
       updateRecommendationStatusRow(db, rec.id, targetStatus, now, now);
+      if (action === 'accept') {
+        applyWorkflowAcceptSideEffectsInTx(db, now, idFn, rec, toPublish);
+      }
       toPublish.push(
         emitEvent(stmts, eventType, rec.goalId, {
           recommendationId: rec.id,
@@ -200,6 +382,16 @@ function recordTerminalFeedback(
           type: rec.type,
         }, now, idFn)
       );
+      if (action === 'accept' || action === 'reject') {
+        appendWorkflowRecommendationStatusEvent(
+          db,
+          rec,
+          action === 'accept' ? 'accepted' : 'rejected',
+          now,
+          idFn,
+          toPublish
+        );
+      }
       toPublish.push(
         emitEvent(stmts, 'user.feedback.recorded', rec.goalId, {
           feedbackId,

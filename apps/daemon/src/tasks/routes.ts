@@ -307,6 +307,7 @@ export function registerTaskRoutes(server: FastifyInstance, deps: TaskRouteDeps)
         parentTaskId: parsed.data.parentTaskId,
         dependencies: parsed.data.dependencies,
         sources: parsed.data.sources,
+        workflowStepRunId: parsed.data.workflowStepRunId ?? null,
         acceptanceCriteria: makeCriterionIds(parsed.data.acceptanceCriteria, idFactory),
         validationSteps: makeValidationStepIds(parsed.data.validationSteps, idFactory),
       }

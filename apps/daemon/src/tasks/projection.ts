@@ -22,6 +22,7 @@ interface TaskDbRow {
   dependencies_json: string;
   sources_json: string;
   generation_id: string | null;
+  workflow_step_run_id: string | null;
   fingerprint: string;
   created_at: string;
   updated_at: string;
@@ -63,6 +64,7 @@ function rowToTask(row: TaskDbRow): Task {
     dependencies: JSON.parse(row.dependencies_json) as string[],
     sources: JSON.parse(row.sources_json) as TaskSourceRef[],
     generationId: row.generation_id,
+    workflowStepRunId: row.workflow_step_run_id,
     fingerprint: row.fingerprint,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -114,8 +116,8 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
       insertTask: db.prepare(`
         INSERT INTO tasks (id, goal_id, parent_task_id, workspace_id, role, status, origin,
           title, description, acceptance_criteria_json, validation_steps_json,
-          dependencies_json, sources_json, generation_id, fingerprint, created_at, updated_at, archived_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          dependencies_json, sources_json, generation_id, workflow_step_run_id, fingerprint, created_at, updated_at, archived_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `),
       updateTask: db.prepare(`
         UPDATE tasks SET title = ?, description = ?, acceptance_criteria_json = ?,
@@ -179,6 +181,7 @@ export interface InsertTaskInput {
   dependenciesJson: string;
   sourcesJson: string;
   generationId: string | null;
+  workflowStepRunId: string | null;
   fingerprint: string;
   createdAt: string;
   updatedAt: string;
@@ -190,7 +193,7 @@ export function insertTask(db: Database.Database, row: InsertTaskInput): void {
     row.id, row.goalId, row.parentTaskId, row.workspaceId, row.role, row.status,
     row.origin, row.title, row.description, row.acceptanceCriteriaJson,
     row.validationStepsJson, row.dependenciesJson, row.sourcesJson,
-    row.generationId, row.fingerprint, row.createdAt, row.updatedAt, row.archivedAt
+    row.generationId, row.workflowStepRunId, row.fingerprint, row.createdAt, row.updatedAt, row.archivedAt
   );
 }
 
