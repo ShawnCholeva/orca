@@ -139,7 +139,12 @@ CREATE TABLE recommendations (
       'update_plan',
       'ask_user',
       'mark_complete',
-      'pause_work'
+      'pause_work',
+      'advance_workflow_step',
+      'launch_workflow_session',
+      'complete_workflow_run',
+      'mark_artifact_satisfied',
+      'request_user_input'
     )
   ),
   status                 TEXT NOT NULL CHECK (status IN ('proposed', 'accepted', 'rejected', 'dismissed', 'modified', 'superseded')),
