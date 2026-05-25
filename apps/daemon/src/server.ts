@@ -159,6 +159,10 @@ import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js'
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
+import {
+  buildOrchestrationProviderCatalog,
+  toModelProvidersResponse,
+} from './workflows/orchestration-transport/provider-catalog.js';
 import { NotConnectedError, UnknownAgentError } from './readiness/service.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
@@ -252,7 +256,8 @@ export function createServer(
   });
 
   server.get('/v1/model-providers', async (): Promise<ListModelProvidersResponse> => {
-    const providers = await daemonContext.modelProviderRegistry.describe();
+    const catalog = await buildOrchestrationProviderCatalog(daemonContext.modelProviderRegistry);
+    const providers = toModelProvidersResponse(catalog);
     return { providers };
   });
 

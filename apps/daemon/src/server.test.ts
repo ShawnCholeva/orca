@@ -414,6 +414,47 @@ describe('server routes', () => {
       'orca/google-gemini',
       'orca/openai',
     ]);
+    expect(
+      Object.fromEntries(body.providers.map((provider) => [provider.id, provider.displayName]))
+    ).toEqual({
+      'orca/anthropic': 'Claude',
+      'orca/google-gemini': 'Gemini',
+      'orca/openai': 'OpenAI',
+    });
+    expect(body.providers.every((provider) => provider.available)).toBe(true);
+  });
+
+  it('GET /v1/model-providers still returns all providers when API keys are missing', async () => {
+    const prevOpenAI = process.env.OPENAI_API_KEY;
+    const prevAnthropic = process.env.ANTHROPIC_API_KEY;
+    const prevGoogle = process.env.GOOGLE_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+
+    try {
+      const response = await server.inject({
+        method: 'GET',
+        url: '/v1/model-providers',
+        headers: AUTH_HEADERS,
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = ListModelProvidersResponse.parse(JSON.parse(response.body));
+      expect(body.providers.map((provider) => provider.id).sort()).toEqual([
+        'orca/anthropic',
+        'orca/google-gemini',
+        'orca/openai',
+      ]);
+      expect(body.providers.every((provider) => provider.available)).toBe(true);
+    } finally {
+      if (prevOpenAI === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = prevOpenAI;
+      if (prevAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = prevAnthropic;
+      if (prevGoogle === undefined) delete process.env.GOOGLE_API_KEY;
+      else process.env.GOOGLE_API_KEY = prevGoogle;
+    }
   });
 
   it('GET /v1/operators requires a Goal and returns operator descriptors', async () => {
