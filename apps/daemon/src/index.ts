@@ -19,6 +19,7 @@ import { createDaemonContext } from './daemon-context.js';
 import { subscribeOrchestrationTriggers } from './orchestrator/triggers.js';
 import { reconcileInFlightGenerations } from './orchestrator/reconcile.js';
 import { seedEngineeringTemplate } from './workflows/templates/seed-engineering.js';
+import { reconcileWorkflowsOnBoot } from './workflows/reconcile.js';
 
 export interface DaemonStartHandles {
   close: () => Promise<void>;
@@ -64,6 +65,7 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
   reconcileStaleExtractions(db, eventBus, bootNow);
   reconcileStaleAssemblies(db, eventBus, bootNow);
   await reconcileInFlightGenerations(db);
+  reconcileWorkflowsOnBoot(db, () => new Date().toISOString());
 
   // Wire orchestration trigger subscriber (must be before HTTP listen).
   const daemonCtx = createDaemonContext(db, eventBus);
