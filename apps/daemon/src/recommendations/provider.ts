@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import {
   ProposedAction,
+  RecommendationType,
   RecommendationSourceRef,
   ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS,
   ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS,
   ORCHESTRATION_RECOMMENDATION_MAX_SOURCES,
   ORCHESTRATION_RECOMMENDATION_MAX_PROPOSED_ACTION_BYTES,
-  type RecommendationType,
 } from '@orca/contracts';
 import type { RecommendationInput } from './input.js';
 import type { RecommendationCandidate } from './rules.js';
@@ -31,19 +31,7 @@ export const RecommendationProviderOutputSchema = z
     candidates: z
       .array(
         z.object({
-          type: z.enum([
-            'create_session',
-            'continue_session',
-            'review_output',
-            'refine_goal',
-            'split_task',
-            'run_validation',
-            'resolve_conflict',
-            'update_plan',
-            'ask_user',
-            'mark_complete',
-            'pause_work',
-          ]),
+          type: RecommendationType,
           title: z.string().trim().min(1).max(ORCHESTRATION_RECOMMENDATION_MAX_TITLE_CHARS),
           rationale: z.string().max(ORCHESTRATION_RECOMMENDATION_MAX_RATIONALE_CHARS),
           proposedAction: ProposedAction,

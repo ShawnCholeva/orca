@@ -133,6 +133,16 @@ function initFieldState(action: ProposedAction): FieldState {
         pauseReason: action.reason,
         relatedTaskIdsText: action.relatedTaskIds.join("\n"),
       };
+    case "advance_workflow_step":
+      return { ...EMPTY_FIELDS };
+    case "launch_workflow_session":
+      return { ...EMPTY_FIELDS, sessionObjective: action.objective };
+    case "complete_workflow_run":
+      return { ...EMPTY_FIELDS };
+    case "mark_artifact_satisfied":
+      return { ...EMPTY_FIELDS };
+    case "request_user_input":
+      return { ...EMPTY_FIELDS, askQuestion: action.question };
   }
 }
 

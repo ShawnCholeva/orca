@@ -6,6 +6,7 @@ import type Database from "better-sqlite3";
 import type { DomainEvent } from "@orca/contracts";
 import type { Config } from "../../config.js";
 import { closeDatabase, openDatabase } from "../../db.js";
+import { EventBus } from "../../events.js";
 import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
 import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { getTemplateById, resetPreparedStatements as resetProjectionStatements } from "./projection.js";
@@ -40,17 +41,17 @@ function setup(): { db: Database.Database; ctx: WorkflowTemplateUsecaseCtx; even
   const db = openDatabase(createConfig(dir));
   runMigrations(db, defaultMigrationsDir());
   const events: DomainEvent[] = [];
+  const bus = new EventBus();
+  bus.subscribe((event) => {
+    events.push(event);
+  });
   let nextId = 0;
   return {
     db,
     events,
     ctx: {
       db,
-      bus: {
-        publish(event) {
-          events.push(event);
-        },
-      },
+      bus,
       now: () => NOW,
       idFactory: () => `fixed-id-${++nextId}`,
     },

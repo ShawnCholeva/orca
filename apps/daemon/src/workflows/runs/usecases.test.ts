@@ -126,16 +126,23 @@ describe("workflow run usecases", () => {
       .prepare("SELECT active_workflow_run_id FROM goals WHERE id = ?")
       .get("goal-1") as { active_workflow_run_id: string | null };
     expect(linkedGoal.active_workflow_run_id).toBe(run.id);
+    expect(run.currentStepRunId).toBeTruthy();
 
     expect(() =>
       startWorkflowRun(ctx, { goalId: "goal-1", templateId: "orca/engineering" })
     ).toThrow(ActiveWorkflowRunExistsError);
 
-    expect(events.map((event) => event.type)).toEqual(["workflow.run.started"]);
+    expect(events.map((event) => event.type)).toEqual([
+      "workflow.run.started",
+      "workflow.step.started",
+    ]);
     const persistedEvents = db
       .prepare("SELECT type FROM events ORDER BY seq ASC")
       .all() as Array<{ type: string }>;
-    expect(persistedEvents.map((row) => row.type)).toEqual(["workflow.run.started"]);
+    expect(persistedEvents.map((row) => row.type)).toEqual([
+      "workflow.run.started",
+      "workflow.step.started",
+    ]);
   });
 
   it("supports pause -> resume and emits lifecycle events", () => {
@@ -156,10 +163,11 @@ describe("workflow run usecases", () => {
 
     expect(events.map((event) => event.type)).toEqual([
       "workflow.run.started",
+      "workflow.step.started",
       "workflow.run.paused",
       "workflow.run.started",
     ]);
-    expect(events[2]?.payload).toMatchObject({ workflowRunId: run.id, resumed: true });
+    expect(events[3]?.payload).toMatchObject({ workflowRunId: run.id, resumed: true });
   });
 
   it("cancel is terminal and clears active goal linkage", () => {
@@ -184,6 +192,7 @@ describe("workflow run usecases", () => {
     expect(() => completeWorkflowRun(ctx, run.id)).toThrow(WorkflowRunInvalidTransitionError);
     expect(events.map((event) => event.type)).toEqual([
       "workflow.run.started",
+      "workflow.step.started",
       "workflow.run.cancelled",
     ]);
   });

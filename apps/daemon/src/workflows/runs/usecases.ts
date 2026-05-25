@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import { WORKFLOW_FAILURE_MAX_MESSAGE_CHARS, type WorkflowRun } from "@orca/contracts";
+import {
+  WORKFLOW_FAILURE_MAX_MESSAGE_CHARS,
+  type DomainEvent,
+  type WorkflowRun,
+} from "@orca/contracts";
 import type { EventBus } from "../../events.js";
 import { redactSecrets } from "../../memory/normalize.js";
 import { appendWorkflowEvent, publishStagedWorkflowEvents } from "../events.js";
+import { createInitialStep } from "../steps/usecases.js";
 import { getTemplateById } from "../templates/projection.js";
 import { getWorkflowRunById } from "./projection.js";
 
@@ -103,6 +108,7 @@ export function startWorkflowRun(
   const runId = idFactory();
 
   const staged = ctx.db.transaction(() => {
+    const stagedEvents: DomainEvent[] = [];
     ensureGoalExists(ctx.db, args.goalId);
     const existingActive = ctx.db
       .prepare(
@@ -133,7 +139,12 @@ export function startWorkflowRun(
       now,
       ctx.idFactory
     );
-    return [event];
+    stagedEvents.push(event);
+    createInitialStep(ctx.db, () => now, runId, {
+      idFactory: ctx.idFactory,
+      stagedEvents,
+    });
+    return stagedEvents;
   })();
 
   publishStagedWorkflowEvents(ctx.bus, staged);

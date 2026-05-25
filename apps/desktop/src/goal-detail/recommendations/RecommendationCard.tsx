@@ -162,6 +162,16 @@ function summarizeAction(action: ProposedAction): string {
       return "Mark task complete";
     case "pause_work":
       return `Pause: ${action.reason.length > 60 ? `${action.reason.slice(0, 60)}…` : action.reason}`;
+    case "advance_workflow_step":
+      return `Advance workflow to ${action.toStepTemplateId}`;
+    case "launch_workflow_session":
+      return `Launch workflow session (${action.operatorId})`;
+    case "complete_workflow_run":
+      return "Complete workflow run";
+    case "mark_artifact_satisfied":
+      return `Mark artifact satisfied: ${action.artifactType}`;
+    case "request_user_input":
+      return `Request input: ${action.question.length > 60 ? `${action.question.slice(0, 60)}…` : action.question}`;
   }
 }
 
