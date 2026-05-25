@@ -10,6 +10,7 @@ import { createGoal } from '../goals.js';
 import { runMigrations, defaultMigrationsDir } from '../migrations.js';
 import { createTask, type TaskCtx } from './usecases.js';
 import { buildTaskGenerationInput, resetPreparedStatements } from './input.js';
+import { ModelProviderRegistry } from '../llm/registry.js';
 
 const tempDirs: string[] = [];
 
@@ -60,6 +61,7 @@ async function seedGoal(db: Database.Database, description = ''): Promise<string
           invoke: () => ({ title: 'Goal', description }),
         }),
       } as never,
+      modelProviderRegistry: new ModelProviderRegistry(),
       inspectWorkspace: async () => {
         throw new Error('not used');
       },
@@ -146,4 +148,3 @@ describe('buildTaskGenerationInput', () => {
     expect(before).not.toBe(after);
   });
 });
-

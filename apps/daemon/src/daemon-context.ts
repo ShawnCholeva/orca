@@ -11,6 +11,10 @@ import type { ConflictDetector } from './conflicts/detectors.js';
 import { DeterministicConflictDetector } from './conflicts/detectors.js';
 import { ReadinessService } from './readiness/service.js';
 import { adapterRegistry } from './adapters/registry.js';
+import { ModelProviderRegistry } from './llm/registry.js';
+import { createAnthropicProvider } from './llm/anthropic.js';
+import { createOpenAIProvider } from './llm/openai.js';
+import { createGeminiProvider } from './llm/gemini.js';
 
 /**
  * Shared dependency container for orchestration daemon use cases.
@@ -24,8 +28,17 @@ export interface DaemonContext {
   recommendationProvider: RecommendationProvider;
   conflictDetector: ConflictDetector;
   readinessService: ReadinessService;
+  modelProviderRegistry: ModelProviderRegistry;
   now: () => string;
   idFactory: () => string;
+}
+
+function createDefaultModelProviderRegistry(): ModelProviderRegistry {
+  const registry = new ModelProviderRegistry();
+  registry.register(createAnthropicProvider());
+  registry.register(createOpenAIProvider());
+  registry.register(createGeminiProvider());
+  return registry;
 }
 
 export function createDaemonContext(db: Database.Database, bus: EventBus): DaemonContext {
@@ -37,6 +50,7 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
     recommendationProvider: new DeterministicRecommendationProvider(),
     conflictDetector: new DeterministicConflictDetector(),
     readinessService: new ReadinessService(db, adapterRegistry),
+    modelProviderRegistry: createDefaultModelProviderRegistry(),
     now: () => new Date().toISOString(),
     idFactory: randomUUID,
   };

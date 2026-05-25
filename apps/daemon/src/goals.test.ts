@@ -18,10 +18,13 @@ import {
   listGoals,
   NotFoundError,
   updateGoal,
+  updateGoalOrchestratorModel,
   ValidationError,
   DuplicateWorkspaceInRequestError,
 } from "./goals.js";
 import type { InspectWorkspacePreview } from "@orca/contracts";
+import { ModelProviderRegistry } from "./llm/registry.js";
+import type { ModelProvider } from "./llm/types.js";
 
 const tempDirs: string[] = [];
 
@@ -44,6 +47,35 @@ function noopInspect(): Promise<InspectWorkspacePreview> {
   return Promise.reject(new Error("inspectWorkspace not expected in this test"));
 }
 
+function buildRegistry(): ModelProviderRegistry {
+  const registry = new ModelProviderRegistry();
+  const mk = (
+    id: ModelProvider["id"],
+    models: string[]
+  ): ModelProvider => ({
+    id,
+    displayName: id,
+    version: "0.1.0",
+    async isAvailable() {
+      return { available: true };
+    },
+    async listModels() {
+      return models.map((modelId) => ({
+        id: modelId,
+        displayName: modelId,
+        capabilities: ["test"],
+      }));
+    },
+    async complete() {
+      throw new Error("unused in test");
+    },
+  });
+  registry.register(mk("orca/anthropic", ["claude-sonnet-4-6"]));
+  registry.register(mk("orca/openai", ["gpt-5", "gpt-4o-mini"]));
+  registry.register(mk("orca/google-gemini", ["gemini-2.5-flash"]));
+  return registry;
+}
+
 function setup(): { db: Database.Database; ctx: CreateGoalCtx } {
   const dir = mkdtempSync(path.join(os.tmpdir(), "orca-goals-test-"));
   tempDirs.push(dir);
@@ -53,7 +85,16 @@ function setup(): { db: Database.Database; ctx: CreateGoalCtx } {
   skills.register(quickGoalSkill);
   skills.register(guidedGoalRefinementSkill);
   skills.freeze();
-  return { db, ctx: { db, bus: eventBus, skills, inspectWorkspace: noopInspect } };
+  return {
+    db,
+    ctx: {
+      db,
+      bus: eventBus,
+      skills,
+      modelProviderRegistry: buildRegistry(),
+      inspectWorkspace: noopInspect,
+    },
+  };
 }
 
 function forceGoalInsertFailure(db: Database.Database): void {
@@ -731,6 +772,99 @@ describe("updateGoal", () => {
     `);
 
     expect(() => updateGoal(created.id, { title: "After" })).not.toThrow();
+  });
+});
+
+describe("orchestrator model selection", () => {
+  it("persists orchestrator provider/model on create when selection is valid", async () => {
+    const { db, ctx } = setup();
+
+    const goal = await createGoal(
+      {
+        title: "With provider",
+        orchestratorModel: {
+          providerId: "orca/openai",
+          modelId: "gpt-5",
+        },
+      },
+      ctx
+    );
+
+    expect(goal.orchestratorProvider).toBe("orca/openai");
+    expect(goal.orchestratorModel).toBe("gpt-5");
+
+    const row = db
+      .prepare("SELECT orchestrator_provider, orchestrator_model FROM goals WHERE id = ?")
+      .get(goal.id) as
+      | { orchestrator_provider: string | null; orchestrator_model: string | null }
+      | undefined;
+    expect(row?.orchestrator_provider).toBe("orca/openai");
+    expect(row?.orchestrator_model).toBe("gpt-5");
+  });
+
+  it("rejects create when provider/model pair is invalid", async () => {
+    const { ctx } = setup();
+
+    await expect(
+      createGoal(
+        {
+          title: "Bad model",
+          orchestratorModel: {
+            providerId: "orca/openai",
+            modelId: "does-not-exist",
+          },
+        },
+        ctx
+      )
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it("patches orchestrator model and emits goal.orchestrator_model_changed", async () => {
+    const { db, ctx } = setup();
+    const created = await createGoal({ title: "Patch me" }, ctx);
+    const publishSpy = vi.spyOn(eventBus, "publish");
+
+    const updated = await updateGoalOrchestratorModel(
+      created.id,
+      { providerId: "orca/anthropic", modelId: "claude-sonnet-4-6" },
+      ctx.modelProviderRegistry
+    );
+
+    expect(updated).toEqual({
+      goalId: created.id,
+      orchestratorProvider: "orca/anthropic",
+      orchestratorModel: "claude-sonnet-4-6",
+    });
+
+    const row = db
+      .prepare("SELECT orchestrator_provider, orchestrator_model FROM goals WHERE id = ?")
+      .get(created.id) as
+      | { orchestrator_provider: string | null; orchestrator_model: string | null }
+      | undefined;
+    expect(row?.orchestrator_provider).toBe("orca/anthropic");
+    expect(row?.orchestrator_model).toBe("claude-sonnet-4-6");
+
+    expect(publishSpy).toHaveBeenCalledTimes(1);
+    expect(publishSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "goal.orchestrator_model_changed",
+        goalId: created.id,
+        payload: {
+          providerId: "orca/anthropic",
+          modelId: "claude-sonnet-4-6",
+        },
+      })
+    );
+
+    const eventRow = db
+      .prepare(
+        "SELECT payload FROM events WHERE goal_id = ? AND type = 'goal.orchestrator_model_changed'"
+      )
+      .get(created.id) as { payload: string } | undefined;
+    expect(JSON.parse(eventRow!.payload)).toEqual({
+      providerId: "orca/anthropic",
+      modelId: "claude-sonnet-4-6",
+    });
   });
 });
 

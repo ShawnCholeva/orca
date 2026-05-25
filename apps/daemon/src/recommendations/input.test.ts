@@ -11,6 +11,7 @@ import type { Config } from '../config.js';
 import { SkillRegistry } from '../registry/skill-registry.js';
 import { quickGoalSkill } from '../skills/quick-goal.js';
 import { buildRecommendationInput, resetPreparedStatements } from './input.js';
+import { ModelProviderRegistry } from '../llm/registry.js';
 
 const tempDirs: string[] = [];
 
@@ -44,7 +45,10 @@ async function seedGoal(
   const skills = new SkillRegistry();
   skills.register(quickGoalSkill);
   const inspectWorkspace = () => Promise.reject(new Error('not expected'));
-  const goal = await createGoal({ title: 'Test Goal', description }, { db, bus, skills, inspectWorkspace });
+  const goal = await createGoal(
+    { title: 'Test Goal', description },
+    { db, bus, skills, modelProviderRegistry: new ModelProviderRegistry(), inspectWorkspace }
+  );
   return goal.id;
 }
 

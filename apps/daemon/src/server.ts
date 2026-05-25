@@ -28,6 +28,7 @@ import {
   type ListEventsResponse,
   type ListGoalsResponse,
   type ListPluginsResponse,
+  type ListModelProvidersResponse,
   type ListSessionsResponse,
   type ListSkillsResponse,
   type ListAgentsResponse,
@@ -46,6 +47,8 @@ import {
   type StopSessionResponse,
   UpdateGoalRequest,
   type UpdateGoalResponse,
+  UpdateGoalOrchestratorModelRequest,
+  type UpdateGoalOrchestratorModelResponse,
   type ArchiveGoalResponse,
   type GoalMemoryItem,
   type GoalDecision,
@@ -62,6 +65,7 @@ import {
   listGoals,
   NotFoundError,
   updateGoal,
+  updateGoalOrchestratorModel,
   ValidationError
 } from './goals.js';
 import { eventBus, listEventsSince } from './events.js';
@@ -239,6 +243,11 @@ export function createServer(
     return { plugins };
   });
 
+  server.get('/v1/model-providers', async (): Promise<ListModelProvidersResponse> => {
+    const providers = await daemonContext.modelProviderRegistry.describe();
+    return { providers };
+  });
+
   server.get('/v1/skills', async (): Promise<ListSkillsResponse> => {
     const skills = skillRegistry.listPublic().map((skill) => ({
       id: skill.id,
@@ -347,7 +356,13 @@ export function createServer(
     }
 
     try {
-      const goal = await createGoal(parsed.data, { db: getDatabase(), bus: eventBus, skills: skillRegistry, inspectWorkspace });
+      const goal = await createGoal(parsed.data, {
+        db: getDatabase(),
+        bus: eventBus,
+        skills: skillRegistry,
+        modelProviderRegistry: daemonContext.modelProviderRegistry,
+        inspectWorkspace
+      });
       reply.status(201);
       return { goal };
     } catch (error) {
@@ -490,6 +505,39 @@ export function createServer(
       throw error;
     }
   });
+
+  server.patch(
+    '/v1/goals/:goalId/orchestrator-model',
+    async (
+      request,
+      reply
+    ): Promise<UpdateGoalOrchestratorModelResponse | { error: string; issues?: unknown }> => {
+      const { goalId } = request.params as { goalId: string };
+      const parsed = UpdateGoalOrchestratorModelRequest.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: 'validation_failed', issues: parsed.error.issues };
+      }
+
+      try {
+        return await updateGoalOrchestratorModel(
+          goalId,
+          parsed.data,
+          daemonContext.modelProviderRegistry
+        );
+      } catch (error) {
+        if (error instanceof ValidationError) {
+          reply.status(400);
+          return { error: 'validation_failed', issues: error.issues };
+        }
+        if (error instanceof NotFoundError) {
+          reply.status(404);
+          return { error: 'not_found' };
+        }
+        throw error;
+      }
+    }
+  );
 
   server.post('/v1/goals/:id/archive', async (request, reply): Promise<ArchiveGoalResponse | { error: string }> => {
     const { id } = request.params as { id: string };

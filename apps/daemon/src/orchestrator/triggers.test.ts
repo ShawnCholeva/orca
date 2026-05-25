@@ -95,6 +95,7 @@ function makeCtx(
     recommendationProvider: opts?.provider ?? new FakeRecommendationProvider(),
     conflictDetector: opts?.detector ?? new FakeConflictDetector(),
     readinessService: null as unknown as DaemonContext['readinessService'],
+    modelProviderRegistry: null as unknown as DaemonContext['modelProviderRegistry'],
     now: nextNow,
     idFactory: nextId,
   };

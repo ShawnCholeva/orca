@@ -21,10 +21,12 @@ import {
   ListGoalMemoryResponse,
   ListGoalDecisionsResponse,
   ListGoalsResponse,
+  ListModelProvidersResponse,
   ListPluginsResponse,
   ListSessionsResponse,
   ListSkillsResponse,
   SessionExtractionOutput,
+  UpdateGoalOrchestratorModelResponse,
   UpdateGoalResponse
 } from '@orca/contracts';
 import type { Config } from './config.js';
@@ -200,6 +202,26 @@ describe('server routes', () => {
     expect(body.goal.status).toBe('active');
   });
 
+  it('POST /v1/goals with orchestratorModel persists provider/model on Goal', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/goals',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: {
+        title: 'with-orchestrator',
+        orchestratorModel: {
+          providerId: 'orca/openai',
+          modelId: 'gpt-5',
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = CreateGoalResponse.parse(JSON.parse(response.body));
+    expect(body.goal.orchestratorProvider).toBe('orca/openai');
+    expect(body.goal.orchestratorModel).toBe('gpt-5');
+  });
+
   it('POST /v1/goals returns 400 for invalid payload', async () => {
     const response = await server.inject({
       method: 'POST',
@@ -250,6 +272,60 @@ describe('server routes', () => {
       payload: { title: 'x' }
     });
     expect(response.statusCode).toBe(404);
+  });
+
+  it('PATCH /v1/goals/:goalId/orchestrator-model updates provider/model and returns 200', async () => {
+    const created = CreateGoalResponse.parse(
+      JSON.parse(
+        (
+          await server.inject({
+            method: 'POST',
+            url: '/v1/goals',
+            headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+            payload: { title: 'orchestrator-target' },
+          })
+        ).body
+      )
+    );
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: `/v1/goals/${created.goal.id}/orchestrator-model`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { providerId: 'orca/anthropic', modelId: 'claude-sonnet-4-6' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = UpdateGoalOrchestratorModelResponse.parse(JSON.parse(response.body));
+    expect(body.goalId).toBe(created.goal.id);
+    expect(body.orchestratorProvider).toBe('orca/anthropic');
+    expect(body.orchestratorModel).toBe('claude-sonnet-4-6');
+  });
+
+  it('PATCH /v1/goals/:goalId/orchestrator-model returns 400 for invalid model', async () => {
+    const created = CreateGoalResponse.parse(
+      JSON.parse(
+        (
+          await server.inject({
+            method: 'POST',
+            url: '/v1/goals',
+            headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+            payload: { title: 'orchestrator-target-2' },
+          })
+        ).body
+      )
+    );
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: `/v1/goals/${created.goal.id}/orchestrator-model`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { providerId: 'orca/openai', modelId: 'bad-model' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error?: string };
+    expect(body.error).toBe('validation_failed');
   });
 
   it('PATCH /v1/goals/:id returns 400 for empty patch', async () => {
@@ -314,6 +390,23 @@ describe('server routes', () => {
       headers: AUTH_HEADERS
     });
     expect(response.statusCode).toBe(404);
+  });
+
+  it('GET /v1/model-providers returns three providers', async () => {
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/model-providers',
+      headers: AUTH_HEADERS,
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = ListModelProvidersResponse.parse(JSON.parse(response.body));
+    expect(body.providers).toHaveLength(3);
+    expect(body.providers.map((provider) => provider.id).sort()).toEqual([
+      'orca/anthropic',
+      'orca/google-gemini',
+      'orca/openai',
+    ]);
   });
 
   it('GET /v1/goals returns a created Goal', async () => {
