@@ -103,7 +103,7 @@ export function createArtifact(
       const rule = stepRun ? stepRules[stepRun.stepTemplateId] : undefined;
       if (rule && ctx) {
         const result =
-          rule.onArtifactCreated?.({ db, now, artifact, ctx }) ?? {
+          rule.onArtifactCreated?.({ db, now, idFactory, stagedEvents, artifact, ctx }) ?? {
             satisfiedCriteria: rule.evaluateArtifactSatisfies?.(artifact, ctx) ?? [],
           };
         if (result.satisfiedCriteria.length > 0) {

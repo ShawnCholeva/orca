@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { WorkflowArtifact, WorkflowArtifactType } from "@orca/contracts";
+import type { DomainEvent, WorkflowArtifact, WorkflowArtifactType } from "@orca/contracts";
 
 export interface StepRuleContext {
   goalId: string;
@@ -44,6 +44,8 @@ export interface StepRule {
   onArtifactCreated?(input: {
     db: Database.Database;
     now: () => string;
+    idFactory?: () => string;
+    stagedEvents?: DomainEvent[];
     artifact: WorkflowArtifact;
     ctx: StepRuleContext;
   }): RuleCreatedArtifactResult;

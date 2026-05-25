@@ -206,6 +206,7 @@ describe("Engineering step rules", () => {
   it("writes task DAG and satisfies issue-breakdown criteria when JSON artifact is created", () => {
     const db = freshDb();
     seedIssueBreakdownWorkflow(db);
+    let nextId = 0;
 
     createArtifact(
       db,
@@ -230,7 +231,7 @@ describe("Engineering step rules", () => {
         }),
         source: "orchestrator",
       },
-      () => "artifact-1"
+      () => `fixed-id-${++nextId}`
     );
 
     const taskCount = db

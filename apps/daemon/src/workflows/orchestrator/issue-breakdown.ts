@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type Database from "better-sqlite3";
-import type { TaskRole } from "@orca/contracts";
+import type { DomainEvent, TaskRole } from "@orca/contracts";
 
 import {
   createTaskInTx,
@@ -27,7 +27,11 @@ export function writeIssueBreakdown(
     workflowRunId: string;
     stepRunId: string;
     tasks: PrdSectionToTask[];
-  }
+  },
+  options: {
+    idFactory?: () => string;
+    stagedEvents?: DomainEvent[];
+  } = {}
 ): { taskIds: string[] } {
   const taskIds: string[] = [];
 
@@ -58,7 +62,7 @@ export function writeIssueBreakdown(
       taskIds.push(task.id);
     }
 
-    appendWorkflowEvent(
+    const event = appendWorkflowEvent(
       db,
       "workflow.task.dag.created",
       {
@@ -68,8 +72,10 @@ export function writeIssueBreakdown(
         taskIds,
         count: taskIds.length,
       },
-      createdAt
+      createdAt,
+      options.idFactory
     );
+    options.stagedEvents?.push(event);
   })();
 
   return { taskIds };

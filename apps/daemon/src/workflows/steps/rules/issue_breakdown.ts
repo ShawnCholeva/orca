@@ -46,15 +46,23 @@ export const issueBreakdownRule: StepRule = {
     }
     return unsatisfied(ctx, CRITERIA);
   },
-  onArtifactCreated({ db, now, artifact, ctx }) {
+  onArtifactCreated({ db, now, idFactory, stagedEvents, artifact, ctx }) {
     if (!nonEmptyArtifact(artifact, "issue_breakdown")) return { satisfiedCriteria: [] };
     const tasks = parseTasks(artifact.body);
-    const { taskIds } = writeIssueBreakdown(db, now, {
-      goalId: ctx.goalId,
-      workflowRunId: ctx.workflowRunId,
-      stepRunId: ctx.stepRunId,
-      tasks,
-    });
+    const { taskIds } = writeIssueBreakdown(
+      db,
+      now,
+      {
+        goalId: ctx.goalId,
+        workflowRunId: ctx.workflowRunId,
+        stepRunId: ctx.stepRunId,
+        tasks,
+      },
+      {
+        idFactory,
+        stagedEvents,
+      }
+    );
     return { satisfiedCriteria: unsatisfied(ctx, CRITERIA), taskIds };
   },
 };
