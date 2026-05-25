@@ -10,7 +10,10 @@ import type {
   WorkflowGuardrailConfig,
   WorkflowStepTemplate,
 } from "@orca/contracts";
-import { NextOrchestratorDecisionResponse } from "@orca/contracts";
+import {
+  NextOrchestratorDecisionResponse,
+  WorkflowStepRunResponse,
+} from "@orca/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Config } from "../../config.js";
@@ -380,5 +383,82 @@ describe("orchestrator routes", () => {
     const body = NextOrchestratorDecisionResponse.parse(JSON.parse(response.body));
     expect(body.decision.decisionType).toBe("advance_step");
     expect(body.recommendationIds).toHaveLength(1);
+  });
+
+  it("submit-input converts answers through step rules and reruns the next decision", async () => {
+    const { db, idFactory } = setup();
+    seedWorkflow(db, {
+      currentStep: step({
+        id: "intake",
+        ordinal: 0,
+        name: "Intake",
+        purpose: "Clarify the goal",
+        requiredOutputs: ["goal_brief", "open_questions"],
+        gateType: "human-input",
+        recommendedCapabilities: [],
+        recommendedOperatorIds: ["human"],
+        exitCriteria: [
+          "goal brief captured",
+          "success outcome captured",
+          "constraints captured",
+          "relevant workspaces identified",
+          "open questions captured",
+        ],
+      }),
+      outstanding: [
+        "goal brief captured",
+        "success outcome captured",
+        "constraints captured",
+        "relevant workspaces identified",
+        "open questions captured",
+      ],
+    });
+    const bus = new EventBus();
+    const context = createDaemonContext(db, bus);
+    server = createServer(createConfig(tempDirs[tempDirs.length - 1]!), {
+      daemonContext: {
+        ...context,
+        operatorSelector: fakeSelector(selection("human")) as OperatorSelector,
+        now: () => NOW,
+        idFactory,
+      },
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/v1/goals/goal-1/workflow-step-runs/step-1/submit-input",
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+      payload: { stepRunId: "step-1", answerText: "Build deterministic workflow rules" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = WorkflowStepRunResponse.parse(JSON.parse(response.body));
+    expect(body.stepRun.satisfiedExitCriteria).toEqual(["goal brief captured"]);
+    expect(body.stepRun.outstandingExitCriteria).toContain("success outcome captured");
+
+    const artifactRow = db
+      .prepare("SELECT type, title, body FROM workflow_artifacts WHERE step_run_id = 'step-1'")
+      .get() as { type: string; title: string; body: string };
+    expect(artifactRow.type).toBe("goal_brief");
+    expect(artifactRow.body).toContain("Build deterministic workflow rules");
+
+    const rec = recommendationRows(db)[0]!;
+    expect(rec.type).toBe("request_user_input");
+    expect(JSON.parse(rec.proposed_action_json as string)).toMatchObject({
+      kind: "request_user_input",
+      workflowStepRunId: "step-1",
+      question: "What outcome should this optimize for?",
+    });
+    const eventRows = db
+      .prepare("SELECT type FROM events ORDER BY seq ASC")
+      .all() as Array<{ type: string }>;
+    expect(eventRows.map((event) => event.type)).toEqual([
+      "workflow.artifact.created",
+      "workflow.user.input.submitted",
+      "workflow.decision.requested",
+      "workflow.decision.recorded",
+      "workflow.recommendation.created",
+      "workflow.user.input.requested",
+    ]);
   });
 });

@@ -20,7 +20,8 @@ import {
 } from "../guardrails/evaluator.js";
 import type { OperatorSelector } from "../operators/selector.js";
 import { getWorkflowRunById } from "../runs/projection.js";
-import { markStepBlocked } from "../steps/usecases.js";
+import { stepRules, type StepRuleContext } from "../steps/rules/index.js";
+import { markStepBlocked, recordExitCriteriaSatisfaction } from "../steps/usecases.js";
 import { getTemplateById } from "../templates/projection.js";
 import { decisionFingerprint, recordDecisionInTx } from "../decisions/usecases.js";
 import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.js";
@@ -38,6 +39,7 @@ interface StepRunRow {
   step_template_id: string;
   ordinal: number;
   status: string;
+  satisfied_exit_criteria_json: string;
   outstanding_exit_criteria_json: string;
 }
 
@@ -113,6 +115,98 @@ function parseOutstanding(row: StepRunRow): string[] {
   return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
 }
 
+function parseSatisfied(row: StepRunRow): string[] {
+  const parsed = JSON.parse(row.satisfied_exit_criteria_json) as unknown;
+  return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
+}
+
+function ruleContext(
+  stepRun: StepRunRow,
+  artifacts: ReturnType<typeof listArtifactsForRun>
+): StepRuleContext {
+  return {
+    goalId: stepRun.goal_id,
+    workflowRunId: stepRun.workflow_run_id,
+    stepRunId: stepRun.id,
+    artifacts,
+    satisfiedExitCriteria: parseSatisfied(stepRun),
+    outstandingExitCriteria: parseOutstanding(stepRun),
+  };
+}
+
+function latestSessionSummarySignal(
+  db: Database.Database,
+  stepRunId: string
+): {
+  sessionId: string;
+  sessionStatus: string;
+  headline: string;
+  summaryText: string;
+} | null {
+  const row = db
+    .prepare(
+      `SELECT s.id AS session_id, s.status AS session_status,
+              COALESCE(ss.headline, '') AS headline,
+              COALESCE(SUBSTR(ss.summary_text, 1, 2048), '') AS summary_text
+         FROM sessions s
+         LEFT JOIN session_summaries ss
+           ON ss.id = (
+             SELECT id FROM session_summaries
+              WHERE session_id = s.id
+              ORDER BY created_at DESC, id DESC
+              LIMIT 1
+           )
+        WHERE s.workflow_step_run_id = ?
+        ORDER BY COALESCE(ss.created_at, s.exited_at, s.started_at, s.created_at) DESC, s.id DESC
+        LIMIT 1`
+    )
+    .get(stepRunId) as
+    | {
+        session_id: string;
+        session_status: string;
+        headline: string;
+        summary_text: string;
+      }
+    | undefined;
+  return row
+    ? {
+        sessionId: row.session_id,
+        sessionStatus: row.session_status,
+        headline: row.headline,
+        summaryText: row.summary_text,
+      }
+    : null;
+}
+
+function applyDeterministicRuleSatisfaction(
+  db: Database.Database,
+  now: () => string,
+  stepRun: StepRunRow,
+  artifacts: ReturnType<typeof listArtifactsForRun>
+): StepRunRow {
+  const rule = stepRules[stepRun.step_template_id];
+  if (!rule) return stepRun;
+
+  const ctx = ruleContext(stepRun, artifacts);
+  const satisfied = new Set<string>();
+  for (const artifact of artifacts) {
+    for (const criterion of rule.evaluateArtifactSatisfies?.(artifact, ctx) ?? []) {
+      satisfied.add(criterion);
+    }
+  }
+
+  const summary = latestSessionSummarySignal(db, stepRun.id);
+  if (summary) {
+    for (const criterion of rule.evaluateSessionSummarySatisfies?.(summary, ctx) ?? []) {
+      satisfied.add(criterion);
+    }
+  }
+
+  if (satisfied.size === 0) return stepRun;
+  recordExitCriteriaSatisfaction(db, now, stepRun.id, Array.from(satisfied));
+  return readStepRun(db, stepRun.id);
+}
+
 function missingInputs(
   step: WorkflowStepTemplate,
   artifacts: ReturnType<typeof listArtifactsForRun>
@@ -158,11 +252,12 @@ export class OrchestratorService {
 
     const template = getTemplateById(db, run.templateId);
     if (!template) throw new OrchestratorTemplateNotFoundError(run.templateId);
-    const stepRun = readStepRun(db, run.currentStepRunId);
+    let stepRun = readStepRun(db, run.currentStepRunId);
     if (stepRun.status !== "active") throw new OrchestratorRunNotActiveError(workflowRunId);
     const stepTpl = template.steps.find((step) => step.id === stepRun.step_template_id);
     if (!stepTpl) throw new OrchestratorStepNotFoundError(stepRun.id);
     const artifacts = listArtifactsForRun(db, workflowRunId);
+    stepRun = applyDeterministicRuleSatisfaction(db, now, stepRun, artifacts);
     const goal = readGoal(db, run.goalId);
     const outstanding = parseOutstanding(stepRun);
     const missing = missingInputs(stepTpl, artifacts);
@@ -366,6 +461,10 @@ export class OrchestratorService {
     options: RequestNextDecisionOptions
   ): { decision: WorkflowDecisionTrace; recommendationIds: string[] } {
     const stagedEvents: DomainEvent[] = [];
+    const rule = stepRules[stepTpl.id];
+    const ctx = ruleContext(stepRun, listArtifactsForRun(db, workflowRunId));
+    const nextQuestion = rule?.nextQuestion?.(ctx);
+    const question = (nextQuestion?.question ?? stepTpl.purpose).slice(0, 1024);
     const output = db.transaction(() => {
       this.appendDecisionRequested(db, now, goalId, workflowRunId, stepRun.id, stepTpl.id, options, stagedEvents);
       const decision = recordDecisionInTx(
@@ -377,7 +476,7 @@ export class OrchestratorService {
           stepRunId: stepRun.id,
           decisionType: "request_user_input",
           selectedAction: `request_input:${stepTpl.id}`,
-          reason: stepTpl.purpose,
+          reason: question,
           influencedBy: outstanding.map((criterion) => ({
             kind: "workflow_step" as const,
             id: stepTpl.id,
@@ -404,9 +503,9 @@ export class OrchestratorService {
           proposedAction: {
             kind: "request_user_input",
             workflowStepRunId: stepRun.id,
-            question: stepTpl.purpose.slice(0, 1024),
+            question,
           },
-          rationale: stepTpl.purpose,
+          rationale: question,
           decisionId: decision.decisionId,
         },
         { idFactory: options.idFactory, stagedEvents }

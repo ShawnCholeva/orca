@@ -774,6 +774,8 @@ export function createServer(
 
   registerWorkflowStepRoutes(server, {
     db,
+    bus: eventBus,
+    operatorSelector: daemonContext.operatorSelector,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
   });
