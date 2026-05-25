@@ -24,6 +24,11 @@ import {
   recordExitCriteriaSatisfaction,
 } from '../workflows/steps/usecases.js';
 import { getTemplateById } from '../workflows/templates/projection.js';
+import {
+  decisionFingerprint,
+  recordDecisionInTx,
+} from '../workflows/decisions/usecases.js';
+import { createRecommendationForWorkflowInTx } from '../workflows/orchestrator/workflow-recommendations.js';
 import { buildRecommendationInput } from './input.js';
 import type { RecommendationProvider, RecommendationProviderOutput } from './provider.js';
 import { RecommendationProviderOutputSchema } from './provider.js';
@@ -294,6 +299,101 @@ function assertFinalStepReadyForCompletion(
   }
 }
 
+function reEvaluateAfterArtifactSatisfactionInTx(
+  db: Database.Database,
+  now: string,
+  idFn: () => string,
+  stepRunId: string,
+  stagedEvents: DomainEvent[]
+): void {
+  const stepRun = readStepRunRow(db, stepRunId);
+  if (!stepRun) return;
+
+  const outstanding = parseOutstandingCriteria(stepRun.outstanding_exit_criteria_json);
+  if (outstanding.length > 0) return;
+
+  const run = getWorkflowRunById(db, stepRun.workflow_run_id);
+  if (!run || run.status !== 'active' || run.currentStepRunId !== stepRunId) return;
+
+  const template = getTemplateById(db, run.templateId);
+  if (!template) return;
+
+  const stepTemplate = template.steps.find((step) => step.id === stepRun.step_template_id);
+  const nextStep = template.steps.find((step) => step.ordinal === stepRun.ordinal + 1);
+  const completing = nextStep === undefined;
+
+  stagedEvents.push(
+    appendWorkflowEvent(
+      db,
+      'workflow.decision.requested',
+      {
+        goalId: run.goalId,
+        workflowRunId: run.id,
+        stepRunId,
+        stepTemplateId: stepRun.step_template_id,
+      },
+      now,
+      idFn
+    )
+  );
+
+  const decision = recordDecisionInTx(
+    db,
+    () => now,
+    {
+      goalId: run.goalId,
+      workflowRunId: run.id,
+      stepRunId,
+      decisionType: completing ? 'mark_run_complete' : 'advance_step',
+      selectedAction: completing
+        ? 'recommend_complete_run'
+        : `recommend_advance:${nextStep.id}`,
+      reason: completing
+        ? 'Final step criteria satisfied; user approval required before completing the run'
+        : 'All exit criteria satisfied; user approval required before advancing',
+      influencedBy: [
+        {
+          kind: 'workflow_step',
+          id: stepRun.step_template_id,
+          label: stepTemplate?.name ?? stepRun.step_template_id,
+          effect: 'satisfied',
+        },
+      ],
+      inputFingerprint: decisionFingerprint({
+        runId: run.id,
+        stepRunId,
+        decisionType: completing ? 'mark_run_complete' : 'advance_step',
+        payload: nextStep?.id ?? 'complete',
+      }),
+    },
+    { idFactory: idFn, stagedEvents }
+  );
+
+  createRecommendationForWorkflowInTx(
+    db,
+    () => now,
+    {
+      goalId: run.goalId,
+      workflowRunId: run.id,
+      stepRunId,
+      type: completing ? 'complete_workflow_run' : 'advance_workflow_step',
+      proposedAction: completing
+        ? { kind: 'complete_workflow_run', workflowRunId: run.id, workflowStepRunId: stepRunId }
+        : {
+            kind: 'advance_workflow_step',
+            workflowRunId: run.id,
+            workflowStepRunId: stepRunId,
+            toStepTemplateId: nextStep.id,
+          },
+      rationale: completing
+        ? 'Final step criteria are satisfied; approve to complete the workflow run.'
+        : 'All exit criteria satisfied; approve to advance to the next workflow step.',
+      decisionId: decision.decisionId,
+    },
+    { idFactory: idFn, stagedEvents }
+  );
+}
+
 function applyWorkflowAcceptSideEffectsInTx(
   db: Database.Database,
   now: string,
@@ -324,6 +424,13 @@ function applyWorkflowAcceptSideEffectsInTx(
       recordExitCriteriaSatisfaction(db, () => now, action.workflowStepRunId, [
         action.artifactType,
       ]);
+      reEvaluateAfterArtifactSatisfactionInTx(
+        db,
+        now,
+        idFn,
+        action.workflowStepRunId,
+        stagedEvents
+      );
       return;
     }
     case 'launch_workflow_session':

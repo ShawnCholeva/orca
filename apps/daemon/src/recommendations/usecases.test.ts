@@ -371,6 +371,13 @@ describe('acceptRecommendation', () => {
     };
     expect(JSON.parse(row.satisfied_exit_criteria_json)).toContain('goal_brief');
     expect(JSON.parse(row.outstanding_exit_criteria_json)).toEqual([]);
+
+    const followUp = db
+      .prepare(
+        "SELECT type, status FROM recommendations WHERE id != 'rec-1' ORDER BY created_at DESC LIMIT 1"
+      )
+      .get() as { type: string; status: string } | undefined;
+    expect(followUp).toEqual({ type: 'complete_workflow_run', status: 'proposed' });
   });
 });
 
