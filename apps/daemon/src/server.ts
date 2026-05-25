@@ -152,6 +152,7 @@ import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
 import { registerWorkflowTemplateRoutes } from './workflows/templates/routes.js';
+import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { NotConnectedError, UnknownAgentError } from './readiness/service.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
@@ -713,6 +714,15 @@ export function createServer(
   // ---- Workflow template routes ----
 
   registerWorkflowTemplateRoutes(server, {
+    db,
+    bus: eventBus,
+    now: daemonContext.now,
+    idFactory: daemonContext.idFactory,
+  });
+
+  // ---- Workflow run lifecycle routes ----
+
+  registerWorkflowRunRoutes(server, {
     db,
     bus: eventBus,
     now: daemonContext.now,
