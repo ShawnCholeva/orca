@@ -21,13 +21,16 @@ import {
   CreateSessionResponse,
   CreateTaskRequest,
   CreateTaskResponse,
+  CreateWorkflowTemplateRequest,
   DismissRecommendationResponse,
+  DuplicateWorkflowTemplateRequest,
   DomainEvent,
   ExtractSessionMemoryResponse,
   GetRecommendationResponse,
   GetContextPackageResponse,
   GetSessionResponse,
   GetSessionMemorySummaryResponse,
+  GetWorkflowTemplateResponse,
   GoalDecision,
   GoalDetailResponse,
   GoalMemoryItem,
@@ -49,6 +52,7 @@ import {
   ListSkillsResponse,
   ListTasksQuery,
   ListTasksResponse,
+  ListWorkflowTemplatesResponse,
   MemoryExtraction,
   ModifyRecommendationRequest,
   ModifyRecommendationResponse,
@@ -76,6 +80,8 @@ import {
   UpdateTaskResponse,
   UpdateGoalRequest,
   UpdateGoalResponse,
+  UpdateWorkflowTemplateRequest,
+  WorkflowTemplateResponse,
   type AgentReadinessReport,
   type PluginSummary,
   type SessionErrorFrame as SessionErrorFrameData,
@@ -151,6 +157,9 @@ type CreateGoalMemoryInput = Parameters<typeof CreateGoalMemoryRequest.parse>[0]
 type PatchGoalMemoryInput = Parameters<typeof PatchGoalMemoryRequest.parse>[0];
 type CreateGoalDecisionInput = Parameters<typeof CreateGoalDecisionRequest.parse>[0];
 type PatchGoalDecisionInput = Parameters<typeof PatchGoalDecisionRequest.parse>[0];
+type CreateWorkflowTemplateInput = Parameters<typeof CreateWorkflowTemplateRequest.parse>[0];
+type DuplicateWorkflowTemplateInput = Parameters<typeof DuplicateWorkflowTemplateRequest.parse>[0];
+type UpdateWorkflowTemplateInput = Parameters<typeof UpdateWorkflowTemplateRequest.parse>[0];
 
 function loadConfig(): Promise<Config> {
   if (configPromise) return configPromise;
@@ -668,6 +677,85 @@ export async function listAdapters(): Promise<ListAdaptersResponse> {
     { headers: authHeaders(token) },
     ListAdaptersResponse,
     "List adapters failed",
+  );
+}
+
+export async function listWorkflowTemplates(): Promise<ListWorkflowTemplatesResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/workflow-templates`,
+    { headers: authHeaders(token) },
+    ListWorkflowTemplatesResponse,
+    "List workflow templates failed",
+  );
+}
+
+export async function getWorkflowTemplate(id: string): Promise<GetWorkflowTemplateResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/workflow-templates/${encodeURIComponent(id)}`,
+    { headers: authHeaders(token) },
+    GetWorkflowTemplateResponse,
+    "Get workflow template failed",
+  );
+}
+
+export async function createWorkflowTemplate(
+  body: CreateWorkflowTemplateInput,
+): Promise<WorkflowTemplateResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/workflow-templates`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(CreateWorkflowTemplateRequest.parse(body)),
+    },
+    WorkflowTemplateResponse,
+    "Create workflow template failed",
+  );
+}
+
+export async function updateWorkflowTemplate(
+  id: string,
+  body: UpdateWorkflowTemplateInput,
+): Promise<WorkflowTemplateResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/workflow-templates/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(UpdateWorkflowTemplateRequest.parse(body)),
+    },
+    WorkflowTemplateResponse,
+    "Update workflow template failed",
+  );
+}
+
+export async function duplicateWorkflowTemplate(
+  id: string,
+  body: DuplicateWorkflowTemplateInput,
+): Promise<WorkflowTemplateResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/workflow-templates/${encodeURIComponent(id)}/duplicate`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(DuplicateWorkflowTemplateRequest.parse(body)),
+    },
+    WorkflowTemplateResponse,
+    "Duplicate workflow template failed",
   );
 }
 

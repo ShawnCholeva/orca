@@ -19,6 +19,7 @@ import { Titlebar } from "./chrome/Titlebar";
 import { BootstrapErrorScreen } from "./chrome/BootstrapErrorScreen";
 import { NoReadyAgentsBanner } from "./chrome/NoReadyAgentsBanner";
 import { OrcaChat } from "./orchestrator/OrcaChat";
+import { WorkflowsPage } from "./workflows/WorkflowsPage";
 import "./orchestrator/orchestrator.css";
 import "./styles.css";
 
@@ -26,7 +27,7 @@ type OnboardingState = "checking" | "needs-onboarding" | "complete" | "error";
 
 type AppMode = "list" | "detail";
 
-type OrchestratorTab = "orchestrator" | "reasoning";
+type WorkspaceTab = "orchestrator" | "workflows" | "reasoning";
 
 function toErrorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -47,7 +48,7 @@ export default function App() {
   const [detailRefreshKey, setDetailRefreshKey] = useState(0);
   const [showCreateFlow, setShowCreateFlow] = useState(false);
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [activeTab, setActiveTab] = useState<OrchestratorTab>("orchestrator");
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("orchestrator");
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
@@ -262,6 +263,15 @@ export default function App() {
             >
               Reasoning
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "workflows"}
+              className={`orchestrator-tab ${activeTab === "workflows" ? "orchestrator-tab--active" : ""}`}
+              onClick={() => setActiveTab("workflows")}
+            >
+              Workflows
+            </button>
           </nav>
 
           {activeTab === "orchestrator" ? (
@@ -308,7 +318,7 @@ export default function App() {
                 </aside>
               </div>
             </section>
-          ) : (
+          ) : activeTab === "reasoning" ? (
             <section className="reasoning-pane" role="tabpanel" aria-label="Reasoning">
               <div className="reasoning-card">
                 <div className="reasoning-card-header">
@@ -340,6 +350,10 @@ export default function App() {
                   </>
                 )}
               </div>
+            </section>
+          ) : (
+            <section className="workflows-pane" role="tabpanel" aria-label="Workflows">
+              <WorkflowsPage />
             </section>
           )}
         </div>
