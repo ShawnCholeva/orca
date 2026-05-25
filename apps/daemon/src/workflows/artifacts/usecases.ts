@@ -1,0 +1,101 @@
+import { randomUUID } from "node:crypto";
+
+import type Database from "better-sqlite3";
+import {
+  WORKFLOW_ARTIFACT_MAX_BODY_BYTES,
+  type WorkflowArtifact,
+  type WorkflowArtifactType,
+} from "@orca/contracts";
+
+import { appendWorkflowEvent } from "../events.js";
+import {
+  getArtifactById,
+  listArtifactsForGoal as listArtifactsForGoalProjection,
+  listArtifactsForRun as listArtifactsForRunProjection,
+} from "./projection.js";
+
+export interface CreateArtifactInput {
+  goalId: string;
+  workflowRunId: string | null;
+  stepRunId: string | null;
+  type: WorkflowArtifactType;
+  title: string;
+  body: string;
+  source: WorkflowArtifact["source"];
+  linkedSessionId?: string | null;
+  linkedTaskId?: string | null;
+  linkedContextPackageId?: string | null;
+}
+
+export function createArtifact(
+  db: Database.Database,
+  now: () => string,
+  input: CreateArtifactInput,
+  idFactory: () => string = randomUUID
+): WorkflowArtifact {
+  const bodyBytes = Buffer.byteLength(input.body, "utf8");
+  if (bodyBytes > WORKFLOW_ARTIFACT_MAX_BODY_BYTES) {
+    throw new Error("artifact_body_too_large");
+  }
+
+  const artifactId = idFactory();
+  const createdAt = now();
+
+  return db.transaction(() => {
+    db.prepare(
+      "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      artifactId,
+      input.goalId,
+      input.workflowRunId,
+      input.stepRunId,
+      input.type,
+      input.title.slice(0, 256),
+      input.body,
+      input.source,
+      input.linkedSessionId ?? null,
+      input.linkedTaskId ?? null,
+      input.linkedContextPackageId ?? null,
+      createdAt
+    );
+
+    appendWorkflowEvent(
+      db,
+      "workflow.artifact.created",
+      {
+        artifactId,
+        goalId: input.goalId,
+        workflowRunId: input.workflowRunId,
+        stepRunId: input.stepRunId,
+        type: input.type,
+        bodyBytes,
+      },
+      createdAt,
+      idFactory
+    );
+
+    return getArtifactById(db, artifactId)!;
+  })();
+}
+
+export function listArtifactsForRun(
+  db: Database.Database,
+  runId: string
+): WorkflowArtifact[] {
+  return listArtifactsForRunProjection(db, runId);
+}
+
+export function listArtifactsForGoal(
+  db: Database.Database,
+  goalId: string,
+  type?: WorkflowArtifactType
+): WorkflowArtifact[] {
+  return listArtifactsForGoalProjection(db, goalId, type);
+}
+
+export function getArtifact(
+  db: Database.Database,
+  id: string
+): WorkflowArtifact | null {
+  return getArtifactById(db, id);
+}
