@@ -151,6 +151,7 @@ import { createDaemonContext, type DaemonContext } from './daemon-context.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
+import { registerWorkflowTemplateRoutes } from './workflows/templates/routes.js';
 import { NotConnectedError, UnknownAgentError } from './readiness/service.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
@@ -708,6 +709,15 @@ export function createServer(
   // ---- Context Package routes ----
 
   registerContextRoutes(server, { db, bus: eventBus, assembler, adapterRegistry });
+
+  // ---- Workflow template routes ----
+
+  registerWorkflowTemplateRoutes(server, {
+    db,
+    bus: eventBus,
+    now: daemonContext.now,
+    idFactory: daemonContext.idFactory,
+  });
 
   // ---- Task orchestration routes ----
 
