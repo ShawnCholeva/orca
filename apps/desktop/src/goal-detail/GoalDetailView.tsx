@@ -6,6 +6,7 @@ import {
   generationNoticeFromEvent,
   ORCHESTRATION_LIVE_REFRESH_DEBOUNCE_MS,
   recommendationEventMayTouchTask,
+  workflowEventMayTouchGoalDetail,
   type RecommendationDetailRefresh,
   type LiveGenerationNotice,
 } from "../events/orchestration-live-refresh";
@@ -16,6 +17,7 @@ import { MemoryPanel } from "./memory/MemoryPanel";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { RecommendationsPanel, type CreateSessionPrefill } from "./recommendations/RecommendationsPanel";
 import { ConflictsBanner } from "./conflicts/ConflictsBanner";
+import { WorkflowRunPanel } from "./workflow/WorkflowRunPanel";
 
 const MEMORY_ITEM_EVENTS = new Set<DomainEventType>([
   "memory.item.created",
@@ -54,6 +56,7 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
   const [decisionsRefreshKey, setDecisionsRefreshKey] = useState(0);
   const [summaryRefreshKey, setSummaryRefreshKey] = useState(0);
   const [sessionsRefreshKey, setSessionsRefreshKey] = useState(0);
+  const [workflowRefreshKey, setWorkflowRefreshKey] = useState(0);
   const [createSessionPrefill, setCreateSessionPrefill] =
     useState<CreateSessionPrefill | null>(null);
   const [taskEditPrefill, setTaskEditPrefill] = useState<{
@@ -75,11 +78,13 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
     recommendations: ReturnType<typeof setTimeout> | null;
     conflicts: ReturnType<typeof setTimeout> | null;
     recommendationDetail: ReturnType<typeof setTimeout> | null;
+    workflow: ReturnType<typeof setTimeout> | null;
   }>({
     tasks: null,
     recommendations: null,
     conflicts: null,
     recommendationDetail: null,
+    workflow: null,
   });
 
   const loadDetail = useCallback(async () => {
@@ -151,6 +156,16 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
     }, ORCHESTRATION_LIVE_REFRESH_DEBOUNCE_MS);
   }, []);
 
+  const scheduleWorkflowRefresh = useCallback(() => {
+    if (debounceTimersRef.current.workflow !== null) {
+      clearTimeout(debounceTimersRef.current.workflow);
+    }
+    debounceTimersRef.current.workflow = setTimeout(() => {
+      debounceTimersRef.current.workflow = null;
+      setWorkflowRefreshKey((k) => k + 1);
+    }, ORCHESTRATION_LIVE_REFRESH_DEBOUNCE_MS);
+  }, []);
+
   const handleOrchestrationEvent = useCallback(
     (event: DomainEvent) => {
       if (event.type === "task.generation.requested") {
@@ -192,6 +207,11 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
         return;
       }
 
+      if (workflowEventMayTouchGoalDetail(event)) {
+        scheduleWorkflowRefresh();
+        return;
+      }
+
       const recommendationId = feedbackRecommendationId(event);
       if (recommendationId !== null) {
         scheduleRecommendationDetailRefresh(recommendationId);
@@ -202,6 +222,7 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
       scheduleRecommendationDetailRefresh,
       scheduleRecommendationsRefresh,
       scheduleTasksRefresh,
+      scheduleWorkflowRefresh,
     ],
   );
 
@@ -233,6 +254,7 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
             scheduleTasksRefresh();
             scheduleRecommendationsRefresh();
             scheduleConflictsRefresh();
+            scheduleWorkflowRefresh();
           }
           hasConnectedRef.current = true;
         }
@@ -245,6 +267,7 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
     scheduleConflictsRefresh,
     scheduleRecommendationsRefresh,
     scheduleTasksRefresh,
+    scheduleWorkflowRefresh,
   ]);
 
   if (loading && !detail) {
@@ -356,6 +379,12 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           goalId={goalId}
           workspaces={workspaces}
           onChanged={() => void loadDetail()}
+        />
+
+        <WorkflowRunPanel
+          goalId={goalId}
+          initialRunId={goal.activeWorkflowRunId ?? null}
+          refreshKey={workflowRefreshKey}
         />
 
         <TasksPanel

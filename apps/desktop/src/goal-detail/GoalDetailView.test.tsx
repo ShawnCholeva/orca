@@ -64,6 +64,11 @@ function makeBaseApiMock(overrides: Record<string, unknown> = {}) {
     detachWorkspace: vi.fn(),
     listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
     listContextPackages: vi.fn().mockResolvedValue({ packages: [], assemblies: [] }),
+    listWorkflowRuns: vi.fn().mockResolvedValue({ runs: [] }),
+    getWorkflowRun: vi.fn(),
+    listWorkflowDecisions: vi.fn().mockResolvedValue({ decisions: [] }),
+    listWorkflowRunArtifacts: vi.fn().mockResolvedValue({ artifacts: [] }),
+    getWorkflowStepRun: vi.fn(),
     listAdapters: vi.fn().mockResolvedValue({ adapters: [] }),
     listTasks: vi.fn().mockResolvedValue({ tasks: [], generations: [] }),
     listConflicts: vi.fn().mockResolvedValue({ conflicts: [] }),
@@ -184,6 +189,7 @@ function setupOrchestrationEventCapture() {
   let capturedOnStatus: ((s: ConnectionStatus) => void) = () => {};
   const listTasksMock = vi.fn().mockResolvedValue({ tasks: [], generations: [] });
   const listRecommendationsMock = vi.fn().mockResolvedValue({ recommendations: [], generations: [] });
+  const listWorkflowRunsMock = vi.fn().mockResolvedValue({ runs: [] });
   const getRecommendationMock = vi.fn().mockResolvedValue({
     recommendation: {
       id: "rec-1",
@@ -215,6 +221,7 @@ function setupOrchestrationEventCapture() {
     ...makeBaseApiMock({
       listTasks: listTasksMock,
       listRecommendations: listRecommendationsMock,
+      listWorkflowRuns: listWorkflowRunsMock,
       getRecommendation: getRecommendationMock,
       listConflicts: listConflictsMock,
       openEventStream: vi.fn().mockImplementation(
@@ -242,6 +249,7 @@ function setupOrchestrationEventCapture() {
     getOnStatus: () => capturedOnStatus,
     listTasksMock,
     listRecommendationsMock,
+    listWorkflowRunsMock,
     getRecommendationMock,
     listConflictsMock,
   };
@@ -714,6 +722,32 @@ describe("GoalDetailView orchestration live-refresh", () => {
     expect(listConflictsMock).toHaveBeenCalledTimes(conflictCallsAfterMount + 1);
     expect(listTasksMock).toHaveBeenCalledTimes(taskCallsAfterMount);
     expect(listRecommendationsMock).toHaveBeenCalledTimes(recommendationCallsAfterMount);
+  });
+
+  it("workflow events refresh only the workflow panel scope", async () => {
+    const { getOnEvent, listTasksMock, listRecommendationsMock, listWorkflowRunsMock } =
+      setupOrchestrationEventCapture();
+    await renderView();
+
+    const taskCallsAfterMount = listTasksMock.mock.calls.length;
+    const recommendationCallsAfterMount = listRecommendationsMock.mock.calls.length;
+    const workflowCallsAfterMount = listWorkflowRunsMock.mock.calls.length;
+
+    await act(async () => {
+      getOnEvent()(
+        makeEvent("workflow.step.completed", "goal-1", {
+          goalId: "goal-1",
+          workflowRunId: "run-1",
+          workflowStepRunId: "step-1",
+          stepTemplateId: "research",
+        }),
+      );
+    });
+    await advanceRefresh(200);
+
+    expect(listTasksMock).toHaveBeenCalledTimes(taskCallsAfterMount);
+    expect(listRecommendationsMock).toHaveBeenCalledTimes(recommendationCallsAfterMount);
+    expect(listWorkflowRunsMock).toHaveBeenCalledTimes(workflowCallsAfterMount + 1);
   });
 
   it("reconnect refetches orchestration panels for the active goal", async () => {

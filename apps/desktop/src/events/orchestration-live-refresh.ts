@@ -56,3 +56,7 @@ export function feedbackRecommendationId(event: DomainEvent): string | null {
     ? recommendationId
     : null;
 }
+
+export function workflowEventMayTouchGoalDetail(event: DomainEvent): boolean {
+  return event.type.startsWith("workflow.");
+}
