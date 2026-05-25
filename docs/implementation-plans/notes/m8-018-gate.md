@@ -3,7 +3,7 @@
 Date: 2026-05-25
 Reviewer: Codex
 Baseline note: `docs/implementation-plans/notes/m8-000-baseline.md`
-Gate SHA: `59c10e0342ec773fe7eb4b35f173db9e32faae9d`
+Gate SHA: `d7431c8f609d787b6256658ee5f0b284f59d0e8f`
 
 ## Scope
 
