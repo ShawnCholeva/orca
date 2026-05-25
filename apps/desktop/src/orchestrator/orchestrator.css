@@ -181,10 +181,21 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
 }
 
 .goal-card:last-child {
   border-bottom: none;
+}
+
+.goal-card:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.goal-card--selected {
+  background: var(--panel-2);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .goal-card-head {

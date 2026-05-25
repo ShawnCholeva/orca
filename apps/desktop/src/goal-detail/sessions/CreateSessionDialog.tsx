@@ -110,6 +110,7 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose, on
         contextPackageId,
         taskId: prefill?.taskId,
         fromRecommendationId: prefill?.fromRecommendationId,
+        workflowStepRunId: prefill?.workflowStepRunId,
       });
       await startSession(session.id, { terminalCols: 80, terminalRows: 24 });
       onCreated(session.id);
@@ -136,6 +137,7 @@ export function CreateSessionDialog({ goalId, workspaces, onCreated, onClose, on
         instruction: objective.trim() || undefined,
         taskId: prefill?.taskId,
         fromRecommendationId: prefill?.fromRecommendationId,
+        workflowStepRunId: prefill?.workflowStepRunId,
       });
       await startSession(session.id, { terminalCols: 80, terminalRows: 24 });
       onCreated(session.id);

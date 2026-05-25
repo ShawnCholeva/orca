@@ -46,6 +46,7 @@ export type CreateSessionPrefill = {
     workspaceId?: string;
   };
   taskId?: string;
+  workflowStepRunId?: string;
   fromRecommendationId: string;
 };
 

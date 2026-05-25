@@ -46,7 +46,7 @@ export function CreateGoalFlow({ onClose, onDone, connectionStatus }: Props) {
   useEffect(() => {
     if (state.phase !== "submitting") return;
     let cancelled = false;
-    const { title, description, draft, pendingWorkspaces } = state;
+    const { title, description, draft, pendingWorkspaces, orchestratorModel } = state;
     createGoal({
       title,
       description,
@@ -55,6 +55,7 @@ export function CreateGoalFlow({ onClose, onDone, connectionStatus }: Props) {
         inputPath: ws.inputPath,
         name: ws.name,
       })),
+      orchestratorModel: orchestratorModel ?? undefined,
     })
       .then((res) => {
         if (!cancelled) {

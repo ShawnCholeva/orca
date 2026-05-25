@@ -24,6 +24,11 @@ const preview = {
   gitProbe: "ok" as const,
 };
 
+const orchestratorModel = {
+  providerId: "orca/openai" as const,
+  modelId: "gpt-5",
+};
+
 function dispatch(state: FlowState, action: FlowAction): FlowState {
   return reducer(state, action);
 }
@@ -31,7 +36,7 @@ function dispatch(state: FlowState, action: FlowAction): FlowState {
 describe("reducer — rough phase", () => {
   it("setTitle updates title and clears error", () => {
     const s = dispatch(
-      { phase: "rough", title: "", description: "", error: "oops" },
+      { phase: "rough", title: "", description: "", orchestratorModel: null, error: "oops" },
       { type: "setTitle", title: "New Title" },
     );
     expect(s).toMatchObject({ phase: "rough", title: "New Title", error: undefined });
@@ -42,24 +47,58 @@ describe("reducer — rough phase", () => {
     expect(s).toMatchObject({ phase: "rough", description: "desc" });
   });
 
+  it("setOrchestratorModel stores the selected provider/model", () => {
+    const s = dispatch(initialState, {
+      type: "setOrchestratorModel",
+      orchestratorModel,
+    });
+    expect(s).toMatchObject({ phase: "rough", orchestratorModel });
+  });
+
   it("refineRequested transitions rough → refining preserving title/description", () => {
-    const rough: FlowState = { phase: "rough", title: "My Goal", description: "some desc" };
+    const rough: FlowState = {
+      phase: "rough",
+      title: "My Goal",
+      description: "some desc",
+      orchestratorModel,
+    };
     const s = dispatch(rough, { type: "refineRequested" });
-    expect(s).toEqual({ phase: "refining", title: "My Goal", description: "some desc" });
+    expect(s).toEqual({
+      phase: "refining",
+      title: "My Goal",
+      description: "some desc",
+      orchestratorModel,
+    });
   });
 
   it("setTitle is no-op in non-rough phase", () => {
-    const refining: FlowState = { phase: "refining", title: "T", description: "" };
+    const refining: FlowState = {
+      phase: "refining",
+      title: "T",
+      description: "",
+      orchestratorModel: null,
+    };
     expect(dispatch(refining, { type: "setTitle", title: "X" })).toBe(refining);
   });
 });
 
 describe("reducer — refining phase", () => {
-  const refining: FlowState = { phase: "refining", title: "Ship guided goal flow", description: "desc" };
+  const refining: FlowState = {
+    phase: "refining",
+    title: "Ship guided goal flow",
+    description: "desc",
+    orchestratorModel,
+  };
 
   it("refineSucceeded → review with draft", () => {
     const s = dispatch(refining, { type: "refineSucceeded", draft });
-    expect(s).toEqual({ phase: "review", title: "Ship guided goal flow", description: "desc", draft });
+    expect(s).toEqual({
+      phase: "review",
+      title: "Ship guided goal flow",
+      description: "desc",
+      orchestratorModel,
+      draft,
+    });
   });
 
   it("refineFailed → rough preserving typed input with error", () => {
@@ -68,6 +107,7 @@ describe("reducer — refining phase", () => {
       phase: "rough",
       title: "Ship guided goal flow",
       description: "desc",
+      orchestratorModel,
       error: "network error",
     });
   });
@@ -78,7 +118,13 @@ describe("reducer — refining phase", () => {
 });
 
 describe("reducer — review phase", () => {
-  const review: FlowState = { phase: "review", title: "T", description: "D", draft };
+  const review: FlowState = {
+    phase: "review",
+    title: "T",
+    description: "D",
+    orchestratorModel,
+    draft,
+  };
 
   it("editArrayItem updates successCriteria item", () => {
     const s = dispatch(review, {
@@ -129,13 +175,22 @@ describe("reducer — review phase", () => {
 
   it("backToRough preserves title/description, no draft", () => {
     const s = dispatch(review, { type: "backToRough" });
-    expect(s).toMatchObject({ phase: "rough", title: "T", description: "D" });
+    expect(s).toMatchObject({
+      phase: "rough",
+      title: "T",
+      description: "D",
+      orchestratorModel,
+    });
     expect("draft" in s).toBe(false);
   });
 
   it("proceedToWorkspaces → workspaces with empty pending list", () => {
     const s = dispatch(review, { type: "proceedToWorkspaces" });
-    expect(s).toMatchObject({ phase: "workspaces", pendingWorkspaces: [] });
+    expect(s).toMatchObject({
+      phase: "workspaces",
+      orchestratorModel,
+      pendingWorkspaces: [],
+    });
   });
 
   it("editArrayItem is no-op outside review phase", () => {
@@ -155,6 +210,7 @@ describe("reducer — workspaces phase", () => {
     phase: "workspaces",
     title: "T",
     description: "D",
+    orchestratorModel,
     draft,
     pendingWorkspaces: [],
   };
@@ -219,12 +275,22 @@ describe("reducer — workspaces phase", () => {
 
   it("backToReview returns to review preserving draft", () => {
     const s = dispatch(workspaces, { type: "backToReview" });
-    expect(s).toMatchObject({ phase: "review", draft, title: "T", description: "D" });
+    expect(s).toMatchObject({
+      phase: "review",
+      draft,
+      title: "T",
+      description: "D",
+      orchestratorModel,
+    });
   });
 
   it("submitRequested transitions to submitting", () => {
     const s = dispatch(workspaces, { type: "submitRequested" });
-    expect(s).toMatchObject({ phase: "submitting", pendingWorkspaces: [] });
+    expect(s).toMatchObject({
+      phase: "submitting",
+      orchestratorModel,
+      pendingWorkspaces: [],
+    });
   });
 
   it("inspectRequested is no-op outside workspaces phase", () => {
@@ -237,6 +303,7 @@ describe("reducer — submitting phase", () => {
     phase: "submitting",
     title: "T",
     description: "D",
+    orchestratorModel,
     draft,
     pendingWorkspaces: [],
   };
@@ -250,6 +317,7 @@ describe("reducer — submitting phase", () => {
     const s = dispatch(submitting, { type: "submitFailed", error: "server error" });
     expect(s).toMatchObject({
       phase: "workspaces",
+      orchestratorModel,
       error: "server error",
       pendingWorkspaces: [],
       draft,
@@ -267,7 +335,13 @@ describe("reducer — cross-phase no-ops", () => {
   });
 
   it("backToReview in non-workspaces phase is no-op", () => {
-    const review: FlowState = { phase: "review", title: "T", description: "D", draft };
+    const review: FlowState = {
+      phase: "review",
+      title: "T",
+      description: "D",
+      orchestratorModel,
+      draft,
+    };
     expect(dispatch(review, { type: "backToReview" })).toBe(review);
   });
 });

@@ -150,7 +150,8 @@ h2 {
 }
 
 .form-field input,
-.form-field textarea {
+.form-field textarea,
+.form-field select {
   padding: 8px 10px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
@@ -163,17 +164,26 @@ h2 {
 }
 
 .form-field input:focus,
-.form-field textarea:focus {
+.form-field textarea:focus,
+.form-field select:focus {
   outline: none;
   border-color: #6366f1;
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
 }
 
 .form-field input:disabled,
-.form-field textarea:disabled {
+.form-field textarea:disabled,
+.form-field select:disabled {
   background: #f9fafb;
   color: #9ca3af;
   cursor: not-allowed;
+}
+
+.form-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #6b7280;
 }
 
 .form-error {

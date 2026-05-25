@@ -19,8 +19,10 @@ import {
   CreateGoalResponse,
   CreateSessionRequest,
   CreateSessionResponse,
+  CreateWorkflowArtifactRequest,
   CreateTaskRequest,
   CreateTaskResponse,
+  GetWorkflowTemplateResponse,
   CreateWorkflowTemplateRequest,
   DismissRecommendationResponse,
   DuplicateWorkflowTemplateRequest,
@@ -30,7 +32,6 @@ import {
   GetContextPackageResponse,
   GetSessionResponse,
   GetSessionMemorySummaryResponse,
-  GetWorkflowTemplateResponse,
   GoalDecision,
   GoalDetailResponse,
   GoalMemoryItem,
@@ -45,6 +46,7 @@ import {
   ListGoalDecisionsResponse,
   ListGoalMemoryResponse,
   ListGoalsResponse,
+  ListModelProvidersResponse,
   ListPluginsResponse,
   ListRecommendationsQuery,
   ListRecommendationsResponse,
@@ -52,10 +54,14 @@ import {
   ListSkillsResponse,
   ListTasksQuery,
   ListTasksResponse,
+  ListWorkflowArtifactsResponse,
+  ListWorkflowDecisionsResponse,
+  ListWorkflowRunsResponse,
   ListWorkflowTemplatesResponse,
   MemoryExtraction,
   ModifyRecommendationRequest,
   ModifyRecommendationResponse,
+  NextOrchestratorDecisionResponse,
   PatchGoalDecisionRequest,
   PatchGoalMemoryRequest,
   RecommendationFeedbackRequest,
@@ -66,21 +72,30 @@ import {
   RefineGoalResponse,
   ResolveConflictRequest,
   ResolveConflictResponse,
+  RequestNextOrchestratorDecisionRequest,
   SessionErrorFrame,
   SessionMemorySummary,
   SessionOutputFrame,
   SplitTaskRequest,
   SplitTaskResponse,
+  StartWorkflowRunRequest,
   StartSessionRequest,
   StartSessionResponse,
   StopSessionResponse,
+  SubmitWorkflowUserInputRequest,
   TaskGenerationRequest,
   TaskGenerationResponse,
+  UpdateGoalOrchestratorModelRequest,
+  UpdateGoalOrchestratorModelResponse,
   UpdateTaskRequest,
   UpdateTaskResponse,
   UpdateGoalRequest,
   UpdateGoalResponse,
   UpdateWorkflowTemplateRequest,
+  WorkflowArtifactResponse,
+  WorkflowDecisionResponse,
+  WorkflowRunResponse,
+  WorkflowStepRunResponse,
   WorkflowTemplateResponse,
   type AgentReadinessReport,
   type PluginSummary,
@@ -680,6 +695,37 @@ export async function listAdapters(): Promise<ListAdaptersResponse> {
   );
 }
 
+export async function listModelProviders(): Promise<ListModelProvidersResponse["providers"]> {
+  const { baseUrl, token } = await loadConfig();
+  const body = await requestJson(
+    `${baseUrl}/v1/model-providers`,
+    { headers: authHeaders(token) },
+    ListModelProvidersResponse,
+    "List model providers failed",
+  );
+  return body.providers;
+}
+
+export async function updateGoalOrchestratorModel(
+  goalId: string,
+  body: UpdateGoalOrchestratorModelRequest,
+): Promise<UpdateGoalOrchestratorModelResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/orchestrator-model`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(UpdateGoalOrchestratorModelRequest.parse(body)),
+    },
+    UpdateGoalOrchestratorModelResponse,
+    "Update orchestrator model failed",
+  );
+}
+
 export async function listWorkflowTemplates(): Promise<ListWorkflowTemplatesResponse> {
   const { baseUrl, token } = await loadConfig();
   return requestJson(
@@ -756,6 +802,165 @@ export async function duplicateWorkflowTemplate(
     },
     WorkflowTemplateResponse,
     "Duplicate workflow template failed",
+  );
+}
+
+export async function startWorkflowRun(
+  goalId: string,
+  body: StartWorkflowRunRequest,
+): Promise<WorkflowRunResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-runs`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(StartWorkflowRunRequest.parse(body)),
+    },
+    WorkflowRunResponse,
+    "Start workflow run failed",
+  );
+}
+
+export async function getWorkflowRun(
+  goalId: string,
+  runId: string,
+): Promise<WorkflowRunResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-runs/${encodeURIComponent(runId)}`,
+    { headers: authHeaders(token) },
+    WorkflowRunResponse,
+    "Get workflow run failed",
+  );
+}
+
+export async function listWorkflowRuns(
+  goalId: string,
+): Promise<ListWorkflowRunsResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-runs`,
+    { headers: authHeaders(token) },
+    ListWorkflowRunsResponse,
+    "List workflow runs failed",
+  );
+}
+
+export async function requestNextOrchestratorDecision(
+  goalId: string,
+  runId: string,
+  body: RequestNextOrchestratorDecisionRequest,
+): Promise<NextOrchestratorDecisionResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-runs/${encodeURIComponent(runId)}/next-decision`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(RequestNextOrchestratorDecisionRequest.parse(body)),
+    },
+    NextOrchestratorDecisionResponse,
+    "Request next orchestrator decision failed",
+  );
+}
+
+export async function listWorkflowDecisions(
+  goalId: string,
+  runId: string,
+): Promise<ListWorkflowDecisionsResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-runs/${encodeURIComponent(runId)}/decisions`,
+    { headers: authHeaders(token) },
+    ListWorkflowDecisionsResponse,
+    "List workflow decisions failed",
+  );
+}
+
+export async function getWorkflowDecision(
+  goalId: string,
+  decisionId: string,
+): Promise<WorkflowDecisionResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-decisions/${encodeURIComponent(decisionId)}`,
+    { headers: authHeaders(token) },
+    WorkflowDecisionResponse,
+    "Get workflow decision failed",
+  );
+}
+
+export async function getWorkflowStepRun(
+  goalId: string,
+  stepRunId: string,
+): Promise<WorkflowStepRunResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-step-runs/${encodeURIComponent(stepRunId)}`,
+    { headers: authHeaders(token) },
+    WorkflowStepRunResponse,
+    "Get workflow step run failed",
+  );
+}
+
+export async function submitWorkflowUserInput(
+  goalId: string,
+  stepRunId: string,
+  body: SubmitWorkflowUserInputRequest,
+): Promise<WorkflowStepRunResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-step-runs/${encodeURIComponent(stepRunId)}/submit-input`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(SubmitWorkflowUserInputRequest.parse(body)),
+    },
+    WorkflowStepRunResponse,
+    "Submit workflow input failed",
+  );
+}
+
+export async function createWorkflowArtifact(
+  goalId: string,
+  body: CreateWorkflowArtifactRequest,
+): Promise<WorkflowArtifactResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-artifacts`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(CreateWorkflowArtifactRequest.parse(body)),
+    },
+    WorkflowArtifactResponse,
+    "Create workflow artifact failed",
+  );
+}
+
+export async function listWorkflowRunArtifacts(
+  goalId: string,
+  runId: string,
+): Promise<ListWorkflowArtifactsResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-runs/${encodeURIComponent(runId)}/artifacts`,
+    { headers: authHeaders(token) },
+    ListWorkflowArtifactsResponse,
+    "List workflow run artifacts failed",
   );
 }
 

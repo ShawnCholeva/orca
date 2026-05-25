@@ -48,6 +48,7 @@ export default function App() {
   const [detailRefreshKey, setDetailRefreshKey] = useState(0);
   const [showCreateFlow, setShowCreateFlow] = useState(false);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [selectedOrchestratorGoalId, setSelectedOrchestratorGoalId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("orchestrator");
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
@@ -134,6 +135,19 @@ export default function App() {
     loadDiagnostics();
   }, []);
 
+  useEffect(() => {
+    if (goals.length === 0) {
+      setSelectedOrchestratorGoalId(null);
+      return;
+    }
+    if (
+      selectedOrchestratorGoalId === null ||
+      !goals.some((goal) => goal.id === selectedOrchestratorGoalId)
+    ) {
+      setSelectedOrchestratorGoalId(goals[0]!.id);
+    }
+  }, [goals, selectedOrchestratorGoalId]);
+
   // WebSocket event stream — refreshes goal list or detail on relevant events
   useEffect(() => {
     const stream = openEventStream({
@@ -156,6 +170,7 @@ export default function App() {
 
   function handleCreateFlowDone(goalId: string) {
     setShowCreateFlow(false);
+    setSelectedOrchestratorGoalId(goalId);
     setCurrentGoalId(goalId);
     setDetailRefreshKey(0);
     setMode("detail");
@@ -292,7 +307,11 @@ export default function App() {
 
               <div className="orchestrator-body">
                 <div className="orchestrator-chat-col">
-                  <OrcaChat />
+                  <OrcaChat
+                    goals={goals}
+                    selectedGoalId={selectedOrchestratorGoalId}
+                    connectionStatus={connectionStatus}
+                  />
                 </div>
 
                 <aside className="orchestrator-rail" aria-label="Goals">
@@ -310,6 +329,8 @@ export default function App() {
                         <GoalCard
                           key={goal.id}
                           goal={goal}
+                          selected={goal.id === selectedOrchestratorGoalId}
+                          onSelect={() => setSelectedOrchestratorGoalId(goal.id)}
                           onView={() => openGoalDetail(goal.id)}
                         />
                       ))}
@@ -371,7 +392,17 @@ export default function App() {
   );
 }
 
-function GoalCard({ goal, onView }: { goal: Goal; onView: () => void }) {
+function GoalCard({
+  goal,
+  selected = false,
+  onSelect,
+  onView,
+}: {
+  goal: Goal;
+  selected?: boolean;
+  onSelect?: () => void;
+  onView: () => void;
+}) {
   const MAX_DESC = 140;
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(goal.title);
@@ -426,7 +457,12 @@ function GoalCard({ goal, onView }: { goal: Goal; onView: () => void }) {
   }
 
   return (
-    <li className="goal-card">
+    <li
+      className={`goal-card${selected ? " goal-card--selected" : ""}`}
+      onClick={() => {
+        if (!editing) onSelect?.();
+      }}
+    >
       {editing ? (
         <form onSubmit={saveEdit} className="goal-card-form">
           <label htmlFor={`gc-title-${goal.id}`}>Title</label>
@@ -480,7 +516,10 @@ function GoalCard({ goal, onView }: { goal: Goal; onView: () => void }) {
             <button
               type="button"
               className="goal-card-btn goal-card-btn--primary"
-              onClick={onView}
+              onClick={(event) => {
+                event.stopPropagation();
+                onView();
+              }}
               disabled={busy}
             >
               View
@@ -488,7 +527,10 @@ function GoalCard({ goal, onView }: { goal: Goal; onView: () => void }) {
             <button
               type="button"
               className="goal-card-btn"
-              onClick={startEdit}
+              onClick={(event) => {
+                event.stopPropagation();
+                startEdit();
+              }}
               disabled={busy}
             >
               Edit
@@ -496,7 +538,10 @@ function GoalCard({ goal, onView }: { goal: Goal; onView: () => void }) {
             <button
               type="button"
               className="goal-card-btn goal-card-btn--danger"
-              onClick={handleArchive}
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleArchive();
+              }}
               disabled={busy}
             >
               Archive

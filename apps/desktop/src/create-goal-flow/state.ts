@@ -1,6 +1,7 @@
 import type {
   GuidedRefinementOutput,
   InspectWorkspacePreview,
+  OrchestratorModelChoice,
 } from "@orca/contracts";
 
 export type RefinementField = "successCriteria" | "constraints" | "assumptions";
@@ -19,6 +20,7 @@ type RoughState = {
   phase: "rough";
   title: string;
   description: string;
+  orchestratorModel: OrchestratorModelChoice | null;
   error?: string;
 };
 
@@ -26,12 +28,14 @@ type RefiningState = {
   phase: "refining";
   title: string;
   description: string;
+  orchestratorModel: OrchestratorModelChoice | null;
 };
 
 type ReviewState = {
   phase: "review";
   title: string;
   description: string;
+  orchestratorModel: OrchestratorModelChoice | null;
   draft: GuidedRefinementOutput;
 };
 
@@ -39,6 +43,7 @@ type WorkspacesState = {
   phase: "workspaces";
   title: string;
   description: string;
+  orchestratorModel: OrchestratorModelChoice | null;
   draft: GuidedRefinementOutput;
   pendingWorkspaces: PendingWorkspace[];
   inspecting?: boolean;
@@ -49,6 +54,7 @@ type SubmittingState = {
   phase: "submitting";
   title: string;
   description: string;
+  orchestratorModel: OrchestratorModelChoice | null;
   draft: GuidedRefinementOutput;
   pendingWorkspaces: PendingWorkspace[];
 };
@@ -70,11 +76,13 @@ export const initialState: FlowState = {
   phase: "rough",
   title: "",
   description: "",
+  orchestratorModel: null,
 };
 
 export type FlowAction =
   | { type: "setTitle"; title: string }
   | { type: "setDescription"; description: string }
+  | { type: "setOrchestratorModel"; orchestratorModel: OrchestratorModelChoice | null }
   | { type: "refineRequested" }
   | { type: "refineSucceeded"; draft: GuidedRefinementOutput }
   | { type: "refineFailed"; error: string }
@@ -115,9 +123,20 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
       }
       return state;
 
+    case "setOrchestratorModel":
+      if (state.phase === "rough") {
+        return { ...state, orchestratorModel: action.orchestratorModel };
+      }
+      return state;
+
     case "refineRequested":
       if (state.phase === "rough") {
-        return { phase: "refining", title: state.title, description: state.description };
+        return {
+          phase: "refining",
+          title: state.title,
+          description: state.description,
+          orchestratorModel: state.orchestratorModel,
+        };
       }
       return state;
 
@@ -127,6 +146,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           phase: "review",
           title: state.title,
           description: state.description,
+          orchestratorModel: state.orchestratorModel,
           draft: action.draft,
         };
       }
@@ -138,6 +158,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           phase: "rough",
           title: state.title,
           description: state.description,
+          orchestratorModel: state.orchestratorModel,
           error: action.error,
         };
       }
@@ -172,7 +193,12 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
 
     case "backToRough":
       if (state.phase === "review") {
-        return { phase: "rough", title: state.title, description: state.description };
+        return {
+          phase: "rough",
+          title: state.title,
+          description: state.description,
+          orchestratorModel: state.orchestratorModel,
+        };
       }
       return state;
 
@@ -182,6 +208,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           phase: "workspaces",
           title: state.title,
           description: state.description,
+          orchestratorModel: state.orchestratorModel,
           draft: state.draft,
           pendingWorkspaces: [],
         };
@@ -243,6 +270,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           phase: "review",
           title: state.title,
           description: state.description,
+          orchestratorModel: state.orchestratorModel,
           draft: state.draft,
         };
       }
@@ -254,6 +282,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           phase: "submitting",
           title: state.title,
           description: state.description,
+          orchestratorModel: state.orchestratorModel,
           draft: state.draft,
           pendingWorkspaces: state.pendingWorkspaces,
         };
@@ -272,6 +301,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           phase: "workspaces",
           title: state.title,
           description: state.description,
+          orchestratorModel: state.orchestratorModel,
           draft: state.draft,
           pendingWorkspaces: state.pendingWorkspaces,
           error: action.error,

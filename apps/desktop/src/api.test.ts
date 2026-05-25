@@ -280,6 +280,67 @@ const contextAssembly = {
   finishedAt: now,
 };
 
+const workflowRun = {
+  id: "run-1",
+  goalId: "goal-1",
+  templateId: "orca/engineering",
+  templateVersion: 1,
+  status: "active" as const,
+  currentStepRunId: "step-1",
+  startedAt: now,
+  finishedAt: null,
+  blockedReason: null,
+};
+
+const workflowStepRun = {
+  id: "step-1",
+  goalId: "goal-1",
+  workflowRunId: "run-1",
+  stepTemplateId: "intake",
+  ordinal: 0,
+  attempt: 1,
+  status: "active" as const,
+  startedAt: now,
+  finishedAt: null,
+  blockedReason: null,
+  satisfiedExitCriteria: [],
+  outstandingExitCriteria: ["goal brief captured"],
+};
+
+const workflowDecision = {
+  decisionId: "wf-dec-1",
+  goalId: "goal-1",
+  workflowRunId: "run-1",
+  stepRunId: "step-1",
+  decisionType: "request_user_input" as const,
+  selectedAction: "request_input:intake",
+  reason: "Need the initial project brief.",
+  influencedBy: [
+    {
+      kind: "artifact" as const,
+      id: "goal_brief",
+      label: "goal_brief",
+      effect: "missing" as const,
+    },
+  ],
+  createdAt: now,
+};
+
+const workflowArtifact = {
+  id: "art-1",
+  goalId: "goal-1",
+  workflowRunId: "run-1",
+  stepRunId: "step-1",
+  type: "goal_brief" as const,
+  title: "Goal Brief",
+  body: "# Goal",
+  source: "user" as const,
+  linkedSessionId: null,
+  linkedTaskId: null,
+  linkedContextPackageId: null,
+  createdAt: now,
+};
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -318,6 +379,53 @@ describe("desktop api client", () => {
       refined: draft,
       workspaces: [{ inputPath: "/tmp/workspace", name: "workspace" }],
     });
+  });
+
+  it("createGoal forwards orchestratorModel when selected", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { goal }));
+
+    await api.createGoal({
+      title: "Workflow goal",
+      description: "Has orchestrator model",
+      orchestratorModel: {
+        providerId: "orca/openai",
+        modelId: "gpt-5",
+      },
+    });
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(String(init?.body))).toEqual({
+      title: "Workflow goal",
+      description: "Has orchestrator model",
+      orchestratorModel: {
+        providerId: "orca/openai",
+        modelId: "gpt-5",
+      },
+    });
+  });
+
+  it("listModelProviders fetches configured providers", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        providers: [
+          {
+            id: "orca/openai",
+            displayName: "OpenAI",
+            available: true,
+            models: [
+              { id: "gpt-5", displayName: "GPT 5", capabilities: ["planning"] },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const response = await api.listModelProviders();
+
+    expect(response).toHaveLength(1);
+    expect(response[0]!.id).toBe("orca/openai");
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/model-providers");
   });
 
   it("refineGoal posts payload and returns draft", async () => {
@@ -509,6 +617,63 @@ describe("desktop api client", () => {
     expect(response.sessions[0]!.id).toBe("sess-1");
     const [url] = fetchMock.mock.calls[0]!;
     expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/sessions");
+  });
+
+  it("workflow wrappers hit the goal-scoped routes with validated payloads", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(201, { run: workflowRun }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, { decision: workflowDecision, recommendationIds: ["rec-1"] }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { stepRun: workflowStepRun }))
+      .mockResolvedValueOnce(jsonResponse(200, { decisions: [workflowDecision] }))
+      .mockResolvedValueOnce(jsonResponse(200, { artifacts: [workflowArtifact] }))
+      .mockResolvedValueOnce(jsonResponse(200, { stepRun: workflowStepRun }));
+
+    const started = await api.startWorkflowRun("goal-1", {
+      goalId: "goal-1",
+      templateId: "orca/engineering",
+    });
+    expect(started.run.id).toBe("run-1");
+
+    const decision = await api.requestNextOrchestratorDecision("goal-1", "run-1", {
+      workflowRunId: "run-1",
+    });
+    expect(decision.recommendationIds).toEqual(["rec-1"]);
+
+    const step = await api.getWorkflowStepRun("goal-1", "step-1");
+    expect(step.stepRun.id).toBe("step-1");
+
+    const decisions = await api.listWorkflowDecisions("goal-1", "run-1");
+    expect(decisions.decisions).toHaveLength(1);
+
+    const artifacts = await api.listWorkflowRunArtifacts("goal-1", "run-1");
+    expect(artifacts.artifacts[0]!.id).toBe("art-1");
+
+    await api.submitWorkflowUserInput("goal-1", "step-1", {
+      stepRunId: "step-1",
+      answerText: "We need a safe workflow UI.",
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "http://127.0.0.1:8787/v1/goals/goal-1/workflow-runs",
+      "http://127.0.0.1:8787/v1/goals/goal-1/workflow-runs/run-1/next-decision",
+      "http://127.0.0.1:8787/v1/goals/goal-1/workflow-step-runs/step-1",
+      "http://127.0.0.1:8787/v1/goals/goal-1/workflow-runs/run-1/decisions",
+      "http://127.0.0.1:8787/v1/goals/goal-1/workflow-runs/run-1/artifacts",
+      "http://127.0.0.1:8787/v1/goals/goal-1/workflow-step-runs/step-1/submit-input",
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).toEqual({
+      goalId: "goal-1",
+      templateId: "orca/engineering",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toEqual({
+      workflowRunId: "run-1",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[5]![1]?.body))).toEqual({
+      stepRunId: "step-1",
+      answerText: "We need a safe workflow UI.",
+    });
   });
 
   it("createSession posts to goal sessions endpoint", async () => {

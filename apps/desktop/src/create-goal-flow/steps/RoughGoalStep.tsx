@@ -1,5 +1,6 @@
 import type { Dispatch } from "react";
 import type { FlowAction, FlowState } from "../state";
+import { OrchestratorModelPicker } from "../../orchestrator/components/OrchestratorModelPicker";
 
 type Props = {
   state: Extract<FlowState, { phase: "rough" }>;
@@ -41,6 +42,14 @@ export function RoughGoalStep({ state, dispatch, connected }: Props) {
           rows={6}
         />
       </div>
+
+      <OrchestratorModelPicker
+        value={state.orchestratorModel}
+        onChange={(orchestratorModel) =>
+          dispatch({ type: "setOrchestratorModel", orchestratorModel })
+        }
+        disabled={!connected}
+      />
 
       {state.error && <div className="form-error">{state.error}</div>}
 
