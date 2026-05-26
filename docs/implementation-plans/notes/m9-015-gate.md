@@ -4,7 +4,7 @@ Date: 2026-05-26
 Reviewer: Codex
 Baseline note: `docs/implementation-plans/notes/m9-000-baseline.md`
 Prior gate note: `docs/implementation-plans/notes/m9-006-gate.md`
-Gate SHA: `5299db4fd86c3744c3b8866527f41c39e22a6030`
+Gate SHA: `bee4c6095fb1156580c97dce8a98aa142cefc195`
 
 ## Scope
 
