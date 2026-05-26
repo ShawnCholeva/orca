@@ -234,6 +234,26 @@ describe("OrcaChat", () => {
     expect(screen.getByPlaceholderText("Message Orca…")).toBeInTheDocument();
   });
 
+  it("does not show provider metadata on the initial goal message", async () => {
+    getGoalDetailMock.mockResolvedValue({
+      goal,
+      refinement: null,
+      workspaces: [],
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    expect(await screen.findByText("Engineering workflow ready")).toBeInTheDocument();
+    expect(screen.queryByText(/orca\/openai/)).toBeNull();
+  });
+
   it("loads persisted messages and sends a freeform orchestrator message", async () => {
     getGoalDetailMock.mockResolvedValue({
       goal,

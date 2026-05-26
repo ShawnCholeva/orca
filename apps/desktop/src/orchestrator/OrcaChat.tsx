@@ -411,12 +411,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
                 selectedGoal.description ||
                 "This goal is ready for supervised workflow orchestration."
               }
-              meta={
-                workflowState.detail?.goal.orchestratorProvider &&
-                workflowState.detail?.goal.orchestratorModel
-                  ? `${workflowState.detail.goal.orchestratorProvider} · ${workflowState.detail.goal.orchestratorModel}`
-                  : "No orchestrator model selected yet."
-              }
             />
 
             {messagesLoading && <ThinkingRow label="loading chat history" />}
