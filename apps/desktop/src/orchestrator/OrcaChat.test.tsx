@@ -294,6 +294,22 @@ describe("OrcaChat", () => {
     });
   });
 
+  it("restores the input composer when a request_user_input recommendation was already accepted", async () => {
+    setupRunLoad(workflowRecommendation({ status: "accepted" }));
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    expect(await screen.findByText("User input requested")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Answer the intake question…")).toBeInTheDocument();
+  });
+
   it("accepts a launch_workflow_session recommendation and opens the session dialog with workflowStepRunId", async () => {
     setupRunLoad(
       workflowRecommendation({

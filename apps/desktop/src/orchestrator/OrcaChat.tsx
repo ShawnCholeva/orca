@@ -203,6 +203,8 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
       ACTIVE_RECOMMENDATION_STATUSES.has(recommendation.status) &&
       recommendation.workflowStepRunId === currentStepRunId,
   );
+  const restoredPendingInput =
+    pendingInput ?? findAcceptedPendingInput(workflowState.recommendations, currentStepRunId);
   const hasModel = Boolean(
     workflowState.detail?.goal.orchestratorProvider &&
       workflowState.detail?.goal.orchestratorModel,
@@ -284,7 +286,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   }
 
   async function handleSubmitInput() {
-    if (!selectedGoalId || !pendingInput) return;
+    if (!selectedGoalId || !restoredPendingInput) return;
     const answerText = answerDraft.trim();
     if (!answerText) {
       setActionError("Answer text is required.");
@@ -294,8 +296,8 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     setSubmittingInput(true);
     setActionError(null);
     try {
-      await submitWorkflowUserInput(selectedGoalId, pendingInput.stepRunId, {
-        stepRunId: pendingInput.stepRunId,
+      await submitWorkflowUserInput(selectedGoalId, restoredPendingInput.stepRunId, {
+        stepRunId: restoredPendingInput.stepRunId,
         answerText,
       });
       setPendingInput(null);
@@ -404,10 +406,10 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
               </div>
             )}
 
-            {pendingInput && (
+            {restoredPendingInput && (
               <div className="orca-chat-input-card">
                 <p className="orca-chat-input-label">User input requested</p>
-                <p className="orca-chat-input-question">{pendingInput.question}</p>
+                <p className="orca-chat-input-question">{restoredPendingInput.question}</p>
                 <textarea
                   value={answerDraft}
                   onChange={(event) => setAnswerDraft(event.target.value)}
@@ -417,7 +419,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
                 />
                 <div className="orca-chat-input-actions">
                   <span className="mono orca-chat-send-hint">
-                    from {pendingInput.recommendationId}
+                    from {restoredPendingInput.recommendationId}
                   </span>
                   <button
                     type="button"
@@ -464,7 +466,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
 
             {!loading &&
               workflowState.run &&
-              !pendingInput &&
+              !restoredPendingInput &&
               workflowRecommendations.length === 0 && (
                 <SystemCard
                   title="No pending workflow recommendations"
@@ -548,6 +550,28 @@ function sortByCreatedAtDesc<T extends { createdAt: string }>(items: T[]): T[] {
 
 function sortRecommendations(items: Recommendation[]): Recommendation[] {
   return [...items].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function findAcceptedPendingInput(
+  recommendations: Recommendation[],
+  currentStepRunId: string | null,
+): PendingInputPrompt | null {
+  if (!currentStepRunId) return null;
+  for (const recommendation of recommendations) {
+    if (
+      recommendation.type === "request_user_input" &&
+      recommendation.status === "accepted" &&
+      recommendation.workflowStepRunId === currentStepRunId &&
+      recommendation.proposedAction.kind === "request_user_input"
+    ) {
+      return {
+        question: recommendation.proposedAction.question,
+        stepRunId: recommendation.proposedAction.workflowStepRunId,
+        recommendationId: recommendation.id,
+      };
+    }
+  }
+  return null;
 }
 
 function isWorkflowRecommendation(recommendation: Recommendation): boolean {
