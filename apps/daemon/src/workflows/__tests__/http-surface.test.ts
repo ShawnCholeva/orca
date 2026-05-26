@@ -407,6 +407,39 @@ describe("M8 HTTP surface", () => {
 
     const attemptSeedTime = new Date().toISOString();
     const reviewId = "review-http-1";
+    const reviewPayload = {
+      id: reviewId,
+      goalId: goal.id,
+      workflowRunId: startedRun.id,
+      stepRunId,
+      attemptId: "attempt-http-2",
+      kind: "select_operator" as const,
+      providerId: "orca/openai" as const,
+      modelId: "gpt-5",
+      title: "Choose an operator",
+      summary: "Step purpose: Select the best operator\nFailed transports: hidden_interactive:fallback:interactive_output_invalid",
+      choices: [
+        {
+          id: "human",
+          label: "human",
+          description: "Continue with explicit human supervision.",
+          proposal: {
+            orcaProposalVersion: 1 as const,
+            kind: "select_operator" as const,
+            payload: {
+              operatorId: "human",
+              operatorKind: "human" as const,
+              reason: "Human review fallback",
+              requiredCapabilities: [],
+              alternativesConsidered: [],
+              confidence: 0.5,
+              requiresUserApproval: false,
+            },
+          },
+        },
+      ],
+      createdAt: attemptSeedTime,
+    };
     db.prepare(
       "INSERT INTO orchestration_workers (id, provider_id, model, adapter_id, state, current_goal_id, current_workflow_run_id, current_step_run_id, last_health_at, created_at) VALUES ('worker-http-1', 'orca/openai', 'gpt-5', 'codex', 'ready', ?, ?, ?, ?, ?)"
     ).run(goal.id, startedRun.id, stepRunId, attemptSeedTime, attemptSeedTime);
@@ -414,8 +447,18 @@ describe("M8 HTTP surface", () => {
       "INSERT INTO orchestration_transport_attempts (id, goal_id, workflow_run_id, step_run_id, decision_id, provider_id, model, transport, worker_id, status, failure_reason, failure_message, raw_text_length, latency_ms, input_fingerprint, created_at, finished_at) VALUES ('attempt-http-1', ?, ?, ?, NULL, 'orca/openai', 'gpt-5', 'hidden_interactive', 'worker-http-1', 'fallback', 'interactive_output_invalid', 'invalid envelope', 55, 100, 'fp-http-1', ?, ?)"
     ).run(goal.id, startedRun.id, stepRunId, attemptSeedTime, attemptSeedTime);
     db.prepare(
-      "INSERT INTO orchestration_human_reviews (id, goal_id, workflow_run_id, step_run_id, attempt_id, decision_kind, payload_json, status, submitted_proposal_json, created_at, submitted_at) VALUES (?, ?, ?, ?, 'attempt-http-1', 'select_operator', '{}', 'pending', NULL, ?, NULL)"
-    ).run(reviewId, goal.id, startedRun.id, stepRunId, attemptSeedTime);
+      "INSERT INTO orchestration_transport_attempts (id, goal_id, workflow_run_id, step_run_id, decision_id, provider_id, model, transport, worker_id, status, failure_reason, failure_message, raw_text_length, latency_ms, input_fingerprint, created_at, finished_at) VALUES ('attempt-http-2', ?, ?, ?, NULL, 'orca/openai', 'gpt-5', 'human_review', NULL, 'pending', NULL, NULL, 0, NULL, 'fp-http-2', ?, NULL)"
+    ).run(goal.id, startedRun.id, stepRunId, attemptSeedTime);
+    db.prepare(
+      "INSERT INTO orchestration_human_reviews (id, goal_id, workflow_run_id, step_run_id, attempt_id, decision_kind, payload_json, status, submitted_proposal_json, created_at, submitted_at) VALUES (?, ?, ?, ?, 'attempt-http-2', 'select_operator', ?, 'pending', NULL, ?, NULL)"
+    ).run(
+      reviewId,
+      goal.id,
+      startedRun.id,
+      stepRunId,
+      JSON.stringify(reviewPayload),
+      attemptSeedTime,
+    );
     db.prepare(
       "INSERT INTO orchestration_worker_hook_traces (id, attempt_id, worker_id, provider_id, hook_event_name, hook_status, summary, failure_reason, created_at) VALUES ('trace-http-1', 'attempt-http-1', 'worker-http-1', 'orca/openai', 'AfterTool', 'succeeded', 'tool completed', NULL, ?)"
     ).run(attemptSeedTime);
@@ -429,7 +472,8 @@ describe("M8 HTTP surface", () => {
       headers: AUTH_HEADERS,
     });
     expect(attemptsResp.statusCode).toBe(200);
-    ListOrchestrationAttemptsResponse.parse(JSON.parse(attemptsResp.body));
+    const attemptsBody = ListOrchestrationAttemptsResponse.parse(JSON.parse(attemptsResp.body));
+    expect(attemptsBody.attempts.find((attempt) => attempt.id === "attempt-http-2")?.humanReview?.id).toBe(reviewId);
 
     const attemptsWrongGoalResp = await server.inject({
       method: "GET",

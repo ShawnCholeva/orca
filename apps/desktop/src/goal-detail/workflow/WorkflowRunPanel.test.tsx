@@ -17,6 +17,7 @@ const apiMocks = vi.hoisted(() => ({
   listWorkflowRunArtifacts: vi.fn(),
   getWorkflowStepRun: vi.fn(),
   getOrchestrationWorker: vi.fn(),
+  submitHumanReviewDecision: vi.fn(),
   listTasks: vi.fn(),
   listSessions: vi.fn(),
   listContextPackages: vi.fn(),
@@ -354,5 +355,119 @@ describe("WorkflowRunPanel", () => {
     expect(screen.getByText("sanitized tail")).toBeInTheDocument();
     expect(screen.getByText("Ready at 2026-01-01 00:02")).toBeInTheDocument();
     expect(screen.queryByText(/raw prompt/i)).not.toBeInTheDocument();
+  });
+
+  it("renders the pending human review form when the run falls back to human review", async () => {
+    apiMocks.listWorkflowRuns.mockResolvedValue({
+      runs: [
+        {
+          id: "run-1",
+          goalId: "goal-1",
+          templateId: "orca/engineering",
+          templateVersion: 1,
+          status: "active",
+          currentStepRunId: "step-2",
+          startedAt: now,
+          finishedAt: null,
+          blockedReason: null,
+        },
+      ],
+    });
+    apiMocks.getWorkflowRun.mockResolvedValue({
+      run: {
+        id: "run-1",
+        goalId: "goal-1",
+        templateId: "orca/engineering",
+        templateVersion: 1,
+        status: "active",
+        currentStepRunId: "step-2",
+        startedAt: now,
+        finishedAt: null,
+        blockedReason: null,
+      },
+    });
+    apiMocks.listWorkflowDecisions.mockResolvedValue({ decisions: [] });
+    apiMocks.listWorkflowRunArtifacts.mockResolvedValue({ artifacts: [] });
+    apiMocks.getWorkflowStepRun.mockResolvedValue({
+      stepRun: {
+        id: "step-2",
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepTemplateId: "issue_breakdown",
+        ordinal: 3,
+        attempt: 1,
+        status: "active",
+        startedAt: now,
+        finishedAt: null,
+        blockedReason: null,
+        satisfiedExitCriteria: [],
+        outstandingExitCriteria: [],
+      },
+    });
+    apiMocks.listTasks.mockResolvedValue({ tasks: [], generations: [] });
+    apiMocks.listSessions.mockResolvedValue({ sessions: [] });
+    apiMocks.listContextPackages.mockResolvedValue({ packages: [], assemblies: [] });
+    apiMocks.listOrchestrationAttempts.mockResolvedValue({
+      attempts: [
+        {
+          id: "attempt-3",
+          goalId: "goal-1",
+          workflowRunId: "run-1",
+          stepRunId: "step-2",
+          kind: "select_operator",
+          providerId: "orca/openai",
+          modelId: "gpt-5",
+          transport: "human_review",
+          status: "pending",
+          failureReason: null,
+          failureMessage: null,
+          diagnostics: null,
+          workerId: null,
+          startedAt: now,
+          finishedAt: null,
+          createdAt: now,
+          humanReview: {
+            id: "review-1",
+            goalId: "goal-1",
+            workflowRunId: "run-1",
+            stepRunId: "step-2",
+            attemptId: "attempt-3",
+            kind: "select_operator",
+            providerId: "orca/openai",
+            modelId: "gpt-5",
+            title: "Choose an operator",
+            summary:
+              "Step purpose: Pick the best operator for implementation\nFailed transports: one_shot:fallback:one_shot_parse_failed",
+            choices: [
+              {
+                id: "human",
+                label: "human",
+                description: "Continue with explicit human supervision.",
+                proposal: {
+                  orcaProposalVersion: 1,
+                  kind: "select_operator",
+                  payload: {
+                    operatorId: "human",
+                    operatorKind: "human",
+                    reason: "Human review fallback",
+                    requiredCapabilities: [],
+                    alternativesConsidered: [],
+                    confidence: 0.5,
+                    requiresUserApproval: false,
+                  },
+                },
+              },
+            ],
+            createdAt: now,
+          },
+        },
+      ],
+    });
+
+    render(<WorkflowRunPanel goalId="goal-1" initialRunId="run-1" />);
+
+    expect(await screen.findByText("Human Review Required")).toBeInTheDocument();
+    expect(screen.getByText("Pick the best operator for implementation")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit review" })).toBeInTheDocument();
   });
 });

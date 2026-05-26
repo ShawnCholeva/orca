@@ -16,6 +16,7 @@ import { EventBus } from "../../events.js";
 import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
 import {
   markTransportAttemptFailed,
+  markTransportAttemptRejected,
   markTransportAttemptRunning,
   markTransportAttemptSucceeded,
   type TransportAttemptUsecaseCtx,
@@ -292,5 +293,55 @@ describe("OrchestrationTransportBroker fallback", () => {
       "one_shot",
       "hidden_interactive",
     ]);
+  });
+
+  it("records rejected hidden interactive proposals before falling back to human review", async () => {
+    const { broker, db, events, attemptCtx } = setup();
+
+    const result = await broker.propose(request("orca/openai"), {
+      runOneShot: async () => ({
+        status: "failed",
+        failureReason: "one_shot_unavailable",
+        failureMessage: "not configured",
+      }),
+      runHiddenInteractive: async ({ attemptId }) => {
+        markTransportAttemptRunning(attemptCtx, attemptId);
+        markTransportAttemptRejected(attemptCtx, {
+          attemptId,
+          failureReason: "proposal_rejected",
+          failureMessage: "guardrail denied choice",
+          rawTextLength: 52,
+          latencyMs: 11,
+        });
+        return {
+          status: "rejected",
+          failureMessage: "guardrail denied choice",
+          rawTextLength: 52,
+          latencyMs: 11,
+        };
+      },
+    });
+
+    expect(result.status).toBe("needs_human_review");
+    expect(attemptRows(db)).toMatchObject([
+      {
+        transport: "one_shot",
+        status: "failed",
+        failure_reason: "one_shot_unavailable",
+      },
+      {
+        transport: "hidden_interactive",
+        status: "rejected",
+        failure_reason: "proposal_rejected",
+      },
+      {
+        transport: "human_review",
+        status: "pending",
+        failure_reason: null,
+      },
+    ]);
+    expect(
+      events.filter((event) => event.type === "workflow.transport.fallback").at(-1)
+    ).toMatchObject({ payload: { failureReason: "proposal_rejected" } });
   });
 });

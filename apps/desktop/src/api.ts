@@ -84,6 +84,7 @@ import {
   StartSessionRequest,
   StartSessionResponse,
   StopSessionResponse,
+  SubmitHumanReviewDecisionRequest,
   SubmitWorkflowUserInputRequest,
   TaskGenerationRequest,
   TaskGenerationResponse,
@@ -910,6 +911,28 @@ export async function getOrchestrationWorker(
     { headers: authHeaders(token) },
     GetOrchestrationWorkerResponse,
     "Get orchestration worker failed",
+  );
+}
+
+export async function submitHumanReviewDecision(
+  goalId: string,
+  runId: string,
+  attemptId: string,
+  body: SubmitHumanReviewDecisionRequest,
+): Promise<NextOrchestratorDecisionResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-runs/${encodeURIComponent(runId)}/human-review/${encodeURIComponent(attemptId)}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(SubmitHumanReviewDecisionRequest.parse(body)),
+    },
+    NextOrchestratorDecisionResponse,
+    "Submit human review decision failed",
   );
 }
 

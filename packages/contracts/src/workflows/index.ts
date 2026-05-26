@@ -540,7 +540,8 @@ export const OrchestrationTransportAttempt = z
     workerId: z.string().min(1).nullable(),
     startedAt: z.string().datetime().nullable(),
     finishedAt: z.string().datetime().nullable(),
-    createdAt: z.string().datetime()
+    createdAt: z.string().datetime(),
+    humanReview: z.lazy(() => HumanReviewPayload).optional()
   })
   .strict();
 export type OrchestrationTransportAttempt = z.infer<

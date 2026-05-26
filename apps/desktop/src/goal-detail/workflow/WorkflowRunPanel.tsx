@@ -25,6 +25,7 @@ import { ArtifactsList } from "./ArtifactsList";
 import { DecisionTraceTimeline } from "./DecisionTraceTimeline";
 import { StepTimeline } from "./StepTimeline";
 import { TaskDagPreview } from "./TaskDagPreview";
+import { WorkflowHumanReviewPanel } from "./WorkflowHumanReviewPanel";
 import { WorkflowTransportDebugDrawer } from "./WorkflowTransportDebugDrawer";
 import { summarizeWorkflowTransportStatus } from "./transportStatus";
 
@@ -177,6 +178,7 @@ export function WorkflowRunPanel({
     VALIDATION_ARTIFACT_TYPES.has(artifact.type),
   ).length;
   const transportStatus = summarizeWorkflowTransportStatus(state.attempts);
+  const pendingHumanReview = findPendingHumanReviewAttempt(state.attempts);
 
   if (!loading && !error && state.runs.length === 0) {
     return null;
@@ -293,6 +295,17 @@ export function WorkflowRunPanel({
             )}
           </section>
 
+          {state.run && pendingHumanReview?.humanReview && (
+            <WorkflowHumanReviewPanel
+              goalId={goalId}
+              runId={state.run.id}
+              attemptId={pendingHumanReview.id}
+              review={pendingHumanReview.humanReview}
+              currentStepLabel={currentStep ? formatStepLabel(currentStep.stepTemplateId) : null}
+              onSubmitted={load}
+            />
+          )}
+
           <StepTimeline
             steps={state.stepRuns}
             currentStepRunId={state.run.currentStepRunId}
@@ -371,6 +384,24 @@ function compareStepRuns(left: WorkflowStepRun, right: WorkflowStepRun): number 
 
 function sortByCreatedAtDesc<T extends { createdAt: string }>(items: T[]): T[] {
   return [...items].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+function findPendingHumanReviewAttempt(
+  attempts: OrchestrationTransportAttempt[],
+): (OrchestrationTransportAttempt & { humanReview: NonNullable<OrchestrationTransportAttempt["humanReview"]> }) | null {
+  for (let index = attempts.length - 1; index >= 0; index -= 1) {
+    const attempt = attempts[index];
+    if (
+      attempt.transport === "human_review" &&
+      attempt.status === "pending" &&
+      attempt.humanReview
+    ) {
+      return attempt as OrchestrationTransportAttempt & {
+        humanReview: NonNullable<OrchestrationTransportAttempt["humanReview"]>;
+      };
+    }
+  }
+  return null;
 }
 
 function formatTemplateLabel(templateId: string): string {

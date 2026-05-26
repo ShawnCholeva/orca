@@ -275,6 +275,63 @@ describe("OrchestratorService", () => {
     });
   });
 
+  it("publishes workflow.operator.selected only after decision and transport links are durable", async () => {
+    const { db, bus, idFactory } = setup();
+    seedWorkflow(db);
+    db.prepare(
+      "INSERT INTO orchestration_transport_attempts (id, goal_id, workflow_run_id, step_run_id, decision_id, provider_id, model, transport, worker_id, status, failure_reason, failure_message, raw_text_length, latency_ms, input_fingerprint, created_at, finished_at) VALUES ('attempt-1', 'goal-1', 'run-1', 'step-1', NULL, 'orca/openai', 'gpt-5.1-mini', 'one_shot', NULL, 'succeeded', NULL, NULL, 42, 7, 'fp-attempt-1', ?, ?)"
+    ).run(NOW, NOW);
+    const observedAtPublish: Array<{
+      decisionRows: number;
+      linkedDecisionId: string | null;
+      recommendationRows: number;
+    }> = [];
+    bus.subscribe((event) => {
+      if (event.type !== "workflow.operator.selected") return;
+      const decisionId = String(event.payload["decisionId"]);
+      const decisionRows = (
+        db
+          .prepare("SELECT count(*) AS count FROM workflow_decisions WHERE id = ?")
+          .get(decisionId) as { count: number }
+      ).count;
+      const attempt = db
+        .prepare("SELECT decision_id FROM orchestration_transport_attempts WHERE id = 'attempt-1'")
+        .get() as { decision_id: string | null };
+      const recommendationRows = (
+        db
+          .prepare(
+            "SELECT count(*) AS count FROM recommendations WHERE goal_id = 'goal-1' AND workflow_step_run_id = 'step-1' AND type = 'launch_workflow_session'"
+          )
+          .get() as { count: number }
+      ).count;
+      observedAtPublish.push({
+        decisionRows,
+        linkedDecisionId: attempt.decision_id,
+        recommendationRows,
+      });
+    });
+    const service = new OrchestratorService(
+      fakeSelectorWithTransport(selection(), {
+        attemptId: "attempt-1",
+        transport: "one_shot",
+      })
+    );
+
+    const result = await service.requestNextDecision(db, () => NOW, "run-1", {
+      bus,
+      idFactory,
+    });
+
+    expect(result.decision.decisionType).toBe("select_operator");
+    expect(observedAtPublish).toEqual([
+      {
+        decisionRows: 1,
+        linkedDecisionId: result.decision.decisionId,
+        recommendationRows: 1,
+      },
+    ]);
+  });
+
   it("creates an advance recommendation for satisfied exit criteria without mutating the run", async () => {
     const { db, bus, idFactory } = setup();
     seedWorkflow(db, { outstanding: [] });

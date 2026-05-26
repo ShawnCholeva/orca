@@ -26,7 +26,9 @@ preserving future ACP/A2A and Level 5 extensibility
 
 Current task:
 
-M9-022
+Milestone 9 implementation is complete through M9-025. Next step: review the
+committed M9 transport fallback changes and move to the next milestone/planning
+handoff.
 
 Prerequisite:
 

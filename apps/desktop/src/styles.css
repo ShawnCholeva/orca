@@ -1363,13 +1363,134 @@ h2 {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
+.workflow-human-review-summary,
+.workflow-human-review-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.workflow-human-review-summary {
+  margin-top: 12px;
+}
+
+.workflow-human-review-summary div {
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #fafafa;
+}
+
+.workflow-human-review-summary dt {
+  font-size: 11px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.workflow-human-review-summary dd {
+  margin-top: 6px;
+  color: #111827;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.workflow-human-review-form {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.workflow-human-review-choice-list {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.workflow-human-review-choice-list legend {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+}
+
+.workflow-human-review-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+  cursor: pointer;
+}
+
+.workflow-human-review-choice input {
+  margin-top: 3px;
+}
+
+.workflow-human-review-choice span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #111827;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.workflow-human-review-choice strong {
+  font-size: 14px;
+}
+
+.workflow-human-review-choice--selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px rgb(37 99 235 / 15%);
+  background: #eff6ff;
+}
+
+.workflow-human-review-form-field--full {
+  grid-column: 1 / -1;
+}
+
+.workflow-human-review-field-hint {
+  margin: 6px 0 0;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.workflow-human-review-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #111827;
+  font-size: 14px;
+}
+
+.workflow-human-review-submit-error {
+  margin: 0;
+}
+
+.workflow-human-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 @media (max-width: 820px) {
   .workflow-run-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .workflow-transport-debug-grid,
-  .workflow-transport-detail-list {
+  .workflow-transport-detail-list,
+  .workflow-human-review-summary,
+  .workflow-human-review-form-grid {
     grid-template-columns: 1fr;
   }
 }

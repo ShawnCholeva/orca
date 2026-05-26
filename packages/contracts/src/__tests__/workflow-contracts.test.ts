@@ -404,7 +404,18 @@ describe("workflow contracts", () => {
       ],
       createdAt: now
     };
+    const pendingAttempt = {
+      ...attempt,
+      id: "attempt-3",
+      transport: "human_review" as const,
+      status: "pending" as const,
+      failureReason: null,
+      failureMessage: null,
+      diagnostics: null,
+      humanReview,
+    };
     expect(HumanReviewPayload.parse(humanReview)).toEqual(humanReview);
+    expect(OrchestrationTransportAttempt.parse(pendingAttempt)).toEqual(pendingAttempt);
     expect(
       SubmitHumanReviewDecisionRequest.parse({
         choiceId: "human",

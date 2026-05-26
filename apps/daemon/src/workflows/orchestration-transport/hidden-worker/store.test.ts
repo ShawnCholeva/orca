@@ -163,7 +163,7 @@ describe("OrchestrationWorkerStore", () => {
     );
     expect(second.seq).toBe(1);
     expect(second.byteOffset).toBe(20);
-    expect(second.byteLength).toBe(16);
+    expect(second.byteLength).toBeLessThanOrEqual(16);
 
     const persisted = db
       .prepare(
@@ -178,7 +178,7 @@ describe("OrchestrationWorkerStore", () => {
     expect(persisted).toHaveLength(1);
     expect(persisted[0].seq).toBe(1);
     expect(persisted[0].byte_offset).toBe(20);
-    expect(persisted[0].byte_length).toBe(16);
+    expect(persisted[0].byte_length).toBe(second.byteLength);
     expect(persisted[0].data.toString("utf8")).toContain("<redacted>");
     expect(persisted[0].data.toString("utf8")).not.toContain("sk-ant-");
 

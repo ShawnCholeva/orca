@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
+  HumanReviewPayload,
   GetOrchestrationWorkerResponse,
   ListOrchestrationAttemptsResponse,
   ListOrchestrationWorkersResponse,
@@ -53,6 +54,25 @@ function diagnosticsForAttempt(row: { failure_reason: string | null; failure_mes
     return `${row.failure_reason}: ${row.failure_message}`;
   }
   return row.failure_reason ?? row.failure_message;
+}
+
+function humanReviewForAttempt(
+  db: Database.Database,
+  attemptId: string
+): z.infer<typeof HumanReviewPayload> | undefined {
+  const row = db
+    .prepare(
+      "SELECT payload_json, status FROM orchestration_human_reviews WHERE attempt_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
+    )
+    .get(attemptId) as { payload_json: string; status: string } | undefined;
+  if (!row || row.status !== "pending") return undefined;
+
+  try {
+    const parsed = HumanReviewPayload.safeParse(JSON.parse(row.payload_json));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function mapHookTraceStatus(
@@ -113,24 +133,31 @@ export function registerOrchestrationTransportRoutes(
     }>;
 
     return ListOrchestrationAttemptsResponse.parse({
-      attempts: attempts.map((row) => ({
-        id: row.id,
-        goalId: row.goal_id,
-        workflowRunId: row.workflow_run_id,
-        stepRunId: row.step_run_id,
-        kind: "select_operator",
-        providerId: row.provider_id,
-        modelId: row.model,
-        transport: row.transport,
-        status: row.status,
-        failureReason: row.failure_reason,
-        failureMessage: row.failure_message,
-        diagnostics: diagnosticsForAttempt(row),
-        workerId: row.worker_id,
-        startedAt: row.created_at,
-        finishedAt: row.finished_at,
-        createdAt: row.created_at,
-      })),
+      attempts: attempts.map((row) => {
+        const humanReview =
+          row.transport === "human_review"
+            ? humanReviewForAttempt(deps.db, row.id)
+            : undefined;
+        return {
+          id: row.id,
+          goalId: row.goal_id,
+          workflowRunId: row.workflow_run_id,
+          stepRunId: row.step_run_id,
+          kind: "select_operator",
+          providerId: row.provider_id,
+          modelId: row.model,
+          transport: row.transport,
+          status: row.status,
+          failureReason: row.failure_reason,
+          failureMessage: row.failure_message,
+          diagnostics: diagnosticsForAttempt(row),
+          workerId: row.worker_id,
+          startedAt: row.created_at,
+          finishedAt: row.finished_at,
+          createdAt: row.created_at,
+          ...(humanReview ? { humanReview } : {}),
+        };
+      }),
     });
   });
 
