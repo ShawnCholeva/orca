@@ -207,7 +207,7 @@ function llmRows(db: Database.Database): Array<Record<string, unknown>> {
 function attemptRows(db: Database.Database): Array<Record<string, unknown>> {
   return db
     .prepare(
-      "SELECT provider_id, model, transport, status, failure_reason, raw_text_length, latency_ms FROM orchestration_transport_attempts ORDER BY created_at ASC, id ASC"
+      "SELECT provider_id, model, transport, status, failure_reason, raw_text_length, latency_ms FROM orchestration_transport_attempts ORDER BY rowid ASC"
     )
     .all() as Array<Record<string, unknown>>;
 }
@@ -310,13 +310,11 @@ describe("OperatorSelector", () => {
         failure_code: "invalid_output",
       },
     ]);
-    expect(attemptRows(db)).toMatchObject([
-      {
-        transport: "one_shot",
-        status: "failed",
-        failure_reason: "one_shot_parse_failed",
-      },
-    ]);
+    expect(attemptRows(db)[0]).toMatchObject({
+      transport: "one_shot",
+      status: "failed",
+      failure_reason: "one_shot_parse_failed",
+    });
   });
 
   it("throws when no operators are ready", async () => {

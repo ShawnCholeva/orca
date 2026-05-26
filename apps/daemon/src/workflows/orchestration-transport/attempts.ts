@@ -13,6 +13,7 @@ import { ProviderError, type ProviderFailureCode } from "../../llm/types.js";
 import { redactSecrets } from "../../memory/normalize.js";
 import { publishStagedWorkflowEvents } from "../events.js";
 import {
+  appendHumanReviewRequestedEvent,
   appendTransportAttemptFinishedEvent,
   appendTransportAttemptStartedEvent,
   appendTransportFallbackEvent,
@@ -268,4 +269,51 @@ export function markTransportAttemptFallback(
   }
 ): TransportAttemptRow {
   return updateAttemptStatus(ctx, "fallback", input);
+}
+
+export function emitTransportFallback(
+  ctx: TransportAttemptUsecaseCtx,
+  input: {
+    attemptId: string;
+    failureReason: OrchestrationTransportFailureReason;
+  }
+): TransportAttemptRow {
+  const now = nowIso(ctx);
+  const makeId = idFactory(ctx);
+  const staged = ctx.db.transaction(() => {
+    const row = requireAttempt(ctx.db, input.attemptId);
+    const event = appendTransportFallbackEvent(
+      ctx.db,
+      toIdentity(row),
+      input.failureReason,
+      now,
+      makeId
+    );
+    return [event];
+  })();
+
+  publishStagedWorkflowEvents(ctx.bus, staged);
+  return requireAttempt(ctx.db, input.attemptId);
+}
+
+export function emitHumanReviewRequested(
+  ctx: TransportAttemptUsecaseCtx,
+  attemptId: string
+): TransportAttemptRow {
+  const now = nowIso(ctx);
+  const makeId = idFactory(ctx);
+  const staged = ctx.db.transaction(() => {
+    const row = requireAttempt(ctx.db, attemptId);
+    const event = appendHumanReviewRequestedEvent(
+      ctx.db,
+      toIdentity(row),
+      row.status,
+      now,
+      makeId
+    );
+    return [event];
+  })();
+
+  publishStagedWorkflowEvents(ctx.bus, staged);
+  return requireAttempt(ctx.db, attemptId);
 }

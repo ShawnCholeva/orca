@@ -16,6 +16,7 @@ import { ModelProviderRegistry } from "../../llm/registry.js";
 import { redactSecrets } from "../../memory/normalize.js";
 import { evaluateGuardrail, type GuardrailContext } from "../guardrails/evaluator.js";
 import { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
+import { validateOperatorSelectionProposal } from "../orchestration-transport/proposals.js";
 import { OperatorRegistry } from "./registry.js";
 
 export interface SelectorInput {
@@ -43,6 +44,13 @@ type GuardrailCheck = {
   allowed: boolean;
   requiresApproval: boolean;
 };
+
+class RejectedOperatorProposalError extends Error {
+  constructor(readonly selection: OperatorSelectionT) {
+    super("operator proposal rejected");
+    this.name = "RejectedOperatorProposalError";
+  }
+}
 
 export class OperatorSelector {
   constructor(
@@ -116,7 +124,10 @@ export class OperatorSelector {
           llmCallId,
         },
       };
-    } catch {
+    } catch (err) {
+      if (err instanceof RejectedOperatorProposalError) {
+        return { valid: false, selection: err.selection };
+      }
       return { valid: false };
     }
   }
@@ -128,9 +139,8 @@ export class OperatorSelector {
     input: SelectorInput,
     readyOperators: OperatorDescriptor[],
     excludedOperatorIds: string[]
-  ): Promise<{ selection: OperatorSelectionT; llmCallId: string }> {
-    const llmCallId = randomUUID();
-    insertRunningLlmCall(db, now(), llmCallId, provider, input);
+  ): Promise<{ selection: OperatorSelectionT; llmCallId?: string }> {
+    let llmCallId: string | undefined;
     const completionRequest = {
       model: input.orchestratorModel!,
       systemPrompt: [
@@ -184,26 +194,53 @@ export class OperatorSelector {
       },
     });
 
+    let rejectedSelection: OperatorSelectionT | undefined;
     const result = await this.orchestrationTransportBroker.propose(orchestrationRequest, {
       runSdkOneShot: async () => {
+        const currentLlmCallId = randomUUID();
+        llmCallId = currentLlmCallId;
+        insertRunningLlmCall(db, now(), currentLlmCallId, provider, input);
         try {
           const response = await provider.complete<unknown>(completionRequest);
           const selection = sanitizeSelection(response.parsed);
-          updateSucceededLlmCall(db, llmCallId, response);
+          updateSucceededLlmCall(db, currentLlmCallId, response);
           return {
             parsed: selection,
             rawTextLength: response.rawTextLength,
             latencyMs: response.latencyMs,
           };
         } catch (err) {
-          updateFailedLlmCall(db, llmCallId, err);
+          updateFailedLlmCall(db, currentLlmCallId, err);
           throw err;
         }
+      },
+      validateProposal: (proposal) => {
+        const selection = sanitizeSelection(proposal);
+        const validation = validateOperatorSelectionProposal({
+          selection,
+          goalId: input.goalId,
+          workflowRunId: input.workflowRunId,
+          stepRunId: input.stepRunId,
+          stepTemplateId: input.stepName,
+          readyOperators,
+          guardrails: input.guardrails,
+        });
+        if (!validation.valid) {
+          rejectedSelection = selection;
+          return {
+            accepted: false,
+            failureMessage: validation.failureMessage,
+          };
+        }
+        return { accepted: true, parsed: validation.selection };
       },
     });
 
     if (result.status === "proposed") {
       return { selection: result.parsed as OperatorSelectionT, llmCallId };
+    }
+    if (rejectedSelection) {
+      throw new RejectedOperatorProposalError(rejectedSelection);
     }
     throw new ProviderError("provider_error", "broker did not return a proposal");
   }
