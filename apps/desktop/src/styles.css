@@ -186,6 +186,65 @@ h2 {
   color: #6b7280;
 }
 
+.orchestrator-provider-readiness {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.orchestrator-provider-readiness-row {
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.orchestrator-provider-readiness-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.orchestrator-provider-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.orchestrator-provider-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.orchestrator-provider-badge--ready {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.orchestrator-provider-badge--setup {
+  color: #9a3412;
+  background: #ffedd5;
+}
+
+.orchestrator-provider-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
 .form-error {
   font-size: 13px;
   color: #dc2626;

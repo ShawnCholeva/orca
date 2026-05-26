@@ -26,7 +26,7 @@ preserving future ACP/A2A and Level 5 extensibility
 
 Current task:
 
-M9-019
+M9-021
 
 Prerequisite:
 
@@ -294,8 +294,7 @@ Do not implement unrelated future milestone functionality.
 
 ## Progress Update
 
-- Completed task: `M9-019 — Transport Event Emission and Privacy Audit`.
+- Completed task: `M9-020 — Desktop Provider Picker Copy and Readiness`.
 - Validation run for this task:
-  - `pnpm --filter @orca/daemon test workflows/__tests__/event-payload-caps`
-  - `pnpm --filter @orca/daemon test workflows/__tests__/event-emit-coverage`
-- Next implementation task: `M9-020 — Desktop Provider Picker Copy and Readiness`.
+  - `pnpm --filter @orca/desktop test OrchestratorModelPicker`
+- Next implementation task: `M9-021 — Workflow Run Panel Transport Status and Debug Drawer`.

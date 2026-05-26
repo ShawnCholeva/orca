@@ -42,13 +42,26 @@ describe("OrchestratorModelPicker", () => {
     });
   });
 
-  it("shows a configured-empty message when no provider is available", async () => {
+  it("shows canonical provider names and readiness badges", async () => {
     listModelProvidersMock.mockResolvedValue([
       {
         id: "orca/openai",
         displayName: "OpenAI",
-        available: false,
-        reason: "missing api key",
+        available: true,
+        models: [{ id: "gpt-5", displayName: "GPT 5", capabilities: ["planning"] }],
+      },
+      {
+        id: "orca/anthropic",
+        displayName: "Anthropic",
+        available: true,
+        reason: "Claude Code is not signed in",
+        models: [{ id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", capabilities: ["planning"] }],
+      },
+      {
+        id: "orca/google-gemini",
+        displayName: "Google Gemini",
+        available: true,
+        reason: "Gemini CLI is not authenticated",
         models: [{ id: "gpt-5", displayName: "GPT 5", capabilities: ["planning"] }],
       },
     ]);
@@ -56,8 +69,50 @@ describe("OrchestratorModelPicker", () => {
 
     render(<OrchestratorModelPicker value={null} onChange={vi.fn()} />);
 
+    expect(await screen.findByText("OpenAI")).toBeInTheDocument();
+    expect(screen.getByText("Claude")).toBeInTheDocument();
+    expect(screen.getByText("Gemini")).toBeInTheDocument();
+    expect(screen.getByText("Automated ready")).toBeInTheDocument();
+    expect(screen.getAllByText("Needs setup")).toHaveLength(2);
+    expect(screen.getByText("Claude Code is not signed in")).toBeInTheDocument();
+    expect(screen.getByText("Gemini CLI is not authenticated")).toBeInTheDocument();
+  });
+
+  it("shows the human-review fallback copy when no automated provider is healthy", async () => {
+    listModelProvidersMock.mockResolvedValue([
+      {
+        id: "orca/openai",
+        displayName: "OpenAI",
+        available: true,
+        reason: "Codex CLI is not signed in",
+        models: [{ id: "gpt-5", displayName: "GPT 5", capabilities: ["planning"] }],
+      },
+      {
+        id: "orca/anthropic",
+        displayName: "Claude",
+        available: true,
+        reason: "Claude Code is not signed in",
+        models: [{ id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", capabilities: ["planning"] }],
+      },
+      {
+        id: "orca/google-gemini",
+        displayName: "Gemini",
+        available: true,
+        reason: "Gemini CLI is not authenticated",
+        models: [{ id: "gemini-2.5-pro", displayName: "Gemini 2.5 Pro", capabilities: ["planning"] }],
+      },
+    ]);
+    const { OrchestratorModelPicker } = await import("./OrchestratorModelPicker");
+
+    render(<OrchestratorModelPicker value={null} onChange={vi.fn()} />);
+
     await waitFor(() => {
-      expect(screen.getByText(/No LLM providers configured/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Automated orchestration can use a signed-in local CLI or explicit SDK configuration\./i),
+      ).toBeInTheDocument();
     });
+    expect(
+      screen.getByText(/this Goal can still proceed with human-reviewed orchestration/i),
+    ).toBeInTheDocument();
   });
 });
