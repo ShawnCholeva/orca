@@ -6,7 +6,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import {
   CreateGoalResponse,
+  GetOrchestrationWorkerResponse,
   GetWorkflowTemplateResponse,
+  ListOrchestrationAttemptsResponse,
+  ListOrchestrationWorkersResponse,
   ListModelProvidersResponse,
   ListOperatorsResponse,
   ListWorkflowArtifactsResponse,
@@ -51,12 +54,13 @@ beforeAll(() => {
 
 describe("M8 HTTP surface", () => {
   let server: FastifyInstance;
+  let db: ReturnType<typeof openDatabase>;
 
   beforeEach(() => {
     const dir = mkdtempSync(path.join(os.tmpdir(), "orca-m8-http-surface-"));
     tempDirs.push(dir);
     const config = createConfig(dir);
-    const db = openDatabase(config);
+    db = openDatabase(config);
     runMigrations(db, defaultMigrationsDir());
     server = createServer(config);
   });
@@ -400,5 +404,61 @@ describe("M8 HTTP surface", () => {
     });
     expect(cancelResp.statusCode).toBe(200);
     WorkflowRunResponse.parse(JSON.parse(cancelResp.body));
+
+    const attemptSeedTime = new Date().toISOString();
+    const reviewId = "review-http-1";
+    db.prepare(
+      "INSERT INTO orchestration_workers (id, provider_id, model, adapter_id, state, current_goal_id, current_workflow_run_id, current_step_run_id, last_health_at, created_at) VALUES ('worker-http-1', 'orca/openai', 'gpt-5', 'codex', 'ready', ?, ?, ?, ?, ?)"
+    ).run(goal.id, startedRun.id, stepRunId, attemptSeedTime, attemptSeedTime);
+    db.prepare(
+      "INSERT INTO orchestration_transport_attempts (id, goal_id, workflow_run_id, step_run_id, decision_id, provider_id, model, transport, worker_id, status, failure_reason, failure_message, raw_text_length, latency_ms, input_fingerprint, created_at, finished_at) VALUES ('attempt-http-1', ?, ?, ?, NULL, 'orca/openai', 'gpt-5', 'hidden_interactive', 'worker-http-1', 'fallback', 'interactive_output_invalid', 'invalid envelope', 55, 100, 'fp-http-1', ?, ?)"
+    ).run(goal.id, startedRun.id, stepRunId, attemptSeedTime, attemptSeedTime);
+    db.prepare(
+      "INSERT INTO orchestration_human_reviews (id, goal_id, workflow_run_id, step_run_id, attempt_id, decision_kind, payload_json, status, submitted_proposal_json, created_at, submitted_at) VALUES (?, ?, ?, ?, 'attempt-http-1', 'select_operator', '{}', 'pending', NULL, ?, NULL)"
+    ).run(reviewId, goal.id, startedRun.id, stepRunId, attemptSeedTime);
+    db.prepare(
+      "INSERT INTO orchestration_worker_hook_traces (id, attempt_id, worker_id, provider_id, hook_event_name, hook_status, summary, failure_reason, created_at) VALUES ('trace-http-1', 'attempt-http-1', 'worker-http-1', 'orca/openai', 'AfterTool', 'succeeded', 'tool completed', NULL, ?)"
+    ).run(attemptSeedTime);
+    db.prepare(
+      "INSERT INTO orchestration_worker_output_chunks (worker_id, seq, byte_offset, byte_length, written_at, data) VALUES ('worker-http-1', 0, 0, 5, ?, ?)"
+    ).run(attemptSeedTime, Buffer.from("hello"));
+
+    const attemptsResp = await server.inject({
+      method: "GET",
+      url: `/v1/goals/${goal.id}/orchestration-attempts?workflowRunId=${startedRun.id}`,
+      headers: AUTH_HEADERS,
+    });
+    expect(attemptsResp.statusCode).toBe(200);
+    ListOrchestrationAttemptsResponse.parse(JSON.parse(attemptsResp.body));
+
+    const attemptsWrongGoalResp = await server.inject({
+      method: "GET",
+      url: `/v1/goals/goal-wrong/orchestration-attempts?workflowRunId=${startedRun.id}`,
+      headers: AUTH_HEADERS,
+    });
+    expect(attemptsWrongGoalResp.statusCode).toBe(404);
+
+    const workersResp = await server.inject({
+      method: "GET",
+      url: "/v1/orchestration-workers",
+      headers: AUTH_HEADERS,
+    });
+    expect(workersResp.statusCode).toBe(200);
+    ListOrchestrationWorkersResponse.parse(JSON.parse(workersResp.body));
+
+    const workerResp = await server.inject({
+      method: "GET",
+      url: "/v1/orchestration-workers/worker-http-1",
+      headers: AUTH_HEADERS,
+    });
+    expect(workerResp.statusCode).toBe(200);
+    GetOrchestrationWorkerResponse.parse(JSON.parse(workerResp.body));
+
+    const workerMissingResp = await server.inject({
+      method: "GET",
+      url: "/v1/orchestration-workers/worker-missing",
+      headers: AUTH_HEADERS,
+    });
+    expect(workerMissingResp.statusCode).toBe(404);
   });
 });
