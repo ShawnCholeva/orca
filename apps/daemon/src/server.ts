@@ -159,6 +159,7 @@ import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js'
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
+import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
 import {
   buildOrchestrationProviderCatalog,
   toModelProvidersResponse,
@@ -793,6 +794,16 @@ export function createServer(
     operatorSelector: daemonContext.operatorSelector,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
+  });
+
+  // ---- Orchestration transport routes ----
+
+  registerOrchestrationTransportRoutes(server, {
+    db,
+    bus: eventBus,
+    now: daemonContext.now,
+    idFactory: daemonContext.idFactory,
+    listOperators: async (goalId) => daemonContext.operatorRegistry.list(goalId),
   });
 
   // ---- Task orchestration routes ----

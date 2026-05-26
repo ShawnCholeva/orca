@@ -19,6 +19,7 @@ import {
   markTransportAttemptRunning,
   markTransportAttemptSucceeded,
 } from "./attempts.js";
+import { createHumanReviewRequest } from "./human-review.js";
 import { resolveTransportPlan } from "./policy.js";
 
 export type BrokerResult =
@@ -116,7 +117,7 @@ export class OrchestrationTransportBroker {
       });
 
       if (transport === "human_review") {
-        return this.createHumanReviewResult(attempt.id);
+        return this.createHumanReviewResult(parsedRequest, attempt.id);
       }
 
       const result = await this.runAutomatedTransport(
@@ -177,15 +178,29 @@ export class OrchestrationTransportBroker {
       transport: "human_review",
       inputFingerprint: fingerprintRequest(request),
     });
-    return this.createHumanReviewResult(humanAttempt.id);
+    return this.createHumanReviewResult(request, humanAttempt.id);
   }
 
-  private createHumanReviewResult(attemptId: string): BrokerResult {
+  private createHumanReviewResult(
+    request: OrchestrationRequestT,
+    attemptId: string
+  ): BrokerResult {
+    const review = createHumanReviewRequest(
+      {
+        db: this.deps.db,
+        now: this.deps.now,
+        idFactory: this.deps.idFactory,
+      },
+      {
+        request,
+        attemptId,
+      }
+    );
     emitHumanReviewRequested(this.attemptCtx(), attemptId);
     return {
       status: "needs_human_review",
       attemptId,
-      reviewPayloadId: this.deps.idFactory(),
+      reviewPayloadId: review.id,
     };
   }
 
