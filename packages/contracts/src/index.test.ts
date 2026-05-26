@@ -101,7 +101,9 @@ import {
   StopSessionResponse,
   SkillExtensionPoint,
   Workspace,
-  WorkspaceType
+  WorkspaceType,
+  CreateGoalAndStartWorkflowRequest,
+  CreateGoalAndStartWorkflowResponse,
 } from "./index.js";
 
 const now = "2026-01-01T00:00:00.000Z";
@@ -1482,5 +1484,70 @@ describe("Context package contracts", () => {
       estimatedTokens: 10
     };
     expectRoundTrip(ContextAssemblyOutput.parse, output, output);
+  });
+});
+
+describe("CreateGoalAndStartWorkflowRequest", () => {
+  it("accepts minimal valid input with workflowTemplateId", () => {
+    const result = CreateGoalAndStartWorkflowRequest.safeParse({
+      title: "My Goal",
+      workflowTemplateId: "orca/engineering",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects missing workflowTemplateId", () => {
+    const result = CreateGoalAndStartWorkflowRequest.safeParse({ title: "My Goal" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty workflowTemplateId", () => {
+    const result = CreateGoalAndStartWorkflowRequest.safeParse({
+      title: "My Goal",
+      workflowTemplateId: "",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("CreateGoalAndStartWorkflowResponse", () => {
+  it("parses full success", () => {
+    const r = CreateGoalAndStartWorkflowResponse.parse({
+      ok: true,
+      goalId: "g-1",
+      workflowRunId: "r-1",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.goalId).toBe("g-1");
+      expect(r.workflowRunId).toBe("r-1");
+    }
+  });
+
+  it("parses startWorkflowRun failure (no runId)", () => {
+    const r = CreateGoalAndStartWorkflowResponse.parse({
+      ok: false,
+      goalId: "g-1",
+      bootstrapError: { phase: "startWorkflowRun", message: "template not found" },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.bootstrapError.phase).toBe("startWorkflowRun");
+      expect(r.workflowRunId).toBeUndefined();
+    }
+  });
+
+  it("parses requestDecision failure (runId present)", () => {
+    const r = CreateGoalAndStartWorkflowResponse.parse({
+      ok: false,
+      goalId: "g-1",
+      workflowRunId: "r-1",
+      bootstrapError: { phase: "requestDecision", message: "orchestrator error" },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.bootstrapError.phase).toBe("requestDecision");
+      expect(r.workflowRunId).toBe("r-1");
+    }
   });
 });

@@ -71,6 +71,35 @@ export const CreateGoalResponse = z.object({
 });
 export type CreateGoalResponse = z.infer<typeof CreateGoalResponse>;
 
+export const CreateGoalAndStartWorkflowRequest = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().max(4000).default(""),
+  workspaces: z.array(WorkspaceAttachmentInput).optional(),
+  orchestratorModel: OrchestratorModelChoice.optional(),
+  workflowTemplateId: z.string().min(1),
+});
+export type CreateGoalAndStartWorkflowRequest = z.infer<typeof CreateGoalAndStartWorkflowRequest>;
+
+const BootstrapError = z.object({
+  phase: z.enum(["startWorkflowRun", "requestDecision"]),
+  message: z.string(),
+});
+
+export const CreateGoalAndStartWorkflowResponse = z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    goalId: z.string(),
+    workflowRunId: z.string(),
+  }),
+  z.object({
+    ok: z.literal(false),
+    goalId: z.string(),
+    workflowRunId: z.string().optional(),
+    bootstrapError: BootstrapError,
+  }),
+]);
+export type CreateGoalAndStartWorkflowResponse = z.infer<typeof CreateGoalAndStartWorkflowResponse>;
+
 export const UpdateGoalRequest = z
   .object({
     title: z.string().min(1).max(200).optional(),
