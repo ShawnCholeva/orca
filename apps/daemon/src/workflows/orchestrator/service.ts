@@ -18,12 +18,20 @@ import {
   type GuardrailContext,
   type GuardrailResult,
 } from "../guardrails/evaluator.js";
-import type { OperatorSelector } from "../operators/selector.js";
+import type {
+  OperatorSelectionTransportAttempt,
+  OperatorSelector,
+} from "../operators/selector.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import { stepRules, type StepRuleContext } from "../steps/rules/index.js";
 import { markStepBlocked, recordExitCriteriaSatisfaction } from "../steps/usecases.js";
 import { getTemplateById } from "../templates/projection.js";
-import { decisionFingerprint, recordDecisionInTx } from "../decisions/usecases.js";
+import {
+  decisionFingerprint,
+  getDecisionById,
+  linkTransportAttemptDecisionInTx,
+  recordDecisionInTx,
+} from "../decisions/usecases.js";
 import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.js";
 
 interface GoalRow {
@@ -328,6 +336,7 @@ export class OrchestratorService {
         requiresApproval,
         selection: result.selection,
         source: result.source,
+        transportAttempt: result.transportAttempt,
       },
       options
     );
@@ -539,6 +548,7 @@ export class OrchestratorService {
         requiresUserApproval: boolean;
       };
       source: "llm" | "fallback";
+      transportAttempt?: OperatorSelectionTransportAttempt;
     },
     options: RequestNextDecisionOptions
   ): { decision: WorkflowDecisionTrace; recommendationIds: string[] } {
@@ -642,6 +652,16 @@ export class OrchestratorService {
         },
         { idFactory: options.idFactory, stagedEvents }
       );
+      if (args.transportAttempt) {
+        linkTransportAttemptDecisionInTx(db, {
+          attemptId: args.transportAttempt.attemptId,
+          decisionId: decision.decisionId,
+          goalId: args.goalId,
+          workflowRunId: args.workflowRunId,
+          stepRunId: args.stepRun.id,
+        });
+      }
+      const decisionWithLinks = getDecisionById(db, decision.decisionId) ?? decision;
       evaluateAllGuardrailsInTx(db, now, args.guardrails, args.guardCtx, decision.decisionId, {
         idFactory: options.idFactory,
         stagedEvents,
@@ -684,7 +704,7 @@ export class OrchestratorService {
         },
         { idFactory: options.idFactory, stagedEvents }
       );
-      return { decision, recommendationIds: [recommendationId] };
+      return { decision: decisionWithLinks, recommendationIds: [recommendationId] };
     })();
     this.publish(options.bus, stagedEvents);
     return output;

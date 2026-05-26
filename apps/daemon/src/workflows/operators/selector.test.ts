@@ -212,6 +212,14 @@ function attemptRows(db: Database.Database): Array<Record<string, unknown>> {
     .all() as Array<Record<string, unknown>>;
 }
 
+function decisionCount(db: Database.Database): number {
+  return (
+    db.prepare("SELECT COUNT(*) AS count FROM workflow_decisions").get() as {
+      count: number;
+    }
+  ).count;
+}
+
 afterEach(() => {
   closeDatabase();
   for (const dir of tempDirs.splice(0)) {
@@ -226,7 +234,11 @@ describe("OperatorSelector", () => {
       selection("agent:codex", "agent"),
     ]);
 
-    const result = await operatorSelector.select(db, () => NOW, baseInput());
+    const result = await operatorSelector.select(
+      db,
+      () => NOW,
+      baseInput({ recommendedOperatorIds: [] })
+    );
 
     expect(result.source).toBe("llm");
     expect(result.selection.operatorId).toBe("agent:codex");
@@ -264,7 +276,11 @@ describe("OperatorSelector", () => {
       selection("agent:still-missing", "agent"),
     ]);
 
-    const result = await operatorSelector.select(db, () => NOW, baseInput());
+    const result = await operatorSelector.select(
+      db,
+      () => NOW,
+      baseInput({ recommendedOperatorIds: [] })
+    );
 
     expect(result.source).toBe("fallback");
     expect(result.selection.operatorId).toBe("agent:codex");
@@ -273,6 +289,7 @@ describe("OperatorSelector", () => {
       excludedOperatorIds: ["agent:missing"],
     });
     expect(llmRows(db).map((row) => row.status)).toEqual(["succeeded", "succeeded"]);
+    expect(decisionCount(db)).toBe(0);
   });
 
   it("goes straight to fallback when no orchestrator model is configured", async () => {
@@ -300,7 +317,11 @@ describe("OperatorSelector", () => {
       { operatorId: "agent:codex" },
     ]);
 
-    const result = await operatorSelector.select(db, () => NOW, baseInput());
+    const result = await operatorSelector.select(
+      db,
+      () => NOW,
+      baseInput({ recommendedOperatorIds: [] })
+    );
 
     expect(result.source).toBe("fallback");
     expect(result.selection.operatorId).toBe("agent:codex");
@@ -328,7 +349,7 @@ describe("OperatorSelector", () => {
 
   it("excludes guardrail-denied operators from LLM and fallback selections", async () => {
     const db = setupDb();
-    const { selector: operatorSelector } = makeSelector(db, READY_OPERATORS, [
+    const { selector: operatorSelector, seenPrompts } = makeSelector(db, READY_OPERATORS, [
       selection("agent:codex", "agent"),
       selection("agent:codex", "agent"),
     ]);
@@ -342,5 +363,23 @@ describe("OperatorSelector", () => {
     expect(result.source).toBe("fallback");
     expect(result.selection.operatorId).toBe("human");
     expect(result.selection.alternativesConsidered).not.toContain("agent:codex");
+    expect(seenPrompts).toHaveLength(0);
+    expect(llmRows(db)).toEqual([]);
+  });
+
+  it("uses deterministic exact-match selection before broker transport", async () => {
+    const db = setupDb();
+    const { selector: operatorSelector, seenPrompts } = makeSelector(db, READY_OPERATORS, [
+      selection("human", "human"),
+    ]);
+
+    const result = await operatorSelector.select(db, () => NOW, baseInput());
+
+    expect(result.source).toBe("fallback");
+    expect(result.selection.operatorId).toBe("agent:codex");
+    expect(result.selection.reason).toContain("known exact recommended operator match");
+    expect(seenPrompts).toHaveLength(0);
+    expect(llmRows(db)).toEqual([]);
+    expect(attemptRows(db)).toEqual([]);
   });
 });

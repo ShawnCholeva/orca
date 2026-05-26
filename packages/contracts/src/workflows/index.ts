@@ -366,6 +366,21 @@ export const WorkflowDecisionInfluence = z
   .strict();
 export type WorkflowDecisionInfluence = z.infer<typeof WorkflowDecisionInfluence>;
 
+export const WorkflowDecisionTransportSummary = z
+  .object({
+    attemptId: Id,
+    providerId: ModelProviderId,
+    modelId: z.string().min(1).max(80),
+    transport: OrchestrationTransport,
+    status: OrchestrationTransportAttemptStatus,
+    workerId: z.string().min(1).nullable(),
+    humanReviewId: z.string().min(1).nullable()
+  })
+  .strict();
+export type WorkflowDecisionTransportSummary = z.infer<
+  typeof WorkflowDecisionTransportSummary
+>;
+
 export const WorkflowDecisionTrace = z
   .object({
     decisionId: Id,
@@ -384,6 +399,7 @@ export const WorkflowDecisionTrace = z
       .optional(),
     confidence: z.number().min(0).max(1).optional(),
     operatorSelectionJson: OperatorSelection.optional(),
+    transportSummary: WorkflowDecisionTransportSummary.optional(),
     createdAt: z.string().datetime()
   })
   .strict();

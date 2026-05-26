@@ -156,6 +156,17 @@ function fakeSelector(result: OperatorSelection, seen: SelectorInput[] = []): Pi
   };
 }
 
+function fakeSelectorWithTransport(
+  result: OperatorSelection,
+  transportAttempt: { attemptId: string; transport: "one_shot" | "hidden_interactive" }
+): Pick<OperatorSelector, "select"> {
+  return {
+    async select() {
+      return { selection: result, source: "llm", transportAttempt };
+    },
+  };
+}
+
 function recommendationRows(db: Database.Database): Array<Record<string, unknown>> {
   return db
     .prepare(
@@ -229,6 +240,39 @@ describe("OrchestratorService", () => {
       "workflow.operator.selected",
       "workflow.recommendation.created",
     ]);
+  });
+
+  it("links a successful transport attempt to the recorded decision", async () => {
+    const { db, bus, idFactory } = setup();
+    seedWorkflow(db);
+    db.prepare(
+      "INSERT INTO orchestration_transport_attempts (id, goal_id, workflow_run_id, step_run_id, decision_id, provider_id, model, transport, worker_id, status, failure_reason, failure_message, raw_text_length, latency_ms, input_fingerprint, created_at, finished_at) VALUES ('attempt-1', 'goal-1', 'run-1', 'step-1', NULL, 'orca/openai', 'gpt-5.1-mini', 'one_shot', NULL, 'succeeded', NULL, NULL, 42, 7, 'fp-attempt-1', ?, ?)"
+    ).run(NOW, NOW);
+    const service = new OrchestratorService(
+      fakeSelectorWithTransport(selection(), {
+        attemptId: "attempt-1",
+        transport: "one_shot",
+      })
+    );
+
+    const result = await service.requestNextDecision(db, () => NOW, "run-1", {
+      bus,
+      idFactory,
+    });
+
+    const attemptRow = db
+      .prepare("SELECT decision_id FROM orchestration_transport_attempts WHERE id = 'attempt-1'")
+      .get() as { decision_id: string | null };
+    expect(attemptRow.decision_id).toBe(result.decision.decisionId);
+    expect(result.decision.transportSummary).toEqual({
+      attemptId: "attempt-1",
+      providerId: "orca/openai",
+      modelId: "gpt-5.1-mini",
+      transport: "one_shot",
+      status: "succeeded",
+      workerId: null,
+      humanReviewId: null,
+    });
   });
 
   it("creates an advance recommendation for satisfied exit criteria without mutating the run", async () => {

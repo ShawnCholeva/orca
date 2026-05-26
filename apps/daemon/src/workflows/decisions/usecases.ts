@@ -7,6 +7,7 @@ import {
   WORKFLOW_OPERATOR_SELECTION_MAX_ALTERNATIVES,
   WORKFLOW_OPERATOR_SELECTION_MAX_REASON_BYTES,
   WorkflowDecisionTrace,
+  WorkflowDecisionTransportSummary,
   type DomainEvent,
   type OperatorSelection,
   type WorkflowDecisionInfluence,
@@ -54,6 +55,27 @@ interface WorkflowDecisionRow {
   confidence: number | null;
   operator_selection_json: string | null;
   created_at: string;
+}
+
+interface DecisionTransportAttemptRow {
+  id: string;
+  provider_id: string;
+  model: string;
+  transport: string;
+  status: string;
+  worker_id: string | null;
+}
+
+interface HumanReviewLinkRow {
+  id: string;
+}
+
+export interface LinkTransportAttemptDecisionInput {
+  attemptId: string;
+  decisionId: string;
+  goalId: string;
+  workflowRunId: string;
+  stepRunId: string | null;
 }
 
 function truncateUtf8(input: string, maxBytes: number): string {
@@ -137,6 +159,7 @@ export function getDecisionById(
     .prepare("SELECT * FROM workflow_decisions WHERE id = ?")
     .get(id) as WorkflowDecisionRow | undefined;
   if (!row) return null;
+  const transportSummary = loadDecisionTransportSummary(db, row.id);
   return WorkflowDecisionTrace.parse({
     decisionId: row.id,
     goalId: row.goal_id,
@@ -154,6 +177,7 @@ export function getDecisionById(
     operatorSelectionJson: row.operator_selection_json
       ? (JSON.parse(row.operator_selection_json) as OperatorSelection)
       : undefined,
+    transportSummary,
     createdAt: row.created_at,
   });
 }
@@ -262,4 +286,51 @@ export function recordDecision(
     publishStagedWorkflowEvents(options.bus, stagedEvents);
   }
   return decision;
+}
+
+function loadDecisionTransportSummary(
+  db: Database.Database,
+  decisionId: string
+): WorkflowDecisionTransportSummary | undefined {
+  const row = db
+    .prepare(
+      "SELECT id, provider_id, model, transport, status, worker_id FROM orchestration_transport_attempts WHERE decision_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
+    )
+    .get(decisionId) as DecisionTransportAttemptRow | undefined;
+  if (!row) return undefined;
+
+  const review = db
+    .prepare(
+      "SELECT id FROM orchestration_human_reviews WHERE attempt_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
+    )
+    .get(row.id) as HumanReviewLinkRow | undefined;
+
+  return WorkflowDecisionTransportSummary.parse({
+    attemptId: row.id,
+    providerId: row.provider_id,
+    modelId: row.model,
+    transport: row.transport,
+    status: row.status,
+    workerId: row.worker_id,
+    humanReviewId: review?.id ?? null,
+  });
+}
+
+export function linkTransportAttemptDecisionInTx(
+  db: Database.Database,
+  input: LinkTransportAttemptDecisionInput
+): boolean {
+  const result = db
+    .prepare(
+      "UPDATE orchestration_transport_attempts SET decision_id = ? WHERE id = ? AND goal_id = ? AND workflow_run_id = ? AND COALESCE(step_run_id, '') = COALESCE(?, '') AND status = 'succeeded' AND (decision_id IS NULL OR decision_id = ?)"
+    )
+    .run(
+      input.decisionId,
+      input.attemptId,
+      input.goalId,
+      input.workflowRunId,
+      input.stepRunId,
+      input.decisionId
+    );
+  return result.changes > 0;
 }

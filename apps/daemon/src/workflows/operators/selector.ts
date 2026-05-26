@@ -34,10 +34,16 @@ export interface SelectorInput {
 
 export type OperatorSelectionSource = "llm" | "fallback";
 
+export interface OperatorSelectionTransportAttempt {
+  attemptId: string;
+  transport: "one_shot" | "hidden_interactive";
+}
+
 export interface OperatorSelectionResult {
   selection: OperatorSelectionT;
   source: OperatorSelectionSource;
   llmCallId?: string;
+  transportAttempt?: OperatorSelectionTransportAttempt;
 }
 
 type GuardrailCheck = {
@@ -68,6 +74,13 @@ export class OperatorSelector {
     const readyOperators = allOperators.filter((operator) => operator.ready);
     if (readyOperators.length === 0) {
       throw new Error("no_ready_operators");
+    }
+    const deterministicSelection = this.selectDeterministic(input, readyOperators);
+    if (deterministicSelection) {
+      return {
+        selection: deterministicSelection,
+        source: "fallback",
+      };
     }
 
     const provider = input.orchestratorProvider
@@ -103,7 +116,7 @@ export class OperatorSelector {
     | { valid: false; selection?: OperatorSelectionT }
   > {
     try {
-      const { selection, llmCallId } = await this.callLlm(
+      const { selection, llmCallId, transportAttempt } = await this.callLlm(
         db,
         now,
         provider,
@@ -122,6 +135,7 @@ export class OperatorSelector {
           selection: { ...selection, requiresUserApproval: selection.requiresUserApproval || guardrails.requiresApproval },
           source: "llm",
           llmCallId,
+          transportAttempt,
         },
       };
     } catch (err) {
@@ -139,7 +153,11 @@ export class OperatorSelector {
     input: SelectorInput,
     readyOperators: OperatorDescriptor[],
     excludedOperatorIds: string[]
-  ): Promise<{ selection: OperatorSelectionT; llmCallId?: string }> {
+  ): Promise<{
+    selection: OperatorSelectionT;
+    llmCallId?: string;
+    transportAttempt: OperatorSelectionTransportAttempt;
+  }> {
     let llmCallId: string | undefined;
     const completionRequest = {
       model: input.orchestratorModel!,
@@ -237,7 +255,14 @@ export class OperatorSelector {
     });
 
     if (result.status === "proposed") {
-      return { selection: result.parsed as OperatorSelectionT, llmCallId };
+      return {
+        selection: result.parsed as OperatorSelectionT,
+        llmCallId,
+        transportAttempt: {
+          attemptId: result.attemptId,
+          transport: result.transport,
+        },
+      };
     }
     if (rejectedSelection) {
       throw new RejectedOperatorProposalError(rejectedSelection);
@@ -267,6 +292,83 @@ export class OperatorSelector {
     return {
       allowed: !results.some((result) => result.result === "deny"),
       requiresApproval: results.some((result) => result.result === "require_approval"),
+    };
+  }
+
+  private selectDeterministic(
+    input: SelectorInput,
+    readyOperators: OperatorDescriptor[]
+  ): OperatorSelectionT | null {
+    const allowedOperators = readyOperators.filter((operator) =>
+      this.checkGuardrails(
+        {
+          operatorId: operator.id,
+          operatorKind: operator.kind,
+          reason: "guardrail precheck",
+          requiredCapabilities: [],
+          alternativesConsidered: [],
+          confidence: 0,
+          requiresUserApproval: false,
+        },
+        input
+      ).allowed
+    );
+    if (allowedOperators.length === 0) {
+      throw new Error("no_allowed_operators");
+    }
+    if (allowedOperators.length === 1) {
+      return this.buildDeterministicSelection(
+        input,
+        allowedOperators[0]!,
+        allowedOperators,
+        "single allowed operator after guardrail filtering"
+      );
+    }
+
+    for (const recommendedId of input.recommendedOperatorIds) {
+      const exact = allowedOperators.find((operator) => operator.id === recommendedId);
+      if (exact) {
+        return this.buildDeterministicSelection(
+          input,
+          exact,
+          allowedOperators,
+          "known exact recommended operator match"
+        );
+      }
+    }
+    return null;
+  }
+
+  private buildDeterministicSelection(
+    input: SelectorInput,
+    chosen: OperatorDescriptor,
+    allowedOperators: OperatorDescriptor[],
+    reason: string
+  ): OperatorSelectionT {
+    const ranked = [...allowedOperators].sort((a, b) => a.id.localeCompare(b.id));
+    const guardrailCheck = this.checkGuardrails(
+      {
+        operatorId: chosen.id,
+        operatorKind: chosen.kind,
+        reason: "guardrail precheck",
+        requiredCapabilities: [],
+        alternativesConsidered: [],
+        confidence: 0,
+        requiresUserApproval: false,
+      },
+      input
+    );
+    return {
+      operatorId: chosen.id,
+      operatorKind: chosen.kind,
+      reason: `deterministic selection: ${reason}`,
+      requiredCapabilities: input.recommendedCapabilities.slice(0, 20),
+      alternativesConsidered: ranked
+        .filter((operator) => operator.id !== chosen.id)
+        .slice(0, 8)
+        .map((operator) => operator.id),
+      confidence: 1,
+      requiresUserApproval: chosen.kind !== "human" || guardrailCheck.requiresApproval,
     };
   }
 
