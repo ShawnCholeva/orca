@@ -50,6 +50,54 @@
   gap: 10px;
 }
 
+.orca-chat-message {
+  max-width: 720px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.orca-chat-message--user {
+  background: rgba(91, 140, 255, 0.1);
+  border-color: rgba(91, 140, 255, 0.24);
+}
+
+.orca-chat-composer {
+  border-top: 1px solid var(--hairline);
+  background: var(--panel);
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.orca-chat-composer textarea {
+  width: 100%;
+  min-height: 42px;
+  max-height: 160px;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.orca-chat-composer textarea:focus {
+  outline: none;
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 2px rgba(91, 140, 255, 0.08);
+}
+
 .orca-chat-input-card {
   display: flex;
   flex-direction: column;

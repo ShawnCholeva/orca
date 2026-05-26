@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type {
   Goal,
   GoalDetailResponse,
+  OrchestratorChatMessage,
   Recommendation,
   WorkflowArtifact,
   WorkflowDecisionTrace,
@@ -12,10 +13,12 @@ import type {
 import type { ConnectionStatus } from "../api";
 import {
   acceptRecommendation,
+  createOrchestratorMessage,
   dismissRecommendation,
   getGoalDetail,
   getWorkflowRun,
   getWorkflowStepRun,
+  listOrchestratorMessages,
   listRecommendations,
   listWorkflowDecisions,
   listWorkflowRunArtifacts,
@@ -85,6 +88,11 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   const [pendingInput, setPendingInput] = useState<PendingInputPrompt | null>(null);
   const [answerDraft, setAnswerDraft] = useState("");
   const [submittingInput, setSubmittingInput] = useState(false);
+  const [messages, setMessages] = useState<OrchestratorChatMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
+  const [messageDraft, setMessageDraft] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
 
   const selectedGoal = goals.find((goal) => goal.id === selectedGoalId) ?? null;
   const connected = connectionStatus === "open";
@@ -94,7 +102,42 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     setPendingInput(null);
     setAnswerDraft("");
     setSessionPrefill(null);
+    setMessageError(null);
   }, [selectedGoalId]);
+
+  useEffect(() => {
+    if (!selectedGoalId) {
+      setMessages([]);
+      setMessagesLoading(false);
+      setMessageError(null);
+      setMessageDraft("");
+      return;
+    }
+
+    const goalId = selectedGoalId;
+    let cancelled = false;
+    setMessagesLoading(true);
+    setMessageError(null);
+
+    async function loadMessages() {
+      try {
+        const response = await listOrchestratorMessages(goalId);
+        if (!cancelled) setMessages(response.messages);
+      } catch (err) {
+        if (!cancelled) {
+          setMessageError(toErrorMessage(err, "Failed to load orchestrator messages."));
+          setMessages([]);
+        }
+      } finally {
+        if (!cancelled) setMessagesLoading(false);
+      }
+    }
+
+    void loadMessages();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshNonce, selectedGoalId]);
 
   useEffect(() => {
     if (!selectedGoalId) {
@@ -174,6 +217,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
         if (event.goalId !== selectedGoalId) return;
         if (
           event.type === "goal.orchestrator_model_changed" ||
+          event.type === "orchestrator.message.created" ||
           event.type.startsWith("workflow.") ||
           event.type.startsWith("recommendation.")
         ) {
@@ -330,6 +374,25 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     }
   }
 
+  async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedGoalId) return;
+    const body = messageDraft.trim();
+    if (!body) return;
+
+    setSendingMessage(true);
+    setMessageError(null);
+    try {
+      const response = await createOrchestratorMessage(selectedGoalId, { body });
+      setMessages((current) => appendMessages(current, [response.message, response.reply]));
+      setMessageDraft("");
+    } catch (err) {
+      setMessageError(toErrorMessage(err, "Failed to send message to Orca."));
+    } finally {
+      setSendingMessage(false);
+    }
+  }
+
   return (
     <div className="orca-chat">
       <div className="orca-chat-scroll scroll">
@@ -355,6 +418,18 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
                   : "No orchestrator model selected yet."
               }
             />
+
+            {messagesLoading && <ThinkingRow label="loading chat history" />}
+
+            {messages.map((message) => (
+              <ChatMessageRow key={message.id} message={message} />
+            ))}
+
+            {messageError && (
+              <div className="form-error" role="alert">
+                {messageError}
+              </div>
+            )}
 
             {loading && <ThinkingRow label="syncing workflow state" />}
 
@@ -477,6 +552,25 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
         )}
       </div>
 
+      {selectedGoal && (
+        <form className="orca-chat-composer" onSubmit={(event) => void handleSendMessage(event)}>
+          <textarea
+            value={messageDraft}
+            onChange={(event) => setMessageDraft(event.target.value)}
+            rows={2}
+            placeholder="Message Orca…"
+            disabled={!connected || sendingMessage}
+          />
+          <button
+            type="submit"
+            className="orca-chat-send orca-chat-send--primary"
+            disabled={!connected || sendingMessage || messageDraft.trim().length === 0}
+          >
+            {sendingMessage ? "Sending…" : "Send"}
+          </button>
+        </form>
+      )}
+
       {sessionPrefill && workflowState.detail && (
         <CreateSessionDialog
           key={sessionPrefill.fromRecommendationId}
@@ -490,6 +584,21 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
           onClose={() => setSessionPrefill(null)}
         />
       )}
+    </div>
+  );
+}
+
+function ChatMessageRow({ message }: { message: OrchestratorChatMessage }) {
+  const isUser = message.role === "user";
+  return (
+    <div className={`msg ${isUser ? "msg--user" : "msg--orca"}`}>
+      {!isUser && <OrcaMark />}
+      <div className="msg-body">
+        <div className="mono msg-meta">{isUser ? "you" : "orca"}</div>
+        <div className={`orca-chat-message orca-chat-message--${message.role}`}>
+          {message.body}
+        </div>
+      </div>
     </div>
   );
 }
@@ -550,6 +659,18 @@ function sortByCreatedAtDesc<T extends { createdAt: string }>(items: T[]): T[] {
 
 function sortRecommendations(items: Recommendation[]): Recommendation[] {
   return [...items].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function appendMessages(
+  current: OrchestratorChatMessage[],
+  incoming: OrchestratorChatMessage[],
+): OrchestratorChatMessage[] {
+  const byId = new Map(current.map((message) => [message.id, message]));
+  for (const message of incoming) byId.set(message.id, message);
+  return [...byId.values()].sort((left, right) => {
+    const created = left.createdAt.localeCompare(right.createdAt);
+    return created === 0 ? left.id.localeCompare(right.id) : created;
+  });
 }
 
 function findAcceptedPendingInput(

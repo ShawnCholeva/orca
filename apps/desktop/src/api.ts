@@ -17,6 +17,8 @@ import {
   CreateGoalMemoryRequest,
   CreateGoalRequest,
   CreateGoalResponse,
+  CreateOrchestratorMessageRequest,
+  CreateOrchestratorMessageResponse,
   CreateSessionRequest,
   CreateSessionResponse,
   CreateWorkflowArtifactRequest,
@@ -48,6 +50,7 @@ import {
   ListGoalsResponse,
   ListModelProvidersResponse,
   ListOrchestrationAttemptsResponse,
+  ListOrchestratorMessagesResponse,
   ListPluginsResponse,
   ListRecommendationsQuery,
   ListRecommendationsResponse,
@@ -871,6 +874,38 @@ export async function requestNextOrchestratorDecision(
     },
     NextOrchestratorDecisionResponse,
     "Request next orchestrator decision failed",
+  );
+}
+
+export async function listOrchestratorMessages(
+  goalId: string,
+): Promise<ListOrchestratorMessagesResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/orchestrator-messages`,
+    { headers: authHeaders(token) },
+    ListOrchestratorMessagesResponse,
+    "List orchestrator messages failed",
+  );
+}
+
+export async function createOrchestratorMessage(
+  goalId: string,
+  body: CreateOrchestratorMessageRequest,
+): Promise<CreateOrchestratorMessageResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/orchestrator-messages`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(CreateOrchestratorMessageRequest.parse(body)),
+    },
+    CreateOrchestratorMessageResponse,
+    "Create orchestrator message failed",
   );
 }
 

@@ -159,6 +159,7 @@ export const DomainEventType = z.enum([
   "conflict.resolved",
   "conflict.dismissed",
   "user.feedback.recorded",
+  "orchestrator.message.created",
   "goal.orchestrator_model_changed",
   "workflow.template.created",
   "workflow.template.updated",
@@ -925,6 +926,53 @@ export const ListGoalDecisionsResponse = z
   })
   .strict();
 export type ListGoalDecisionsResponse = z.infer<typeof ListGoalDecisionsResponse>;
+
+export const OrchestratorChatRole = z.enum(["user", "orchestrator", "system"]);
+export type OrchestratorChatRole = z.infer<typeof OrchestratorChatRole>;
+
+export const OrchestratorChatMessageKind = z.enum(["message"]);
+export type OrchestratorChatMessageKind = z.infer<typeof OrchestratorChatMessageKind>;
+
+export const OrchestratorChatMessage = z
+  .object({
+    id: z.string(),
+    goalId: z.string(),
+    role: OrchestratorChatRole,
+    kind: OrchestratorChatMessageKind,
+    body: z.string().trim().min(1).max(4000),
+    correlationId: z.string().nullable(),
+    createdAt: z.string().datetime()
+  })
+  .strict();
+export type OrchestratorChatMessage = z.infer<typeof OrchestratorChatMessage>;
+
+export const ListOrchestratorMessagesResponse = z
+  .object({
+    messages: z.array(OrchestratorChatMessage)
+  })
+  .strict();
+export type ListOrchestratorMessagesResponse = z.infer<
+  typeof ListOrchestratorMessagesResponse
+>;
+
+export const CreateOrchestratorMessageRequest = z
+  .object({
+    body: z.string().trim().min(1).max(4000)
+  })
+  .strict();
+export type CreateOrchestratorMessageRequest = z.infer<
+  typeof CreateOrchestratorMessageRequest
+>;
+
+export const CreateOrchestratorMessageResponse = z
+  .object({
+    message: OrchestratorChatMessage,
+    reply: OrchestratorChatMessage
+  })
+  .strict();
+export type CreateOrchestratorMessageResponse = z.infer<
+  typeof CreateOrchestratorMessageResponse
+>;
 
 export const GetSessionMemorySummaryResponse = z
   .object({

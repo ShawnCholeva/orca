@@ -83,6 +83,26 @@ const decision = {
   archivedAt: null,
 };
 
+const orchestratorUserMessage = {
+  id: "msg-user",
+  goalId: "goal-1",
+  role: "user" as const,
+  kind: "message" as const,
+  body: "Need a rollout plan.",
+  correlationId: "corr-1",
+  createdAt: now,
+};
+
+const orchestratorReplyMessage = {
+  id: "msg-orca",
+  goalId: "goal-1",
+  role: "orchestrator" as const,
+  kind: "message" as const,
+  body: "Start with a bounded verification pass.",
+  correlationId: "corr-1",
+  createdAt: now,
+};
+
 const summary = {
   id: "sum-1",
   sessionId: "sess-1",
@@ -674,6 +694,38 @@ describe("desktop api client", () => {
       stepRunId: "step-1",
       answerText: "We need a safe workflow UI.",
     });
+  });
+
+  it("listOrchestratorMessages fetches goal-scoped chat rows", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { messages: [orchestratorUserMessage, orchestratorReplyMessage] }),
+    );
+
+    const response = await api.listOrchestratorMessages("goal-1");
+
+    expect(response.messages.map((message) => message.id)).toEqual(["msg-user", "msg-orca"]);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/orchestrator-messages");
+    expect(init?.method).toBeUndefined();
+  });
+
+  it("createOrchestratorMessage posts a goal-scoped chat message", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(201, {
+        message: orchestratorUserMessage,
+        reply: orchestratorReplyMessage,
+      }),
+    );
+
+    const response = await api.createOrchestratorMessage("goal-1", {
+      body: "Need a rollout plan.",
+    });
+
+    expect(response.reply.role).toBe("orchestrator");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/orchestrator-messages");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ body: "Need a rollout plan." });
   });
 
   it("createSession posts to goal sessions endpoint", async () => {

@@ -63,7 +63,8 @@ describe("runMigrations", () => {
       "0009_agent_readiness.sql",
       "0010_workflows.sql",
       "0011_workflow_recommendation_types.sql",
-      "0012_orchestration_transport.sql"
+      "0012_orchestration_transport.sql",
+      "0013_orchestrator_messages.sql"
     ]);
   });
 
@@ -157,7 +158,8 @@ describe("runMigrations", () => {
       "0009_agent_readiness.sql",
       "0010_workflows.sql",
       "0011_workflow_recommendation_types.sql",
-      "0012_orchestration_transport.sql"
+      "0012_orchestration_transport.sql",
+      "0013_orchestrator_messages.sql"
     ]);
 
     const goalCount = (
@@ -189,6 +191,25 @@ describe("runMigrations", () => {
       "attached_at"
     ]);
     expect(columns.some((column) => column.name === "input_path")).toBe(false);
+  });
+
+  it("creates orchestrator_messages with the expected columns", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    const columns = db.prepare("PRAGMA table_info(orchestrator_messages)").all() as {
+      name: string;
+    }[];
+
+    expect(columns.map((column) => column.name)).toEqual([
+      "id",
+      "goal_id",
+      "role",
+      "kind",
+      "body",
+      "correlation_id",
+      "created_at",
+    ]);
   });
 
   it("enforces foreign keys for workspaces.goal_id", () => {
@@ -284,7 +305,8 @@ describe("session tables migration", () => {
       "0009_agent_readiness.sql",
       "0010_workflows.sql",
       "0011_workflow_recommendation_types.sql",
-      "0012_orchestration_transport.sql"
+      "0012_orchestration_transport.sql",
+      "0013_orchestrator_messages.sql"
     ]);
 
     const tables = (
@@ -770,7 +792,8 @@ describe("migration 0010 workflows", () => {
     expect(upgrade.applied).toEqual([
       "0010_workflows.sql",
       "0011_workflow_recommendation_types.sql",
-      "0012_orchestration_transport.sql"
+      "0012_orchestration_transport.sql",
+      "0013_orchestrator_messages.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1293,7 +1316,10 @@ describe("migration 0012 orchestration transport", () => {
     ]);
 
     const upgrade = runMigrations(db, defaultMigrationsDir());
-    expect(upgrade.applied).toEqual(["0012_orchestration_transport.sql"]);
+    expect(upgrade.applied).toEqual([
+      "0012_orchestration_transport.sql",
+      "0013_orchestrator_messages.sql"
+    ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
     expect(rerun.applied).toEqual([]);

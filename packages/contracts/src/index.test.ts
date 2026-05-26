@@ -12,6 +12,8 @@ import {
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
   CheckStep,
+  CreateOrchestratorMessageRequest,
+  CreateOrchestratorMessageResponse,
   CreateGoalDecisionRequest,
   CreateGoalMemoryRequest,
   CreateContextPackageRequest,
@@ -35,6 +37,7 @@ import {
   DecisionConfirmedEventPayload,
   DecisionCreatedEventPayload,
   DecisionUpdatedEventPayload,
+  DomainEvent,
   DomainEventType,
   ExtractSessionMemoryResponse,
   GetSessionResponse,
@@ -56,6 +59,7 @@ import {
   ListContextPackagesResponse,
   ListGoalDecisionsResponse,
   ListGoalMemoryResponse,
+  ListOrchestratorMessagesResponse,
   ListSessionsResponse,
   GoalWorkspaceErrorCode,
   MemoryDomainEventType,
@@ -72,6 +76,7 @@ import {
   MemoryItemUpdatedEventPayload,
   PatchGoalDecisionRequest,
   PatchGoalMemoryRequest,
+  OrchestratorChatMessage,
   RepairAction,
   RefineGoalRequest,
   RefineGoalResponse,
@@ -382,6 +387,71 @@ describe("agent readiness contracts", () => {
     };
     expect(Agent.parse(base)).toBeDefined();
     expect(Agent.parse({ ...base, readiness: null })).toBeDefined();
+  });
+});
+
+describe("orchestrator chat contracts", () => {
+  it("parses a goal-scoped orchestrator chat message", () => {
+    expect(
+      OrchestratorChatMessage.parse({
+        id: "msg-1",
+        goalId: "goal-1",
+        role: "user",
+        kind: "message",
+        body: "Please keep the plan narrow.",
+        correlationId: null,
+        createdAt: "2026-05-26T12:00:00.000Z"
+      })
+    ).toMatchObject({ id: "msg-1", role: "user" });
+  });
+
+  it("parses create/list orchestrator message payloads", () => {
+    expect(CreateOrchestratorMessageRequest.parse({ body: "Need a rollout plan." })).toEqual({
+      body: "Need a rollout plan."
+    });
+    expect(
+      ListOrchestratorMessagesResponse.parse({
+        messages: []
+      })
+    ).toEqual({ messages: [] });
+  });
+
+  it("parses create response with user and orchestrator rows", () => {
+    expect(
+      CreateOrchestratorMessageResponse.parse({
+        message: {
+          id: "msg-user",
+          goalId: "goal-1",
+          role: "user",
+          kind: "message",
+          body: "Need a rollout plan.",
+          correlationId: "corr-1",
+          createdAt: "2026-05-26T12:00:00.000Z"
+        },
+        reply: {
+          id: "msg-orca",
+          goalId: "goal-1",
+          role: "orchestrator",
+          kind: "message",
+          body: "Start with a bounded verification pass.",
+          correlationId: "corr-1",
+          createdAt: "2026-05-26T12:00:01.000Z"
+        }
+      })
+    ).toBeDefined();
+  });
+
+  it("parses orchestrator.message.created events", () => {
+    expect(
+      DomainEvent.parse({
+        seq: 10,
+        id: "evt-1",
+        type: "orchestrator.message.created",
+        goalId: "goal-1",
+        payload: { messageId: "msg-1", role: "user" },
+        createdAt: "2026-05-26T12:00:00.000Z"
+      })
+    ).toMatchObject({ type: "orchestrator.message.created" });
   });
 });
 

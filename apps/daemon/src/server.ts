@@ -158,6 +158,7 @@ import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js';
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
+import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
 import {
@@ -792,6 +793,16 @@ export function createServer(
     db,
     bus: eventBus,
     operatorSelector: daemonContext.operatorSelector,
+    now: daemonContext.now,
+    idFactory: daemonContext.idFactory,
+  });
+
+  // ---- Goal-scoped orchestrator chat routes ----
+
+  registerOrchestratorChatRoutes(server, {
+    db,
+    bus: eventBus,
+    modelProviderRegistry: daemonContext.modelProviderRegistry,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
   });
