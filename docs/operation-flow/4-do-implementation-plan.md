@@ -26,7 +26,7 @@ preserving future ACP/A2A and Level 5 extensibility
 
 Current task:
 
-M9-021
+M9-022
 
 Prerequisite:
 
@@ -294,7 +294,8 @@ Do not implement unrelated future milestone functionality.
 
 ## Progress Update
 
-- Completed task: `M9-020 — Desktop Provider Picker Copy and Readiness`.
+- Completed task: `M9-021 — Workflow Run Panel Transport Status and Debug Drawer`.
 - Validation run for this task:
-  - `pnpm --filter @orca/desktop test OrchestratorModelPicker`
-- Next implementation task: `M9-021 — Workflow Run Panel Transport Status and Debug Drawer`.
+  - `pnpm --filter @orca/desktop typecheck`
+  - `pnpm --filter @orca/desktop test WorkflowRunPanel`
+- Next implementation task: `M9-022 — Human Review Desktop Flow`.

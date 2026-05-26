@@ -47,6 +47,7 @@ import {
   ListGoalMemoryResponse,
   ListGoalsResponse,
   ListModelProvidersResponse,
+  ListOrchestrationAttemptsResponse,
   ListPluginsResponse,
   ListRecommendationsQuery,
   ListRecommendationsResponse,
@@ -62,6 +63,7 @@ import {
   ModifyRecommendationRequest,
   ModifyRecommendationResponse,
   NextOrchestratorDecisionResponse,
+  GetOrchestrationWorkerResponse,
   PatchGoalDecisionRequest,
   PatchGoalMemoryRequest,
   RecommendationFeedbackRequest,
@@ -881,6 +883,33 @@ export async function listWorkflowDecisions(
     { headers: authHeaders(token) },
     ListWorkflowDecisionsResponse,
     "List workflow decisions failed",
+  );
+}
+
+export async function listOrchestrationAttempts(
+  goalId: string,
+  workflowRunId: string,
+): Promise<ListOrchestrationAttemptsResponse> {
+  const { baseUrl, token } = await loadConfig();
+  const url = new URL(`${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/orchestration-attempts`);
+  url.searchParams.set("workflowRunId", workflowRunId);
+  return requestJson(
+    url,
+    { headers: authHeaders(token) },
+    ListOrchestrationAttemptsResponse,
+    "List orchestration attempts failed",
+  );
+}
+
+export async function getOrchestrationWorker(
+  workerId: string,
+): Promise<GetOrchestrationWorkerResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/orchestration-workers/${encodeURIComponent(workerId)}`,
+    { headers: authHeaders(token) },
+    GetOrchestrationWorkerResponse,
+    "Get orchestration worker failed",
   );
 }
 

@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkflowRunPanel } from "./WorkflowRunPanel";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -13,8 +13,10 @@ const apiMocks = vi.hoisted(() => ({
   listWorkflowRuns: vi.fn(),
   getWorkflowRun: vi.fn(),
   listWorkflowDecisions: vi.fn(),
+  listOrchestrationAttempts: vi.fn(),
   listWorkflowRunArtifacts: vi.fn(),
   getWorkflowStepRun: vi.fn(),
+  getOrchestrationWorker: vi.fn(),
   listTasks: vi.fn(),
   listSessions: vi.fn(),
   listContextPackages: vi.fn(),
@@ -26,6 +28,10 @@ const apiMocks = vi.hoisted(() => ({
 vi.mock("../../api", () => apiMocks);
 
 describe("WorkflowRunPanel", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("renders the active run with influenced-by chips and linked tasks", async () => {
     apiMocks.listWorkflowRuns.mockResolvedValue({
       runs: [
@@ -167,6 +173,9 @@ describe("WorkflowRunPanel", () => {
       packages: [],
       assemblies: [],
     });
+    apiMocks.listOrchestrationAttempts.mockResolvedValue({
+      attempts: [],
+    });
 
     render(<WorkflowRunPanel goalId="goal-1" initialRunId="run-1" />);
 
@@ -178,5 +187,172 @@ describe("WorkflowRunPanel", () => {
     expect(screen.getByText("workflow_step:Issue Breakdown (satisfied)")).toBeInTheDocument();
     expect(screen.getByText("artifact:Issue DAG (required)")).toBeInTheDocument();
     expect(screen.getByText("Implement workflow panel")).toBeInTheDocument();
+  });
+
+  it("shows transport fallback status and opens the debug drawer with sanitized worker diagnostics", async () => {
+    apiMocks.listWorkflowRuns.mockResolvedValue({
+      runs: [
+        {
+          id: "run-1",
+          goalId: "goal-1",
+          templateId: "orca/engineering",
+          templateVersion: 1,
+          status: "active",
+          currentStepRunId: "step-2",
+          startedAt: now,
+          finishedAt: null,
+          blockedReason: null,
+        },
+      ],
+    });
+    apiMocks.getWorkflowRun.mockResolvedValue({
+      run: {
+        id: "run-1",
+        goalId: "goal-1",
+        templateId: "orca/engineering",
+        templateVersion: 1,
+        status: "active",
+        currentStepRunId: "step-2",
+        startedAt: now,
+        finishedAt: null,
+        blockedReason: null,
+      },
+    });
+    apiMocks.listWorkflowDecisions.mockResolvedValue({
+      decisions: [
+        {
+          decisionId: "dec-transport-1",
+          goalId: "goal-1",
+          workflowRunId: "run-1",
+          stepRunId: "step-2",
+          decisionType: "select_operator",
+          selectedAction: "recommend_operator:codex",
+          reason: "Codex is the best available fit.",
+          influencedBy: [],
+          operatorSelectionJson: {
+            operatorId: "codex",
+            operatorKind: "agent",
+            reason: "Strong repo editing support.",
+            requiredCapabilities: ["planning"],
+            alternativesConsidered: ["claude-code"],
+            confidence: 0.82,
+            requiresUserApproval: false,
+          },
+          transportSummary: {
+            attemptId: "attempt-2",
+            providerId: "orca/openai",
+            modelId: "gpt-5",
+            transport: "hidden_interactive",
+            status: "succeeded",
+            workerId: "worker-1",
+            humanReviewId: null,
+          },
+          createdAt: now,
+        },
+      ],
+    });
+    apiMocks.listWorkflowRunArtifacts.mockResolvedValue({
+      artifacts: [],
+    });
+    apiMocks.getWorkflowStepRun.mockResolvedValue({
+      stepRun: {
+        id: "step-2",
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepTemplateId: "issue_breakdown",
+        ordinal: 3,
+        attempt: 1,
+        status: "active",
+        startedAt: now,
+        finishedAt: null,
+        blockedReason: null,
+        satisfiedExitCriteria: [],
+        outstandingExitCriteria: [],
+      },
+    });
+    apiMocks.listTasks.mockResolvedValue({
+      tasks: [],
+      generations: [],
+    });
+    apiMocks.listSessions.mockResolvedValue({
+      sessions: [],
+    });
+    apiMocks.listContextPackages.mockResolvedValue({
+      packages: [],
+      assemblies: [],
+    });
+    apiMocks.listOrchestrationAttempts.mockResolvedValue({
+      attempts: [
+        {
+          id: "attempt-1",
+          goalId: "goal-1",
+          workflowRunId: "run-1",
+          stepRunId: "step-2",
+          kind: "select_operator",
+          providerId: "orca/openai",
+          modelId: "gpt-5",
+          transport: "one_shot",
+          status: "fallback",
+          failureReason: "one_shot_parse_failed",
+          failureMessage: "invalid envelope",
+          diagnostics: "one_shot_parse_failed: invalid envelope",
+          workerId: null,
+          startedAt: now,
+          finishedAt: now,
+          createdAt: now,
+        },
+        {
+          id: "attempt-2",
+          goalId: "goal-1",
+          workflowRunId: "run-1",
+          stepRunId: "step-2",
+          kind: "select_operator",
+          providerId: "orca/openai",
+          modelId: "gpt-5",
+          transport: "hidden_interactive",
+          status: "succeeded",
+          failureReason: null,
+          failureMessage: null,
+          diagnostics: null,
+          workerId: "worker-1",
+          startedAt: now,
+          finishedAt: now,
+          createdAt: "2026-01-01T00:01:00.000Z",
+        },
+      ],
+    });
+    apiMocks.getOrchestrationWorker.mockResolvedValue({
+      worker: {
+        id: "worker-1",
+        providerId: "orca/openai",
+        modelId: "gpt-5",
+        state: "ready",
+        currentGoalId: "goal-1",
+        currentWorkflowRunId: "run-1",
+        currentAttemptId: "attempt-2",
+        failureReason: null,
+        failureMessage: null,
+        healthCheckedAt: "2026-01-01T00:02:00.000Z",
+        createdAt: now,
+        updatedAt: "2026-01-01T00:02:00.000Z",
+        hookCapabilities: null,
+        hookTraces: [],
+        outputTail: "sanitized tail",
+      },
+    });
+
+    render(<WorkflowRunPanel goalId="goal-1" initialRunId="run-1" />);
+
+    expect((await screen.findAllByText("Fell back to interactive worker")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Debug transport" })[0]!);
+
+    expect(await screen.findByRole("dialog", { name: "Transport Debug" })).toBeInTheDocument();
+    expect(screen.getByText("Transport Debug")).toBeInTheDocument();
+    expect(screen.getByText("Occurred")).toBeInTheDocument();
+    expect(screen.getByText("Sanitized output tail")).toBeInTheDocument();
+    expect(screen.getByText("sanitized tail")).toBeInTheDocument();
+    expect(screen.getByText("Ready at 2026-01-01 00:02")).toBeInTheDocument();
+    expect(screen.queryByText(/raw prompt/i)).not.toBeInTheDocument();
   });
 });

@@ -1,10 +1,17 @@
-import type { WorkflowDecisionTrace } from "@orca/contracts";
+import type {
+  OrchestrationTransportAttempt,
+  WorkflowDecisionTrace,
+} from "@orca/contracts";
+
+import { summarizeAttemptStatus } from "./transportStatus";
 
 type Props = {
   decisions: WorkflowDecisionTrace[];
+  attempts: OrchestrationTransportAttempt[];
+  onOpenTransportDebug: (attemptId: string) => void;
 };
 
-export function DecisionTraceTimeline({ decisions }: Props) {
+export function DecisionTraceTimeline({ decisions, attempts, onOpenTransportDebug }: Props) {
   return (
     <section className="workflow-panel-card" aria-label="Workflow decisions">
       <div className="workflow-panel-card-header">
@@ -19,11 +26,31 @@ export function DecisionTraceTimeline({ decisions }: Props) {
           {decisions.map((decision) => (
             <li key={decision.decisionId} className="workflow-decision-item">
               <div className="workflow-decision-head">
-                <span className="workflow-decision-badge">{decision.decisionType}</span>
-                <span className="workflow-decision-action">
-                  {summarizeAction(decision.selectedAction)}
-                </span>
+                <div className="workflow-decision-heading">
+                  <span className="workflow-decision-badge">{decision.decisionType}</span>
+                  <span className="workflow-decision-action">
+                    {summarizeAction(decision.selectedAction)}
+                  </span>
+                </div>
+                {decision.transportSummary && (
+                  <button
+                    type="button"
+                    className="goal-action-button goal-action-button--secondary"
+                    onClick={() => onOpenTransportDebug(decision.transportSummary!.attemptId)}
+                  >
+                    Debug transport
+                  </button>
+                )}
               </div>
+              {decision.transportSummary && (
+                <p className="workflow-decision-transport">
+                  <span
+                    className={`workflow-transport-status-chip workflow-transport-status-chip--${resolveTransportTone(decision.transportSummary.attemptId, attempts)}`}
+                  >
+                    {resolveTransportLabel(decision.transportSummary.attemptId, attempts)}
+                  </span>
+                </p>
+              )}
               <p className="workflow-decision-reason">{decision.reason}</p>
               {decision.influencedBy.length > 0 && (
                 <ul className="workflow-decision-influences" aria-label="Influenced by">
@@ -54,4 +81,22 @@ function summarizeAction(value: string): string {
     .replace(/^recommend_/, "")
     .replace(/^request_input:/, "request input: ")
     .replace(/_/g, " ");
+}
+
+function resolveTransportLabel(
+  attemptId: string,
+  attempts: OrchestrationTransportAttempt[],
+): string {
+  const attempt = attempts.find((item) => item.id === attemptId);
+  if (!attempt) return "Transport recorded";
+  return summarizeAttemptStatus(attempt, attempts).label;
+}
+
+function resolveTransportTone(
+  attemptId: string,
+  attempts: OrchestrationTransportAttempt[],
+): "success" | "warning" | "danger" | "neutral" {
+  const attempt = attempts.find((item) => item.id === attemptId);
+  if (!attempt) return "neutral";
+  return summarizeAttemptStatus(attempt, attempts).tone;
 }

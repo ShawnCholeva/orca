@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   ContextPackage,
+  OrchestrationTransportAttempt,
   SessionSummary,
   Task,
   WorkflowArtifact,
@@ -12,6 +13,7 @@ import {
   getWorkflowRun,
   getWorkflowStepRun,
   listContextPackages,
+  listOrchestrationAttempts,
   listSessions,
   listTasks,
   listWorkflowDecisions,
@@ -23,6 +25,8 @@ import { ArtifactsList } from "./ArtifactsList";
 import { DecisionTraceTimeline } from "./DecisionTraceTimeline";
 import { StepTimeline } from "./StepTimeline";
 import { TaskDagPreview } from "./TaskDagPreview";
+import { WorkflowTransportDebugDrawer } from "./WorkflowTransportDebugDrawer";
+import { summarizeWorkflowTransportStatus } from "./transportStatus";
 
 type Props = {
   goalId: string;
@@ -36,6 +40,7 @@ type WorkflowPanelState = {
   stepRuns: WorkflowStepRun[];
   artifacts: WorkflowArtifact[];
   decisions: WorkflowDecisionTrace[];
+  attempts: OrchestrationTransportAttempt[];
   tasks: Task[];
   sessions: SessionSummary[];
   contextPackages: ContextPackage[];
@@ -47,6 +52,7 @@ const EMPTY_STATE: WorkflowPanelState = {
   stepRuns: [],
   artifacts: [],
   decisions: [],
+  attempts: [],
   tasks: [],
   sessions: [],
   contextPackages: [],
@@ -61,6 +67,7 @@ export function WorkflowRunPanel({
 }: Props) {
   const [state, setState] = useState<WorkflowPanelState>(EMPTY_STATE);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(initialRunId);
+  const [debugAttemptId, setDebugAttemptId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,7 +87,15 @@ export function WorkflowRunPanel({
         setSelectedRunId(nextRunId);
       }
 
-      const [runResponse, decisionsResponse, artifactsResponse, tasksResponse, sessionsResponse, contextResponse] =
+      const [
+        runResponse,
+        decisionsResponse,
+        artifactsResponse,
+        tasksResponse,
+        sessionsResponse,
+        contextResponse,
+        attemptsResponse,
+      ] =
         await Promise.all([
           getWorkflowRun(goalId, nextRunId),
           listWorkflowDecisions(goalId, nextRunId),
@@ -88,6 +103,7 @@ export function WorkflowRunPanel({
           listTasks(goalId, { includeArchived: true, limit: 50 }),
           listSessions(goalId),
           listContextPackages(goalId, { limit: 50 }),
+          listOrchestrationAttempts(goalId, nextRunId).catch(() => ({ attempts: [] })),
         ]);
 
       const stepRunIds = collectStepRunIds(
@@ -121,6 +137,7 @@ export function WorkflowRunPanel({
         stepRuns,
         artifacts: sortByCreatedAtDesc(artifactsResponse.artifacts),
         decisions: sortByCreatedAtDesc(decisionsResponse.decisions),
+        attempts: attemptsResponse.attempts,
         tasks: tasksResponse.tasks.filter(
           (task) =>
             task.workflowStepRunId !== null &&
@@ -159,6 +176,7 @@ export function WorkflowRunPanel({
   const validationArtifactCount = state.artifacts.filter((artifact) =>
     VALIDATION_ARTIFACT_TYPES.has(artifact.type),
   ).length;
+  const transportStatus = summarizeWorkflowTransportStatus(state.attempts);
 
   if (!loading && !error && state.runs.length === 0) {
     return null;
@@ -248,6 +266,22 @@ export function WorkflowRunPanel({
               </div>
             </dl>
 
+            {transportStatus && (
+              <div className="workflow-run-transport-summary">
+                <div>
+                  <p className="workflow-run-summary-label">Transport</p>
+                  <p className="workflow-run-next-action-title">{transportStatus.label}</p>
+                </div>
+                <button
+                  type="button"
+                  className="goal-action-button goal-action-button--secondary"
+                  onClick={() => setDebugAttemptId(state.attempts.at(-1)?.id ?? null)}
+                >
+                  Debug transport
+                </button>
+              </div>
+            )}
+
             {latestDecision && (
               <div className="workflow-run-next-action">
                 <p className="workflow-run-summary-label">Next action</p>
@@ -265,8 +299,21 @@ export function WorkflowRunPanel({
           />
           <ArtifactsList artifacts={state.artifacts} stepRuns={state.stepRuns} />
           <TaskDagPreview tasks={state.tasks} sessions={state.sessions} />
-          <DecisionTraceTimeline decisions={state.decisions} />
+          <DecisionTraceTimeline
+            decisions={state.decisions}
+            attempts={state.attempts}
+            onOpenTransportDebug={setDebugAttemptId}
+          />
         </div>
+      )}
+
+      {state.run && debugAttemptId !== null && (
+        <WorkflowTransportDebugDrawer
+          attempts={state.attempts}
+          initialAttemptId={debugAttemptId}
+          run={state.run}
+          onClose={() => setDebugAttemptId(null)}
+        />
       )}
     </section>
   );
