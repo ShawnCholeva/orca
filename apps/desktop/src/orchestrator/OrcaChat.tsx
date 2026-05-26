@@ -413,18 +413,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
               }
             />
 
-            {messagesLoading && <ThinkingRow label="loading chat history" />}
-
-            {messages.map((message) => (
-              <ChatMessageRow key={message.id} message={message} />
-            ))}
-
-            {messageError && (
-              <div className="form-error" role="alert">
-                {messageError}
-              </div>
-            )}
-
             {loading && <ThinkingRow label="syncing workflow state" />}
 
             {!loading && error && (
@@ -542,6 +530,18 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
                   body="Orca will surface the next approval or intake request here when the workflow advances."
                 />
               )}
+
+            {messagesLoading && <ThinkingRow label="loading chat history" />}
+
+            {messages.map((message) => (
+              <ChatMessageRow key={message.id} message={message} />
+            ))}
+
+            {messageError && (
+              <div className="form-error" role="alert">
+                {messageError}
+              </div>
+            )}
           </>
         )}
       </div>

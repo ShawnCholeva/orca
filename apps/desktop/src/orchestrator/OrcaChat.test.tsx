@@ -234,6 +234,30 @@ describe("OrcaChat", () => {
     expect(screen.getByPlaceholderText("Message Orca…")).toBeInTheDocument();
   });
 
+  it("renders freeform messages below workflow status cards", async () => {
+    setupRunLoad(workflowRecommendation());
+    listRecommendationsMock.mockResolvedValue({ recommendations: [], generations: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [{ ...userMessage, body: "hello" }],
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    const workflowStatus = await screen.findByText("No pending workflow recommendations");
+    const chatMessage = await screen.findByText("hello");
+
+    expect(
+      workflowStatus.compareDocumentPosition(chatMessage) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+  });
+
   it("does not show provider metadata on the initial goal message", async () => {
     getGoalDetailMock.mockResolvedValue({
       goal,
