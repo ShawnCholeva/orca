@@ -54,6 +54,24 @@ const FORBIDDEN_KEYS = new Set([
   "summaryText",
 ]);
 
+const M9_EVENT_TYPES = new Set([
+  "workflow.transport.attempt_started",
+  "workflow.transport.attempt_finished",
+  "workflow.transport.fallback",
+  "workflow.worker.state_changed",
+  "workflow.human_review.requested",
+]);
+
+const FORBIDDEN_VALUES = [
+  "prompt text",
+  "{\"orcaProposalVersion\":1,\"kind\":\"select_operator\",\"payload\":{\"reason\":\"raw\"}}",
+  "raw worker output line 1",
+  "{\"contextPackageId\":\"ctx-1\",\"files\":[{\"path\":\"src/secret.ts\",\"body\":\"sensitive\"}]}",
+  "authorization: bearer sk-secret",
+  "api_key=abc123",
+  "token=abc123",
+];
+
 function walk(obj: unknown, fn: (key: string) => void): void {
   if (!obj || typeof obj !== "object") return;
   for (const [key, value] of Object.entries(obj)) {
@@ -81,6 +99,21 @@ describe("M8 workflow event payload caps", () => {
       walk(payload, (key) => {
         expect(FORBIDDEN_KEYS.has(key)).toBe(false);
       });
+    }
+  });
+
+  test("M9 events reject payloads that exceed cap due to sensitive raw content", () => {
+    for (const type of WorkflowEventType.options) {
+      if (!M9_EVENT_TYPES.has(type)) continue;
+      for (const forbiddenValue of FORBIDDEN_VALUES) {
+        const payload = {
+          ...payloadByType[type],
+          attemptId: forbiddenValue.repeat(512),
+        };
+        expect(() => WorkflowEvent.parse({ type, payload })).toThrow(
+          /at most .* bytes when serialized/
+        );
+      }
     }
   });
 });

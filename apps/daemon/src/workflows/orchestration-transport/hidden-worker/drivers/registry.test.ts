@@ -122,8 +122,12 @@ describe("hidden-worker transcript fixtures", () => {
       const limitedTranscript = "429 rate limit exceeded; quota reached";
       expect(driver.detectRateLimited(limitedTranscript)).toBe(true);
 
-      const summary = driver.summarizeDebug("token=sk-abcdef0123456789 this is safe");
-      expect(summary).not.toContain("sk-abcdef0123456789");
+      const summary = driver.summarizeDebug(
+        "authorization: bearer sk-abcdef0123456789 api_key=abc123 token=def456"
+      );
+      expect(summary).not.toContain("bearer sk-abcdef0123456789");
+      expect(summary).not.toContain("api_key=abc123");
+      expect(summary).not.toContain("token=def456");
       expect(summary.length).toBeLessThanOrEqual(256);
     });
   }

@@ -90,4 +90,22 @@ describe("workflow event emit coverage", () => {
       }
     }
   });
+
+  test("transport modules do not directly log raw prompt/output/proposal content", () => {
+    const transportFiles = files.filter((file) =>
+      file.includes(`${path.sep}workflows${path.sep}orchestration-transport${path.sep}`)
+    );
+    const sensitiveTerms = ["prompt", "output", "proposal", "context package"];
+    for (const file of transportFiles) {
+      const code = readFileSync(file, "utf8");
+      expect(code.includes("console.log("), `${file} has console.log`).toBe(false);
+      expect(code.includes("console.debug("), `${file} has console.debug`).toBe(false);
+      for (const term of sensitiveTerms) {
+        expect(
+          code.includes(`logger.debug("${term}`) || code.includes(`logger.info("${term}`),
+          `${file} logs sensitive term '${term}'`
+        ).toBe(false);
+      }
+    }
+  });
 });

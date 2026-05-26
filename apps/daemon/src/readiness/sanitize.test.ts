@@ -48,6 +48,7 @@ describe("sanitizeOutput", () => {
     expect(sanitizeOutput("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.abc.def")).toContain(
       "<redacted>",
     );
+    expect(sanitizeOutput("authorization: bearer sk-abcdef0123456789")).toContain("<redacted>");
   });
 
   it("redacts PEM private keys", () => {
@@ -69,6 +70,14 @@ describe("sanitizeOutput", () => {
 
   it("redacts high-entropy 32+ char tokens", () => {
     expect(sanitizeOutput("token=abcdefghijklmnopqrstuvwxyz12345678")).toContain("<redacted>");
+  });
+
+  it("redacts plain key=value secrets outside URLs", () => {
+    const out = sanitizeOutput("api_key=abc123 token=def456 password=ghi789");
+    expect(out).toContain("<redacted>");
+    expect(out).not.toContain("api_key=abc123");
+    expect(out).not.toContain("token=def456");
+    expect(out).not.toContain("password=ghi789");
   });
 
   it("does not redact normal short words", () => {

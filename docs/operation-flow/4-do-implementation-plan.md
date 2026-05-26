@@ -291,3 +291,11 @@ Commit changes
 Output changes from a product perspective
 
 Do not implement unrelated future milestone functionality.
+
+## Progress Update
+
+- Completed task: `M9-019 — Transport Event Emission and Privacy Audit`.
+- Validation run for this task:
+  - `pnpm --filter @orca/daemon test workflows/__tests__/event-payload-caps`
+  - `pnpm --filter @orca/daemon test workflows/__tests__/event-emit-coverage`
+- Next implementation task: `M9-020 — Desktop Provider Picker Copy and Readiness`.
