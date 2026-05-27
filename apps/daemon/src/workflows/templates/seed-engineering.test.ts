@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
+import { WorkflowStepTemplate } from "@orca/contracts";
 import type { Config } from "../../config.js";
 import { closeDatabase, openDatabase } from "../../db.js";
 import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
@@ -99,14 +100,8 @@ describe("seedEngineeringTemplate", () => {
           id: "old",
           ordinal: 0,
           name: "Old",
-          purpose: "old",
-          requiredInputs: [],
-          requiredOutputs: ["goal_brief"],
-          gateType: "human-input",
-          recommendedCapabilities: [],
-          validationExpectations: [],
-          exitCriteria: ["old"],
-          recommendedOperatorIds: [],
+          instructions: "old placeholder",
+          outputSchema: [{ key: "summary", type: "string", required: true }],
         },
       ]),
       JSON.stringify([]),
@@ -123,5 +118,16 @@ describe("seedEngineeringTemplate", () => {
     expect(template?.updatedAt).toBe("2026-03-01T00:00:00.000Z");
     expect(template?.steps).toHaveLength(8);
     expect(template?.guardrails).toHaveLength(6);
+  });
+
+  it("seeds steps with only instructions + outputSchema", () => {
+    const db = setup();
+    seedEngineeringTemplate(db, () => "2026-05-27T00:00:00.000Z");
+    const row = db.prepare("SELECT steps_json FROM workflow_templates WHERE id=?").get(ENGINEERING_ID) as { steps_json: string };
+    const steps = JSON.parse(row.steps_json);
+    for (const s of steps) expect(() => WorkflowStepTemplate.parse(s)).not.toThrow();
+    const intake = steps.find((s: { id: string }) => s.id === "intake");
+    expect(intake.instructions).toMatch(/interview/i);
+    expect(intake.outputSchema.some((f: { key: string }) => f.key === "problem")).toBe(true);
   });
 });

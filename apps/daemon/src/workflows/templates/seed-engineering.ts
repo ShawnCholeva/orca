@@ -5,7 +5,7 @@ import type {
 } from "@orca/contracts";
 
 export const ENGINEERING_ID = "orca/engineering";
-export const ENGINEERING_VERSION = 1;
+export const ENGINEERING_VERSION = 2;
 
 const ENGINEERING_NAME = "Engineering";
 const ENGINEERING_DESCRIPTION =
@@ -16,151 +16,78 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
     id: "intake",
     ordinal: 0,
     name: "Intake",
-    purpose: "Clarify the goal and capture the bounded brief that will drive the workflow.",
-    requiredInputs: [],
-    requiredOutputs: ["goal_brief", "open_questions"],
-    gateType: "human-input",
-    recommendedCapabilities: ["requirements_gathering", "clarification"],
-    validationExpectations: [],
-    exitCriteria: [
-      "goal brief captured",
-      "constraints captured",
-      "open questions captured",
-      "success outcome captured",
-      "relevant workspaces identified",
+    instructions:
+      "Interview the user relentlessly about this goal until you reach shared understanding, " +
+      "walking each branch of the decision tree and resolving dependencies one at a time. " +
+      "Ask one question at a time. For each question, provide your recommended answer. " +
+      "When a question may be answerable from attached workspace context, first use the " +
+      "available workspace summaries or snippets; if no trustworthy workspace context is " +
+      "available, ask the user directly instead of pretending to know. Complete only when the " +
+      "brief is unambiguous; report remaining assumptions and open questions in the completion " +
+      "self-check.",
+    outputSchema: [
+      { key: "problem", type: "string", required: true },
+      { key: "success_outcome", type: "string", required: true },
+      { key: "constraints", type: "array", itemType: "string", required: true },
+      { key: "relevant_workspaces", type: "array", itemType: "string", required: false },
+      { key: "open_questions", type: "array", itemType: "string", required: false },
     ],
-    recommendedOperatorIds: ["human", "orca/anthropic:claude-sonnet-4-6"],
   },
   {
     id: "research",
     ordinal: 1,
     name: "Research",
-    purpose: "Ground the implementation approach in the current codebase and known risks.",
-    requiredInputs: ["goal_brief"],
-    requiredOutputs: ["research_summary"],
-    gateType: "human-approval",
-    recommendedCapabilities: ["codebase_analysis", "risk_assessment"],
-    validationExpectations: [],
-    exitCriteria: [
-      "relevant files and systems identified",
-      "current implementation summarized",
-      "dependencies and risks captured",
-      "unknowns captured",
-      "likely implementation area and module boundaries identified",
-    ],
-    recommendedOperatorIds: ["agent:claude-code", "orca/google-gemini:gemini-2.5-pro"],
+    instructions:
+      "Ground the implementation approach in the current codebase and known risks.",
+    outputSchema: [{ key: "summary", type: "string", required: true }],
   },
   {
     id: "prd",
     ordinal: 2,
     name: "PRD / Destination",
-    purpose: "Turn alignment and research into a buildable destination document.",
-    requiredInputs: ["goal_brief", "research_summary"],
-    requiredOutputs: ["prd"],
-    gateType: "human-approval",
-    recommendedCapabilities: ["prd_writing", "product_thinking"],
-    validationExpectations: [],
-    exitCriteria: [
-      "problem and solution stated",
-      "user stories or behavior statements exist",
-      "acceptance criteria exist",
-      "non-goals exist",
-      "implementation and testing decisions captured",
-      "definition of done exists",
-    ],
-    recommendedOperatorIds: ["orca/anthropic:claude-sonnet-4-6"],
+    instructions:
+      "Turn alignment and research into a buildable destination document.",
+    outputSchema: [{ key: "summary", type: "string", required: true }],
   },
   {
     id: "issue_breakdown",
     ordinal: 3,
     name: "Issue Breakdown",
-    purpose: "Convert PRD into independently grabbable vertical-slice tasks.",
-    requiredInputs: ["prd"],
-    requiredOutputs: ["issue_breakdown"],
-    gateType: "human-approval",
-    recommendedCapabilities: ["task_decomposition", "dependency_inference"],
-    validationExpectations: [],
-    exitCriteria: [
-      "work split into clear tasks",
-      "dependencies explicit",
-      "first vertical slice reaches user/test-visible behavior where possible",
-      "validation expectations exist",
-      "suggested role or capabilities exist for each task",
-    ],
-    recommendedOperatorIds: ["orca/anthropic:claude-sonnet-4-6", "orca/openai:gpt-4o"],
+    instructions:
+      "Convert the PRD into independently grabbable vertical-slice tasks.",
+    outputSchema: [{ key: "summary", type: "string", required: true }],
   },
   {
     id: "execution",
     ordinal: 4,
     name: "Execution",
-    purpose: "Recommend and supervise bounded agent work for the next unblocked task.",
-    requiredInputs: ["issue_breakdown"],
-    requiredOutputs: ["implementation_result", "test_report"],
-    gateType: "human-approval",
-    recommendedCapabilities: ["code_editing", "test_writing", "validation"],
-    validationExpectations: ["unit tests run", "typecheck run"],
-    exitCriteria: [
-      "assigned task completed or blocked with reason",
-      "changed files summarized when applicable",
-      "validation run or skipped with reason",
-      "failures captured",
-    ],
-    recommendedOperatorIds: ["agent:codex", "agent:claude-code", "agent:opencode"],
+    instructions:
+      "Recommend and supervise bounded agent work for the next unblocked task.",
+    outputSchema: [{ key: "summary", type: "string", required: true }],
   },
   {
     id: "qa",
     ordinal: 5,
     name: "QA",
-    purpose: "Human-led product judgment with an Orca-generated checklist.",
-    requiredInputs: ["implementation_result"],
-    requiredOutputs: ["qa_report"],
-    gateType: "human-input",
-    recommendedCapabilities: ["qa", "human_judgment"],
-    validationExpectations: ["acceptance criteria checked"],
-    exitCriteria: [
-      "acceptance criteria checked",
-      "passing or failing items recorded",
-      "bugs or gaps captured",
-      "rework required or not required is explicit",
-    ],
-    recommendedOperatorIds: ["human", "orca/google-gemini:gemini-2.5-pro"],
+    instructions:
+      "Conduct human-led product judgment with an Orca-generated acceptance checklist.",
+    outputSchema: [{ key: "summary", type: "string", required: true }],
   },
   {
     id: "review",
     ordinal: 6,
     name: "Fresh-Context Review",
-    purpose: "Review in a separate context instead of degraded implementer context.",
-    requiredInputs: ["prd", "research_summary", "implementation_result", "qa_report"],
-    requiredOutputs: ["review_report"],
-    gateType: "automated",
-    recommendedCapabilities: ["code_review", "architecture_review"],
-    validationExpectations: [],
-    exitCriteria: [
-      "architecture drift assessed",
-      "test gaps assessed",
-      "maintainability risks captured",
-      "blocking issues identified or ruled out",
-      "follow-up tasks created where needed",
-    ],
-    recommendedOperatorIds: ["orca/anthropic:claude-opus-4-7", "agent:claude-code"],
+    instructions:
+      "Review the implementation in a fresh context instead of degraded implementer context.",
+    outputSchema: [{ key: "summary", type: "string", required: true }],
   },
   {
     id: "done",
     ordinal: 7,
     name: "Done",
-    purpose: "Finalize the durable outcome and memory.",
-    requiredInputs: ["review_report", "qa_report", "implementation_result"],
-    requiredOutputs: ["final_summary", "memory_update"],
-    gateType: "human-approval",
-    recommendedCapabilities: ["summarization", "memory_curation"],
-    validationExpectations: [],
-    exitCriteria: [
-      "final result summarized",
-      "important decisions captured",
-      "follow-up work captured",
-      "goal marked complete or left active with explicit remaining work",
-    ],
-    recommendedOperatorIds: ["orca/anthropic:claude-sonnet-4-6"],
+    instructions:
+      "Finalize the durable outcome and capture memory for future goals.",
+    outputSchema: [{ key: "summary", type: "string", required: true }],
   },
 ];
 
