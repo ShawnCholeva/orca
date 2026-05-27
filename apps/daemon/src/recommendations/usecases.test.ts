@@ -115,14 +115,8 @@ function seedWorkflow(db: Database.Database, goalId: string, opts?: {
           id: currentStepId,
           ordinal: 0,
           name: 'Done',
-          purpose: 'Finalize',
-          requiredInputs: [],
-          requiredOutputs: [],
-          gateType: 'automated',
-          recommendedCapabilities: [],
-          validationExpectations: [],
-          exitCriteria: [],
-          recommendedOperatorIds: [],
+          instructions: 'Finalize the work.',
+          outputSchema: [{ key: 'result', type: 'string', required: true }],
         },
       ]
     : [
@@ -130,27 +124,15 @@ function seedWorkflow(db: Database.Database, goalId: string, opts?: {
           id: currentStepId,
           ordinal: 0,
           name: 'Execution',
-          purpose: 'Implement',
-          requiredInputs: [],
-          requiredOutputs: [],
-          gateType: 'automated',
-          recommendedCapabilities: [],
-          validationExpectations: [],
-          exitCriteria: [],
-          recommendedOperatorIds: [],
+          instructions: 'Implement the plan.',
+          outputSchema: [{ key: 'result', type: 'string', required: true }],
         },
         {
           id: 'qa',
           ordinal: 1,
           name: 'QA',
-          purpose: 'Validate',
-          requiredInputs: [],
-          requiredOutputs: [],
-          gateType: 'automated',
-          recommendedCapabilities: [],
-          validationExpectations: [],
-          exitCriteria: [],
-          recommendedOperatorIds: [],
+          instructions: 'Validate the implementation.',
+          outputSchema: [{ key: 'result', type: 'string', required: true }],
         },
       ];
   db.prepare(
@@ -344,41 +326,11 @@ describe('acceptRecommendation', () => {
     expect(step.status).toBe('passed');
   });
 
-  it('accepting mark_artifact_satisfied records matching exit criteria', () => {
-    const db = freshDb();
-    seedGoal(db, 'g1');
-    seedWorkflow(db, 'g1', { finalStep: true, outstanding: ['goal_brief'] });
-    seedRec(db, {
-      goalId: 'g1',
-      type: 'mark_artifact_satisfied',
-      workflowStepRunId: 'step-1',
-      proposedActionJson: JSON.stringify({
-        kind: 'mark_artifact_satisfied',
-        workflowStepRunId: 'step-1',
-        artifactType: 'goal_brief',
-      }),
-    });
-
-    acceptRecommendation(makeCtx(db), 'rec-1');
-
-    const row = db
-      .prepare(
-        "SELECT satisfied_exit_criteria_json, outstanding_exit_criteria_json FROM workflow_step_runs WHERE id='step-1'"
-      )
-      .get() as {
-      satisfied_exit_criteria_json: string;
-      outstanding_exit_criteria_json: string;
-    };
-    expect(JSON.parse(row.satisfied_exit_criteria_json)).toContain('goal_brief');
-    expect(JSON.parse(row.outstanding_exit_criteria_json)).toEqual([]);
-
-    const followUp = db
-      .prepare(
-        "SELECT type, status FROM recommendations WHERE id != 'rec-1' ORDER BY created_at DESC LIMIT 1"
-      )
-      .get() as { type: string; status: string } | undefined;
-    expect(followUp).toEqual({ type: 'complete_workflow_run', status: 'proposed' });
-  });
+  // DELETED: 'accepting mark_artifact_satisfied records matching exit criteria'.
+  // Exit criteria were removed in the instruction-driven redesign (Task 9); the step-run
+  // satisfied/outstanding exit-criteria recording no longer exists. The instruction-driven
+  // step output validation is covered by service.skill-step.test.ts and the output-schema
+  // validator tests in @orca/contracts.
 });
 
 // ── reject ────────────────────────────────────────────────────────────────────

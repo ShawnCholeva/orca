@@ -13,13 +13,10 @@ import {
   ListModelProvidersResponse,
   ListOperatorsResponse,
   ListWorkflowArtifactsResponse,
-  ListWorkflowDecisionsResponse,
   ListWorkflowRunsResponse,
   ListWorkflowTemplatesResponse,
-  NextOrchestratorDecisionResponse,
   UpdateGoalOrchestratorModelResponse,
   WorkflowArtifactResponse,
-  WorkflowDecisionResponse,
   WorkflowRunResponse,
   WorkflowStepRunResponse,
   WorkflowTemplateResponse,
@@ -133,14 +130,8 @@ describe("M8 HTTP surface", () => {
           {
             id: "intake",
             name: "Intake",
-            purpose: "Capture brief from user",
-            requiredInputs: [],
-            requiredOutputs: ["goal_brief"],
-            gateType: "human-input",
-            recommendedCapabilities: [],
-            validationExpectations: [],
-            exitCriteria: ["brief captured"],
-            recommendedOperatorIds: [],
+            instructions: "Capture a brief from the user.",
+            outputSchema: [{ key: "goal_brief", type: "string", required: true }],
           },
         ],
         guardrails: [],
@@ -179,14 +170,8 @@ describe("M8 HTTP surface", () => {
             id: "intake",
             ordinal: 0,
             name: "Intake",
-            purpose: "Capture brief from user",
-            requiredInputs: [],
-            requiredOutputs: ["goal_brief"],
-            gateType: "human-input",
-            recommendedCapabilities: [],
-            validationExpectations: [],
-            exitCriteria: ["brief captured"],
-            recommendedOperatorIds: [],
+            instructions: "Capture a brief from the user.",
+            outputSchema: [{ key: "goal_brief", type: "string", required: true }],
           },
         ],
         guardrails: [],
@@ -238,46 +223,12 @@ describe("M8 HTTP surface", () => {
     });
     expect(wrongGoalRunResp.statusCode).toBe(404);
 
-    const nextDecisionResp = await server.inject({
-      method: "POST",
-      url: `/v1/goals/${goal.id}/workflow-runs/${startedRun.id}/next-decision`,
-      headers: { "content-type": "application/json", ...AUTH_HEADERS },
-      payload: { workflowRunId: startedRun.id },
-    });
-    expect(nextDecisionResp.statusCode).toBe(200);
-    const nextDecision = NextOrchestratorDecisionResponse.parse(
-      JSON.parse(nextDecisionResp.body)
-    ).decision;
-
-    const listDecisionsResp = await server.inject({
-      method: "GET",
-      url: `/v1/goals/${goal.id}/workflow-runs/${startedRun.id}/decisions`,
-      headers: AUTH_HEADERS,
-    });
-    expect(listDecisionsResp.statusCode).toBe(200);
-    ListWorkflowDecisionsResponse.parse(JSON.parse(listDecisionsResp.body));
-
-    const wrongGoalDecisionsResp = await server.inject({
-      method: "GET",
-      url: `/v1/goals/goal-wrong/workflow-runs/${startedRun.id}/decisions`,
-      headers: AUTH_HEADERS,
-    });
-    expect(wrongGoalDecisionsResp.statusCode).toBe(404);
-
-    const getDecisionResp = await server.inject({
-      method: "GET",
-      url: `/v1/goals/${goal.id}/workflow-decisions/${nextDecision.decisionId}`,
-      headers: AUTH_HEADERS,
-    });
-    expect(getDecisionResp.statusCode).toBe(200);
-    WorkflowDecisionResponse.parse(JSON.parse(getDecisionResp.body));
-
-    const wrongGoalDecisionResp = await server.inject({
-      method: "GET",
-      url: `/v1/goals/goal-wrong/workflow-decisions/${nextDecision.decisionId}`,
-      headers: AUTH_HEADERS,
-    });
-    expect(wrongGoalDecisionResp.statusCode).toBe(404);
+    // NOTE: The live next-decision skill loop (and the decision-list / get-decision /
+    // submit-input flow that depends on a produced decision) is exercised by
+    // service.skill-step.test.ts, decisions/routes.test.ts, and steps/routes.skill-input.test.ts.
+    // Driving it here over HTTP would require stubbing the broker + selector + operator
+    // registry through createServer (no injection seam), so this route-mounting test only
+    // verifies mounting/scoping for the routes it can drive without a live model turn.
 
     const getStepRunResp = await server.inject({
       method: "GET",
@@ -302,43 +253,8 @@ describe("M8 HTTP surface", () => {
     });
     expect(submitInputValidationResp.statusCode).toBe(400);
 
-    const submitInputResp = await server.inject({
-      method: "POST",
-      url: `/v1/goals/${goal.id}/workflow-step-runs/${stepRunId}/submit-input`,
-      headers: { "content-type": "application/json", ...AUTH_HEADERS },
-      payload: {
-        stepRunId,
-        answerText: "Goal: route coverage",
-        satisfiedExitCriteria: ["brief captured"],
-        artifactInputs: [
-          {
-            type: "goal_brief",
-            title: "Goal Brief",
-            body: "Goal details",
-          },
-        ],
-      },
-    });
-    expect(submitInputResp.statusCode).toBe(200);
-    WorkflowStepRunResponse.parse(JSON.parse(submitInputResp.body));
-
-    const runArtifactsResp = await server.inject({
-      method: "GET",
-      url: `/v1/goals/${goal.id}/workflow-runs/${startedRun.id}/artifacts`,
-      headers: AUTH_HEADERS,
-    });
-    expect(runArtifactsResp.statusCode).toBe(200);
-    const runArtifacts = ListWorkflowArtifactsResponse.parse(
-      JSON.parse(runArtifactsResp.body)
-    );
-    expect(runArtifacts.artifacts.length).toBeGreaterThan(0);
-
-    const runArtifactsWrongGoalResp = await server.inject({
-      method: "GET",
-      url: `/v1/goals/goal-wrong/workflow-runs/${startedRun.id}/artifacts`,
-      headers: AUTH_HEADERS,
-    });
-    expect(runArtifactsWrongGoalResp.statusCode).toBe(404);
+    // The successful submit-input flow (which requires an active question decision produced
+    // by the skill loop) is covered by steps/routes.skill-input.test.ts.
 
     const createArtifactResp = await server.inject({
       method: "POST",
@@ -357,6 +273,24 @@ describe("M8 HTTP surface", () => {
     const createdArtifact = WorkflowArtifactResponse.parse(
       JSON.parse(createArtifactResp.body)
     ).artifact;
+
+    const runArtifactsResp = await server.inject({
+      method: "GET",
+      url: `/v1/goals/${goal.id}/workflow-runs/${startedRun.id}/artifacts`,
+      headers: AUTH_HEADERS,
+    });
+    expect(runArtifactsResp.statusCode).toBe(200);
+    const runArtifacts = ListWorkflowArtifactsResponse.parse(
+      JSON.parse(runArtifactsResp.body)
+    );
+    expect(runArtifacts.artifacts.length).toBeGreaterThan(0);
+
+    const runArtifactsWrongGoalResp = await server.inject({
+      method: "GET",
+      url: `/v1/goals/goal-wrong/workflow-runs/${startedRun.id}/artifacts`,
+      headers: AUTH_HEADERS,
+    });
+    expect(runArtifactsWrongGoalResp.statusCode).toBe(404);
 
     const listArtifactsResp = await server.inject({
       method: "GET",

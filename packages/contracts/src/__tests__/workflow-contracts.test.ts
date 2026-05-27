@@ -92,14 +92,8 @@ const step = {
   id: "intake",
   ordinal: 0,
   name: "Intake",
-  purpose: "Clarify the goal",
-  requiredInputs: [],
-  requiredOutputs: ["goal_brief" as const],
-  gateType: "human-input" as const,
-  recommendedCapabilities: ["planning"],
-  validationExpectations: ["Brief is clear"],
-  exitCriteria: ["Goal brief exists"],
-  recommendedOperatorIds: ["human"]
+  instructions: "Clarify the goal and produce a goal brief.",
+  outputSchema: [{ key: "goal_brief", type: "string" as const, required: true }]
 };
 
 const guardrail = {
@@ -145,8 +139,10 @@ const stepRun = {
   startedAt: now,
   finishedAt: null,
   blockedReason: null,
-  satisfiedExitCriteria: [],
-  outstandingExitCriteria: ["Goal brief exists"]
+  selectedOperatorId: null,
+  selectedProviderId: null,
+  selectedModelId: null,
+  operatorSelectedAt: null
 };
 
 const decision = {
