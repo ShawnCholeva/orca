@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+export {
+  WorkflowStepOutputSchema,
+  WorkflowStepOutputField,
+  validateStepOutput,
+  type ValidateResult,
+} from "./output-schema.js";
+
 const UTF8_ENCODER = new TextEncoder();
 
 function utf8ByteLength(value: string): number {
