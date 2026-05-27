@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { CreateGoalAndStartWorkflowRequest } from "@orca/contracts";
-import type { Goal, WorkflowRun } from "@orca/contracts";
+import type { Goal, OrchestratorModelChoice, WorkflowRun } from "@orca/contracts";
 import { ValidationError, DuplicateWorkspaceInRequestError } from "../goals.js";
 import { WorkspaceInspectionError } from "../workspaces/errors.js";
 
@@ -10,7 +10,7 @@ export interface GoalBootstrapRouteDeps {
     title: string;
     description: string;
     workspaces?: { inputPath: string; name?: string }[];
-    orchestratorModel?: unknown;
+    orchestratorModel?: OrchestratorModelChoice;
   }) => Promise<Goal>;
   startWorkflowRunFn: (args: { goalId: string; templateId: string }) => WorkflowRun;
   requestNextDecisionFn: (goalId: string, runId: string) => Promise<unknown>;
