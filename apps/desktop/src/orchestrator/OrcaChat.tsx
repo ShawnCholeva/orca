@@ -99,6 +99,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   const [messageDraft, setMessageDraft] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
   const composerFormRef = useRef<HTMLFormElement>(null);
+  const autoAcceptedInputRecs = useRef<Set<string>>(new Set());
 
   const selectedGoal = goals.find((goal) => goal.id === selectedGoalId) ?? null;
   const connected = connectionStatus === "open";
@@ -109,6 +110,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     setAnswerDraft("");
     setSessionPrefill(null);
     setMessageError(null);
+    autoAcceptedInputRecs.current.clear();
   }, [selectedGoalId]);
 
   useEffect(() => {
@@ -270,12 +272,36 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
       ACTIVE_RECOMMENDATION_STATUSES.has(recommendation.status) &&
       recommendation.workflowStepRunId === currentStepRunId,
   );
+  const inputRecs = workflowRecommendations.filter(
+    (recommendation) => recommendation.type === "request_user_input",
+  );
+  const actionRecs = workflowRecommendations.filter(
+    (recommendation) => recommendation.type !== "request_user_input",
+  );
   const restoredPendingInput =
     pendingInput ?? findAcceptedPendingInput(workflowState.recommendations, currentStepRunId);
   const hasModel = Boolean(
     workflowState.detail?.goal.orchestratorProvider &&
       workflowState.detail?.goal.orchestratorModel,
   );
+
+  const firstInputRec = inputRecs[0] ?? null;
+  useEffect(() => {
+    if (restoredPendingInput) return;
+    if (!firstInputRec) return;
+    if (firstInputRec.proposedAction.kind !== "request_user_input") return;
+    if (autoAcceptedInputRecs.current.has(firstInputRec.id)) return;
+    autoAcceptedInputRecs.current.add(firstInputRec.id);
+    setPendingInput({
+      question: firstInputRec.proposedAction.question,
+      stepRunId: firstInputRec.proposedAction.workflowStepRunId,
+      recommendationId: firstInputRec.id,
+    });
+    setAnswerDraft("");
+    void acceptRecommendation(firstInputRec.id, {}).catch(() => {
+      autoAcceptedInputRecs.current.delete(firstInputRec.id);
+    });
+  }, [firstInputRec, restoredPendingInput]);
 
   async function handleRecoveryStart() {
     if (!selectedGoalId || !recoveryTemplateId) return;
@@ -545,13 +571,13 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
               </div>
             )}
 
-            {!loading && workflowRecommendations.length > 0 && (
+            {!loading && actionRecs.length > 0 && (
               <div className="orca-chat-recommendations">
                 <p className="orca-chat-section-title">
-                  Workflow recommendations ({workflowRecommendations.length})
+                  Workflow recommendations ({actionRecs.length})
                 </p>
                 <ul className="recommendation-list">
-                  {workflowRecommendations.map((recommendation) => (
+                  {actionRecs.map((recommendation) => (
                     <li key={recommendation.id}>
                       <RecommendationCard
                         recommendation={recommendation}
@@ -579,7 +605,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
             {!loading &&
               workflowState.run &&
               !restoredPendingInput &&
-              workflowRecommendations.length === 0 && (
+              actionRecs.length === 0 && (
                 <SystemCard
                   title="No pending workflow recommendations"
                   body="Orca will surface the next approval or intake request here when the workflow advances."
@@ -632,7 +658,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
                 }
               }}
               rows={2}
-              placeholder="Ask Orca to plan, delegate, escalate, or summarize…"
+              placeholder="Message Orca…"
               disabled={!connected || sendingMessage}
             />
             <div className="orca-chat-compose-actions">
@@ -656,6 +682,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
                   <path d="M5 12h14" />
                   <path d="M13 5l7 7-7 7" />
                 </svg>
+                <span className="sr-only">Send</span>
               </button>
             </div>
           </div>

@@ -388,7 +388,7 @@ describe("OrcaChat", () => {
     );
   });
 
-  it("accepts a request_user_input recommendation and submits the answer", async () => {
+  it("shows the input card immediately for a request_user_input rec and auto-accepts once", async () => {
     setupRunLoad(workflowRecommendation());
     acceptRecommendationMock.mockResolvedValue({
       recommendation: workflowRecommendation({ status: "accepted" }),
@@ -425,16 +425,16 @@ describe("OrcaChat", () => {
     });
     const { OrcaChat } = await import("./OrcaChat");
 
-    render(
-      <OrcaChat
-        goals={[goal]}
-        selectedGoalId="goal-1"
-        connectionStatus="open"
-      />,
-    );
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
-    fireEvent.click(await screen.findByText("Accept"));
+    // No Accept gate: the input card appears without any click.
     expect(await screen.findByText("User input requested")).toBeInTheDocument();
+    expect(screen.queryByText("Accept")).toBeNull();
+
+    await waitFor(() => {
+      expect(acceptRecommendationMock).toHaveBeenCalledWith("rec-1", {});
+    });
+    expect(acceptRecommendationMock).toHaveBeenCalledTimes(1);
 
     fireEvent.change(screen.getByPlaceholderText("Answer the intake question…"), {
       target: { value: "We need a deterministic workflow chat." },
@@ -447,6 +447,28 @@ describe("OrcaChat", () => {
         answerText: "We need a deterministic workflow chat.",
       });
     });
+  });
+
+  it("keeps the Accept gate for an advance_workflow_step recommendation", async () => {
+    setupRunLoad(
+      workflowRecommendation({
+        type: "advance_workflow_step",
+        title: "Advance to research",
+        rationale: "Intake complete.",
+        proposedAction: {
+          kind: "advance_workflow_step",
+          workflowRunId: "run-1",
+          workflowStepRunId: "step-1",
+          toStepTemplateId: "research",
+        },
+      }),
+    );
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByText("Accept")).toBeInTheDocument();
+    expect(screen.queryByText("User input requested")).toBeNull();
   });
 
   it("restores the input composer when a request_user_input recommendation was already accepted", async () => {
