@@ -164,9 +164,9 @@ function validatePayload(
       };
     }
     case "score_transition":
-    case "evaluate_exit_criteria":
     case "repair_artifact":
     case "run_audit":
+    case "run_step_skill":
       return failure(rawText, reason, "unsupported proposal kind");
   }
 }

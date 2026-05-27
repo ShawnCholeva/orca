@@ -9,9 +9,6 @@ import {
 } from "@orca/contracts";
 
 import { appendWorkflowEvent } from "../events.js";
-import { stepRules, type StepRuleContext } from "../steps/rules/index.js";
-import { getWorkflowStepRunById } from "../steps/projection.js";
-import { recordExitCriteriaSatisfaction } from "../steps/usecases.js";
 import {
   getArtifactById,
   listArtifactsForGoal as listArtifactsForGoalProjection,
@@ -29,22 +26,6 @@ export interface CreateArtifactInput {
   linkedSessionId?: string | null;
   linkedTaskId?: string | null;
   linkedContextPackageId?: string | null;
-}
-
-function contextForStep(
-  db: Database.Database,
-  stepRunId: string
-): StepRuleContext | null {
-  const stepRun = getWorkflowStepRunById(db, stepRunId);
-  if (!stepRun) return null;
-  return {
-    goalId: stepRun.goalId,
-    workflowRunId: stepRun.workflowRunId,
-    stepRunId: stepRun.id,
-    artifacts: listArtifactsForRunProjection(db, stepRun.workflowRunId),
-    satisfiedExitCriteria: stepRun.satisfiedExitCriteria,
-    outstandingExitCriteria: stepRun.outstandingExitCriteria,
-  };
 }
 
 export function createArtifact(
@@ -97,21 +78,6 @@ export function createArtifact(
     stagedEvents?.push(event);
 
     const artifact = getArtifactById(db, artifactId)!;
-    if (input.stepRunId) {
-      const ctx = contextForStep(db, input.stepRunId);
-      const stepRun = ctx ? getWorkflowStepRunById(db, input.stepRunId) : null;
-      const rule = stepRun ? stepRules[stepRun.stepTemplateId] : undefined;
-      if (rule && ctx) {
-        const result =
-          rule.onArtifactCreated?.({ db, now, idFactory, stagedEvents, artifact, ctx }) ?? {
-            satisfiedCriteria: rule.evaluateArtifactSatisfies?.(artifact, ctx) ?? [],
-          };
-        if (result.satisfiedCriteria.length > 0) {
-          recordExitCriteriaSatisfaction(db, now, input.stepRunId, result.satisfiedCriteria);
-        }
-      }
-    }
-
     return artifact;
   })();
 }

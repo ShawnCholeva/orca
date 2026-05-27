@@ -697,7 +697,7 @@ export async function submitHumanReviewDecision(
           workflowStepRunId: stepRun.id,
           operatorId: normalizedSelection.operatorId,
           operatorKind: normalizedSelection.operatorKind,
-          objective: stepTemplate.purpose,
+          objective: stepTemplate.instructions,
         },
         rationale: normalizedSelection.reason,
         decisionId: decision.decisionId,
