@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { WorkflowStepOutputSchema } from "./output-schema.js";
 
 export {
   WorkflowStepOutputSchema,
@@ -25,6 +26,7 @@ function hasMaxSerializedBytes(value: unknown, maxBytes: number): boolean {
 export const WORKFLOW_TEMPLATE_MAX_NAME_CHARS = 100;
 export const WORKFLOW_TEMPLATE_MAX_DESCRIPTION_BYTES = 2048;
 export const WORKFLOW_STEP_MAX_PURPOSE_BYTES = 1024;
+export const WORKFLOW_STEP_MAX_INSTRUCTIONS_BYTES = 8192;
 export const WORKFLOW_GUARDRAIL_MAX_LABEL_CHARS = 100;
 export const WORKFLOW_GUARDRAIL_MAX_CONFIG_BYTES = 2048;
 export const WORKFLOW_ARTIFACT_MAX_TITLE_CHARS = 256;
@@ -78,7 +80,9 @@ export const WorkflowArtifactType = z.enum([
   "qa_report",
   "review_report",
   "final_summary",
-  "memory_update"
+  "memory_update",
+  "step_output",
+  "interview_turn",
 ]);
 export type WorkflowArtifactType = z.infer<typeof WorkflowArtifactType>;
 
@@ -252,14 +256,8 @@ export const WorkflowStepTemplate = z
     id: Id100,
     ordinal: z.number().int().nonnegative(),
     name: z.string().min(1).max(100),
-    purpose: BoundedString(WORKFLOW_STEP_MAX_PURPOSE_BYTES, "purpose"),
-    requiredInputs: z.array(WorkflowArtifactType).max(20),
-    requiredOutputs: z.array(WorkflowArtifactType).max(20),
-    gateType: WorkflowStepGateType,
-    recommendedCapabilities: z.array(z.string().min(1).max(80)).max(20),
-    validationExpectations: z.array(z.string().min(1).max(256)).max(20),
-    exitCriteria: z.array(z.string().min(1).max(256)).max(20),
-    recommendedOperatorIds: z.array(Id100).max(10)
+    instructions: BoundedString(WORKFLOW_STEP_MAX_INSTRUCTIONS_BYTES, "instructions"),
+    outputSchema: WorkflowStepOutputSchema,
   })
   .strict();
 export type WorkflowStepTemplate = z.infer<typeof WorkflowStepTemplate>;
@@ -333,6 +331,17 @@ export const WorkflowArtifact = z
   })
   .strict();
 export type WorkflowArtifact = z.infer<typeof WorkflowArtifact>;
+
+export const InterviewTurn = z
+  .object({
+    turnIndex: z.number().int().nonnegative(),
+    questionDecisionId: Id,
+    question: z.string().min(1).max(2000),
+    answer: z.string().min(1).max(8192),
+    answeredAt: z.string().datetime(),
+  })
+  .strict();
+export type InterviewTurn = z.infer<typeof InterviewTurn>;
 
 export const OperatorSelection = z
   .object({
