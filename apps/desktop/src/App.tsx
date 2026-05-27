@@ -20,6 +20,7 @@ import { BootstrapErrorScreen } from "./chrome/BootstrapErrorScreen";
 import { NoReadyAgentsBanner } from "./chrome/NoReadyAgentsBanner";
 import { OrcaChat } from "./orchestrator/OrcaChat";
 import { WorkflowsPage } from "./workflows/WorkflowsPage";
+import { EmptyGoalsView } from "./empty-state/EmptyGoalsView";
 import "./orchestrator/orchestrator.css";
 import "./styles.css";
 
@@ -171,9 +172,8 @@ export default function App() {
   function handleCreateFlowDone(goalId: string) {
     setShowCreateFlow(false);
     setSelectedOrchestratorGoalId(goalId);
-    setCurrentGoalId(goalId);
-    setDetailRefreshKey(0);
-    setMode("detail");
+    setActiveTab("orchestrator");
+    setMode("list");
   }
 
   function handleBackToList() {
@@ -286,6 +286,13 @@ export default function App() {
 
           {/* ── Main area: topbar + pane ── */}
           <div className="orchestrator-main">
+            {goals.length === 0 ? (
+              <EmptyGoalsView
+                onCreate={() => setShowCreateFlow(true)}
+                disabled={!connected}
+              />
+            ) : (
+            <>
             <nav className="orchestrator-tabs" role="tablist" aria-label="Workspace views">
               {/* Breadcrumb */}
               <div className="orchestrator-breadcrumb">
@@ -339,6 +346,18 @@ export default function App() {
 
               {/* Right actions */}
               <div className="orchestrator-tab-actions">
+                {selectedOrchestratorGoalId && (
+                  <button
+                    type="button"
+                    className="orchestrator-detail-btn"
+                    onClick={() => openGoalDetail(selectedOrchestratorGoalId)}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M8 13h8M8 17h8M8 9h2" />
+                    </svg>
+                    Goal Details
+                  </button>
+                )}
                 <span className={`orchestrator-status-dot orchestrator-status-dot--${connectionStatus}`} title={statusLabel[connectionStatus]} />
               </div>
             </nav>
@@ -394,6 +413,8 @@ export default function App() {
               <section className="workflows-pane" role="tabpanel" aria-label="Workflows">
                 <WorkflowsPage />
               </section>
+            )}
+            </>
             )}
           </div>
         </div>

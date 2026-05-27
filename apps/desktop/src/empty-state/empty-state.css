@@ -1,0 +1,145 @@
+/* Empty goals hero — shown in the main area when a connected user has no goals */
+
+.empty-goals {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.empty-goals-wash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(700px 500px at 30% 20%, rgba(91, 140, 255, 0.1), transparent 60%),
+    radial-gradient(600px 400px at 80% 80%, rgba(139, 92, 246, 0.08), transparent 60%);
+}
+
+.empty-goals-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 560px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 18px;
+}
+
+.empty-goals-mark {
+  position: relative;
+  width: 116px;
+  height: 116px;
+}
+
+.empty-goals-mark svg {
+  position: absolute;
+  inset: 0;
+}
+
+.empty-goals-mark-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.empty-goals-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  color: var(--text);
+  line-height: 1.15;
+}
+
+.empty-goals-body {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-2);
+  max-width: 46ch;
+}
+
+.empty-goals-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.empty-goals-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 16px;
+  height: 38px;
+  border-radius: var(--r-md, 10px);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.empty-goals-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.empty-goals-btn:active:not(:disabled) {
+  background: var(--accent-active);
+}
+
+.empty-goals-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.empty-goals-hints {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--hairline);
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  text-align: left;
+}
+
+.empty-goals-hint {
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+}
+
+.empty-goals-hint-num {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9.5px;
+  color: var(--text-3);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.empty-goals-hint-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.empty-goals-hint-body {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.5;
+}

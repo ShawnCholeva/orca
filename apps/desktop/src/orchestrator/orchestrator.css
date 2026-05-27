@@ -382,6 +382,30 @@
   cursor: not-allowed;
 }
 
+/* Goal Details button (above chat) */
+.orchestrator-detail-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--hairline);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.orchestrator-detail-btn:hover {
+  color: var(--text);
+  border-color: var(--hairline-strong);
+  background: var(--panel-2);
+}
+
 /* Connection status dot */
 .orchestrator-status-dot {
   width: 7px;
