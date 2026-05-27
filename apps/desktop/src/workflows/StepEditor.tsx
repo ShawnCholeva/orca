@@ -1,11 +1,17 @@
 import type { ReactNode } from "react";
 import {
-  WorkflowArtifactType,
-  WorkflowStepGateType,
   type CreateWorkflowTemplateRequest,
+  type WorkflowStepOutputSchema,
+  type WorkflowStepOutputField,
 } from "@orca/contracts";
 
 export type WorkflowStepDraft = CreateWorkflowTemplateRequest["steps"][number];
+
+type FieldType = WorkflowStepOutputField["type"];
+type ItemType = NonNullable<WorkflowStepOutputField["itemType"]>;
+
+const FIELD_TYPES: FieldType[] = ["string", "number", "boolean", "array", "object"];
+const ITEM_TYPES: ItemType[] = ["string", "number", "boolean", "object"];
 
 interface StepEditorProps {
   step: WorkflowStepDraft;
@@ -17,9 +23,6 @@ interface StepEditorProps {
   onRemove?: () => void;
 }
 
-const ARTIFACT_TYPES = WorkflowArtifactType.options;
-const GATE_TYPES = WorkflowStepGateType.options;
-
 export function StepEditor({
   step,
   index,
@@ -29,6 +32,28 @@ export function StepEditor({
   onMoveDown,
   onRemove,
 }: StepEditorProps) {
+  function updateSchema(updater: (schema: WorkflowStepOutputSchema) => WorkflowStepOutputSchema) {
+    onChange({ ...step, outputSchema: updater(step.outputSchema) });
+  }
+
+  function handleFieldChange(fieldIndex: number, patch: Partial<WorkflowStepOutputField>) {
+    updateSchema((schema) =>
+      schema.map((field, i) => (i === fieldIndex ? { ...field, ...patch } : field)),
+    );
+  }
+
+  function handleAddField() {
+    updateSchema((schema) => [
+      ...schema,
+      { key: "field", type: "string" as FieldType, required: true },
+    ]);
+  }
+
+  function handleRemoveField(fieldIndex: number) {
+    if (step.outputSchema.length <= 1) return;
+    updateSchema((schema) => schema.filter((_, i) => i !== fieldIndex));
+  }
+
   return (
     <article className="workflow-step-card">
       <div className="workflow-step-card__header">
@@ -61,173 +86,103 @@ export function StepEditor({
             maxLength={100}
           />
         </Field>
-        <Field label="Gate Type">
-          <select
-            value={step.gateType}
-            onChange={(event) => onChange({ ...step, gateType: event.target.value as WorkflowStepDraft["gateType"] })}
-            disabled={locked}
-          >
-            {GATE_TYPES.map((gateType) => (
-              <option key={gateType} value={gateType}>
-                {gateType}
-              </option>
-            ))}
-          </select>
-        </Field>
       </div>
 
-      <Field label="Purpose">
+      <Field label="Instructions">
         <textarea
-          value={step.purpose}
-          onChange={(event) => onChange({ ...step, purpose: event.target.value })}
+          value={step.instructions}
+          onChange={(event) => onChange({ ...step, instructions: event.target.value })}
           disabled={locked}
-          rows={3}
+          rows={5}
         />
       </Field>
 
-      <div className="workflow-step-artifacts">
-        <ArtifactSelector
-          label="Required Inputs"
-          selected={step.requiredInputs}
-          disabled={locked}
-          onToggle={(artifactType) =>
-            onChange({
-              ...step,
-              requiredInputs: toggleArtifact(step.requiredInputs, artifactType),
-            })}
-        />
-        <ArtifactSelector
-          label="Required Outputs"
-          selected={step.requiredOutputs}
-          disabled={locked}
-          onToggle={(artifactType) =>
-            onChange({
-              ...step,
-              requiredOutputs: toggleArtifact(step.requiredOutputs, artifactType),
-            })}
-        />
-      </div>
-
-      <ArrayFieldEditor
-        label="Recommended Capabilities"
-        values={step.recommendedCapabilities}
-        disabled={locked}
-        addLabel="Add Capability"
-        onChange={(recommendedCapabilities) => onChange({ ...step, recommendedCapabilities })}
-      />
-      <ArrayFieldEditor
-        label="Validation Expectations"
-        values={step.validationExpectations}
-        disabled={locked}
-        addLabel="Add Validation Expectation"
-        onChange={(validationExpectations) => onChange({ ...step, validationExpectations })}
-      />
-      <ArrayFieldEditor
-        label="Exit Criteria"
-        values={step.exitCriteria}
-        disabled={locked}
-        addLabel="Add Exit Criterion"
-        onChange={(exitCriteria) => onChange({ ...step, exitCriteria })}
-      />
-      <ArrayFieldEditor
-        label="Recommended Operators"
-        values={step.recommendedOperatorIds}
-        disabled={locked}
-        addLabel="Add Operator"
-        onChange={(recommendedOperatorIds) => onChange({ ...step, recommendedOperatorIds })}
-      />
-    </article>
-  );
-}
-
-function toggleArtifact(
-  values: WorkflowStepDraft["requiredInputs"] | WorkflowStepDraft["requiredOutputs"],
-  artifactType: (typeof ARTIFACT_TYPES)[number],
-) {
-  return values.includes(artifactType)
-    ? values.filter((value) => value !== artifactType)
-    : [...values, artifactType];
-}
-
-function ArtifactSelector({
-  label,
-  selected,
-  disabled,
-  onToggle,
-}: {
-  label: string;
-  selected: WorkflowStepDraft["requiredInputs"] | WorkflowStepDraft["requiredOutputs"];
-  disabled: boolean;
-  onToggle: (artifactType: (typeof ARTIFACT_TYPES)[number]) => void;
-}) {
-  return (
-    <fieldset className="workflow-artifact-selector" disabled={disabled}>
-      <legend>{label}</legend>
-      <div className="workflow-artifact-selector__grid">
-        {ARTIFACT_TYPES.map((artifactType) => (
-          <label key={artifactType} className="workflow-artifact-selector__option">
-            <input
-              type="checkbox"
-              checked={selected.includes(artifactType)}
-              onChange={() => onToggle(artifactType)}
-              disabled={disabled}
-            />
-            <span>{artifactType}</span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
-function ArrayFieldEditor({
-  label,
-  values,
-  disabled,
-  addLabel,
-  onChange,
-}: {
-  label: string;
-  values: string[];
-  disabled: boolean;
-  addLabel: string;
-  onChange: (values: string[]) => void;
-}) {
-  return (
-    <div className="workflow-array-field">
-      <div className="workflow-array-field__header">
-        <span>{label}</span>
-        {!disabled && (
-          <button
-            type="button"
-            className="workflow-quiet-btn"
-            onClick={() => onChange([...values, ""])}
-          >
-            {addLabel}
-          </button>
-        )}
-      </div>
-      {values.length === 0 ? (
-        <p className="workflow-array-field__empty">None configured.</p>
-      ) : (
+      <div className="workflow-array-field">
+        <div className="workflow-array-field__header">
+          <span>Output Schema</span>
+          {!locked && (
+            <button
+              type="button"
+              className="workflow-quiet-btn"
+              onClick={handleAddField}
+              disabled={step.outputSchema.length >= 32}
+            >
+              Add field
+            </button>
+          )}
+        </div>
         <div className="workflow-array-field__items">
-          {values.map((value, index) => (
-            <div key={`${label}-${index}`} className="workflow-array-field__item">
+          {step.outputSchema.map((field, fieldIndex) => (
+            <div key={fieldIndex} className="workflow-schema-field workflow-array-field__item">
               <input
                 type="text"
-                value={value}
-                onChange={(event) => {
-                  const next = values.slice();
-                  next[index] = event.target.value;
-                  onChange(next);
-                }}
-                disabled={disabled}
+                aria-label={`Field ${fieldIndex + 1} key`}
+                value={field.key}
+                onChange={(event) => handleFieldChange(fieldIndex, { key: event.target.value })}
+                disabled={locked}
+                placeholder="key"
               />
-              {!disabled && (
+              <select
+                aria-label={`Field ${fieldIndex + 1} type`}
+                value={field.type}
+                onChange={(event) => {
+                  const nextType = event.target.value as FieldType;
+                  const patch: Partial<WorkflowStepOutputField> = { type: nextType };
+                  if (nextType !== "array") {
+                    patch.itemType = undefined;
+                  }
+                  handleFieldChange(fieldIndex, patch);
+                }}
+                disabled={locked}
+              >
+                {FIELD_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              <label className="workflow-schema-field__required">
+                <input
+                  type="checkbox"
+                  checked={field.required}
+                  onChange={(event) => handleFieldChange(fieldIndex, { required: event.target.checked })}
+                  disabled={locked}
+                />
+                required
+              </label>
+              <input
+                type="text"
+                aria-label={`Field ${fieldIndex + 1} description`}
+                value={field.description ?? ""}
+                onChange={(event) =>
+                  handleFieldChange(fieldIndex, {
+                    description: event.target.value || undefined,
+                  })
+                }
+                disabled={locked}
+                placeholder="description (optional)"
+              />
+              {field.type === "array" && (
+                <select
+                  aria-label={`Field ${fieldIndex + 1} item type`}
+                  value={field.itemType ?? ""}
+                  onChange={(event) =>
+                    handleFieldChange(fieldIndex, {
+                      itemType: (event.target.value as ItemType) || undefined,
+                    })
+                  }
+                  disabled={locked}
+                >
+                  <option value="">item type (optional)</option>
+                  {ITEM_TYPES.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              )}
+              {!locked && (
                 <button
                   type="button"
                   className="workflow-danger-btn"
-                  onClick={() => onChange(values.filter((_, itemIndex) => itemIndex !== index))}
+                  onClick={() => handleRemoveField(fieldIndex)}
+                  disabled={step.outputSchema.length <= 1}
                 >
                   Remove
                 </button>
@@ -235,8 +190,8 @@ function ArrayFieldEditor({
             </div>
           ))}
         </div>
-      )}
-    </div>
+      </div>
+    </article>
   );
 }
 

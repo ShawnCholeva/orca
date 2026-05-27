@@ -31,27 +31,20 @@ function makeTemplate(overrides: Partial<WorkflowTemplate> = {}): WorkflowTempla
         id: "step-1",
         ordinal: 0,
         name: "Research",
-        purpose: "Inspect code.",
-        requiredInputs: ["goal_brief"],
-        requiredOutputs: ["research_summary"],
-        gateType: "human-approval",
-        recommendedCapabilities: ["analysis"],
-        validationExpectations: [],
-        exitCriteria: ["files identified"],
-        recommendedOperatorIds: ["human"],
+        instructions: "Inspect the codebase and summarize findings.",
+        outputSchema: [
+          { key: "summary", type: "string", required: true },
+          { key: "files_identified", type: "number", required: false },
+        ],
       },
       {
         id: "step-2",
         ordinal: 1,
         name: "Build",
-        purpose: "Implement code.",
-        requiredInputs: ["research_summary"],
-        requiredOutputs: ["implementation_result"],
-        gateType: "human-approval",
-        recommendedCapabilities: ["coding"],
-        validationExpectations: ["run unit tests"],
-        exitCriteria: ["code merged"],
-        recommendedOperatorIds: ["agent:codex"],
+        instructions: "Implement the solution based on research.",
+        outputSchema: [
+          { key: "result", type: "string", required: true },
+        ],
       },
     ],
     guardrails: [],
@@ -116,14 +109,10 @@ describe("TemplateDetail", () => {
     stepCards = Array.from(container.querySelectorAll(".workflow-step-card")) as HTMLElement[];
     fireEvent.click(within(stepCards[2]).getByRole("button", { name: "Remove Step" }));
 
+    // Edit the instructions of the first step
     const firstStepCard = (Array.from(container.querySelectorAll(".workflow-step-card")) as HTMLElement[])[0];
-    const outputsFieldset = within(firstStepCard).getByText("Required Outputs").closest("fieldset") as HTMLElement;
-    fireEvent.click(within(outputsFieldset).getByLabelText("qa_report"));
-
-    const validationSection = within(firstStepCard).getByText("Validation Expectations").closest(".workflow-array-field") as HTMLElement;
-    fireEvent.click(within(validationSection).getByRole("button", { name: "Add Validation Expectation" }));
-    fireEvent.change(within(validationSection).getByRole("textbox"), {
-      target: { value: "run smoke tests" },
+    fireEvent.change(within(firstStepCard).getByLabelText("Instructions"), {
+      target: { value: "Updated instructions for research step." },
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
@@ -135,8 +124,7 @@ describe("TemplateDetail", () => {
         steps: [
           expect.objectContaining({
             id: "step-1",
-            requiredOutputs: expect.arrayContaining(["research_summary", "qa_report"]),
-            validationExpectations: ["run smoke tests"],
+            instructions: "Updated instructions for research step.",
           }),
           expect.objectContaining({
             id: "step-3",
@@ -145,5 +133,19 @@ describe("TemplateDetail", () => {
         ],
       }),
     );
+  });
+
+  it("renders output schema fields for each step", () => {
+    render(
+      <TemplateDetail
+        template={makeTemplate()}
+        onTemplateSaved={() => {}}
+        onTemplateDuplicated={() => {}}
+      />,
+    );
+
+    // The first step has 2 schema fields; confirm the key inputs are present
+    const keyInputs = screen.getAllByPlaceholderText("key");
+    expect(keyInputs.length).toBeGreaterThanOrEqual(2);
   });
 });

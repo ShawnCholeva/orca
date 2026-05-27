@@ -256,14 +256,8 @@ function buildTemplateInput(draft: TemplateDraft): CreateWorkflowTemplateInput {
       id: step.id,
       ordinal: index,
       name: step.name.trim(),
-      purpose: step.purpose.trim(),
-      requiredInputs: step.requiredInputs,
-      requiredOutputs: step.requiredOutputs,
-      gateType: step.gateType,
-      recommendedCapabilities: normalizeTextList(step.recommendedCapabilities),
-      validationExpectations: normalizeTextList(step.validationExpectations),
-      exitCriteria: normalizeTextList(step.exitCriteria),
-      recommendedOperatorIds: normalizeTextList(step.recommendedOperatorIds),
+      instructions: step.instructions,
+      outputSchema: step.outputSchema,
     })),
     guardrails: draft.guardrails.map((guardrail) => ({
       id: guardrail.id,
@@ -281,10 +275,6 @@ function buildTemplateInput(draft: TemplateDraft): CreateWorkflowTemplateInput {
 
 function buildDuplicateName(name: string): string {
   return name.endsWith(" Copy") ? `${name} 2` : `${name} Copy`;
-}
-
-function normalizeTextList(values: string[]): string[] {
-  return values.map((value) => value.trim()).filter((value) => value.length > 0);
 }
 
 function parseJson(value: string, fallbackMessage: string): unknown {
@@ -311,14 +301,8 @@ function createStepDraft(steps: WorkflowStepDraft[]): WorkflowStepDraft {
     id: `step-${nextIndex}`,
     ordinal: steps.length,
     name: `Step ${nextIndex}`,
-    purpose: "",
-    requiredInputs: [],
-    requiredOutputs: [],
-    gateType: "human-approval",
-    recommendedCapabilities: [],
-    validationExpectations: [],
-    exitCriteria: [],
-    recommendedOperatorIds: [],
+    instructions: "Describe what this step does.",
+    outputSchema: [{ key: "result", type: "string" as const, required: true }],
   };
 }
 
