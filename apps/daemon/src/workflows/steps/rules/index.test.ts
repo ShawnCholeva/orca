@@ -284,3 +284,55 @@ describe("Engineering step rules", () => {
     ]);
   });
 });
+
+describe("intakeRule.evaluateGoalContextSatisfies", () => {
+  const baseCtx: StepRuleContext = {
+    goalId: "goal-1",
+    workflowRunId: "run-1",
+    stepRunId: "step-1",
+    artifacts: [],
+    satisfiedExitCriteria: [],
+    outstandingExitCriteria: [
+      "goal brief captured",
+      "success outcome captured",
+      "constraints captured",
+      "relevant workspaces identified",
+      "open questions captured",
+    ],
+  };
+
+  it("seeds a goal_brief artifact from a non-empty description", () => {
+    const result = stepRules.intake.evaluateGoalContextSatisfies?.(
+      { title: "Speed up checkout", description: "  Make checkout faster  " },
+      baseCtx,
+    );
+    expect(result).toEqual([
+      {
+        criterion: "goal brief captured",
+        artifact: {
+          type: "goal_brief",
+          title: "Goal Brief (draft)",
+          body: "# Problem\n\nMake checkout faster",
+        },
+      },
+    ]);
+  });
+
+  it("returns [] when the description is empty or whitespace", () => {
+    expect(
+      stepRules.intake.evaluateGoalContextSatisfies?.(
+        { title: "T", description: "   " },
+        baseCtx,
+      ),
+    ).toEqual([]);
+  });
+
+  it("returns [] when the brief criterion is already satisfied", () => {
+    expect(
+      stepRules.intake.evaluateGoalContextSatisfies?.(
+        { title: "T", description: "Make checkout faster" },
+        { ...baseCtx, satisfiedExitCriteria: ["goal brief captured"] },
+      ),
+    ).toEqual([]);
+  });
+});

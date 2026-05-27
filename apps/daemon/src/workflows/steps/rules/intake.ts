@@ -11,6 +11,21 @@ const CRITERIA = {
 
 export const intakeRule: StepRule = {
   stepTemplateId: "intake",
+  evaluateGoalContextSatisfies(goal, ctx) {
+    const description = goal.description.trim();
+    if (description.length === 0) return [];
+    if (ctx.satisfiedExitCriteria.includes(CRITERIA.brief)) return [];
+    return [
+      {
+        criterion: CRITERIA.brief,
+        artifact: {
+          type: "goal_brief",
+          title: "Goal Brief (draft)",
+          body: `# Problem\n\n${description}`,
+        },
+      },
+    ];
+  },
   nextQuestion(ctx) {
     if (!ctx.satisfiedExitCriteria.includes(CRITERIA.brief)) {
       return { question: "What problem are we solving?" };
