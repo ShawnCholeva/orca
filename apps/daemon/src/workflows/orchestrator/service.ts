@@ -432,8 +432,13 @@ export class OrchestratorService {
       );
     }
 
+    // _completion is reserved on step_output bodies; a step outputSchema must not define it.
     const body = JSON.stringify({ ...proposal.output, _completion: proposal.completion });
-    this.createStepOutputArtifact(db, now, ctx, body, options);
+    // Artifact write and the advance/complete decision are separate transactions but recoverable:
+    // a crash between them re-routes via the existing step_output idempotency branch on retry.
+    const artifactEvents: DomainEvent[] = [];
+    this.createStepOutputArtifact(db, now, ctx, body, options, artifactEvents);
+    this.publish(options.bus, artifactEvents);
     return this.commitAdvanceOrComplete(db, now, ctx, options);
   }
 
@@ -480,7 +485,7 @@ export class OrchestratorService {
     const latest = decisions.find(
       (d) => d.stepRunId === stepRunId && d.decisionType === "request_user_input"
     );
-    if (!latest) throw new OrchestratorStepNotFoundError(stepRunId);
+    if (!latest) throw new Error(`active question decision not found for step run: ${stepRunId}`);
     return { decision: latest, recommendationIds: [] };
   }
 
@@ -516,6 +521,8 @@ export class OrchestratorService {
     if (!chosen || chosen.kind !== "model" || !chosen.providerId || !chosen.modelId) {
       return this.blockRun(db, now, ctx, "no ready model operator", options);
     }
+    const providerId = chosen.providerId;
+    const modelId = chosen.modelId;
 
     const stagedEvents: DomainEvent[] = [];
     const decision = db.transaction(() => {
@@ -567,8 +574,8 @@ export class OrchestratorService {
       );
       recordOperatorSelection(db, stepRun.id, {
         operatorId: chosen.id,
-        providerId: chosen.providerId!,
-        modelId: chosen.modelId!,
+        providerId,
+        modelId,
         at: now(),
       });
       stagedEvents.push(
@@ -605,7 +612,8 @@ export class OrchestratorService {
       goal: GoalRow;
     },
     body: string,
-    options: RequestNextDecisionOptions
+    options: RequestNextDecisionOptions,
+    stagedEvents: DomainEvent[]
   ): void {
     createArtifact(
       db,
@@ -622,7 +630,8 @@ export class OrchestratorService {
         linkedTaskId: null,
         linkedContextPackageId: null,
       },
-      options.idFactory
+      options.idFactory,
+      stagedEvents
     );
   }
 
@@ -648,6 +657,7 @@ export class OrchestratorService {
         stagedEvents,
       });
       this.publish(options.bus, stagedEvents);
+      // recursion depth is bounded by the number of consecutive auto-completing intermediate steps (template step count).
       return this.requestNextDecision(db, now, run.id, options);
     }
 
