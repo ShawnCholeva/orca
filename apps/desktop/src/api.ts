@@ -17,6 +17,8 @@ import {
   CreateGoalMemoryRequest,
   CreateGoalRequest,
   CreateGoalResponse,
+  CreateGoalAndStartWorkflowRequest,
+  CreateGoalAndStartWorkflowResponse,
   CreateOrchestratorMessageRequest,
   CreateOrchestratorMessageResponse,
   CreateSessionRequest,
@@ -412,6 +414,25 @@ export async function createGoal(
     },
     CreateGoalResponse,
     "Create goal failed",
+  );
+}
+
+export async function createGoalAndStartWorkflow(
+  input: CreateGoalAndStartWorkflowRequest,
+): Promise<CreateGoalAndStartWorkflowResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/create-and-start-workflow`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(CreateGoalAndStartWorkflowRequest.parse(input)),
+    },
+    CreateGoalAndStartWorkflowResponse,
+    "Create goal and start workflow failed",
   );
 }
 
