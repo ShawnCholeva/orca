@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type {
   Goal,
   GoalDetailResponse,
@@ -8,6 +8,7 @@ import type {
   WorkflowDecisionTrace,
   WorkflowRun,
   WorkflowStepRun,
+  WorkflowTemplate,
 } from "@orca/contracts";
 
 import type { ConnectionStatus } from "../api";
@@ -22,6 +23,7 @@ import {
   listRecommendations,
   listWorkflowDecisions,
   listWorkflowRunArtifacts,
+  listWorkflowTemplates,
   openEventStream,
   rejectRecommendation,
   requestNextOrchestratorDecision,
@@ -35,7 +37,6 @@ import type { CreateSessionPrefill } from "../goal-detail/recommendations/Recomm
 import { WorkflowBanner } from "./components/WorkflowBanner";
 import "./orca-chat.css";
 
-const ENGINEERING_TEMPLATE_ID = "orca/engineering";
 const WORKFLOW_RECOMMENDATION_TYPES = [
   "advance_workflow_step",
   "launch_workflow_session",
@@ -83,6 +84,10 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [recoveryExpanded, setRecoveryExpanded] = useState(false);
+  const [recoveryTemplateId, setRecoveryTemplateId] = useState<string | null>(null);
+  const [recoveryTemplates, setRecoveryTemplates] = useState<WorkflowTemplate[]>([]);
+  const [recoveryTemplatesLoaded, setRecoveryTemplatesLoaded] = useState(false);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [sessionPrefill, setSessionPrefill] = useState<CreateSessionPrefill | null>(null);
   const [pendingInput, setPendingInput] = useState<PendingInputPrompt | null>(null);
@@ -93,6 +98,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   const [messageError, setMessageError] = useState<string | null>(null);
   const [messageDraft, setMessageDraft] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
+  const composerFormRef = useRef<HTMLFormElement>(null);
 
   const selectedGoal = goals.find((goal) => goal.id === selectedGoalId) ?? null;
   const connected = connectionStatus === "open";
@@ -104,6 +110,23 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     setSessionPrefill(null);
     setMessageError(null);
   }, [selectedGoalId]);
+
+  useEffect(() => {
+    if (!recoveryExpanded) return;
+    if (recoveryTemplatesLoaded) return;
+    let cancelled = false;
+    listWorkflowTemplates()
+      .then((res) => {
+        if (!cancelled) {
+          setRecoveryTemplates(res.templates);
+          setRecoveryTemplatesLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRecoveryTemplatesLoaded(true); // show empty
+      });
+    return () => { cancelled = true; };
+  }, [recoveryExpanded, recoveryTemplatesLoaded]);
 
   useEffect(() => {
     if (!selectedGoalId) {
@@ -254,21 +277,23 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
       workflowState.detail?.goal.orchestratorModel,
   );
 
-  async function handleStartEngineeringWorkflow() {
-    if (!selectedGoalId) return;
+  async function handleRecoveryStart() {
+    if (!selectedGoalId || !recoveryTemplateId) return;
     setStarting(true);
     setActionError(null);
     try {
       const runResponse = await startWorkflowRun(selectedGoalId, {
         goalId: selectedGoalId,
-        templateId: ENGINEERING_TEMPLATE_ID,
+        templateId: recoveryTemplateId,
       });
       await requestNextOrchestratorDecision(selectedGoalId, runResponse.run.id, {
         workflowRunId: runResponse.run.id,
       });
       setRefreshNonce((current) => current + 1);
+      setRecoveryExpanded(false);
+      setRecoveryTemplateId(null);
     } catch (err) {
-      setActionError(toErrorMessage(err, "Failed to start Engineering workflow."));
+      setActionError(toErrorMessage(err, "Failed to start workflow."));
     } finally {
       setStarting(false);
     }
@@ -413,7 +438,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
               }
             />
 
-            {loading && <ThinkingRow label="syncing workflow state" />}
+            {loading && <ThinkingRow label="routing" />}
 
             {!loading && error && (
               <div className="form-error" role="alert">
@@ -434,17 +459,47 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
               hasModel &&
               !workflowState.run && (
                 <SystemCard
-                  title="Engineering workflow ready"
-                  body="Start the built-in Engineering workflow to collect intake, supervise execution, and keep approvals explicit."
+                  title="No workflow running"
+                  body="This goal has no active workflow run. Start one to begin orchestration."
                 >
-                  <button
-                    type="button"
-                    className="submit-button"
-                    onClick={() => void handleStartEngineeringWorkflow()}
-                    disabled={!connected || starting}
-                  >
-                    {starting ? "Starting…" : "Start Engineering workflow"}
-                  </button>
+                  {!recoveryExpanded ? (
+                    <button
+                      type="button"
+                      className="submit-button"
+                      onClick={() => setRecoveryExpanded(true)}
+                      disabled={!connected}
+                    >
+                      Start Workflow
+                    </button>
+                  ) : (
+                    <div className="orca-chat-recovery-form">
+                      {!recoveryTemplatesLoaded ? (
+                        <p className="form-hint">Loading workflows…</p>
+                      ) : recoveryTemplates.length === 0 ? (
+                        <p className="form-hint">No workflows available. Create one in the Workflows tab.</p>
+                      ) : (
+                        <>
+                          <select
+                            value={recoveryTemplateId ?? ""}
+                            onChange={(e) => setRecoveryTemplateId(e.target.value || null)}
+                          >
+                            <option value="" disabled>Choose workflow…</option>
+                            {recoveryTemplates.map((t) => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="submit-button"
+                            onClick={() => void handleRecoveryStart()}
+                            disabled={!connected || starting || recoveryTemplateId === null}
+                          >
+                            {starting ? "Starting…" : "Start"}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </SystemCard>
               )}
 
@@ -531,7 +586,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
                 />
               )}
 
-            {messagesLoading && <ThinkingRow label="loading chat history" />}
+            {messagesLoading && <ThinkingRow label="routing" />}
 
             {messages.map((message) => (
               <ChatMessageRow key={message.id} message={message} />
@@ -547,21 +602,63 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
       </div>
 
       {selectedGoal && (
-        <form className="orca-chat-composer" onSubmit={(event) => void handleSendMessage(event)}>
-          <textarea
-            value={messageDraft}
-            onChange={(event) => setMessageDraft(event.target.value)}
-            rows={2}
-            placeholder="Message Orca…"
-            disabled={!connected || sendingMessage}
-          />
-          <button
-            type="submit"
-            className="orca-chat-send orca-chat-send--primary"
-            disabled={!connected || sendingMessage || messageDraft.trim().length === 0}
-          >
-            {sendingMessage ? "Sending…" : "Send"}
-          </button>
+        <form
+          ref={composerFormRef}
+          className="orca-chat-composer"
+          onSubmit={(event) => void handleSendMessage(event)}
+        >
+          <div className="orca-chat-input-wrapper">
+            <svg
+              className="orca-chat-input-icon"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6z" />
+            </svg>
+            <textarea
+              value={messageDraft}
+              onChange={(event) => setMessageDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  composerFormRef.current?.requestSubmit();
+                }
+              }}
+              rows={2}
+              placeholder="Ask Orca to plan, delegate, escalate, or summarize…"
+              disabled={!connected || sendingMessage}
+            />
+            <div className="orca-chat-compose-actions">
+              <span className="mono orca-chat-send-hint">↵ send</span>
+              <button
+                type="submit"
+                className={`orca-chat-send${messageDraft.trim() && !sendingMessage ? " orca-chat-send--active" : ""}`}
+                disabled={!connected || sendingMessage || messageDraft.trim().length === 0}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M5 12h14" />
+                  <path d="M13 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+          </div>
         </form>
       )}
 
@@ -583,15 +680,20 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
 }
 
 function ChatMessageRow({ message }: { message: OrchestratorChatMessage }) {
-  const isUser = message.role === "user";
+  if (message.role === "user") {
+    return (
+      <div className="msg msg--user">
+        <div className="mono msg-meta">you</div>
+        <div className="orca-chat-message orca-chat-message--user">{message.body}</div>
+      </div>
+    );
+  }
   return (
-    <div className={`msg ${isUser ? "msg--user" : "msg--orca"}`}>
-      {!isUser && <OrcaMark />}
+    <div className="msg msg--orca">
+      <OrcaMark />
       <div className="msg-body">
-        <div className="mono msg-meta">{isUser ? "you" : "orca"}</div>
-        <div className={`orca-chat-message orca-chat-message--${message.role}`}>
-          {message.body}
-        </div>
+        <div className="mono msg-meta">orca</div>
+        <div className="orca-chat-message">{message.body}</div>
       </div>
     </div>
   );

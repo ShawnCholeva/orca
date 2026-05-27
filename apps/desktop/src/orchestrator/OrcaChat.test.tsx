@@ -20,6 +20,7 @@ const listWorkflowRunArtifactsMock = vi.fn();
 const openEventStreamMock = vi.fn();
 const rejectRecommendationMock = vi.fn();
 const requestNextOrchestratorDecisionMock = vi.fn();
+const listWorkflowTemplatesMock = vi.fn();
 const startWorkflowRunMock = vi.fn();
 const submitWorkflowUserInputMock = vi.fn();
 
@@ -37,6 +38,7 @@ vi.mock("../api", () => ({
   openEventStream: (...args: unknown[]) => openEventStreamMock(...args),
   rejectRecommendation: (...args: unknown[]) => rejectRecommendationMock(...args),
   requestNextOrchestratorDecision: (...args: unknown[]) => requestNextOrchestratorDecisionMock(...args),
+  listWorkflowTemplates: (...args: unknown[]) => listWorkflowTemplatesMock(...args),
   startWorkflowRun: (...args: unknown[]) => startWorkflowRunMock(...args),
   submitWorkflowUserInput: (...args: unknown[]) => submitWorkflowUserInputMock(...args),
   toErrorMessage: (err: unknown, fallback: string) =>
@@ -195,6 +197,8 @@ describe("OrcaChat", () => {
     listWorkflowRunArtifactsMock.mockReset();
     rejectRecommendationMock.mockReset();
     requestNextOrchestratorDecisionMock.mockReset();
+    listWorkflowTemplatesMock.mockReset();
+    listWorkflowTemplatesMock.mockResolvedValue({ templates: [] });
     startWorkflowRunMock.mockReset();
     submitWorkflowUserInputMock.mockReset();
     openEventStreamMock.mockReset();
@@ -274,7 +278,7 @@ describe("OrcaChat", () => {
       />,
     );
 
-    expect(await screen.findByText("Engineering workflow ready")).toBeInTheDocument();
+    expect(await screen.findByText("No workflow running")).toBeInTheDocument();
     expect(screen.queryByText(/orca\/openai/)).toBeNull();
   });
 
@@ -315,11 +319,14 @@ describe("OrcaChat", () => {
     expect(await screen.findByText("I will keep it bounded.")).toBeInTheDocument();
   });
 
-  it("starts the Engineering workflow for a selected goal", async () => {
+  it("starts a workflow via recovery card for a goal with no run", async () => {
     getGoalDetailMock.mockResolvedValue({
       goal,
       refinement: null,
       workspaces: [],
+    });
+    listWorkflowTemplatesMock.mockResolvedValue({
+      templates: [{ id: "orca/engineering", name: "Engineering", description: null, version: 1, steps: [] }],
     });
     startWorkflowRunMock.mockResolvedValue({
       run: {
@@ -358,7 +365,15 @@ describe("OrcaChat", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByText("Start Engineering workflow"));
+    // Expand recovery form
+    fireEvent.click(await screen.findByText("Start Workflow"));
+
+    // Select the template
+    const select = await screen.findByRole("combobox");
+    fireEvent.change(select, { target: { value: "orca/engineering" } });
+
+    // Submit
+    fireEvent.click(screen.getByText("Start"));
 
     await waitFor(() => {
       expect(startWorkflowRunMock).toHaveBeenCalledWith("goal-1", {
