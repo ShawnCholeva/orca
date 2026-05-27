@@ -29,6 +29,13 @@ export interface SessionSummarySignal {
 
 export interface StepRule {
   stepTemplateId: string;
+  evaluateGoalContextSatisfies?(
+    goal: { title: string; description: string },
+    ctx: StepRuleContext
+  ): Array<{
+    criterion: string;
+    artifact?: { type: WorkflowArtifactType; title: string; body: string };
+  }>;
   evaluateUserInputAsArtifact?(input: {
     answerText: string;
     ctx: StepRuleContext;
