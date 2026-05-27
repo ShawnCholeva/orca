@@ -15,9 +15,8 @@ import type { OperatorSelector } from "../operators/selector.js";
 import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { OrchestratorService } from "../orchestrator/service.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
-import { stepRules, type StepRuleContext } from "./rules/index.js";
+import { getDecisionById } from "../decisions/usecases.js";
 import { getWorkflowStepRunById } from "./projection.js";
-import { recordExitCriteriaSatisfaction } from "./usecases.js";
 
 export interface WorkflowStepRouteDeps {
   db: Database.Database;
@@ -87,59 +86,84 @@ export function registerWorkflowStepRoutes(
       );
     }
 
+    // Validate answerText + questionDecisionId BEFORE opening the transaction
+    // so we can return proper HTTP errors.
+    const answerText = parsed.data.answerText;
+    const questionDecisionId = parsed.data.questionDecisionId;
+    let validatedDecision: Awaited<ReturnType<typeof getDecisionById>> = null;
+    let existingTurns: ReturnType<typeof listArtifactsForRun> = [];
+
+    if (answerText !== undefined) {
+      if (answerText.trim().length === 0) {
+        reply.status(400);
+        return apiError("validation_failed", "answerText must not be empty");
+      }
+      if (!questionDecisionId) {
+        reply.status(400);
+        return apiError(
+          "validation_failed",
+          "questionDecisionId is required when submitting an answer"
+        );
+      }
+      const decision = getDecisionById(deps.db, questionDecisionId);
+      if (
+        !decision ||
+        decision.stepRunId !== stepRun.id ||
+        decision.decisionType !== "request_user_input"
+      ) {
+        reply.status(400);
+        return apiError(
+          "validation_failed",
+          "questionDecisionId does not match an active question for this step"
+        );
+      }
+      const turns = listArtifactsForRun(deps.db, stepRun.workflowRunId).filter(
+        (a) => a.type === "interview_turn" && a.stepRunId === stepRun.id
+      );
+      if (
+        turns.some(
+          (a) =>
+            (JSON.parse(a.body) as { questionDecisionId?: string }).questionDecisionId ===
+            questionDecisionId
+        )
+      ) {
+        reply.status(409);
+        return apiError("question_already_answered", "this question has already been answered");
+      }
+      validatedDecision = decision;
+      existingTurns = turns;
+    }
+
     const artifactIds: string[] = [];
     const stagedEvents: DomainEvent[] = [];
     deps.db.transaction(() => {
-      let updatedStep = stepRun;
-      const explicitCriteria = parsed.data.satisfiedExitCriteria ?? [];
-      if (explicitCriteria.length > 0) {
-        updatedStep = recordExitCriteriaSatisfaction(deps.db, now, id, explicitCriteria);
-      }
-
-      const answerText = parsed.data.answerText;
-      if (answerText !== undefined) {
-        const rule = stepRules[updatedStep.stepTemplateId];
-        const ctx: StepRuleContext = {
-          goalId,
-          workflowRunId: updatedStep.workflowRunId,
-          stepRunId: updatedStep.id,
-          artifacts: listArtifactsForRun(deps.db, updatedStep.workflowRunId),
-          satisfiedExitCriteria: updatedStep.satisfiedExitCriteria,
-          outstandingExitCriteria: updatedStep.outstandingExitCriteria,
+      if (answerText !== undefined && validatedDecision) {
+        const turn = {
+          turnIndex: existingTurns.length,
+          questionDecisionId: questionDecisionId!,
+          question: validatedDecision.reason,
+          answer: redactSecrets(answerText),
+          answeredAt: now(),
         };
-        const evaluated = rule?.evaluateUserInputAsArtifact?.({
-          answerText: redactSecrets(answerText),
-          ctx,
-        });
-        if (evaluated?.artifact) {
-          const created = createArtifact(
-            deps.db,
-            now,
-            {
-              goalId,
-              workflowRunId: updatedStep.workflowRunId,
-              stepRunId: updatedStep.id,
-              type: evaluated.artifact.type,
-              title: redactSecrets(evaluated.artifact.title).slice(0, 256),
-              body: redactSecrets(evaluated.artifact.body),
-              source: "user",
-              linkedSessionId: null,
-              linkedTaskId: null,
-              linkedContextPackageId: null,
-            },
-            deps.idFactory,
-            stagedEvents
-          );
-          artifactIds.push(created.id);
-        }
-        if ((evaluated?.satisfiedCriteria.length ?? 0) > 0) {
-          updatedStep = recordExitCriteriaSatisfaction(
-            deps.db,
-            now,
-            id,
-            evaluated?.satisfiedCriteria ?? []
-          );
-        }
+        const created = createArtifact(
+          deps.db,
+          now,
+          {
+            goalId,
+            workflowRunId: stepRun.workflowRunId,
+            stepRunId: stepRun.id,
+            type: "interview_turn",
+            title: `Turn ${turn.turnIndex}`.slice(0, 256),
+            body: JSON.stringify(turn),
+            source: "user",
+            linkedSessionId: null,
+            linkedTaskId: null,
+            linkedContextPackageId: null,
+          },
+          deps.idFactory,
+          stagedEvents
+        );
+        artifactIds.push(created.id);
       }
 
       for (const artifact of parsed.data.artifactInputs ?? []) {
@@ -148,8 +172,8 @@ export function registerWorkflowStepRoutes(
           now,
           {
             goalId,
-            workflowRunId: updatedStep.workflowRunId,
-            stepRunId: updatedStep.id,
+            workflowRunId: stepRun.workflowRunId,
+            stepRunId: stepRun.id,
             type: artifact.type,
             title: redactSecrets(artifact.title).slice(0, 256),
             body: redactSecrets(artifact.body),
@@ -170,8 +194,8 @@ export function registerWorkflowStepRoutes(
           "workflow.user.input.submitted",
           {
             goalId,
-            workflowRunId: updatedStep.workflowRunId,
-            stepRunId: updatedStep.id,
+            workflowRunId: stepRun.workflowRunId,
+            stepRunId: stepRun.id,
             answerBytes:
               parsed.data.answerText === undefined
                 ? undefined
