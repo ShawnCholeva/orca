@@ -6,7 +6,9 @@ import {
 } from "@orca/contracts";
 
 import type { EventBus } from "../../events.js";
+import type { OperatorRegistry } from "../operators/registry.js";
 import type { OperatorSelector } from "../operators/selector.js";
+import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import {
   OrchestratorGoalNotFoundError,
@@ -21,6 +23,8 @@ export interface OrchestratorRouteDeps {
   db: Database.Database;
   bus: EventBus;
   operatorSelector: Pick<OperatorSelector, "select">;
+  orchestrationTransportBroker: Pick<OrchestrationTransportBroker, "propose">;
+  operatorRegistry: Pick<OperatorRegistry, "list">;
   now?: () => string;
   idFactory?: () => string;
 }
@@ -33,7 +37,11 @@ export function registerOrchestratorRoutes(
   server: FastifyInstance,
   deps: OrchestratorRouteDeps
 ): void {
-  const service = new OrchestratorService(deps.operatorSelector);
+  const service = new OrchestratorService(
+    deps.operatorSelector,
+    deps.orchestrationTransportBroker,
+    deps.operatorRegistry
+  );
 
   server.post("/v1/goals/:goalId/workflow-runs/:id/next-decision", async (request, reply) => {
     const { goalId, id } = request.params as { goalId: string; id: string };

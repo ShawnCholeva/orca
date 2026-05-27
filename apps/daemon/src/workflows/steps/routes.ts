@@ -10,7 +10,9 @@ import type { EventBus } from "../../events.js";
 import { redactSecrets } from "../../memory/normalize.js";
 import { createArtifact } from "../artifacts/usecases.js";
 import { appendWorkflowEvent, publishStagedWorkflowEvents } from "../events.js";
+import type { OperatorRegistry } from "../operators/registry.js";
 import type { OperatorSelector } from "../operators/selector.js";
+import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { OrchestratorService } from "../orchestrator/service.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
 import { stepRules, type StepRuleContext } from "./rules/index.js";
@@ -21,6 +23,8 @@ export interface WorkflowStepRouteDeps {
   db: Database.Database;
   bus?: EventBus;
   operatorSelector?: Pick<OperatorSelector, "select">;
+  orchestrationTransportBroker?: Pick<OrchestrationTransportBroker, "propose">;
+  operatorRegistry?: Pick<OperatorRegistry, "list">;
   now?: () => string;
   idFactory?: () => string;
 }
@@ -34,9 +38,14 @@ export function registerWorkflowStepRoutes(
   deps: WorkflowStepRouteDeps
 ): void {
   const now = deps.now ?? (() => new Date().toISOString());
-  const orchestratorService = deps.operatorSelector
-    ? new OrchestratorService(deps.operatorSelector)
-    : null;
+  const orchestratorService =
+    deps.operatorSelector && deps.orchestrationTransportBroker && deps.operatorRegistry
+      ? new OrchestratorService(
+          deps.operatorSelector,
+          deps.orchestrationTransportBroker,
+          deps.operatorRegistry
+        )
+      : null;
 
   function stepForGoal(goalId: string, stepRunId: string) {
     const stepRun = getWorkflowStepRunById(deps.db, stepRunId);

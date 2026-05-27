@@ -7,6 +7,7 @@ import {
   WORKFLOW_FAILURE_MAX_MESSAGE_CHARS,
   type ModelProviderId,
   type OperatorDescriptor,
+  type OperatorKind,
   type OperatorSelection as OperatorSelectionT,
   type WorkflowGuardrailConfig,
 } from "@orca/contracts";
@@ -30,6 +31,7 @@ export interface SelectorInput {
   guardrails: WorkflowGuardrailConfig[];
   orchestratorProvider: ModelProviderId | null;
   orchestratorModel: string | null;
+  allowedKinds?: OperatorKind[];
 }
 
 export type OperatorSelectionSource = "llm" | "fallback";
@@ -71,7 +73,11 @@ export class OperatorSelector {
     input: SelectorInput
   ): Promise<OperatorSelectionResult> {
     const allOperators = await this.operators.list(input.goalId);
-    const readyOperators = allOperators.filter((operator) => operator.ready);
+    let readyOperators = allOperators.filter((operator) => operator.ready);
+    if (input.allowedKinds) {
+      const allowed = new Set(input.allowedKinds);
+      readyOperators = readyOperators.filter((operator) => allowed.has(operator.kind));
+    }
     if (readyOperators.length === 0) {
       throw new Error("no_ready_operators");
     }

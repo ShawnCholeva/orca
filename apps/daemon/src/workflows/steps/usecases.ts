@@ -5,6 +5,7 @@ import { WORKFLOW_FAILURE_MAX_MESSAGE_CHARS, WorkflowStepRun } from "@orca/contr
 import { redactSecrets } from "../../memory/normalize.js";
 import { appendWorkflowEvent } from "../events.js";
 import { getWorkflowRunById } from "../runs/projection.js";
+import { getWorkflowStepRunById } from "./projection.js";
 import { getTemplateById } from "../templates/projection.js";
 
 interface WorkflowStepRunRow {
@@ -70,24 +71,9 @@ export function stepFingerprint(
 }
 
 function readStep(db: Database.Database, id: string): WorkflowStepRunT {
-  const row = db
-    .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
-    .get(id) as WorkflowStepRunRow | undefined;
-  if (!row) throw new WorkflowStepNotFoundError(id);
-  return WorkflowStepRun.parse({
-    id: row.id,
-    goalId: row.goal_id,
-    workflowRunId: row.workflow_run_id,
-    stepTemplateId: row.step_template_id,
-    ordinal: row.ordinal,
-    attempt: row.attempt,
-    status: row.status,
-    startedAt: row.started_at,
-    finishedAt: row.finished_at,
-    blockedReason: row.blocked_reason,
-    satisfiedExitCriteria: JSON.parse(row.satisfied_exit_criteria_json) as string[],
-    outstandingExitCriteria: JSON.parse(row.outstanding_exit_criteria_json) as string[],
-  });
+  const step = getWorkflowStepRunById(db, id);
+  if (!step) throw new WorkflowStepNotFoundError(id);
+  return step;
 }
 
 function readStepRow(db: Database.Database, id: string): WorkflowStepRunRow {
@@ -123,14 +109,13 @@ function insertStep(
   templateStepId: string,
   ordinal: number,
   attempt: number,
-  exitCriteria: string[],
   eventOptions?: StepEventOptions
 ): WorkflowStepRunT {
   const id = randomUUID();
   const timestamp = now();
   const fingerprint = stepFingerprint(runId, templateStepId, attempt);
   db.prepare(
-    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES (?, ?, ?, ?, ?, ?, 'active', '[]', ?, NULL, ?, NULL, ?)"
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES (?, ?, ?, ?, ?, ?, 'active', '[]', '[]', NULL, ?, NULL, ?)"
   ).run(
     id,
     goalId,
@@ -138,7 +123,6 @@ function insertStep(
     templateStepId,
     ordinal,
     attempt,
-    JSON.stringify(exitCriteria),
     timestamp,
     fingerprint
   );
@@ -180,7 +164,6 @@ export function createInitialStep(
     first.id,
     first.ordinal,
     1,
-    first.exitCriteria,
     eventOptions
   );
 }
@@ -227,10 +210,6 @@ export function advanceToNextStep(
         "advance"
       );
     }
-    if (current.outstandingExitCriteria.length > 0) {
-      throw new WorkflowStepExitCriteriaIncompleteError(currentStepRunId);
-    }
-
     const run = getWorkflowRunById(db, current.workflowRunId);
     if (!run) throw new Error("run_not_found");
     const template = getTemplateById(db, run.templateId);
@@ -280,7 +259,6 @@ export function advanceToNextStep(
       next.id,
       next.ordinal,
       1,
-      next.exitCriteria,
       eventOptions
     );
   })();
@@ -404,7 +382,6 @@ export function retryStep(
       row.stepTemplateId,
       row.ordinal,
       row.attempt + 1,
-      templateStep.exitCriteria,
       eventOptions
     );
   })();

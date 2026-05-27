@@ -438,7 +438,11 @@ export function createServer(
         args
       ),
     requestNextDecisionFn: async (_goalId, runId) => {
-      const orchestratorService = new OrchestratorService(daemonContext.operatorSelector);
+      const orchestratorService = new OrchestratorService(
+        daemonContext.operatorSelector,
+        daemonContext.orchestrationTransportBroker,
+        daemonContext.operatorRegistry
+      );
       return orchestratorService.requestNextDecision(
         getDatabase(),
         daemonContext.now ?? (() => new Date().toISOString()),
@@ -813,6 +817,8 @@ export function createServer(
     db,
     bus: eventBus,
     operatorSelector: daemonContext.operatorSelector,
+    orchestrationTransportBroker: daemonContext.orchestrationTransportBroker,
+    operatorRegistry: daemonContext.operatorRegistry,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
   });
@@ -823,6 +829,8 @@ export function createServer(
     db,
     bus: eventBus,
     operatorSelector: daemonContext.operatorSelector,
+    orchestrationTransportBroker: daemonContext.orchestrationTransportBroker,
+    operatorRegistry: daemonContext.operatorRegistry,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
   });

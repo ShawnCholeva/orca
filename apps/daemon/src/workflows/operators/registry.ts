@@ -61,6 +61,8 @@ export class OperatorRegistry {
             : boundedReason(availability.reason, "unavailable"),
           supportsRepoEditing: false,
           supportsTerminal: false,
+          providerId: provider.id,
+          modelId: model.id,
         });
       }
     }

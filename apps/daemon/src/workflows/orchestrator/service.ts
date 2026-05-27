@@ -1,15 +1,22 @@
 import type Database from "better-sqlite3";
 import {
+  InterviewTurn,
+  OrchestrationRequest,
+  StepSkillProposal,
+  validateStepOutput,
   type DomainEvent,
   type ModelProviderId,
   type OperatorKind,
   type WorkflowArtifactType,
   type WorkflowDecisionTrace,
   type WorkflowGuardrailConfig,
+  type WorkflowRun as WorkflowRunT,
+  type WorkflowStepRun as WorkflowStepRunT,
   type WorkflowStepTemplate,
+  type WorkflowTemplate as WorkflowTemplateT,
 } from "@orca/contracts";
 
-import type { EventBus } from "../../events.js";
+import { EventBus } from "../../events.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
 import { createArtifact } from "../artifacts/usecases.js";
 import { appendWorkflowEvent, publishStagedWorkflowEvents } from "../events.js";
@@ -19,20 +26,27 @@ import {
   type GuardrailContext,
   type GuardrailResult,
 } from "../guardrails/evaluator.js";
+import type { OperatorRegistry } from "../operators/registry.js";
 import type {
   OperatorSelectionTransportAttempt,
   OperatorSelector,
 } from "../operators/selector.js";
+import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { getWorkflowRunById } from "../runs/projection.js";
+import { markWorkflowRunBlocked } from "../runs/usecases.js";
 import { stepRules, type StepRuleContext } from "../steps/rules/index.js";
-import { markStepBlocked, recordExitCriteriaSatisfaction } from "../steps/usecases.js";
+import { getWorkflowStepRunById, recordOperatorSelection } from "../steps/projection.js";
+import { advanceToNextStep, markStepBlocked, recordExitCriteriaSatisfaction } from "../steps/usecases.js";
 import { getTemplateById } from "../templates/projection.js";
 import {
   decisionFingerprint,
   getDecisionById,
   linkTransportAttemptDecisionInTx,
+  listDecisionsForRun,
   recordDecisionInTx,
 } from "../decisions/usecases.js";
+import { reconstructTranscript } from "./interview.js";
+import { buildStepExecutionInput } from "./step-input.js";
 import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.js";
 
 interface GoalRow {
@@ -293,7 +307,11 @@ function pureGuardrailResults(
 }
 
 export class OrchestratorService {
-  constructor(private readonly operatorSelector: Pick<OperatorSelector, "select">) {}
+  constructor(
+    private readonly operatorSelector: Pick<OperatorSelector, "select">,
+    private readonly broker: Pick<OrchestrationTransportBroker, "propose">,
+    private readonly operators: Pick<OperatorRegistry, "list">
+  ) {}
 
   async requestNextDecision(
     db: Database.Database,
@@ -307,88 +325,455 @@ export class OrchestratorService {
 
     const template = getTemplateById(db, run.templateId);
     if (!template) throw new OrchestratorTemplateNotFoundError(run.templateId);
-    let stepRun = readStepRun(db, run.currentStepRunId);
+    const stepRun = readStepRun(db, run.currentStepRunId);
     if (stepRun.status !== "active") throw new OrchestratorRunNotActiveError(workflowRunId);
     const stepTpl = template.steps.find((step) => step.id === stepRun.step_template_id);
     if (!stepTpl) throw new OrchestratorStepNotFoundError(stepRun.id);
-    let artifacts = listArtifactsForRun(db, workflowRunId);
-    stepRun = applyDeterministicRuleSatisfaction(db, now, stepRun, artifacts);
     const goal = readGoal(db, run.goalId);
-    stepRun = applyGoalContextSatisfaction(db, now, stepRun, goal, workflowRunId, options.idFactory);
-    artifacts = listArtifactsForRun(db, workflowRunId);
-    const outstanding = parseOutstanding(stepRun);
-    const missing = missingInputs(stepTpl, artifacts);
 
-    if (missing.length > 0) {
-      return this.commitMissingInputDecision(db, now, run.goalId, workflowRunId, stepRun, stepTpl, missing, options);
+    return this.commitSkillStepDecision(
+      db,
+      now,
+      { run, stepRun, stepTpl, template, goal },
+      options
+    );
+  }
+
+  private async commitSkillStepDecision(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+    },
+    options: RequestNextDecisionOptions
+  ): Promise<{ decision: WorkflowDecisionTrace; recommendationIds: string[] }> {
+    const { run, stepRun, stepTpl, template, goal } = ctx;
+    const artifacts = listArtifactsForRun(db, run.id);
+    const stepArtifacts = artifacts.filter((a) => a.stepRunId === stepRun.id);
+
+    // (1) idempotency: a valid step_output already exists -> advance or complete.
+    if (stepArtifacts.some((a) => a.type === "step_output")) {
+      return this.commitAdvanceOrComplete(db, now, ctx, options);
     }
 
-    if (outstanding.length === 0) {
-      const nextStepTpl = template.steps.find((step) => step.ordinal === stepRun.ordinal + 1);
-      return this.commitSatisfiedExitDecision(
+    // (2) idempotency: an unanswered question is outstanding -> wait, create nothing new.
+    if (this.hasActiveUnansweredQuestion(db, stepArtifacts, stepRun.id)) {
+      return this.commitNoop(db, run.id, stepRun.id);
+    }
+
+    // (3) select a model operator once.
+    const sel = getWorkflowStepRunById(db, stepRun.id);
+    if (!sel || !sel.selectedOperatorId) {
+      return this.commitOperatorSelectionForSkill(db, now, ctx, options);
+    }
+    if (!sel.selectedProviderId || !sel.selectedModelId) {
+      return this.blockRun(db, now, ctx, "no ready model operator", options);
+    }
+
+    // (4) run the skill turn.
+    const transcript = reconstructTranscript(stepArtifacts);
+    const stepRunByStepId = this.stepRunIdsByTemplateId(db, run.id);
+    const input = buildStepExecutionInput({
+      goal: { id: goal.id, description: goal.description },
+      steps: template.steps,
+      currentStep: stepTpl,
+      artifacts,
+      transcript,
+      stepRunByStepId,
+    });
+
+    const validate = (raw: unknown) => {
+      const parsed = StepSkillProposal.safeParse(raw);
+      if (!parsed.success) {
+        return { accepted: false as const, failureMessage: "invalid step skill proposal" };
+      }
+      if (parsed.data.action === "complete") {
+        const v = validateStepOutput(stepTpl.outputSchema, parsed.data.output);
+        if (!v.ok) {
+          return { accepted: false as const, failureMessage: `schema: ${v.errors.join("; ")}` };
+        }
+      }
+      return { accepted: true as const, parsed: parsed.data };
+    };
+
+    const request = OrchestrationRequest.parse({
+      kind: "run_step_skill",
+      goalId: goal.id,
+      workflowRunId: run.id,
+      stepRunId: stepRun.id,
+      providerId: sel.selectedProviderId,
+      modelId: sel.selectedModelId,
+      payload: input,
+    });
+
+    let result = await this.broker.propose(request, { validateProposal: validate });
+    if (result.status !== "proposed") {
+      result = await this.broker.propose(request, { validateProposal: validate });
+    }
+    if (result.status !== "proposed") {
+      return this.blockRun(db, now, ctx, "step output did not match schema", options);
+    }
+
+    const proposal = result.parsed as StepSkillProposal;
+    if (proposal.action === "ask") {
+      return this.commitUserInputDecision(
         db,
         now,
-        run.goalId,
-        workflowRunId,
+        goal.id,
+        run.id,
         stepRun,
         stepTpl,
-        nextStepTpl,
+        proposal.question,
         options
       );
     }
 
-    if (stepTpl.gateType === "human-input") {
-      return this.commitUserInputDecision(db, now, run.goalId, workflowRunId, stepRun, stepTpl, outstanding, options);
-    }
+    const body = JSON.stringify({ ...proposal.output, _completion: proposal.completion });
+    this.createStepOutputArtifact(db, now, ctx, body, options);
+    return this.commitAdvanceOrComplete(db, now, ctx, options);
+  }
 
+  private stepRunIdsByTemplateId(
+    db: Database.Database,
+    workflowRunId: string
+  ): Record<string, string> {
+    const rows = db
+      .prepare(
+        "SELECT step_template_id, id FROM workflow_step_runs WHERE workflow_run_id = ?"
+      )
+      .all(workflowRunId) as Array<{ step_template_id: string; id: string }>;
+    const out: Record<string, string> = {};
+    for (const row of rows) out[row.step_template_id] = row.id;
+    return out;
+  }
+
+  private hasActiveUnansweredQuestion(
+    db: Database.Database,
+    stepArtifacts: ReturnType<typeof listArtifactsForRun>,
+    stepRunId: string
+  ): boolean {
+    const questionDecisions = db
+      .prepare(
+        "SELECT id FROM workflow_decisions WHERE step_run_id = ? AND decision_type = 'request_user_input'"
+      )
+      .all(stepRunId) as Array<{ id: string }>;
+    if (questionDecisions.length === 0) return false;
+    const answeredDecisionIds = new Set<string>();
+    for (const artifact of stepArtifacts) {
+      if (artifact.type !== "interview_turn") continue;
+      const parsed = InterviewTurn.safeParse(JSON.parse(artifact.body));
+      if (parsed.success) answeredDecisionIds.add(parsed.data.questionDecisionId);
+    }
+    return questionDecisions.some((d) => !answeredDecisionIds.has(d.id));
+  }
+
+  private commitNoop(
+    db: Database.Database,
+    workflowRunId: string,
+    stepRunId: string
+  ): { decision: WorkflowDecisionTrace; recommendationIds: string[] } {
+    const decisions = listDecisionsForRun(db, workflowRunId);
+    const latest = decisions.find(
+      (d) => d.stepRunId === stepRunId && d.decisionType === "request_user_input"
+    );
+    if (!latest) throw new OrchestratorStepNotFoundError(stepRunId);
+    return { decision: latest, recommendationIds: [] };
+  }
+
+  private async commitOperatorSelectionForSkill(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+    },
+    options: RequestNextDecisionOptions
+  ): Promise<{ decision: WorkflowDecisionTrace; recommendationIds: string[] }> {
+    const { run, stepRun, stepTpl, template, goal } = ctx;
     const result = await this.operatorSelector.select(db, now, {
-      goalId: run.goalId,
-      workflowRunId,
+      goalId: goal.id,
+      workflowRunId: run.id,
       stepRunId: stepRun.id,
       stepName: stepTpl.id,
-      stepPurpose: stepTpl.purpose,
-      recommendedCapabilities: stepTpl.recommendedCapabilities,
-      recommendedOperatorIds: stepTpl.recommendedOperatorIds,
+      stepPurpose: stepTpl.instructions.slice(0, 1024),
+      recommendedCapabilities: [],
+      recommendedOperatorIds: [],
       guardrails: template.guardrails,
       orchestratorProvider: goal.orchestrator_provider,
       orchestratorModel: goal.orchestrator_model,
+      allowedKinds: ["model"],
     });
 
-    const guardCtx: GuardrailContext = {
-      goalId: run.goalId,
-      workflowRunId,
-      stepRunId: stepRun.id,
-      stepTemplateId: stepTpl.id,
-      candidateAction: {
-        kind: "launch_workflow_session",
-        operatorId: result.selection.operatorId,
-      },
-    };
-    const guardResults = pureGuardrailResults(template.guardrails, guardCtx);
-    const denied = guardResults.find((guardrail) => guardrail.result === "deny");
-    const requiresApproval =
-      result.selection.requiresUserApproval ||
-      guardResults.some((guardrail) => guardrail.result === "require_approval");
+    const descriptors = await this.operators.list(goal.id);
+    const chosen = descriptors.find((d) => d.id === result.selection.operatorId);
+    if (!chosen || chosen.kind !== "model" || !chosen.providerId || !chosen.modelId) {
+      return this.blockRun(db, now, ctx, "no ready model operator", options);
+    }
 
-    return this.commitOperatorDecision(
+    const stagedEvents: DomainEvent[] = [];
+    const decision = db.transaction(() => {
+      this.appendDecisionRequested(
+        db,
+        now,
+        goal.id,
+        run.id,
+        stepRun.id,
+        stepTpl.id,
+        options,
+        stagedEvents
+      );
+      const recorded = recordDecisionInTx(
+        db,
+        now,
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          stepRunId: stepRun.id,
+          decisionType: "select_operator",
+          selectedAction: `select:${chosen.id}`,
+          reason: result.selection.reason,
+          influencedBy: [
+            {
+              kind: "workflow_step",
+              id: stepTpl.id,
+              label: stepTpl.name,
+              effect: "preferred",
+            },
+            {
+              kind: "operator_readiness",
+              id: chosen.id,
+              label: chosen.id,
+              effect: "satisfied",
+            },
+          ],
+          alternativesConsidered: result.selection.alternativesConsidered,
+          confidence: result.selection.confidence,
+          operatorSelection: result.selection,
+          inputFingerprint: decisionFingerprint({
+            runId: run.id,
+            stepRunId: stepRun.id,
+            decisionType: "select_operator",
+            payload: { operatorId: chosen.id, source: result.source },
+          }),
+        },
+        { idFactory: options.idFactory, stagedEvents }
+      );
+      recordOperatorSelection(db, stepRun.id, {
+        operatorId: chosen.id,
+        providerId: chosen.providerId!,
+        modelId: chosen.modelId!,
+        at: now(),
+      });
+      stagedEvents.push(
+        appendWorkflowEvent(
+          db,
+          "workflow.operator.selected",
+          {
+            decisionId: recorded.decisionId,
+            goalId: goal.id,
+            workflowRunId: run.id,
+            stepRunId: stepRun.id,
+            operatorId: chosen.id,
+            operatorKind: chosen.kind,
+            source: result.source,
+            requiresApproval: result.selection.requiresUserApproval,
+          },
+          now(),
+          options.idFactory
+        )
+      );
+      return recorded;
+    })();
+    this.publish(options.bus, stagedEvents);
+    return { decision, recommendationIds: [] };
+  }
+
+  private createStepOutputArtifact(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      goal: GoalRow;
+    },
+    body: string,
+    options: RequestNextDecisionOptions
+  ): void {
+    createArtifact(
       db,
       now,
       {
-        goalId: run.goalId,
-        workflowRunId,
-        stepRun,
-        stepTpl,
-        guardrails: template.guardrails,
-        guardCtx,
-        guardResults,
-        denied,
-        requiresApproval,
-        selection: result.selection,
-        source: result.source,
-        transportAttempt: result.transportAttempt,
+        goalId: ctx.goal.id,
+        workflowRunId: ctx.run.id,
+        stepRunId: ctx.stepRun.id,
+        type: "step_output",
+        title: ctx.stepTpl.name.slice(0, 256),
+        body,
+        source: "orchestrator",
+        linkedSessionId: null,
+        linkedTaskId: null,
+        linkedContextPackageId: null,
       },
-      options
+      options.idFactory
     );
+  }
+
+  private async commitAdvanceOrComplete(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+    },
+    options: RequestNextDecisionOptions
+  ): Promise<{ decision: WorkflowDecisionTrace; recommendationIds: string[] }> {
+    const { run, stepRun, stepTpl, template, goal } = ctx;
+    const nextStepTpl = template.steps.find((step) => step.ordinal === stepRun.ordinal + 1);
+
+    if (nextStepTpl) {
+      const stagedEvents: DomainEvent[] = [];
+      advanceToNextStep(db, now, stepRun.id, {
+        idFactory: options.idFactory,
+        stagedEvents,
+      });
+      this.publish(options.bus, stagedEvents);
+      return this.requestNextDecision(db, now, run.id, options);
+    }
+
+    const stagedEvents: DomainEvent[] = [];
+    const output = db.transaction(() => {
+      this.appendDecisionRequested(
+        db,
+        now,
+        goal.id,
+        run.id,
+        stepRun.id,
+        stepTpl.id,
+        options,
+        stagedEvents
+      );
+      const decision = recordDecisionInTx(
+        db,
+        now,
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          stepRunId: stepRun.id,
+          decisionType: "mark_run_complete",
+          selectedAction: "recommend_complete_run",
+          reason: "Final step output produced; user approval required before completing the run",
+          influencedBy: [
+            {
+              kind: "workflow_step",
+              id: stepTpl.id,
+              label: stepTpl.name,
+              effect: "satisfied",
+            },
+          ],
+          inputFingerprint: decisionFingerprint({
+            runId: run.id,
+            stepRunId: stepRun.id,
+            decisionType: "mark_run_complete",
+            payload: "complete",
+          }),
+        },
+        { idFactory: options.idFactory, stagedEvents }
+      );
+      const recommendationId = createRecommendationForWorkflowInTx(
+        db,
+        now,
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          stepRunId: stepRun.id,
+          type: "complete_workflow_run",
+          proposedAction: {
+            kind: "complete_workflow_run",
+            workflowRunId: run.id,
+            workflowStepRunId: stepRun.id,
+          },
+          rationale: "Final step output produced; approve to complete the workflow run.",
+          decisionId: decision.decisionId,
+        },
+        { idFactory: options.idFactory, stagedEvents }
+      );
+      return { decision, recommendationIds: [recommendationId] };
+    })();
+    this.publish(options.bus, stagedEvents);
+    return output;
+  }
+
+  private blockRun(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      goal: GoalRow;
+    },
+    reason: string,
+    options: RequestNextDecisionOptions
+  ): { decision: WorkflowDecisionTrace; recommendationIds: string[] } {
+    const { run, stepRun, stepTpl, goal } = ctx;
+    const stagedEvents: DomainEvent[] = [];
+    const decision = db.transaction(() => {
+      this.appendDecisionRequested(
+        db,
+        now,
+        goal.id,
+        run.id,
+        stepRun.id,
+        stepTpl.id,
+        options,
+        stagedEvents
+      );
+      return recordDecisionInTx(
+        db,
+        now,
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          stepRunId: stepRun.id,
+          decisionType: "block_run",
+          selectedAction: "block:step_output",
+          reason,
+          influencedBy: [
+            {
+              kind: "workflow_step",
+              id: stepTpl.id,
+              label: stepTpl.name,
+              effect: "blocked",
+            },
+          ],
+          inputFingerprint: decisionFingerprint({
+            runId: run.id,
+            stepRunId: stepRun.id,
+            decisionType: "block_run",
+            payload: reason,
+          }),
+        },
+        { idFactory: options.idFactory, stagedEvents }
+      );
+    })();
+    this.publish(options.bus, stagedEvents);
+    markWorkflowRunBlocked(
+      { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
+      run.id,
+      reason
+    );
+    return { decision, recommendationIds: [] };
   }
 
   private commitMissingInputDecision(
@@ -515,14 +900,11 @@ export class OrchestratorService {
     workflowRunId: string,
     stepRun: StepRunRow,
     stepTpl: WorkflowStepTemplate,
-    outstanding: string[],
+    rawQuestion: string,
     options: RequestNextDecisionOptions
   ): { decision: WorkflowDecisionTrace; recommendationIds: string[] } {
     const stagedEvents: DomainEvent[] = [];
-    const rule = stepRules[stepTpl.id];
-    const ctx = ruleContext(stepRun, listArtifactsForRun(db, workflowRunId));
-    const nextQuestion = rule?.nextQuestion?.(ctx);
-    const question = (nextQuestion?.question ?? stepTpl.purpose).slice(0, 1024);
+    const question = rawQuestion.slice(0, 1024);
     const output = db.transaction(() => {
       this.appendDecisionRequested(db, now, goalId, workflowRunId, stepRun.id, stepTpl.id, options, stagedEvents);
       const decision = recordDecisionInTx(
@@ -535,17 +917,19 @@ export class OrchestratorService {
           decisionType: "request_user_input",
           selectedAction: `request_input:${stepTpl.id}`,
           reason: question,
-          influencedBy: outstanding.map((criterion) => ({
-            kind: "workflow_step" as const,
-            id: stepTpl.id,
-            label: criterion,
-            effect: "required" as const,
-          })),
+          influencedBy: [
+            {
+              kind: "workflow_step" as const,
+              id: stepTpl.id,
+              label: stepTpl.name,
+              effect: "required" as const,
+            },
+          ],
           inputFingerprint: decisionFingerprint({
             runId: workflowRunId,
             stepRunId: stepRun.id,
             decisionType: "request_user_input",
-            payload: outstanding,
+            payload: question,
           }),
         },
         { idFactory: options.idFactory, stagedEvents }
