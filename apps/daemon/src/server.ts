@@ -153,6 +153,9 @@ import { createDaemonContext, type DaemonContext } from './daemon-context.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
+import { registerGoalBootstrapRoute } from './goals/bootstrap-route.js';
+import { startWorkflowRun } from './workflows/runs/usecases.js';
+import { OrchestratorService } from './workflows/orchestrator/service.js';
 import { registerWorkflowTemplateRoutes } from './workflows/templates/routes.js';
 import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js';
@@ -416,6 +419,33 @@ export function createServer(
       }
       throw error;
     }
+  });
+
+  // ---- Composite goal + workflow bootstrap ----
+
+  registerGoalBootstrapRoute(server, {
+    createGoalFn: (input) =>
+      createGoal(input, {
+        db: getDatabase(),
+        bus: eventBus,
+        skills: skillRegistry,
+        modelProviderRegistry: daemonContext.modelProviderRegistry,
+        inspectWorkspace,
+      }),
+    startWorkflowRunFn: (args) =>
+      startWorkflowRun(
+        { db: getDatabase(), bus: eventBus, now: daemonContext.now, idFactory: daemonContext.idFactory },
+        args
+      ),
+    requestNextDecisionFn: async (_goalId, runId) => {
+      const orchestratorService = new OrchestratorService(daemonContext.operatorSelector);
+      return orchestratorService.requestNextDecision(
+        getDatabase(),
+        daemonContext.now ?? (() => new Date().toISOString()),
+        runId,
+        { bus: eventBus, idFactory: daemonContext.idFactory }
+      );
+    },
   });
 
   server.get('/v1/goals', async (): Promise<ListGoalsResponse> => {
