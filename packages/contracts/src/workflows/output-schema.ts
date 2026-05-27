@@ -37,7 +37,9 @@ function typeOf(value: unknown): "string" | "number" | "boolean" | "array" | "ob
   return "other";
 }
 
-// depth: remaining nesting levels to validate (cap 2 total => start at 1 for nested call)
+// depth controls recursion: validateStepOutput starts at 1 so top-level fields may
+// recurse one level into nested object fields (2 levels total); deeper structures are
+// accepted as opaque.
 function checkField(
   field: WorkflowStepOutputField,
   value: unknown,

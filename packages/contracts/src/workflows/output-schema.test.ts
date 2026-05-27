@@ -36,4 +36,30 @@ describe("validateStepOutput", () => {
     expect(validateStepOutput(nested, { owner: { name: "a" } }).ok).toBe(true);
     expect(validateStepOutput(nested, { owner: {} }).ok).toBe(false);
   });
+
+  it("rejects a null output", () => {
+    const r = validateStepOutput(schema, null);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.errors.join()).toMatch(/expected object/);
+  });
+
+  it("does not validate beyond nesting depth 2 (third level opaque)", () => {
+    const deep = WorkflowStepOutputSchema.parse([
+      { key: "owner", type: "object", required: true, fields: [
+        { key: "profile", type: "object", required: true, fields: [
+          { key: "name", type: "string", required: true },
+        ] },
+      ] },
+    ]);
+    // profile.name is wrong type, but it sits at the 3rd level → not checked
+    const r = validateStepOutput(deep, { owner: { profile: { name: 123 } } });
+    expect(r.ok).toBe(true);
+  });
+
+  it("accepts an empty required array and rejects mixed item types", () => {
+    expect(validateStepOutput(schema, { problem: "x", constraints: [] }).ok).toBe(true);
+    const r = validateStepOutput(schema, { problem: "x", constraints: ["a", 1] });
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.errors.join()).toMatch(/constraints\[1\]/);
+  });
 });
