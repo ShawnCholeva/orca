@@ -212,6 +212,17 @@ describe("runMigrations", () => {
     ]);
   });
 
+  it("workflow_step_runs has operator-selection columns", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+    const cols = db.prepare("PRAGMA table_info(workflow_step_runs)").all() as { name: string }[];
+    const names = cols.map((c) => c.name);
+    expect(names).toContain("selected_operator_id");
+    expect(names).toContain("selected_provider_id");
+    expect(names).toContain("selected_model_id");
+    expect(names).toContain("operator_selected_at");
+  });
+
   it("enforces foreign keys for workspaces.goal_id", () => {
     const db = freshDb();
     runMigrations(db, defaultMigrationsDir());

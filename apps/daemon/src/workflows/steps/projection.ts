@@ -12,8 +12,10 @@ interface WorkflowStepRunRow {
   started_at: string | null;
   finished_at: string | null;
   blocked_reason: string | null;
-  satisfied_exit_criteria_json: string;
-  outstanding_exit_criteria_json: string;
+  selected_operator_id: string | null;
+  selected_provider_id: string | null;
+  selected_model_id: string | null;
+  operator_selected_at: string | null;
 }
 
 let _db: Database.Database | null = null;
@@ -23,7 +25,7 @@ function ensureStmt(db: Database.Database): Database.Statement {
   if (_db !== db || !_stmt) {
     _db = db;
     _stmt = db.prepare(
-      "SELECT id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, started_at, finished_at, blocked_reason, satisfied_exit_criteria_json, outstanding_exit_criteria_json FROM workflow_step_runs WHERE id = ?"
+      "SELECT id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, started_at, finished_at, blocked_reason, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at FROM workflow_step_runs WHERE id = ?"
     );
   }
   return _stmt;
@@ -46,8 +48,10 @@ function rowToStepRun(row: WorkflowStepRunRow): WorkflowStepRunT {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     blockedReason: row.blocked_reason,
-    satisfiedExitCriteria: JSON.parse(row.satisfied_exit_criteria_json) as string[],
-    outstandingExitCriteria: JSON.parse(row.outstanding_exit_criteria_json) as string[],
+    selectedOperatorId: row.selected_operator_id,
+    selectedProviderId: row.selected_provider_id as never,
+    selectedModelId: row.selected_model_id,
+    operatorSelectedAt: row.operator_selected_at,
   });
 }
 
@@ -57,4 +61,15 @@ export function getWorkflowStepRunById(
 ): WorkflowStepRunT | null {
   const row = ensureStmt(db).get(id) as WorkflowStepRunRow | undefined;
   return row ? rowToStepRun(row) : null;
+}
+
+export function recordOperatorSelection(
+  db: Database.Database,
+  id: string,
+  sel: { operatorId: string; providerId: string; modelId: string; at: string }
+): void {
+  db.prepare(
+    "UPDATE workflow_step_runs SET selected_operator_id=?, selected_provider_id=?, selected_model_id=?, operator_selected_at=? WHERE id=?"
+  ).run(sel.operatorId, sel.providerId, sel.modelId, sel.at, id);
+  resetWorkflowStepProjectionPreparedStatements();
 }

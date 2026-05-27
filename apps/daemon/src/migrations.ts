@@ -8,6 +8,8 @@ const WORKFLOW_RECOMMENDATION_TYPES_MIGRATION =
   "0011_workflow_recommendation_types.sql";
 const ORCHESTRATION_TRANSPORT_MIGRATION = "0012_orchestration_transport.sql";
 const ORCHESTRATOR_MESSAGES_MIGRATION = "0013_orchestrator_messages.sql";
+const WORKFLOW_STEP_RUNS_OPERATOR_SELECTION_MIGRATION =
+  "0014_workflow_step_runs_operator_selection.sql";
 
 export const migrationFiles = [
   "0001_init.sql",
@@ -21,7 +23,8 @@ export const migrationFiles = [
   "0010_workflows.sql",
   WORKFLOW_RECOMMENDATION_TYPES_MIGRATION,
   ORCHESTRATION_TRANSPORT_MIGRATION,
-  ORCHESTRATOR_MESSAGES_MIGRATION
+  ORCHESTRATOR_MESSAGES_MIGRATION,
+  WORKFLOW_STEP_RUNS_OPERATOR_SELECTION_MIGRATION
 ] as const;
 
 export function runMigrations(
