@@ -52,7 +52,7 @@
 
 .orca-chat-message {
   max-width: 720px;
-  padding: 10px 12px;
+  padding: 10px 14px;
   border-radius: 10px;
   border: 1px solid var(--hairline);
   background: var(--panel-2);
@@ -63,39 +63,61 @@
 }
 
 .orca-chat-message--user {
-  background: rgba(91, 140, 255, 0.1);
-  border-color: rgba(91, 140, 255, 0.24);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  border-radius: 12px 12px 4px 12px;
 }
 
 .orca-chat-composer {
   border-top: 1px solid var(--hairline);
-  background: var(--panel);
-  padding: 12px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: end;
+  background: var(--panel-2);
+  padding: 10px 12px 12px;
+  flex-shrink: 0;
 }
 
-.orca-chat-composer textarea {
-  width: 100%;
+.orca-chat-input-wrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  background: var(--bg);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 10px;
+  padding: 8px 10px;
+  transition: border-color 120ms ease;
+}
+
+.orca-chat-input-wrapper:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 2px rgba(91, 140, 255, 0.08);
+}
+
+.orca-chat-input-icon {
+  color: var(--text-4);
+  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+
+.orca-chat-input-wrapper textarea {
+  flex: 1;
+  min-width: 0;
   min-height: 42px;
   max-height: 160px;
-  padding: 10px 12px;
-  border: 1px solid var(--hairline-strong);
-  border-radius: 8px;
-  background: var(--bg);
+  background: transparent;
+  border: none;
+  outline: none;
   color: var(--text);
   font-family: inherit;
   font-size: 13px;
-  line-height: 1.45;
-  resize: vertical;
+  line-height: 1.5;
+  resize: none;
+  padding: 3px 0;
 }
 
-.orca-chat-composer textarea:focus {
-  outline: none;
-  border-color: var(--accent-line);
-  box-shadow: 0 0 0 2px rgba(91, 140, 255, 0.08);
+.orca-chat-compose-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .orca-chat-input-card {
@@ -146,18 +168,43 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 108px;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid transparent;
+  border-radius: 7px;
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-2);
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
+  /* icon-only size */
+  width: 26px;
+  height: 26px;
+  padding: 0;
 }
 
-.orca-chat-send--primary {
+.orca-chat-send:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
+.orca-chat-send--active {
   background: var(--accent);
   color: #fff;
+  border-color: transparent;
+}
+
+.orca-chat-send--active:hover:not(:disabled) {
+  background: var(--accent-hover, #78a1ff);
+}
+
+/* Text-button variant — used in input-card Submit */
+.orca-chat-send--primary {
+  min-width: 108px;
+  width: auto;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+  border-radius: 8px;
 }
 
 .orca-chat-send--primary:hover:not(:disabled) {
@@ -362,6 +409,13 @@
   display: flex;
   gap: 10px;
   max-width: 92%;
+}
+
+.msg--user {
+  flex-direction: column;
+  align-items: flex-end;
+  margin-left: auto;
+  max-width: 78%;
 }
 
 .msg-meta {

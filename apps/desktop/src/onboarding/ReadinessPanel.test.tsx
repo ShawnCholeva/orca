@@ -8,7 +8,7 @@ const agents = [
 
 const mockRunAll = vi.fn();
 const mockRunOne = vi.fn();
-const mockOpenUrl = vi.fn();
+const mockOpenUrl = vi.fn().mockResolvedValue(undefined);
 
 beforeEach(() => {
   mockRunAll.mockReset();

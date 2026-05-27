@@ -9,7 +9,7 @@ describe("RepairBlock", () => {
     render(
       <RepairBlock
         repair={{ kind: "run_command", command: "codex login", label: "Sign in to Codex" }}
-        onOpenUrl={vi.fn()}
+        onOpenUrl={vi.fn().mockResolvedValue(undefined)}
       />,
     );
     expect(screen.getByTestId("repair-command")).toHaveTextContent("codex login");
@@ -18,7 +18,7 @@ describe("RepairBlock", () => {
   });
 
   it("renders install_url with a clickable Install button", () => {
-    const onOpenUrl = vi.fn();
+    const onOpenUrl = vi.fn().mockResolvedValue(undefined);
     render(
       <RepairBlock
         repair={{ kind: "install_url", url: "https://example.com", label: "Install Gemini CLI" }}
@@ -38,7 +38,7 @@ describe("RepairBlock", () => {
           label: "Set API key",
           requiresAppRestart: true,
         }}
-        onOpenUrl={vi.fn()}
+        onOpenUrl={vi.fn().mockResolvedValue(undefined)}
       />,
     );
     expect(screen.getByText(/restart orca/i)).toBeInTheDocument();

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
+import { waitFor } from "@testing-library/react";
 import type { Agent } from "@orca/contracts";
 import { OnboardingView } from "./OnboardingView";
 import { ThemeProvider } from "../theme/ThemeProvider";
@@ -40,10 +41,12 @@ import * as api from "../api";
 
 describe("OnboardingView", () => {
   let container: HTMLDivElement;
+  let currentRoot: ReturnType<typeof createRoot> | null = null;
 
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
+    currentRoot = null;
     vi.mocked(api.listAgents).mockResolvedValue(SEED_AGENTS);
     vi.mocked(api.updateAgentConnection).mockImplementation(async (id, connected) => ({
       ...(SEED_AGENTS.find((a) => a.id === id) ?? agent(id, id, false, 0)),
@@ -59,7 +62,10 @@ describe("OnboardingView", () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    if (currentRoot) {
+      await act(async () => { currentRoot!.unmount(); });
+    }
     document.body.removeChild(container);
     vi.useRealTimers();
     vi.clearAllMocks();
@@ -67,6 +73,7 @@ describe("OnboardingView", () => {
 
   async function render(onComplete: (ids: string[]) => void) {
     const root = createRoot(container);
+    currentRoot = root;
     await act(async () => {
       root.render(
         <ThemeProvider>
@@ -131,10 +138,13 @@ describe("OnboardingView", () => {
   });
 
   it("persists selections via updateAgentConnection then calls onComplete", async () => {
-    vi.mocked(api.runReadinessCheck).mockResolvedValue([
-      { agentId: "claude-code", status: "ready", steps: [], checkedAt: NOW, version: "1.0.0" },
-      { agentId: "codex", status: "ready", steps: [], checkedAt: NOW, version: "1.0.0" },
-    ]);
+    vi.mocked(api.runReadinessCheckForAgent).mockImplementation(async (id: string) => ({
+      agentId: id,
+      status: "ready" as const,
+      steps: [],
+      checkedAt: NOW,
+      version: "1.0.0",
+    }));
     const onComplete = vi.fn();
     await render(onComplete);
     clickByText("Get started");
@@ -150,8 +160,7 @@ describe("OnboardingView", () => {
     clickByText("Continue");
     expect(container.textContent).toContain("Preparing your workspace");
 
-    // Flush the parallel PATCH calls then ReadinessPanel initialization.
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    // Flush updateAgentConnection promises.
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
     expect(api.updateAgentConnection).toHaveBeenCalledTimes(SEED_AGENTS.length);
@@ -160,21 +169,22 @@ describe("OnboardingView", () => {
     expect(api.updateAgentConnection).toHaveBeenCalledWith("gemini-cli", false);
     expect(api.updateAgentConnection).toHaveBeenCalledWith("opencode", false);
 
-    // Continue is now enabled since readyCount > 0.
-    const continueBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.trim() === "Continue",
-    ) as HTMLButtonElement;
-    expect(continueBtn.disabled).toBe(false);
-    act(() => { continueBtn.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
-
-    expect(onComplete).toHaveBeenCalledTimes(1);
+    // In test mode, infra timers fire at 0ms. waitFor polls until animation completes
+    // and auto-complete fires (all agents ready → onComplete called automatically).
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledTimes(1);
+    }, { timeout: 3000 });
     expect(onComplete.mock.calls[0][0]).toEqual(["claude-code", "codex"]);
   });
 
-  it("step 2 mounts the readiness panel and disables Continue until ≥1 ready", async () => {
-    vi.mocked(api.runReadinessCheck).mockResolvedValue([
-      { agentId: "claude-code", status: "needs_auth", steps: [], repair: { kind: "run_command", command: "claude auth login", label: "Sign in" }, checkedAt: "2026-05-22T00:00:00.000Z" },
-    ]);
+  it("step 2 runs readiness checks and disables Continue until ≥1 ready", async () => {
+    vi.mocked(api.runReadinessCheckForAgent).mockImplementation(async (id: string) => ({
+      agentId: id,
+      status: "needs_auth" as const,
+      steps: [],
+      repair: { kind: "run_command" as const, command: "claude auth login", label: "Sign in" },
+      checkedAt: NOW,
+    }));
     await render(vi.fn());
     clickByText("Get started");
     act(() => {
@@ -183,18 +193,22 @@ describe("OnboardingView", () => {
     });
     clickByText("Continue");
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(api.runReadinessCheck).toHaveBeenCalled();
-    const cont = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.trim() === "Continue",
-    ) as HTMLButtonElement;
-    expect(cont.disabled).toBe(true);
+    await waitFor(() => expect(api.runReadinessCheckForAgent).toHaveBeenCalled(), { timeout: 3000 });
+    await waitFor(() => {
+      const cont = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.trim() === "Continue",
+      ) as HTMLButtonElement | undefined;
+      expect(cont?.disabled).toBe(true);
+    }, { timeout: 3000 });
   });
 
   it("when 0 ready and all settled, shows 'Continue anyway'", async () => {
-    vi.mocked(api.runReadinessCheck).mockResolvedValue([
-      { agentId: "claude-code", status: "missing", steps: [], checkedAt: "2026-05-22T00:00:00.000Z" },
-    ]);
+    vi.mocked(api.runReadinessCheckForAgent).mockImplementation(async (id: string) => ({
+      agentId: id,
+      status: "missing" as const,
+      steps: [],
+      checkedAt: NOW,
+    }));
     const onComplete = vi.fn();
     await render(onComplete);
     clickByText("Get started");
@@ -204,7 +218,11 @@ describe("OnboardingView", () => {
     });
     clickByText("Continue");
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await waitFor(() => {
+      expect(Array.from(container.querySelectorAll("button")).some(
+        (b) => b.textContent?.includes("Continue anyway"),
+      )).toBe(true);
+    }, { timeout: 3000 });
     clickByText("Continue anyway");
     expect(onComplete).toHaveBeenCalled();
   });

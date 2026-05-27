@@ -7,7 +7,7 @@ interface ReadinessRowProps {
   agent: Agent;
   state: RowState;
   onRetry: (id: string) => void;
-  onOpenUrl: (url: string) => void;
+  onOpenUrl: (url: string) => Promise<void>;
 }
 
 export function ReadinessRow({ agent, state, onRetry, onOpenUrl }: ReadinessRowProps) {
@@ -28,7 +28,11 @@ export function ReadinessRow({ agent, state, onRetry, onOpenUrl }: ReadinessRowP
         </div>
       ))}
       {state === "settled" && r?.repair && (
-        <RepairBlock repair={r.repair} onOpenUrl={onOpenUrl} />
+        <RepairBlock
+          repair={r.repair}
+          onOpenUrl={onOpenUrl}
+          onActionTaken={() => onRetry(agent.id)}
+        />
       )}
       {state === "settled" && status !== "ready" && (
         <button

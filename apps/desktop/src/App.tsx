@@ -231,23 +231,12 @@ export default function App() {
     );
   }
 
+  const selectedGoal = goals.find((g) => g.id === selectedOrchestratorGoalId) ?? null;
+
   return (
     <div className="app-shell">
       <Titlebar />
       {onboardingState === "complete" && <NoReadyAgentsBanner agents={agents} />}
-      <div className="app">
-      <header className="status-header">
-        <h1 className="app-title">Orca</h1>
-        <div className={`connection-indicator connection-indicator--${connectionStatus}`}>
-          {statusLabel[connectionStatus]}
-        </div>
-      </header>
-
-      {connectionStatus === "closed" && (
-        <div className="error-banner">
-          Daemon is disconnected — start the daemon to use Orca.
-        </div>
-      )}
 
       {mode === "detail" && currentGoalId ? (
         <div className="main-content main-content--full">
@@ -259,124 +248,154 @@ export default function App() {
         </div>
       ) : (
         <div className="orchestrator-shell">
-          <nav className="orchestrator-tabs" role="tablist" aria-label="Workspace views">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "orchestrator"}
-              className={`orchestrator-tab ${activeTab === "orchestrator" ? "orchestrator-tab--active" : ""}`}
-              onClick={() => setActiveTab("orchestrator")}
-            >
-              Orchestrator
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "reasoning"}
-              className={`orchestrator-tab ${activeTab === "reasoning" ? "orchestrator-tab--active" : ""}`}
-              onClick={() => setActiveTab("reasoning")}
-            >
-              Reasoning
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "workflows"}
-              className={`orchestrator-tab ${activeTab === "workflows" ? "orchestrator-tab--active" : ""}`}
-              onClick={() => setActiveTab("workflows")}
-            >
-              Workflows
-            </button>
-          </nav>
+          {/* ── Goals rail — LEFT ── */}
+          <aside className="orchestrator-rail" aria-label="Goals">
+            <div className="orchestrator-rail-header">
+              <span className="orchestrator-rail-title">Goals</span>
+              <button
+                type="button"
+                className="orchestrator-rail-new-btn"
+                onClick={() => setShowCreateFlow(true)}
+                disabled={!connected}
+                aria-label="New Goal"
+                title="New Goal"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+            </div>
+            {goals.length === 0 ? (
+              <p className="orchestrator-rail-empty">
+                No goals yet. Click <strong>+</strong> to start.
+              </p>
+            ) : (
+              <ul className="orchestrator-rail-list">
+                {goals.map((goal) => (
+                  <GoalCard
+                    key={goal.id}
+                    goal={goal}
+                    selected={goal.id === selectedOrchestratorGoalId}
+                    onSelect={() => setSelectedOrchestratorGoalId(goal.id)}
+                    onView={() => openGoalDetail(goal.id)}
+                  />
+                ))}
+              </ul>
+            )}
+          </aside>
 
-          {activeTab === "orchestrator" ? (
-            <section className="orchestrator-pane" role="tabpanel" aria-label="Orchestrator">
-              <div className="orchestrator-actions">
-                <span className="orchestrator-actions-meta">
-                  {goals.length} goal{goals.length === 1 ? "" : "s"} · ask Orca to plan or delegate
+          {/* ── Main area: topbar + pane ── */}
+          <div className="orchestrator-main">
+            <nav className="orchestrator-tabs" role="tablist" aria-label="Workspace views">
+              {/* Breadcrumb */}
+              <div className="orchestrator-breadcrumb">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.5" fill="currentColor" />
+                </svg>
+                <span className="orchestrator-breadcrumb-name">
+                  {selectedGoal?.title ?? "Select a goal"}
                 </span>
+              </div>
+
+              {/* Tab buttons */}
+              <div className="orchestrator-tab-group">
                 <button
                   type="button"
-                  className="orchestrator-primary-btn"
-                  onClick={() => setShowCreateFlow(true)}
-                  disabled={!connected}
+                  role="tab"
+                  aria-selected={activeTab === "orchestrator"}
+                  className={`orchestrator-tab${activeTab === "orchestrator" ? " orchestrator-tab--active" : ""}`}
+                  onClick={() => setActiveTab("orchestrator")}
                 >
-                  + New Goal
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6z" />
+                  </svg>
+                  Orchestrator
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "reasoning"}
+                  className={`orchestrator-tab${activeTab === "reasoning" ? " orchestrator-tab--active" : ""}`}
+                  onClick={() => setActiveTab("reasoning")}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" /><circle cx="12" cy="12" r="4" />
+                  </svg>
+                  Reasoning
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "workflows"}
+                  className={`orchestrator-tab${activeTab === "workflows" ? " orchestrator-tab--active" : ""}`}
+                  onClick={() => setActiveTab("workflows")}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="3" width="6" height="6" rx="1" /><rect x="15" y="3" width="6" height="6" rx="1" /><rect x="9" y="15" width="6" height="6" rx="1" /><path d="M6 9v3h12V9M12 12v3" />
+                  </svg>
+                  Workflows
                 </button>
               </div>
 
-              <div className="orchestrator-body">
-                <div className="orchestrator-chat-col">
-                  <OrcaChat
-                    goals={goals}
-                    selectedGoalId={selectedOrchestratorGoalId}
-                    connectionStatus={connectionStatus}
-                  />
-                </div>
+              {/* Right actions */}
+              <div className="orchestrator-tab-actions">
+                <span className={`orchestrator-status-dot orchestrator-status-dot--${connectionStatus}`} title={statusLabel[connectionStatus]} />
+              </div>
+            </nav>
 
-                <aside className="orchestrator-rail" aria-label="Goals">
-                  <div className="orchestrator-rail-header">
-                    <span className="orchestrator-rail-title">Goals</span>
-                    <span className="orchestrator-rail-count mono">{goals.length}</span>
+            {connectionStatus === "closed" && (
+              <div className="error-banner error-banner--inline">
+                Daemon disconnected — start the daemon to use Orca.
+              </div>
+            )}
+
+            {activeTab === "orchestrator" ? (
+              <section className="orchestrator-pane" role="tabpanel" aria-label="Orchestrator">
+                <OrcaChat
+                  goals={goals}
+                  selectedGoalId={selectedOrchestratorGoalId}
+                  connectionStatus={connectionStatus}
+                />
+              </section>
+            ) : activeTab === "reasoning" ? (
+              <section className="reasoning-pane" role="tabpanel" aria-label="Reasoning">
+                <div className="reasoning-card">
+                  <div className="reasoning-card-header">
+                    <h2 className="reasoning-card-title">Runtime Diagnostics</h2>
+                    <button
+                      type="button"
+                      className="reasoning-action-btn"
+                      onClick={loadDiagnostics}
+                      disabled={diagnosticsLoading}
+                    >
+                      {diagnosticsLoading ? "Loading…" : "Refresh"}
+                    </button>
                   </div>
-                  {goals.length === 0 ? (
-                    <p className="orchestrator-rail-empty">
-                      No goals yet. Click <strong>+ New Goal</strong> to start.
-                    </p>
-                  ) : (
-                    <ul className="orchestrator-rail-list">
-                      {goals.map((goal) => (
-                        <GoalCard
-                          key={goal.id}
-                          goal={goal}
-                          selected={goal.id === selectedOrchestratorGoalId}
-                          onSelect={() => setSelectedOrchestratorGoalId(goal.id)}
-                          onView={() => openGoalDetail(goal.id)}
-                        />
-                      ))}
-                    </ul>
+                  {diagnosticsError && <p className="reasoning-error">{diagnosticsError}</p>}
+                  {!diagnosticsLoading && !diagnosticsError && diagnostics !== null && (
+                    <>
+                      <h3 className="reasoning-card-subtitle">Plugins ({diagnostics.plugins.length})</h3>
+                      <ul className="reasoning-list">
+                        {diagnostics.plugins.map((p) => (
+                          <li key={p.id}>{p.id} — {p.capabilities.join(", ")}</li>
+                        ))}
+                      </ul>
+                      <h3 className="reasoning-card-subtitle">Skills ({diagnostics.skills.length})</h3>
+                      <ul className="reasoning-list">
+                        {diagnostics.skills.map((s) => (
+                          <li key={s.id}>{s.id} — {s.extensionPoint} ({s.title})</li>
+                        ))}
+                      </ul>
+                    </>
                   )}
-                </aside>
-              </div>
-            </section>
-          ) : activeTab === "reasoning" ? (
-            <section className="reasoning-pane" role="tabpanel" aria-label="Reasoning">
-              <div className="reasoning-card">
-                <div className="reasoning-card-header">
-                  <h2 className="reasoning-card-title">Runtime Diagnostics</h2>
-                  <button
-                    type="button"
-                    className="reasoning-action-btn"
-                    onClick={loadDiagnostics}
-                    disabled={diagnosticsLoading}
-                  >
-                    {diagnosticsLoading ? "Loading…" : "Refresh"}
-                  </button>
                 </div>
-                {diagnosticsError && <p className="reasoning-error">{diagnosticsError}</p>}
-                {!diagnosticsLoading && !diagnosticsError && diagnostics !== null && (
-                  <>
-                    <h3 className="reasoning-card-subtitle">Plugins ({diagnostics.plugins.length})</h3>
-                    <ul className="reasoning-list">
-                      {diagnostics.plugins.map((p) => (
-                        <li key={p.id}>{p.id} — {p.capabilities.join(", ")}</li>
-                      ))}
-                    </ul>
-                    <h3 className="reasoning-card-subtitle">Skills ({diagnostics.skills.length})</h3>
-                    <ul className="reasoning-list">
-                      {diagnostics.skills.map((s) => (
-                        <li key={s.id}>{s.id} — {s.extensionPoint} ({s.title})</li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-              </div>
-            </section>
-          ) : (
-            <section className="workflows-pane" role="tabpanel" aria-label="Workflows">
-              <WorkflowsPage />
-            </section>
-          )}
+              </section>
+            ) : (
+              <section className="workflows-pane" role="tabpanel" aria-label="Workflows">
+                <WorkflowsPage />
+              </section>
+            )}
+          </div>
         </div>
       )}
 
@@ -387,7 +406,6 @@ export default function App() {
           onDone={handleCreateFlowDone}
         />
       )}
-      </div>
     </div>
   );
 }

@@ -1,134 +1,22 @@
-/* Orchestrator shell — tabbed top-level layout matching the operational theme
-   used by onboarding. */
+/* Orchestrator shell — left rail + main area */
 
 .orchestrator-shell {
   flex: 1;
   min-height: 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   background: var(--bg);
   color: var(--text);
-}
-
-.orchestrator-tabs {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 24px 0;
-  border-bottom: 1px solid var(--hairline);
-  flex-shrink: 0;
-}
-
-.orchestrator-tab {
-  position: relative;
-  padding: 10px 14px;
-  background: transparent;
-  border: none;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0.1px;
-  color: var(--text-3);
-  cursor: pointer;
-  transition: color 120ms ease;
-}
-
-.orchestrator-tab:hover:not(:disabled) {
-  color: var(--text);
-}
-
-.orchestrator-tab--active {
-  color: var(--text);
-}
-
-.orchestrator-tab--active::after {
-  content: "";
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: -1px;
-  height: 2px;
-  background: var(--accent);
-  border-radius: 2px 2px 0 0;
-}
-
-/* ── Orchestrator tab content ─────────────────────── */
-
-.orchestrator-pane {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 14px;
-  gap: 14px;
   overflow: hidden;
 }
 
-.orchestrator-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-.orchestrator-actions-meta {
-  font-size: 11px;
-  color: var(--text-3);
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-}
-
-.orchestrator-primary-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 14px;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
-  border: 1px solid transparent;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 120ms ease;
-}
-
-.orchestrator-primary-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-
-.orchestrator-primary-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.orchestrator-body {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 1fr 320px;
-  gap: 14px;
-  overflow: hidden;
-}
-
-@media (max-width: 900px) {
-  .orchestrator-body {
-    grid-template-columns: 1fr;
-  }
-}
-
-.orchestrator-chat-col {
-  display: flex;
-  min-height: 0;
-}
+/* ── Left goals rail ─────────────────────── */
 
 .orchestrator-rail {
+  width: 248px;
+  flex-shrink: 0;
   background: var(--panel);
-  border: 1px solid var(--hairline);
-  border-radius: 12px;
+  border-right: 1px solid var(--hairline);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -136,7 +24,7 @@
 }
 
 .orchestrator-rail-header {
-  padding: 12px 14px;
+  padding: 10px 12px 8px;
   border-bottom: 1px solid var(--hairline);
   display: flex;
   align-items: center;
@@ -145,7 +33,7 @@
 }
 
 .orchestrator-rail-title {
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 1.3px;
   text-transform: uppercase;
@@ -153,10 +41,28 @@
   font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 
-.orchestrator-rail-count {
-  font-size: 11px;
-  color: var(--text-3);
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+.orchestrator-rail-new-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.orchestrator-rail-new-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.orchestrator-rail-new-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .orchestrator-rail-list {
@@ -166,60 +72,73 @@
   list-style: none;
   display: flex;
   flex-direction: column;
+  padding: 4px 8px 8px;
 }
 
 .orchestrator-rail-empty {
-  padding: 18px 14px;
+  padding: 16px 14px;
   font-size: 12px;
   color: var(--text-3);
   text-align: center;
+  line-height: 1.6;
 }
+
+/* Goal rail items */
 
 .goal-card {
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--hairline);
+  padding: 9px 9px;
+  margin-bottom: 2px;
+  border-radius: 7px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
-}
-
-.goal-card:last-child {
-  border-bottom: none;
+  transition: background 120ms ease;
+  position: relative;
 }
 
 .goal-card:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.025);
 }
 
 .goal-card--selected {
-  background: var(--panel-2);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.goal-card--selected::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
 }
 
 .goal-card-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .goal-card-title {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 500;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.35;
 }
 
 .goal-card-status {
-  font-size: 9.5px;
-  letter-spacing: 0.8px;
+  font-size: 9px;
+  letter-spacing: 0.6px;
   text-transform: uppercase;
-  padding: 2px 7px;
+  padding: 2px 6px;
   border-radius: 999px;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-weight: 600;
@@ -233,13 +152,13 @@
 
 .goal-card-status--archived {
   color: var(--text-3);
-  background: var(--panel-2);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .goal-card-desc {
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.5;
-  color: var(--text-2);
+  color: var(--text-3);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -247,26 +166,26 @@
 }
 
 .goal-card-meta {
-  font-size: 10.5px;
+  font-size: 10px;
   color: var(--text-4);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 
 .goal-card-actions {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   margin-top: 2px;
 }
 
 .goal-card-btn {
   flex: 1;
-  height: 26px;
-  padding: 0 10px;
-  background: var(--panel-2);
+  height: 24px;
+  padding: 0 8px;
+  background: transparent;
   border: 1px solid var(--hairline);
-  border-radius: 6px;
-  color: var(--text-2);
-  font-size: 11.5px;
+  border-radius: 5px;
+  color: var(--text-3);
+  font-size: 11px;
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
@@ -274,7 +193,7 @@
 }
 
 .goal-card-btn:hover:not(:disabled) {
-  background: var(--bg);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   border-color: var(--hairline-strong);
 }
@@ -286,8 +205,6 @@
 }
 
 .goal-card-btn--primary:hover:not(:disabled) {
-  background: var(--accent-soft);
-  color: var(--accent);
   border-color: var(--accent);
 }
 
@@ -308,7 +225,7 @@
 }
 
 .goal-card-form label {
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.8px;
@@ -321,8 +238,8 @@
   background: var(--bg);
   border: 1px solid var(--hairline-strong);
   border-radius: 6px;
-  padding: 7px 9px;
-  font-size: 12.5px;
+  padding: 6px 8px;
+  font-size: 12px;
   color: var(--text);
   font-family: inherit;
   resize: vertical;
@@ -339,11 +256,181 @@
   color: var(--err);
   border: 1px solid transparent;
   border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 11.5px;
+  padding: 5px 8px;
+  font-size: 11px;
 }
 
-/* ── Reasoning tab (Runtime Diagnostics for now) ── */
+/* ── Main area ─────────────────────── */
+
+.orchestrator-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── TopBar: breadcrumb + tabs + actions ─────────────────────── */
+
+.orchestrator-tabs {
+  height: 46px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--panel);
+}
+
+.orchestrator-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  max-width: 180px;
+  color: var(--text-3);
+  overflow: hidden;
+}
+
+.orchestrator-breadcrumb-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orchestrator-tab-group {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.orchestrator-tab-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Tab buttons */
+.orchestrator-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.orchestrator-tab:hover:not(:disabled) {
+  color: var(--text-2);
+}
+
+.orchestrator-tab--active {
+  color: var(--text);
+}
+
+.orchestrator-tab--active::after {
+  content: "";
+  position: absolute;
+  bottom: -7px;
+  left: 12px;
+  right: 12px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+
+/* Primary button (+ New Goal) */
+.orchestrator-primary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.orchestrator-primary-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.orchestrator-primary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Connection status dot */
+.orchestrator-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.orchestrator-status-dot--open {
+  background: var(--run);
+  box-shadow: 0 0 0 3px var(--run-soft);
+}
+
+.orchestrator-status-dot--connecting {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-soft);
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+.orchestrator-status-dot--closed {
+  background: var(--err);
+  box-shadow: 0 0 0 3px var(--err-soft);
+}
+
+/* ── Pane content ─────────────────────── */
+
+.orchestrator-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  overflow: hidden;
+}
+
+/* Inline disconnect banner */
+.error-banner--inline {
+  background: var(--err-soft);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+  color: var(--err);
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  flex-shrink: 0;
+  margin-bottom: 10px;
+  border-radius: 8px;
+}
+
+/* ── Reasoning tab ─────────────────────── */
 
 .reasoning-pane {
   flex: 1;

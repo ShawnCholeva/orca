@@ -285,6 +285,271 @@
   pointer-events: none;
 }
 
+/* ── Setup panel (Preparing your workspace) ──────────── */
+.setup-panel {
+  min-height: 480px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 40px;
+}
+
+.setup-spinner {
+  position: relative;
+  width: 96px;
+  height: 96px;
+}
+
+.setup-spinner-ring {
+  position: absolute;
+  inset: 0;
+  animation: orca-spin 1.6s linear infinite;
+}
+
+.setup-spinner-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.setup-spinner-orb {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2, #8B5CF6));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 28px rgba(91,140,255,0.45);
+}
+
+.setup-progress {
+  width: 100%;
+  max-width: 420px;
+}
+
+.setup-progress-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.setup-progress-label {
+  font-size: 10.5px;
+  color: var(--text-3);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.setup-progress-pct {
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+
+.setup-progress-track {
+  height: 4px;
+  background: var(--hairline);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.setup-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2, #8B5CF6));
+  transition: width 400ms ease;
+}
+
+.setup-tasks {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setup-task {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: background 200ms ease, opacity 200ms ease, border-color 200ms ease;
+}
+
+.setup-task--running {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.setup-task--pending {
+  opacity: 0.45;
+}
+
+.setup-task-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
+}
+
+.setup-task-icon--done {
+  background: var(--run);
+  border-color: var(--run);
+}
+
+.setup-task-icon--failed {
+  background: var(--err);
+  border-color: var(--err);
+}
+
+.setup-task-icon--running {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.setup-task-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse-dot 0.9s ease-in-out infinite;
+}
+
+.setup-task-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.setup-task-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.setup-task-detail {
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.setup-task-status {
+  font-size: 10px;
+  color: var(--accent);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.setup-task-status--err {
+  color: var(--err);
+}
+
+.setup-task--failed {
+  background: var(--err-soft);
+  border-color: rgba(239,68,68,0.25);
+}
+
+.setup-task-repair {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.setup-task-step-fail {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--err);
+}
+
+.setup-task-retry-btn {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--hairline-strong);
+  color: var(--text);
+  transition: background 120ms ease;
+  width: fit-content;
+  margin-top: 2px;
+}
+
+.setup-task-retry-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.10);
+}
+
+.setup-task-retry-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* RepairBlock embedded in setup task */
+.setup-task-repair .repair-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.setup-task-repair .repair-block code {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--text);
+  background: rgba(0,0,0,0.25);
+  padding: 6px 10px;
+  border-radius: 6px;
+  display: block;
+  word-break: break-all;
+  border: 1px solid var(--hairline);
+}
+
+.setup-task-repair .repair-block button {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--hairline-strong);
+  color: var(--text);
+  transition: background 120ms ease;
+  width: fit-content;
+}
+
+.setup-task-repair .repair-block button:hover {
+  background: rgba(255,255,255,0.10);
+}
+
+.setup-task-repair .repair-block-hint,
+.setup-task-repair .repair-block-error {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
 /* ── Agent grid ───────────────────────────────────────── */
 .agent-grid-center {
   min-height: 100%;

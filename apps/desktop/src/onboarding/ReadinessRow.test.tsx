@@ -18,7 +18,7 @@ const baseAgent = {
 
 describe("ReadinessRow", () => {
   it("renders 'Checking' when status is checking", () => {
-    render(<ReadinessRow agent={baseAgent} state="checking" onRetry={vi.fn()} onOpenUrl={vi.fn()} />);
+    render(<ReadinessRow agent={baseAgent} state="checking" onRetry={vi.fn()} onOpenUrl={vi.fn().mockResolvedValue(undefined)} />);
     expect(screen.getByText(/checking/i)).toBeInTheDocument();
   });
 
@@ -37,7 +37,7 @@ describe("ReadinessRow", () => {
         }}
         state="settled"
         onRetry={vi.fn()}
-        onOpenUrl={vi.fn()}
+        onOpenUrl={vi.fn().mockResolvedValue(undefined)}
       />,
     );
     expect(screen.getByText(/ready/i)).toBeInTheDocument();
@@ -60,7 +60,7 @@ describe("ReadinessRow", () => {
         }}
         state="settled"
         onRetry={onRetry}
-        onOpenUrl={vi.fn()}
+        onOpenUrl={vi.fn().mockResolvedValue(undefined)}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
@@ -91,7 +91,7 @@ describe("ReadinessRow", () => {
         }}
         state="settled"
         onRetry={vi.fn()}
-        onOpenUrl={vi.fn()}
+        onOpenUrl={vi.fn().mockResolvedValue(undefined)}
       />,
     );
     expect(screen.getByText(/configuration detected; not smoke-tested/i)).toBeInTheDocument();
@@ -118,7 +118,7 @@ describe("ReadinessRow", () => {
         }}
         state="settled"
         onRetry={vi.fn()}
-        onOpenUrl={vi.fn()}
+        onOpenUrl={vi.fn().mockResolvedValue(undefined)}
       />,
     );
     const retry = screen.getByRole("button", { name: /retry/i });

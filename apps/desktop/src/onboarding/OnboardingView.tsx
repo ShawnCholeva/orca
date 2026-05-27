@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
-import type { Agent } from "@orca/contracts";
-import { listAgents, updateAgentConnection, runReadinessCheck, runReadinessCheckForAgent } from "../api";
-import { ReadinessPanel } from "./ReadinessPanel";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Agent, AgentReadinessReport } from "@orca/contracts";
+import { listAgents, updateAgentConnection, runReadinessCheckForAgent } from "../api";
+import { RepairBlock } from "./RepairBlock";
 import { openExternal } from "../utils/openExternal";
 import {
   ArrowRightIcon,
@@ -9,6 +9,7 @@ import {
   ChevronLeftIcon,
   InfoIcon,
   OrcaMark,
+  XIcon,
   glyphFor,
 } from "./glyphs";
 import { useTheme } from "../theme/ThemeProvider";
@@ -187,17 +188,13 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
               <AgentGrid agents={agents} selected={selected} onToggle={toggle} />
             </div>
           )}
-          {step === 2 && !connectionsSaved && (
-            <div className="agent-grid-center">
-              <span className="mono onboarding-footer-meta">Saving agent selections…</span>
-            </div>
-          )}
-          {step === 2 && connectionsSaved && (
-            <ReadinessPanel
-              agents={agents.filter((a) => selected[a.id] && a.connected)}
-              runAll={runReadinessCheck}
+          {step === 2 && (
+            <SetupPanel
+              agents={agents.filter((a) => selected[a.id])}
+              connectionsSaved={connectionsSaved}
               runOne={runReadinessCheckForAgent}
               onOpenUrl={openExternal}
+              onComplete={(ids) => onComplete(ids)}
               onChange={setReadinessState}
             />
           )}
@@ -276,6 +273,251 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
       </main>
     </div>
   );
+}
+
+function SetupPanel({
+  agents,
+  connectionsSaved,
+  runOne,
+  onOpenUrl,
+  onComplete,
+  onChange,
+}: {
+  agents: Agent[];
+  connectionsSaved: boolean;
+  runOne: (id: string) => Promise<AgentReadinessReport>;
+  onOpenUrl: (url: string) => Promise<void>;
+  onComplete: (agentIds: string[]) => void;
+  onChange: (s: { readyCount: number; settled: boolean }) => void;
+}) {
+  const tasks = useMemo(() => [
+    { id: "conductor", label: "Initializing Orca", detail: "Loading orchestration runtime", agentId: null as string | null },
+    ...agents.map((a) => ({ id: `rt-${a.id}`, label: `Registering ${a.name}`, detail: a.shortLabel, agentId: a.id })),
+    { id: "memory",    label: "Provisioning shared memory", detail: "Goal memory store + indices", agentId: null },
+    { id: "roles",     label: "Loading default roles",      detail: "Architect · Engineer · Reviewer · QA", agentId: null },
+    { id: "workflows", label: "Loading default workflows",  detail: "Brainstorm", agentId: null },
+    { id: "ready",     label: "Finalizing workspace",       detail: "Almost there", agentId: null },
+  ], [agents]);
+
+  const [animIdx, setAnimIdx] = useState(0);
+  const [animDoneIdx, setAnimDoneIdx] = useState(-1);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [agentReports, setAgentReports] = useState<Record<string, AgentReadinessReport | null>>({});
+  const [agentChecking, setAgentChecking] = useState<Record<string, boolean>>({});
+
+  const onCompleteRef = useRef(onComplete);
+  const onChangeRef = useRef(onChange);
+  const runOneRef = useRef(runOne);
+  const connectionsSavedRef = useRef(connectionsSaved);
+  const hasCompletedRef = useRef(false);
+  onCompleteRef.current = onComplete;
+  onChangeRef.current = onChange;
+  runOneRef.current = runOne;
+  connectionsSavedRef.current = connectionsSaved;
+
+  const animationDone = animIdx >= tasks.length;
+
+  // Animation loop: timer for infra tasks, runOne() for agent tasks (blocks until resolved)
+  useEffect(() => {
+    if (animationDone) return;
+    const task = tasks[animIdx];
+    if (!task) return;
+    let cancelled = false;
+
+    if (task.agentId) {
+      setAgentChecking((prev) => ({ ...prev, [task.agentId!]: true }));
+      runOneRef.current(task.agentId)
+        .then((report) => {
+          if (cancelled) return;
+          setAgentReports((prev) => ({ ...prev, [task.agentId!]: report }));
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (cancelled) return;
+          setAgentChecking((prev) => ({ ...prev, [task.agentId!]: false }));
+          setAnimDoneIdx(animIdx);
+          setAnimIdx((i) => i + 1);
+        });
+    } else {
+      timerRef.current = setTimeout(() => {
+        if (cancelled) return;
+        setAnimDoneIdx(animIdx);
+        setAnimIdx((i) => i + 1);
+      }, process.env.NODE_ENV === "test" ? 0 : 550 + Math.random() * 350);
+    }
+
+    return () => {
+      cancelled = true;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [animIdx, animationDone, tasks]);
+
+  // When animation completes: report settled state + auto-complete if all ready
+  useEffect(() => {
+    if (!animationDone) return;
+    const readyIds = agents.filter((a) => agentReports[a.id]?.status === "ready").map((a) => a.id);
+    onChangeRef.current({ readyCount: readyIds.length, settled: true });
+    if (readyIds.length === agents.length && agents.length > 0 && connectionsSaved && !hasCompletedRef.current) {
+      hasCompletedRef.current = true;
+      onCompleteRef.current(readyIds);
+    }
+  }, [animationDone, connectionsSaved, agentReports, agents]);
+
+  function handleRetry(agentId: string) {
+    setAgentChecking((prev) => ({ ...prev, [agentId]: true }));
+    runOneRef.current(agentId)
+      .then((report) => {
+        setAgentReports((prev) => {
+          const next = { ...prev, [agentId]: report };
+          const readyIds = agents.filter((a) => next[a.id]?.status === "ready").map((a) => a.id);
+          onChangeRef.current({ readyCount: readyIds.length, settled: true });
+          if (readyIds.length === agents.length && agents.length > 0 && connectionsSavedRef.current && !hasCompletedRef.current) {
+            hasCompletedRef.current = true;
+            onCompleteRef.current(readyIds);
+          }
+          return next;
+        });
+      })
+      .finally(() => setAgentChecking((prev) => ({ ...prev, [agentId]: false })));
+  }
+
+  const progress = Math.min(1, (animDoneIdx + 1) / tasks.length);
+
+  return (
+    <div className="setup-panel">
+      <div className="setup-spinner">
+        <svg viewBox="0 0 96 96" width="96" height="96" className="setup-spinner-ring">
+          <defs>
+            <linearGradient id="setup-grad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="var(--accent)" />
+              <stop offset="100%" stopColor="var(--accent-2, #8B5CF6)" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <circle cx="48" cy="48" r="40" fill="none" stroke="var(--hairline)" strokeWidth="2" />
+          <circle cx="48" cy="48" r="40" fill="none" stroke="url(#setup-grad)" strokeWidth="2" strokeLinecap="round" strokeDasharray="180 360" />
+        </svg>
+        <div className="setup-spinner-center">
+          <div className="setup-spinner-orb">
+            <svg width="20" height="20" viewBox="0 0 14 14">
+              <circle cx="7" cy="7" r="1.8" fill="#fff" />
+              <circle cx="7" cy="7" r="4" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="1" />
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div className="setup-progress">
+        <div className="setup-progress-header">
+          <span className="mono setup-progress-label">Progress</span>
+          <span className="mono setup-progress-pct">{Math.round(progress * 100)}%</span>
+        </div>
+        <div className="setup-progress-track">
+          <div className="setup-progress-fill" style={{ width: `${progress * 100}%` }} />
+        </div>
+      </div>
+
+      <div className="setup-tasks">
+        {tasks.map((t, i) => {
+          const report = t.agentId ? (agentReports[t.agentId] ?? null) : null;
+          let iconState: "pending" | "running" | "done" | "checking" | "ready" | "failed";
+
+          if (t.agentId) {
+            if (agentChecking[t.agentId]) {
+              iconState = "checking";
+            } else if (i < animIdx) {
+              iconState = report?.status === "ready" ? "ready" : report ? "failed" : "done";
+            } else if (i === animIdx) {
+              iconState = "checking";
+            } else {
+              iconState = "pending";
+            }
+          } else {
+            iconState = i < animIdx ? "done" : i === animIdx ? "running" : "pending";
+          }
+
+          const isActive = iconState === "running" || iconState === "checking";
+          const isPending = iconState === "pending";
+          const isFailed = iconState === "failed";
+          const isGreen = iconState === "done" || iconState === "ready";
+
+          return (
+            <div
+              key={t.id}
+              className={
+                "setup-task" +
+                (isActive ? " setup-task--running" : "") +
+                (isPending ? " setup-task--pending" : "") +
+                (isFailed ? " setup-task--failed" : "")
+              }
+            >
+              <span
+                className={
+                  "setup-task-icon" +
+                  (isGreen ? " setup-task-icon--done" : "") +
+                  (isFailed ? " setup-task-icon--failed" : "") +
+                  (isActive ? " setup-task-icon--running" : "")
+                }
+              >
+                {isGreen && <CheckIcon size={11} color="#fff" strokeWidth={2.5} />}
+                {isFailed && <XIcon size={11} color="#fff" strokeWidth={2.5} />}
+                {isActive && <span className="setup-task-pulse" />}
+              </span>
+              <div className="setup-task-body">
+                <div className="setup-task-label">{t.label}</div>
+                <div className="mono setup-task-detail">{t.detail}</div>
+                {isFailed && report && (
+                  <div className="setup-task-repair">
+                    {report.steps.filter((s) => !s.ok).map((s, si) => (
+                      <div key={si} className="setup-task-step-fail">
+                        <XIcon size={10} color="var(--err)" strokeWidth={2.5} />
+                        <span>{s.detail ?? s.name}</span>
+                      </div>
+                    ))}
+                    {report.repair && (
+                      <RepairBlock
+                        repair={report.repair}
+                        onOpenUrl={onOpenUrl}
+                        onActionTaken={() => handleRetry(t.agentId!)}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      className="setup-task-retry-btn"
+                      onClick={() => handleRetry(t.agentId!)}
+                      disabled={!!agentChecking[t.agentId!]}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+              </div>
+              {isActive && (
+                <span className="mono setup-task-status">
+                  {iconState === "checking" ? "checking" : "running"}
+                </span>
+              )}
+              {isFailed && (
+                <span className="mono setup-task-status setup-task-status--err">
+                  {labelForStatus(report?.status)}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function labelForStatus(status: string | undefined): string {
+  switch (status) {
+    case "missing": return "not installed";
+    case "needs_auth": return "not signed in";
+    case "misconfigured": return "misconfigured";
+    case "failed": return "check failed";
+    default: return "failed";
+  }
 }
 
 function WelcomePanel() {

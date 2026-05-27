@@ -8,7 +8,7 @@ interface ReadinessPanelProps {
   agents: Agent[];
   runAll: () => Promise<AgentReadinessReport[]>;
   runOne: (id: string) => Promise<AgentReadinessReport>;
-  onOpenUrl: (url: string) => void;
+  onOpenUrl: (url: string) => Promise<void>;
   onChange: (state: { readyCount: number; settled: boolean }) => void;
 }
 
