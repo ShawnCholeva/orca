@@ -6,7 +6,7 @@ import { WorkflowBanner } from "./WorkflowBanner";
 const now = "2026-01-01T00:00:00.000Z";
 
 describe("WorkflowBanner", () => {
-  it("renders run state, criteria, next action, and artifacts", () => {
+  it("renders run state, next action, and artifacts", () => {
     render(
       <WorkflowBanner
         run={{
@@ -31,8 +31,6 @@ describe("WorkflowBanner", () => {
           startedAt: now,
           finishedAt: null,
           blockedReason: null,
-          satisfiedExitCriteria: ["problem stated"],
-          outstandingExitCriteria: ["tasks split"],
         }}
         latestDecision={{
           decisionId: "dec-1",
@@ -72,8 +70,6 @@ describe("WorkflowBanner", () => {
     );
 
     expect(screen.getByText("Engineering workflow · Issue Breakdown")).toBeInTheDocument();
-    expect(screen.getByText("Satisfied (1)")).toBeInTheDocument();
-    expect(screen.getByText("Outstanding (1)")).toBeInTheDocument();
     expect(screen.getByText("advance:execution")).toBeInTheDocument();
     expect(screen.getByText("Why this action?")).toBeInTheDocument();
     expect(screen.getByText("Issue DAG")).toBeInTheDocument();

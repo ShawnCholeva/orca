@@ -323,8 +323,6 @@ const workflowStepRun = {
   startedAt: now,
   finishedAt: null,
   blockedReason: null,
-  satisfiedExitCriteria: [],
-  outstandingExitCriteria: ["goal brief captured"],
 };
 
 const workflowDecision = {

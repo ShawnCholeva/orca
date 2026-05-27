@@ -266,6 +266,36 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
 
   const latestDecision = workflowState.decisions[0] ?? null;
   const currentStepRunId = workflowState.stepRun?.id ?? null;
+
+  const activeQuestionDecisionId =
+    currentStepRunId
+      ? (workflowState.decisions.find(
+          (d) => d.decisionType === "request_user_input" && d.stepRunId === currentStepRunId,
+        )?.decisionId ?? null)
+      : null;
+
+  const latestCompletion = (() => {
+    if (!currentStepRunId) return null;
+    const outputs = workflowState.artifacts.filter(
+      (a) => a.type === "step_output" && a.stepRunId === currentStepRunId,
+    );
+    const latest = outputs[outputs.length - 1];
+    if (!latest) return null;
+    try {
+      const body = JSON.parse(latest.body) as {
+        _completion?: {
+          confidence: string;
+          assumptions: string[];
+          openQuestions: string[];
+          whyComplete: string;
+        };
+      };
+      return body._completion ?? null;
+    } catch {
+      return null;
+    }
+  })();
+
   const workflowRecommendations = workflowState.recommendations.filter(
     (recommendation) =>
       isWorkflowRecommendation(recommendation) &&
@@ -387,12 +417,17 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
       setActionError("Answer text is required.");
       return;
     }
+    if (!activeQuestionDecisionId) {
+      setActionError("No active question to answer.");
+      return;
+    }
 
     setSubmittingInput(true);
     setActionError(null);
     try {
       await submitWorkflowUserInput(selectedGoalId, restoredPendingInput.stepRunId, {
         stepRunId: restoredPendingInput.stepRunId,
+        questionDecisionId: activeQuestionDecisionId,
         answerText,
       });
       setPendingInput(null);
@@ -536,6 +571,39 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
                 latestDecision={latestDecision}
                 artifacts={workflowState.artifacts}
               />
+            )}
+
+            {latestCompletion && (
+              <div className="orca-chat-completion">
+                <span className="orca-chat-completion-confidence workflow-banner-subtitle">
+                  Step complete · confidence: {latestCompletion.confidence}
+                </span>
+                <p className="orca-chat-completion-why">{latestCompletion.whyComplete}</p>
+                {latestCompletion.assumptions.length > 0 && (
+                  <details className="orca-chat-completion-details">
+                    <summary className="workflow-banner-subtitle">
+                      Assumptions ({latestCompletion.assumptions.length})
+                    </summary>
+                    <ul>
+                      {latestCompletion.assumptions.map((a, i) => (
+                        <li key={i}>{a}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+                {latestCompletion.openQuestions.length > 0 && (
+                  <details className="orca-chat-completion-details">
+                    <summary className="workflow-banner-subtitle">
+                      Open questions ({latestCompletion.openQuestions.length})
+                    </summary>
+                    <ul>
+                      {latestCompletion.openQuestions.map((q, i) => (
+                        <li key={i}>{q}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
             )}
 
             {actionError && (

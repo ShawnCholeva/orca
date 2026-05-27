@@ -160,8 +160,6 @@ function setupRunLoad(rec: Recommendation) {
       startedAt: now,
       finishedAt: null,
       blockedReason: null,
-      satisfiedExitCriteria: [],
-      outstandingExitCriteria: ["assigned task completed or blocked with reason"],
     },
   });
   listWorkflowDecisionsMock.mockResolvedValue({
@@ -171,7 +169,7 @@ function setupRunLoad(rec: Recommendation) {
         goalId: "goal-1",
         workflowRunId: "run-1",
         stepRunId: "step-1",
-        decisionType: "select_operator",
+        decisionType: "request_user_input",
         selectedAction: "request_input:intake",
         reason: "Need user input before proceeding.",
         influencedBy: [],
@@ -419,8 +417,6 @@ describe("OrcaChat", () => {
         startedAt: now,
         finishedAt: null,
         blockedReason: null,
-        satisfiedExitCriteria: ["goal brief captured"],
-        outstandingExitCriteria: [],
       },
     });
     const { OrcaChat } = await import("./OrcaChat");
@@ -444,6 +440,7 @@ describe("OrcaChat", () => {
     await waitFor(() => {
       expect(submitWorkflowUserInputMock).toHaveBeenCalledWith("goal-1", "step-1", {
         stepRunId: "step-1",
+        questionDecisionId: "dec-1",
         answerText: "We need a deterministic workflow chat.",
       });
     });

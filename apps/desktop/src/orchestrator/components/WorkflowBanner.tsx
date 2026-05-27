@@ -30,21 +30,6 @@ export function WorkflowBanner({ run, stepRun, latestDecision, artifacts }: Prop
         </span>
       </div>
 
-      {stepRun && (
-        <div className="workflow-banner-grid">
-          <CriteriaList
-            heading={`Satisfied (${stepRun.satisfiedExitCriteria.length})`}
-            items={stepRun.satisfiedExitCriteria}
-            empty="No criteria satisfied yet."
-          />
-          <CriteriaList
-            heading={`Outstanding (${stepRun.outstandingExitCriteria.length})`}
-            items={stepRun.outstandingExitCriteria}
-            empty="No outstanding criteria."
-          />
-        </div>
-      )}
-
       {latestDecision && (
         <div className="workflow-banner-decision">
           <p className="workflow-banner-subtitle">Next action</p>
@@ -84,27 +69,6 @@ export function WorkflowBanner({ run, stepRun, latestDecision, artifacts }: Prop
         )}
       </div>
     </section>
-  );
-}
-
-function CriteriaList(props: {
-  heading: string;
-  items: string[];
-  empty: string;
-}) {
-  return (
-    <div className="workflow-banner-criteria">
-      <p className="workflow-banner-subtitle">{props.heading}</p>
-      {props.items.length === 0 ? (
-        <p className="workflow-banner-empty">{props.empty}</p>
-      ) : (
-        <ul className="workflow-banner-criteria-list">
-          {props.items.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      )}
-    </div>
   );
 }
 
