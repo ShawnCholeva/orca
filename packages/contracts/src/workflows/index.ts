@@ -137,9 +137,9 @@ export type OrchestrationTransport = z.infer<typeof OrchestrationTransport>;
 export const OrchestrationDecisionKind = z.enum([
   "select_operator",
   "score_transition",
-  "evaluate_exit_criteria",
   "repair_artifact",
-  "run_audit"
+  "run_audit",
+  "run_step_skill"
 ]);
 export type OrchestrationDecisionKind = z.infer<typeof OrchestrationDecisionKind>;
 
@@ -308,8 +308,10 @@ export const WorkflowStepRun = z
     startedAt: z.string().datetime().nullable(),
     finishedAt: z.string().datetime().nullable(),
     blockedReason: z.string().max(WORKFLOW_FAILURE_MAX_MESSAGE_CHARS).nullable(),
-    satisfiedExitCriteria: z.array(z.string().min(1).max(256)).max(20),
-    outstandingExitCriteria: z.array(z.string().min(1).max(256)).max(20)
+    selectedOperatorId: Id100.nullable().optional(),
+    selectedProviderId: ModelProviderId.nullable().optional(),
+    selectedModelId: z.string().min(1).max(80).nullable().optional(),
+    operatorSelectedAt: z.string().datetime().nullable().optional(),
   })
   .strict();
 export type WorkflowStepRun = z.infer<typeof WorkflowStepRun>;
@@ -367,7 +369,9 @@ export const OperatorDescriptor = z
     ready: z.boolean(),
     notReadyReason: z.string().max(WORKFLOW_FAILURE_MAX_MESSAGE_CHARS).optional(),
     supportsRepoEditing: z.boolean(),
-    supportsTerminal: z.boolean()
+    supportsTerminal: z.boolean(),
+    providerId: ModelProviderId.optional(),
+    modelId: z.string().min(1).max(80).optional(),
   })
   .strict();
 export type OperatorDescriptor = z.infer<typeof OperatorDescriptor>;
@@ -535,6 +539,25 @@ export const OrchestrationProposalEnvelope = z
 export type OrchestrationProposalEnvelope = z.infer<
   typeof OrchestrationProposalEnvelope
 >;
+
+export const StepSkillProposal = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("ask"),
+    question: z.string().min(1).max(2000),
+    rationale: z.string().max(1000).optional(),
+  }).strict(),
+  z.object({
+    action: z.literal("complete"),
+    output: z.record(z.unknown()),
+    completion: z.object({
+      confidence: z.enum(["low", "medium", "high"]),
+      assumptions: z.array(z.string().max(500)).max(20),
+      openQuestions: z.array(z.string().max(500)).max(20),
+      whyComplete: z.string().max(1000),
+    }).strict(),
+  }).strict(),
+]);
+export type StepSkillProposal = z.infer<typeof StepSkillProposal>;
 
 export const OrchestrationTransportAttempt = z
   .object({
@@ -757,6 +780,7 @@ export type WorkflowStepRunResponse = z.infer<typeof WorkflowStepRunResponse>;
 export const SubmitWorkflowUserInputRequest = z
   .object({
     stepRunId: Id,
+    questionDecisionId: Id.optional(),
     answerText: z.string().max(8192).optional(),
     satisfiedExitCriteria: z.array(z.string().min(1).max(256)).max(20).optional(),
     artifactInputs: z
