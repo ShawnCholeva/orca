@@ -425,6 +425,96 @@ describe("OrchestratorService", () => {
       workflow_step_run_id: "step-1",
     });
   });
+
+  describe("goal context seeding (intake)", () => {
+    function seedIntakeRun(db: Database.Database, description: string): void {
+      const intake = step({
+        id: "intake",
+        ordinal: 0,
+        name: "Intake",
+        purpose: "Capture the goal brief",
+        requiredInputs: [],
+        requiredOutputs: ["goal_brief"],
+        gateType: "human-input",
+        recommendedCapabilities: [],
+        recommendedOperatorIds: ["human"],
+        exitCriteria: [
+          "goal brief captured",
+          "success outcome captured",
+          "constraints captured",
+          "relevant workspaces identified",
+          "open questions captured",
+        ],
+      });
+      seedWorkflow(db, { currentStep: intake, outstanding: intake.exitCriteria });
+      db.prepare("UPDATE goals SET description = ? WHERE id = 'goal-1'").run(description);
+    }
+
+    it("seeds goal_brief from the description and asks the next question", async () => {
+      const { db, bus, idFactory } = setup();
+      seedIntakeRun(db, "Make checkout faster");
+      const service = new OrchestratorService(fakeSelector(selection()));
+
+      const result = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+      expect(result.decision.decisionType).toBe("request_user_input");
+
+      const rows = recommendationRows(db);
+      expect(rows).toHaveLength(1);
+      const action = JSON.parse(rows[0].proposed_action_json as string) as { question: string };
+      expect(action.question).toBe("What outcome should this optimize for?");
+
+      const artifacts = db
+        .prepare(
+          "SELECT type, title, body, source FROM workflow_artifacts WHERE workflow_run_id = 'run-1'",
+        )
+        .all();
+      expect(artifacts).toEqual([
+        {
+          type: "goal_brief",
+          title: "Goal Brief (draft)",
+          body: "# Problem\n\nMake checkout faster",
+          source: "orchestrator",
+        },
+      ]);
+
+      const stepRow = db
+        .prepare("SELECT satisfied_exit_criteria_json FROM workflow_step_runs WHERE id = 'step-1'")
+        .get() as { satisfied_exit_criteria_json: string };
+      expect(JSON.parse(stepRow.satisfied_exit_criteria_json)).toContain("goal brief captured");
+    });
+
+    it("asks the problem question when the description is empty", async () => {
+      const { db, bus, idFactory } = setup();
+      seedIntakeRun(db, "");
+      const service = new OrchestratorService(fakeSelector(selection()));
+
+      const result = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+      const rows = recommendationRows(db);
+      const action = JSON.parse(rows[0].proposed_action_json as string) as { question: string };
+      expect(action.question).toBe("What problem are we solving?");
+
+      const count = db
+        .prepare("SELECT COUNT(*) AS c FROM workflow_artifacts WHERE workflow_run_id = 'run-1'")
+        .get() as { c: number };
+      expect(count.c).toBe(0);
+    });
+
+    it("does not duplicate the goal_brief when the step is already seeded", async () => {
+      const { db, bus, idFactory } = setup();
+      seedIntakeRun(db, "Make checkout faster");
+      const service = new OrchestratorService(fakeSelector(selection()));
+
+      await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+      await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+      const count = db
+        .prepare("SELECT COUNT(*) AS c FROM workflow_artifacts WHERE type = 'goal_brief'")
+        .get() as { c: number };
+      expect(count.c).toBe(1);
+    });
+  });
 });
 
 describe("orchestrator routes", () => {

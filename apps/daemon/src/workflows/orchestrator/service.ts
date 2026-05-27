@@ -11,6 +11,7 @@ import {
 
 import type { EventBus } from "../../events.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
+import { createArtifact } from "../artifacts/usecases.js";
 import { appendWorkflowEvent, publishStagedWorkflowEvents } from "../events.js";
 import {
   evaluateAllGuardrailsInTx,
@@ -36,6 +37,8 @@ import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.
 
 interface GoalRow {
   id: string;
+  title: string;
+  description: string;
   orchestrator_provider: ModelProviderId | null;
   orchestrator_model: string | null;
 }
@@ -112,7 +115,9 @@ function readStepRun(db: Database.Database, stepRunId: string | null): StepRunRo
 
 function readGoal(db: Database.Database, goalId: string): GoalRow {
   const row = db
-    .prepare("SELECT id, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?")
+    .prepare(
+      "SELECT id, title, description, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?",
+    )
     .get(goalId) as GoalRow | undefined;
   if (!row) throw new OrchestratorGoalNotFoundError(goalId);
   return row;
@@ -215,6 +220,48 @@ function applyDeterministicRuleSatisfaction(
   return readStepRun(db, stepRun.id);
 }
 
+function applyGoalContextSatisfaction(
+  db: Database.Database,
+  now: () => string,
+  stepRun: StepRunRow,
+  goal: GoalRow,
+  workflowRunId: string,
+  idFactory?: () => string
+): StepRunRow {
+  const rule = stepRules[stepRun.step_template_id];
+  if (!rule?.evaluateGoalContextSatisfies) return stepRun;
+
+  const ctx = ruleContext(stepRun, listArtifactsForRun(db, workflowRunId));
+  const results = rule.evaluateGoalContextSatisfies(
+    { title: goal.title, description: goal.description },
+    ctx
+  );
+  if (results.length === 0) return stepRun;
+
+  const satisfied: string[] = [];
+  for (const item of results) {
+    if (item.artifact) {
+      createArtifact(
+        db,
+        now,
+        {
+          goalId: stepRun.goal_id,
+          workflowRunId,
+          stepRunId: stepRun.id,
+          type: item.artifact.type,
+          title: item.artifact.title,
+          body: item.artifact.body,
+          source: "orchestrator",
+        },
+        idFactory
+      );
+    }
+    satisfied.push(item.criterion);
+  }
+  recordExitCriteriaSatisfaction(db, now, stepRun.id, satisfied);
+  return readStepRun(db, stepRun.id);
+}
+
 function missingInputs(
   step: WorkflowStepTemplate,
   artifacts: ReturnType<typeof listArtifactsForRun>
@@ -264,9 +311,11 @@ export class OrchestratorService {
     if (stepRun.status !== "active") throw new OrchestratorRunNotActiveError(workflowRunId);
     const stepTpl = template.steps.find((step) => step.id === stepRun.step_template_id);
     if (!stepTpl) throw new OrchestratorStepNotFoundError(stepRun.id);
-    const artifacts = listArtifactsForRun(db, workflowRunId);
+    let artifacts = listArtifactsForRun(db, workflowRunId);
     stepRun = applyDeterministicRuleSatisfaction(db, now, stepRun, artifacts);
     const goal = readGoal(db, run.goalId);
+    stepRun = applyGoalContextSatisfaction(db, now, stepRun, goal, workflowRunId, options.idFactory);
+    artifacts = listArtifactsForRun(db, workflowRunId);
     const outstanding = parseOutstanding(stepRun);
     const missing = missingInputs(stepTpl, artifacts);
 
