@@ -9,11 +9,13 @@ import {
   listAdapterExecutionModeConfigs,
   upsertAdapterExecutionModeConfig,
 } from "./execution-modes.js";
+import type { EventBus } from "../events.js";
 
 export interface AdapterExecutionModeRouteDeps {
   db: Database.Database;
   now: () => string;
   supportedByAdapter: Record<string, ExecutionMode[]>;
+  bus?: EventBus;
 }
 
 export function registerAdapterExecutionModeRoutes(
@@ -52,7 +54,7 @@ export function registerAdapterExecutionModeRoutes(
       return { error: { code: "adapter_not_registered", message: `Adapter ${id} is not registered in this daemon` } };
     }
     try {
-      const stored = upsertAdapterExecutionModeConfig(deps.db, deps.now, parsed.data, supported, "settings_api");
+      const stored = upsertAdapterExecutionModeConfig(deps.db, deps.now, parsed.data, supported, "settings_api", { bus: deps.bus });
       return stored;
     } catch (err) {
       reply.status(400);

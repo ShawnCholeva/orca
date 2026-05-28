@@ -9,6 +9,7 @@ import {
   upsertAdapterExecutionModeConfig,
   seedAdapterExecutionModes,
 } from "./execution-modes.js";
+import { EventBus } from "../events.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIG_DIR = path.resolve(__dirname, "../../migrations");
@@ -106,5 +107,43 @@ describe("adapter execution-mode repository", () => {
     );
     const cfg = getAdapterExecutionModeConfig(db, "codex");
     expect(cfg!.enabledExecutionModes.find((e) => e.preferred)?.mode).toBe("shadow_session");
+  });
+});
+
+describe("audit event on upsert", () => {
+  it("appends adapter.execution_modes.changed event and publishes it", () => {
+    const db = makeDb();
+    const bus = new EventBus();
+    const seen: { type: string; payload: unknown }[] = [];
+    bus.subscribe((event) => seen.push({ type: event.type, payload: event.payload }));
+
+    upsertAdapterExecutionModeConfig(
+      db,
+      () => "2026-05-28T01:00:00.000Z",
+      {
+        adapterId: "codex",
+        enabledExecutionModes: [
+          { mode: "shadow_session", preferred: true },
+          { mode: "one_shot" },
+        ],
+        disabledExecutionModes: [],
+      },
+      ["one_shot", "shadow_session"],
+      "user",
+      { bus }
+    );
+
+    const changed = seen.find((e) => e.type === "adapter.execution_modes.changed");
+    expect(changed).toBeDefined();
+    expect((changed!.payload as { adapterId: string }).adapterId).toBe("codex");
+
+    // also persisted to events table
+    const rows = db.prepare(
+      "SELECT type, payload FROM events WHERE type = 'adapter.execution_modes.changed'"
+    ).all() as { type: string; payload: string }[];
+    expect(rows.length).toBe(1);
+    const parsed = JSON.parse(rows[0]!.payload) as { adapterId: string; updatedBy: string };
+    expect(parsed.adapterId).toBe("codex");
+    expect(parsed.updatedBy).toBe("user");
   });
 });

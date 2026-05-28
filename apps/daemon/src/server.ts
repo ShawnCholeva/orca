@@ -841,6 +841,7 @@ export function createServer(
       db,
       now: daemonContext.now,
       supportedByAdapter,
+      bus: eventBus,
     });
   }
 

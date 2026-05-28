@@ -224,7 +224,8 @@ export const DomainEventType = z.enum([
   "workflow.transport.attempt_finished",
   "workflow.transport.fallback",
   "workflow.worker.state_changed",
-  "workflow.human_review.requested"
+  "workflow.human_review.requested",
+  "adapter.execution_modes.changed"
 ]);
 export type DomainEventType = z.infer<typeof DomainEventType>;
 

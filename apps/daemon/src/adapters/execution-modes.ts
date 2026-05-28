@@ -1,10 +1,13 @@
+import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import {
   AdapterExecutionModeConfig,
   validateAdapterExecutionModeConfig,
   type AdapterId,
+  type DomainEvent,
   type ExecutionMode,
 } from "@orca/contracts";
+import type { EventBus } from "../events.js";
 
 export const ADAPTER_EXECUTION_MODE_DEFAULTS: Record<AdapterId, AdapterExecutionModeConfig> = {
   "claude-code": {
@@ -84,31 +87,68 @@ export function listAdapterExecutionModeConfigs(
   }));
 }
 
+export interface UpsertOptions {
+  bus?: EventBus;
+}
+
 export function upsertAdapterExecutionModeConfig(
   db: Database.Database,
   now: () => string,
   config: AdapterExecutionModeConfig,
   supportedModes: ExecutionMode[],
-  updatedBy: string
+  updatedBy: string,
+  options: UpsertOptions = {}
 ): AdapterExecutionModeConfig {
   const validation = validateAdapterExecutionModeConfig(config, supportedModes);
   if (!validation.ok) throw new Error(validation.reason);
-  db.prepare(
-    `INSERT INTO adapter_execution_modes
-       (adapter_id, enabled_modes_json, disabled_modes_json, updated_at, updated_by)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(adapter_id) DO UPDATE SET
-       enabled_modes_json=excluded.enabled_modes_json,
-       disabled_modes_json=excluded.disabled_modes_json,
-       updated_at=excluded.updated_at,
-       updated_by=excluded.updated_by`
-  ).run(
-    config.adapterId,
-    JSON.stringify(config.enabledExecutionModes),
-    JSON.stringify(config.disabledExecutionModes),
-    now(),
-    updatedBy
-  );
+
+  const ts = now();
+  let publishedEvent: DomainEvent | null = null;
+
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO adapter_execution_modes
+         (adapter_id, enabled_modes_json, disabled_modes_json, updated_at, updated_by)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(adapter_id) DO UPDATE SET
+         enabled_modes_json=excluded.enabled_modes_json,
+         disabled_modes_json=excluded.disabled_modes_json,
+         updated_at=excluded.updated_at,
+         updated_by=excluded.updated_by`
+    ).run(
+      config.adapterId,
+      JSON.stringify(config.enabledExecutionModes),
+      JSON.stringify(config.disabledExecutionModes),
+      ts,
+      updatedBy
+    );
+
+    if (options.bus) {
+      const eventId = randomUUID();
+      const payload = {
+        adapterId: config.adapterId,
+        enabledExecutionModes: config.enabledExecutionModes,
+        disabledExecutionModes: config.disabledExecutionModes,
+        updatedBy,
+      };
+      const result = db.prepare(
+        "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)"
+      ).run(eventId, "adapter.execution_modes.changed", null, JSON.stringify(payload), ts);
+      publishedEvent = {
+        seq: Number(result.lastInsertRowid),
+        id: eventId,
+        type: "adapter.execution_modes.changed",
+        goalId: null,
+        payload,
+        createdAt: ts,
+      };
+    }
+  })();
+
+  if (publishedEvent && options.bus) {
+    options.bus.publish(publishedEvent);
+  }
+
   return config;
 }
 
