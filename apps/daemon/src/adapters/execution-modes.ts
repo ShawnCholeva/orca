@@ -125,22 +125,14 @@ export function seedAdapterExecutionModes(
   for (const [adapterId, defaults] of Object.entries(ADAPTER_EXECUTION_MODE_DEFAULTS)) {
     const supported = supportedByAdapter[adapterId];
     if (!supported) continue;
-    const supportedSet = new Set(supported);
-    // Filter disabled modes to those actually in the supported set for this deployment
-    const config: AdapterExecutionModeConfig = {
-      ...defaults,
-      disabledExecutionModes: defaults.disabledExecutionModes.filter((e) =>
-        supportedSet.has(e.mode)
-      ),
-    };
-    const validation = validateAdapterExecutionModeConfig(config, supported);
+    const validation = validateAdapterExecutionModeConfig(defaults, supported);
     if (!validation.ok) {
       throw new Error(`seed defaults invalid for adapter ${adapterId}: ${validation.reason}`);
     }
     insert.run(
-      config.adapterId,
-      JSON.stringify(config.enabledExecutionModes),
-      JSON.stringify(config.disabledExecutionModes),
+      defaults.adapterId,
+      JSON.stringify(defaults.enabledExecutionModes),
+      JSON.stringify(defaults.disabledExecutionModes),
       now()
     );
   }
