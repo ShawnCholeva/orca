@@ -164,6 +164,7 @@ import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js'
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
+import { registerAgentHookRoutes } from './agent-hooks/routes.js';
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
 import {
   buildOrchestrationProviderCatalog,
@@ -889,6 +890,15 @@ export function createServer(
     sessionRuntime,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
+  });
+
+  // ---- Agent hook routes ----
+
+  // Stubbed: real wiring to OrchestratorMediator lands in Sub-plan 5 (judgement loop).
+  registerAgentHookRoutes(server, {
+    onResponseDone: async (payload) => {
+      server.log.info({ msg: 'agent.response.done', ...payload });
+    },
   });
 
   // ---- Workflow orchestrator routes ----
