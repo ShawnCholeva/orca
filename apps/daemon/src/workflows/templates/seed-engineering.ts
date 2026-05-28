@@ -5,7 +5,7 @@ import type {
 } from "@orca/contracts";
 
 export const ENGINEERING_ID = "orca/engineering";
-export const ENGINEERING_VERSION = 2;
+export const ENGINEERING_VERSION = 3;
 
 const ENGINEERING_NAME = "Engineering";
 const ENGINEERING_DESCRIPTION =

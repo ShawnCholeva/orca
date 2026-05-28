@@ -27,7 +27,7 @@ const operationalDark: ThemeDefinition = {
     "--hairline": "rgba(255,255,255,0.06)",
     "--hairline-strong": "rgba(255,255,255,0.16)",
     "--text": "#E5EAF5",
-    "--text-2": "rgba(229,234,245,0.66)",
+    "--text-2": "rgba(245,245,245,0.82)",
     "--text-3": "rgba(229,234,245,0.46)",
     "--text-4": "rgba(229,234,245,0.24)",
 
