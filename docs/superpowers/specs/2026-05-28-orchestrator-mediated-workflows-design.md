@@ -115,9 +115,9 @@ Deterministic engine drives lifecycle. Orchestrator-LLM owns judgement.
 
 ```
 step N start (engine, deterministic)
-  resolve agent:
-    candidate adapter ids = template.agentPreference[]
-    pick first adapter whose operator descriptor reports ready
+  resolve agent + model:
+    walk template.agentPreference[]
+    pick first entry where adapter is ready AND adapter supports entry.modelId
   resolve execution mode:
     pick adapter's preferred enabled mode
   spawn per-step agent session (or one_shot dispatcher)
@@ -218,12 +218,41 @@ Bounded to the orchestration request payload limit (~64 KiB). Truncation order w
 Add to `WorkflowStepTemplate`:
 
 ```ts
-agentPreference: string[];   // ordered adapter ids; first-ready wins. Required, min length 1.
+type StepAgentChoice = {
+  adapterId: string;
+  modelId: string;                  // adapter-validated; the agent runs against this model
+  providerId?: ModelProviderId;     // optional; adapter may infer when unambiguous
+};
+
+agentPreference: StepAgentChoice[];  // ordered; resolver picks first whose adapter is ready
+                                     // AND supports the modelId. Required, min length 1.
 ```
 
-No `executionMode` field on the template; the adapter's runtime config decides.
+No `executionMode` field on the template; the adapter's runtime config decides transport.
 
-`orca/engineering` bumps to v4 with `agentPreference: ["claude-code"]` on every step (only adapter wired in MVP; preferences become meaningful when codex/opencode/etc. ship).
+Per-step model lets template authors match model weight to workload (cheap conversational models for interview/QA, heavier reasoning models for synthesis/review/execution) while the goal-scoped orchestrator-LLM remains a separate, user-selected concern.
+
+Resolution semantics:
+
+- Walk `agentPreference[]` in order.
+- For each entry, check (a) adapter is registered and ready, (b) adapter declares the `modelId` is supported.
+- First entry satisfying both is chosen. Adapter execution mode is then resolved from the adapter's DB-backed config (preferred enabled mode; fallbacks on dispatch failure).
+- If no entry satisfies, the run is blocked with `no ready agent for step X (preferences: [...])`.
+
+`orca/engineering` bumps to v4 with the following per-step defaults (claude-code adapter; tune freely as adapter/model coverage grows):
+
+| Step | adapterId | modelId | Rationale |
+|---|---|---|---|
+| Intake | `claude-code` | `claude-haiku-4-5` | Cheap conversational interview |
+| Research | `claude-code` | `claude-opus-4-7` | Deep reasoning over codebase; plan quality compounds downstream |
+| PRD | `claude-code` | `claude-opus-4-7` | Synthesis with high judgment cost; defines the destination |
+| Issue Breakdown | `claude-code` | `claude-opus-4-7` | Decomposition shapes all execution work; worth the heavier model |
+| Execution | `claude-code` | `claude-sonnet-4-6` | Mechanical once plan is good; sonnet handles edits + tool use well |
+| QA | `claude-code` | `claude-haiku-4-5` | Conversational acceptance walk-through |
+| Review | `claude-code` | `claude-opus-4-7` | Fresh-context deep review |
+| Done | `claude-code` | `claude-haiku-4-5` | Finalize, capture memory items |
+
+Fallback usage example: `[{claude-code, claude-opus-4-7}, {claude-code, claude-sonnet-4-6}]` — if opus is unavailable (creds missing / not enabled for that adapter), the step degrades to sonnet rather than blocking.
 
 ### Workflow contract changes summary
 
@@ -231,8 +260,9 @@ No `executionMode` field on the template; the adapter's runtime config decides.
 // packages/contracts/src/workflows/index.ts
 
 WorkflowStepTemplate += {
-  agentPreference: string[]  // min length 1
+  agentPreference: StepAgentChoice[]  // min length 1; ordered fallback
 }
+// StepAgentChoice = { adapterId: string; modelId: string; providerId?: ModelProviderId }
 
 // Removed (orchestrator no longer routes by operator kind selection):
 // - per-step operator selection via LLM
@@ -315,7 +345,7 @@ Daemon:
 - `apps/daemon/src/workflows/operators/adapter-config.ts` (new) — `getAdapterExecutionModeConfig(adapterId)`, mutation API with invariant validation, audit event emission, on-boot seeding from adapter-declared defaults.
 - New DB migration: `adapter_execution_modes` table + seed.
 - `apps/daemon/src/orchestrator-llm/session.ts` (new) — manage the goal-scoped orchestrator-LLM session lifecycle (spawn, hook registration, send, terminate, reattach).
-- Agent adapter interface — add `supportedExecutionModes` capability declaration; add a `composeInitialPrompt(input)` helper that wraps step instructions with the step-complete emission convention; add `parseResponseHookPayload(...)` for adapter-specific normalization.
+- Agent adapter interface — add `supportedExecutionModes` capability declaration; add `supportedModels: string[]` (or equivalent capability query like `supportsModel(modelId)`) so the resolver can validate `StepAgentChoice.modelId`; add a `composeInitialPrompt(input)` helper that wraps step instructions with the step-complete emission convention; add `parseResponseHookPayload(...)` for adapter-specific normalization.
 - HTTP/IPC endpoint for response-done callbacks at `/v1/agent-hooks/response-done`. Adapter wires its native hook (Claude Code `Stop` hook, etc.) to call this endpoint on spawn.
 - `bootstrap-route.ts` — drop the single `requestNextDecision` call after run creation. Run progression is event-driven from this point: engine reacts to user messages, agent hooks, crashes, timeouts.
 
