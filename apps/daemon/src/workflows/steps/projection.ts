@@ -66,7 +66,7 @@ export function getWorkflowStepRunById(
 export function recordOperatorSelection(
   db: Database.Database,
   id: string,
-  sel: { operatorId: string; providerId: string; modelId: string; at: string }
+  sel: { operatorId: string; providerId: string | null; modelId: string | null; at: string }
 ): void {
   db.prepare(
     "UPDATE workflow_step_runs SET selected_operator_id=?, selected_provider_id=?, selected_model_id=?, operator_selected_at=? WHERE id=?"
