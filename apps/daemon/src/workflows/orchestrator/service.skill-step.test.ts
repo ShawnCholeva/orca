@@ -57,7 +57,8 @@ describe("OrchestratorService skill step", () => {
       .prepare("SELECT selected_model_id FROM workflow_step_runs WHERE id = 'step-1'")
       .get() as { selected_model_id: string | null };
     expect(stepRow.selected_model_id).toBe("claude-sonnet-4-6");
-    expect(seen[0]?.allowedKinds).toEqual(["model"]);
+    // allowedKinds is no longer restricted to ["model"]; both model and agent operators are eligible.
+    expect(seen[0]?.allowedKinds).toBeUndefined();
 
     const second = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(second.decision.decisionType).toBe("request_user_input");

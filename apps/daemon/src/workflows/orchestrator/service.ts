@@ -6,6 +6,7 @@ import {
   validateStepOutput,
   type DomainEvent,
   type ModelProviderId,
+  type OperatorDescriptor,
   type WorkflowDecisionTrace,
   type WorkflowRun as WorkflowRunT,
   type WorkflowStepTemplate,
@@ -29,8 +30,14 @@ import {
   listDecisionsForRun,
   recordDecisionInTx,
 } from "../decisions/usecases.js";
+import { evaluateGuardrailRequiresApproval } from "../guardrails/evaluator.js";
 import { reconstructTranscript } from "./interview.js";
+import { buildAgentObjective } from "./agent-objective.js";
 import { buildStepExecutionInput } from "./step-input.js";
+import {
+  recommendationOrDirectLaunch,
+  type WorkflowSessionLauncher,
+} from "./session-launcher.js";
 import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.js";
 
 interface GoalRow {
@@ -137,7 +144,10 @@ export class OrchestratorService {
   constructor(
     private readonly operatorSelector: Pick<OperatorSelector, "select">,
     private readonly broker: Pick<OrchestrationTransportBroker, "propose">,
-    private readonly operators: Pick<OperatorRegistry, "list">
+    private readonly operators: Pick<OperatorRegistry, "list">,
+    private readonly launcher: WorkflowSessionLauncher = {
+      launch: async () => { throw new Error("direct_launch_unsupported"); },
+    }
   ) {}
 
   async requestNextDecision(
@@ -192,11 +202,23 @@ export class OrchestratorService {
       return this.commitNoop(db, run.id, stepRun.id);
     }
 
-    // (3) select a model operator once.
+    // (3) select an operator once (model or agent).
     const sel = getWorkflowStepRunById(db, stepRun.id);
     if (!sel || !sel.selectedOperatorId) {
       return this.commitOperatorSelectionForSkill(db, now, ctx, options);
     }
+
+    // (3a) branch on operator kind.
+    const descriptors = await this.operators.list(goal.id);
+    const chosen = descriptors.find((d) => d.id === sel.selectedOperatorId);
+    if (!chosen) {
+      return this.blockRun(db, now, ctx, "selected operator missing", options);
+    }
+    if (chosen.kind === "agent") {
+      return this.commitAgentStepDecision(db, now, ctx, chosen, options);
+    }
+
+    // Model path: require providerId + modelId.
     if (!sel.selectedProviderId || !sel.selectedModelId) {
       return this.blockRun(db, now, ctx, "no ready model operator", options);
     }
@@ -316,6 +338,181 @@ export class OrchestratorService {
     return { decision: latest, recommendationIds: [] };
   }
 
+  /**
+   * Returns the latest decision for a step run, regardless of type.
+   * Used by agent step noop paths where there is no "request_user_input" decision.
+   */
+  private commitNoopLatestDecision(
+    db: Database.Database,
+    workflowRunId: string,
+    stepRunId: string
+  ): { decision: WorkflowDecisionTrace; recommendationIds: string[] } {
+    const decisions = listDecisionsForRun(db, workflowRunId);
+    const latest = decisions
+      .filter((d) => d.stepRunId === stepRunId)
+      .at(-1);
+    if (!latest) throw new Error(`no decision found for step run: ${stepRunId}`);
+    return { decision: latest, recommendationIds: [] };
+  }
+
+  private hasOpenLaunchRecommendation(
+    db: Database.Database,
+    stepRunId: string
+  ): boolean {
+    const row = db
+      .prepare(
+        "SELECT id FROM recommendations WHERE workflow_step_run_id = ? AND type = 'launch_workflow_session' AND status = 'proposed' LIMIT 1"
+      )
+      .get(stepRunId);
+    return row !== undefined;
+  }
+
+  private commitLaunchRecommendation(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      goal: GoalRow;
+    },
+    chosen: OperatorDescriptor,
+    objective: string,
+    options: RequestNextDecisionOptions
+  ): { decision: WorkflowDecisionTrace; recommendationIds: string[] } {
+    const { run, stepRun, stepTpl, goal } = ctx;
+    const stagedEvents: DomainEvent[] = [];
+    const output = db.transaction(() => {
+      this.appendDecisionRequested(
+        db,
+        now,
+        goal.id,
+        run.id,
+        stepRun.id,
+        stepTpl.id,
+        options,
+        stagedEvents
+      );
+      const decision = recordDecisionInTx(
+        db,
+        now,
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          stepRunId: stepRun.id,
+          decisionType: "select_operator",
+          selectedAction: `launch:${chosen.id}`,
+          reason: `Launch ${chosen.displayName} to execute "${stepTpl.name}".`,
+          influencedBy: [
+            {
+              kind: "workflow_step",
+              id: stepTpl.id,
+              label: stepTpl.name,
+              effect: "required",
+            },
+          ],
+          inputFingerprint: decisionFingerprint({
+            runId: run.id,
+            stepRunId: stepRun.id,
+            decisionType: "select_operator",
+            payload: { operatorId: chosen.id, action: "launch" },
+          }),
+        },
+        { idFactory: options.idFactory, stagedEvents }
+      );
+      const recommendationId = createRecommendationForWorkflowInTx(
+        db,
+        now,
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          stepRunId: stepRun.id,
+          type: "launch_workflow_session",
+          proposedAction: {
+            kind: "launch_workflow_session",
+            workflowStepRunId: stepRun.id,
+            operatorId: chosen.id,
+            operatorKind: chosen.kind as "agent",
+            objective,
+          },
+          rationale: `Launch ${chosen.displayName} to execute "${stepTpl.name}".`,
+          decisionId: decision.decisionId,
+        },
+        { idFactory: options.idFactory, stagedEvents }
+      );
+      return { decision, recommendationIds: [recommendationId] };
+    })();
+    this.publish(options.bus, stagedEvents);
+    return output;
+  }
+
+  private async commitAgentStepDecision(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+    },
+    chosen: OperatorDescriptor,
+    options: RequestNextDecisionOptions
+  ): Promise<{ decision: WorkflowDecisionTrace; recommendationIds: string[] }> {
+    const { run, stepRun, stepTpl, template, goal } = ctx;
+
+    // (a) running session linked? → no-op
+    const linked = db
+      .prepare(
+        "SELECT id, status FROM sessions WHERE workflow_step_run_id = ? AND status IN ('created','starting','running')"
+      )
+      .all(stepRun.id) as Array<{ id: string; status: string }>;
+    if (linked.length > 0) {
+      return this.commitNoopLatestDecision(db, run.id, stepRun.id);
+    }
+
+    // (b) open launch recommendation? → idempotent no-op
+    if (this.hasOpenLaunchRecommendation(db, stepRun.id)) {
+      return this.commitNoopLatestDecision(db, run.id, stepRun.id);
+    }
+
+    // (c) build objective
+    const objective = buildAgentObjective(stepTpl, { goal, stepRun });
+
+    // (d) evaluate guardrails
+    const guardrailCheck = evaluateGuardrailRequiresApproval(template.guardrails, {
+      goalId: goal.id,
+      workflowRunId: run.id,
+      stepRunId: stepRun.id,
+      stepTemplateId: stepTpl.id,
+      candidateAction: { kind: "launch_workflow_session", operatorId: chosen.id },
+    });
+    if (guardrailCheck === "deny") {
+      return this.blockRun(db, now, ctx, "launch denied by guardrail", options);
+    }
+    const requiresApproval = guardrailCheck === "require_approval";
+
+    // (e) route: recommendation or direct launch
+    const launchCtx = {
+      goalId: goal.id,
+      workflowRunId: run.id,
+      workflowStepRunId: stepRun.id,
+      operatorId: chosen.id,
+      operatorKind: "agent" as const,
+      objective,
+    };
+    const outcome = recommendationOrDirectLaunch({
+      requiresApproval,
+      launcher: this.launcher,
+      ctx: launchCtx,
+    });
+
+    if (outcome === "direct") {
+      return this.commitNoopLatestDecision(db, run.id, stepRun.id);
+    }
+    return this.commitLaunchRecommendation(db, now, ctx, chosen, objective, options);
+  }
+
   private async commitOperatorSelectionForSkill(
     db: Database.Database,
     now: () => string,
@@ -340,16 +537,22 @@ export class OrchestratorService {
       guardrails: template.guardrails,
       orchestratorProvider: goal.orchestrator_provider,
       orchestratorModel: goal.orchestrator_model,
-      allowedKinds: ["model"],
+      // allowedKinds omitted: both "model" and "agent" operators are eligible
     });
 
     const descriptors = await this.operators.list(goal.id);
     const chosen = descriptors.find((d) => d.id === result.selection.operatorId);
-    if (!chosen || chosen.kind !== "model" || !chosen.providerId || !chosen.modelId) {
+    if (!chosen) {
       return this.blockRun(db, now, ctx, "no ready model operator", options);
     }
-    const providerId = chosen.providerId;
-    const modelId = chosen.modelId;
+
+    // For model operators, providerId+modelId are required.
+    // For agent operators, both are null.
+    const providerId = chosen.kind === "model" ? (chosen.providerId ?? null) : null;
+    const modelId = chosen.kind === "model" ? (chosen.modelId ?? null) : null;
+    if (chosen.kind === "model" && (!providerId || !modelId)) {
+      return this.blockRun(db, now, ctx, "no ready model operator", options);
+    }
 
     const stagedEvents: DomainEvent[] = [];
     const decision = db.transaction(() => {

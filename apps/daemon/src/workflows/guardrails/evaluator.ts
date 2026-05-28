@@ -218,6 +218,16 @@ export function evaluateGuardrail(
   }
 }
 
+export function evaluateGuardrailRequiresApproval(
+  guardrails: WorkflowGuardrailConfig[],
+  ctx: GuardrailContext
+): "allow" | "require_approval" | "deny" {
+  const results = guardrails.map((g) => evaluateGuardrail(g, ctx));
+  if (results.some((r) => r.result === "deny")) return "deny";
+  if (results.some((r) => r.result === "require_approval")) return "require_approval";
+  return "allow";
+}
+
 export function evaluateAllGuardrailsInTx(
   db: Database.Database,
   now: () => string,
