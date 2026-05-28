@@ -13,9 +13,9 @@ function deps(overrides: Partial<SynthesisDeps> = {}): SynthesisDeps {
   return {
     broker: {
       propose: vi.fn(async () => ({
-        status: "proposed",
+        status: "proposed" as const,
         attemptId: "att",
-        transport: "one_shot",
+        transport: "one_shot" as const,
         parsed: { output: { summary: "from model" } },
         rawTextLength: 0,
         latencyMs: 0,
@@ -33,6 +33,7 @@ const input: SynthesisInput = {
   modelId: "claude-sonnet-4-6",
   outputSchema: schema as unknown as SynthesisInput["outputSchema"],
   stepInput: { goal: { id: "g", description: "" }, currentStep: { id: "execution", ordinal: 4, name: "Execution", instructions: "i", outputSchema: schema as unknown as SynthesisInput["outputSchema"] }, previousStepOutput: null, priorStepOutputs: [], transcript: [] },
+  sessionResult: "",
 };
 
 describe("synthesizeStepOutput", () => {

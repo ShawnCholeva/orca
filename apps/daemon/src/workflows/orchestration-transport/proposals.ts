@@ -167,6 +167,7 @@ function validatePayload(
     case "repair_artifact":
     case "run_audit":
     case "run_step_skill":
+    case "synthesize_step_output":
       return failure(rawText, reason, "unsupported proposal kind");
   }
 }

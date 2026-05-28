@@ -222,7 +222,7 @@ export class OrchestratorService {
     // (5) Non-exited terminal states → block immediately, no synthesis.
     if (sess.status === "failed" || sess.status === "stopped") {
       const reason = `session ${sess.status}${sess.failure_reason ? `: ${sess.failure_reason}` : ""}`;
-      this.blockRun(db, now, { run, stepRun, stepTpl, template, goal }, reason, options);
+      this.blockRun(db, now, { run, stepRun, stepTpl, goal }, reason, options);
       return;
     }
 
@@ -247,7 +247,7 @@ export class OrchestratorService {
       this.blockRun(
         db,
         now,
-        { run, stepRun, stepTpl, template, goal },
+        { run, stepRun, stepTpl, goal },
         "synthesis requires orchestrator model",
         options
       );
@@ -270,7 +270,7 @@ export class OrchestratorService {
     );
 
     if (!result.ok) {
-      this.blockRun(db, now, { run, stepRun, stepTpl, template, goal }, result.reason, options);
+      this.blockRun(db, now, { run, stepRun, stepTpl, goal }, result.reason, options);
       return;
     }
 
