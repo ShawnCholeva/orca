@@ -10,6 +10,7 @@ import {
 } from "@orca/contracts";
 import type { EventBus } from "../../events.js";
 import { getTemplateById, listTemplates } from "./projection.js";
+import { validateTemplatePipeline } from "./validate-pipeline.js";
 import {
   createCustomTemplate,
   duplicateTemplate,
@@ -67,8 +68,9 @@ export function registerWorkflowTemplateRoutes(
     }
 
     const template = createCustomTemplate(createUsecaseCtx(deps), parsed.data);
+    const warnings = validateTemplatePipeline(template.steps);
     reply.status(201);
-    return WorkflowTemplateResponse.parse({ template });
+    return WorkflowTemplateResponse.parse({ template, warnings });
   });
 
   server.patch("/v1/workflow-templates/:id", async (request, reply) => {
@@ -81,7 +83,8 @@ export function registerWorkflowTemplateRoutes(
 
     try {
       const template = updateCustomTemplate(createUsecaseCtx(deps), id, parsed.data);
-      return WorkflowTemplateResponse.parse({ template });
+      const warnings = validateTemplatePipeline(template.steps);
+      return WorkflowTemplateResponse.parse({ template, warnings });
     } catch (error) {
       if (error instanceof WorkflowTemplateNotFoundError) {
         reply.status(404);

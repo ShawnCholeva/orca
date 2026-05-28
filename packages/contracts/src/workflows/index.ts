@@ -757,7 +757,8 @@ export type UpdateWorkflowTemplateRequest = z.infer<
 
 export const WorkflowTemplateResponse = z
   .object({
-    template: WorkflowTemplate
+    template: WorkflowTemplate,
+    warnings: z.array(z.string()).default([])
   })
   .strict();
 export type WorkflowTemplateResponse = z.infer<typeof WorkflowTemplateResponse>;
