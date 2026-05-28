@@ -65,7 +65,8 @@ describe("runMigrations", () => {
       "0011_workflow_recommendation_types.sql",
       "0012_orchestration_transport.sql",
       "0013_orchestrator_messages.sql",
-      "0014_workflow_step_runs_operator_selection.sql"
+      "0014_workflow_step_runs_operator_selection.sql",
+      "0015_adapter_execution_modes.sql"
     ]);
   });
 
@@ -161,7 +162,8 @@ describe("runMigrations", () => {
       "0011_workflow_recommendation_types.sql",
       "0012_orchestration_transport.sql",
       "0013_orchestrator_messages.sql",
-      "0014_workflow_step_runs_operator_selection.sql"
+      "0014_workflow_step_runs_operator_selection.sql",
+      "0015_adapter_execution_modes.sql"
     ]);
 
     const goalCount = (
@@ -320,7 +322,8 @@ describe("session tables migration", () => {
       "0011_workflow_recommendation_types.sql",
       "0012_orchestration_transport.sql",
       "0013_orchestrator_messages.sql",
-      "0014_workflow_step_runs_operator_selection.sql"
+      "0014_workflow_step_runs_operator_selection.sql",
+      "0015_adapter_execution_modes.sql"
     ]);
 
     const tables = (
@@ -808,7 +811,8 @@ describe("migration 0010 workflows", () => {
       "0011_workflow_recommendation_types.sql",
       "0012_orchestration_transport.sql",
       "0013_orchestrator_messages.sql",
-      "0014_workflow_step_runs_operator_selection.sql"
+      "0014_workflow_step_runs_operator_selection.sql",
+      "0015_adapter_execution_modes.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1334,7 +1338,8 @@ describe("migration 0012 orchestration transport", () => {
     expect(upgrade.applied).toEqual([
       "0012_orchestration_transport.sql",
       "0013_orchestrator_messages.sql",
-      "0014_workflow_step_runs_operator_selection.sql"
+      "0014_workflow_step_runs_operator_selection.sql",
+      "0015_adapter_execution_modes.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
