@@ -248,7 +248,7 @@ Resolution semantics:
 | PRD | `claude-code` | `claude-opus-4-7` | Synthesis with high judgment cost; defines the destination |
 | Issue Breakdown | `claude-code` | `claude-opus-4-7` | Decomposition shapes all execution work; worth the heavier model |
 | Execution | `claude-code` | `claude-sonnet-4-6` | Mechanical once plan is good; sonnet handles edits + tool use well |
-| QA | `claude-code` | `claude-haiku-4-5` | Conversational acceptance walk-through |
+| QA | `claude-code` | `claude-sonnet-4-6` | Acceptance walk-through with judgment over PRD signals |
 | Review | `claude-code` | `claude-opus-4-7` | Fresh-context deep review |
 | Done | `claude-code` | `claude-haiku-4-5` | Finalize, capture memory items |
 
