@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdapterId } from "../index.js";
+import { AdapterId } from "./ids.js";
 
 export const ExecutionMode = z.enum(["shadow_session", "one_shot"]);
 export type ExecutionMode = z.infer<typeof ExecutionMode>;

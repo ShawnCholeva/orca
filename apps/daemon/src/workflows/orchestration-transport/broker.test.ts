@@ -21,7 +21,7 @@ import {
   markTransportAttemptSucceeded,
   type TransportAttemptUsecaseCtx,
 } from "./attempts.js";
-import { OrchestrationTransportBroker } from "./broker.js";
+import { OrchestrationTransportBroker, execModeToTransport } from "./broker.js";
 
 const NOW = "2026-01-01T00:00:00.000Z";
 const tempDirs: string[] = [];
@@ -343,5 +343,65 @@ describe("OrchestrationTransportBroker fallback", () => {
     expect(
       events.filter((event) => event.type === "workflow.transport.fallback").at(-1)
     ).toMatchObject({ payload: { failureReason: "proposal_rejected" } });
+  });
+});
+
+describe("execModeToTransport", () => {
+  it("maps shadow_session -> hidden_interactive", () => {
+    expect(execModeToTransport("shadow_session")).toBe("hidden_interactive");
+  });
+  it("maps one_shot -> one_shot", () => {
+    expect(execModeToTransport("one_shot")).toBe("one_shot");
+  });
+});
+
+describe("propose with modeResolver", () => {
+  it("uses modeResolver to pick the primary transport for the adapter", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "orca-broker-mr-"));
+    tempDirs.push(dir);
+    const db = openDatabase(createConfig(dir));
+    runMigrations(db, defaultMigrationsDir());
+    seedWorkflow(db);
+    const bus = new EventBus();
+    let nextId = 0;
+    const idFactory = () => `id-${++nextId}`;
+    const attemptCtx = { db, bus, now: () => NOW, idFactory };
+
+    const calls: string[] = [];
+    const modeResolver = (adapterId: string) => {
+      calls.push(adapterId);
+      return "hidden_interactive" as const;
+    };
+    const broker = new OrchestrationTransportBroker({ ...attemptCtx, modeResolver });
+
+    const oneShot = vi.fn(async () => ({ status: "proposed" as const, parsed: { ok: true }, rawTextLength: 5, latencyMs: 1 }));
+    const hidden = vi.fn(async () => ({ status: "proposed" as const, parsed: { ok: true }, rawTextLength: 5, latencyMs: 1 }));
+
+    const result = await broker.propose(
+      {
+        kind: "select_operator",
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepRunId: "step-1",
+        providerId: "orca/openai",
+        modelId: "model-1",
+        adapterId: "claude-code",
+        payload: { requested: true },
+      },
+      { runOneShot: oneShot, runHiddenInteractive: hidden }
+    );
+
+    expect(result.status).toBe("proposed");
+    expect(calls).toEqual(["claude-code"]);
+    expect(hidden).toHaveBeenCalledTimes(1);
+    expect(oneShot).not.toHaveBeenCalled();
+  });
+
+  it("falls back to provider plan when no modeResolver or no adapterId", async () => {
+    const { broker } = setup();
+    const oneShot = vi.fn(async () => ({ status: "proposed" as const, parsed: { ok: true }, rawTextLength: 5, latencyMs: 1 }));
+    const result = await broker.propose(request("orca/openai"), { runOneShot: oneShot });
+    expect(result.status).toBe("proposed");
+    expect(oneShot).toHaveBeenCalledTimes(1);
   });
 });

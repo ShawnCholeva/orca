@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AdapterId } from "../adapters/ids.js";
 import { WorkflowStepOutputSchema } from "./output-schema.js";
 
 export {
@@ -520,6 +521,7 @@ export const OrchestrationRequest = z
     providerId: ModelProviderId,
     modelId: z.string().min(1).max(80),
     attemptId: z.string().min(1).optional(),
+    adapterId: AdapterId.optional(),
     payload: z
       .unknown()
       .refine(

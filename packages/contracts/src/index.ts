@@ -5,8 +5,10 @@ import {
   OrchestratorModelChoice,
   WorkflowArtifactType
 } from "./workflows/index.js";
+import { AdapterId } from "./adapters/ids.js";
 
 export * from "./workflows/index.js";
+export * from "./adapters/ids.js";
 
 const UTF8_ENCODER = new TextEncoder();
 
@@ -433,8 +435,6 @@ export const SessionFailureReason = z.enum([
 ]);
 export type SessionFailureReason = z.infer<typeof SessionFailureReason>;
 
-export const AdapterId = z.enum(["shell-manual", "claude-code", "opencode", "codex", "gemini-cli"]);
-export type AdapterId = z.infer<typeof AdapterId>;
 
 export const ContextRole = z.enum([
   "architect",
