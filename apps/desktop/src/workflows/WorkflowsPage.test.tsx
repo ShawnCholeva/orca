@@ -72,7 +72,7 @@ describe("WorkflowsPage", () => {
     });
 
     listTemplatesMock.mockResolvedValue({ templates: [builtIn] });
-    duplicateTemplateMock.mockResolvedValue(copy);
+    duplicateTemplateMock.mockResolvedValue({ template: copy, warnings: [] });
 
     render(<WorkflowsPage />);
 

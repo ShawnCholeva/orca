@@ -82,8 +82,8 @@ describe("TemplateDetail", () => {
   it("saves custom step edits through the typed API wrapper and supports add/remove/reorder", async () => {
     const template = makeTemplate();
     saveTemplateMock.mockResolvedValue({
-      ...template,
-      version: 2,
+      template: { ...template, version: 2 },
+      warnings: [],
     });
 
     const { container } = render(

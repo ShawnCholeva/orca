@@ -32,10 +32,12 @@ export function TemplateDetail({
   const [saving, setSaving] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   useEffect(() => {
     setDraft(toDraft(template));
     setError(null);
+    setWarnings([]);
     setSaving(false);
     setDuplicating(false);
   }, [template]);
@@ -48,9 +50,11 @@ export function TemplateDetail({
   async function handleSave() {
     setSaving(true);
     setError(null);
+    setWarnings([]);
     try {
-      const saved = await saveTemplate(template.id, buildTemplateInput(draft));
-      onTemplateSaved(saved);
+      const result = await saveTemplate(template.id, buildTemplateInput(draft));
+      if (result.warnings.length > 0) setWarnings(result.warnings);
+      onTemplateSaved(result.template);
     } catch (err) {
       setError(toErrorMessage(err, "Failed to save workflow template."));
     } finally {
@@ -61,9 +65,11 @@ export function TemplateDetail({
   async function handleDuplicate() {
     setDuplicating(true);
     setError(null);
+    setWarnings([]);
     try {
-      const duplicated = await duplicateTemplate(template.id, buildDuplicateName(template.name));
-      onTemplateDuplicated(duplicated);
+      const result = await duplicateTemplate(template.id, buildDuplicateName(template.name));
+      if (result.warnings.length > 0) setWarnings(result.warnings);
+      onTemplateDuplicated(result.template);
     } catch (err) {
       setError(toErrorMessage(err, "Failed to duplicate workflow template."));
     } finally {
@@ -106,6 +112,17 @@ export function TemplateDetail({
       </div>
 
       {error && <div className="workflow-error-banner">{error}</div>}
+
+      {warnings.length > 0 && (
+        <div className="workflow-warnings">
+          <strong>Heads up:</strong>
+          <ul>
+            {warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="workflow-field-grid">
         <Field label="Template Name">

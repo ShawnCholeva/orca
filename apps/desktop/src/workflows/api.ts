@@ -9,6 +9,11 @@ import type { CreateWorkflowTemplateRequest, WorkflowTemplate } from "@orca/cont
 
 export type WorkflowTemplateInput = CreateWorkflowTemplateRequest;
 
+export type TemplateResult = {
+  template: WorkflowTemplate;
+  warnings: string[];
+};
+
 export async function listTemplates() {
   return listWorkflowTemplates();
 }
@@ -17,26 +22,26 @@ export async function getTemplate(id: string) {
   return getWorkflowTemplate(id);
 }
 
-export async function createTemplate(input: WorkflowTemplateInput): Promise<WorkflowTemplate> {
+export async function createTemplate(input: WorkflowTemplateInput): Promise<TemplateResult> {
   const response = await createWorkflowTemplate(input);
-  return response.template;
+  return { template: response.template, warnings: response.warnings };
 }
 
 export async function saveTemplate(
   id: string,
   input: WorkflowTemplateInput,
-): Promise<WorkflowTemplate> {
+): Promise<TemplateResult> {
   const response = await updateWorkflowTemplate(id, input);
-  return response.template;
+  return { template: response.template, warnings: response.warnings };
 }
 
 export async function duplicateTemplate(
   sourceTemplateId: string,
   name: string,
-): Promise<WorkflowTemplate> {
+): Promise<TemplateResult> {
   const response = await duplicateWorkflowTemplate(sourceTemplateId, {
     sourceTemplateId,
     name,
   });
-  return response.template;
+  return { template: response.template, warnings: response.warnings };
 }

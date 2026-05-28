@@ -41,7 +41,7 @@ export function WorkflowsPage() {
     setCreating(true);
     setError(null);
     try {
-      const created = await createTemplate({
+      const result = await createTemplate({
         name: "Untitled Workflow",
         description: "",
         steps: [
@@ -54,8 +54,8 @@ export function WorkflowsPage() {
         ],
         guardrails: [],
       });
-      setTemplates((current) => sortTemplates([...current, created]));
-      setSelectedId(created.id);
+      setTemplates((current) => sortTemplates([...current, result.template]));
+      setSelectedId(result.template.id);
     } catch (err) {
       setError(toErrorMessage(err, "Failed to create workflow template."));
     } finally {
