@@ -149,6 +149,7 @@ import {
 } from './extractions/usecases.js';
 import type { SessionPreparationAssembler } from './context/assembler.js';
 import { registerContextRoutes } from './context/routes.js';
+import { registerAdapterExecutionModeRoutes } from './adapters/execution-modes-routes.js';
 import { createDaemonContext, type DaemonContext } from './daemon-context.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
@@ -828,6 +829,20 @@ export function createServer(
   // ---- Context Package routes ----
 
   registerContextRoutes(server, { db, bus: eventBus, assembler, adapterRegistry });
+
+  // ---- Adapter execution-mode routes ----
+
+  {
+    const supportedByAdapter: Record<string, import("@orca/contracts").ExecutionMode[]> = {};
+    for (const adapter of adapterRegistry.listAgentAdapters()) {
+      supportedByAdapter[adapter.id] = adapter.supportedExecutionModes;
+    }
+    registerAdapterExecutionModeRoutes(server, {
+      db,
+      now: daemonContext.now,
+      supportedByAdapter,
+    });
+  }
 
   // ---- Workflow template routes ----
 
