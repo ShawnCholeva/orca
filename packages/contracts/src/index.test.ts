@@ -1622,14 +1622,27 @@ describe("ExecutionMode and AdapterExecutionModeConfig", () => {
     if (!result.ok) { expect(result.reason).toMatch(/non-empty/); }
   });
 
-  it("rejects mode not in supportedExecutionModes", () => {
+  it("rejects enabled mode not in supportedExecutionModes", () => {
     const config: AdapterExecutionModeConfig = {
       adapterId: "claude-code",
-      enabledExecutionModes: [{ mode: "shadow_session", preferred: true }],
-      disabledExecutionModes: [{ mode: "one_shot", reason: "x" }],
+      enabledExecutionModes: [
+        { mode: "shadow_session", preferred: true },
+        { mode: "one_shot" },
+      ],
+      disabledExecutionModes: [],
     };
     const result = validateAdapterExecutionModeConfig(config, ["shadow_session"]); // one_shot not supported
     expect(result.ok).toBe(false);
-    if (!result.ok) { expect(result.reason).toMatch(/not supported/); }
+    if (!result.ok) expect(result.reason).toMatch(/not supported/);
+  });
+
+  it("allows disabled mode not in supportedExecutionModes (policy log)", () => {
+    const config: AdapterExecutionModeConfig = {
+      adapterId: "opencode",
+      enabledExecutionModes: [{ mode: "shadow_session", preferred: true }],
+      disabledExecutionModes: [{ mode: "one_shot", reason: "adapter does not implement one-shot yet" }],
+    };
+    const result = validateAdapterExecutionModeConfig(config, ["shadow_session"]);
+    expect(result.ok).toBe(true);
   });
 });

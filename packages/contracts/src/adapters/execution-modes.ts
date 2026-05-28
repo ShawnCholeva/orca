@@ -63,11 +63,6 @@ export function validateAdapterExecutionModeConfig(
       return { ok: false, reason: `mode ${e.mode} not supported by adapter ${config.adapterId}` };
     }
   }
-  for (const e of config.disabledExecutionModes) {
-    if (!supported.has(e.mode)) {
-      return { ok: false, reason: `mode ${e.mode} not supported by adapter ${config.adapterId}` };
-    }
-  }
 
   return { ok: true };
 }
