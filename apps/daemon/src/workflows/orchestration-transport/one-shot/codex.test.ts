@@ -45,6 +45,7 @@ function makeAdapter(
       command: "codex login status",
     }),
     repairFor: () => undefined,
+    supportsModel: () => false,
     ...overrides,
   };
 }

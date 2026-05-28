@@ -191,6 +191,19 @@ for (const { name, envKey, defaultBin, create } of ADAPTER_CASES) {
   });
 }
 
+describe("adapter supportsModel", () => {
+  it("claude-code supports the haiku/sonnet/opus models referenced by engineering v4", () => {
+    const a = new ClaudeCodeAdapter();
+    expect(a.supportsModel("claude-haiku-4-5")).toBe(true);
+    expect(a.supportsModel("claude-sonnet-4-6")).toBe(true);
+    expect(a.supportsModel("claude-opus-4-7")).toBe(true);
+  });
+
+  it("shell-manual rejects unknown model ids", () => {
+    expect(new ShellManualAdapter().supportsModel("anything")).toBe(false);
+  });
+});
+
 describe("adapter supportedExecutionModes", () => {
   it("claude-code declares shadow_session and one_shot", () => {
     expect(new ClaudeCodeAdapter().supportedExecutionModes).toEqual(

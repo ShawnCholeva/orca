@@ -21,6 +21,7 @@ function makeAdapter(id: AgentAdapter["id"]): AgentAdapter {
       command: `${id} auth status`,
     }),
     repairFor: () => undefined,
+    supportsModel: () => false,
   };
 }
 

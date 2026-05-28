@@ -60,6 +60,10 @@ export class ShellManualAdapter implements AgentAdapter {
     }
     return { name: "authenticated" as const, ok: true, authStatus: "ready" as const, command: "shell" };
   }
+  supportsModel(_modelId: string): boolean {
+    return false;
+  }
+
   repairFor(_status: AgentReadinessStatus): RepairAction | undefined {
     return undefined;
   }

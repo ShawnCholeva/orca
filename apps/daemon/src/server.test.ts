@@ -673,6 +673,7 @@ function fakeAdapter(id: string, ready: boolean): AgentAdapter {
         : { name: 'authenticated', ok: false, authStatus: 'needs_auth', command: `${id} auth`, detail: 'not signed in' };
     },
     repairFor() { return undefined; },
+    supportsModel: () => false,
   };
 }
 

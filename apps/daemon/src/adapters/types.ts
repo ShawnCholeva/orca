@@ -37,6 +37,8 @@ export interface AgentAdapter {
    * The runtime DB-backed AdapterExecutionModeConfig must declare a subset of these.
    */
   supportedExecutionModes: ExecutionMode[];
+  /** Return true if this adapter can drive the given model id. */
+  supportsModel(modelId: string): boolean;
   contextDelivery: AdapterContextDelivery;
   resolveSpawn(input: AdapterSpawnInput): Promise<AdapterSpawnResult>;
   probeAvailability(): Promise<AdapterAvailability>;

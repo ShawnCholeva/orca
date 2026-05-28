@@ -89,6 +89,7 @@ describe("registry hardening", () => {
         checkInstalled: async () => ({ name: 'installed' as const, ok: true, command: '' }),
         checkAuth: async () => ({ name: 'authenticated' as const, ok: true, authStatus: 'ready' as const, command: '' }),
         repairFor: () => undefined,
+        supportsModel: () => false,
       })
     ).toThrowError("AdapterRegistry is frozen");
   });
@@ -105,6 +106,7 @@ describe("registry hardening", () => {
       checkInstalled: async () => ({ name: 'installed' as const, ok: true, command: '' }),
       checkAuth: async () => ({ name: 'authenticated' as const, ok: true, authStatus: 'ready' as const, command: '' }),
       repairFor: () => undefined,
+      supportsModel: () => false,
     });
 
     expect(() =>
@@ -118,6 +120,7 @@ describe("registry hardening", () => {
         checkInstalled: async () => ({ name: 'installed' as const, ok: true, command: '' }),
         checkAuth: async () => ({ name: 'authenticated' as const, ok: true, authStatus: 'ready' as const, command: '' }),
         repairFor: () => undefined,
+        supportsModel: () => false,
       })
     ).toThrowError("Duplicate adapter id: shell-manual");
   });

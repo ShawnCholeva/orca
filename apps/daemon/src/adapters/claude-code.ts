@@ -25,6 +25,16 @@ export class ClaudeCodeAdapter implements AgentAdapter {
   readonly supportedExecutionModes: ExecutionMode[] = ["shadow_session", "one_shot"];
   readonly contextDelivery: AdapterContextDelivery = { mode: "preview_only", maxBytes: 32768 };
 
+  private static readonly KNOWN_MODELS = new Set([
+    "claude-haiku-4-5",
+    "claude-sonnet-4-6",
+    "claude-opus-4-7",
+  ]);
+
+  supportsModel(modelId: string): boolean {
+    return ClaudeCodeAdapter.KNOWN_MODELS.has(modelId);
+  }
+
   constructor(
     private readonly resolveFn: ResolveFn = resolveBinary,
     private readonly runFn: RunCheckFn = runCheckCommand,

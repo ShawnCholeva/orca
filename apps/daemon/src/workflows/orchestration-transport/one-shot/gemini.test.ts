@@ -45,6 +45,7 @@ function makeAdapter(
       command: "gemini auth",
     }),
     repairFor: () => undefined,
+    supportsModel: () => false,
     ...overrides,
   };
 }

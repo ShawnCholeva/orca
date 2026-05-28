@@ -49,6 +49,10 @@ class FakeAdapter implements AgentAdapter {
   repairFor(_status: AgentReadinessStatus): RepairAction | undefined {
     return undefined;
   }
+
+  supportsModel(_modelId: string): boolean {
+    return false;
+  }
 }
 
 class FakeReadiness {

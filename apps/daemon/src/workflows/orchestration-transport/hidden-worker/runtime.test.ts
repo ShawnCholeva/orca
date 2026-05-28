@@ -113,6 +113,7 @@ function makeAdapterRegistry(): AdapterRegistry {
     repairFor() {
       return undefined;
     },
+    supportsModel: () => false,
   };
   registry.register(adapter);
   return registry;

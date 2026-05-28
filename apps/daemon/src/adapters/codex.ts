@@ -28,6 +28,18 @@ export class CodexAdapter implements AgentAdapter {
   readonly supportedExecutionModes: ExecutionMode[] = ["one_shot", "shadow_session"];
   readonly contextDelivery: AdapterContextDelivery = { mode: "preview_only", maxBytes: 32768 };
 
+  private static readonly KNOWN_MODELS = new Set([
+    "gpt-5",
+    "gpt-5-codex",
+    "gpt-4.1",
+    "o3",
+    "o4-mini",
+  ]);
+
+  supportsModel(modelId: string): boolean {
+    return CodexAdapter.KNOWN_MODELS.has(modelId);
+  }
+
   constructor(
     private readonly resolveFn: ResolveFn = resolveBinary,
     private readonly runFn: RunCheckFn = runCheckCommand,

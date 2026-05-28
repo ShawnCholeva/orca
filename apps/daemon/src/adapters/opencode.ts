@@ -39,6 +39,10 @@ export class OpenCodeAdapter implements AgentAdapter {
   readonly supportedExecutionModes: ExecutionMode[] = ["shadow_session"];
   readonly contextDelivery: AdapterContextDelivery = { mode: "preview_only", maxBytes: 32768 };
 
+  supportsModel(modelId: string): boolean {
+    return modelId.length > 0;
+  }
+
   constructor(
     private readonly resolveFn: ResolveFn = resolveBinary,
     private readonly runFn: RunCheckFn = runCheckCommand,
