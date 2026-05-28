@@ -28,6 +28,7 @@ function makeAdapter(
   return {
     id: "gemini-cli",
     title: "Gemini CLI",
+    supportedExecutionModes: ["one_shot"] as const,
     contextDelivery: { mode: "preview_only", maxBytes: 32768 },
     resolveSpawn: async () => ({
       command: "gemini",

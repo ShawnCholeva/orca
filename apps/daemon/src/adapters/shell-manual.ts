@@ -2,11 +2,12 @@ import type { AgentAdapter, AdapterSpawnInput, AdapterSpawnResult, AdapterAvaila
 import { buildSpawnEnv } from "./types.js";
 import { resolveBinary } from "./resolve.js";
 import type { ResolveFn } from "./resolve.js";
-import type { AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
+import type { AgentReadinessStatus, CheckStep, RepairAction, ExecutionMode } from "@orca/contracts";
 
 export class ShellManualAdapter implements AgentAdapter {
   readonly id = "shell-manual" as const;
   readonly title = "Shell (Manual)";
+  readonly supportedExecutionModes: ExecutionMode[] = ["shadow_session"];
   readonly contextDelivery: AdapterContextDelivery = { mode: 'initial_input', maxBytes: 32768 };
 
   private readonly resolveFn: ResolveFn;

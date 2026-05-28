@@ -11,7 +11,7 @@ import { runCheckCommand, inheritCredEnv, type RunCheckResult } from "../readine
 import { sanitizeOutput } from "../readiness/sanitize.js";
 import { installUrlFor, signInCommandFor } from "../readiness/repair-links.js";
 import { parseVersion } from "../readiness/version.js";
-import type { AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
+import type { AgentReadinessStatus, CheckStep, RepairAction, ExecutionMode } from "@orca/contracts";
 
 export type RunCheckFn = (
   command: string,
@@ -36,6 +36,7 @@ function lastCredCount(cleaned: string): number | null {
 export class OpenCodeAdapter implements AgentAdapter {
   readonly id = "opencode" as const;
   readonly title = "opencode";
+  readonly supportedExecutionModes: ExecutionMode[] = ["shadow_session"];
   readonly contextDelivery: AdapterContextDelivery = { mode: "preview_only", maxBytes: 32768 };
 
   constructor(

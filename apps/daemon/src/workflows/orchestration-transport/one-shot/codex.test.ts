@@ -28,6 +28,7 @@ function makeAdapter(
   return {
     id: "codex",
     title: "Codex",
+    supportedExecutionModes: ["one_shot", "shadow_session"] as const,
     contextDelivery: { mode: "preview_only", maxBytes: 32768 },
     resolveSpawn: async () => ({
       command: "codex",

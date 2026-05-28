@@ -82,6 +82,7 @@ describe("registry hardening", () => {
       adapters.register({
         id: 'codex' as const,
         title: 'Fake',
+        supportedExecutionModes: ["one_shot", "shadow_session"] as const,
         contextDelivery: { mode: 'preview_only' as const, maxBytes: 32768 },
         resolveSpawn: async () => ({ command: '', args: [], env: {}, cwd: '' }),
         probeAvailability: async () => ({ status: 'unknown' as const }),
@@ -97,6 +98,7 @@ describe("registry hardening", () => {
     adapters.register({
       id: 'shell-manual' as const,
       title: 'First',
+      supportedExecutionModes: ["shadow_session"] as const,
       contextDelivery: { mode: 'preview_only' as const, maxBytes: 32768 },
       resolveSpawn: async () => ({ command: '', args: [], env: {}, cwd: '' }),
       probeAvailability: async () => ({ status: 'unknown' as const }),
@@ -109,6 +111,7 @@ describe("registry hardening", () => {
       adapters.register({
         id: 'shell-manual' as const,
         title: 'Duplicate',
+        supportedExecutionModes: ["shadow_session"] as const,
         contextDelivery: { mode: 'preview_only' as const, maxBytes: 32768 },
         resolveSpawn: async () => ({ command: '', args: [], env: {}, cwd: '' }),
         probeAvailability: async () => ({ status: 'unknown' as const }),

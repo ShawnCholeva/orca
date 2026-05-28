@@ -11,7 +11,7 @@ import { runCheckCommand, inheritCredEnv, type RunCheckResult } from "../readine
 import { sanitizeOutput } from "../readiness/sanitize.js";
 import { installUrlFor, signInCommandFor } from "../readiness/repair-links.js";
 import { parseVersion } from "../readiness/version.js";
-import type { AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
+import type { AgentReadinessStatus, CheckStep, RepairAction, ExecutionMode } from "@orca/contracts";
 
 export type RunCheckFn = (
   command: string,
@@ -22,6 +22,7 @@ export type RunCheckFn = (
 export class ClaudeCodeAdapter implements AgentAdapter {
   readonly id = "claude-code" as const;
   readonly title = "Claude Code";
+  readonly supportedExecutionModes: ExecutionMode[] = ["shadow_session", "one_shot"];
   readonly contextDelivery: AdapterContextDelivery = { mode: "preview_only", maxBytes: 32768 };
 
   constructor(

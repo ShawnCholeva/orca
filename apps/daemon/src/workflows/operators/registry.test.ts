@@ -21,6 +21,7 @@ const NOW = "2026-01-01T00:00:00.000Z";
 
 class FakeAdapter implements AgentAdapter {
   readonly contextDelivery = { mode: "initial_input" as const, maxBytes: 1024 };
+  readonly supportedExecutionModes = ["shadow_session" as const];
 
   constructor(
     readonly id: AdapterId,
