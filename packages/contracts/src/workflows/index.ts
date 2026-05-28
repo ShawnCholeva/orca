@@ -1498,3 +1498,13 @@ export const WorkflowEvent = z
     }
   });
 export type WorkflowEvent = z.infer<typeof WorkflowEvent>;
+
+export const OrchestratorAction = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("paraphrase_agent_message"), body: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
+  z.object({ kind: z.literal("forward_to_agent"), translated: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
+  z.object({ kind: z.literal("answer_user_directly"), body: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
+  z.object({ kind: z.literal("approve_step_complete"), rationale: z.string().max(2000).optional() }),
+  z.object({ kind: z.literal("revise_step"), feedback: z.string().min(1).max(4000), rationale: z.string().max(2000).optional() }),
+  z.object({ kind: z.literal("escalate_to_user"), body: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
+]);
+export type OrchestratorAction = z.infer<typeof OrchestratorAction>;

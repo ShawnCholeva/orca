@@ -79,7 +79,8 @@ import {
   WorkflowWorkerStateChangedEventPayload,
   WORKFLOW_ARTIFACT_MAX_BODY_BYTES,
   WORKFLOW_EVENT_MAX_PAYLOAD_BYTES,
-  WORKFLOW_GUARDRAIL_MAX_CONFIG_BYTES
+  WORKFLOW_GUARDRAIL_MAX_CONFIG_BYTES,
+  OrchestratorAction
 } from "../index.js";
 
 const now = "2026-01-01T00:00:00.000Z";
@@ -917,5 +918,14 @@ describe("workflow contracts", () => {
 
     expect(Task.parse(task)).toEqual(task);
     expect(Recommendation.parse(recommendation)).toEqual(recommendation);
+  });
+});
+
+describe("OrchestratorAction", () => {
+  it("parses approve_step_complete", () => {
+    expect(OrchestratorAction.parse({ kind: "approve_step_complete" })).toBeDefined();
+  });
+  it("rejects unknown kind", () => {
+    expect(() => OrchestratorAction.parse({ kind: "explode" })).toThrow();
   });
 });
