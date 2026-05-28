@@ -1317,6 +1317,17 @@ git commit -m "chore: remove orphaned references to deleted step fields"
   `reconcile.ts` next-step-run creation helper — read before wiring, follow the existing
   pattern.
 
+## Notable changes (Phase 1 implementation — deviations from this plan)
+
+Tracked for the Phase 2 doc. Each entry is where the as-built implementation departed from the plan text above.
+
+- **Task 4 — migration mechanism.** The plan assumed migrations are a JS array of `{ id, name, up }` objects appended in `migrations.ts`. Reality: migrations are **SQL files** under `apps/daemon/migrations/` registered in the `migrationFiles` array in `migrations.ts`, applied by `runMigrations(db, dir)`. Implemented as a new file `0014_workflow_step_runs_operator_selection.sql` (ALTER TABLE adds the four columns) plus an entry in `migrationFiles`. The exit-criteria columns (`satisfied_exit_criteria_json`, `outstanding_exit_criteria_json`) remain in the table (NOT NULL DEFAULT '[]'); they're no longer read but SQLite can't drop them cleanly and leaving them is harmless.
+- **Task 4 — test harness.** The plan's test used `openMigratedTestDb()`; the real harness in `migrations.test.ts` uses `freshDb()` + `runMigrations(db, defaultMigrationsDir())` then `PRAGMA table_info(...)`. Test written to match.
+- **Task 7 — provider/model resolution (decision 1A, user-approved).** The plan said "provider/model come from the chosen `OperatorDescriptor`, NOT parsed from the id," but model descriptors did not populate those fields and the service had no way to read them. Resolved by: (a) `registry.ts` `list()` now sets `providerId: provider.id` and `modelId: model.id` on model descriptors; (b) `OperatorRegistry` (or its `list`) is injected into `OrchestratorService`, which looks the chosen descriptor up by operatorId after `select()` and reads provider/model from it. DI threaded through all `new OrchestratorService(...)` sites (server.ts, orchestrator/routes.ts, steps/routes.ts) + daemon-context.
+- **Task 7 — model-only enforcement (decision 2B, user-approved).** `OperatorSelector.select()` ranked all ready operators (agent/model/human) with no kind filter. Added an `allowedKinds?: OperatorKind[]` field to `SelectorInput`; `select()` pre-filters `readyOperators` to those kinds before ranking. The skill-step path passes `allowedKinds: ["model"]`. Phase 2 will add agent-operator routing.
+- **Task 7 — broker DI.** `OrchestratorService` constructor gains a broker handle (`OrchestrationTransportBroker`, sourced from daemon-context's `orchestrationTransportBroker`) used for the `run_step_skill` `propose` call. Threaded through the same construction sites as the registry.
+- **Task 7 — SelectorInput synthesis.** The new `WorkflowStepTemplate` dropped `purpose`/`recommendedCapabilities`/`recommendedOperatorIds`, which `SelectorInput` still requires. The skill-step path synthesizes them: `stepPurpose` = step `instructions` (truncated), `recommendedCapabilities` = `[]`, `recommendedOperatorIds` = `[]`.
+
 ## Note: Task 0 (scroll bug) is already done
 
 The Workflows-tab scroll fix lives in `apps/desktop/src/workflows/workflows.css`
