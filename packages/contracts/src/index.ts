@@ -3009,3 +3009,12 @@ export type CheckReadinessAllResponse = z.infer<typeof CheckReadinessAllResponse
 
 export const CheckReadinessOneResponse = z.object({ report: AgentReadinessReport });
 export type CheckReadinessOneResponse = z.infer<typeof CheckReadinessOneResponse>;
+
+export {
+  ExecutionMode,
+  EnabledExecutionModeEntry,
+  DisabledExecutionModeEntry,
+  AdapterExecutionModeConfig,
+  validateAdapterExecutionModeConfig,
+} from "./adapters/execution-modes.js";
+export type { ValidationResult as AdapterExecutionModeValidation } from "./adapters/execution-modes.js";

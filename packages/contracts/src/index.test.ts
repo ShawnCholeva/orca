@@ -1551,3 +1551,85 @@ describe("CreateGoalAndStartWorkflowResponse", () => {
     }
   });
 });
+
+import {
+  ExecutionMode,
+  AdapterExecutionModeConfig,
+  validateAdapterExecutionModeConfig,
+} from "./index.js";
+
+describe("ExecutionMode and AdapterExecutionModeConfig", () => {
+  it("parses both execution modes", () => {
+    expect(ExecutionMode.parse("shadow_session")).toBe("shadow_session");
+    expect(ExecutionMode.parse("one_shot")).toBe("one_shot");
+    expect(() => ExecutionMode.parse("invalid")).toThrow();
+  });
+
+  it("validates a valid config", () => {
+    const config: AdapterExecutionModeConfig = {
+      adapterId: "claude-code",
+      enabledExecutionModes: [{ mode: "shadow_session", preferred: true }],
+      disabledExecutionModes: [{ mode: "one_shot", reason: "post 2026-06-15 -p billing" }],
+    };
+    const result = validateAdapterExecutionModeConfig(config, ["shadow_session", "one_shot"]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects config with no preferred entry", () => {
+    const config: AdapterExecutionModeConfig = {
+      adapterId: "claude-code",
+      enabledExecutionModes: [{ mode: "shadow_session" }],
+      disabledExecutionModes: [],
+    };
+    const result = validateAdapterExecutionModeConfig(config, ["shadow_session", "one_shot"]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) { expect(result.reason).toMatch(/preferred/); }
+  });
+
+  it("rejects config with multiple preferred entries", () => {
+    const config: AdapterExecutionModeConfig = {
+      adapterId: "claude-code",
+      enabledExecutionModes: [
+        { mode: "shadow_session", preferred: true },
+        { mode: "one_shot", preferred: true },
+      ],
+      disabledExecutionModes: [],
+    };
+    const result = validateAdapterExecutionModeConfig(config, ["shadow_session", "one_shot"]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) { expect(result.reason).toMatch(/exactly one preferred/); }
+  });
+
+  it("rejects config with intersecting enabled and disabled", () => {
+    const config: AdapterExecutionModeConfig = {
+      adapterId: "claude-code",
+      enabledExecutionModes: [{ mode: "shadow_session", preferred: true }],
+      disabledExecutionModes: [{ mode: "shadow_session", reason: "x" }],
+    };
+    const result = validateAdapterExecutionModeConfig(config, ["shadow_session", "one_shot"]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) { expect(result.reason).toMatch(/cannot be both enabled and disabled/); }
+  });
+
+  it("rejects empty enabled list", () => {
+    const config: AdapterExecutionModeConfig = {
+      adapterId: "claude-code",
+      enabledExecutionModes: [],
+      disabledExecutionModes: [{ mode: "shadow_session", reason: "x" }, { mode: "one_shot", reason: "y" }],
+    };
+    const result = validateAdapterExecutionModeConfig(config, ["shadow_session", "one_shot"]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) { expect(result.reason).toMatch(/non-empty/); }
+  });
+
+  it("rejects mode not in supportedExecutionModes", () => {
+    const config: AdapterExecutionModeConfig = {
+      adapterId: "claude-code",
+      enabledExecutionModes: [{ mode: "shadow_session", preferred: true }],
+      disabledExecutionModes: [{ mode: "one_shot", reason: "x" }],
+    };
+    const result = validateAdapterExecutionModeConfig(config, ["shadow_session"]); // one_shot not supported
+    expect(result.ok).toBe(false);
+    if (!result.ok) { expect(result.reason).toMatch(/not supported/); }
+  });
+});
