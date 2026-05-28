@@ -68,7 +68,7 @@ Schema invariants (validated on every mutation):
 - Exactly one entry in `enabled_modes_json` has `preferred: true`.
 - `enabled ∩ disabled = ∅`.
 - `enabled_modes_json` non-empty.
-- Every mode referenced in either array must appear in the adapter's code-declared `supportedExecutionModes`.
+- Every mode in `enabled_modes_json` must appear in the adapter's code-declared `supportedExecutionModes`. The `disabled_modes_json` array is a free-text policy log and MAY reference modes the adapter does not currently support (e.g. "one_shot — adapter does not implement one-shot yet" for opencode); this records forward-compatible policy without requiring fictitious capability declarations.
 
 Seed on daemon boot: for each registered adapter, `INSERT OR IGNORE` a row using adapter-declared defaults. Future adapter capability changes ship in code; the row's enabled/disabled split is migrated separately (admin tool or migration).
 
