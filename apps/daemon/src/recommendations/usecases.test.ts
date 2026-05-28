@@ -117,6 +117,7 @@ function seedWorkflow(db: Database.Database, goalId: string, opts?: {
           name: 'Done',
           instructions: 'Finalize the work.',
           outputSchema: [{ key: 'result', type: 'string', required: true }],
+          agentPreference: [{ adapterId: 'claude-code', modelId: 'claude-haiku-4-5' }],
         },
       ]
     : [
@@ -126,6 +127,7 @@ function seedWorkflow(db: Database.Database, goalId: string, opts?: {
           name: 'Execution',
           instructions: 'Implement the plan.',
           outputSchema: [{ key: 'result', type: 'string', required: true }],
+          agentPreference: [{ adapterId: 'claude-code', modelId: 'claude-haiku-4-5' }],
         },
         {
           id: 'qa',
@@ -133,6 +135,7 @@ function seedWorkflow(db: Database.Database, goalId: string, opts?: {
           name: 'QA',
           instructions: 'Validate the implementation.',
           outputSchema: [{ key: 'result', type: 'string', required: true }],
+          agentPreference: [{ adapterId: 'claude-code', modelId: 'claude-haiku-4-5' }],
         },
       ];
   db.prepare(

@@ -58,6 +58,7 @@ function seedTemplate(
         name: "Step 1",
         instructions: "Produce the goal brief.",
         outputSchema: [{ key: "goal_brief", type: "string", required: true }],
+        agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
       },
     ]),
     JSON.stringify([]),

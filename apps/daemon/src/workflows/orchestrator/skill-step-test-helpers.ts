@@ -72,6 +72,7 @@ export interface SkillStep {
   name: string;
   instructions: string;
   outputSchema: Array<{ key: string; type: string; required: boolean }>;
+  agentPreference: Array<{ adapterId: string; modelId: string }>;
 }
 
 export function makeStep(patch: Partial<SkillStep> = {}): SkillStep {
@@ -81,6 +82,7 @@ export function makeStep(patch: Partial<SkillStep> = {}): SkillStep {
     name: "Plan",
     instructions: "Plan the work and produce a problem statement.",
     outputSchema: [{ key: "problem", type: "string", required: true }],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
     ...patch,
   };
 }
@@ -106,6 +108,7 @@ export function seedSkillWorkflow(db: Database.Database, args: SeedWorkflowArgs 
         name: "Build",
         instructions: "Implement the plan.",
         outputSchema: [{ key: "result", type: "string", required: true }],
+        agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
       }),
     ];
   const current = steps[0]!;

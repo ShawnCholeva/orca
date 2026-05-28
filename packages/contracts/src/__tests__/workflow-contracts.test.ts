@@ -30,6 +30,7 @@ import {
   ProposedAction,
   Recommendation,
   RecommendationType,
+  StepAgentChoice,
   SubmitHumanReviewDecisionRequest,
   Task,
   WorkflowArtifact,
@@ -61,6 +62,7 @@ import {
   WorkflowStepFailedEventPayload,
   WorkflowStepSkippedEventPayload,
   WorkflowStepStartedEventPayload,
+  WorkflowStepTemplate,
   WorkflowTaskDagCreatedEventPayload,
   WorkflowTaskDagUpdatedEventPayload,
   WorkflowTemplate,
@@ -94,7 +96,8 @@ const step = {
   ordinal: 0,
   name: "Intake",
   instructions: "Clarify the goal and produce a goal brief.",
-  outputSchema: [{ key: "goal_brief", type: "string" as const, required: true }]
+  outputSchema: [{ key: "goal_brief", type: "string" as const, required: true }],
+  agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }]
 };
 
 const guardrail = {
@@ -927,5 +930,28 @@ describe("OrchestratorAction", () => {
   });
   it("rejects unknown kind", () => {
     expect(() => OrchestratorAction.parse({ kind: "explode" })).toThrow();
+  });
+});
+
+describe("StepAgentChoice + agentPreference", () => {
+  it("StepAgentChoice parses", () => {
+    expect(StepAgentChoice.parse({ adapterId: "claude-code", modelId: "claude-haiku-4-5" })).toBeDefined();
+  });
+
+  it("WorkflowStepTemplate requires non-empty agentPreference", () => {
+    const r = WorkflowStepTemplate.safeParse({
+      id: "intake", ordinal: 0, name: "Intake", instructions: "x",
+      outputSchema: [], agentPreference: [],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("WorkflowStepTemplate accepts valid agentPreference", () => {
+    const r = WorkflowStepTemplate.safeParse({
+      id: "intake", ordinal: 0, name: "Intake", instructions: "x",
+      outputSchema: [{ key: "problem", type: "string", required: true }],
+      agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+    });
+    expect(r.success).toBe(true);
   });
 });

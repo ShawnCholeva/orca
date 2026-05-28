@@ -253,6 +253,15 @@ export const WorkflowGuardrailConfig = z
   .strict();
 export type WorkflowGuardrailConfig = z.infer<typeof WorkflowGuardrailConfig>;
 
+export const StepAgentChoice = z
+  .object({
+    adapterId: AdapterId,
+    modelId: z.string().min(1).max(80),
+    providerId: ModelProviderId.optional(),
+  })
+  .strict();
+export type StepAgentChoice = z.infer<typeof StepAgentChoice>;
+
 export const WorkflowStepTemplate = z
   .object({
     id: Id100,
@@ -260,6 +269,7 @@ export const WorkflowStepTemplate = z
     name: z.string().min(1).max(100),
     instructions: BoundedString(WORKFLOW_STEP_MAX_INSTRUCTIONS_BYTES, "instructions"),
     outputSchema: WorkflowStepOutputSchema,
+    agentPreference: z.array(StepAgentChoice).min(1).max(8),
   })
   .strict();
 export type WorkflowStepTemplate = z.infer<typeof WorkflowStepTemplate>;

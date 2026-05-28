@@ -103,6 +103,7 @@ describe("seedEngineeringTemplate", () => {
           name: "Old",
           instructions: "old placeholder",
           outputSchema: [{ key: "summary", type: "string", required: true }],
+          agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
         },
       ]),
       JSON.stringify([]),

@@ -59,6 +59,7 @@ function seedTemplate(db: Database.Database, id: string, version: number): void 
         name: "Intake",
         instructions: "Collect user input and capture a goal brief.",
         outputSchema: [{ key: "goal_brief", type: "string", required: true }],
+        agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
       },
     ]),
     JSON.stringify([]),
