@@ -35,10 +35,7 @@ import { evaluateGuardrailRequiresApproval } from "../guardrails/evaluator.js";
 import { reconstructTranscript } from "./interview.js";
 import { buildAgentObjective } from "./agent-objective.js";
 import { buildStepExecutionInput } from "./step-input.js";
-import {
-  recommendationOrDirectLaunch,
-  type WorkflowSessionLauncher,
-} from "./session-launcher.js";
+import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.js";
 import { decodeSessionTail } from "./session-tail.js";
 import { synthesizeStepOutput } from "./synthesize.js";
@@ -659,16 +656,19 @@ export class OrchestratorService {
       operatorKind: "agent" as const,
       objective,
     };
-    const outcome = recommendationOrDirectLaunch({
-      requiresApproval,
-      launcher: this.launcher,
-      ctx: launchCtx,
-    });
 
-    if (outcome === "direct") {
-      return this.commitNoopLatestDecision(db, run.id, stepRun.id);
+    if (requiresApproval) {
+      return this.commitLaunchRecommendation(db, now, ctx, chosen, objective, options);
     }
-    return this.commitLaunchRecommendation(db, now, ctx, chosen, objective, options);
+
+    // Direct launch: await to catch direct_launch_unsupported (e.g. no workspace attached).
+    // On failure, fall back to a recommendation so the user can resolve the issue.
+    try {
+      await this.launcher.launch(launchCtx);
+      return this.commitNoopLatestDecision(db, run.id, stepRun.id);
+    } catch {
+      return this.commitLaunchRecommendation(db, now, ctx, chosen, objective, options);
+    }
   }
 
   private async commitOperatorSelectionForSkill(

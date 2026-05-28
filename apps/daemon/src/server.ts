@@ -427,7 +427,7 @@ export function createServer(
     daemonContext.operatorSelector,
     daemonContext.orchestrationTransportBroker,
     daemonContext.operatorRegistry,
-    undefined,
+    daemonContext.workflowSessionLauncher,
     sessionOutputStore
   );
 
@@ -846,6 +846,7 @@ export function createServer(
     operatorSelector: daemonContext.operatorSelector,
     orchestrationTransportBroker: daemonContext.orchestrationTransportBroker,
     operatorRegistry: daemonContext.operatorRegistry,
+    workflowSessionLauncher: daemonContext.workflowSessionLauncher,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
   });
@@ -858,6 +859,7 @@ export function createServer(
     operatorSelector: daemonContext.operatorSelector,
     orchestrationTransportBroker: daemonContext.orchestrationTransportBroker,
     operatorRegistry: daemonContext.operatorRegistry,
+    workflowSessionLauncher: daemonContext.workflowSessionLauncher,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
   });

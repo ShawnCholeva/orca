@@ -14,6 +14,7 @@ import type { OperatorRegistry } from "../operators/registry.js";
 import type { OperatorSelector } from "../operators/selector.js";
 import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { OrchestratorService } from "../orchestrator/service.js";
+import type { WorkflowSessionLauncher } from "../orchestrator/session-launcher.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
 import { getDecisionById } from "../decisions/usecases.js";
 import { getWorkflowStepRunById } from "./projection.js";
@@ -24,6 +25,7 @@ export interface WorkflowStepRouteDeps {
   operatorSelector?: Pick<OperatorSelector, "select">;
   orchestrationTransportBroker?: Pick<OrchestrationTransportBroker, "propose">;
   operatorRegistry?: Pick<OperatorRegistry, "list">;
+  workflowSessionLauncher?: WorkflowSessionLauncher;
   now?: () => string;
   idFactory?: () => string;
 }
@@ -42,7 +44,8 @@ export function registerWorkflowStepRoutes(
       ? new OrchestratorService(
           deps.operatorSelector,
           deps.orchestrationTransportBroker,
-          deps.operatorRegistry
+          deps.operatorRegistry,
+          deps.workflowSessionLauncher
         )
       : null;
 

@@ -18,6 +18,10 @@ import { createGeminiProvider } from './llm/gemini.js';
 import { OperatorRegistry } from './workflows/operators/registry.js';
 import { OperatorSelector } from './workflows/operators/selector.js';
 import { OrchestrationTransportBroker } from './workflows/orchestration-transport/broker.js';
+import { createSession as createSessionUseCase } from './sessions/usecases.js';
+import { listWorkspacesByGoal } from './workspaces/projection.js';
+import { ProductionWorkflowSessionLauncher } from './workflows/orchestrator/session-launcher-impl.js';
+import type { WorkflowSessionLauncher } from './workflows/orchestrator/session-launcher.js';
 
 /**
  * Shared dependency container for orchestration daemon use cases.
@@ -35,6 +39,7 @@ export interface DaemonContext {
   operatorRegistry: OperatorRegistry;
   orchestrationTransportBroker: OrchestrationTransportBroker;
   operatorSelector: OperatorSelector;
+  workflowSessionLauncher: WorkflowSessionLauncher;
   now: () => string;
   idFactory: () => string;
 }
@@ -63,6 +68,33 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
     now,
     idFactory,
   });
+
+  // Production workflow session launcher: picks first attached workspace for goal (Phase 2 limitation).
+  const workflowSessionLauncher = new ProductionWorkflowSessionLauncher({
+    createSession: async (input) => {
+      const session = await createSessionUseCase(
+        { db, bus, adapterRegistry },
+        {
+          goalId: input.goalId,
+          workspaceId: input.workspaceId,
+          adapterId: input.adapterId,
+          role: input.role,
+          instruction: input.instruction,
+          title: input.title,
+        }
+      );
+      // Set workflow_step_run_id on the created session row so the orchestrator
+      // can detect a live linked session via the sessions query in commitAgentStepDecision.
+      db.prepare("UPDATE sessions SET workflow_step_run_id = ? WHERE id = ?")
+        .run(input.workflowStepRunId, session.id);
+      return session;
+    },
+    firstWorkspaceId: (goalId) => {
+      const workspaces = listWorkspacesByGoal(db, goalId);
+      return workspaces[0]?.id ?? null;
+    },
+  });
+
   return {
     db,
     bus,
@@ -79,6 +111,7 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
       operatorRegistry,
       orchestrationTransportBroker
     ),
+    workflowSessionLauncher,
     now,
     idFactory,
   };
