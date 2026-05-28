@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { StepSkillProposal } from "@orca/contracts";
+import type { OrchestrationRequest, StepSkillProposal } from "@orca/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { resetWorkflowEventPreparedStatements } from "../events.js";
@@ -215,5 +215,40 @@ describe("OrchestratorService skill step", () => {
       .prepare("SELECT status FROM workflow_runs WHERE id = 'run-1'")
       .get() as { status: string };
     expect(run.status).toBe("blocked");
+  });
+
+  it("model step input includes workspaceContext when workspaces are attached", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedSkillWorkflow(db, {
+      selectedOperatorId: "orca/anthropic:claude-sonnet-4-6",
+      selectedProviderId: "orca/anthropic",
+      selectedModelId: "claude-sonnet-4-6",
+      operatorSelectedAt: NOW,
+    });
+    // Seed a workspace for the goal.
+    db.prepare(
+      "INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run("ws1", "goal-1", "/r", "monorepo", "repo", null, null, "ok", NOW);
+
+    // Spy broker captures the request payload.
+    let capturedPayload: unknown;
+    const spyBroker: Pick<import("../orchestration-transport/broker.js").OrchestrationTransportBroker, "propose"> = {
+      async propose(req: OrchestrationRequest, opts) {
+        capturedPayload = req.payload;
+        // Delegate to fakeBroker logic for a valid ask response.
+        const raw: StepSkillProposal = { action: "ask", question: "q?" };
+        const v = opts?.validateProposal ? await opts.validateProposal(raw) : { accepted: true as const };
+        if (!v.accepted) return { status: "needs_human_review" as const, attemptId: "a", reviewPayloadId: "r" };
+        return { status: "proposed" as const, attemptId: "a", transport: "one_shot" as const, parsed: raw, rawTextLength: null, latencyMs: 1 };
+      },
+    };
+
+    const service = new OrchestratorService(fakeSelector(), spyBroker, fakeRegistry());
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    const payload = capturedPayload as Record<string, unknown> | undefined;
+    expect(payload?.workspaceContext).toBeDefined();
+    const wc = payload?.workspaceContext as { workspaces: Array<{ id: string }> } | undefined;
+    expect(wc?.workspaces[0]?.id).toBe("ws1");
   });
 });

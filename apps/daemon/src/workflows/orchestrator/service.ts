@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import {
   InterviewTurn,
   OrchestrationRequest,
+  ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES,
   StepSkillProposal,
   validateStepOutput,
   type DomainEvent,
@@ -40,6 +41,8 @@ import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.
 import { decodeSessionTail } from "./session-tail.js";
 import { synthesizeStepOutput } from "./synthesize.js";
 import { detectPendingAgentQuestion } from "./agent-interview.js";
+import { assembleWorkspaceContext } from "./workspace-context.js";
+import { listWorkspacesByGoal } from "../../workspaces/projection.js";
 
 interface GoalRow {
   id: string;
@@ -438,6 +441,13 @@ export class OrchestratorService {
     // (4) run the skill turn.
     const transcript = reconstructTranscript(stepArtifacts);
     const stepRunByStepId = this.stepRunIdsByTemplateId(db, run.id);
+    const rawWorkspaces = listWorkspacesByGoal(db, goal.id);
+    const workspaceContext = assembleWorkspaceContext({
+      workspaces: rawWorkspaces.map((w) => ({ id: w.id, name: w.name, root: w.path })),
+      summaries: [],
+      snippets: [],
+      payloadBudget: Math.floor(ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES * 0.25),
+    });
     const input = buildStepExecutionInput({
       goal: { id: goal.id, description: goal.description },
       steps: template.steps,
@@ -445,6 +455,7 @@ export class OrchestratorService {
       artifacts,
       transcript,
       stepRunByStepId,
+      workspaceContext: workspaceContext.workspaces.length > 0 ? workspaceContext : undefined,
     });
 
     const validate = (raw: unknown) => {

@@ -1,5 +1,6 @@
 // step-input.ts
 import type { InterviewTurn, WorkflowArtifact, WorkflowStepTemplate } from "@orca/contracts";
+import type { WorkspaceContextOutput } from "./workspace-context.js";
 
 export interface StepExecutionInput {
   goal: { id: string; description: string };
@@ -7,6 +8,7 @@ export interface StepExecutionInput {
   previousStepOutput: unknown | null;
   priorStepOutputs: Array<{ stepId: string; stepName: string; output: unknown }>;
   transcript: InterviewTurn[];
+  workspaceContext?: WorkspaceContextOutput;
 }
 
 function parseOutput(body: string): unknown {
@@ -20,8 +22,9 @@ export function buildStepExecutionInput(args: {
   artifacts: WorkflowArtifact[];
   transcript: InterviewTurn[];
   stepRunByStepId: Record<string, string>; // stepTemplateId -> stepRunId
+  workspaceContext?: WorkspaceContextOutput;
 }): StepExecutionInput {
-  const { goal, steps, currentStep, artifacts, transcript, stepRunByStepId } = args;
+  const { goal, steps, currentStep, artifacts, transcript, stepRunByStepId, workspaceContext } = args;
   const outputByStepRunId = new Map<string, unknown>();
   for (const a of artifacts) {
     if (a.type === "step_output" && a.stepRunId) outputByStepRunId.set(a.stepRunId, parseOutput(a.body));
@@ -42,5 +45,6 @@ export function buildStepExecutionInput(args: {
     previousStepOutput,
     priorStepOutputs,
     transcript,
+    ...(workspaceContext !== undefined ? { workspaceContext } : {}),
   };
 }
