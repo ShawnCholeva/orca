@@ -1,4 +1,10 @@
-import type { AdapterExecutionModeConfig, AdapterId } from "@orca/contracts";
+import type Database from "better-sqlite3";
+import {
+  AdapterExecutionModeConfig,
+  validateAdapterExecutionModeConfig,
+  type AdapterId,
+  type ExecutionMode,
+} from "@orca/contracts";
 
 export const ADAPTER_EXECUTION_MODE_DEFAULTS: Record<AdapterId, AdapterExecutionModeConfig> = {
   "claude-code": {
@@ -37,3 +43,105 @@ export const ADAPTER_EXECUTION_MODE_DEFAULTS: Record<AdapterId, AdapterExecution
     disabledExecutionModes: [],
   },
 };
+
+interface Row {
+  adapter_id: string;
+  enabled_modes_json: string;
+  disabled_modes_json: string;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export function getAdapterExecutionModeConfig(
+  db: Database.Database,
+  adapterId: string
+): AdapterExecutionModeConfig | null {
+  const row = db
+    .prepare(
+      "SELECT adapter_id, enabled_modes_json, disabled_modes_json, updated_at, updated_by FROM adapter_execution_modes WHERE adapter_id=?"
+    )
+    .get(adapterId) as Row | undefined;
+  if (!row) return null;
+  return {
+    adapterId: row.adapter_id as AdapterExecutionModeConfig["adapterId"],
+    enabledExecutionModes: JSON.parse(row.enabled_modes_json),
+    disabledExecutionModes: JSON.parse(row.disabled_modes_json),
+  };
+}
+
+export function listAdapterExecutionModeConfigs(
+  db: Database.Database
+): AdapterExecutionModeConfig[] {
+  const rows = db
+    .prepare(
+      "SELECT adapter_id, enabled_modes_json, disabled_modes_json, updated_at, updated_by FROM adapter_execution_modes ORDER BY adapter_id"
+    )
+    .all() as Row[];
+  return rows.map((row) => ({
+    adapterId: row.adapter_id as AdapterExecutionModeConfig["adapterId"],
+    enabledExecutionModes: JSON.parse(row.enabled_modes_json),
+    disabledExecutionModes: JSON.parse(row.disabled_modes_json),
+  }));
+}
+
+export function upsertAdapterExecutionModeConfig(
+  db: Database.Database,
+  now: () => string,
+  config: AdapterExecutionModeConfig,
+  supportedModes: ExecutionMode[],
+  updatedBy: string
+): AdapterExecutionModeConfig {
+  const validation = validateAdapterExecutionModeConfig(config, supportedModes);
+  if (!validation.ok) throw new Error(validation.reason);
+  db.prepare(
+    `INSERT INTO adapter_execution_modes
+       (adapter_id, enabled_modes_json, disabled_modes_json, updated_at, updated_by)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(adapter_id) DO UPDATE SET
+       enabled_modes_json=excluded.enabled_modes_json,
+       disabled_modes_json=excluded.disabled_modes_json,
+       updated_at=excluded.updated_at,
+       updated_by=excluded.updated_by`
+  ).run(
+    config.adapterId,
+    JSON.stringify(config.enabledExecutionModes),
+    JSON.stringify(config.disabledExecutionModes),
+    now(),
+    updatedBy
+  );
+  return config;
+}
+
+export function seedAdapterExecutionModes(
+  db: Database.Database,
+  now: () => string,
+  supportedByAdapter: Record<string, ExecutionMode[]>
+): void {
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO adapter_execution_modes
+       (adapter_id, enabled_modes_json, disabled_modes_json, updated_at, updated_by)
+     VALUES (?, ?, ?, ?, 'system_seed')`
+  );
+  for (const [adapterId, defaults] of Object.entries(ADAPTER_EXECUTION_MODE_DEFAULTS)) {
+    const supported = supportedByAdapter[adapterId];
+    if (!supported) continue;
+    const supportedSet = new Set(supported);
+    // Filter disabled modes to those actually in the supported set for this deployment
+    const config: AdapterExecutionModeConfig = {
+      ...defaults,
+      disabledExecutionModes: defaults.disabledExecutionModes.filter((e) =>
+        supportedSet.has(e.mode)
+      ),
+    };
+    const validation = validateAdapterExecutionModeConfig(config, supported);
+    if (!validation.ok) {
+      throw new Error(`seed defaults invalid for adapter ${adapterId}: ${validation.reason}`);
+    }
+    insert.run(
+      config.adapterId,
+      JSON.stringify(config.enabledExecutionModes),
+      JSON.stringify(config.disabledExecutionModes),
+      now()
+    );
+  }
+}
