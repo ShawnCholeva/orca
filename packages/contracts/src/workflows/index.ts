@@ -139,7 +139,8 @@ export const OrchestrationDecisionKind = z.enum([
   "score_transition",
   "repair_artifact",
   "run_audit",
-  "run_step_skill"
+  "run_step_skill",
+  "synthesize_step_output",
 ]);
 export type OrchestrationDecisionKind = z.infer<typeof OrchestrationDecisionKind>;
 
@@ -539,6 +540,31 @@ export const OrchestrationProposalEnvelope = z
 export type OrchestrationProposalEnvelope = z.infer<
   typeof OrchestrationProposalEnvelope
 >;
+
+export const SynthesisRequest = z
+  .object({
+    sessionResult: BoundedString(
+      ORCHESTRATION_WORKER_OUTPUT_TAIL_MAX_BYTES,
+      "sessionResult"
+    ),
+    outputSchema: WorkflowStepOutputSchema,
+    stepInput: z.unknown(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!hasMaxSerializedBytes(value, ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `SynthesisRequest must be at most ${ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES} bytes when serialized`,
+      });
+    }
+  });
+export type SynthesisRequest = z.infer<typeof SynthesisRequest>;
+
+export const SynthesisProposal = z
+  .object({ output: z.record(z.unknown()) })
+  .strict();
+export type SynthesisProposal = z.infer<typeof SynthesisProposal>;
 
 export const StepSkillProposal = z.discriminatedUnion("action", [
   z.object({
