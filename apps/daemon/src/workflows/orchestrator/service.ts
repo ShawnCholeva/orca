@@ -39,6 +39,7 @@ import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.js";
 import { decodeSessionTail } from "./session-tail.js";
 import { synthesizeStepOutput } from "./synthesize.js";
+import { detectPendingAgentQuestion } from "./agent-interview.js";
 
 interface GoalRow {
   id: string;
@@ -303,6 +304,62 @@ export class OrchestratorService {
 
     // (10) Drive advancement to the next step / completion.
     await this.requestNextDecision(db, now, run.id, options);
+  }
+
+  /**
+   * Called whenever a chunk of session output lands. Scans the tail for the
+   * [orca:ask] sentinel and, if found, records a request_user_input decision.
+   * Idempotent: a second call with the same sentinel is a no-op because
+   * hasActiveUnansweredQuestion returns true once the first decision exists.
+   */
+  async onSessionOutputChunk(
+    db: Database.Database,
+    now: () => string,
+    args: { sessionId: string; goalId: string },
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    // (1) Resolve step run from session.
+    const sess = db
+      .prepare("SELECT workflow_step_run_id FROM sessions WHERE id = ?")
+      .get(args.sessionId) as { workflow_step_run_id: string | null } | undefined;
+    if (!sess?.workflow_step_run_id) return;
+
+    // (2) Load step run; skip if not active.
+    const stepRun = db
+      .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
+      .get(sess.workflow_step_run_id) as StepRunRow | undefined;
+    if (!stepRun || stepRun.status !== "active") return;
+
+    // (3) Scan the tail for a sentinel.
+    const tail = decodeSessionTail(this.sessionOutputStore.readTail(args.sessionId));
+    const question = detectPendingAgentQuestion(tail);
+    if (!question) return;
+
+    // (4) Idempotency: already an unanswered question outstanding?
+    const stepArtifacts = listArtifactsForRun(db, stepRun.workflow_run_id).filter(
+      (a) => a.stepRunId === stepRun.id
+    );
+    if (this.hasActiveUnansweredQuestion(db, stepArtifacts, stepRun.id)) return;
+
+    // (5) Load run, template, step template to call commitUserInputDecision.
+    const run = getWorkflowRunById(db, stepRun.workflow_run_id);
+    if (!run || run.status !== "active") return;
+    const template = getTemplateById(db, run.templateId);
+    if (!template) return;
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) return;
+
+    // (6) Record the decision.
+    this.commitUserInputDecision(
+      db,
+      now,
+      run.goalId,
+      run.id,
+      stepRun,
+      stepTpl,
+      question,
+      options
+    );
   }
 
   async requestNextDecision(

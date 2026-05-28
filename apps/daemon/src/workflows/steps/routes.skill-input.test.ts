@@ -4,7 +4,7 @@ import path from "node:path";
 
 import type Database from "better-sqlite3";
 import fastify from "fastify";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { closeDatabase, openDatabase } from "../../db.js";
 import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
@@ -209,5 +209,119 @@ describe("submit-input: interview_turn artifact creation", () => {
       (a) => a.type === "interview_turn" && a.stepRunId === STEP_RUN_ID
     );
     expect(turns).toHaveLength(1);
+  });
+});
+
+describe("submit-input: PTY answer injection", () => {
+  function setupWithSession(db: Database.Database): {
+    sessionId: string;
+    writeSpy: ReturnType<typeof vi.fn>;
+  } {
+    const sessionId = "sess-inject-1";
+    const writeSpy = vi.fn();
+
+    // Seed a workspace for FK
+    db.prepare(
+      "INSERT INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-inject-1', ?, 'main', '/tmp/repo', 'git', 'ok', ?)"
+    ).run(GOAL_ID, NOW);
+
+    // Seed a running session linked to the step run
+    db.prepare(
+      "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, started_at, workflow_step_run_id) VALUES (?, ?, 'ws-inject-1', 'claude-code', 'S', 'running', ?, ?, ?)"
+    ).run(sessionId, GOAL_ID, NOW, NOW, STEP_RUN_ID);
+
+    return { sessionId, writeSpy };
+  }
+
+  it("injects answer into the running PTY session when sessionRuntime is provided", async () => {
+    const { db } = setup();
+
+    const { sessionId, writeSpy } = setupWithSession(db);
+
+    let nextId = 0;
+    const app2 = fastify({ logger: false });
+    openApps.push(app2);
+
+    registerWorkflowStepRoutes(app2, {
+      db,
+      now: () => NOW,
+      idFactory: () => `artifact-${++nextId}`,
+      sessionRuntime: {
+        getHandle: (id: string) => (id === sessionId ? { write: writeSpy } : undefined),
+      },
+    });
+
+    const response = await app2.inject({
+      method: "POST",
+      url: `/v1/goals/${GOAL_ID}/workflow-step-runs/${STEP_RUN_ID}/submit-input`,
+      payload: {
+        stepRunId: STEP_RUN_ID,
+        questionDecisionId: QUESTION_DECISION_ID,
+        answerText: "us-west-2",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(writeSpy).toHaveBeenCalledWith(Buffer.from("us-west-2\n", "utf8"));
+  });
+
+  it("does not throw when sessionRuntime is absent", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "orca-no-runtime-"));
+    tempDirs.push(dir);
+    const db2 = openDatabase({ ...createConfig(dir) });
+    runMigrations(db2, defaultMigrationsDir());
+
+    // Minimal seeding (no session)
+    db2.prepare(
+      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+    ).run(GOAL_ID, NOW, NOW);
+    db2.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('tmpl-1', 'T', 'd', 1, 1, 1, '[]', '[]', ?, ?)"
+    ).run(NOW, NOW);
+    db2.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES (?, ?, 'tmpl-1', 1, 'active', ?, NULL, ?, NULL)"
+    ).run(RUN_ID, GOAL_ID, STEP_RUN_ID, NOW);
+    db2.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES (?, ?, ?, 'intake', 0, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1')"
+    ).run(STEP_RUN_ID, GOAL_ID, RUN_ID, NOW);
+    db2.transaction(() => {
+      recordDecisionInTx(
+        db2,
+        () => NOW,
+        {
+          goalId: GOAL_ID,
+          workflowRunId: RUN_ID,
+          stepRunId: STEP_RUN_ID,
+          decisionType: "request_user_input",
+          selectedAction: "request_input:intake",
+          reason: "Region?",
+          influencedBy: [],
+          inputFingerprint: "fp-q-no-rt",
+        },
+        { idFactory: () => QUESTION_DECISION_ID }
+      );
+    })();
+
+    let nextId = 0;
+    const app3 = fastify({ logger: false });
+    openApps.push(app3);
+    registerWorkflowStepRoutes(app3, {
+      db: db2,
+      now: () => NOW,
+      idFactory: () => `a-${++nextId}`,
+      // sessionRuntime intentionally omitted
+    });
+
+    const response = await app3.inject({
+      method: "POST",
+      url: `/v1/goals/${GOAL_ID}/workflow-step-runs/${STEP_RUN_ID}/submit-input`,
+      payload: {
+        stepRunId: STEP_RUN_ID,
+        questionDecisionId: QUESTION_DECISION_ID,
+        answerText: "us-west-2",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
   });
 });

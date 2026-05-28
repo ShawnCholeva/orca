@@ -18,6 +18,7 @@ import type { WorkflowSessionLauncher } from "../orchestrator/session-launcher.j
 import { listArtifactsForRun } from "../artifacts/projection.js";
 import { getDecisionById } from "../decisions/usecases.js";
 import { getWorkflowStepRunById } from "./projection.js";
+import { injectAnswerToSession } from "../orchestrator/agent-interview.js";
 
 export interface WorkflowStepRouteDeps {
   db: Database.Database;
@@ -26,6 +27,7 @@ export interface WorkflowStepRouteDeps {
   orchestrationTransportBroker?: Pick<OrchestrationTransportBroker, "propose">;
   operatorRegistry?: Pick<OperatorRegistry, "list">;
   workflowSessionLauncher?: WorkflowSessionLauncher;
+  sessionRuntime?: { getHandle(sessionId: string): { write(data: Buffer): void } | undefined };
   now?: () => string;
   idFactory?: () => string;
 }
@@ -212,6 +214,24 @@ export function registerWorkflowStepRoutes(
     })();
     if (deps.bus) {
       publishStagedWorkflowEvents(deps.bus, stagedEvents);
+    }
+
+    // If this was an answer submission and a running session is linked to the
+    // step run, inject the answer directly into the PTY stdin so the agent
+    // receives it without re-prompting.
+    if (answerText !== undefined && deps.sessionRuntime) {
+      const linked = deps.db
+        .prepare(
+          "SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('running','starting') ORDER BY started_at DESC LIMIT 1"
+        )
+        .get(stepRun.id) as { id: string } | undefined;
+      if (linked) {
+        injectAnswerToSession(
+          { getHandle: (id) => deps.sessionRuntime!.getHandle(id) },
+          linked.id,
+          answerText
+        );
+      }
     }
 
     if (orchestratorService) {

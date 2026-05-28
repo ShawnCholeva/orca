@@ -26,6 +26,12 @@ export interface SessionOutputStore {
   readTail(sessionId: string): SessionOutputSnapshot;
 }
 
+export interface SessionOutputStoreOptions {
+  tailBytes?: number;
+  /** Called synchronously after each non-empty chunk is successfully appended. */
+  onChunkAppended?: (sessionId: string) => void;
+}
+
 let _db: Database.Database | null = null;
 let _stmts: {
   selectCounters: Database.Statement;
@@ -93,10 +99,11 @@ export function resetPreparedStatements(): void {
 
 export function createSessionOutputStore(
   db: Database.Database,
-  options?: { tailBytes?: number }
+  options?: SessionOutputStoreOptions
 ): SessionOutputStore {
   const stmts = ensureStmts(db);
   const capBytes = options?.tailBytes ?? DEFAULT_TAIL_BYTES;
+  const onChunkAppended = options?.onChunkAppended;
 
   return {
     appendChunk(sessionId: string, data: Buffer): { seq: number; byteOffset: number } {
@@ -115,7 +122,7 @@ export function createSessionOutputStore(
       const bounded = data.length > capBytes ? data.subarray(data.length - capBytes) : data;
       const skipped = data.length - bounded.length;
 
-      return db.transaction(() => {
+      const result = db.transaction(() => {
         const current = stmts.selectCounters.get(sessionId) as SessionCounterRow | undefined;
         if (!current) {
           throw new Error(`Session not found: ${sessionId}`);
@@ -149,6 +156,8 @@ export function createSessionOutputStore(
         stmts.updateCounters.run(outputSeq, outputBytesKept, outputOffsetFirst, sessionId);
         return { seq, byteOffset };
       })();
+      onChunkAppended?.(sessionId);
+      return result;
     },
 
     readTail(sessionId: string): SessionOutputSnapshot {

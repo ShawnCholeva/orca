@@ -205,9 +205,30 @@ export function createServer(
   const startedAt = new Date().toISOString();
   const db = getDatabase();
   const daemonContext = deps?.daemonContext ?? createDaemonContext(db, eventBus);
+  // Late-binding ref so the onChunkAppended callback can reference orchestratorService
+  // even though sessionOutputStore is constructed before orchestratorService below.
+  const _orchestratorServiceRef: { current: OrchestratorService | null } = { current: null };
   const sessionOutputStore =
     deps?.sessionOutputStore ??
-    createSessionOutputStore(db, { tailBytes: config.sessionOutputTailBytes });
+    createSessionOutputStore(db, {
+      tailBytes: config.sessionOutputTailBytes,
+      onChunkAppended: (sessionId) => {
+        if (!_orchestratorServiceRef.current) return;
+        // Best-effort: look up goalId from the session row.
+        const row = db
+          .prepare("SELECT goal_id FROM sessions WHERE id = ?")
+          .get(sessionId) as { goal_id: string } | undefined;
+        if (!row) return;
+        _orchestratorServiceRef.current
+          .onSessionOutputChunk(
+            db,
+            daemonContext.now,
+            { sessionId, goalId: row.goal_id },
+            { bus: eventBus, idFactory: daemonContext.idFactory }
+          )
+          .catch((err) => console.error("[workflow] onSessionOutputChunk error", err));
+      },
+    });
   const sessionRuntime =
     deps?.sessionRuntime ??
     new SessionRuntime(new NodePtyManager(), config.sessionStopGraceMs, config.sessionWsBufferLimitBytes);
@@ -430,6 +451,8 @@ export function createServer(
     daemonContext.workflowSessionLauncher,
     sessionOutputStore
   );
+  // Wire the late-binding ref so the onChunkAppended callback is live.
+  _orchestratorServiceRef.current = orchestratorService;
 
   // Subscribe to session terminal events → drive workflow step synthesis.
   eventBus.subscribe((event) => {
@@ -847,6 +870,7 @@ export function createServer(
     orchestrationTransportBroker: daemonContext.orchestrationTransportBroker,
     operatorRegistry: daemonContext.operatorRegistry,
     workflowSessionLauncher: daemonContext.workflowSessionLauncher,
+    sessionRuntime,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
   });
