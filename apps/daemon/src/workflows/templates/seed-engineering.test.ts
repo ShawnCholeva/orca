@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import DatabaseCtor from "better-sqlite3";
 import type Database from "better-sqlite3";
 import { WorkflowStepTemplate } from "@orca/contracts";
 import type { Config } from "../../config.js";
@@ -129,5 +130,26 @@ describe("seedEngineeringTemplate", () => {
     const intake = steps.find((s: { id: string }) => s.id === "intake");
     expect(intake.instructions).toMatch(/interview/i);
     expect(intake.outputSchema.some((f: { key: string }) => f.key === "problem")).toBe(true);
+  });
+});
+
+describe("engineering seed (production instructions)", () => {
+  it("version is bumped to 3", () => {
+    expect(ENGINEERING_VERSION).toBe(3);
+  });
+
+  it("all steps validate and have non-placeholder instructions + non-trivial schemas", () => {
+    const db = new DatabaseCtor(":memory:");
+    runMigrations(db, defaultMigrationsDir());
+    seedEngineeringTemplate(db, () => "2026-05-27T00:00:00.000Z");
+    const row = db.prepare("SELECT steps_json FROM workflow_templates WHERE id=?").get(ENGINEERING_ID) as { steps_json: string };
+    const steps = JSON.parse(row.steps_json) as Array<{ id: string; name: string; instructions: string; outputSchema: unknown[] }>;
+    for (const s of steps) {
+      expect(() => WorkflowStepTemplate.parse(s)).not.toThrow();
+      expect(s.instructions.length).toBeGreaterThan(80);
+    }
+    const exec = steps.find((s) => s.id === "execution")!;
+    const keys = (exec.outputSchema as Array<{ key: string }>).map((f) => f.key);
+    expect(keys).toEqual(expect.arrayContaining(["changed_files", "validation", "summary", "blocked"]));
   });
 });

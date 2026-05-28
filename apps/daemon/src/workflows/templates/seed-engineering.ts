@@ -38,56 +38,127 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
     ordinal: 1,
     name: "Research",
     instructions:
-      "Ground the implementation approach in the current codebase and known risks.",
-    outputSchema: [{ key: "summary", type: "string", required: true }],
+      "Ground the implementation approach in the current codebase and known risks. " +
+      "Use the available workspaceContext (summaries and snippets) before asking the user. " +
+      "Identify the smallest set of files, modules, and constraints the work will touch, " +
+      "and call out any risks the brief did not capture. Complete only when the approach " +
+      "is plausible and the risk set is enumerated.",
+    outputSchema: [
+      { key: "summary", type: "string", required: true },
+      { key: "files_in_scope", type: "array", itemType: "string", required: true },
+      { key: "risks", type: "array", itemType: "string", required: false },
+    ],
   },
   {
     id: "prd",
     ordinal: 2,
     name: "PRD / Destination",
     instructions:
-      "Turn alignment and research into a buildable destination document.",
-    outputSchema: [{ key: "summary", type: "string", required: true }],
+      "Turn the intake brief and research into a buildable destination document. " +
+      "Capture the user-visible outcome, the acceptance signals, and the non-goals. " +
+      "Avoid premature design details — leave implementation choices to issue breakdown.",
+    outputSchema: [
+      { key: "summary", type: "string", required: true },
+      { key: "user_outcome", type: "string", required: true },
+      { key: "acceptance_signals", type: "array", itemType: "string", required: true },
+      { key: "non_goals", type: "array", itemType: "string", required: false },
+    ],
   },
   {
     id: "issue_breakdown",
     ordinal: 3,
     name: "Issue Breakdown",
     instructions:
-      "Convert the PRD into independently grabbable vertical-slice tasks.",
-    outputSchema: [{ key: "summary", type: "string", required: true }],
+      "Convert the PRD into independently grabbable vertical-slice tasks. " +
+      "Each task should be atomic, shippable, and have clear acceptance criteria. " +
+      "Prefer fewer larger tasks over many trivial ones; flag tasks that require coordination.",
+    outputSchema: [
+      { key: "summary", type: "string", required: true },
+      {
+        key: "tasks",
+        type: "array",
+        itemType: "object",
+        required: true,
+        fields: [
+          { key: "title", type: "string", required: true },
+          { key: "acceptance", type: "string", required: true },
+        ],
+      },
+    ],
   },
   {
     id: "execution",
     ordinal: 4,
     name: "Execution",
     instructions:
-      "Recommend and supervise bounded agent work for the next unblocked task.",
-    outputSchema: [{ key: "summary", type: "string", required: true }],
+      "Implement the next unblocked task in the issue breakdown. Edit only the files in scope. " +
+      "Run unit tests and typecheck before declaring success; if you skip a check, record the reason. " +
+      "If you hit an irrecoverable blocker, set blocked=true with a clear reason.",
+    outputSchema: [
+      { key: "summary", type: "string", required: true },
+      { key: "changed_files", type: "array", itemType: "string", required: true },
+      {
+        key: "validation",
+        type: "object",
+        required: true,
+        fields: [
+          { key: "ran", type: "boolean", required: true },
+          { key: "passed", type: "boolean", required: true },
+          { key: "skipped", type: "string", required: false },
+        ],
+      },
+      { key: "blocked", type: "boolean", required: true },
+      { key: "blocked_reason", type: "string", required: false },
+    ],
   },
   {
     id: "qa",
     ordinal: 5,
     name: "QA",
     instructions:
-      "Conduct human-led product judgment with an Orca-generated acceptance checklist.",
-    outputSchema: [{ key: "summary", type: "string", required: true }],
+      "Conduct human-led product judgment using an Orca-generated acceptance checklist. " +
+      "Ask the user to confirm each acceptance signal from the PRD; record what passed, " +
+      "what failed, and the user's verdict.",
+    outputSchema: [
+      { key: "summary", type: "string", required: true },
+      {
+        key: "checklist",
+        type: "array",
+        itemType: "object",
+        required: true,
+        fields: [
+          { key: "item", type: "string", required: true },
+          { key: "result", type: "string", required: true },
+        ],
+      },
+      { key: "verdict", type: "string", required: true },
+    ],
   },
   {
     id: "review",
     ordinal: 6,
     name: "Fresh-Context Review",
     instructions:
-      "Review the implementation in a fresh context instead of degraded implementer context.",
-    outputSchema: [{ key: "summary", type: "string", required: true }],
+      "Review the implementation against the PRD in a fresh context (no implementer assumptions). " +
+      "Identify correctness, scope, and risk concerns. If anything is unsafe to ship, return " +
+      "actionable change requests; otherwise approve.",
+    outputSchema: [
+      { key: "summary", type: "string", required: true },
+      { key: "approved", type: "boolean", required: true },
+      { key: "change_requests", type: "array", itemType: "string", required: false },
+    ],
   },
   {
     id: "done",
     ordinal: 7,
     name: "Done",
     instructions:
-      "Finalize the durable outcome and capture memory for future goals.",
-    outputSchema: [{ key: "summary", type: "string", required: true }],
+      "Finalize the durable outcome. Capture the lessons learned and any reusable " +
+      "memory items for future goals.",
+    outputSchema: [
+      { key: "summary", type: "string", required: true },
+      { key: "memory_items", type: "array", itemType: "string", required: false },
+    ],
   },
 ];
 
