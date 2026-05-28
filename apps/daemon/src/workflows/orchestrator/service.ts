@@ -14,6 +14,7 @@ import {
 } from "@orca/contracts";
 
 import { EventBus } from "../../events.js";
+import type { SessionOutputStore } from "../../sessions/output-store.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
 import { createArtifact } from "../artifacts/usecases.js";
 import { appendWorkflowEvent, publishStagedWorkflowEvents } from "../events.js";
@@ -39,6 +40,8 @@ import {
   type WorkflowSessionLauncher,
 } from "./session-launcher.js";
 import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.js";
+import { decodeSessionTail } from "./session-tail.js";
+import { synthesizeStepOutput } from "./synthesize.js";
 
 interface GoalRow {
   id: string;
@@ -140,15 +143,170 @@ function requestEventPayload(args: {
   };
 }
 
+/** Minimal no-op output store used when sessionOutputStore is not injected */
+const NULL_OUTPUT_STORE: SessionOutputStore = {
+  appendChunk: () => { throw new Error("appendChunk not supported on null output store"); },
+  readTail: (sessionId) => ({
+    sessionId,
+    firstByteOffset: 0,
+    nextSeq: 0,
+    totalBytesKept: 0,
+    chunks: [],
+  }),
+};
+
 export class OrchestratorService {
+  private readonly sessionOutputStore: SessionOutputStore;
+
   constructor(
     private readonly operatorSelector: Pick<OperatorSelector, "select">,
     private readonly broker: Pick<OrchestrationTransportBroker, "propose">,
     private readonly operators: Pick<OperatorRegistry, "list">,
     private readonly launcher: WorkflowSessionLauncher = {
       launch: async () => { throw new Error("direct_launch_unsupported"); },
+    },
+    sessionOutputStore?: SessionOutputStore
+  ) {
+    this.sessionOutputStore = sessionOutputStore ?? NULL_OUTPUT_STORE;
+  }
+
+  /**
+   * Called when a session reaches a terminal state (exited | stopped | failed).
+   * Synthesizes step output from session tail (exited) or blocks the run
+   * (failed/stopped). Idempotent: if step_output already exists, skips
+   * synthesis but still drives advancement via requestNextDecision.
+   */
+  async onWorkflowSessionCompleted(
+    db: Database.Database,
+    now: () => string,
+    args: { sessionId: string; goalId: string },
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    // (1) Load session; skip if not linked to a workflow step run.
+    const sess = db
+      .prepare(
+        "SELECT id, workflow_step_run_id, status, failure_reason FROM sessions WHERE id = ?"
+      )
+      .get(args.sessionId) as
+      | { id: string; workflow_step_run_id: string | null; status: string; failure_reason: string | null }
+      | undefined;
+    if (!sess || !sess.workflow_step_run_id) return;
+
+    // (2) Load step run; skip if not active.
+    const stepRun = db
+      .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
+      .get(sess.workflow_step_run_id) as StepRunRow | undefined;
+    if (!stepRun || stepRun.status !== "active") return;
+
+    // (3) Idempotency: skip synthesis if step_output exists, but still advance.
+    const existing = db
+      .prepare(
+        "SELECT 1 FROM workflow_artifacts WHERE step_run_id = ? AND type = 'step_output' LIMIT 1"
+      )
+      .get(stepRun.id);
+    if (existing) {
+      await this.requestNextDecision(db, now, stepRun.workflow_run_id, options).catch(() => {});
+      return;
     }
-  ) {}
+
+    // (4) Load run, template, goal — needed for blockRun/synthesis context.
+    const run = getWorkflowRunById(db, stepRun.workflow_run_id);
+    if (!run || run.status !== "active") return;
+    const template = getTemplateById(db, run.templateId);
+    if (!template) return;
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) return;
+    const goal = readGoal(db, run.goalId);
+
+    // (5) Non-exited terminal states → block immediately, no synthesis.
+    if (sess.status === "failed" || sess.status === "stopped") {
+      const reason = `session ${sess.status}${sess.failure_reason ? `: ${sess.failure_reason}` : ""}`;
+      this.blockRun(db, now, { run, stepRun, stepTpl, template, goal }, reason, options);
+      return;
+    }
+
+    // (6) Build synthesis inputs from session tail and artifact history.
+    const tail = decodeSessionTail(this.sessionOutputStore.readTail(args.sessionId));
+    const artifacts = listArtifactsForRun(db, run.id);
+    const transcript = reconstructTranscript(artifacts.filter((a) => a.stepRunId === stepRun.id));
+    const stepRunByStepId = this.stepRunIdsByTemplateId(db, run.id);
+    const stepInput = buildStepExecutionInput({
+      goal: { id: goal.id, description: goal.description },
+      steps: template.steps,
+      currentStep: stepTpl,
+      artifacts,
+      transcript,
+      stepRunByStepId,
+    });
+
+    // (7) Orchestrator model required for synthesis.
+    const provider = goal.orchestrator_provider;
+    const model = goal.orchestrator_model;
+    if (!provider || !model) {
+      this.blockRun(
+        db,
+        now,
+        { run, stepRun, stepTpl, template, goal },
+        "synthesis requires orchestrator model",
+        options
+      );
+      return;
+    }
+
+    // (8) Parse-then-synthesize.
+    const result = await synthesizeStepOutput(
+      { broker: this.broker },
+      {
+        goalId: goal.id,
+        workflowRunId: run.id,
+        stepRunId: stepRun.id,
+        providerId: provider,
+        modelId: model,
+        outputSchema: stepTpl.outputSchema,
+        stepInput,
+        sessionResult: tail,
+      }
+    );
+
+    if (!result.ok) {
+      this.blockRun(db, now, { run, stepRun, stepTpl, template, goal }, result.reason, options);
+      return;
+    }
+
+    // (9) Write step_output artifact with source + linkedSessionId.
+    const body = JSON.stringify({
+      ...result.output,
+      _completion: {
+        confidence: "medium",
+        assumptions: [],
+        openQuestions: [],
+        whyComplete: `Derived from session ${args.sessionId} via ${result.source}`,
+      },
+    });
+    const stagedEvents: DomainEvent[] = [];
+    createArtifact(
+      db,
+      now,
+      {
+        goalId: goal.id,
+        workflowRunId: run.id,
+        stepRunId: stepRun.id,
+        type: "step_output",
+        title: stepTpl.name.slice(0, 256),
+        body,
+        source: result.source,
+        linkedSessionId: args.sessionId,
+        linkedTaskId: null,
+        linkedContextPackageId: null,
+      },
+      options.idFactory,
+      stagedEvents
+    );
+    this.publish(options.bus, stagedEvents);
+
+    // (10) Drive advancement to the next step / completion.
+    await this.requestNextDecision(db, now, run.id, options);
+  }
 
   async requestNextDecision(
     db: Database.Database,

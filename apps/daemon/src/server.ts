@@ -421,6 +421,39 @@ export function createServer(
     }
   });
 
+  // Shared orchestrator service instance — receives sessionOutputStore so that
+  // onWorkflowSessionCompleted can synthesize step output from session tails.
+  const orchestratorService = new OrchestratorService(
+    daemonContext.operatorSelector,
+    daemonContext.orchestrationTransportBroker,
+    daemonContext.operatorRegistry,
+    undefined,
+    sessionOutputStore
+  );
+
+  // Subscribe to session terminal events → drive workflow step synthesis.
+  eventBus.subscribe((event) => {
+    if (
+      event.type !== "session.exited" &&
+      event.type !== "session.stopped" &&
+      event.type !== "session.failed"
+    )
+      return;
+    const sessionId =
+      typeof event.payload.sessionId === "string" ? event.payload.sessionId : null;
+    const goalId =
+      typeof event.payload.goalId === "string" ? event.payload.goalId : null;
+    if (!sessionId || !goalId) return;
+    orchestratorService
+      .onWorkflowSessionCompleted(
+        db,
+        daemonContext.now,
+        { sessionId, goalId },
+        { bus: eventBus, idFactory: daemonContext.idFactory }
+      )
+      .catch((err) => console.error("[workflow] onWorkflowSessionCompleted error", err));
+  });
+
   // ---- Composite goal + workflow bootstrap ----
 
   registerGoalBootstrapRoute(server, {
@@ -437,19 +470,13 @@ export function createServer(
         { db: getDatabase(), bus: eventBus, now: daemonContext.now, idFactory: daemonContext.idFactory },
         args
       ),
-    requestNextDecisionFn: async (_goalId, runId) => {
-      const orchestratorService = new OrchestratorService(
-        daemonContext.operatorSelector,
-        daemonContext.orchestrationTransportBroker,
-        daemonContext.operatorRegistry
-      );
-      return orchestratorService.requestNextDecision(
+    requestNextDecisionFn: async (_goalId, runId) =>
+      orchestratorService.requestNextDecision(
         getDatabase(),
         daemonContext.now ?? (() => new Date().toISOString()),
         runId,
         { bus: eventBus, idFactory: daemonContext.idFactory }
-      );
-    },
+      ),
   });
 
   server.get('/v1/goals', async (): Promise<ListGoalsResponse> => {
