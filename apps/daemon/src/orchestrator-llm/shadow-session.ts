@@ -75,10 +75,13 @@ export class ShadowSessionManager {
   }
 
   async ask(goalId: string, input: AskInput): Promise<{ text: string }> {
-    const session = this.getSession(goalId);
+    let session = this.getSession(goalId);
+    if (!session) {
+      await this.spawn(goalId);
+      session = this.getSession(goalId);
+    }
     if (!session) throw new Error(`no shadow session for goal ${goalId}`);
-    // Serialize: each ask waits for the previous one to settle.
-    const run = session.queue.then(() => this.askOnce(goalId, session, input));
+    const run = session.queue.then(() => this.askOnce(goalId, session!, input));
     session.queue = run.catch(() => undefined);
     return run;
   }

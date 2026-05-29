@@ -64,4 +64,21 @@ describe("ShadowSessionManager.ask", () => {
       m.ask("G1", { systemPrompt: "S", userPrompt: "q", timeoutMs: 10 })
     ).rejects.toThrow(/timeout/i);
   });
+
+  it("auto-spawns a session if ask is called before spawn", async () => {
+    const pty = new FakePtyManager();
+    const m = new ShadowSessionManager({
+      ptyManager: pty,
+      resolveSpawn: () => ({ command: "claude", args: [], env: {}, cwd: "/tmp" }),
+      pollIntervalMs: 1,
+    });
+    // NOTE: no explicit m.spawn("G1") here.
+    const p = m.ask("G1", { systemPrompt: "S", userPrompt: "q", timeoutMs: 1000 });
+    await new Promise((r) => setTimeout(r, 5));
+    controlFakePty(pty.handles[0]).emitData(
+      Buffer.from('```orca:action\n{"ok":1}\n```\n')
+    );
+    expect((await p).text).toBe('{"ok":1}');
+    expect(m.has("G1")).toBe(true);
+  });
 });

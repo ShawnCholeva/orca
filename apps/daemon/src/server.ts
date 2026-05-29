@@ -534,10 +534,16 @@ export function createServer(
     }).catch((err) => console.error("[resume] boot resume failed", err));
   }
 
-  // Tear down shadow sessions when a workflow run completes (best-effort).
+  // Tear down shadow sessions when a workflow run reaches a terminal state (best-effort).
+  const TERMINAL_RUN_EVENTS = new Set<string>([
+    "workflow.run.completed",
+    "workflow.run.failed",
+    "workflow.run.cancelled",
+    "workflow.run.blocked",
+  ]);
   eventBus.subscribe((event) => {
-    if (event.type === "workflow.run.completed" && event.goalId) {
-      void shadowSessions.terminate(event.goalId);
+    if (TERMINAL_RUN_EVENTS.has(event.type) && event.goalId) {
+      void shadowSessions.terminate(event.goalId).catch(() => {});
     }
   });
 
@@ -751,6 +757,7 @@ export function createServer(
     const { id } = request.params as { id: string };
     try {
       const goal = archiveGoal(id);
+      void shadowSessions.terminate(id).catch(() => {});
       return { goal };
     } catch (error) {
       if (error instanceof NotFoundError) {
