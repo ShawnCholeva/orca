@@ -405,6 +405,56 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
   });
 });
 
+describe("OrchestratorService.onUserMessage (user_message trigger)", () => {
+  it("forward_to_agent: relays the translated text into the live agent session", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+
+    const agentInput = vi.fn();
+    const service = makeJudgeService(
+      fakeMediator({ kind: "forward_to_agent", translated: "please add tests" }),
+      agentInput
+    );
+
+    await service.onUserMessage(
+      db,
+      () => NOW,
+      { goalId: "goal-1", body: "add tests" },
+      { bus, idFactory }
+    );
+
+    expect(agentInput).toHaveBeenCalledTimes(1);
+    const [sessionId, text] = agentInput.mock.calls[0]!;
+    expect(sessionId).toBe("sess-judge");
+    expect(text).toContain("please add tests");
+  });
+
+  it("answer_user_directly: posts an orchestrator message and does NOT message the agent", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+
+    const agentInput = vi.fn();
+    const service = makeJudgeService(
+      fakeMediator({ kind: "answer_user_directly", body: "sure" }),
+      agentInput
+    );
+
+    await service.onUserMessage(
+      db,
+      () => NOW,
+      { goalId: "goal-1", body: "is this done?" },
+      { bus, idFactory }
+    );
+
+    expect(orchestratorMessageCount(db)).toBe(1);
+    expect(agentInput).not.toHaveBeenCalled();
+  });
+});
+
 /** Seed a run whose current step (step-1, ordinal 0) is the FIRST step, unselected. */
 function setupFirstStepRun(db: Database.Database) {
   const step = makeStep({

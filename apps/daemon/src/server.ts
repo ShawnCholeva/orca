@@ -940,6 +940,14 @@ export function createServer(
     modelProviderRegistry: daemonContext.modelProviderRegistry,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
+    onUserMessage: async (goalId, body) => {
+      await orchestratorService.onUserMessage(
+        getDatabase(),
+        daemonContext.now ?? (() => new Date().toISOString()),
+        { goalId, body },
+        { bus: eventBus, idFactory: daemonContext.idFactory }
+      );
+    },
   });
 
   // ---- Orchestration transport routes ----

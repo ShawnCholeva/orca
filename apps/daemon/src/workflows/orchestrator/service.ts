@@ -8,6 +8,7 @@ import {
   type DomainEvent,
   type ModelProviderId,
   type OperatorDescriptor,
+  type OrchestratorAction,
   type WorkflowDecisionTrace,
   type WorkflowRun as WorkflowRunT,
   type WorkflowStepTemplate,
@@ -437,19 +438,58 @@ export class OrchestratorService {
     });
 
     const ctx = { run, stepRun, stepTpl, template, goal };
+    await this.applyOrchestratorAction(
+      db,
+      now,
+      ctx,
+      payload.sessionId,
+      payload.responseText,
+      action,
+      options
+    );
+  }
 
+  /**
+   * Applies an OrchestratorAction produced by the mediator. Shared by
+   * onAgentResponseDone (response-done trigger) and onUserMessage (user_message
+   * trigger). Effects:
+   *  - paraphrase / answer / escalate → post an orchestrator chat message
+   *  - forward_to_agent → relay the translated text into the live agent session
+   *  - approve_step_complete → write step_output (from the response's
+   *    orca:step-complete block) and advance the run
+   *  - revise_step → bump the revise counter; below the cap relay feedback to the
+   *    agent, at the cap post an escalation message
+   */
+  private async applyOrchestratorAction(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+    },
+    sessionId: string | null,
+    responseText: string,
+    action: OrchestratorAction,
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
     switch (action.kind) {
       case "paraphrase_agent_message":
-      case "answer_user_directly": {
-        this.postOrchestratorMessage(db, now, run.goalId, action.body, options);
+      case "answer_user_directly":
+      case "escalate_to_user": {
+        this.postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options);
         return;
       }
       case "forward_to_agent": {
-        this.postOrchestratorMessage(db, now, run.goalId, action.translated, options);
+        if (sessionId && this.agentInput) {
+          await this.agentInput(sessionId, action.translated + "\n");
+        }
         return;
       }
       case "approve_step_complete": {
-        const block = extractOrcaStepCompleteBlock(payload.responseText);
+        const block = extractOrcaStepCompleteBlock(responseText);
         const stagedEvents: DomainEvent[] = [];
         this.createStepOutputArtifact(
           db,
@@ -460,33 +500,98 @@ export class OrchestratorService {
           stagedEvents
         );
         this.publish(options.bus, stagedEvents);
-        await this.advanceToNextStep(db, now, run.id, options);
+        await this.advanceToNextStep(db, now, ctx.run.id, options);
         return;
       }
       case "revise_step": {
-        const counter = incrementReviseAttempt(stepRun.revise_attempts ?? 0);
+        const counter = incrementReviseAttempt(ctx.stepRun.revise_attempts ?? 0);
         db.prepare("UPDATE workflow_step_runs SET revise_attempts = ? WHERE id = ?").run(
           counter.nextAttempt,
-          stepRun.id
+          ctx.stepRun.id
         );
         if (counter.capReached) {
           this.postOrchestratorMessage(
             db,
             now,
-            run.goalId,
+            ctx.run.goalId,
             `Step needs help after ${REVISE_CAP} revision attempts:\n${action.feedback}`,
             options
           );
-        } else if (this.agentInput) {
-          await this.agentInput(payload.sessionId, action.feedback + "\n");
+        } else if (sessionId && this.agentInput) {
+          await this.agentInput(sessionId, action.feedback + "\n");
         }
         return;
       }
-      case "escalate_to_user": {
-        this.postOrchestratorMessage(db, now, run.goalId, action.body, options);
-        return;
-      }
     }
+  }
+
+  /**
+   * Called when a user posts an orchestrator chat message during an active
+   * workflow run. Invokes the orchestrator-LLM mediator with the user_message
+   * trigger and applies the resulting action (paraphrase / answer / forward to
+   * agent / escalate / approve / revise).
+   *
+   * No-op when no mediator is configured (production wiring lands later), when
+   * the goal has no active run, or when the run has no active current step.
+   */
+  async onUserMessage(
+    db: Database.Database,
+    now: () => string,
+    args: { goalId: string; body: string },
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    if (!this.orchestratorMediator) return;
+
+    const runId = (
+      db
+        .prepare(
+          "SELECT id FROM workflow_runs WHERE goal_id = ? AND status = 'active' ORDER BY started_at DESC LIMIT 1"
+        )
+        .get(args.goalId) as { id: string } | undefined
+    )?.id;
+    if (!runId) return;
+    const run = getWorkflowRunById(db, runId);
+    if (!run || run.status !== "active" || !run.currentStepRunId) return;
+    const stepRun = db
+      .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
+      .get(run.currentStepRunId) as StepRunRow | undefined;
+    if (!stepRun || stepRun.status !== "active") return;
+    const template = getTemplateById(db, run.templateId);
+    if (!template) return;
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) return;
+    const goal = db
+      .prepare(
+        "SELECT id, title, description, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?"
+      )
+      .get(run.goalId) as GoalRow | undefined;
+    if (!goal) return;
+
+    const adapterId = (stepRun.selected_operator_id ?? "").replace(/^agent:/, "");
+    const modelId = stepRun.selected_model_id ?? "";
+
+    const action = await this.orchestratorMediator.invoke({
+      triggerKind: "user_message",
+      goalId: args.goalId,
+      runId: run.id,
+      stepRunId: stepRun.id,
+      adapterId,
+      modelId,
+      triggerPayload: { userMessage: args.body },
+    });
+
+    // Live session for the current step (needed for forward_to_agent / revise).
+    const sessionId =
+      (
+        db
+          .prepare(
+            "SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('created','starting','running') ORDER BY created_at DESC LIMIT 1"
+          )
+          .get(stepRun.id) as { id: string } | undefined
+      )?.id ?? null;
+
+    const ctx = { run, stepRun, stepTpl, template, goal };
+    await this.applyOrchestratorAction(db, now, ctx, sessionId, "", action, options);
   }
 
   /**
