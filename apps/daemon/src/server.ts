@@ -466,11 +466,17 @@ export function createServer(
     resolveSpawnCommand: (cwd) => {
       // goalId is the basename of the shadow dir (shadowRoot/<goalId>)
       const goalId = path.basename(cwd);
+      // Inherit the user's env so `claude` finds HOME/~/.claude (subscription auth),
+      // but never hand the shadow session the daemon's secret/mutation tokens.
+      const DENY = new Set(["ORCA_TOKEN", "ORCA_AUTH_TOKEN", "ORCA_DESKTOP_TOKEN", "ORCA_API_TOKEN", "ORCA_MUTATION_TOKEN"]);
       const env: Record<string, string> = {};
-      if (process.env["PATH"]) env["PATH"] = process.env["PATH"];
+      for (const [k, v] of Object.entries(process.env)) {
+        if (v !== undefined && !DENY.has(k)) env[k] = v;
+      }
       env["ORCA_GOAL_ID"] = goalId;
       env["ORCA_SESSION_ID"] = shadowSessionId(goalId);
-      return { command: "claude", args: [], env, cwd };
+      const command = process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude";
+      return { command, args: [], env, cwd };
     },
   });
   const shadowClient = new ShadowSessionLlmClient(shadowSessions, { timeoutMs: 60_000 });
