@@ -1,20 +1,23 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { PtyHandle, PtyManager } from "../pty/types.js";
 import { extractActionBlock } from "./sentinel.js";
-
-export interface ShadowSpawnCommand {
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-  cwd: string;
-}
+import { buildShadowHookSettings } from "./shadow-hook-settings.js";
 
 export interface ShadowSessionDeps {
   ptyManager: PtyManager;
-  /** Resolves the spawn command for the goal's orchestrator adapter (claude-code). */
-  resolveSpawn: (goalId: string) => ShadowSpawnCommand | Promise<ShadowSpawnCommand>;
+  shadowRoot: string;                 // e.g. ~/.orca/shadow
+  daemonPort: number;                 // bound port; mutable via setDaemonPort
+  isReady: () => Promise<boolean>;    // ()=>true in tests; ClaudeCodeAdapter.checkAuth in prod
+  resolveSpawnCommand: (cwd: string) => { command: string; args: string[]; env: Record<string, string>; cwd: string };
   cols?: number;
   rows?: number;
-  pollIntervalMs?: number;
+}
+
+interface Pending {
+  resolve: (r: { text: string }) => void;
+  reject: (e: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 interface Session {
@@ -23,7 +26,7 @@ interface Session {
   disposeData: () => void;
   systemSent: boolean;
   queue: Promise<unknown>;
-  consumedUpTo: number;
+  pending: Pending | null;
 }
 
 export interface AskInput {
@@ -43,10 +46,21 @@ export class ShadowSessionManager {
 
   /** Spawns the goal's shadow PTY (idempotent). Returns a stable session id. */
   async spawn(goalId: string): Promise<string> {
-    const existing = this.sessions.get(goalId);
-    if (existing) return shadowSessionId(goalId);
+    if (this.sessions.has(goalId)) return shadowSessionId(goalId);
 
-    const cmd = await this.deps.resolveSpawn(goalId);
+    if (!(await this.deps.isReady())) {
+      throw new Error("orchestrator shadow not ready: sign in to Claude Code");
+    }
+
+    const dir = join(this.deps.shadowRoot, goalId);
+    mkdirSync(join(dir, ".claude"), { recursive: true });
+    writeFileSync(
+      join(dir, ".claude", "settings.local.json"),
+      JSON.stringify(buildShadowHookSettings({ goalId, port: this.deps.daemonPort }), null, 2),
+      "utf8",
+    );
+
+    const cmd = this.deps.resolveSpawnCommand(dir);
     const { handle, events } = this.deps.ptyManager.start({
       command: cmd.command,
       args: cmd.args,
@@ -55,72 +69,89 @@ export class ShadowSessionManager {
       cols: this.deps.cols ?? 120,
       rows: this.deps.rows ?? 40,
     });
-    const session: Session = { handle, output: "", disposeData: () => {}, systemSent: false, queue: Promise.resolve(), consumedUpTo: 0 };
+    const session: Session = { handle, output: "", disposeData: () => {}, systemSent: false, queue: Promise.resolve(), pending: null };
+    let trustAnswered = false;
     session.disposeData = events.onData((chunk) => {
       session.output += chunk.toString("utf8");
+      if (session.output.length > 200_000) session.output = session.output.slice(-100_000);
+      // Best-effort: answer the one-time folder-trust prompt so the session becomes usable.
+      if (!trustAnswered && /trust|do you want to proceed|press enter/i.test(session.output.slice(-2000))) {
+        trustAnswered = true;
+        try { handle.write(Buffer.from("\r", "utf8")); } catch { /* ignore */ }
+      }
     });
     events.onExit(() => {
+      const s = this.sessions.get(goalId);
+      if (s) {
+        if (s.pending) {
+          clearTimeout(s.pending.timer);
+          const p = s.pending;
+          s.pending = null;
+          p.reject(new Error(`shadow session for goal ${goalId} exited`));
+        }
+        s.disposeData();
+      }
       this.sessions.delete(goalId);
     });
     this.sessions.set(goalId, session);
     return shadowSessionId(goalId);
   }
 
+  setDaemonPort(port: number): void {
+    this.deps.daemonPort = port;
+  }
+
   async terminate(goalId: string): Promise<void> {
     const session = this.sessions.get(goalId);
     if (!session) return;
+    if (session.pending) {
+      clearTimeout(session.pending.timer);
+      const p = session.pending;
+      session.pending = null;
+      p.reject(new Error(`shadow session for goal ${goalId} terminated`));
+    }
     session.disposeData();
-    session.handle.kill("SIGTERM");
     this.sessions.delete(goalId);
+    session.handle.kill("SIGTERM");
   }
 
   async ask(goalId: string, input: AskInput): Promise<{ text: string }> {
-    let session = this.getSession(goalId);
-    if (!session) {
+    if (!this.sessions.has(goalId)) {
       await this.spawn(goalId);
-      session = this.getSession(goalId);
     }
+    const session = this.getSession(goalId);
     if (!session) throw new Error(`no shadow session for goal ${goalId}`);
-    const run = session.queue.then(() => this.askOnce(goalId, session!, input));
-    session.queue = run.catch(() => undefined);
-    return run;
+    const next = session.queue.then(() => this.askOnce(goalId, input));
+    session.queue = next.catch(() => undefined);
+    return next;
   }
 
-  private async askOnce(
-    goalId: string,
-    session: Session,
-    input: AskInput
-  ): Promise<{ text: string }> {
+  private askOnce(goalId: string, input: AskInput): Promise<{ text: string }> {
+    const session = this.getSession(goalId);
+    if (!session) return Promise.reject(new Error(`no shadow session for goal ${goalId}`));
     const prelude = session.systemSent ? "" : input.systemPrompt + "\n\n";
     session.systemSent = true;
-    session.handle.write(Buffer.from(prelude + input.userPrompt + "\n", "utf8"));
+    session.handle.write(Buffer.from(prelude + input.userPrompt + "\r", "utf8"));
+    return new Promise<{ text: string }>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        session.pending = null;
+        reject(new Error(`shadow orchestrator timeout for goal ${goalId}`));
+      }, input.timeoutMs);
+      session.pending = { resolve, reject, timer };
+    });
+  }
 
-    const interval = this.deps.pollIntervalMs ?? 50;
-    const deadline = Date.now() + input.timeoutMs;
-    const FENCE_CLOSE = "```";
-    for (;;) {
-      const fresh = session.output.slice(session.consumedUpTo);
-      const block = extractActionBlock(fresh);
-      if (block !== null) {
-        // Drop the consumed prefix (including this block) so session.output stays
-        // bounded on a long-lived session, then reset the high-water mark.
-        const closeIdx = fresh.lastIndexOf(FENCE_CLOSE);
-        const consumedInFresh = closeIdx >= 0 ? closeIdx + FENCE_CLOSE.length : fresh.length;
-        session.output = session.output.slice(session.consumedUpTo + consumedInFresh);
-        session.consumedUpTo = 0;
-        return { text: block };
-      }
-      if (Date.now() >= deadline) {
-        // Discard whatever this prompt produced so far: it bounds memory across
-        // repeated timeouts and prevents an already-buffered partial from being
-        // mis-captured by the next ask. (A reply that arrives strictly after this
-        // point is an inherent interactive-PTY race; full correlation is a follow-up.)
-        session.output = "";
-        session.consumedUpTo = 0;
-        throw new Error(`shadow orchestrator timeout for goal ${goalId}`);
-      }
-      await new Promise((r) => setTimeout(r, interval));
-    }
+  /** Called by the hook endpoint when the goal's shadow session emits Stop/StopFailure. */
+  resolvePending(goalId: string, result: { text?: string; failure?: boolean }): void {
+    const session = this.getSession(goalId);
+    const pending = session?.pending ?? null;
+    if (!session || !pending) return; // stray/duplicate hook -> drop
+    clearTimeout(pending.timer);
+    session.pending = null;
+    if (result.failure) { pending.reject(new Error("shadow orchestrator StopFailure")); return; }
+    const block = extractActionBlock(result.text ?? "");
+    if (block === null) { pending.reject(new Error("shadow orchestrator: no orca:action block (unparseable)")); return; }
+    pending.resolve({ text: block });
   }
 
   /** Internal access for the ask() loop. */

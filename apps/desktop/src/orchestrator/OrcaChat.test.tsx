@@ -379,4 +379,70 @@ describe("OrcaChat", () => {
 
     expect(await screen.findByText(/Confirm done/)).toBeInTheDocument();
   });
+
+  it("shows thinking indicator after async reply (reply:null) and clears it when orchestrator reply lands", async () => {
+    getGoalDetailMock.mockResolvedValue({
+      goal,
+      refinement: null,
+      workspaces: [],
+    });
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+
+    // Capture the onEvent callback when openEventStream is called.
+    let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+    openEventStreamMock.mockImplementation(({ onEvent }: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+      capturedOnEvent = onEvent;
+      return { close: vi.fn() };
+    });
+
+    // createOrchestratorMessage returns reply:null (shadow_session async path).
+    createOrchestratorMessageMock.mockResolvedValue({
+      message: { ...userMessage, id: "msg-user-async", body: "Kick off the plan." },
+      reply: null,
+    });
+
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    // Wait for initial render to settle.
+    await screen.findByPlaceholderText("Message Orca…");
+
+    // Type and send a message.
+    fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
+      target: { value: "Kick off the plan." },
+    });
+    fireEvent.click(screen.getByText("Send"));
+
+    await waitFor(() => {
+      expect(createOrchestratorMessageMock).toHaveBeenCalledWith("goal-1", {
+        body: "Kick off the plan.",
+      });
+    });
+
+    // Awaiting-reply indicator should now be visible.
+    expect(await screen.findByTestId("awaiting-reply")).toBeInTheDocument();
+
+    // Simulate the orchestrator reply arriving: update messages mock to return
+    // an orchestrator-role message as the last item, then fire the SSE event
+    // so the component refreshes.
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        { ...userMessage, id: "msg-user-async", body: "Kick off the plan." },
+        { ...orcaMessage, id: "msg-orca-async", body: "I have started the plan." },
+      ],
+    });
+
+    // Trigger the refresh via the SSE onEvent callback.
+    expect(capturedOnEvent).not.toBeNull();
+    capturedOnEvent!({ type: "orchestrator.message.created", goalId: "goal-1" });
+
+    // After refresh the indicator should be gone.
+    await waitFor(() => {
+      expect(screen.queryByTestId("awaiting-reply")).toBeNull();
+    });
+
+    // The orchestrator reply message is visible.
+    expect(screen.getByText("I have started the plan.")).toBeInTheDocument();
+  });
 });

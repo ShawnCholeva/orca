@@ -16,24 +16,111 @@ function setup() {
 }
 
 describe("createOrchestratorMessage shadow path", () => {
-  it("uses shadow ask() (not SDK) for orca/anthropic with no active run, returns reply", async () => {
+  it("shadow_session mode: returns reply:null and posts the orchestrator reply asynchronously", async () => {
+    const db = setup(); // goal G1, provider orca/anthropic, NO active run
+    const inserted: string[] = [];
+    let resolveAsk: (r: { text: string }) => void = () => {};
+    const ask = vi.fn(() => new Promise<{ text: string }>((r) => { resolveAsk = r; }));
+    let idN = 0;
+    const ctx: any = {
+      db, bus: { publish: vi.fn() },
+      modelProviderRegistry: { get: vi.fn(() => { throw new Error("SDK must not be used"); }) },
+      shadowAsk: ask,
+      resolveOrchestratorMode: () => "shadow_session",
+      onOrchestratorReply: (goalId: string, body: string) => { inserted.push(body); },
+      now: () => "2026-05-29T00:00:00Z",
+      idFactory: () => `id${++idN}`,
+    };
+    const res = await createOrchestratorMessage(ctx, "G1", { body: "hello" });
+    expect(res.reply).toBeNull();
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(inserted).toEqual([]);
+    resolveAsk({ text: '{"replyText":"hi async"}' });
+    await new Promise((r) => setImmediate(r));
+    expect(inserted).toEqual(["hi async"]);
+  });
+
+  it("shadow_session mode: posts fallback message when shadowAsk rejects", async () => {
     const db = setup();
-    const ask = vi.fn().mockResolvedValue({ text: '{"replyText":"hi from shadow"}' });
+    const inserted: string[] = [];
+    const ask = vi.fn().mockRejectedValue(new Error("network error"));
+    let idN = 0;
+    const ctx: any = {
+      db, bus: { publish: vi.fn() },
+      modelProviderRegistry: { get: vi.fn(() => { throw new Error("SDK must not be used"); }) },
+      shadowAsk: ask,
+      resolveOrchestratorMode: () => "shadow_session",
+      onOrchestratorReply: (_goalId: string, body: string) => { inserted.push(body); },
+      now: () => "2026-05-29T00:00:00Z",
+      idFactory: () => `id${++idN}`,
+    };
+    const res = await createOrchestratorMessage(ctx, "G1", { body: "hello" });
+    expect(res.reply).toBeNull();
+    await new Promise((r) => setImmediate(r));
+    expect(inserted).toEqual(["Orchestrator is unavailable right now. Please try again."]);
+  });
+
+  it("shadow_session mode: posts unreadable-reply message when shadowAsk output is malformed", async () => {
+    const db = setup();
+    const inserted: string[] = [];
+    const ask = vi.fn().mockResolvedValue({ text: "not json {{{" });
+    let idN = 0;
+    const ctx: any = {
+      db, bus: { publish: vi.fn() },
+      modelProviderRegistry: { get: vi.fn(() => { throw new Error("SDK must not be used"); }) },
+      shadowAsk: ask,
+      resolveOrchestratorMode: () => "shadow_session",
+      onOrchestratorReply: (_goalId: string, body: string) => { inserted.push(body); },
+      now: () => "2026-05-29T00:00:00Z",
+      idFactory: () => `id${++idN}`,
+    };
+    const res = await createOrchestratorMessage(ctx, "G1", { body: "hello" });
+    expect(res.reply).toBeNull();
+    await new Promise((r) => setImmediate(r));
+    expect(inserted).toEqual(["Orchestrator returned an unreadable reply."]);
+  });
+
+  it("shadow_session mode: throws OrchestratorChatProviderUnavailableError when shadowAsk or onOrchestratorReply is missing", async () => {
+    const db = setup();
+    let idN = 0;
+    await expect(
+      createOrchestratorMessage(
+        {
+          db,
+          bus: { publish: vi.fn() } as any,
+          modelProviderRegistry: { get: vi.fn() } as any,
+          resolveOrchestratorMode: () => "shadow_session",
+          // shadowAsk intentionally omitted
+          now: () => "2026-05-29T00:00:00Z",
+          idFactory: () => `id${++idN}`,
+        } as any,
+        "G1",
+        { body: "hello" }
+      )
+    ).rejects.toMatchObject({ code: "orchestrator_provider_unavailable" });
+  });
+
+  it("one_shot mode: calls SDK provider and returns reply synchronously", async () => {
+    const db = setup();
+    db.exec(`UPDATE goals SET orchestrator_provider = 'orca/openai' WHERE id = 'G1'`);
+    const fakeProvider = {
+      complete: vi.fn().mockResolvedValue({ parsed: { replyText: "sync hi" } }),
+    };
     let idN = 0;
     const res = await createOrchestratorMessage(
       {
         db,
         bus: { publish: vi.fn() } as any,
-        modelProviderRegistry: { get: vi.fn(() => { throw new Error("SDK must not be used"); }) } as any,
-        shadowAsk: ask,
+        modelProviderRegistry: { get: vi.fn(() => fakeProvider) } as any,
+        resolveOrchestratorMode: () => "one_shot",
         now: () => "2026-05-29T00:00:00Z",
         idFactory: () => `id${++idN}`,
       } as any,
       "G1",
       { body: "hello" }
     );
-    expect(ask).toHaveBeenCalledTimes(1);
-    expect(res.reply?.body).toBe("hi from shadow");
+    expect(fakeProvider.complete).toHaveBeenCalledTimes(1);
+    expect(res.reply?.body).toBe("sync hi");
   });
 
   it("returns reply:null when a workflow run is active (defers to mediator)", async () => {
@@ -47,6 +134,8 @@ describe("createOrchestratorMessage shadow path", () => {
         bus: { publish: vi.fn() } as any,
         modelProviderRegistry: { get: vi.fn() } as any,
         shadowAsk: ask,
+        resolveOrchestratorMode: () => "shadow_session",
+        onOrchestratorReply: vi.fn(),
         now: () => "2026-05-29T00:00:00Z",
         idFactory: () => `id${++idN}`,
       } as any,
@@ -55,25 +144,5 @@ describe("createOrchestratorMessage shadow path", () => {
     );
     expect(res.reply).toBeNull();
     expect(ask).not.toHaveBeenCalled();
-  });
-
-  it("throws OrchestratorChatProviderUnavailableError when shadow output is malformed", async () => {
-    const db = setup();
-    const ask = vi.fn().mockResolvedValue({ text: "not json {{{" });
-    let idN = 0;
-    await expect(
-      createOrchestratorMessage(
-        {
-          db,
-          bus: { publish: vi.fn() } as any,
-          modelProviderRegistry: { get: vi.fn() } as any,
-          shadowAsk: ask,
-          now: () => "2026-05-29T00:00:00Z",
-          idFactory: () => `id${++idN}`,
-        } as any,
-        "G1",
-        { body: "hello" }
-      )
-    ).rejects.toMatchObject({ code: "orchestrator_provider_unavailable" });
   });
 });

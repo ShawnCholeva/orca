@@ -68,6 +68,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   const [messageError, setMessageError] = useState<string | null>(null);
   const [messageDraft, setMessageDraft] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [awaitingReply, setAwaitingReply] = useState(false);
   const composerFormRef = useRef<HTMLFormElement>(null);
 
   const selectedGoal = goals.find((goal) => goal.id === selectedGoalId) ?? null;
@@ -76,6 +77,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   useEffect(() => {
     setActionError(null);
     setMessageError(null);
+    setAwaitingReply(false);
   }, [selectedGoalId]);
 
   useEffect(() => {
@@ -112,7 +114,13 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     async function loadMessages() {
       try {
         const response = await listOrchestratorMessages(goalId);
-        if (!cancelled) setMessages(response.messages);
+        if (!cancelled) {
+          setMessages(response.messages);
+          const lastMsg = response.messages[response.messages.length - 1] ?? null;
+          if (lastMsg && lastMsg.role !== "user") {
+            setAwaitingReply(false);
+          }
+        }
       } catch (err) {
         if (!cancelled) {
           setMessageError(toErrorMessage(err, "Failed to load orchestrator messages."));
@@ -295,6 +303,9 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
           response.reply ? [response.message, response.reply] : [response.message]
         )
       );
+      if (response.reply == null) {
+        setAwaitingReply(true);
+      }
       setMessageDraft("");
     } catch (err) {
       setMessageError(toErrorMessage(err, "Failed to send message to Orca."));
@@ -470,6 +481,12 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
                 onConfirm={handleConfirmDone}
                 onDecline={handleDeclineDone}
               />
+            )}
+
+            {awaitingReply && (
+              <div data-testid="awaiting-reply">
+                <ThinkingRow label="orchestrator" />
+              </div>
             )}
 
             {messageError && (

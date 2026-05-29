@@ -1,17 +1,23 @@
 import { describe, it, expect } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ShadowSessionManager } from "./orchestrator-llm/shadow-session.js";
 import { ShadowSessionLlmClient } from "./orchestrator-llm/shadow-llm-client.js";
 import { OrchestratorMediator } from "./orchestrator-llm/mediator.js";
 import { composeOrchestratorPrompt } from "./orchestrator-llm/prompts.js";
-import { FakePtyManager, controlFakePty } from "./pty/fake.js";
+import { FakePtyManager } from "./pty/fake.js";
 
 describe("shadow orchestrator wiring", () => {
   it("mediator.invoke drives a paraphrase action end-to-end via the shadow session", async () => {
     const pty = new FakePtyManager();
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
     const mgr = new ShadowSessionManager({
       ptyManager: pty,
-      resolveSpawn: () => ({ command: "claude", args: [], env: {}, cwd: "/tmp" }),
-      pollIntervalMs: 1,
+      shadowRoot: root,
+      daemonPort: 8787,
+      isReady: async () => true,
+      resolveSpawnCommand: (cwd) => ({ command: "claude", args: [], env: {}, cwd }),
     });
     await mgr.spawn("G1");
     const mediator = new OrchestratorMediator({
@@ -32,10 +38,11 @@ describe("shadow orchestrator wiring", () => {
       adapterId: "claude-code", modelId: "claude-haiku-4-5",
       triggerPayload: { userMessage: "hi" },
     });
-    await new Promise((r) => setTimeout(r, 5));
-    controlFakePty(pty.handles[0]).emitData(
-      Buffer.from('```orca:action\n{"kind":"answer_user_directly","body":"hello"}\n```\n')
-    );
+    // Let askOnce run (it's queued via session.queue.then())
+    await Promise.resolve();
+    mgr.resolvePending("G1", {
+      text: '```orca:action\n{"kind":"answer_user_directly","body":"hello"}\n```',
+    });
 
     const action = await p;
     expect(action.kind).toBe("answer_user_directly");

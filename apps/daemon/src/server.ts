@@ -70,7 +70,7 @@ import {
   updateGoalOrchestratorModel,
   ValidationError
 } from './goals.js';
-import { eventBus, listEventsSince } from './events.js';
+import { eventBus, listEventsSince, type EventBus } from './events.js';
 import { getGoalRefinement } from './goal-refinements.js';
 import { inspectWorkspace } from './workspaces/inspect.js';
 import { WorkspaceInspectionError } from './workspaces/errors.js';
@@ -164,6 +164,8 @@ import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js'
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
+import { insertMessageWithEvent } from './orchestrator-chat/usecases.js';
+import { registerOrchestratorHookRoutes } from './orchestrator-hooks/routes.js';
 import { ShadowSessionManager, shadowSessionId } from './orchestrator-llm/shadow-session.js';
 import { ShadowSessionLlmClient } from './orchestrator-llm/shadow-llm-client.js';
 import { OrchestratorMediator } from './orchestrator-llm/mediator.js';
@@ -455,15 +457,38 @@ export function createServer(
   const shadowPtyManager = new NodePtyManager();
   const shadowSessions = new ShadowSessionManager({
     ptyManager: shadowPtyManager,
-    resolveSpawn: async (goalId) => {
+    shadowRoot: path.join(config.dataDir, "shadow"),
+    daemonPort: config.port,
+    isReady: async () => {
       const adapter = adapterRegistry.get("claude-code");
-      if (!adapter) throw new Error("claude-code adapter not registered");
-      const ws = listWorkspacesByGoal(db, goalId)[0];
-      const workspacePath = ws?.path ?? process.cwd();
-      const spawn = await adapter.resolveSpawn({ goalId, sessionId: shadowSessionId(goalId), workspacePath });
-      return { command: spawn.command, args: spawn.args, env: spawn.env, cwd: spawn.cwd };
+      if (!adapter) return false;
+      const step = await adapter.checkAuth();
+      return step.ok;
+    },
+    resolveSpawnCommand: (cwd) => {
+      // goalId is the basename of the shadow dir (shadowRoot/<goalId>)
+      const goalId = path.basename(cwd);
+      // Inherit the user's env so `claude` finds HOME/~/.claude (subscription auth),
+      // but never hand the shadow session the daemon's secret/mutation tokens.
+      const DENY = new Set(["ORCA_TOKEN", "ORCA_AUTH_TOKEN", "ORCA_DESKTOP_TOKEN", "ORCA_API_TOKEN", "ORCA_MUTATION_TOKEN"]);
+      const env: Record<string, string> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (v !== undefined && !DENY.has(k)) env[k] = v;
+      }
+      env["ORCA_GOAL_ID"] = goalId;
+      env["ORCA_SESSION_ID"] = shadowSessionId(goalId);
+      const command = process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude";
+      return { command, args: [], env, cwd };
     },
   });
+  // Update the hook endpoint URL with the actual bound port after listen.
+  server.addHook("onListen", async () => {
+    const addr = server.server.address();
+    if (addr && typeof addr === "object" && typeof addr.port === "number") {
+      shadowSessions.setDaemonPort(addr.port);
+    }
+  });
+
   const shadowClient = new ShadowSessionLlmClient(shadowSessions, { timeoutMs: 60_000 });
   const orchestratorMediator = new OrchestratorMediator({
     llm: shadowClient,
@@ -519,10 +544,6 @@ export function createServer(
         // sessions terminal. No-op.
       },
       respawn: async ({ runId, stepRunId, goalId }) => {
-        // Best-effort: re-spawn the shadow orchestrator session for this goal.
-        void shadowSessions.spawn(goalId).catch((err) =>
-          console.error("[resume] shadow spawn failed for goal", goalId, err)
-        );
         await orchestratorService.respawnStepAgent(
           db,
           daemonContext.now ?? (() => new Date().toISOString()),
@@ -1019,7 +1040,27 @@ export function createServer(
     modelProviderRegistry: daemonContext.modelProviderRegistry,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
-    shadowAsk: (goalId, input) => shadowSessions.ask(goalId, input),
+    shadowAsk: async (goalId, input) => {
+      await shadowSessions.spawn(goalId);
+      return shadowSessions.ask(goalId, input);
+    },
+    resolveOrchestratorMode: (provider) => {
+      const adapterId =
+        provider === "orca/anthropic" ? "claude-code"
+        : provider === "orca/openai" ? "codex"
+        : provider === "orca/google-gemini" ? "gemini-cli"
+        : "claude-code";
+      try {
+        return daemonContext.stepDispatchCapabilities.resolveMode(adapterId).mode === "shadow_session"
+          ? "shadow_session" : "one_shot";
+      } catch (err) {
+        console.error("[orchestrator] resolveOrchestratorMode failed; defaulting to one_shot", err);
+        return "one_shot";
+      }
+    },
+    onOrchestratorReply: (goalId, body) => {
+      postOrchestratorChatReply(db, eventBus, daemonContext, goalId, body);
+    },
     onUserMessage: async (goalId, body) => {
       await orchestratorService.onUserMessage(
         getDatabase(),
@@ -1028,6 +1069,12 @@ export function createServer(
         { bus: eventBus, idFactory: daemonContext.idFactory }
       );
     },
+  });
+
+  // ---- Orchestrator hook endpoint ----
+
+  registerOrchestratorHookRoutes(server, {
+    resolvePending: (goalId, result) => shadowSessions.resolvePending(goalId, result),
   });
 
   // ---- Orchestration transport routes ----
@@ -1435,4 +1482,29 @@ export function createServer(
   });
 
   return server;
+}
+
+function postOrchestratorChatReply(
+  db: ReturnType<typeof getDatabase>,
+  bus: EventBus,
+  ctx: DaemonContext,
+  goalId: string,
+  body: string
+): void {
+  try {
+    insertMessageWithEvent(
+      { db, bus, modelProviderRegistry: ctx.modelProviderRegistry, now: ctx.now, idFactory: ctx.idFactory },
+      {
+        id: ctx.idFactory(),
+        goalId,
+        role: "orchestrator",
+        body,
+        correlationId: ctx.idFactory(),
+        createdAt: ctx.now(),
+      }
+    );
+  } catch (err) {
+    console.error("[orchestrator] postOrchestratorChatReply failed", err);
+    // never rethrow: this runs in a fire-and-forget orchestrator-reply path
+  }
 }
