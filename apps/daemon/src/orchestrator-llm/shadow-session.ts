@@ -104,12 +104,21 @@ export class ShadowSessionManager {
   async terminate(goalId: string): Promise<void> {
     const session = this.sessions.get(goalId);
     if (!session) return;
+    if (session.pending) {
+      clearTimeout(session.pending.timer);
+      const p = session.pending;
+      session.pending = null;
+      p.reject(new Error(`shadow session for goal ${goalId} terminated`));
+    }
     session.disposeData();
-    session.handle.kill("SIGTERM");
     this.sessions.delete(goalId);
+    session.handle.kill("SIGTERM");
   }
 
   async ask(goalId: string, input: AskInput): Promise<{ text: string }> {
+    if (!this.sessions.has(goalId)) {
+      await this.spawn(goalId);
+    }
     const session = this.getSession(goalId);
     if (!session) throw new Error(`no shadow session for goal ${goalId}`);
     const next = session.queue.then(() => this.askOnce(goalId, input));

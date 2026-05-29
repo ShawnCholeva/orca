@@ -81,4 +81,29 @@ describe("ShadowSessionManager.ask (hook-resolved)", () => {
     await expect(p).rejects.toThrow(/exited/i);
     expect(m.has("G1")).toBe(false);
   });
+
+  it("terminate rejects an in-flight ask immediately (no timeout wait)", async () => {
+    const { m } = mgr();
+    await m.spawn("G1");
+    const p = m.ask("G1", { systemPrompt: "S", userPrompt: "q", timeoutMs: 60_000 });
+    await Promise.resolve(); // let askOnce register pending
+    await m.terminate("G1");
+    await expect(p).rejects.toThrow(/terminated/i);
+    expect(m.has("G1")).toBe(false);
+  });
+
+  it("ask auto-spawns when no session exists yet", async () => {
+    const { pty, m } = mgr();
+    // NOTE: no m.spawn("G1") first
+    const p = m.ask("G1", { systemPrompt: "S", userPrompt: "q", timeoutMs: 1000 });
+    // spawn is async (await isReady() + sync start); drain microtasks until the session exists,
+    // then two more ticks: one for ask() to resume past "await spawn" and schedule
+    // session.queue.then(askOnce), and one for that .then callback to actually run askOnce.
+    while (!m.has("G1")) await tick();
+    await tick(); // ask() resumes, executes session.queue.then(() => askOnce(...))
+    await tick(); // .then callback fires — askOnce runs and registers pending
+    expect(m.has("G1")).toBe(true);
+    m.resolvePending("G1", { text: '```orca:action\n{"ok":1}\n```' });
+    expect((await p).text).toBe('{"ok":1}');
+  });
 });
