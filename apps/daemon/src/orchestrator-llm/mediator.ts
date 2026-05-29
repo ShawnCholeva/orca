@@ -8,6 +8,7 @@ import type { OrchestratorInvocationContext } from "./context.js";
 
 export interface OrchestratorLlmClient {
   request(input: {
+    goalId: string;
     adapterId: string;
     modelId: string;
     systemPrompt: string;
@@ -61,6 +62,7 @@ export class OrchestratorMediator {
       triggerPayload: input.triggerPayload,
     });
     const res1 = await this.deps.llm.request({
+      goalId: input.goalId,
       adapterId: input.adapterId,
       modelId: input.modelId,
       ...prompt,
@@ -68,6 +70,7 @@ export class OrchestratorMediator {
     const parsed1 = tryParseAction(res1.text);
     if (parsed1) return parsed1;
     const res2 = await this.deps.llm.request({
+      goalId: input.goalId,
       adapterId: input.adapterId,
       modelId: input.modelId,
       ...prompt,
