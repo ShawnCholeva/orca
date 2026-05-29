@@ -27,6 +27,7 @@ export const migrationFiles = [
   WORKFLOW_STEP_RUNS_OPERATOR_SELECTION_MIGRATION,
   "0015_adapter_execution_modes.sql",
   "0016_workflow_step_runs_revise_attempts.sql",
+  "0017_orchestrator_messages_chat_kinds.sql",
 ] as const;
 
 export function runMigrations(

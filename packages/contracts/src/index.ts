@@ -957,11 +957,30 @@ export const ListGoalDecisionsResponse = z
   .strict();
 export type ListGoalDecisionsResponse = z.infer<typeof ListGoalDecisionsResponse>;
 
-export const OrchestratorChatRole = z.enum(["user", "orchestrator", "system"]);
+export const OrchestratorChatRole = z.enum([
+  "user",
+  "orchestrator",
+  "system",
+  "agent_paraphrased",
+  "internal_thought"
+]);
 export type OrchestratorChatRole = z.infer<typeof OrchestratorChatRole>;
 
 export const OrchestratorChatMessageKind = z.enum(["message"]);
 export type OrchestratorChatMessageKind = z.infer<typeof OrchestratorChatMessageKind>;
+
+export const OrchestratorInternalThoughtKind = z.enum([
+  "step_started",
+  "thinking",
+  "agent_invocation",
+  "schema_validation",
+  "revise",
+  "agent_crash",
+  "mark_done_ready"
+]);
+export type OrchestratorInternalThoughtKind = z.infer<
+  typeof OrchestratorInternalThoughtKind
+>;
 
 export const OrchestratorChatMessage = z
   .object({
@@ -969,8 +988,11 @@ export const OrchestratorChatMessage = z
     goalId: z.string(),
     role: OrchestratorChatRole,
     kind: OrchestratorChatMessageKind,
-    body: z.string().trim().min(1).max(4000),
+    body: z.string().trim().min(1).max(20_000),
     correlationId: z.string().nullable(),
+    rawAgentText: z.string().max(200_000).nullable().optional(),
+    whyRationale: z.string().max(4000).nullable().optional(),
+    internalKind: OrchestratorInternalThoughtKind.nullable().optional(),
     createdAt: z.string().datetime()
   })
   .strict();
