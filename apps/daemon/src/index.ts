@@ -6,6 +6,9 @@ import { eventBus } from './events.js';
 import { defaultMigrationsDir, runMigrations } from './migrations.js';
 import { seedAgents } from './agents.js';
 import { bootstrapRegistries } from './registry/bootstrap.js';
+import { adapterRegistry } from './adapters/registry.js';
+import { seedAdapterExecutionModes } from './adapters/execution-modes.js';
+import type { ExecutionMode } from '@orca/contracts';
 import { createServer } from './server.js';
 import { registerShutdown } from './shutdown.js';
 import { reconcileSessionsOnBoot } from './sessions/reconciliation.js';
@@ -50,6 +53,17 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
     bootstrapRegistries();
   } catch (err) {
     console.error('[orca-daemon] Registry bootstrap failed — aborting startup:', err);
+    process.exit(1);
+  }
+
+  try {
+    const supportedByAdapter: Record<string, ExecutionMode[]> = {};
+    for (const adapter of adapterRegistry.listAgentAdapters()) {
+      supportedByAdapter[adapter.id] = adapter.supportedExecutionModes;
+    }
+    seedAdapterExecutionModes(db, () => new Date().toISOString(), supportedByAdapter);
+  } catch (err) {
+    console.error('[orca-daemon] Adapter execution-mode seed failed — aborting startup:', err);
     process.exit(1);
   }
 
@@ -100,6 +114,7 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
     sessionOutputStore,
     extractionRunner,
     daemonContext: daemonCtx,
+    resumeActiveRunsOnBoot: true,
   });
 
   try {

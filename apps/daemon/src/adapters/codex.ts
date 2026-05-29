@@ -11,7 +11,7 @@ import { runCheckCommand, inheritCredEnv, type RunCheckResult } from "../readine
 import { sanitizeOutput } from "../readiness/sanitize.js";
 import { installUrlFor, signInCommandFor } from "../readiness/repair-links.js";
 import { parseVersion } from "../readiness/version.js";
-import type { AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
+import type { AgentReadinessStatus, CheckStep, RepairAction, ExecutionMode } from "@orca/contracts";
 
 export type RunCheckFn = (
   command: string,
@@ -25,7 +25,20 @@ const NOT_LOGGED_IN =
 export class CodexAdapter implements AgentAdapter {
   readonly id = "codex" as const;
   readonly title = "Codex";
+  readonly supportedExecutionModes: ExecutionMode[] = ["one_shot", "shadow_session"];
   readonly contextDelivery: AdapterContextDelivery = { mode: "preview_only", maxBytes: 32768 };
+
+  private static readonly KNOWN_MODELS = new Set([
+    "gpt-5",
+    "gpt-5-codex",
+    "gpt-4.1",
+    "o3",
+    "o4-mini",
+  ]);
+
+  supportsModel(modelId: string): boolean {
+    return CodexAdapter.KNOWN_MODELS.has(modelId);
+  }
 
   constructor(
     private readonly resolveFn: ResolveFn = resolveBinary,

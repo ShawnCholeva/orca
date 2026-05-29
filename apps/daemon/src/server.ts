@@ -149,6 +149,7 @@ import {
 } from './extractions/usecases.js';
 import type { SessionPreparationAssembler } from './context/assembler.js';
 import { registerContextRoutes } from './context/routes.js';
+import { registerAdapterExecutionModeRoutes } from './adapters/execution-modes-routes.js';
 import { createDaemonContext, type DaemonContext } from './daemon-context.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
@@ -156,13 +157,20 @@ import { registerConflictRoutes } from './conflicts/routes.js';
 import { registerGoalBootstrapRoute } from './goals/bootstrap-route.js';
 import { startWorkflowRun } from './workflows/runs/usecases.js';
 import { OrchestratorService } from './workflows/orchestrator/service.js';
+import { resumeActiveRuns } from './workflows/orchestrator/resume.js';
 import { registerWorkflowTemplateRoutes } from './workflows/templates/routes.js';
 import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js';
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
+import { ShadowSessionManager, shadowSessionId } from './orchestrator-llm/shadow-session.js';
+import { ShadowSessionLlmClient } from './orchestrator-llm/shadow-llm-client.js';
+import { OrchestratorMediator } from './orchestrator-llm/mediator.js';
+import { composeOrchestratorPrompt } from './orchestrator-llm/prompts.js';
+import { buildContextFromDb } from './orchestrator-llm/build-context.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
+import { registerAgentHookRoutes } from './agent-hooks/routes.js';
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
 import {
   buildOrchestrationProviderCatalog,
@@ -200,6 +208,7 @@ export function createServer(
     extractionRunner?: ExtractionRunner;
     assembler?: SessionPreparationAssembler;
     daemonContext?: DaemonContext;
+    resumeActiveRunsOnBoot?: boolean;
   }
 ): FastifyInstance {
   const startedAt = new Date().toISOString();
@@ -442,6 +451,27 @@ export function createServer(
     }
   });
 
+  // Shadow PTY manager + session manager for the orchestrator-LLM.
+  const shadowPtyManager = new NodePtyManager();
+  const shadowSessions = new ShadowSessionManager({
+    ptyManager: shadowPtyManager,
+    resolveSpawn: async (goalId) => {
+      const adapter = adapterRegistry.get("claude-code");
+      if (!adapter) throw new Error("claude-code adapter not registered");
+      const ws = listWorkspacesByGoal(db, goalId)[0];
+      const workspacePath = ws?.path ?? process.cwd();
+      const spawn = await adapter.resolveSpawn({ goalId, sessionId: shadowSessionId(goalId), workspacePath });
+      return { command: spawn.command, args: spawn.args, env: spawn.env, cwd: spawn.cwd };
+    },
+  });
+  const shadowClient = new ShadowSessionLlmClient(shadowSessions, { timeoutMs: 60_000 });
+  const orchestratorMediator = new OrchestratorMediator({
+    llm: shadowClient,
+    buildContext: ({ goalId, runId, stepRunId }) =>
+      buildContextFromDb(db, { goalId, runId, stepRunId, payloadBudgetBytes: 64 * 1024 }),
+    composePrompt: composeOrchestratorPrompt,
+  });
+
   // Shared orchestrator service instance — receives sessionOutputStore so that
   // onWorkflowSessionCompleted can synthesize step output from session tails.
   const orchestratorService = new OrchestratorService(
@@ -449,10 +479,73 @@ export function createServer(
     daemonContext.orchestrationTransportBroker,
     daemonContext.operatorRegistry,
     daemonContext.workflowSessionLauncher,
-    sessionOutputStore
+    sessionOutputStore,
+    daemonContext.stepDispatchCapabilities,
+    orchestratorMediator,
+    (sessionId: string, text: string) => {
+      sessionRuntime.getHandle(sessionId)?.write(Buffer.from(text, "utf8"));
+    }
   );
   // Wire the late-binding ref so the onChunkAppended callback is live.
   _orchestratorServiceRef.current = orchestratorService;
+
+  // Boot-time resume (production only — gated so createServer in tests is inert).
+  // reconcileSessionsOnBoot has already marked stale running/starting sessions as
+  // terminal before this point, so in practice every active run's session is dead
+  // → respawn. reattach is a no-op because node-pty children cannot survive a
+  // daemon restart; reconcile + respawn cover recovery.
+  if (deps?.resumeActiveRunsOnBoot) {
+    void resumeActiveRuns({
+      listActiveRuns: async () => {
+        const rows = db.prepare(`
+          SELECT wr.id AS run_id, wr.goal_id, wr.current_step_run_id,
+                 (SELECT s.id FROM sessions s WHERE s.workflow_step_run_id = wr.current_step_run_id AND s.status IN ('running','starting') ORDER BY s.created_at DESC LIMIT 1) AS session_id
+          FROM workflow_runs wr
+          WHERE wr.status = 'active'
+        `).all() as Array<{ run_id: string; goal_id: string; current_step_run_id: string; session_id: string | null }>;
+        return rows.map((r) => ({
+          runId: r.run_id,
+          goalId: r.goal_id,
+          currentStepRunId: r.current_step_run_id,
+          sessionId: r.session_id,
+        }));
+      },
+      isSessionAlive: async (id) => {
+        const row = db.prepare("SELECT status FROM sessions WHERE id = ?").get(id) as { status: string } | undefined;
+        return row?.status === "running" || row?.status === "starting";
+      },
+      reattach: async () => {
+        // node-pty cannot reattach across restart; reconcile already marked stale
+        // sessions terminal. No-op.
+      },
+      respawn: async ({ runId, stepRunId, goalId }) => {
+        // Best-effort: re-spawn the shadow orchestrator session for this goal.
+        void shadowSessions.spawn(goalId).catch((err) =>
+          console.error("[resume] shadow spawn failed for goal", goalId, err)
+        );
+        await orchestratorService.respawnStepAgent(
+          db,
+          daemonContext.now ?? (() => new Date().toISOString()),
+          runId,
+          stepRunId,
+          { bus: eventBus, idFactory: daemonContext.idFactory }
+        );
+      },
+    }).catch((err) => console.error("[resume] boot resume failed", err));
+  }
+
+  // Tear down shadow sessions when a workflow run reaches a terminal state (best-effort).
+  const TERMINAL_RUN_EVENTS = new Set<string>([
+    "workflow.run.completed",
+    "workflow.run.failed",
+    "workflow.run.cancelled",
+    "workflow.run.blocked",
+  ]);
+  eventBus.subscribe((event) => {
+    if (TERMINAL_RUN_EVENTS.has(event.type) && event.goalId) {
+      void shadowSessions.terminate(event.goalId).catch(() => {});
+    }
+  });
 
   // Subscribe to session terminal events → drive workflow step synthesis.
   eventBus.subscribe((event) => {
@@ -493,8 +586,9 @@ export function createServer(
         { db: getDatabase(), bus: eventBus, now: daemonContext.now, idFactory: daemonContext.idFactory },
         args
       ),
-    requestNextDecisionFn: async (_goalId, runId) =>
-      orchestratorService.requestNextDecision(
+    spawnOrchestratorSessionFn: async (goalId, _runId) => shadowSessions.spawn(goalId),
+    startWorkflowFirstStepFn: async (_goalId, runId) =>
+      orchestratorService.startWorkflowFirstStep(
         getDatabase(),
         daemonContext.now ?? (() => new Date().toISOString()),
         runId,
@@ -663,6 +757,7 @@ export function createServer(
     const { id } = request.params as { id: string };
     try {
       const goal = archiveGoal(id);
+      void shadowSessions.terminate(id).catch(() => {});
       return { goal };
     } catch (error) {
       if (error instanceof NotFoundError) {
@@ -829,6 +924,21 @@ export function createServer(
 
   registerContextRoutes(server, { db, bus: eventBus, assembler, adapterRegistry });
 
+  // ---- Adapter execution-mode routes ----
+
+  {
+    const supportedByAdapter: Record<string, import("@orca/contracts").ExecutionMode[]> = {};
+    for (const adapter of adapterRegistry.listAgentAdapters()) {
+      supportedByAdapter[adapter.id] = adapter.supportedExecutionModes;
+    }
+    registerAdapterExecutionModeRoutes(server, {
+      db,
+      now: daemonContext.now,
+      supportedByAdapter,
+      bus: eventBus,
+    });
+  }
+
   // ---- Workflow template routes ----
 
   registerWorkflowTemplateRoutes(server, {
@@ -870,9 +980,21 @@ export function createServer(
     orchestrationTransportBroker: daemonContext.orchestrationTransportBroker,
     operatorRegistry: daemonContext.operatorRegistry,
     workflowSessionLauncher: daemonContext.workflowSessionLauncher,
+    stepDispatch: daemonContext.stepDispatchCapabilities,
     sessionRuntime,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
+  });
+
+  // ---- Agent hook routes ----
+
+  registerAgentHookRoutes(server, {
+    onResponseDone: async (payload) => {
+      await orchestratorService.onAgentResponseDone(db, daemonContext.now, payload, {
+        bus: eventBus,
+        idFactory: daemonContext.idFactory,
+      });
+    },
   });
 
   // ---- Workflow orchestrator routes ----
@@ -884,6 +1006,7 @@ export function createServer(
     orchestrationTransportBroker: daemonContext.orchestrationTransportBroker,
     operatorRegistry: daemonContext.operatorRegistry,
     workflowSessionLauncher: daemonContext.workflowSessionLauncher,
+    stepDispatch: daemonContext.stepDispatchCapabilities,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
   });
@@ -896,6 +1019,15 @@ export function createServer(
     modelProviderRegistry: daemonContext.modelProviderRegistry,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
+    shadowAsk: (goalId, input) => shadowSessions.ask(goalId, input),
+    onUserMessage: async (goalId, body) => {
+      await orchestratorService.onUserMessage(
+        getDatabase(),
+        daemonContext.now ?? (() => new Date().toISOString()),
+        { goalId, body },
+        { bus: eventBus, idFactory: daemonContext.idFactory }
+      );
+    },
   });
 
   // ---- Orchestration transport routes ----

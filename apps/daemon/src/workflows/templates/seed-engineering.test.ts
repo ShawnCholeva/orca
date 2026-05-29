@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import DatabaseCtor from "better-sqlite3";
 import type Database from "better-sqlite3";
@@ -14,6 +15,9 @@ import {
   ENGINEERING_VERSION,
   seedEngineeringTemplate,
 } from "./seed-engineering.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const MIG_DIR = path.resolve(__dirname, "../../../migrations");
 
 const tempDirs: string[] = [];
 const NOW = "2026-01-01T00:00:00.000Z";
@@ -69,7 +73,7 @@ describe("seedEngineeringTemplate", () => {
       "review",
       "done",
     ]);
-    expect(template?.guardrails).toHaveLength(6);
+    expect(template?.guardrails).toHaveLength(5);
   });
 
   it("is a no-op when the same version already exists", () => {
@@ -103,6 +107,7 @@ describe("seedEngineeringTemplate", () => {
           name: "Old",
           instructions: "old placeholder",
           outputSchema: [{ key: "summary", type: "string", required: true }],
+          agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
         },
       ]),
       JSON.stringify([]),
@@ -118,7 +123,7 @@ describe("seedEngineeringTemplate", () => {
     expect(template?.isLocked).toBe(true);
     expect(template?.updatedAt).toBe("2026-03-01T00:00:00.000Z");
     expect(template?.steps).toHaveLength(8);
-    expect(template?.guardrails).toHaveLength(6);
+    expect(template?.guardrails).toHaveLength(5);
   });
 
   it("seeds steps with only instructions + outputSchema", () => {
@@ -134,8 +139,8 @@ describe("seedEngineeringTemplate", () => {
 });
 
 describe("engineering seed (production instructions)", () => {
-  it("version is bumped to 3", () => {
-    expect(ENGINEERING_VERSION).toBe(3);
+  it("version is bumped to 4", () => {
+    expect(ENGINEERING_VERSION).toBe(4);
   });
 
   it("all steps validate and have non-placeholder instructions + non-trivial schemas", () => {
@@ -152,4 +157,21 @@ describe("engineering seed (production instructions)", () => {
     const keys = (exec.outputSchema as Array<{ key: string }>).map((f) => f.key);
     expect(keys).toEqual(expect.arrayContaining(["changed_files", "validation", "summary", "blocked"]));
   });
+});
+
+it("engineering template seeds at v4 with agentPreference per step", () => {
+  expect(ENGINEERING_VERSION).toBe(4);
+  const db = new DatabaseCtor(":memory:");
+  runMigrations(db, MIG_DIR);
+  seedEngineeringTemplate(db, () => "2026-05-28T00:00:00.000Z");
+  const row = db.prepare("SELECT steps_json, guardrails_json FROM workflow_templates WHERE id='orca/engineering'").get() as { steps_json: string; guardrails_json: string };
+  const steps = JSON.parse(row.steps_json) as Array<{ id: string; agentPreference: Array<{ adapterId: string; modelId: string }> }>;
+  const intake = steps.find((s) => s.id === "intake")!;
+  expect(intake.agentPreference[0]).toEqual({ adapterId: "claude-code", modelId: "claude-haiku-4-5" });
+  const research = steps.find((s) => s.id === "research")!;
+  expect(research.agentPreference[0].modelId).toBe("claude-opus-4-7");
+  const execution = steps.find((s) => s.id === "execution")!;
+  expect(execution.agentPreference[0].modelId).toBe("claude-sonnet-4-6");
+  const guards = JSON.parse(row.guardrails_json) as Array<{ id: string }>;
+  expect(guards.find((g) => g.id === "approval_launch_agent")).toBeUndefined();
 });

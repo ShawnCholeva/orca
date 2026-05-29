@@ -19,6 +19,7 @@ function makeAdapter(id: string, opts: {
   return {
     id: id as never,
     title: id,
+    supportedExecutionModes: ["shadow_session" as const],
     contextDelivery: { mode: "preview_only", maxBytes: 32768 },
     async resolveSpawn() { throw new Error("unused"); },
     async probeAvailability() { return { status: "available" as const }; },
@@ -31,6 +32,7 @@ function makeAdapter(id: string, opts: {
       if (s === "ready") return undefined;
       return { kind: "run_command" as const, command: `${id} fix`, label: "Fix" };
     },
+    supportsModel: () => false,
   };
 }
 

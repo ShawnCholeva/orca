@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import { WorkflowStepTemplate, WorkflowArtifactType, InterviewTurn } from "./index.js";
 
 describe("WorkflowStepTemplate (instruction-driven)", () => {
-  it("accepts id/ordinal/name/instructions/outputSchema", () => {
+  it("accepts id/ordinal/name/instructions/outputSchema/agentPreference", () => {
     const parsed = WorkflowStepTemplate.parse({
       id: "intake", ordinal: 0, name: "Intake",
       instructions: "Interview the user.",
       outputSchema: [{ key: "problem", type: "string", required: true }],
+      agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
     });
     expect(parsed.id).toBe("intake");
   });
@@ -14,11 +15,12 @@ describe("WorkflowStepTemplate (instruction-driven)", () => {
     expect(() => WorkflowStepTemplate.parse({
       id: "x", ordinal: 0, name: "X", instructions: "i",
       outputSchema: [{ key: "k", type: "string", required: true }],
+      agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
       gateType: "human-input",
     })).toThrow();
   });
   it("requires instructions and a non-empty outputSchema", () => {
-    expect(() => WorkflowStepTemplate.parse({ id: "x", ordinal: 0, name: "X", outputSchema: [] }))
+    expect(() => WorkflowStepTemplate.parse({ id: "x", ordinal: 0, name: "X", outputSchema: [], agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] }))
       .toThrow();
   });
 });

@@ -4,7 +4,9 @@ import type Database from "better-sqlite3";
 import {
   OrchestrationRequest,
   type OrchestrationRequest as OrchestrationRequestT,
+  type OrchestrationTransport,
   type OrchestrationTransportFailureReason,
+  type ExecutionMode,
 } from "@orca/contracts";
 
 import type { EventBus } from "../../events.js";
@@ -21,6 +23,12 @@ import {
 } from "./attempts.js";
 import { createHumanReviewRequest } from "./human-review.js";
 import { resolveTransportPlan } from "./policy.js";
+
+export type AdapterModeResolver = (adapterId: string) => "one_shot" | "hidden_interactive";
+
+export function execModeToTransport(mode: ExecutionMode): "one_shot" | "hidden_interactive" {
+  return mode === "shadow_session" ? "hidden_interactive" : "one_shot";
+}
 
 export type BrokerResult =
   | {
@@ -84,6 +92,7 @@ export interface OrchestrationTransportBrokerDeps {
   bus: EventBus;
   now: () => string;
   idFactory: () => string;
+  modeResolver?: AdapterModeResolver;
 }
 
 type AttemptCtx = Parameters<typeof createPendingTransportAttempt>[0];
@@ -100,7 +109,12 @@ export class OrchestrationTransportBroker {
       return this.proposeSdkCompatibility(parsedRequest, options);
     }
 
-    const plan = resolveTransportPlan(parsedRequest.providerId);
+    const providerPlan = resolveTransportPlan(parsedRequest.providerId);
+    let plan: OrchestrationTransport[] = providerPlan;
+    if (this.deps.modeResolver && parsedRequest.adapterId) {
+      const primary = this.deps.modeResolver(parsedRequest.adapterId);
+      plan = [primary, ...providerPlan.filter((t) => t !== primary)];
+    }
     const inputFingerprint = fingerprintRequest(parsedRequest);
 
     for (const transport of plan) {

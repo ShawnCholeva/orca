@@ -82,12 +82,14 @@ describe("registry hardening", () => {
       adapters.register({
         id: 'codex' as const,
         title: 'Fake',
+        supportedExecutionModes: ["one_shot", "shadow_session"] as const,
         contextDelivery: { mode: 'preview_only' as const, maxBytes: 32768 },
         resolveSpawn: async () => ({ command: '', args: [], env: {}, cwd: '' }),
         probeAvailability: async () => ({ status: 'unknown' as const }),
         checkInstalled: async () => ({ name: 'installed' as const, ok: true, command: '' }),
         checkAuth: async () => ({ name: 'authenticated' as const, ok: true, authStatus: 'ready' as const, command: '' }),
         repairFor: () => undefined,
+        supportsModel: () => false,
       })
     ).toThrowError("AdapterRegistry is frozen");
   });
@@ -97,24 +99,28 @@ describe("registry hardening", () => {
     adapters.register({
       id: 'shell-manual' as const,
       title: 'First',
+      supportedExecutionModes: ["shadow_session"] as const,
       contextDelivery: { mode: 'preview_only' as const, maxBytes: 32768 },
       resolveSpawn: async () => ({ command: '', args: [], env: {}, cwd: '' }),
       probeAvailability: async () => ({ status: 'unknown' as const }),
       checkInstalled: async () => ({ name: 'installed' as const, ok: true, command: '' }),
       checkAuth: async () => ({ name: 'authenticated' as const, ok: true, authStatus: 'ready' as const, command: '' }),
       repairFor: () => undefined,
+      supportsModel: () => false,
     });
 
     expect(() =>
       adapters.register({
         id: 'shell-manual' as const,
         title: 'Duplicate',
+        supportedExecutionModes: ["shadow_session"] as const,
         contextDelivery: { mode: 'preview_only' as const, maxBytes: 32768 },
         resolveSpawn: async () => ({ command: '', args: [], env: {}, cwd: '' }),
         probeAvailability: async () => ({ status: 'unknown' as const }),
         checkInstalled: async () => ({ name: 'installed' as const, ok: true, command: '' }),
         checkAuth: async () => ({ name: 'authenticated' as const, ok: true, authStatus: 'ready' as const, command: '' }),
         repairFor: () => undefined,
+        supportsModel: () => false,
       })
     ).toThrowError("Duplicate adapter id: shell-manual");
   });

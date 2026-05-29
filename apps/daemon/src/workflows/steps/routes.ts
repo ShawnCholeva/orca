@@ -13,7 +13,7 @@ import { appendWorkflowEvent, publishStagedWorkflowEvents } from "../events.js";
 import type { OperatorRegistry } from "../operators/registry.js";
 import type { OperatorSelector } from "../operators/selector.js";
 import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
-import { OrchestratorService } from "../orchestrator/service.js";
+import { OrchestratorService, type StepDispatchCapabilities } from "../orchestrator/service.js";
 import type { WorkflowSessionLauncher } from "../orchestrator/session-launcher.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
 import { getDecisionById } from "../decisions/usecases.js";
@@ -27,6 +27,7 @@ export interface WorkflowStepRouteDeps {
   orchestrationTransportBroker?: Pick<OrchestrationTransportBroker, "propose">;
   operatorRegistry?: Pick<OperatorRegistry, "list">;
   workflowSessionLauncher?: WorkflowSessionLauncher;
+  stepDispatch?: StepDispatchCapabilities;
   sessionRuntime?: { getHandle(sessionId: string): { write(data: Buffer): void } | undefined };
   now?: () => string;
   idFactory?: () => string;
@@ -47,7 +48,9 @@ export function registerWorkflowStepRoutes(
           deps.operatorSelector,
           deps.orchestrationTransportBroker,
           deps.operatorRegistry,
-          deps.workflowSessionLauncher
+          deps.workflowSessionLauncher,
+          undefined,
+          deps.stepDispatch
         )
       : null;
 

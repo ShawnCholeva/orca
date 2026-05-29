@@ -80,6 +80,7 @@ function makeAdapterRegistry(): AdapterRegistry {
   const adapter: AgentAdapter = {
     id: "codex",
     title: "Codex",
+    supportedExecutionModes: ["one_shot", "shadow_session"],
     contextDelivery: { mode: "preview_only", maxBytes: 32768 },
     async resolveSpawn(_input: AdapterSpawnInput): Promise<AdapterSpawnResult> {
       return {
@@ -112,6 +113,7 @@ function makeAdapterRegistry(): AdapterRegistry {
     repairFor() {
       return undefined;
     },
+    supportsModel: () => false,
   };
   registry.register(adapter);
   return registry;

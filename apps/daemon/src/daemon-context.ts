@@ -17,7 +17,9 @@ import { createOpenAIProvider } from './llm/openai.js';
 import { createGeminiProvider } from './llm/gemini.js';
 import { OperatorRegistry } from './workflows/operators/registry.js';
 import { OperatorSelector } from './workflows/operators/selector.js';
-import { OrchestrationTransportBroker } from './workflows/orchestration-transport/broker.js';
+import { OrchestrationTransportBroker, execModeToTransport } from './workflows/orchestration-transport/broker.js';
+import { AdapterDispatcher } from './adapters/dispatcher.js';
+import type { StepDispatchCapabilities } from './workflows/orchestrator/service.js';
 import { createSession as createSessionUseCase } from './sessions/usecases.js';
 import { listWorkspacesByGoal } from './workspaces/projection.js';
 import { ProductionWorkflowSessionLauncher } from './workflows/orchestrator/session-launcher-impl.js';
@@ -37,8 +39,10 @@ export interface DaemonContext {
   readinessService: ReadinessService;
   modelProviderRegistry: ModelProviderRegistry;
   operatorRegistry: OperatorRegistry;
+  adapterDispatcher: AdapterDispatcher;
   orchestrationTransportBroker: OrchestrationTransportBroker;
   operatorSelector: OperatorSelector;
+  stepDispatchCapabilities: StepDispatchCapabilities;
   workflowSessionLauncher: WorkflowSessionLauncher;
   now: () => string;
   idFactory: () => string;
@@ -62,11 +66,23 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
   );
   const now = () => new Date().toISOString();
   const idFactory = randomUUID;
+  const adapterDispatcher = new AdapterDispatcher({ db });
+  const stepDispatchCapabilities: StepDispatchCapabilities = {
+    isAdapterReady: async (adapterId) => {
+      if (!adapterRegistry.get(adapterId)) return false;
+      const report = await readinessService.checkAgent(adapterId);
+      return report.status === "ready";
+    },
+    supportsModel: (adapterId, modelId) =>
+      adapterRegistry.get(adapterId)?.supportsModel(modelId) ?? false,
+    resolveMode: (adapterId) => adapterDispatcher.resolveMode(adapterId),
+  };
   const orchestrationTransportBroker = new OrchestrationTransportBroker({
     db,
     bus,
     now,
     idFactory,
+    modeResolver: (adapterId: string) => execModeToTransport(adapterDispatcher.resolveMode(adapterId).mode),
   });
 
   // Production workflow session launcher: picks first attached workspace for goal (Phase 2 limitation).
@@ -105,12 +121,14 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
     readinessService,
     modelProviderRegistry,
     operatorRegistry,
+    adapterDispatcher,
     orchestrationTransportBroker,
     operatorSelector: new OperatorSelector(
       modelProviderRegistry,
       operatorRegistry,
       orchestrationTransportBroker
     ),
+    stepDispatchCapabilities,
     workflowSessionLauncher,
     now,
     idFactory,

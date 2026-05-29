@@ -13,7 +13,8 @@ export interface GoalBootstrapRouteDeps {
     orchestratorModel?: OrchestratorModelChoice;
   }) => Promise<Goal>;
   startWorkflowRunFn: (args: { goalId: string; templateId: string }) => WorkflowRun;
-  requestNextDecisionFn: (goalId: string, runId: string) => Promise<unknown>;
+  spawnOrchestratorSessionFn: (goalId: string, runId: string) => Promise<string>;
+  startWorkflowFirstStepFn: (goalId: string, runId: string) => Promise<void>;
 }
 
 function apiError(code: string, message: string) {
@@ -77,9 +78,10 @@ export function registerGoalBootstrapRoute(
 
     const workflowRunId = run.id;
 
-    // Phase 3: request first orchestrator decision — failure returns partial-success body
+    // Phase 3: spawn orchestrator-LLM session + start first step's agent — failure returns partial-success body
     try {
-      await deps.requestNextDecisionFn(goalId, workflowRunId);
+      await deps.spawnOrchestratorSessionFn(goalId, workflowRunId);
+      await deps.startWorkflowFirstStepFn(goalId, workflowRunId);
     } catch (err) {
       reply.status(201);
       return {
@@ -87,8 +89,8 @@ export function registerGoalBootstrapRoute(
         goalId,
         workflowRunId,
         bootstrapError: {
-          phase: "requestDecision",
-          message: err instanceof Error ? err.message : "Failed to request orchestrator decision",
+          phase: "startFirstStep",
+          message: err instanceof Error ? err.message : "Failed to start first step",
         },
       };
     }

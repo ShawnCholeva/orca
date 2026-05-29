@@ -275,6 +275,7 @@ function buildTemplateInput(draft: TemplateDraft): CreateWorkflowTemplateInput {
       name: step.name.trim(),
       instructions: step.instructions,
       outputSchema: step.outputSchema,
+      agentPreference: step.agentPreference,
     })),
     guardrails: draft.guardrails.map((guardrail) => ({
       id: guardrail.id,
@@ -320,6 +321,7 @@ function createStepDraft(steps: WorkflowStepDraft[]): WorkflowStepDraft {
     name: `Step ${nextIndex}`,
     instructions: "Describe what this step does.",
     outputSchema: [{ key: "result", type: "string" as const, required: true }],
+    agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }],
   };
 }
 

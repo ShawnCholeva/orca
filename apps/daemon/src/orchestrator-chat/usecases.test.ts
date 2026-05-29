@@ -118,6 +118,28 @@ describe("orchestrator chat projection", () => {
       "msg-2",
     ]);
   });
+
+  it("round-trips internal_thought rows with internal_kind/why_rationale and agent_paraphrased raw_agent_text", () => {
+    const { db } = setup();
+    db.exec(`
+      INSERT INTO orchestrator_messages (id, goal_id, role, kind, body, correlation_id, created_at, raw_agent_text, why_rationale, internal_kind)
+      VALUES
+        ('it-1', 'goal-1', 'internal_thought', 'message', 'Starting Intake', NULL, '2026-05-26T12:00:00.000Z', NULL, 'step instructions said...', 'step_started'),
+        ('ap-1', 'goal-1', 'agent_paraphrased', 'message', 'The agent finished the research.', NULL, '2026-05-26T12:00:01.000Z', '<full raw transcript>', NULL, NULL)
+    `);
+
+    const messages = listOrchestratorMessagesByGoal(db, "goal-1");
+    expect(messages).toHaveLength(2);
+
+    const thought = messages[0];
+    expect(thought.role).toBe("internal_thought");
+    expect(thought.internalKind).toBe("step_started");
+    expect(thought.whyRationale).toBe("step instructions said...");
+
+    const paraphrase = messages[1];
+    expect(paraphrase.role).toBe("agent_paraphrased");
+    expect(paraphrase.rawAgentText).toBe("<full raw transcript>");
+  });
 });
 
 describe("orchestrator chat usecases", () => {

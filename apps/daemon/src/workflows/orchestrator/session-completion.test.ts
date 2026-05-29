@@ -14,7 +14,9 @@ import {
   makeStep,
   fakeSelector,
   fakeRegistry,
+  fakeStepDispatch,
 } from "./skill-step-test-helpers.js";
+import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import type {
   BrokerCompatibilityOptions,
   BrokerResult,
@@ -126,14 +128,16 @@ function fakeAlwaysInvalidBroker(): { broker: { propose: typeof _propose } } {
 
 function makeService(
   broker: { propose: (req: unknown, opts?: BrokerCompatibilityOptions) => Promise<BrokerResult> },
-  outputStore: SessionOutputStore
+  outputStore: SessionOutputStore,
+  extra: { launcher?: WorkflowSessionLauncher } = {}
 ): OrchestratorService {
   return new OrchestratorService(
     fakeSelector(),
     broker as never,
     fakeRegistry(),
-    undefined,
-    outputStore
+    extra.launcher,
+    outputStore,
+    extra.launcher ? fakeStepDispatch() : undefined
   );
 }
 
@@ -150,6 +154,9 @@ function seedWorkflowWithSession(
     stepRunStatus?: string;
     goalProvider?: string | null;
     goalModel?: string | null;
+    crashRetries?: number;
+    selectedOperatorId?: string | null;
+    selectedModelId?: string | null;
   } = {}
 ): {
   sessionId: string;
@@ -167,6 +174,9 @@ function seedWorkflowWithSession(
   const stepRunStatus = opts.stepRunStatus ?? "active";
   const provider = opts.goalProvider === undefined ? PROVIDER : opts.goalProvider;
   const model = opts.goalModel === undefined ? MODEL : opts.goalModel;
+  const crashRetries = opts.crashRetries ?? 0;
+  const selectedOperatorId = opts.selectedOperatorId ?? null;
+  const selectedModelId = opts.selectedModelId ?? null;
 
   const step = makeStep({
     id: "plan",
@@ -199,9 +209,20 @@ function seedWorkflowWithSession(
   db.prepare(
     `INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status,
        satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at,
-       fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at)
-     VALUES (?, ?, ?, ?, 0, 1, ?, '[]', '[]', NULL, ?, NULL, 'fp-1', NULL, NULL, NULL, NULL)`
-  ).run(stepRunId, goalId, runId, step.id, stepRunStatus, NOW);
+       fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at, crash_retries)
+     VALUES (?, ?, ?, ?, 0, 1, ?, '[]', '[]', NULL, ?, NULL, 'fp-1', ?, NULL, ?, ?, ?)`
+  ).run(
+    stepRunId,
+    goalId,
+    runId,
+    step.id,
+    stepRunStatus,
+    NOW,
+    selectedOperatorId,
+    selectedModelId,
+    selectedOperatorId ? NOW : null,
+    crashRetries
+  );
 
   db.prepare(
     `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, failure_reason, workflow_step_run_id)
@@ -326,11 +347,104 @@ describe("OrchestratorService.onWorkflowSessionCompleted", () => {
     expect(artifactCount(db, "step_output")).toBe(0);
   });
 
-  it("session.failed: terminal status is failed → run blocked, broker NOT called", async () => {
+  it("session.failed under crash cap → respawns same step, run NOT blocked, broker NOT called", async () => {
     const { db, bus, idFactory } = setupHarness();
-    const { sessionId, goalId, runId } = seedWorkflowWithSession(db, {
+    const { sessionId, goalId, runId, stepRunId } = seedWorkflowWithSession(db, {
       sessionStatus: "failed",
       failureReason: "oom killed",
+      selectedOperatorId: "agent:claude-code",
+      selectedModelId: "claude-haiku-4-5",
+    });
+
+    const brokerSpy = vi.fn();
+    const launch: WorkflowSessionLauncher["launch"] = vi.fn(async () => ({
+      sessionId: "respawn-1",
+    }));
+    const outputStore = fakeOutputStore();
+    const service = makeService({ propose: brokerSpy }, outputStore, {
+      launcher: { launch },
+    });
+
+    await service.onWorkflowSessionCompleted(
+      db,
+      () => NOW,
+      { sessionId, goalId },
+      { bus, idFactory }
+    );
+
+    // Respawned the same step.
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(launch).mock.calls[0][0]).toMatchObject({
+      workflowStepRunId: stepRunId,
+    });
+
+    // Run stays active; no block, no synthesis.
+    expect(isRunBlocked(db, runId)).toBe(false);
+    expect(brokerSpy).not.toHaveBeenCalled();
+    expect(artifactCount(db, "step_output")).toBe(0);
+
+    // crash_retries incremented to 1.
+    const retries = (
+      db
+        .prepare("SELECT crash_retries AS c FROM workflow_step_runs WHERE id = ?")
+        .get(stepRunId) as { c: number }
+    ).c;
+    expect(retries).toBe(1);
+  });
+
+  it("session.failed at crash cap → posts escalation message, no respawn", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, stepRunId } = seedWorkflowWithSession(db, {
+      sessionStatus: "failed",
+      failureReason: "oom killed",
+      crashRetries: 2, // this failure → 3 = cap
+      selectedOperatorId: "agent:claude-code",
+      selectedModelId: "claude-haiku-4-5",
+    });
+
+    const brokerSpy = vi.fn();
+    const launch: WorkflowSessionLauncher["launch"] = vi.fn(async () => ({
+      sessionId: "respawn-1",
+    }));
+    const outputStore = fakeOutputStore();
+    const service = makeService({ propose: brokerSpy }, outputStore, {
+      launcher: { launch },
+    });
+
+    await service.onWorkflowSessionCompleted(
+      db,
+      () => NOW,
+      { sessionId, goalId },
+      { bus, idFactory }
+    );
+
+    expect(launch).not.toHaveBeenCalled();
+    expect(brokerSpy).not.toHaveBeenCalled();
+    expect(artifactCount(db, "step_output")).toBe(0);
+
+    // crash_retries hit the cap.
+    const retries = (
+      db
+        .prepare("SELECT crash_retries AS c FROM workflow_step_runs WHERE id = ?")
+        .get(stepRunId) as { c: number }
+    ).c;
+    expect(retries).toBe(3);
+
+    // Escalation message posted to orchestrator chat.
+    const msg = db
+      .prepare(
+        "SELECT body FROM orchestrator_messages WHERE goal_id = ? AND role = 'orchestrator' LIMIT 1"
+      )
+      .get(goalId) as { body: string } | undefined;
+    expect(msg?.body).toMatch(/crashed 3 times/i);
+    expect(msg?.body).toMatch(/manual intervention/i);
+  });
+
+  it("session.stopped: user-requested stop → run blocked, broker NOT called", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, runId } = seedWorkflowWithSession(db, {
+      sessionStatus: "stopped",
+      failureReason: "user stopped",
     });
 
     const brokerSpy = vi.fn();
@@ -348,11 +462,10 @@ describe("OrchestratorService.onWorkflowSessionCompleted", () => {
     expect(brokerSpy).not.toHaveBeenCalled();
     expect(artifactCount(db, "step_output")).toBe(0);
 
-    // Reason should mention "failed"
     const decision = db
       .prepare("SELECT reason FROM workflow_decisions WHERE decision_type = 'block_run' LIMIT 1")
       .get() as { reason: string } | undefined;
-    expect(decision?.reason).toMatch(/failed/i);
+    expect(decision?.reason).toMatch(/stopped/i);
   });
 
   it("non-workflow session: session with workflow_step_run_id = null → no-op, no artifact", async () => {

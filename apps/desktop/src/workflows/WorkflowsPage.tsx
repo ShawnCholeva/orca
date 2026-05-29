@@ -50,6 +50,7 @@ export function WorkflowsPage() {
             name: "Step 1",
             instructions: "Describe what this step does.",
             outputSchema: [{ key: "result", type: "string", required: true }],
+            agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }],
           },
         ],
         guardrails: [],

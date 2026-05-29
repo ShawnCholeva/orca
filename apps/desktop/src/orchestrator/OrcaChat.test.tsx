@@ -1,64 +1,38 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Goal, Recommendation } from "@orca/contracts";
+import type { Goal, OrchestratorChatMessage } from "@orca/contracts";
 
 vi.mock("@tauri-apps/api/core", () => ({
   isTauri: () => false,
   invoke: vi.fn(),
 }));
 
-const acceptRecommendationMock = vi.fn();
 const createOrchestratorMessageMock = vi.fn();
-const dismissRecommendationMock = vi.fn();
 const getGoalDetailMock = vi.fn();
 const getWorkflowRunMock = vi.fn();
 const getWorkflowStepRunMock = vi.fn();
 const listOrchestratorMessagesMock = vi.fn();
-const listRecommendationsMock = vi.fn();
 const listWorkflowDecisionsMock = vi.fn();
 const listWorkflowRunArtifactsMock = vi.fn();
 const openEventStreamMock = vi.fn();
-const rejectRecommendationMock = vi.fn();
 const requestNextOrchestratorDecisionMock = vi.fn();
 const listWorkflowTemplatesMock = vi.fn();
 const startWorkflowRunMock = vi.fn();
-const submitWorkflowUserInputMock = vi.fn();
 
 vi.mock("../api", () => ({
-  acceptRecommendation: (...args: unknown[]) => acceptRecommendationMock(...args),
   createOrchestratorMessage: (...args: unknown[]) => createOrchestratorMessageMock(...args),
-  dismissRecommendation: (...args: unknown[]) => dismissRecommendationMock(...args),
   getGoalDetail: (...args: unknown[]) => getGoalDetailMock(...args),
   getWorkflowRun: (...args: unknown[]) => getWorkflowRunMock(...args),
   getWorkflowStepRun: (...args: unknown[]) => getWorkflowStepRunMock(...args),
   listOrchestratorMessages: (...args: unknown[]) => listOrchestratorMessagesMock(...args),
-  listRecommendations: (...args: unknown[]) => listRecommendationsMock(...args),
   listWorkflowDecisions: (...args: unknown[]) => listWorkflowDecisionsMock(...args),
   listWorkflowRunArtifacts: (...args: unknown[]) => listWorkflowRunArtifactsMock(...args),
   openEventStream: (...args: unknown[]) => openEventStreamMock(...args),
-  rejectRecommendation: (...args: unknown[]) => rejectRecommendationMock(...args),
   requestNextOrchestratorDecision: (...args: unknown[]) => requestNextOrchestratorDecisionMock(...args),
   listWorkflowTemplates: (...args: unknown[]) => listWorkflowTemplatesMock(...args),
   startWorkflowRun: (...args: unknown[]) => startWorkflowRunMock(...args),
-  submitWorkflowUserInput: (...args: unknown[]) => submitWorkflowUserInputMock(...args),
   toErrorMessage: (err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback,
-}));
-
-vi.mock("../goal-detail/sessions/CreateSessionDialog", () => ({
-  CreateSessionDialog: ({
-    prefill,
-  }: {
-    prefill?: {
-      adapterId: string;
-      objective: string;
-      workflowStepRunId?: string;
-    } | null;
-  }) => (
-    <div data-testid="create-session-dialog">
-      {prefill?.adapterId}:{prefill?.workflowStepRunId}:{prefill?.objective}
-    </div>
-  ),
 }));
 
 const now = "2026-01-01T00:00:00.000Z";
@@ -77,59 +51,27 @@ const goal: Goal = {
   archivedAt: null,
 };
 
-const userMessage = {
+const userMessage: OrchestratorChatMessage = {
   id: "msg-user",
   goalId: "goal-1",
-  role: "user" as const,
-  kind: "message" as const,
+  role: "user",
+  kind: "message",
   body: "Need a rollout plan.",
   correlationId: "corr-1",
   createdAt: now,
 };
 
-const orcaMessage = {
+const orcaMessage: OrchestratorChatMessage = {
   id: "msg-orca",
   goalId: "goal-1",
-  role: "orchestrator" as const,
-  kind: "message" as const,
+  role: "orchestrator",
+  kind: "message",
   body: "Start with a bounded verification pass.",
   correlationId: "corr-1",
   createdAt: now,
 };
 
-function workflowRecommendation(
-  overrides: Partial<Recommendation> = {},
-): Recommendation {
-  return {
-    id: "rec-1",
-    goalId: "goal-1",
-    type: "request_user_input",
-    status: "proposed",
-    source: "deterministic_provider",
-    title: "Answer intake question",
-    rationale: "Need the initial problem statement.",
-    proposedAction: {
-      kind: "request_user_input",
-      workflowStepRunId: "step-1",
-      question: "What problem are we solving?",
-    },
-    confidence: 0.8,
-    sources: [],
-    relatedTaskId: null,
-    relatedSessionId: null,
-    relatedContextPackageId: null,
-    relatedConflictId: null,
-    generationId: null,
-    workflowStepRunId: "step-1",
-    fingerprint: "rec-fp-1",
-    supersededById: null,
-    createdAt: now,
-    updatedAt: now,
-    ...overrides,
-  };
-}
-
-function setupRunLoad(rec: Recommendation) {
+function setupRunLoad() {
   getGoalDetailMock.mockResolvedValue({
     goal: { ...goal, activeWorkflowRunId: "run-1" },
     refinement: null,
@@ -162,43 +104,23 @@ function setupRunLoad(rec: Recommendation) {
       blockedReason: null,
     },
   });
-  listWorkflowDecisionsMock.mockResolvedValue({
-    decisions: [
-      {
-        decisionId: "dec-1",
-        goalId: "goal-1",
-        workflowRunId: "run-1",
-        stepRunId: "step-1",
-        decisionType: "request_user_input",
-        selectedAction: "request_input:intake",
-        reason: "Need user input before proceeding.",
-        influencedBy: [],
-        createdAt: now,
-      },
-    ],
-  });
+  listWorkflowDecisionsMock.mockResolvedValue({ decisions: [] });
   listWorkflowRunArtifactsMock.mockResolvedValue({ artifacts: [] });
-  listRecommendationsMock.mockResolvedValue({ recommendations: [rec], generations: [] });
 }
 
 describe("OrcaChat", () => {
   beforeEach(() => {
-    acceptRecommendationMock.mockReset();
     createOrchestratorMessageMock.mockReset();
-    dismissRecommendationMock.mockReset();
     getGoalDetailMock.mockReset();
     getWorkflowRunMock.mockReset();
     getWorkflowStepRunMock.mockReset();
     listOrchestratorMessagesMock.mockReset();
-    listRecommendationsMock.mockReset();
     listWorkflowDecisionsMock.mockReset();
     listWorkflowRunArtifactsMock.mockReset();
-    rejectRecommendationMock.mockReset();
     requestNextOrchestratorDecisionMock.mockReset();
     listWorkflowTemplatesMock.mockReset();
     listWorkflowTemplatesMock.mockResolvedValue({ templates: [] });
     startWorkflowRunMock.mockReset();
-    submitWorkflowUserInputMock.mockReset();
     openEventStreamMock.mockReset();
     openEventStreamMock.mockReturnValue({ close: vi.fn() });
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
@@ -219,9 +141,8 @@ describe("OrcaChat", () => {
     expect(screen.queryByPlaceholderText("Message Orca…")).toBeNull();
   });
 
-  it("shows the composer even when there are no pending workflow recommendations", async () => {
-    setupRunLoad(workflowRecommendation());
-    listRecommendationsMock.mockResolvedValue({ recommendations: [], generations: [] });
+  it("shows the selected goal SystemCard and composer when a goal is selected", async () => {
+    setupRunLoad();
     const { OrcaChat } = await import("./OrcaChat");
 
     render(
@@ -232,15 +153,15 @@ describe("OrcaChat", () => {
       />,
     );
 
-    expect(await screen.findByText("No pending workflow recommendations")).toBeInTheDocument();
+    expect(await screen.findByText("Ship Engineering workflow chat")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Message Orca…")).toBeInTheDocument();
   });
 
-  it("renders freeform messages below workflow status cards", async () => {
-    setupRunLoad(workflowRecommendation());
-    listRecommendationsMock.mockResolvedValue({ recommendations: [], generations: [] });
-    listOrchestratorMessagesMock.mockResolvedValue({
-      messages: [{ ...userMessage, body: "hello" }],
+  it("shows the no-model SystemCard when the goal lacks an orchestrator model", async () => {
+    getGoalDetailMock.mockResolvedValue({
+      goal: { ...goal, orchestratorProvider: null, orchestratorModel: null },
+      refinement: null,
+      workspaces: [],
     });
     const { OrcaChat } = await import("./OrcaChat");
 
@@ -252,12 +173,7 @@ describe("OrcaChat", () => {
       />,
     );
 
-    const workflowStatus = await screen.findByText("No pending workflow recommendations");
-    const chatMessage = await screen.findByText("hello");
-
-    expect(
-      workflowStatus.compareDocumentPosition(chatMessage) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).not.toBe(0);
+    expect(await screen.findByText("Goal needs an orchestrator model")).toBeInTheDocument();
   });
 
   it("does not show provider metadata on the initial goal message", async () => {
@@ -386,153 +302,81 @@ describe("OrcaChat", () => {
     );
   });
 
-  it("shows the input card immediately for a request_user_input rec and auto-accepts once", async () => {
-    setupRunLoad(workflowRecommendation());
-    acceptRecommendationMock.mockResolvedValue({
-      recommendation: workflowRecommendation({ status: "accepted" }),
-      proposedAction: {
-        kind: "request_user_input",
-        workflowStepRunId: "step-1",
-        question: "What problem are we solving?",
-      },
-      feedback: {
-        id: "fb-1",
-        goalId: "goal-1",
-        recommendationId: "rec-1",
-        action: "accept",
-        note: null,
-        modifiedPayloadJson: null,
-        createdAt: now,
-      },
-    });
-    submitWorkflowUserInputMock.mockResolvedValue({
-      stepRun: {
-        id: "step-1",
-        goalId: "goal-1",
-        workflowRunId: "run-1",
-        stepTemplateId: "intake",
-        ordinal: 0,
-        attempt: 1,
-        status: "active",
-        startedAt: now,
-        finishedAt: null,
-        blockedReason: null,
-      },
+  it("renders an internal-thought row from the message list", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-thought",
+          goalId: "goal-1",
+          role: "internal_thought",
+          kind: "message",
+          body: "Starting Intake",
+          correlationId: null,
+          internalKind: "step_started",
+          createdAt: now,
+        },
+      ],
     });
     const { OrcaChat } = await import("./OrcaChat");
 
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
-    // No Accept gate: the input card appears without any click.
-    expect(await screen.findByText("User input requested")).toBeInTheDocument();
-    expect(screen.queryByText("Accept")).toBeNull();
-
-    await waitFor(() => {
-      expect(acceptRecommendationMock).toHaveBeenCalledWith("rec-1", {});
-    });
-    expect(acceptRecommendationMock).toHaveBeenCalledTimes(1);
-
-    fireEvent.change(screen.getByPlaceholderText("Answer the intake question…"), {
-      target: { value: "We need a deterministic workflow chat." },
-    });
-    fireEvent.click(screen.getByText("Submit"));
-
-    await waitFor(() => {
-      expect(submitWorkflowUserInputMock).toHaveBeenCalledWith("goal-1", "step-1", {
-        stepRunId: "step-1",
-        questionDecisionId: "dec-1",
-        answerText: "We need a deterministic workflow chat.",
-      });
-    });
+    expect(await screen.findByText(/Starting Intake/)).toBeInTheDocument();
   });
 
-  it("keeps the Accept gate for an advance_workflow_step recommendation", async () => {
-    setupRunLoad(
-      workflowRecommendation({
-        type: "advance_workflow_step",
-        title: "Advance to research",
-        rationale: "Intake complete.",
-        proposedAction: {
-          kind: "advance_workflow_step",
-          workflowRunId: "run-1",
-          workflowStepRunId: "step-1",
-          toStepTemplateId: "research",
+  it("renders an agent-paraphrased message with the raw transcript hidden by default", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-paraphrased",
+          goalId: "goal-1",
+          role: "agent_paraphrased",
+          kind: "message",
+          body: "I asked the user to confirm the rollout scope.",
+          rawAgentText: "RAW transcript that should stay hidden",
+          correlationId: null,
+          createdAt: now,
         },
-      }),
-    );
+      ],
+    });
     const { OrcaChat } = await import("./OrcaChat");
 
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
-    expect(await screen.findByText("Accept")).toBeInTheDocument();
-    expect(screen.queryByText("User input requested")).toBeNull();
+    expect(
+      await screen.findByText("I asked the user to confirm the rollout scope."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("RAW transcript that should stay hidden")).toBeNull();
+
+    // Toggling the disclosure reveals the raw transcript.
+    fireEvent.click(screen.getByText(/Show raw agent transcript/));
+    expect(
+      await screen.findByText("RAW transcript that should stay hidden"),
+    ).toBeInTheDocument();
   });
 
-  it("restores the input composer when a request_user_input recommendation was already accepted", async () => {
-    setupRunLoad(workflowRecommendation({ status: "accepted" }));
-    const { OrcaChat } = await import("./OrcaChat");
-
-    render(
-      <OrcaChat
-        goals={[goal]}
-        selectedGoalId="goal-1"
-        connectionStatus="open"
-      />,
-    );
-
-    expect(await screen.findByText("User input requested")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Answer the intake question…")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Message Orca…")).toBeInTheDocument();
-  });
-
-  it("accepts a launch_workflow_session recommendation and opens the session dialog with workflowStepRunId", async () => {
-    setupRunLoad(
-      workflowRecommendation({
-        type: "launch_workflow_session",
-        title: "Launch implementation session",
-        rationale: "Execution can start.",
-        proposedAction: {
-          kind: "launch_workflow_session",
-          workflowStepRunId: "step-1",
-          operatorId: "agent:codex",
-          operatorKind: "agent",
-          objective: "Implement the next task",
+  it("renders the MarkDoneConfirmCard when the last message signals mark_done_ready", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-done",
+          goalId: "goal-1",
+          role: "internal_thought",
+          kind: "message",
+          body: "All steps complete.",
+          correlationId: null,
+          internalKind: "mark_done_ready",
+          createdAt: now,
         },
-      }),
-    );
-    acceptRecommendationMock.mockResolvedValue({
-      recommendation: workflowRecommendation({ status: "accepted" }),
-      proposedAction: {
-        kind: "launch_workflow_session",
-        workflowStepRunId: "step-1",
-        operatorId: "agent:codex",
-        operatorKind: "agent",
-        objective: "Implement the next task",
-      },
-      feedback: {
-        id: "fb-1",
-        goalId: "goal-1",
-        recommendationId: "rec-1",
-        action: "accept",
-        note: null,
-        modifiedPayloadJson: null,
-        createdAt: now,
-      },
+      ],
     });
     const { OrcaChat } = await import("./OrcaChat");
 
-    render(
-      <OrcaChat
-        goals={[goal]}
-        selectedGoalId="goal-1"
-        connectionStatus="open"
-      />,
-    );
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
-    fireEvent.click(await screen.findByText("Accept"));
-
-    expect(await screen.findByTestId("create-session-dialog")).toHaveTextContent(
-      "codex:step-1:Implement the next task",
-    );
+    expect(await screen.findByText(/Confirm done/)).toBeInTheDocument();
   });
 });

@@ -660,6 +660,7 @@ function fakeAdapter(id: string, ready: boolean): AgentAdapter {
   return {
     id: id as never,
     title: id,
+    supportedExecutionModes: ["shadow_session" as const],
     contextDelivery: { mode: 'preview_only', maxBytes: 32768 },
     async resolveSpawn() { throw new Error('unused'); },
     async probeAvailability() { return { status: 'available' as const }; },
@@ -672,6 +673,7 @@ function fakeAdapter(id: string, ready: boolean): AgentAdapter {
         : { name: 'authenticated', ok: false, authStatus: 'needs_auth', command: `${id} auth`, detail: 'not signed in' };
     },
     repairFor() { return undefined; },
+    supportsModel: () => false,
   };
 }
 

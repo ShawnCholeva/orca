@@ -8,6 +8,7 @@ const step = (id: string, ordinal: number, outputKeys: string[]): WorkflowStepTe
   name: id,
   instructions: "x",
   outputSchema: outputKeys.map((k) => ({ key: k, type: "string" as const, required: true })),
+  agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
 });
 
 describe("validateTemplatePipeline", () => {

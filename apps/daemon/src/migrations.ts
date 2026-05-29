@@ -24,7 +24,11 @@ export const migrationFiles = [
   WORKFLOW_RECOMMENDATION_TYPES_MIGRATION,
   ORCHESTRATION_TRANSPORT_MIGRATION,
   ORCHESTRATOR_MESSAGES_MIGRATION,
-  WORKFLOW_STEP_RUNS_OPERATOR_SELECTION_MIGRATION
+  WORKFLOW_STEP_RUNS_OPERATOR_SELECTION_MIGRATION,
+  "0015_adapter_execution_modes.sql",
+  "0016_workflow_step_runs_revise_attempts.sql",
+  "0017_orchestrator_messages_chat_kinds.sql",
+  "0018_workflow_step_runs_crash_retries.sql",
 ] as const;
 
 export function runMigrations(

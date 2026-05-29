@@ -5,8 +5,10 @@ import {
   OrchestratorModelChoice,
   WorkflowArtifactType
 } from "./workflows/index.js";
+import { AdapterId } from "./adapters/ids.js";
 
 export * from "./workflows/index.js";
+export * from "./adapters/ids.js";
 
 const UTF8_ENCODER = new TextEncoder();
 
@@ -224,7 +226,8 @@ export const DomainEventType = z.enum([
   "workflow.transport.attempt_finished",
   "workflow.transport.fallback",
   "workflow.worker.state_changed",
-  "workflow.human_review.requested"
+  "workflow.human_review.requested",
+  "adapter.execution_modes.changed"
 ]);
 export type DomainEventType = z.infer<typeof DomainEventType>;
 
@@ -432,8 +435,6 @@ export const SessionFailureReason = z.enum([
 ]);
 export type SessionFailureReason = z.infer<typeof SessionFailureReason>;
 
-export const AdapterId = z.enum(["shell-manual", "claude-code", "opencode", "codex", "gemini-cli"]);
-export type AdapterId = z.infer<typeof AdapterId>;
 
 export const ContextRole = z.enum([
   "architect",
@@ -956,11 +957,30 @@ export const ListGoalDecisionsResponse = z
   .strict();
 export type ListGoalDecisionsResponse = z.infer<typeof ListGoalDecisionsResponse>;
 
-export const OrchestratorChatRole = z.enum(["user", "orchestrator", "system"]);
+export const OrchestratorChatRole = z.enum([
+  "user",
+  "orchestrator",
+  "system",
+  "agent_paraphrased",
+  "internal_thought"
+]);
 export type OrchestratorChatRole = z.infer<typeof OrchestratorChatRole>;
 
 export const OrchestratorChatMessageKind = z.enum(["message"]);
 export type OrchestratorChatMessageKind = z.infer<typeof OrchestratorChatMessageKind>;
+
+export const OrchestratorInternalThoughtKind = z.enum([
+  "step_started",
+  "thinking",
+  "agent_invocation",
+  "schema_validation",
+  "revise",
+  "agent_crash",
+  "mark_done_ready"
+]);
+export type OrchestratorInternalThoughtKind = z.infer<
+  typeof OrchestratorInternalThoughtKind
+>;
 
 export const OrchestratorChatMessage = z
   .object({
@@ -968,8 +988,11 @@ export const OrchestratorChatMessage = z
     goalId: z.string(),
     role: OrchestratorChatRole,
     kind: OrchestratorChatMessageKind,
-    body: z.string().trim().min(1).max(4000),
+    body: z.string().trim().min(1).max(20_000),
     correlationId: z.string().nullable(),
+    rawAgentText: z.string().max(200_000).nullable().optional(),
+    whyRationale: z.string().max(4000).nullable().optional(),
+    internalKind: OrchestratorInternalThoughtKind.nullable().optional(),
     createdAt: z.string().datetime()
   })
   .strict();
@@ -996,7 +1019,7 @@ export type CreateOrchestratorMessageRequest = z.infer<
 export const CreateOrchestratorMessageResponse = z
   .object({
     message: OrchestratorChatMessage,
-    reply: OrchestratorChatMessage
+    reply: OrchestratorChatMessage.nullable()
   })
   .strict();
 export type CreateOrchestratorMessageResponse = z.infer<
@@ -3009,3 +3032,12 @@ export type CheckReadinessAllResponse = z.infer<typeof CheckReadinessAllResponse
 
 export const CheckReadinessOneResponse = z.object({ report: AgentReadinessReport });
 export type CheckReadinessOneResponse = z.infer<typeof CheckReadinessOneResponse>;
+
+export {
+  ExecutionMode,
+  EnabledExecutionModeEntry,
+  DisabledExecutionModeEntry,
+  AdapterExecutionModeConfig,
+  validateAdapterExecutionModeConfig,
+} from "./adapters/execution-modes.js";
+export type { ValidationResult as AdapterExecutionModeValidation } from "./adapters/execution-modes.js";

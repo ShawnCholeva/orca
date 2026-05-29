@@ -85,7 +85,8 @@ import {
   UpdateTaskResponse,
   TaskUpdatedPayload,
   TriggerKind,
-  UserFeedbackRecordedPayload
+  UserFeedbackRecordedPayload,
+  OrchestratorChatMessage
 } from "../index.js";
 
 const now = "2026-01-01T00:00:00.000Z";
@@ -821,5 +822,35 @@ describe("orchestration contracts", () => {
     expect(RecommendationFeedbackAction.parse("modify")).toBe("modify");
     expect(TriggerKind.parse("session_summary_updated")).toBe("session_summary_updated");
     expect(TaskRole.parse("qa")).toBe("qa");
+  });
+
+  it("OrchestratorChatMessage accepts internal_thought with internalKind + whyRationale", () => {
+    const m = OrchestratorChatMessage.parse({
+      id: "m1",
+      goalId: "g1",
+      role: "internal_thought",
+      kind: "message",
+      body: "Starting Intake",
+      correlationId: null,
+      internalKind: "step_started",
+      whyRationale: "step instructions said...",
+      createdAt: "2026-05-28T00:00:00.000Z"
+    });
+    expect(m.role).toBe("internal_thought");
+    expect(m.internalKind).toBe("step_started");
+  });
+
+  it("OrchestratorChatMessage accepts agent_paraphrased with rawAgentText", () => {
+    const m = OrchestratorChatMessage.parse({
+      id: "m2",
+      goalId: "g1",
+      role: "agent_paraphrased",
+      kind: "message",
+      body: "The agent finished the research.",
+      correlationId: null,
+      rawAgentText: "<full raw transcript>",
+      createdAt: "2026-05-28T00:00:00.000Z"
+    });
+    expect(m.rawAgentText).toContain("raw");
   });
 });

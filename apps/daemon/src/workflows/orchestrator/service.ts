@@ -8,6 +8,7 @@ import {
   type DomainEvent,
   type ModelProviderId,
   type OperatorDescriptor,
+  type OrchestratorAction,
   type WorkflowDecisionTrace,
   type WorkflowRun as WorkflowRunT,
   type WorkflowStepTemplate,
@@ -15,6 +16,7 @@ import {
 } from "@orca/contracts";
 
 import { EventBus } from "../../events.js";
+import type { ResolvedMode } from "../../adapters/dispatcher.js";
 import type { SessionOutputStore } from "../../sessions/output-store.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
 import { createArtifact } from "../artifacts/usecases.js";
@@ -43,6 +45,20 @@ import { synthesizeStepOutput } from "./synthesize.js";
 import { detectPendingAgentQuestion } from "./agent-interview.js";
 import { assembleWorkspaceContext } from "./workspace-context.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
+import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.js";
+import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
+import { judgeAgentResponse } from "./judgement.js";
+import { extractOrcaStepCompleteBlock } from "./orca-output.js";
+import { incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
+import { incrementCrashRetry, CRASH_RETRY_CAP } from "./crash-retry.js";
+import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
+import { randomUUID } from "node:crypto";
+
+export interface StepDispatchCapabilities {
+  isAdapterReady(adapterId: string): Promise<boolean>;
+  supportsModel(adapterId: string, modelId: string): boolean;
+  resolveMode(adapterId: string): ResolvedMode;
+}
 
 interface GoalRow {
   id: string;
@@ -59,6 +75,10 @@ interface StepRunRow {
   step_template_id: string;
   ordinal: number;
   status: string;
+  selected_operator_id: string | null;
+  selected_model_id: string | null;
+  revise_attempts: number;
+  crash_retries: number;
 }
 
 export interface RequestNextDecisionOptions {
@@ -166,7 +186,10 @@ export class OrchestratorService {
     private readonly launcher: WorkflowSessionLauncher = {
       launch: async () => { throw new Error("direct_launch_unsupported"); },
     },
-    sessionOutputStore?: SessionOutputStore
+    sessionOutputStore?: SessionOutputStore,
+    private readonly stepDispatch?: StepDispatchCapabilities,
+    private readonly orchestratorMediator?: Pick<OrchestratorMediator, "invoke"> & Partial<Pick<OrchestratorMediator, "invokeWithBackoff">>,
+    private readonly agentInput?: (sessionId: string, text: string) => void | Promise<void>
   ) {
     this.sessionOutputStore = sessionOutputStore ?? NULL_OUTPUT_STORE;
   }
@@ -219,10 +242,41 @@ export class OrchestratorService {
     if (!stepTpl) return;
     const goal = readGoal(db, run.goalId);
 
-    // (5) Non-exited terminal states → block immediately, no synthesis.
-    if (sess.status === "failed" || sess.status === "stopped") {
-      const reason = `session ${sess.status}${sess.failure_reason ? `: ${sess.failure_reason}` : ""}`;
-      this.blockRun(db, now, { run, stepRun, stepTpl, goal }, reason, options);
+    // (5) Non-exited terminal states.
+    // User-requested stop is not a crash → block immediately.
+    if (sess.status === "stopped") {
+      this.blockRun(
+        db,
+        now,
+        { run, stepRun, stepTpl, goal },
+        `session stopped${sess.failure_reason ? `: ${sess.failure_reason}` : ""}`,
+        options
+      );
+      return;
+    }
+    // Crash → consume a retry from the budget; respawn under cap, escalate at cap.
+    if (sess.status === "failed") {
+      const counter = incrementCrashRetry(stepRun.crash_retries ?? 0);
+      db.prepare("UPDATE workflow_step_runs SET crash_retries = ? WHERE id = ?").run(
+        counter.nextAttempt,
+        stepRun.id
+      );
+      if (counter.capReached) {
+        this.postOrchestratorMessage(
+          db,
+          now,
+          run.goalId,
+          `The agent for "${stepTpl.name}" crashed ${CRASH_RETRY_CAP} times${sess.failure_reason ? ` (${sess.failure_reason})` : ""}. Manual intervention needed.`,
+          options
+        );
+      } else {
+        await this.spawnStepAgent(
+          db,
+          now,
+          { run, stepRun, stepTpl, template, goal },
+          options
+        );
+      }
       return;
     }
 
@@ -365,6 +419,463 @@ export class OrchestratorService {
     );
   }
 
+  /**
+   * Called when a per-step agent emits a completed response (via the
+   * /v1/agent-hooks/response-done endpoint). Judges the response and applies the
+   * resulting OrchestratorAction: forwards/paraphrases chat messages, approves a
+   * step (writing step_output + advancing), sends revise feedback back to the
+   * agent (bounded by REVISE_CAP), or escalates to the user.
+   *
+   * No-op when the session is not linked to an active workflow step run, or when
+   * no orchestrator mediator is configured (production wiring lands in a later
+   * sub-plan; behavior is proven via unit tests with a fake mediator).
+   */
+  async onAgentResponseDone(
+    db: Database.Database,
+    now: () => string,
+    payload: { sessionId: string; adapterId: string; responseText: string },
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const sess = db
+      .prepare("SELECT workflow_step_run_id FROM sessions WHERE id = ?")
+      .get(payload.sessionId) as { workflow_step_run_id: string | null } | undefined;
+    if (!sess?.workflow_step_run_id) return;
+    const stepRun = db
+      .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
+      .get(sess.workflow_step_run_id) as StepRunRow | undefined;
+    if (!stepRun || stepRun.status !== "active") return;
+    const run = getWorkflowRunById(db, stepRun.workflow_run_id);
+    if (!run || run.status !== "active") return;
+    const template = getTemplateById(db, run.templateId);
+    if (!template) return;
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) return;
+    const goal = readGoal(db, run.goalId);
+    if (!this.orchestratorMediator) return; // not configured
+
+    const adapterId = (stepRun.selected_operator_id ?? "").replace(/^agent:/, "");
+    const modelId = stepRun.selected_model_id ?? "";
+
+    const action = await judgeAgentResponse({
+      mediator: this.orchestratorMediator as OrchestratorMediator,
+      schemaValidate: (output) => {
+        const v = validateStepOutput(stepTpl.outputSchema, output);
+        return v.ok ? { ok: true } : { ok: false, errors: v.errors };
+      },
+      goalId: run.goalId,
+      runId: run.id,
+      stepRunId: stepRun.id,
+      adapterId,
+      modelId,
+      responseText: payload.responseText,
+    });
+
+    const ctx = { run, stepRun, stepTpl, template, goal };
+    await this.applyOrchestratorAction(
+      db,
+      now,
+      ctx,
+      payload.sessionId,
+      payload.responseText,
+      action,
+      options
+    );
+  }
+
+  /**
+   * Applies an OrchestratorAction produced by the mediator. Shared by
+   * onAgentResponseDone (response-done trigger) and onUserMessage (user_message
+   * trigger). Effects:
+   *  - paraphrase / answer / escalate → post an orchestrator chat message
+   *  - forward_to_agent → relay the translated text into the live agent session
+   *  - approve_step_complete → write step_output (from the response's
+   *    orca:step-complete block) and advance the run
+   *  - revise_step → bump the revise counter; below the cap relay feedback to the
+   *    agent, at the cap post an escalation message
+   */
+  private async applyOrchestratorAction(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+    },
+    sessionId: string | null,
+    responseText: string,
+    action: OrchestratorAction,
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    switch (action.kind) {
+      case "paraphrase_agent_message":
+      case "answer_user_directly":
+      case "escalate_to_user": {
+        this.postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options);
+        return;
+      }
+      case "forward_to_agent": {
+        if (sessionId && this.agentInput) {
+          await this.agentInput(sessionId, action.translated + "\n");
+        }
+        return;
+      }
+      case "approve_step_complete": {
+        const block = extractOrcaStepCompleteBlock(responseText);
+        const stagedEvents: DomainEvent[] = [];
+        this.createStepOutputArtifact(
+          db,
+          now,
+          ctx,
+          JSON.stringify(block ?? {}),
+          options,
+          stagedEvents
+        );
+        this.publish(options.bus, stagedEvents);
+        await this.advanceToNextStep(db, now, ctx.run.id, options);
+        return;
+      }
+      case "revise_step": {
+        const counter = incrementReviseAttempt(ctx.stepRun.revise_attempts ?? 0);
+        db.prepare("UPDATE workflow_step_runs SET revise_attempts = ? WHERE id = ?").run(
+          counter.nextAttempt,
+          ctx.stepRun.id
+        );
+        if (counter.capReached) {
+          this.postOrchestratorMessage(
+            db,
+            now,
+            ctx.run.goalId,
+            `Step needs help after ${REVISE_CAP} revision attempts:\n${action.feedback}`,
+            options
+          );
+        } else if (sessionId && this.agentInput) {
+          await this.agentInput(sessionId, action.feedback + "\n");
+        }
+        return;
+      }
+    }
+  }
+
+  /**
+   * Called when a user posts an orchestrator chat message during an active
+   * workflow run. Invokes the orchestrator-LLM mediator with the user_message
+   * trigger and applies the resulting action (paraphrase / answer / forward to
+   * agent / escalate / approve / revise).
+   *
+   * No-op when no mediator is configured (production wiring lands later), when
+   * the goal has no active run, or when the run has no active current step.
+   */
+  async onUserMessage(
+    db: Database.Database,
+    now: () => string,
+    args: { goalId: string; body: string },
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    if (!this.orchestratorMediator) return;
+
+    const runId = (
+      db
+        .prepare(
+          "SELECT id FROM workflow_runs WHERE goal_id = ? AND status = 'active' ORDER BY started_at DESC LIMIT 1"
+        )
+        .get(args.goalId) as { id: string } | undefined
+    )?.id;
+    if (!runId) return;
+    const run = getWorkflowRunById(db, runId);
+    if (!run || run.status !== "active" || !run.currentStepRunId) return;
+    const stepRun = db
+      .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
+      .get(run.currentStepRunId) as StepRunRow | undefined;
+    if (!stepRun || stepRun.status !== "active") return;
+    const template = getTemplateById(db, run.templateId);
+    if (!template) return;
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) return;
+    const goal = db
+      .prepare(
+        "SELECT id, title, description, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?"
+      )
+      .get(run.goalId) as GoalRow | undefined;
+    if (!goal) return;
+
+    const adapterId = (stepRun.selected_operator_id ?? "").replace(/^agent:/, "");
+    const modelId = stepRun.selected_model_id ?? "";
+
+    const invoke = this.orchestratorMediator.invokeWithBackoff?.bind(this.orchestratorMediator) ?? this.orchestratorMediator.invoke.bind(this.orchestratorMediator);
+
+    let action;
+    try {
+      action = await invoke({
+        triggerKind: "user_message",
+        goalId: args.goalId,
+        runId: run.id,
+        stepRunId: stepRun.id,
+        adapterId,
+        modelId,
+        triggerPayload: { userMessage: args.body },
+      });
+    } catch (err) {
+      this.postOrchestratorMessage(
+        db, now, run.goalId,
+        `Orchestrator-LLM unavailable after retries; pausing — last error: ${err instanceof Error ? err.message : "unknown"}`,
+        options
+      );
+      return;
+    }
+
+    // Live session for the current step (needed for forward_to_agent / revise).
+    const sessionId =
+      (
+        db
+          .prepare(
+            "SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('created','starting','running') ORDER BY created_at DESC LIMIT 1"
+          )
+          .get(stepRun.id) as { id: string } | undefined
+      )?.id ?? null;
+
+    const ctx = { run, stepRun, stepTpl, template, goal };
+    await this.applyOrchestratorAction(db, now, ctx, sessionId, "", action, options);
+  }
+
+  /**
+   * Inserts a single orchestrator_messages row (role "orchestrator", kind
+   * "message") and emits the orchestrator.message.created event, mirroring the
+   * orchestrator-chat use case shape. Used for escalations and forwarded /
+   * paraphrased agent messages.
+   */
+  private postOrchestratorMessage(
+    db: Database.Database,
+    now: () => string,
+    goalId: string,
+    body: string,
+    options: RequestNextDecisionOptions
+  ): void {
+    const idFactory = options.idFactory ?? randomUUID;
+    const messageId = idFactory();
+    const correlationId = idFactory();
+    const createdAt = now();
+    const event = db.transaction(() => {
+      db.prepare(
+        `INSERT INTO orchestrator_messages
+          (id, goal_id, role, kind, body, correlation_id, created_at)
+         VALUES (?, ?, 'orchestrator', 'message', ?, ?, ?)`
+      ).run(messageId, goalId, body, correlationId, createdAt);
+      const payload = { messageId, role: "orchestrator" as const };
+      const eventId = idFactory();
+      const result = db
+        .prepare(
+          "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)"
+        )
+        .run(
+          eventId,
+          "orchestrator.message.created",
+          goalId,
+          JSON.stringify(payload),
+          createdAt
+        );
+      return {
+        seq: Number(result.lastInsertRowid),
+        id: eventId,
+        type: "orchestrator.message.created",
+        goalId,
+        payload,
+        createdAt,
+      } satisfies DomainEvent;
+    })();
+    options.bus?.publish(event);
+  }
+
+  /**
+   * Bootstraps a workflow run by spawning the agent for its first step (ordinal
+   * 0). Used by the run-bootstrap route. The current step run must already point
+   * at the first step (created at run start).
+   */
+  async startWorkflowFirstStep(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run) throw new OrchestratorRunNotFoundError(runId);
+    const template = getTemplateById(db, run.templateId);
+    if (!template) throw new OrchestratorTemplateNotFoundError(run.templateId);
+    const firstStep = template.steps.find((s) => s.ordinal === 0);
+    if (!firstStep) throw new Error(`template has no first step: ${run.templateId}`);
+    const stepRun = readStepRun(db, run.currentStepRunId);
+    const goal = readGoal(db, run.goalId);
+    await this.spawnStepAgent(
+      db,
+      now,
+      { run, stepRun, stepTpl: firstStep, template, goal },
+      options
+    );
+  }
+
+  /**
+   * Re-launches the agent for a run's currently-active step. Used by boot-time
+   * resume: node-pty children die with the daemon, so on restart an active step's
+   * session is gone and must be respawned. No-op if the run/step is no longer
+   * active. spawnStepAgent is idempotent on selection (already-selected step is
+   * re-launched without re-selecting), so this just relaunches the session.
+   */
+  async respawnStepAgent(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    stepRunId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run || run.status !== "active") return;
+    const template = getTemplateById(db, run.templateId);
+    if (!template) return;
+    const stepRun = db
+      .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
+      .get(stepRunId) as StepRunRow | undefined;
+    if (!stepRun || stepRun.status !== "active") return;
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) return;
+    const goal = db
+      .prepare(
+        "SELECT id, title, description, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?"
+      )
+      .get(run.goalId) as GoalRow | undefined;
+    if (!goal) return;
+    await this.spawnStepAgent(db, now, { run, stepRun, stepTpl, template, goal }, options);
+  }
+
+  /**
+   * Advances the run past the current step's produced output, then — when an
+   * intermediate step becomes active — spawns the next step's agent. On the
+   * terminal step, commitAdvanceOrComplete produces the complete_workflow_run
+   * recommendation and no further agent is spawned.
+   *
+   * Composition note: commitAdvanceOrComplete, for an intermediate step, calls
+   * the free-function advanceToNextStep (moving currentStepRunId) and then
+   * recurses via requestNextDecision. That recursion deterministically *selects*
+   * the next step's operator but does NOT launch a session. spawnStepAgent is
+   * therefore idempotent on selection (it skips re-selecting an already-selected
+   * step) so the operator is selected exactly once and the agent launched
+   * exactly once.
+   */
+  async advanceToNextStep(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run) throw new OrchestratorRunNotFoundError(runId);
+    const stepRun = readStepRun(db, run.currentStepRunId);
+    const template = getTemplateById(db, run.templateId);
+    if (!template) throw new OrchestratorTemplateNotFoundError(run.templateId);
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) throw new OrchestratorStepNotFoundError(stepRun.id);
+    const goal = readGoal(db, run.goalId);
+
+    await this.commitAdvanceOrComplete(db, now, { run, stepRun, stepTpl, template, goal }, options);
+
+    // If a NEW intermediate step is now active, spawn its agent (exactly once).
+    const after = getWorkflowRunById(db, runId);
+    if (
+      after &&
+      after.status === "active" &&
+      after.currentStepRunId &&
+      after.currentStepRunId !== stepRun.id
+    ) {
+      const nextStepRun = readStepRun(db, after.currentStepRunId);
+      const nextTpl = template.steps.find((s) => s.id === nextStepRun.step_template_id);
+      if (nextTpl) {
+        await this.spawnStepAgent(
+          db,
+          now,
+          { run: after, stepRun: nextStepRun, stepTpl: nextTpl, template, goal },
+          options
+        );
+      }
+    }
+  }
+
+  /**
+   * Resolves the deterministic per-step agent dispatch, persists the selection
+   * (idempotent — skipped if the step is already operator-selected), then
+   * launches a session for the step with a composed initial prompt.
+   */
+  private async spawnStepAgent(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+    },
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    if (!this.stepDispatch) throw new Error("step dispatch capabilities not configured");
+    const dispatch = await resolveStepDispatch({
+      preferences: ctx.stepTpl.agentPreference,
+      isAdapterReady: (id) => this.stepDispatch!.isAdapterReady(id),
+      supportsModel: (id, mid) => this.stepDispatch!.supportsModel(id, mid),
+      resolveMode: (id) => this.stepDispatch!.resolveMode(id),
+    });
+
+    // Persist selection only when the step has not already been operator-selected
+    // (commitAdvanceOrComplete's recursion may have selected it already).
+    if (!ctx.stepRun.selected_operator_id) {
+      this.commitDeterministicStepSelection(db, now, ctx, dispatch, options);
+    }
+
+    await this.launcher.launch({
+      goalId: ctx.goal.id,
+      workflowRunId: ctx.run.id,
+      workflowStepRunId: ctx.stepRun.id,
+      operatorId: "agent:" + dispatch.adapterId,
+      operatorKind: "agent",
+      objective: composeAgentInitialPrompt({
+        stepInstructions: ctx.stepTpl.instructions,
+        outputSchema: ctx.stepTpl.outputSchema,
+        priorStepArtifacts: this.collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.ordinal),
+      }),
+    });
+  }
+
+  /**
+   * Reads step_output artifacts for steps with ordinal < the current step,
+   * returning each as { stepId, outputJson }. stepId is the step_template_id of
+   * the artifact's step run; outputJson is the parsed artifact body.
+   */
+  private collectPriorStepArtifacts(
+    db: Database.Database,
+    runId: string,
+    ordinal: number
+  ): Array<{ stepId: string; outputJson: unknown }> {
+    const stepRuns = db
+      .prepare(
+        "SELECT id, step_template_id, ordinal FROM workflow_step_runs WHERE workflow_run_id = ?"
+      )
+      .all(runId) as Array<{ id: string; step_template_id: string; ordinal: number }>;
+    const byId = new Map(stepRuns.map((s) => [s.id, s]));
+    const out: Array<{ stepId: string; outputJson: unknown }> = [];
+    for (const artifact of listArtifactsForRun(db, runId)) {
+      if (artifact.type !== "step_output" || !artifact.stepRunId) continue;
+      const owner = byId.get(artifact.stepRunId);
+      if (!owner || owner.ordinal >= ordinal) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(artifact.body);
+      } catch {
+        parsed = artifact.body;
+      }
+      out.push({ stepId: owner.step_template_id, outputJson: parsed });
+    }
+    return out;
+  }
+
   async requestNextDecision(
     db: Database.Database,
     now: () => string,
@@ -417,10 +928,22 @@ export class OrchestratorService {
       return this.commitNoop(db, run.id, stepRun.id);
     }
 
-    // (3) select an operator once (model or agent).
+    // (3) deterministically resolve the per-step agent once.
     const sel = getWorkflowStepRunById(db, stepRun.id);
     if (!sel || !sel.selectedOperatorId) {
-      return this.commitOperatorSelectionForSkill(db, now, ctx, options);
+      if (!this.stepDispatch) {
+        return this.blockRun(db, now, ctx, "step dispatch capabilities not configured", options);
+      }
+      const dispatch = await resolveStepDispatch({
+        preferences: stepTpl.agentPreference,
+        isAdapterReady: (id) => this.stepDispatch!.isAdapterReady(id),
+        supportsModel: (id, mid) => this.stepDispatch!.supportsModel(id, mid),
+        resolveMode: (id) => this.stepDispatch!.resolveMode(id),
+      }).catch(() => null);
+      if (!dispatch) {
+        return this.blockRun(db, now, ctx, "no ready agent for step", options);
+      }
+      return this.commitDeterministicStepSelection(db, now, ctx, dispatch, options);
     }
 
     // (3a) branch on operator kind.
@@ -739,7 +1262,7 @@ export class OrchestratorService {
     }
   }
 
-  private async commitOperatorSelectionForSkill(
+  private commitDeterministicStepSelection(
     db: Database.Database,
     now: () => string,
     ctx: {
@@ -749,36 +1272,12 @@ export class OrchestratorService {
       template: WorkflowTemplateT;
       goal: GoalRow;
     },
+    dispatch: ResolvedStepDispatch,
     options: RequestNextDecisionOptions
-  ): Promise<{ decision: WorkflowDecisionTrace; recommendationIds: string[] }> {
-    const { run, stepRun, stepTpl, template, goal } = ctx;
-    const result = await this.operatorSelector.select(db, now, {
-      goalId: goal.id,
-      workflowRunId: run.id,
-      stepRunId: stepRun.id,
-      stepName: stepTpl.id,
-      stepPurpose: stepTpl.instructions.slice(0, 1024),
-      recommendedCapabilities: [],
-      recommendedOperatorIds: [],
-      guardrails: template.guardrails,
-      orchestratorProvider: goal.orchestrator_provider,
-      orchestratorModel: goal.orchestrator_model,
-      // allowedKinds omitted: both "model" and "agent" operators are eligible
-    });
-
-    const descriptors = await this.operators.list(goal.id);
-    const chosen = descriptors.find((d) => d.id === result.selection.operatorId);
-    if (!chosen) {
-      return this.blockRun(db, now, ctx, "no ready model operator", options);
-    }
-
-    // For model operators, providerId+modelId are required.
-    // For agent operators, both are null.
-    const providerId = chosen.kind === "model" ? (chosen.providerId ?? null) : null;
-    const modelId = chosen.kind === "model" ? (chosen.modelId ?? null) : null;
-    if (chosen.kind === "model" && (!providerId || !modelId)) {
-      return this.blockRun(db, now, ctx, "no ready model operator", options);
-    }
+  ): { decision: WorkflowDecisionTrace; recommendationIds: string[] } {
+    const { run, stepRun, stepTpl, goal } = ctx;
+    const operatorId = `agent:${dispatch.adapterId}`;
+    const providerId = dispatch.providerId ?? null;
 
     const stagedEvents: DomainEvent[] = [];
     const decision = db.transaction(() => {
@@ -800,38 +1299,35 @@ export class OrchestratorService {
           workflowRunId: run.id,
           stepRunId: stepRun.id,
           decisionType: "select_operator",
-          selectedAction: `select:${chosen.id}`,
-          reason: result.selection.reason,
+          selectedAction: `select:${dispatch.adapterId}:${dispatch.modelId}`,
+          reason: "deterministic preference resolution",
           influencedBy: [
             {
               kind: "workflow_step",
               id: stepTpl.id,
               label: stepTpl.name,
-              effect: "preferred",
+              effect: "required",
             },
             {
               kind: "operator_readiness",
-              id: chosen.id,
-              label: chosen.id,
+              id: operatorId,
+              label: operatorId,
               effect: "satisfied",
             },
           ],
-          alternativesConsidered: result.selection.alternativesConsidered,
-          confidence: result.selection.confidence,
-          operatorSelection: result.selection,
           inputFingerprint: decisionFingerprint({
             runId: run.id,
             stepRunId: stepRun.id,
             decisionType: "select_operator",
-            payload: { operatorId: chosen.id, source: result.source },
+            payload: { operatorId, source: "deterministic" },
           }),
         },
         { idFactory: options.idFactory, stagedEvents }
       );
       recordOperatorSelection(db, stepRun.id, {
-        operatorId: chosen.id,
+        operatorId,
         providerId,
-        modelId,
+        modelId: dispatch.modelId,
         at: now(),
       });
       stagedEvents.push(
@@ -843,10 +1339,10 @@ export class OrchestratorService {
             goalId: goal.id,
             workflowRunId: run.id,
             stepRunId: stepRun.id,
-            operatorId: chosen.id,
-            operatorKind: chosen.kind,
-            source: result.source,
-            requiresApproval: result.selection.requiresUserApproval,
+            operatorId,
+            operatorKind: "agent",
+            source: "deterministic",
+            executionMode: dispatch.executionMode,
           },
           now(),
           options.idFactory

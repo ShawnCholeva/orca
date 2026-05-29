@@ -11,7 +11,7 @@ import { runCheckCommand, inheritCredEnv, type RunCheckResult } from "../readine
 import { sanitizeOutput } from "../readiness/sanitize.js";
 import { installUrlFor, signInCommandFor } from "../readiness/repair-links.js";
 import { parseVersion } from "../readiness/version.js";
-import type { AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
+import type { AgentReadinessStatus, CheckStep, RepairAction, ExecutionMode } from "@orca/contracts";
 
 export type RunCheckFn = (
   command: string,
@@ -22,7 +22,18 @@ export type RunCheckFn = (
 export class ClaudeCodeAdapter implements AgentAdapter {
   readonly id = "claude-code" as const;
   readonly title = "Claude Code";
+  readonly supportedExecutionModes: ExecutionMode[] = ["shadow_session", "one_shot"];
   readonly contextDelivery: AdapterContextDelivery = { mode: "preview_only", maxBytes: 32768 };
+
+  private static readonly KNOWN_MODELS = new Set([
+    "claude-haiku-4-5",
+    "claude-sonnet-4-6",
+    "claude-opus-4-7",
+  ]);
+
+  supportsModel(modelId: string): boolean {
+    return ClaudeCodeAdapter.KNOWN_MODELS.has(modelId);
+  }
 
   constructor(
     private readonly resolveFn: ResolveFn = resolveBinary,

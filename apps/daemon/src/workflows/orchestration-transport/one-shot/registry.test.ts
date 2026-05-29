@@ -9,6 +9,7 @@ function makeAdapter(id: AgentAdapter["id"]): AgentAdapter {
   return {
     id,
     title: `${id} adapter`,
+    supportedExecutionModes: ["one_shot", "shadow_session"],
     contextDelivery: { mode: "preview_only", maxBytes: 1024 },
     resolveSpawn: async () => ({ command: id, args: [], env: {}, cwd: "/tmp" }),
     probeAvailability: async () => ({ status: "available" }),
@@ -20,6 +21,7 @@ function makeAdapter(id: AgentAdapter["id"]): AgentAdapter {
       command: `${id} auth status`,
     }),
     repairFor: () => undefined,
+    supportsModel: () => false,
   };
 }
 

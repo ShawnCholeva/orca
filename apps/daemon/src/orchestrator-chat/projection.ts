@@ -10,7 +10,7 @@ export function listOrchestratorMessagesByGoal(
 ): OrchestratorChatMessageT[] {
   const rows = db
     .prepare(
-      `SELECT id, goal_id, role, kind, body, correlation_id, created_at
+      `SELECT id, goal_id, role, kind, body, correlation_id, created_at, raw_agent_text, why_rationale, internal_kind
          FROM orchestrator_messages
         WHERE goal_id = ?
         ORDER BY created_at ASC, id ASC`
@@ -25,6 +25,9 @@ export function listOrchestratorMessagesByGoal(
       kind: row.kind,
       body: row.body,
       correlationId: row.correlation_id ?? null,
+      rawAgentText: row.raw_agent_text ?? null,
+      whyRationale: row.why_rationale ?? null,
+      internalKind: row.internal_kind ?? null,
       createdAt: row.created_at,
     })
   );

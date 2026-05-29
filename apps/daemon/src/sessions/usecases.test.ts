@@ -375,6 +375,7 @@ function makeStartRegistry(cwd: string): AdapterRegistry {
   registry.register({
     id: 'shell-manual' as const,
     title: 'Shell (Manual)',
+    supportedExecutionModes: ["shadow_session"] as const,
     contextDelivery: { mode: 'preview_only' as const, maxBytes: 32768 },
     async resolveSpawn() {
       return { command: '/bin/sh', args: [], env: {}, cwd };
@@ -391,6 +392,7 @@ function makeStartRegistry(cwd: string): AdapterRegistry {
     repairFor() {
       return undefined;
     },
+    supportsModel: () => false,
   });
   return registry;
 }

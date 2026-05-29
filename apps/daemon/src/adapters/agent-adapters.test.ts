@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ClaudeCodeAdapter } from "./claude-code.js";
 import { OpenCodeAdapter } from "./opencode.js";
 import { CodexAdapter } from "./codex.js";
+import { GeminiAdapter } from "./gemini.js";
+import { ShellManualAdapter } from "./shell-manual.js";
 import type { AgentAdapter } from "./types.js";
 import { resolveBinary } from "./resolve.js";
 import type { ResolveBinaryResult, ResolveFn } from "./resolve.js";
@@ -188,3 +190,36 @@ for (const { name, envKey, defaultBin, create } of ADAPTER_CASES) {
     });
   });
 }
+
+describe("adapter supportsModel", () => {
+  it("claude-code supports the haiku/sonnet/opus models referenced by engineering v4", () => {
+    const a = new ClaudeCodeAdapter();
+    expect(a.supportsModel("claude-haiku-4-5")).toBe(true);
+    expect(a.supportsModel("claude-sonnet-4-6")).toBe(true);
+    expect(a.supportsModel("claude-opus-4-7")).toBe(true);
+  });
+
+  it("shell-manual rejects unknown model ids", () => {
+    expect(new ShellManualAdapter().supportsModel("anything")).toBe(false);
+  });
+});
+
+describe("adapter supportedExecutionModes", () => {
+  it("claude-code declares shadow_session and one_shot", () => {
+    expect(new ClaudeCodeAdapter().supportedExecutionModes).toEqual(
+      expect.arrayContaining(["shadow_session", "one_shot"])
+    );
+  });
+  it("codex declares one_shot and shadow_session", () => {
+    expect(new CodexAdapter().supportedExecutionModes).toEqual(
+      expect.arrayContaining(["one_shot", "shadow_session"])
+    );
+  });
+  it("opencode declares shadow_session", () => {
+    expect(new OpenCodeAdapter().supportedExecutionModes).toContain("shadow_session");
+  });
+  it("gemini and shell-manual declare at least one mode", () => {
+    expect(new GeminiAdapter().supportedExecutionModes.length).toBeGreaterThan(0);
+    expect(new ShellManualAdapter().supportedExecutionModes.length).toBeGreaterThan(0);
+  });
+});

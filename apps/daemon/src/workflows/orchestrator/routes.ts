@@ -17,6 +17,7 @@ import {
   OrchestratorService,
   OrchestratorStepNotFoundError,
   OrchestratorTemplateNotFoundError,
+  type StepDispatchCapabilities,
 } from "./service.js";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
 
@@ -27,6 +28,7 @@ export interface OrchestratorRouteDeps {
   orchestrationTransportBroker: Pick<OrchestrationTransportBroker, "propose">;
   operatorRegistry: Pick<OperatorRegistry, "list">;
   workflowSessionLauncher?: WorkflowSessionLauncher;
+  stepDispatch?: StepDispatchCapabilities;
   now?: () => string;
   idFactory?: () => string;
 }
@@ -43,7 +45,9 @@ export function registerOrchestratorRoutes(
     deps.operatorSelector,
     deps.orchestrationTransportBroker,
     deps.operatorRegistry,
-    deps.workflowSessionLauncher
+    deps.workflowSessionLauncher,
+    undefined,
+    deps.stepDispatch
   );
 
   server.post("/v1/goals/:goalId/workflow-runs/:id/next-decision", async (request, reply) => {

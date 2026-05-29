@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AdapterId } from "../adapters/ids.js";
 import { WorkflowStepOutputSchema } from "./output-schema.js";
 
 export {
@@ -252,6 +253,15 @@ export const WorkflowGuardrailConfig = z
   .strict();
 export type WorkflowGuardrailConfig = z.infer<typeof WorkflowGuardrailConfig>;
 
+export const StepAgentChoice = z
+  .object({
+    adapterId: AdapterId,
+    modelId: z.string().min(1).max(80),
+    providerId: ModelProviderId.optional(),
+  })
+  .strict();
+export type StepAgentChoice = z.infer<typeof StepAgentChoice>;
+
 export const WorkflowStepTemplate = z
   .object({
     id: Id100,
@@ -259,6 +269,7 @@ export const WorkflowStepTemplate = z
     name: z.string().min(1).max(100),
     instructions: BoundedString(WORKFLOW_STEP_MAX_INSTRUCTIONS_BYTES, "instructions"),
     outputSchema: WorkflowStepOutputSchema,
+    agentPreference: z.array(StepAgentChoice).min(1).max(8),
   })
   .strict();
 export type WorkflowStepTemplate = z.infer<typeof WorkflowStepTemplate>;
@@ -520,6 +531,7 @@ export const OrchestrationRequest = z
     providerId: ModelProviderId,
     modelId: z.string().min(1).max(80),
     attemptId: z.string().min(1).optional(),
+    adapterId: AdapterId.optional(),
     payload: z
       .unknown()
       .refine(
@@ -1496,3 +1508,13 @@ export const WorkflowEvent = z
     }
   });
 export type WorkflowEvent = z.infer<typeof WorkflowEvent>;
+
+export const OrchestratorAction = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("paraphrase_agent_message"), body: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
+  z.object({ kind: z.literal("forward_to_agent"), translated: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
+  z.object({ kind: z.literal("answer_user_directly"), body: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
+  z.object({ kind: z.literal("approve_step_complete"), rationale: z.string().max(2000).optional() }),
+  z.object({ kind: z.literal("revise_step"), feedback: z.string().min(1).max(4000), rationale: z.string().max(2000).optional() }),
+  z.object({ kind: z.literal("escalate_to_user"), body: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
+]);
+export type OrchestratorAction = z.infer<typeof OrchestratorAction>;

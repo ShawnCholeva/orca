@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   augmentInstructionsWithOutputConvention,
+  extractOrcaStepCompleteBlock,
   parseOrcaOutputBlock,
 } from "./orca-output.js";
 
@@ -37,5 +38,21 @@ describe("parseOrcaOutputBlock", () => {
   });
   it("returns null when the block is not valid JSON", () => {
     expect(parseOrcaOutputBlock("```orca-output\nnot json\n```")).toBeNull();
+  });
+});
+
+describe("extractOrcaStepCompleteBlock", () => {
+  it("returns null when no block present", () => {
+    expect(extractOrcaStepCompleteBlock("nothing here")).toBeNull();
+  });
+  it("extracts the last orca:step-complete block", () => {
+    expect(extractOrcaStepCompleteBlock("```orca:step-complete\n{\"a\":1}\n```")).toEqual({ a: 1 });
+  });
+  it("returns the last block when multiple present", () => {
+    const text = "```orca:step-complete\n{\"a\":1}\n```\nmore\n```orca:step-complete\n{\"a\":2}\n```";
+    expect(extractOrcaStepCompleteBlock(text)).toEqual({ a: 2 });
+  });
+  it("returns null on invalid JSON", () => {
+    expect(extractOrcaStepCompleteBlock("```orca:step-complete\nnot json\n```")).toBeNull();
   });
 });

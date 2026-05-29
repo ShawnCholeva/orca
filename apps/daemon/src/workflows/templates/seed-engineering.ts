@@ -5,7 +5,7 @@ import type {
 } from "@orca/contracts";
 
 export const ENGINEERING_ID = "orca/engineering";
-export const ENGINEERING_VERSION = 3;
+export const ENGINEERING_VERSION = 4;
 
 const ENGINEERING_NAME = "Engineering";
 const ENGINEERING_DESCRIPTION =
@@ -32,6 +32,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       { key: "relevant_workspaces", type: "array", itemType: "string", required: false },
       { key: "open_questions", type: "array", itemType: "string", required: false },
     ],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
   },
   {
     id: "research",
@@ -48,6 +49,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       { key: "files_in_scope", type: "array", itemType: "string", required: true },
       { key: "risks", type: "array", itemType: "string", required: false },
     ],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-opus-4-7" }],
   },
   {
     id: "prd",
@@ -63,6 +65,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       { key: "acceptance_signals", type: "array", itemType: "string", required: true },
       { key: "non_goals", type: "array", itemType: "string", required: false },
     ],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-opus-4-7" }],
   },
   {
     id: "issue_breakdown",
@@ -85,6 +88,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
         ],
       },
     ],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-opus-4-7" }],
   },
   {
     id: "execution",
@@ -110,6 +114,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       { key: "blocked", type: "boolean", required: true },
       { key: "blocked_reason", type: "string", required: false },
     ],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-sonnet-4-6" }],
   },
   {
     id: "qa",
@@ -133,6 +138,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       },
       { key: "verdict", type: "string", required: true },
     ],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-sonnet-4-6" }],
   },
   {
     id: "review",
@@ -147,6 +153,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       { key: "approved", type: "boolean", required: true },
       { key: "change_requests", type: "array", itemType: "string", required: false },
     ],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-opus-4-7" }],
   },
   {
     id: "done",
@@ -159,16 +166,11 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       { key: "summary", type: "string", required: true },
       { key: "memory_items", type: "array", itemType: "string", required: false },
     ],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
   },
 ];
 
 const ENGINEERING_GUARDRAILS: WorkflowGuardrailConfig[] = [
-  {
-    id: "approval_launch_agent",
-    kind: "approval_required",
-    label: "Require approval to launch agents",
-    configJson: { actions: ["launch_workflow_session"] },
-  },
   {
     id: "approval_mark_done",
     kind: "approval_required",

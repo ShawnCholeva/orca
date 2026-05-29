@@ -22,6 +22,8 @@ export interface OrchestratorChatRouteDeps {
   modelProviderRegistry: ModelProviderRegistry;
   now?: () => string;
   idFactory?: () => string;
+  shadowAsk?: (goalId: string, input: { systemPrompt: string; userPrompt: string; timeoutMs: number }) => Promise<{ text: string }>;
+  onUserMessage?: (goalId: string, body: string) => Promise<void>;
 }
 
 function apiError(code: string, message: string): { error: { code: string; message: string } } {
@@ -67,10 +69,15 @@ export function registerOrchestratorChatRoutes(
           modelProviderRegistry: deps.modelProviderRegistry,
           now: deps.now,
           idFactory: deps.idFactory,
+          shadowAsk: deps.shadowAsk,
         },
         goalId,
         parsed.data
       );
+      if (deps.onUserMessage) {
+        // Best-effort orchestrator-LLM trigger; never block the chat reply.
+        await deps.onUserMessage(goalId, parsed.data.body).catch(() => {});
+      }
       reply.status(201);
       return CreateOrchestratorMessageResponse.parse(response);
     } catch (error) {

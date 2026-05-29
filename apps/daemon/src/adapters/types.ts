@@ -1,4 +1,4 @@
-import type { AdapterId, AgentReadinessStatus, CheckStep, RepairAction } from "@orca/contracts";
+import type { AdapterId, AgentReadinessStatus, CheckStep, RepairAction, ExecutionMode } from "@orca/contracts";
 
 export interface AdapterContextDelivery {
   mode: 'initial_input' | 'context_file' | 'preview_only';
@@ -32,6 +32,13 @@ export interface AgentAdapter {
   title: string;
   supportsRepoEditing?: boolean;
   supportsTerminal?: boolean;
+  /**
+   * Execution modes this adapter can technically dispatch. Code-declared invariant.
+   * The runtime DB-backed AdapterExecutionModeConfig must declare a subset of these.
+   */
+  supportedExecutionModes: ExecutionMode[];
+  /** Return true if this adapter can drive the given model id. */
+  supportsModel(modelId: string): boolean;
   contextDelivery: AdapterContextDelivery;
   resolveSpawn(input: AdapterSpawnInput): Promise<AdapterSpawnResult>;
   probeAvailability(): Promise<AdapterAvailability>;
