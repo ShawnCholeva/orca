@@ -1053,7 +1053,8 @@ export function createServer(
       try {
         return daemonContext.stepDispatchCapabilities.resolveMode(adapterId).mode === "shadow_session"
           ? "shadow_session" : "one_shot";
-      } catch {
+      } catch (err) {
+        console.error("[orchestrator] resolveOrchestratorMode failed; defaulting to one_shot", err);
         return "one_shot";
       }
     },
@@ -1490,15 +1491,20 @@ function postOrchestratorChatReply(
   goalId: string,
   body: string
 ): void {
-  insertMessageWithEvent(
-    { db, bus, modelProviderRegistry: ctx.modelProviderRegistry, now: ctx.now, idFactory: ctx.idFactory },
-    {
-      id: ctx.idFactory(),
-      goalId,
-      role: "orchestrator",
-      body,
-      correlationId: ctx.idFactory(),
-      createdAt: ctx.now(),
-    }
-  );
+  try {
+    insertMessageWithEvent(
+      { db, bus, modelProviderRegistry: ctx.modelProviderRegistry, now: ctx.now, idFactory: ctx.idFactory },
+      {
+        id: ctx.idFactory(),
+        goalId,
+        role: "orchestrator",
+        body,
+        correlationId: ctx.idFactory(),
+        createdAt: ctx.now(),
+      }
+    );
+  } catch (err) {
+    console.error("[orchestrator] postOrchestratorChatReply failed", err);
+    // never rethrow: this runs in a fire-and-forget orchestrator-reply path
+  }
 }
