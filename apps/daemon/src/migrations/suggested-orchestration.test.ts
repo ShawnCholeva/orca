@@ -142,7 +142,8 @@ describe("suggested orchestration migration schema", () => {
       "0012_orchestration_transport.sql",
       "0013_orchestrator_messages.sql",
       "0014_workflow_step_runs_operator_selection.sql",
-      "0015_adapter_execution_modes.sql"
+      "0015_adapter_execution_modes.sql",
+      "0016_workflow_step_runs_revise_attempts.sql"
     ]);
 
     const postCounts = {
