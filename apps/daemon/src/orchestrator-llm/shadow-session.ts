@@ -14,7 +14,12 @@ export interface ShadowSessionDeps {
   resolveSpawn: (goalId: string) => ShadowSpawnCommand | Promise<ShadowSpawnCommand>;
   cols?: number;
   rows?: number;
-  pollIntervalMs?: number;
+}
+
+interface Pending {
+  resolve: (r: { text: string }) => void;
+  reject: (e: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 interface Session {
@@ -23,7 +28,7 @@ interface Session {
   disposeData: () => void;
   systemSent: boolean;
   queue: Promise<unknown>;
-  consumedUpTo: number;
+  pending: Pending | null;
 }
 
 export interface AskInput {
@@ -55,7 +60,7 @@ export class ShadowSessionManager {
       cols: this.deps.cols ?? 120,
       rows: this.deps.rows ?? 40,
     });
-    const session: Session = { handle, output: "", disposeData: () => {}, systemSent: false, queue: Promise.resolve(), consumedUpTo: 0 };
+    const session: Session = { handle, output: "", disposeData: () => {}, systemSent: false, queue: Promise.resolve(), pending: null };
     session.disposeData = events.onData((chunk) => {
       session.output += chunk.toString("utf8");
     });
@@ -75,52 +80,39 @@ export class ShadowSessionManager {
   }
 
   async ask(goalId: string, input: AskInput): Promise<{ text: string }> {
-    let session = this.getSession(goalId);
-    if (!session) {
-      await this.spawn(goalId);
-      session = this.getSession(goalId);
-    }
+    const session = this.getSession(goalId);
     if (!session) throw new Error(`no shadow session for goal ${goalId}`);
-    const run = session.queue.then(() => this.askOnce(goalId, session!, input));
-    session.queue = run.catch(() => undefined);
-    return run;
+    const next = session.queue.then(() => this.askOnce(goalId, input));
+    session.queue = next.catch(() => undefined);
+    return next;
   }
 
-  private async askOnce(
-    goalId: string,
-    session: Session,
-    input: AskInput
-  ): Promise<{ text: string }> {
+  private askOnce(goalId: string, input: AskInput): Promise<{ text: string }> {
+    const session = this.getSession(goalId);
+    if (!session) return Promise.reject(new Error(`no shadow session for goal ${goalId}`));
     const prelude = session.systemSent ? "" : input.systemPrompt + "\n\n";
     session.systemSent = true;
-    session.handle.write(Buffer.from(prelude + input.userPrompt + "\n", "utf8"));
+    session.handle.write(Buffer.from(prelude + input.userPrompt + "\r", "utf8"));
+    return new Promise<{ text: string }>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        session.pending = null;
+        reject(new Error(`shadow orchestrator timeout for goal ${goalId}`));
+      }, input.timeoutMs);
+      session.pending = { resolve, reject, timer };
+    });
+  }
 
-    const interval = this.deps.pollIntervalMs ?? 50;
-    const deadline = Date.now() + input.timeoutMs;
-    const FENCE_CLOSE = "```";
-    for (;;) {
-      const fresh = session.output.slice(session.consumedUpTo);
-      const block = extractActionBlock(fresh);
-      if (block !== null) {
-        // Drop the consumed prefix (including this block) so session.output stays
-        // bounded on a long-lived session, then reset the high-water mark.
-        const closeIdx = fresh.lastIndexOf(FENCE_CLOSE);
-        const consumedInFresh = closeIdx >= 0 ? closeIdx + FENCE_CLOSE.length : fresh.length;
-        session.output = session.output.slice(session.consumedUpTo + consumedInFresh);
-        session.consumedUpTo = 0;
-        return { text: block };
-      }
-      if (Date.now() >= deadline) {
-        // Discard whatever this prompt produced so far: it bounds memory across
-        // repeated timeouts and prevents an already-buffered partial from being
-        // mis-captured by the next ask. (A reply that arrives strictly after this
-        // point is an inherent interactive-PTY race; full correlation is a follow-up.)
-        session.output = "";
-        session.consumedUpTo = 0;
-        throw new Error(`shadow orchestrator timeout for goal ${goalId}`);
-      }
-      await new Promise((r) => setTimeout(r, interval));
-    }
+  /** Called by the hook endpoint when the goal's shadow session emits Stop/StopFailure. */
+  resolvePending(goalId: string, result: { text?: string; failure?: boolean }): void {
+    const session = this.getSession(goalId);
+    const pending = session?.pending ?? null;
+    if (!session || !pending) return; // stray/duplicate hook -> drop
+    clearTimeout(pending.timer);
+    session.pending = null;
+    if (result.failure) { pending.reject(new Error("shadow orchestrator StopFailure")); return; }
+    const block = extractActionBlock(result.text ?? "");
+    if (block === null) { pending.reject(new Error("shadow orchestrator: no orca:action block (unparseable)")); return; }
+    pending.resolve({ text: block });
   }
 
   /** Internal access for the ask() loop. */
