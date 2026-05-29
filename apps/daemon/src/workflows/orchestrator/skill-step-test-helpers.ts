@@ -20,9 +20,11 @@ import type {
   OrchestrationTransportBroker,
 } from "../orchestration-transport/broker.js";
 import type { OperatorSelector, SelectorInput } from "../operators/selector.js";
+import type { StepDispatchCapabilities } from "./service.js";
 
 export const NOW = "2026-01-01T00:00:00.000Z";
 export const MODEL_OPERATOR_ID = "orca/anthropic:claude-sonnet-4-6";
+export const AGENT_OPERATOR_ID = "agent:claude-code";
 
 const tempDirs: string[] = [];
 
@@ -172,10 +174,36 @@ export function fakeSelector(seen: SelectorInput[] = []): Pick<OperatorSelector,
   };
 }
 
+export function agentOperatorDescriptor(): OperatorDescriptor {
+  return {
+    id: AGENT_OPERATOR_ID,
+    kind: "agent",
+    displayName: "Claude Code",
+    capabilities: [],
+    ready: true,
+    supportsRepoEditing: true,
+    supportsTerminal: true,
+  };
+}
+
 export function fakeRegistry(): Pick<OperatorRegistry, "list"> {
   return {
     async list() {
-      return [modelOperatorDescriptor()];
+      return [agentOperatorDescriptor(), modelOperatorDescriptor()];
+    },
+  };
+}
+
+export function fakeStepDispatch(): StepDispatchCapabilities {
+  return {
+    async isAdapterReady(adapterId) {
+      return adapterId === "claude-code";
+    },
+    supportsModel(adapterId, modelId) {
+      return adapterId === "claude-code" && modelId === "claude-haiku-4-5";
+    },
+    resolveMode(adapterId) {
+      return { adapterId, mode: "shadow_session", fallbacks: [] };
     },
   };
 }

@@ -451,7 +451,8 @@ export function createServer(
     daemonContext.orchestrationTransportBroker,
     daemonContext.operatorRegistry,
     daemonContext.workflowSessionLauncher,
-    sessionOutputStore
+    sessionOutputStore,
+    daemonContext.stepDispatchCapabilities
   );
   // Wire the late-binding ref so the onChunkAppended callback is live.
   _orchestratorServiceRef.current = orchestratorService;
@@ -887,6 +888,7 @@ export function createServer(
     orchestrationTransportBroker: daemonContext.orchestrationTransportBroker,
     operatorRegistry: daemonContext.operatorRegistry,
     workflowSessionLauncher: daemonContext.workflowSessionLauncher,
+    stepDispatch: daemonContext.stepDispatchCapabilities,
     sessionRuntime,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
@@ -910,6 +912,7 @@ export function createServer(
     orchestrationTransportBroker: daemonContext.orchestrationTransportBroker,
     operatorRegistry: daemonContext.operatorRegistry,
     workflowSessionLauncher: daemonContext.workflowSessionLauncher,
+    stepDispatch: daemonContext.stepDispatchCapabilities,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
   });

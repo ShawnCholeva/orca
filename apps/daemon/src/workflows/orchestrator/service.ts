@@ -15,6 +15,7 @@ import {
 } from "@orca/contracts";
 
 import { EventBus } from "../../events.js";
+import type { ResolvedMode } from "../../adapters/dispatcher.js";
 import type { SessionOutputStore } from "../../sessions/output-store.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
 import { createArtifact } from "../artifacts/usecases.js";
@@ -43,6 +44,13 @@ import { synthesizeStepOutput } from "./synthesize.js";
 import { detectPendingAgentQuestion } from "./agent-interview.js";
 import { assembleWorkspaceContext } from "./workspace-context.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
+import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.js";
+
+export interface StepDispatchCapabilities {
+  isAdapterReady(adapterId: string): Promise<boolean>;
+  supportsModel(adapterId: string, modelId: string): boolean;
+  resolveMode(adapterId: string): ResolvedMode;
+}
 
 interface GoalRow {
   id: string;
@@ -166,7 +174,8 @@ export class OrchestratorService {
     private readonly launcher: WorkflowSessionLauncher = {
       launch: async () => { throw new Error("direct_launch_unsupported"); },
     },
-    sessionOutputStore?: SessionOutputStore
+    sessionOutputStore?: SessionOutputStore,
+    private readonly stepDispatch?: StepDispatchCapabilities
   ) {
     this.sessionOutputStore = sessionOutputStore ?? NULL_OUTPUT_STORE;
   }
@@ -417,10 +426,22 @@ export class OrchestratorService {
       return this.commitNoop(db, run.id, stepRun.id);
     }
 
-    // (3) select an operator once (model or agent).
+    // (3) deterministically resolve the per-step agent once.
     const sel = getWorkflowStepRunById(db, stepRun.id);
     if (!sel || !sel.selectedOperatorId) {
-      return this.commitOperatorSelectionForSkill(db, now, ctx, options);
+      if (!this.stepDispatch) {
+        return this.blockRun(db, now, ctx, "step dispatch capabilities not configured", options);
+      }
+      const dispatch = await resolveStepDispatch({
+        preferences: stepTpl.agentPreference,
+        isAdapterReady: (id) => this.stepDispatch!.isAdapterReady(id),
+        supportsModel: (id, mid) => this.stepDispatch!.supportsModel(id, mid),
+        resolveMode: (id) => this.stepDispatch!.resolveMode(id),
+      }).catch(() => null);
+      if (!dispatch) {
+        return this.blockRun(db, now, ctx, "no ready agent for step", options);
+      }
+      return this.commitDeterministicStepSelection(db, now, ctx, dispatch, options);
     }
 
     // (3a) branch on operator kind.
@@ -739,7 +760,7 @@ export class OrchestratorService {
     }
   }
 
-  private async commitOperatorSelectionForSkill(
+  private commitDeterministicStepSelection(
     db: Database.Database,
     now: () => string,
     ctx: {
@@ -749,36 +770,12 @@ export class OrchestratorService {
       template: WorkflowTemplateT;
       goal: GoalRow;
     },
+    dispatch: ResolvedStepDispatch,
     options: RequestNextDecisionOptions
-  ): Promise<{ decision: WorkflowDecisionTrace; recommendationIds: string[] }> {
-    const { run, stepRun, stepTpl, template, goal } = ctx;
-    const result = await this.operatorSelector.select(db, now, {
-      goalId: goal.id,
-      workflowRunId: run.id,
-      stepRunId: stepRun.id,
-      stepName: stepTpl.id,
-      stepPurpose: stepTpl.instructions.slice(0, 1024),
-      recommendedCapabilities: [],
-      recommendedOperatorIds: [],
-      guardrails: template.guardrails,
-      orchestratorProvider: goal.orchestrator_provider,
-      orchestratorModel: goal.orchestrator_model,
-      // allowedKinds omitted: both "model" and "agent" operators are eligible
-    });
-
-    const descriptors = await this.operators.list(goal.id);
-    const chosen = descriptors.find((d) => d.id === result.selection.operatorId);
-    if (!chosen) {
-      return this.blockRun(db, now, ctx, "no ready model operator", options);
-    }
-
-    // For model operators, providerId+modelId are required.
-    // For agent operators, both are null.
-    const providerId = chosen.kind === "model" ? (chosen.providerId ?? null) : null;
-    const modelId = chosen.kind === "model" ? (chosen.modelId ?? null) : null;
-    if (chosen.kind === "model" && (!providerId || !modelId)) {
-      return this.blockRun(db, now, ctx, "no ready model operator", options);
-    }
+  ): { decision: WorkflowDecisionTrace; recommendationIds: string[] } {
+    const { run, stepRun, stepTpl, goal } = ctx;
+    const operatorId = `agent:${dispatch.adapterId}`;
+    const providerId = dispatch.providerId ?? null;
 
     const stagedEvents: DomainEvent[] = [];
     const decision = db.transaction(() => {
@@ -800,38 +797,35 @@ export class OrchestratorService {
           workflowRunId: run.id,
           stepRunId: stepRun.id,
           decisionType: "select_operator",
-          selectedAction: `select:${chosen.id}`,
-          reason: result.selection.reason,
+          selectedAction: `select:${dispatch.adapterId}:${dispatch.modelId}`,
+          reason: "deterministic preference resolution",
           influencedBy: [
             {
               kind: "workflow_step",
               id: stepTpl.id,
               label: stepTpl.name,
-              effect: "preferred",
+              effect: "required",
             },
             {
               kind: "operator_readiness",
-              id: chosen.id,
-              label: chosen.id,
+              id: operatorId,
+              label: operatorId,
               effect: "satisfied",
             },
           ],
-          alternativesConsidered: result.selection.alternativesConsidered,
-          confidence: result.selection.confidence,
-          operatorSelection: result.selection,
           inputFingerprint: decisionFingerprint({
             runId: run.id,
             stepRunId: stepRun.id,
             decisionType: "select_operator",
-            payload: { operatorId: chosen.id, source: result.source },
+            payload: { operatorId, source: "deterministic" },
           }),
         },
         { idFactory: options.idFactory, stagedEvents }
       );
       recordOperatorSelection(db, stepRun.id, {
-        operatorId: chosen.id,
+        operatorId,
         providerId,
-        modelId,
+        modelId: dispatch.modelId,
         at: now(),
       });
       stagedEvents.push(
@@ -843,10 +837,10 @@ export class OrchestratorService {
             goalId: goal.id,
             workflowRunId: run.id,
             stepRunId: stepRun.id,
-            operatorId: chosen.id,
-            operatorKind: chosen.kind,
-            source: result.source,
-            requiresApproval: result.selection.requiresUserApproval,
+            operatorId,
+            operatorKind: "agent",
+            source: "deterministic",
+            executionMode: dispatch.executionMode,
           },
           now(),
           options.idFactory

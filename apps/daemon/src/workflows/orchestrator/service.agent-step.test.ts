@@ -13,6 +13,7 @@ import {
   seedSkillWorkflow,
   setupHarness,
   makeStep,
+  fakeStepDispatch,
 } from "./skill-step-test-helpers.js";
 import type { SelectorInput } from "../operators/selector.js";
 
@@ -71,7 +72,9 @@ function makeAgentService(launcher: WorkflowSessionLauncher): OrchestratorServic
     fakeAgentSelector(),
     fakeBrokerNoop(),
     { async list() { return [agentOperatorDescriptor()]; } },
-    launcher
+    launcher,
+    undefined,
+    fakeStepDispatch()
   );
 }
 

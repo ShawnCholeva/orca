@@ -12,6 +12,7 @@ import {
   fakeBroker,
   fakeRegistry,
   fakeSelector,
+  fakeStepDispatch,
   makeStep,
   NOW,
   seedSkillWorkflow,
@@ -19,7 +20,14 @@ import {
 } from "./skill-step-test-helpers.js";
 
 function makeService(raw: StepSkillProposal, seen: SelectorInput[] = []): OrchestratorService {
-  return new OrchestratorService(fakeSelector(seen), fakeBroker(raw), fakeRegistry());
+  return new OrchestratorService(
+    fakeSelector(seen),
+    fakeBroker(raw),
+    fakeRegistry(),
+    undefined,
+    undefined,
+    fakeStepDispatch()
+  );
 }
 
 function decisionCount(db: Database.Database, type?: string): number {
@@ -45,25 +53,35 @@ afterEach(() => {
 const ASK: StepSkillProposal = { action: "ask", question: "What problem are we solving?" };
 
 describe("OrchestratorService skill step", () => {
-  it("selects a model operator then asks the operator's question", async () => {
+  it("deterministically selects the per-step agent then recommends launching it", async () => {
     const { db, bus, idFactory } = setupHarness();
     seedSkillWorkflow(db);
-    const seen: SelectorInput[] = [];
-    const service = makeService(ASK, seen);
+    const service = makeService(ASK);
 
+    // (1) First decision: deterministic operator selection from agentPreference.
     const first = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(first.decision.decisionType).toBe("select_operator");
+    expect(first.decision.selectedAction).toBe("select:claude-code:claude-haiku-4-5");
+    expect(first.recommendationIds).toEqual([]);
     const stepRow = db
-      .prepare("SELECT selected_model_id FROM workflow_step_runs WHERE id = 'step-1'")
-      .get() as { selected_model_id: string | null };
-    expect(stepRow.selected_model_id).toBe("claude-sonnet-4-6");
-    // allowedKinds is no longer restricted to ["model"]; both model and agent operators are eligible.
-    expect(seen[0]?.allowedKinds).toBeUndefined();
+      .prepare(
+        "SELECT selected_operator_id, selected_model_id FROM workflow_step_runs WHERE id = 'step-1'"
+      )
+      .get() as { selected_operator_id: string | null; selected_model_id: string | null };
+    expect(stepRow.selected_operator_id).toBe("agent:claude-code");
+    expect(stepRow.selected_model_id).toBe("claude-haiku-4-5");
 
+    // (2) Second decision: routes into the agent branch. With the default launcher
+    // (throws direct_launch_unsupported) and no linked session, it falls back to a
+    // launch recommendation.
     const second = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
-    expect(second.decision.decisionType).toBe("request_user_input");
-    expect(second.decision.reason).toBe("What problem are we solving?");
+    expect(second.decision.decisionType).toBe("select_operator");
+    expect(second.decision.selectedAction).toBe("launch:agent:claude-code");
     expect(second.recommendationIds).toHaveLength(1);
+    const rec = db
+      .prepare("SELECT type FROM recommendations WHERE id = ?")
+      .get(second.recommendationIds[0]) as { type: string };
+    expect(rec.type).toBe("launch_workflow_session");
   });
 
   it("does not create a new request_user_input decision when a question is unanswered", async () => {
@@ -135,7 +153,10 @@ describe("OrchestratorService skill step", () => {
           } as const;
         },
       },
-      fakeRegistry()
+      fakeRegistry(),
+      undefined,
+      undefined,
+      fakeStepDispatch()
     );
 
     await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
@@ -243,7 +264,14 @@ describe("OrchestratorService skill step", () => {
       },
     };
 
-    const service = new OrchestratorService(fakeSelector(), spyBroker, fakeRegistry());
+    const service = new OrchestratorService(
+      fakeSelector(),
+      spyBroker,
+      fakeRegistry(),
+      undefined,
+      undefined,
+      fakeStepDispatch()
+    );
     await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     const payload = capturedPayload as Record<string, unknown> | undefined;
