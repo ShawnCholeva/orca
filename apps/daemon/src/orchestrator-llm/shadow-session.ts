@@ -111,6 +111,12 @@ export class ShadowSessionManager {
         return { text: block };
       }
       if (Date.now() >= deadline) {
+        // Discard whatever this prompt produced so far: it bounds memory across
+        // repeated timeouts and prevents an already-buffered partial from being
+        // mis-captured by the next ask. (A reply that arrives strictly after this
+        // point is an inherent interactive-PTY race; full correlation is a follow-up.)
+        session.output = "";
+        session.consumedUpTo = 0;
         throw new Error(`shadow orchestrator timeout for goal ${goalId}`);
       }
       await new Promise((r) => setTimeout(r, interval));

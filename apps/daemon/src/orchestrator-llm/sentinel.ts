@@ -3,8 +3,10 @@ const FENCE_CLOSE = "```";
 
 /**
  * Returns the inner text of the LAST complete ```orca:action ... ``` block in
- * `text`, or null if no complete block is present yet. Used to detect that the
- * orchestrator shadow session has finished emitting its structured action.
+ * `text` (assuming properly separated fences, as the orchestrator is instructed
+ * to emit exactly one block per turn), or null if no complete block is present
+ * yet. Used to detect that the orchestrator shadow session has finished emitting
+ * its structured action.
  */
 export function extractActionBlock(text: string): string | null {
   let result: string | null = null;
