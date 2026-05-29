@@ -1,5 +1,6 @@
 import type { OrchestratorInvocationContext } from "./context.js";
 import type { WorkflowStepOutputSchema } from "@orca/contracts";
+import { SENTINEL_INSTRUCTION } from "./sentinel.js";
 
 export interface AgentInitialPromptInput {
   stepInstructions: string;
@@ -69,6 +70,8 @@ export function composeOrchestratorPrompt(input: OrchestratorPromptInput): Orche
     "- revise_step (the agent's proposal is insufficient; produce concrete feedback)",
     "- escalate_to_user (a failure has occurred; describe and ask for guidance)",
     "Return exactly one structured action.",
+    "",
+    SENTINEL_INSTRUCTION,
   ].join("\n");
 
   const userPrompt = JSON.stringify({
