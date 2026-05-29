@@ -123,7 +123,11 @@ export async function createOrchestratorMessage(
       userMessage: parsed.body,
     });
     const out = await ctx.shadowAsk(goalId, { systemPrompt: sys, userPrompt: usr, timeoutMs: 60_000 });
-    replyText = GuidanceReply.parse(JSON.parse(out.text)).replyText;
+    try {
+      replyText = GuidanceReply.parse(JSON.parse(out.text)).replyText;
+    } catch {
+      throw new OrchestratorChatProviderUnavailableError(goal.orchestrator_provider);
+    }
   } else {
     const provider = ctx.modelProviderRegistry.get(goal.orchestrator_provider);
     if (!provider) throw new OrchestratorChatProviderUnavailableError(goal.orchestrator_provider);

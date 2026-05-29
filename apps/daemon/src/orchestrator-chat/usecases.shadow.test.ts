@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import Database from "better-sqlite3";
-import { createOrchestratorMessage } from "./usecases.js";
+import { createOrchestratorMessage, OrchestratorChatProviderUnavailableError } from "./usecases.js";
 
 function setup() {
   const db = new Database(":memory:");
@@ -55,5 +55,25 @@ describe("createOrchestratorMessage shadow path", () => {
     );
     expect(res.reply).toBeNull();
     expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("throws OrchestratorChatProviderUnavailableError when shadow output is malformed", async () => {
+    const db = setup();
+    const ask = vi.fn().mockResolvedValue({ text: "not json {{{" });
+    let idN = 0;
+    await expect(
+      createOrchestratorMessage(
+        {
+          db,
+          bus: { publish: vi.fn() } as any,
+          modelProviderRegistry: { get: vi.fn() } as any,
+          shadowAsk: ask,
+          now: () => "2026-05-29T00:00:00Z",
+          idFactory: () => `id${++idN}`,
+        } as any,
+        "G1",
+        { body: "hello" }
+      )
+    ).rejects.toMatchObject({ code: "orchestrator_provider_unavailable" });
   });
 });
