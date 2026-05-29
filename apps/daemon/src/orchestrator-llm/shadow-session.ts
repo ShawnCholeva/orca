@@ -63,8 +63,19 @@ export class ShadowSessionManager {
     const session: Session = { handle, output: "", disposeData: () => {}, systemSent: false, queue: Promise.resolve(), pending: null };
     session.disposeData = events.onData((chunk) => {
       session.output += chunk.toString("utf8");
+      if (session.output.length > 200_000) session.output = session.output.slice(-100_000);
     });
     events.onExit(() => {
+      const s = this.sessions.get(goalId);
+      if (s) {
+        if (s.pending) {
+          clearTimeout(s.pending.timer);
+          const p = s.pending;
+          s.pending = null;
+          p.reject(new Error(`shadow session for goal ${goalId} exited`));
+        }
+        s.disposeData();
+      }
       this.sessions.delete(goalId);
     });
     this.sessions.set(goalId, session);

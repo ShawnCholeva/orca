@@ -64,4 +64,14 @@ describe("ShadowSessionManager.ask (hook-resolved)", () => {
     m.resolvePending("G1", { text: "sorry, no json here" });
     await expect(p).rejects.toThrow(/no .*action|unparse/i);
   });
+
+  it("rejects an outstanding ask when the session exits", async () => {
+    const { pty, m } = mgr();
+    await m.spawn("G1");
+    const p = m.ask("G1", { systemPrompt: "S", userPrompt: "q", timeoutMs: 5000 });
+    await Promise.resolve(); // let askOnce run and register pending
+    controlFakePty(pty.handles[0]).emitExit({ exitCode: 1, signal: null });
+    await expect(p).rejects.toThrow(/exited/i);
+    expect(m.has("G1")).toBe(false);
+  });
 });
