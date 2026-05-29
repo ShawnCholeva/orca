@@ -50,6 +50,7 @@ export function controlFakePty(handle: PtyHandle): FakePtyControl {
 
 export class FakePtyManager implements PtyManager {
   private nextPid = 1000;
+  readonly handles: PtyHandle[] = [];
 
   start(_opts: PtyStartOptions): { handle: PtyHandle; events: PtyEvents } {
     const state: FakePtyState = {
@@ -80,6 +81,7 @@ export class FakePtyManager implements PtyManager {
     };
 
     stateMap.set(handle, state);
+    this.handles.push(handle);
 
     const events: PtyEvents = {
       onData(handler): () => void {
