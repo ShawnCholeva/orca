@@ -452,7 +452,15 @@ export function createServer(
     daemonContext.operatorRegistry,
     daemonContext.workflowSessionLauncher,
     sessionOutputStore,
-    daemonContext.stepDispatchCapabilities
+    daemonContext.stepDispatchCapabilities,
+    // Production orchestrator-mediator wiring (real LLM client + context builder)
+    // lands in a later sub-plan (bootstrap rewrite). Until then the mediator is
+    // unconfigured and onAgentResponseDone early-returns; behavior is proven by
+    // the agent-step unit tests which inject a fake mediator.
+    undefined,
+    (sessionId: string, text: string) => {
+      sessionRuntime.getHandle(sessionId)?.write(Buffer.from(text, "utf8"));
+    }
   );
   // Wire the late-binding ref so the onChunkAppended callback is live.
   _orchestratorServiceRef.current = orchestratorService;
@@ -896,10 +904,12 @@ export function createServer(
 
   // ---- Agent hook routes ----
 
-  // Stubbed: real wiring to OrchestratorMediator lands in Sub-plan 5 (judgement loop).
   registerAgentHookRoutes(server, {
     onResponseDone: async (payload) => {
-      server.log.info({ msg: 'agent.response.done', ...payload });
+      await orchestratorService.onAgentResponseDone(db, daemonContext.now, payload, {
+        bus: eventBus,
+        idFactory: daemonContext.idFactory,
+      });
     },
   });
 

@@ -16,6 +16,8 @@ import {
   fakeStepDispatch,
 } from "./skill-step-test-helpers.js";
 import type { SelectorInput } from "../operators/selector.js";
+import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
+import type { OrchestratorAction } from "@orca/contracts";
 
 const AGENT_OPERATOR_ID = "agent:claude-code";
 
@@ -76,6 +78,64 @@ function makeAgentService(launcher: WorkflowSessionLauncher): OrchestratorServic
     undefined,
     fakeStepDispatch()
   );
+}
+
+function fakeMediator(action: OrchestratorAction): Pick<OrchestratorMediator, "invoke"> {
+  return {
+    async invoke() {
+      return action;
+    },
+  };
+}
+
+/** A mediator that records whether it was invoked (to assert deterministic short-circuit) */
+function spyMediator(action: OrchestratorAction): Pick<OrchestratorMediator, "invoke"> & { calls: number } {
+  const spy = { calls: 0 } as { calls: number; invoke: OrchestratorMediator["invoke"] };
+  spy.invoke = (async () => {
+    spy.calls += 1;
+    return action;
+  }) as OrchestratorMediator["invoke"];
+  return spy as Pick<OrchestratorMediator, "invoke"> & { calls: number };
+}
+
+function makeJudgeService(
+  mediator: Pick<OrchestratorMediator, "invoke">,
+  agentInput: (sessionId: string, text: string) => void | Promise<void>
+): OrchestratorService {
+  return new OrchestratorService(
+    fakeAgentSelector(),
+    fakeBrokerNoop(),
+    { async list() { return [agentOperatorDescriptor()]; } },
+    makeLauncher(),
+    undefined,
+    fakeStepDispatch(),
+    mediator,
+    agentInput
+  );
+}
+
+/** Mark the active step run as agent-selected and link a session to it */
+function seedAgentSession(db: Database.Database, opts: { reviseAttempts?: number } = {}) {
+  db.prepare(
+    "UPDATE workflow_step_runs SET selected_operator_id = 'agent:claude-code', selected_provider_id = NULL, selected_model_id = 'claude-haiku-4-5', operator_selected_at = ?, revise_attempts = ? WHERE id = 'step-1'"
+  ).run(NOW, opts.reviseAttempts ?? 0);
+  db.prepare(
+    "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES ('sess-judge', 'goal-1', 'ws-1', 'claude-code', 'Session', 'running', ?, 'step-1')"
+  ).run(NOW);
+}
+
+function stepOutputCount(db: Database.Database): number {
+  return (
+    db
+      .prepare("SELECT COUNT(*) AS c FROM workflow_artifacts WHERE step_run_id = 'step-1' AND type = 'step_output'")
+      .get() as { c: number }
+  ).c;
+}
+
+function orchestratorMessageCount(db: Database.Database): number {
+  return (
+    db.prepare("SELECT COUNT(*) AS c FROM orchestrator_messages WHERE goal_id = 'goal-1'").get() as { c: number }
+  ).c;
 }
 
 /** Seed a workflow with an agent-capable template step */
@@ -251,5 +311,96 @@ describe("OrchestratorService agent step", () => {
     const result = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(result.recommendationIds).toHaveLength(0);
     expect(launchFn).not.toHaveBeenCalled();
+  });
+});
+
+describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
+  it("approve_step_complete: writes step_output artifact and recommends run completion", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+
+    const agentInput = vi.fn();
+    const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), agentInput);
+
+    // Schema-valid step-complete block → mediator returns approve.
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // step_output artifact written for the step
+    expect(stepOutputCount(db)).toBe(1);
+    // single terminal step → commitAdvanceOrComplete recommends completing the run
+    expect(recommendationCount(db, "complete_workflow_run")).toBe(1);
+    expect(agentInput).not.toHaveBeenCalled();
+  });
+
+  it("revise_step under cap: bumps revise_attempts to 1 and sends feedback to the agent", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db, { reviseAttempts: 0 });
+
+    const agentInput = vi.fn();
+    // Mediator should NOT be consulted: schema-invalid block makes judgement return revise deterministically.
+    const mediator = spyMediator({ kind: "approve_step_complete" });
+    const service = makeJudgeService(mediator, agentInput);
+
+    // Schema-INVALID block (missing required `result`) → deterministic revise.
+    const responseText =
+      "Attempt.\n```orca:step-complete\n" + JSON.stringify({ wrong: "field" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    expect(mediator.calls).toBe(0);
+    const row = db
+      .prepare("SELECT revise_attempts FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { revise_attempts: number };
+    expect(row.revise_attempts).toBe(1);
+    expect(agentInput).toHaveBeenCalledTimes(1);
+    const [sessionId, text] = agentInput.mock.calls[0]!;
+    expect(sessionId).toBe("sess-judge");
+    expect(text).toContain("schema validation");
+    expect(stepOutputCount(db)).toBe(0);
+  });
+
+  it("revise_step at cap: posts an orchestrator escalation message and does NOT message the agent", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    // Pre-set to REVISE_CAP - 1 so the next attempt reaches the cap.
+    seedAgentSession(db, { reviseAttempts: 2 });
+
+    const agentInput = vi.fn();
+    const service = makeJudgeService(spyMediator({ kind: "approve_step_complete" }), agentInput);
+
+    const responseText =
+      "Attempt.\n```orca:step-complete\n" + JSON.stringify({ wrong: "field" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    const row = db
+      .prepare("SELECT revise_attempts FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { revise_attempts: number };
+    expect(row.revise_attempts).toBe(3);
+    expect(orchestratorMessageCount(db)).toBe(1);
+    expect(agentInput).not.toHaveBeenCalled();
   });
 });

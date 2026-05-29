@@ -45,6 +45,11 @@ import { detectPendingAgentQuestion } from "./agent-interview.js";
 import { assembleWorkspaceContext } from "./workspace-context.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
 import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.js";
+import { judgeAgentResponse } from "./judgement.js";
+import { extractOrcaStepCompleteBlock } from "./orca-output.js";
+import { incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
+import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
+import { randomUUID } from "node:crypto";
 
 export interface StepDispatchCapabilities {
   isAdapterReady(adapterId: string): Promise<boolean>;
@@ -67,6 +72,9 @@ interface StepRunRow {
   step_template_id: string;
   ordinal: number;
   status: string;
+  selected_operator_id: string | null;
+  selected_model_id: string | null;
+  revise_attempts: number;
 }
 
 export interface RequestNextDecisionOptions {
@@ -175,7 +183,9 @@ export class OrchestratorService {
       launch: async () => { throw new Error("direct_launch_unsupported"); },
     },
     sessionOutputStore?: SessionOutputStore,
-    private readonly stepDispatch?: StepDispatchCapabilities
+    private readonly stepDispatch?: StepDispatchCapabilities,
+    private readonly orchestratorMediator?: Pick<OrchestratorMediator, "invoke">,
+    private readonly agentInput?: (sessionId: string, text: string) => void | Promise<void>
   ) {
     this.sessionOutputStore = sessionOutputStore ?? NULL_OUTPUT_STORE;
   }
@@ -372,6 +382,158 @@ export class OrchestratorService {
       question,
       options
     );
+  }
+
+  /**
+   * Called when a per-step agent emits a completed response (via the
+   * /v1/agent-hooks/response-done endpoint). Judges the response and applies the
+   * resulting OrchestratorAction: forwards/paraphrases chat messages, approves a
+   * step (writing step_output + advancing), sends revise feedback back to the
+   * agent (bounded by REVISE_CAP), or escalates to the user.
+   *
+   * No-op when the session is not linked to an active workflow step run, or when
+   * no orchestrator mediator is configured (production wiring lands in a later
+   * sub-plan; behavior is proven via unit tests with a fake mediator).
+   */
+  async onAgentResponseDone(
+    db: Database.Database,
+    now: () => string,
+    payload: { sessionId: string; adapterId: string; responseText: string },
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const sess = db
+      .prepare("SELECT workflow_step_run_id FROM sessions WHERE id = ?")
+      .get(payload.sessionId) as { workflow_step_run_id: string | null } | undefined;
+    if (!sess?.workflow_step_run_id) return;
+    const stepRun = db
+      .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
+      .get(sess.workflow_step_run_id) as StepRunRow | undefined;
+    if (!stepRun || stepRun.status !== "active") return;
+    const run = getWorkflowRunById(db, stepRun.workflow_run_id);
+    if (!run || run.status !== "active") return;
+    const template = getTemplateById(db, run.templateId);
+    if (!template) return;
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) return;
+    const goal = readGoal(db, run.goalId);
+    if (!this.orchestratorMediator) return; // not configured
+
+    const adapterId = (stepRun.selected_operator_id ?? "").replace(/^agent:/, "");
+    const modelId = stepRun.selected_model_id ?? "";
+
+    const action = await judgeAgentResponse({
+      mediator: this.orchestratorMediator as OrchestratorMediator,
+      schemaValidate: (output) => {
+        const v = validateStepOutput(stepTpl.outputSchema, output);
+        return v.ok ? { ok: true } : { ok: false, errors: v.errors };
+      },
+      goalId: run.goalId,
+      runId: run.id,
+      stepRunId: stepRun.id,
+      adapterId,
+      modelId,
+      responseText: payload.responseText,
+    });
+
+    const ctx = { run, stepRun, stepTpl, template, goal };
+
+    switch (action.kind) {
+      case "paraphrase_agent_message":
+      case "answer_user_directly": {
+        this.postOrchestratorMessage(db, now, run.goalId, action.body, options);
+        return;
+      }
+      case "forward_to_agent": {
+        this.postOrchestratorMessage(db, now, run.goalId, action.translated, options);
+        return;
+      }
+      case "approve_step_complete": {
+        const block = extractOrcaStepCompleteBlock(payload.responseText);
+        const stagedEvents: DomainEvent[] = [];
+        this.createStepOutputArtifact(
+          db,
+          now,
+          ctx,
+          JSON.stringify(block ?? {}),
+          options,
+          stagedEvents
+        );
+        this.publish(options.bus, stagedEvents);
+        await this.commitAdvanceOrComplete(db, now, ctx, options);
+        return;
+      }
+      case "revise_step": {
+        const counter = incrementReviseAttempt(stepRun.revise_attempts ?? 0);
+        db.prepare("UPDATE workflow_step_runs SET revise_attempts = ? WHERE id = ?").run(
+          counter.nextAttempt,
+          stepRun.id
+        );
+        if (counter.capReached) {
+          this.postOrchestratorMessage(
+            db,
+            now,
+            run.goalId,
+            `Step needs help after ${REVISE_CAP} revision attempts:\n${action.feedback}`,
+            options
+          );
+        } else if (this.agentInput) {
+          await this.agentInput(payload.sessionId, action.feedback + "\n");
+        }
+        return;
+      }
+      case "escalate_to_user": {
+        this.postOrchestratorMessage(db, now, run.goalId, action.body, options);
+        return;
+      }
+    }
+  }
+
+  /**
+   * Inserts a single orchestrator_messages row (role "orchestrator", kind
+   * "message") and emits the orchestrator.message.created event, mirroring the
+   * orchestrator-chat use case shape. Used for escalations and forwarded /
+   * paraphrased agent messages.
+   */
+  private postOrchestratorMessage(
+    db: Database.Database,
+    now: () => string,
+    goalId: string,
+    body: string,
+    options: RequestNextDecisionOptions
+  ): void {
+    const idFactory = options.idFactory ?? randomUUID;
+    const messageId = idFactory();
+    const correlationId = idFactory();
+    const createdAt = now();
+    const event = db.transaction(() => {
+      db.prepare(
+        `INSERT INTO orchestrator_messages
+          (id, goal_id, role, kind, body, correlation_id, created_at)
+         VALUES (?, ?, 'orchestrator', 'message', ?, ?, ?)`
+      ).run(messageId, goalId, body, correlationId, createdAt);
+      const payload = { messageId, role: "orchestrator" as const };
+      const eventId = idFactory();
+      const result = db
+        .prepare(
+          "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)"
+        )
+        .run(
+          eventId,
+          "orchestrator.message.created",
+          goalId,
+          JSON.stringify(payload),
+          createdAt
+        );
+      return {
+        seq: Number(result.lastInsertRowid),
+        id: eventId,
+        type: "orchestrator.message.created",
+        goalId,
+        payload,
+        createdAt,
+      } satisfies DomainEvent;
+    })();
+    options.bus?.publish(event);
   }
 
   async requestNextDecision(
