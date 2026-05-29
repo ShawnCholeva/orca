@@ -152,6 +152,7 @@ describe('context migration 0006_context.sql', () => {
       '0015_adapter_execution_modes.sql',
       '0016_workflow_step_runs_revise_attempts.sql',
       '0017_orchestrator_messages_chat_kinds.sql',
+      '0018_workflow_step_runs_crash_retries.sql',
     ]);
 
     const tables = (
@@ -230,6 +231,7 @@ describe('context migration 0006_context.sql', () => {
       '0015_adapter_execution_modes.sql',
       '0016_workflow_step_runs_revise_attempts.sql',
       '0017_orchestrator_messages_chat_kinds.sql',
+      '0018_workflow_step_runs_crash_retries.sql',
     ]);
 
     const counts = {

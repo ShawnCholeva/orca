@@ -144,7 +144,8 @@ describe("suggested orchestration migration schema", () => {
       "0014_workflow_step_runs_operator_selection.sql",
       "0015_adapter_execution_modes.sql",
       "0016_workflow_step_runs_revise_attempts.sql",
-      "0017_orchestrator_messages_chat_kinds.sql"
+      "0017_orchestrator_messages_chat_kinds.sql",
+      "0018_workflow_step_runs_crash_retries.sql"
     ]);
 
     const postCounts = {

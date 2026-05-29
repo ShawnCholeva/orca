@@ -50,6 +50,7 @@ import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
 import { judgeAgentResponse } from "./judgement.js";
 import { extractOrcaStepCompleteBlock } from "./orca-output.js";
 import { incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
+import { incrementCrashRetry, CRASH_RETRY_CAP } from "./crash-retry.js";
 import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
 import { randomUUID } from "node:crypto";
 
@@ -77,6 +78,7 @@ interface StepRunRow {
   selected_operator_id: string | null;
   selected_model_id: string | null;
   revise_attempts: number;
+  crash_retries: number;
 }
 
 export interface RequestNextDecisionOptions {
@@ -240,10 +242,41 @@ export class OrchestratorService {
     if (!stepTpl) return;
     const goal = readGoal(db, run.goalId);
 
-    // (5) Non-exited terminal states → block immediately, no synthesis.
-    if (sess.status === "failed" || sess.status === "stopped") {
-      const reason = `session ${sess.status}${sess.failure_reason ? `: ${sess.failure_reason}` : ""}`;
-      this.blockRun(db, now, { run, stepRun, stepTpl, goal }, reason, options);
+    // (5) Non-exited terminal states.
+    // User-requested stop is not a crash → block immediately.
+    if (sess.status === "stopped") {
+      this.blockRun(
+        db,
+        now,
+        { run, stepRun, stepTpl, goal },
+        `session stopped${sess.failure_reason ? `: ${sess.failure_reason}` : ""}`,
+        options
+      );
+      return;
+    }
+    // Crash → consume a retry from the budget; respawn under cap, escalate at cap.
+    if (sess.status === "failed") {
+      const counter = incrementCrashRetry(stepRun.crash_retries ?? 0);
+      db.prepare("UPDATE workflow_step_runs SET crash_retries = ? WHERE id = ?").run(
+        counter.nextAttempt,
+        stepRun.id
+      );
+      if (counter.capReached) {
+        this.postOrchestratorMessage(
+          db,
+          now,
+          run.goalId,
+          `The agent for "${stepTpl.name}" crashed ${CRASH_RETRY_CAP} times${sess.failure_reason ? ` (${sess.failure_reason})` : ""}. Manual intervention needed.`,
+          options
+        );
+      } else {
+        await this.spawnStepAgent(
+          db,
+          now,
+          { run, stepRun, stepTpl, template, goal },
+          options
+        );
+      }
       return;
     }
 

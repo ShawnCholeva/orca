@@ -68,7 +68,8 @@ describe("runMigrations", () => {
       "0014_workflow_step_runs_operator_selection.sql",
       "0015_adapter_execution_modes.sql",
       "0016_workflow_step_runs_revise_attempts.sql",
-      "0017_orchestrator_messages_chat_kinds.sql"
+      "0017_orchestrator_messages_chat_kinds.sql",
+      "0018_workflow_step_runs_crash_retries.sql"
     ]);
   });
 
@@ -167,7 +168,8 @@ describe("runMigrations", () => {
       "0014_workflow_step_runs_operator_selection.sql",
       "0015_adapter_execution_modes.sql",
       "0016_workflow_step_runs_revise_attempts.sql",
-      "0017_orchestrator_messages_chat_kinds.sql"
+      "0017_orchestrator_messages_chat_kinds.sql",
+      "0018_workflow_step_runs_crash_retries.sql"
     ]);
 
     const goalCount = (
@@ -332,7 +334,8 @@ describe("session tables migration", () => {
       "0014_workflow_step_runs_operator_selection.sql",
       "0015_adapter_execution_modes.sql",
       "0016_workflow_step_runs_revise_attempts.sql",
-      "0017_orchestrator_messages_chat_kinds.sql"
+      "0017_orchestrator_messages_chat_kinds.sql",
+      "0018_workflow_step_runs_crash_retries.sql"
     ]);
 
     const tables = (
@@ -823,7 +826,8 @@ describe("migration 0010 workflows", () => {
       "0014_workflow_step_runs_operator_selection.sql",
       "0015_adapter_execution_modes.sql",
       "0016_workflow_step_runs_revise_attempts.sql",
-      "0017_orchestrator_messages_chat_kinds.sql"
+      "0017_orchestrator_messages_chat_kinds.sql",
+      "0018_workflow_step_runs_crash_retries.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1352,7 +1356,8 @@ describe("migration 0012 orchestration transport", () => {
       "0014_workflow_step_runs_operator_selection.sql",
       "0015_adapter_execution_modes.sql",
       "0016_workflow_step_runs_revise_attempts.sql",
-      "0017_orchestrator_messages_chat_kinds.sql"
+      "0017_orchestrator_messages_chat_kinds.sql",
+      "0018_workflow_step_runs_crash_retries.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
