@@ -99,9 +99,12 @@ export class ShadowSessionManager {
       const fresh = session.output.slice(session.consumedUpTo);
       const block = extractActionBlock(fresh);
       if (block !== null) {
-        // Advance the high-water mark past this block so a later ask never re-reads it.
+        // Drop the consumed prefix (including this block) so session.output stays
+        // bounded on a long-lived session, then reset the high-water mark.
         const closeIdx = fresh.lastIndexOf(FENCE_CLOSE);
-        session.consumedUpTo += closeIdx >= 0 ? closeIdx + FENCE_CLOSE.length : fresh.length;
+        const consumedInFresh = closeIdx >= 0 ? closeIdx + FENCE_CLOSE.length : fresh.length;
+        session.output = session.output.slice(session.consumedUpTo + consumedInFresh);
+        session.consumedUpTo = 0;
         return { text: block };
       }
       if (Date.now() >= deadline) {
