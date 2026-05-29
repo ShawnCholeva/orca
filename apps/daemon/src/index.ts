@@ -114,6 +114,7 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
     sessionOutputStore,
     extractionRunner,
     daemonContext: daemonCtx,
+    resumeActiveRunsOnBoot: true,
   });
 
   try {

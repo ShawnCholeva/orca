@@ -715,6 +715,39 @@ export class OrchestratorService {
   }
 
   /**
+   * Re-launches the agent for a run's currently-active step. Used by boot-time
+   * resume: node-pty children die with the daemon, so on restart an active step's
+   * session is gone and must be respawned. No-op if the run/step is no longer
+   * active. spawnStepAgent is idempotent on selection (already-selected step is
+   * re-launched without re-selecting), so this just relaunches the session.
+   */
+  async respawnStepAgent(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    stepRunId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run || run.status !== "active") return;
+    const template = getTemplateById(db, run.templateId);
+    if (!template) return;
+    const stepRun = db
+      .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
+      .get(stepRunId) as StepRunRow | undefined;
+    if (!stepRun || stepRun.status !== "active") return;
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) return;
+    const goal = db
+      .prepare(
+        "SELECT id, title, description, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?"
+      )
+      .get(run.goalId) as GoalRow | undefined;
+    if (!goal) return;
+    await this.spawnStepAgent(db, now, { run, stepRun, stepTpl, template, goal }, options);
+  }
+
+  /**
    * Advances the run past the current step's produced output, then — when an
    * intermediate step becomes active — spawns the next step's agent. On the
    * terminal step, commitAdvanceOrComplete produces the complete_workflow_run

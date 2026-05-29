@@ -157,6 +157,7 @@ import { registerConflictRoutes } from './conflicts/routes.js';
 import { registerGoalBootstrapRoute } from './goals/bootstrap-route.js';
 import { startWorkflowRun } from './workflows/runs/usecases.js';
 import { OrchestratorService } from './workflows/orchestrator/service.js';
+import { resumeActiveRuns } from './workflows/orchestrator/resume.js';
 import { registerWorkflowTemplateRoutes } from './workflows/templates/routes.js';
 import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js';
@@ -202,6 +203,7 @@ export function createServer(
     extractionRunner?: ExtractionRunner;
     assembler?: SessionPreparationAssembler;
     daemonContext?: DaemonContext;
+    resumeActiveRunsOnBoot?: boolean;
   }
 ): FastifyInstance {
   const startedAt = new Date().toISOString();
@@ -464,6 +466,47 @@ export function createServer(
   );
   // Wire the late-binding ref so the onChunkAppended callback is live.
   _orchestratorServiceRef.current = orchestratorService;
+
+  // Boot-time resume (production only — gated so createServer in tests is inert).
+  // reconcileSessionsOnBoot has already marked stale running/starting sessions as
+  // terminal before this point, so in practice every active run's session is dead
+  // → respawn. reattach is a no-op because node-pty children cannot survive a
+  // daemon restart; reconcile + respawn cover recovery.
+  if (deps?.resumeActiveRunsOnBoot) {
+    void resumeActiveRuns({
+      listActiveRuns: async () => {
+        const rows = db.prepare(`
+          SELECT wr.id AS run_id, wr.goal_id, wr.current_step_run_id,
+                 (SELECT s.id FROM sessions s WHERE s.workflow_step_run_id = wr.current_step_run_id AND s.status IN ('running','starting') ORDER BY s.created_at DESC LIMIT 1) AS session_id
+          FROM workflow_runs wr
+          WHERE wr.status = 'active'
+        `).all() as Array<{ run_id: string; goal_id: string; current_step_run_id: string; session_id: string | null }>;
+        return rows.map((r) => ({
+          runId: r.run_id,
+          goalId: r.goal_id,
+          currentStepRunId: r.current_step_run_id,
+          sessionId: r.session_id,
+        }));
+      },
+      isSessionAlive: async (id) => {
+        const row = db.prepare("SELECT status FROM sessions WHERE id = ?").get(id) as { status: string } | undefined;
+        return row?.status === "running" || row?.status === "starting";
+      },
+      reattach: async () => {
+        // node-pty cannot reattach across restart; reconcile already marked stale
+        // sessions terminal. No-op.
+      },
+      respawn: async ({ runId, stepRunId }) => {
+        await orchestratorService.respawnStepAgent(
+          db,
+          daemonContext.now ?? (() => new Date().toISOString()),
+          runId,
+          stepRunId,
+          { bus: eventBus, idFactory: daemonContext.idFactory }
+        );
+      },
+    }).catch((err) => console.error("[resume] boot resume failed", err));
+  }
 
   // Subscribe to session terminal events → drive workflow step synthesis.
   eventBus.subscribe((event) => {

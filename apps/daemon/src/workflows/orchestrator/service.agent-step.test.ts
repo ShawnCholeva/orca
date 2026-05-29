@@ -585,6 +585,32 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     );
   });
 
+  it("respawnStepAgent re-launches the active step's agent", async () => {
+    const { db } = setupHarness();
+    setupFirstStepRun(db);
+    // Mark the active step as already operator-selected (as it would be after a
+    // prior boot launched it).
+    db.prepare(
+      "UPDATE workflow_step_runs SET selected_operator_id = 'agent:claude-code', selected_provider_id = NULL, selected_model_id = 'claude-haiku-4-5', operator_selected_at = ? WHERE id = 'step-1'"
+    ).run(NOW);
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-respawn" }));
+    const launcher = makeLauncher(launchFn);
+    const service = makeAgentService(launcher);
+
+    await service.respawnStepAgent(db, () => NOW, "run-1", "step-1");
+
+    expect(launchFn).toHaveBeenCalledOnce();
+    expect(launchFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowRunId: "run-1",
+        workflowStepRunId: "step-1",
+        operatorId: "agent:claude-code",
+        operatorKind: "agent",
+      })
+    );
+  });
+
   it("advanceToNextStep on the terminal step yields complete_workflow_run, no further spawn", async () => {
     const { db } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" }); // single terminal step (ordinal 0)
