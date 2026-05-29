@@ -38,6 +38,17 @@ export interface MediatorInvokeInput {
 export class OrchestratorMediator {
   constructor(private readonly deps: MediatorDeps) {}
 
+  async invokeWithBackoff(input: MediatorInvokeInput, attempt = 0): Promise<OrchestratorAction> {
+    try {
+      return await this.invoke(input);
+    } catch (err) {
+      if (attempt >= 5) throw err;
+      const backoffMs = Math.min(60_000, 500 * Math.pow(2, attempt));
+      await new Promise((r) => setTimeout(r, backoffMs));
+      return this.invokeWithBackoff(input, attempt + 1);
+    }
+  }
+
   async invoke(input: MediatorInvokeInput): Promise<OrchestratorAction> {
     const context = this.deps.buildContext({
       goalId: input.goalId,

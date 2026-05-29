@@ -188,7 +188,7 @@ export class OrchestratorService {
     },
     sessionOutputStore?: SessionOutputStore,
     private readonly stepDispatch?: StepDispatchCapabilities,
-    private readonly orchestratorMediator?: Pick<OrchestratorMediator, "invoke">,
+    private readonly orchestratorMediator?: Pick<OrchestratorMediator, "invoke"> & Partial<Pick<OrchestratorMediator, "invokeWithBackoff">>,
     private readonly agentInput?: (sessionId: string, text: string) => void | Promise<void>
   ) {
     this.sessionOutputStore = sessionOutputStore ?? NULL_OUTPUT_STORE;
@@ -603,15 +603,27 @@ export class OrchestratorService {
     const adapterId = (stepRun.selected_operator_id ?? "").replace(/^agent:/, "");
     const modelId = stepRun.selected_model_id ?? "";
 
-    const action = await this.orchestratorMediator.invoke({
-      triggerKind: "user_message",
-      goalId: args.goalId,
-      runId: run.id,
-      stepRunId: stepRun.id,
-      adapterId,
-      modelId,
-      triggerPayload: { userMessage: args.body },
-    });
+    const invoke = this.orchestratorMediator.invokeWithBackoff?.bind(this.orchestratorMediator) ?? this.orchestratorMediator.invoke.bind(this.orchestratorMediator);
+
+    let action;
+    try {
+      action = await invoke({
+        triggerKind: "user_message",
+        goalId: args.goalId,
+        runId: run.id,
+        stepRunId: stepRun.id,
+        adapterId,
+        modelId,
+        triggerPayload: { userMessage: args.body },
+      });
+    } catch (err) {
+      this.postOrchestratorMessage(
+        db, now, run.goalId,
+        `Orchestrator-LLM unavailable after retries; pausing — last error: ${err instanceof Error ? err.message : "unknown"}`,
+        options
+      );
+      return;
+    }
 
     // Live session for the current step (needed for forward_to_agent / revise).
     const sessionId =
