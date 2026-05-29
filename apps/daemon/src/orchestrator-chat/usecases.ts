@@ -200,7 +200,7 @@ function readCurrentStep(
   );
 }
 
-function insertMessageWithEvent(
+export function insertMessageWithEvent(
   ctx: OrchestratorChatCtx,
   message: {
     id: string;

@@ -70,7 +70,7 @@ import {
   updateGoalOrchestratorModel,
   ValidationError
 } from './goals.js';
-import { eventBus, listEventsSince } from './events.js';
+import { eventBus, listEventsSince, type EventBus } from './events.js';
 import { getGoalRefinement } from './goal-refinements.js';
 import { inspectWorkspace } from './workspaces/inspect.js';
 import { WorkspaceInspectionError } from './workspaces/errors.js';
@@ -164,6 +164,8 @@ import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js'
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
+import { insertMessageWithEvent } from './orchestrator-chat/usecases.js';
+import { registerOrchestratorHookRoutes } from './orchestrator-hooks/routes.js';
 import { ShadowSessionManager, shadowSessionId } from './orchestrator-llm/shadow-session.js';
 import { ShadowSessionLlmClient } from './orchestrator-llm/shadow-llm-client.js';
 import { OrchestratorMediator } from './orchestrator-llm/mediator.js';
@@ -479,6 +481,14 @@ export function createServer(
       return { command, args: [], env, cwd };
     },
   });
+  // Update the hook endpoint URL with the actual bound port after listen.
+  server.addHook("onListen", async () => {
+    const addr = server.server.address();
+    if (addr && typeof addr === "object" && typeof addr.port === "number") {
+      shadowSessions.setDaemonPort(addr.port);
+    }
+  });
+
   const shadowClient = new ShadowSessionLlmClient(shadowSessions, { timeoutMs: 60_000 });
   const orchestratorMediator = new OrchestratorMediator({
     llm: shadowClient,
@@ -534,10 +544,6 @@ export function createServer(
         // sessions terminal. No-op.
       },
       respawn: async ({ runId, stepRunId, goalId }) => {
-        // Best-effort: re-spawn the shadow orchestrator session for this goal.
-        void shadowSessions.spawn(goalId).catch((err) =>
-          console.error("[resume] shadow spawn failed for goal", goalId, err)
-        );
         await orchestratorService.respawnStepAgent(
           db,
           daemonContext.now ?? (() => new Date().toISOString()),
@@ -1034,7 +1040,26 @@ export function createServer(
     modelProviderRegistry: daemonContext.modelProviderRegistry,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
-    shadowAsk: (goalId, input) => shadowSessions.ask(goalId, input),
+    shadowAsk: async (goalId, input) => {
+      await shadowSessions.spawn(goalId);
+      return shadowSessions.ask(goalId, input);
+    },
+    resolveOrchestratorMode: (provider) => {
+      const adapterId =
+        provider === "orca/anthropic" ? "claude-code"
+        : provider === "orca/openai" ? "codex"
+        : provider === "orca/google-gemini" ? "gemini-cli"
+        : "claude-code";
+      try {
+        return daemonContext.stepDispatchCapabilities.resolveMode(adapterId).mode === "shadow_session"
+          ? "shadow_session" : "one_shot";
+      } catch {
+        return "one_shot";
+      }
+    },
+    onOrchestratorReply: (goalId, body) => {
+      postOrchestratorChatReply(db, eventBus, daemonContext, goalId, body);
+    },
     onUserMessage: async (goalId, body) => {
       await orchestratorService.onUserMessage(
         getDatabase(),
@@ -1043,6 +1068,12 @@ export function createServer(
         { bus: eventBus, idFactory: daemonContext.idFactory }
       );
     },
+  });
+
+  // ---- Orchestrator hook endpoint ----
+
+  registerOrchestratorHookRoutes(server, {
+    resolvePending: (goalId, result) => shadowSessions.resolvePending(goalId, result),
   });
 
   // ---- Orchestration transport routes ----
@@ -1450,4 +1481,24 @@ export function createServer(
   });
 
   return server;
+}
+
+function postOrchestratorChatReply(
+  db: ReturnType<typeof getDatabase>,
+  bus: EventBus,
+  ctx: DaemonContext,
+  goalId: string,
+  body: string
+): void {
+  insertMessageWithEvent(
+    { db, bus, modelProviderRegistry: ctx.modelProviderRegistry, now: ctx.now, idFactory: ctx.idFactory },
+    {
+      id: ctx.idFactory(),
+      goalId,
+      role: "orchestrator",
+      body,
+      correlationId: ctx.idFactory(),
+      createdAt: ctx.now(),
+    }
+  );
 }
