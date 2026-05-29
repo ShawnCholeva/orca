@@ -455,13 +455,22 @@ export function createServer(
   const shadowPtyManager = new NodePtyManager();
   const shadowSessions = new ShadowSessionManager({
     ptyManager: shadowPtyManager,
-    resolveSpawn: async (goalId) => {
+    shadowRoot: path.join(config.dataDir, "shadow"),
+    daemonPort: config.port,
+    isReady: async () => {
       const adapter = adapterRegistry.get("claude-code");
-      if (!adapter) throw new Error("claude-code adapter not registered");
-      const ws = listWorkspacesByGoal(db, goalId)[0];
-      const workspacePath = ws?.path ?? process.cwd();
-      const spawn = await adapter.resolveSpawn({ goalId, sessionId: shadowSessionId(goalId), workspacePath });
-      return { command: spawn.command, args: spawn.args, env: spawn.env, cwd: spawn.cwd };
+      if (!adapter) return false;
+      const step = await adapter.checkAuth();
+      return step.ok;
+    },
+    resolveSpawnCommand: (cwd) => {
+      // goalId is the basename of the shadow dir (shadowRoot/<goalId>)
+      const goalId = path.basename(cwd);
+      const env: Record<string, string> = {};
+      if (process.env["PATH"]) env["PATH"] = process.env["PATH"];
+      env["ORCA_GOAL_ID"] = goalId;
+      env["ORCA_SESSION_ID"] = shadowSessionId(goalId);
+      return { command: "claude", args: [], env, cwd };
     },
   });
   const shadowClient = new ShadowSessionLlmClient(shadowSessions, { timeoutMs: 60_000 });

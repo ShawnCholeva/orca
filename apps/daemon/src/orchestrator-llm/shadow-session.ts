@@ -1,17 +1,15 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { PtyHandle, PtyManager } from "../pty/types.js";
 import { extractActionBlock } from "./sentinel.js";
-
-export interface ShadowSpawnCommand {
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-  cwd: string;
-}
+import { buildShadowHookSettings } from "./shadow-hook-settings.js";
 
 export interface ShadowSessionDeps {
   ptyManager: PtyManager;
-  /** Resolves the spawn command for the goal's orchestrator adapter (claude-code). */
-  resolveSpawn: (goalId: string) => ShadowSpawnCommand | Promise<ShadowSpawnCommand>;
+  shadowRoot: string;                 // e.g. ~/.orca/shadow
+  daemonPort: number;                 // bound port; mutable via setDaemonPort
+  isReady: () => Promise<boolean>;    // ()=>true in tests; ClaudeCodeAdapter.checkAuth in prod
+  resolveSpawnCommand: (cwd: string) => { command: string; args: string[]; env: Record<string, string>; cwd: string };
   cols?: number;
   rows?: number;
 }
@@ -48,10 +46,21 @@ export class ShadowSessionManager {
 
   /** Spawns the goal's shadow PTY (idempotent). Returns a stable session id. */
   async spawn(goalId: string): Promise<string> {
-    const existing = this.sessions.get(goalId);
-    if (existing) return shadowSessionId(goalId);
+    if (this.sessions.has(goalId)) return shadowSessionId(goalId);
 
-    const cmd = await this.deps.resolveSpawn(goalId);
+    if (!(await this.deps.isReady())) {
+      throw new Error("orchestrator shadow not ready: sign in to Claude Code");
+    }
+
+    const dir = join(this.deps.shadowRoot, goalId);
+    mkdirSync(join(dir, ".claude"), { recursive: true });
+    writeFileSync(
+      join(dir, ".claude", "settings.local.json"),
+      JSON.stringify(buildShadowHookSettings({ goalId, port: this.deps.daemonPort }), null, 2),
+      "utf8",
+    );
+
+    const cmd = this.deps.resolveSpawnCommand(dir);
     const { handle, events } = this.deps.ptyManager.start({
       command: cmd.command,
       args: cmd.args,
@@ -61,9 +70,15 @@ export class ShadowSessionManager {
       rows: this.deps.rows ?? 40,
     });
     const session: Session = { handle, output: "", disposeData: () => {}, systemSent: false, queue: Promise.resolve(), pending: null };
+    let trustAnswered = false;
     session.disposeData = events.onData((chunk) => {
       session.output += chunk.toString("utf8");
       if (session.output.length > 200_000) session.output = session.output.slice(-100_000);
+      // Best-effort: answer the one-time folder-trust prompt so the session becomes usable.
+      if (!trustAnswered && /trust|do you want to proceed|press enter/i.test(session.output.slice(-2000))) {
+        trustAnswered = true;
+        try { handle.write(Buffer.from("\r", "utf8")); } catch { /* ignore */ }
+      }
     });
     events.onExit(() => {
       const s = this.sessions.get(goalId);
@@ -80,6 +95,10 @@ export class ShadowSessionManager {
     });
     this.sessions.set(goalId, session);
     return shadowSessionId(goalId);
+  }
+
+  setDaemonPort(port: number): void {
+    this.deps.daemonPort = port;
   }
 
   async terminate(goalId: string): Promise<void> {

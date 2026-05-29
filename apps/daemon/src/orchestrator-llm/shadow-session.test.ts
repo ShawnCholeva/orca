@@ -1,12 +1,19 @@
 import { describe, it, expect } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { FakePtyManager, controlFakePty } from "../pty/fake.js";
 import { ShadowSessionManager } from "./shadow-session.js";
 
 function mgr() {
   const pty = new FakePtyManager();
+  const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
   const m = new ShadowSessionManager({
     ptyManager: pty,
-    resolveSpawn: () => ({ command: "claude", args: [], env: {}, cwd: "/tmp" }),
+    shadowRoot: root,
+    daemonPort: 8787,
+    isReady: async () => true,
+    resolveSpawnCommand: (cwd) => ({ command: "claude", args: [], env: {}, cwd }),
   });
   return { pty, m };
 }
