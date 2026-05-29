@@ -6,7 +6,8 @@ function makeDeps(overrides: Partial<GoalBootstrapRouteDeps> = {}): GoalBootstra
   return {
     createGoalFn: vi.fn().mockResolvedValue({ id: "goal-1" }),
     startWorkflowRunFn: vi.fn().mockReturnValue({ id: "run-1", goalId: "goal-1" }),
-    requestNextDecisionFn: vi.fn().mockResolvedValue({ queued: true }),
+    spawnOrchestratorSessionFn: vi.fn().mockResolvedValue("orchsess-1"),
+    startWorkflowFirstStepFn: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -73,9 +74,10 @@ describe("POST /v1/goals/create-and-start-workflow", () => {
     expect(body.bootstrapError.phase).toBe("startWorkflowRun");
   });
 
-  it("returns 201 with ok:false + phase requestDecision when requestNextDecision throws", async () => {
+  it("returns 201 with ok:false + phase startFirstStep when startWorkflowFirstStep throws", async () => {
     const deps = makeDeps({
-      requestNextDecisionFn: vi.fn().mockRejectedValue(new Error("orchestrator error")),
+      spawnOrchestratorSessionFn: vi.fn().mockResolvedValue("orchsess-1"),
+      startWorkflowFirstStepFn: vi.fn().mockRejectedValue(new Error("first step error")),
     });
     const server = await buildServer(deps);
     const res = await server.inject({
@@ -93,7 +95,26 @@ describe("POST /v1/goals/create-and-start-workflow", () => {
     expect(body.ok).toBe(false);
     expect(body.goalId).toBe("goal-1");
     expect(body.workflowRunId).toBe("run-1");
-    expect(body.bootstrapError.phase).toBe("requestDecision");
+    expect(body.bootstrapError.phase).toBe("startFirstStep");
+  });
+
+  it("bootstrap spawns orchestrator session and first step's agent session", async () => {
+    const deps = makeDeps();
+    const server = await buildServer(deps);
+    const res = await server.inject({
+      method: "POST",
+      url: "/v1/goals/create-and-start-workflow",
+      payload: VALID_BODY,
+    });
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body) as { ok: boolean; goalId: string; workflowRunId: string };
+    expect(body.ok).toBe(true);
+    expect(
+      (deps.spawnOrchestratorSessionFn as ReturnType<typeof vi.fn>).mock.calls.length
+    ).toBe(1);
+    expect(
+      (deps.startWorkflowFirstStepFn as ReturnType<typeof vi.fn>).mock.calls.length
+    ).toBe(1);
   });
 
   it("propagates createGoal validation errors as 400", async () => {

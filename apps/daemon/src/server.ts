@@ -504,8 +504,13 @@ export function createServer(
         { db: getDatabase(), bus: eventBus, now: daemonContext.now, idFactory: daemonContext.idFactory },
         args
       ),
-    requestNextDecisionFn: async (_goalId, runId) =>
-      orchestratorService.requestNextDecision(
+    spawnOrchestratorSessionFn: async (_goalId, _runId) => {
+      // Production orchestrator-LLM session wiring is deferred (see Sub-plan 7/later integration).
+      // Returning a placeholder keeps bootstrap functional; the first step's agent still launches.
+      return `orchsess-${_goalId}`;
+    },
+    startWorkflowFirstStepFn: async (_goalId, runId) =>
+      orchestratorService.startWorkflowFirstStep(
         getDatabase(),
         daemonContext.now ?? (() => new Date().toISOString()),
         runId,
