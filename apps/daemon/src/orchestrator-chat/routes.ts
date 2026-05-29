@@ -23,6 +23,8 @@ export interface OrchestratorChatRouteDeps {
   now?: () => string;
   idFactory?: () => string;
   shadowAsk?: (goalId: string, input: { systemPrompt: string; userPrompt: string; timeoutMs: number }) => Promise<{ text: string }>;
+  resolveOrchestratorMode?: (provider: string) => "shadow_session" | "one_shot";
+  onOrchestratorReply?: (goalId: string, body: string) => void;
   onUserMessage?: (goalId: string, body: string) => Promise<void>;
 }
 
@@ -70,6 +72,8 @@ export function registerOrchestratorChatRoutes(
           now: deps.now,
           idFactory: deps.idFactory,
           shadowAsk: deps.shadowAsk,
+          resolveOrchestratorMode: deps.resolveOrchestratorMode,
+          onOrchestratorReply: deps.onOrchestratorReply,
         },
         goalId,
         parsed.data

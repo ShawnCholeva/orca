@@ -24,6 +24,8 @@ export interface OrchestratorChatCtx {
     goalId: string,
     input: { systemPrompt: string; userPrompt: string; timeoutMs: number }
   ) => Promise<{ text: string }>;
+  resolveOrchestratorMode?: (provider: string) => "shadow_session" | "one_shot";
+  onOrchestratorReply?: (goalId: string, body: string) => void;
   now?: () => string;
   idFactory?: () => string;
 }
@@ -108,9 +110,12 @@ export async function createOrchestratorMessage(
     return CreateOrchestratorMessageResponse.parse({ message: userMessage, reply: null });
   }
 
-  let replyText: string;
-  if (goal.orchestrator_provider === "orca/anthropic") {
-    if (!ctx.shadowAsk) throw new OrchestratorChatProviderUnavailableError(goal.orchestrator_provider);
+  const mode = ctx.resolveOrchestratorMode?.(goal.orchestrator_provider) ?? "one_shot";
+
+  if (mode === "shadow_session") {
+    if (!ctx.shadowAsk || !ctx.onOrchestratorReply) {
+      throw new OrchestratorChatProviderUnavailableError(goal.orchestrator_provider);
+    }
     const sys = [
       "You are Orca's goal orchestrator.",
       "Answer the user's freeform guidance message for the current goal.",
@@ -118,49 +123,43 @@ export async function createOrchestratorMessage(
       'Return JSON: {"replyText":"..."}.',
       "Output protocol: wrap that JSON in a fenced ```orca:action block and emit nothing after the closing fence.",
     ].join("\n");
-    const usr = JSON.stringify({
-      goal: { id: goal.id, title: goal.title, description: goal.description },
-      userMessage: parsed.body,
-    });
-    const out = await ctx.shadowAsk(goalId, { systemPrompt: sys, userPrompt: usr, timeoutMs: 60_000 });
-    try {
-      replyText = GuidanceReply.parse(JSON.parse(out.text)).replyText;
-    } catch {
-      throw new OrchestratorChatProviderUnavailableError(goal.orchestrator_provider);
-    }
-  } else {
-    const provider = ctx.modelProviderRegistry.get(goal.orchestrator_provider);
-    if (!provider) throw new OrchestratorChatProviderUnavailableError(goal.orchestrator_provider);
-    const currentStep = readCurrentStep(ctx.db, goal.active_workflow_run_id);
-    const completion = await provider.complete<unknown>({
-      model: goal.orchestrator_model,
-      systemPrompt: [
-        "You are Orca's goal orchestrator.",
-        "Answer the user's freeform guidance message for the current goal.",
-        "This is chat-only guidance: do not claim that recommendations, workflow steps, artifacts, or decisions were changed.",
-        "Return only structured JSON matching OrchestratorGuidanceReply.",
-      ].join("\n"),
-      userPrompt: JSON.stringify({
-        goal: {
-          id: goal.id,
-          title: goal.title,
-          description: goal.description,
-        },
-        activeWorkflowRunId: goal.active_workflow_run_id,
-        currentStep,
-        userMessage: parsed.body,
-      }),
-      responseSchemaName: "OrchestratorGuidanceReply",
-      responseSchema: GuidanceReply,
-      maxOutputTokens: 800,
-      temperature: 0.2,
-      callMetadata: {
-        goalId,
-      },
-    });
-    replyText = GuidanceReply.parse(completion.parsed).replyText;
+    const usr = JSON.stringify({ goal: { id: goal.id, title: goal.title, description: goal.description }, userMessage: parsed.body });
+    void ctx.shadowAsk(goalId, { systemPrompt: sys, userPrompt: usr, timeoutMs: 120_000 })
+      .then((out) => {
+        let body: string;
+        try { body = GuidanceReply.parse(JSON.parse(out.text)).replyText; }
+        catch { body = "Orchestrator returned an unreadable reply."; }
+        ctx.onOrchestratorReply!(goalId, body);
+      })
+      .catch(() => ctx.onOrchestratorReply!(goalId, "Orchestrator is unavailable right now. Please try again."));
+    return CreateOrchestratorMessageResponse.parse({ message: userMessage, reply: null });
   }
 
+  // one_shot (SDK) — synchronous (existing path)
+  const provider = ctx.modelProviderRegistry.get(goal.orchestrator_provider);
+  if (!provider) throw new OrchestratorChatProviderUnavailableError(goal.orchestrator_provider);
+  const currentStep = readCurrentStep(ctx.db, goal.active_workflow_run_id);
+  const completion = await provider.complete<unknown>({
+    model: goal.orchestrator_model,
+    systemPrompt: [
+      "You are Orca's goal orchestrator.",
+      "Answer the user's freeform guidance message for the current goal.",
+      "This is chat-only guidance: do not claim that recommendations, workflow steps, artifacts, or decisions were changed.",
+      "Return only structured JSON matching OrchestratorGuidanceReply.",
+    ].join("\n"),
+    userPrompt: JSON.stringify({
+      goal: { id: goal.id, title: goal.title, description: goal.description },
+      activeWorkflowRunId: goal.active_workflow_run_id,
+      currentStep,
+      userMessage: parsed.body,
+    }),
+    responseSchemaName: "OrchestratorGuidanceReply",
+    responseSchema: GuidanceReply,
+    maxOutputTokens: 800,
+    temperature: 0.2,
+    callMetadata: { goalId },
+  });
+  const replyText = GuidanceReply.parse(completion.parsed).replyText;
   const replyMessage = insertMessageWithEvent(ctx, {
     id: idFactory(),
     goalId,
@@ -169,11 +168,7 @@ export async function createOrchestratorMessage(
     correlationId,
     createdAt: now(),
   });
-
-  return CreateOrchestratorMessageResponse.parse({
-    message: userMessage,
-    reply: replyMessage,
-  });
+  return CreateOrchestratorMessageResponse.parse({ message: userMessage, reply: replyMessage });
 }
 
 function readGoal(db: Database.Database, goalId: string): GoalRow | null {
