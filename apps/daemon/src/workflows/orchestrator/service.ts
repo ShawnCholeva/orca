@@ -45,6 +45,7 @@ import { detectPendingAgentQuestion } from "./agent-interview.js";
 import { assembleWorkspaceContext } from "./workspace-context.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
 import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.js";
+import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
 import { judgeAgentResponse } from "./judgement.js";
 import { extractOrcaStepCompleteBlock } from "./orca-output.js";
 import { incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
@@ -459,7 +460,7 @@ export class OrchestratorService {
           stagedEvents
         );
         this.publish(options.bus, stagedEvents);
-        await this.commitAdvanceOrComplete(db, now, ctx, options);
+        await this.advanceToNextStep(db, now, run.id, options);
         return;
       }
       case "revise_step": {
@@ -534,6 +535,162 @@ export class OrchestratorService {
       } satisfies DomainEvent;
     })();
     options.bus?.publish(event);
+  }
+
+  /**
+   * Bootstraps a workflow run by spawning the agent for its first step (ordinal
+   * 0). Used by the run-bootstrap route. The current step run must already point
+   * at the first step (created at run start).
+   */
+  async startWorkflowFirstStep(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run) throw new OrchestratorRunNotFoundError(runId);
+    const template = getTemplateById(db, run.templateId);
+    if (!template) throw new OrchestratorTemplateNotFoundError(run.templateId);
+    const firstStep = template.steps.find((s) => s.ordinal === 0);
+    if (!firstStep) throw new Error(`template has no first step: ${run.templateId}`);
+    const stepRun = readStepRun(db, run.currentStepRunId);
+    const goal = readGoal(db, run.goalId);
+    await this.spawnStepAgent(
+      db,
+      now,
+      { run, stepRun, stepTpl: firstStep, template, goal },
+      options
+    );
+  }
+
+  /**
+   * Advances the run past the current step's produced output, then — when an
+   * intermediate step becomes active — spawns the next step's agent. On the
+   * terminal step, commitAdvanceOrComplete produces the complete_workflow_run
+   * recommendation and no further agent is spawned.
+   *
+   * Composition note: commitAdvanceOrComplete, for an intermediate step, calls
+   * the free-function advanceToNextStep (moving currentStepRunId) and then
+   * recurses via requestNextDecision. That recursion deterministically *selects*
+   * the next step's operator but does NOT launch a session. spawnStepAgent is
+   * therefore idempotent on selection (it skips re-selecting an already-selected
+   * step) so the operator is selected exactly once and the agent launched
+   * exactly once.
+   */
+  async advanceToNextStep(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run) throw new OrchestratorRunNotFoundError(runId);
+    const stepRun = readStepRun(db, run.currentStepRunId);
+    const template = getTemplateById(db, run.templateId);
+    if (!template) throw new OrchestratorTemplateNotFoundError(run.templateId);
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) throw new OrchestratorStepNotFoundError(stepRun.id);
+    const goal = readGoal(db, run.goalId);
+
+    await this.commitAdvanceOrComplete(db, now, { run, stepRun, stepTpl, template, goal }, options);
+
+    // If a NEW intermediate step is now active, spawn its agent (exactly once).
+    const after = getWorkflowRunById(db, runId);
+    if (
+      after &&
+      after.status === "active" &&
+      after.currentStepRunId &&
+      after.currentStepRunId !== stepRun.id
+    ) {
+      const nextStepRun = readStepRun(db, after.currentStepRunId);
+      const nextTpl = template.steps.find((s) => s.id === nextStepRun.step_template_id);
+      if (nextTpl) {
+        await this.spawnStepAgent(
+          db,
+          now,
+          { run: after, stepRun: nextStepRun, stepTpl: nextTpl, template, goal },
+          options
+        );
+      }
+    }
+  }
+
+  /**
+   * Resolves the deterministic per-step agent dispatch, persists the selection
+   * (idempotent — skipped if the step is already operator-selected), then
+   * launches a session for the step with a composed initial prompt.
+   */
+  private async spawnStepAgent(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+    },
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    if (!this.stepDispatch) throw new Error("step dispatch capabilities not configured");
+    const dispatch = await resolveStepDispatch({
+      preferences: ctx.stepTpl.agentPreference,
+      isAdapterReady: (id) => this.stepDispatch!.isAdapterReady(id),
+      supportsModel: (id, mid) => this.stepDispatch!.supportsModel(id, mid),
+      resolveMode: (id) => this.stepDispatch!.resolveMode(id),
+    });
+
+    // Persist selection only when the step has not already been operator-selected
+    // (commitAdvanceOrComplete's recursion may have selected it already).
+    if (!ctx.stepRun.selected_operator_id) {
+      this.commitDeterministicStepSelection(db, now, ctx, dispatch, options);
+    }
+
+    await this.launcher.launch({
+      goalId: ctx.goal.id,
+      workflowRunId: ctx.run.id,
+      workflowStepRunId: ctx.stepRun.id,
+      operatorId: "agent:" + dispatch.adapterId,
+      operatorKind: "agent",
+      objective: composeAgentInitialPrompt({
+        stepInstructions: ctx.stepTpl.instructions,
+        outputSchema: ctx.stepTpl.outputSchema,
+        priorStepArtifacts: this.collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.ordinal),
+      }),
+    });
+  }
+
+  /**
+   * Reads step_output artifacts for steps with ordinal < the current step,
+   * returning each as { stepId, outputJson }. stepId is the step_template_id of
+   * the artifact's step run; outputJson is the parsed artifact body.
+   */
+  private collectPriorStepArtifacts(
+    db: Database.Database,
+    runId: string,
+    ordinal: number
+  ): Array<{ stepId: string; outputJson: unknown }> {
+    const stepRuns = db
+      .prepare(
+        "SELECT id, step_template_id, ordinal FROM workflow_step_runs WHERE workflow_run_id = ?"
+      )
+      .all(runId) as Array<{ id: string; step_template_id: string; ordinal: number }>;
+    const byId = new Map(stepRuns.map((s) => [s.id, s]));
+    const out: Array<{ stepId: string; outputJson: unknown }> = [];
+    for (const artifact of listArtifactsForRun(db, runId)) {
+      if (artifact.type !== "step_output" || !artifact.stepRunId) continue;
+      const owner = byId.get(artifact.stepRunId);
+      if (!owner || owner.ordinal >= ordinal) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(artifact.body);
+      } catch {
+        parsed = artifact.body;
+      }
+      out.push({ stepId: owner.step_template_id, outputJson: parsed });
+    }
+    return out;
   }
 
   async requestNextDecision(

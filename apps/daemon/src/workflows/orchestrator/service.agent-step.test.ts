@@ -404,3 +404,152 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     expect(agentInput).not.toHaveBeenCalled();
   });
 });
+
+/** Seed a run whose current step (step-1, ordinal 0) is the FIRST step, unselected. */
+function setupFirstStepRun(db: Database.Database) {
+  const step = makeStep({
+    id: "implement",
+    ordinal: 0,
+    name: "Implement",
+    instructions: "Write the implementation.",
+    outputSchema: [{ key: "result", type: "string", required: true }],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+  });
+
+  db.prepare(
+    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+  ).run("goal-1", NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', 'desc', 1, 1, 1, ?, '[]', ?, ?)"
+  ).run(JSON.stringify([step]), NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)"
+  ).run(NOW);
+  db.prepare(
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-1', 'goal-1', 'run-1', ?, 0, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1', NULL, NULL, NULL, NULL)"
+  ).run(step.id, NOW);
+}
+
+/**
+ * Seed a 2-step run with step-1 active (ordinal 0) holding a valid step_output,
+ * and step-2 (ordinal 1) already created (pending) so commitAdvanceOrComplete
+ * advances currentStepRunId to it.
+ */
+function setupTwoStepRunWithOutput(db: Database.Database) {
+  const step1 = makeStep({
+    id: "plan",
+    ordinal: 0,
+    name: "Plan",
+    instructions: "Plan the work.",
+    outputSchema: [{ key: "plan", type: "string", required: true }],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+  });
+  const step2 = makeStep({
+    id: "build",
+    ordinal: 1,
+    name: "Build",
+    instructions: "Implement the plan.",
+    outputSchema: [{ key: "result", type: "string", required: true }],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+  });
+
+  db.prepare(
+    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+  ).run("goal-1", NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', 'desc', 1, 1, 1, ?, '[]', ?, ?)"
+  ).run(JSON.stringify([step1, step2]), NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)"
+  ).run(NOW);
+  // step-1: active, selected, with step_output. step-2 is created by
+  // advanceToNextStep (the usecase generates a fresh UUID for the next step run).
+  db.prepare(
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-1', 'goal-1', 'run-1', ?, 0, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1', 'agent:claude-code', NULL, 'claude-haiku-4-5', ?)"
+  ).run(step1.id, NOW, NOW);
+  // step_output artifact on step-1
+  db.prepare(
+    "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-1', 'goal-1', 'run-1', 'step-1', 'step_output', 'Plan', ?, 'orchestrator', NULL, NULL, NULL, ?)"
+  ).run(JSON.stringify({ plan: "do the thing", _completion: {} }), NOW);
+}
+
+describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () => {
+  it("startWorkflowFirstStep persists selection + invokes launcher", async () => {
+    const { db } = setupHarness();
+    setupFirstStepRun(db);
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-x" }));
+    const launcher = makeLauncher(launchFn);
+    const service = makeAgentService(launcher);
+
+    await service.startWorkflowFirstStep(db, () => NOW, "run-1");
+
+    const row = db
+      .prepare(
+        "SELECT selected_operator_id, selected_model_id FROM workflow_step_runs WHERE id = 'step-1'"
+      )
+      .get() as { selected_operator_id: string | null; selected_model_id: string | null };
+    expect(row.selected_operator_id).toBe("agent:claude-code");
+    expect(row.selected_model_id).toBe("claude-haiku-4-5");
+
+    expect(launchFn).toHaveBeenCalledOnce();
+    expect(launchFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorId: "agent:claude-code",
+        operatorKind: "agent",
+        objective: expect.stringContaining("Write the implementation."),
+      })
+    );
+    expect(launchFn).toHaveBeenCalledWith(
+      expect.objectContaining({ objective: expect.stringContaining("orca:step-complete") })
+    );
+  });
+
+  it("advanceToNextStep spawns the next step's agent for an intermediate step", async () => {
+    const { db } = setupHarness();
+    setupTwoStepRunWithOutput(db);
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-x" }));
+    const launcher = makeLauncher(launchFn);
+    const service = makeAgentService(launcher);
+
+    await service.advanceToNextStep(db, () => NOW, "run-1");
+
+    const run = db
+      .prepare("SELECT current_step_run_id FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { current_step_run_id: string };
+    expect(run.current_step_run_id).not.toBe("step-1");
+
+    // the advanced step run is for the second template step ("build")
+    const nextStep = db
+      .prepare("SELECT step_template_id FROM workflow_step_runs WHERE id = ?")
+      .get(run.current_step_run_id) as { step_template_id: string };
+    expect(nextStep.step_template_id).toBe("build");
+
+    expect(launchFn).toHaveBeenCalledOnce();
+    expect(launchFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorId: "agent:claude-code",
+        workflowStepRunId: run.current_step_run_id,
+      })
+    );
+  });
+
+  it("advanceToNextStep on the terminal step yields complete_workflow_run, no further spawn", async () => {
+    const { db } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" }); // single terminal step (ordinal 0)
+    // give the terminal step a step_output so commitAdvanceOrComplete completes
+    db.prepare(
+      "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-final', 'goal-1', 'run-1', 'step-1', 'step_output', 'Implement', ?, 'orchestrator', NULL, NULL, NULL, ?)"
+    ).run(JSON.stringify({ result: "done", _completion: {} }), NOW);
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-x" }));
+    const launcher = makeLauncher(launchFn);
+    const service = makeAgentService(launcher);
+
+    await service.advanceToNextStep(db, () => NOW, "run-1");
+
+    expect(recommendationCount(db, "complete_workflow_run")).toBe(1);
+    expect(launchFn).not.toHaveBeenCalled();
+  });
+});
