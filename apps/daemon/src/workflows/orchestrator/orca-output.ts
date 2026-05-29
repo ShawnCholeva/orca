@@ -25,3 +25,15 @@ export function parseOrcaOutputBlock(text: string): unknown | null {
     return null;
   }
 }
+
+export function extractOrcaStepCompleteBlock(text: string): unknown | null {
+  const re = /```orca:step-complete\s*\n([\s\S]*?)\n```/g;
+  let last: string | null = null;
+  for (const m of text.matchAll(re)) last = m[1] ?? null;
+  if (last === null) return null;
+  try {
+    return JSON.parse(last);
+  } catch {
+    return null;
+  }
+}
