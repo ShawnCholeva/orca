@@ -1019,7 +1019,7 @@ export type CreateOrchestratorMessageRequest = z.infer<
 export const CreateOrchestratorMessageResponse = z
   .object({
     message: OrchestratorChatMessage,
-    reply: OrchestratorChatMessage
+    reply: OrchestratorChatMessage.nullable()
   })
   .strict();
 export type CreateOrchestratorMessageResponse = z.infer<

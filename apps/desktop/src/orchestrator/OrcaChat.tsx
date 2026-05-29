@@ -289,7 +289,12 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     setMessageError(null);
     try {
       const response = await createOrchestratorMessage(selectedGoalId, { body });
-      setMessages((current) => appendMessages(current, [response.message, response.reply]));
+      setMessages((current) =>
+        appendMessages(
+          current,
+          response.reply ? [response.message, response.reply] : [response.message]
+        )
+      );
       setMessageDraft("");
     } catch (err) {
       setMessageError(toErrorMessage(err, "Failed to send message to Orca."));

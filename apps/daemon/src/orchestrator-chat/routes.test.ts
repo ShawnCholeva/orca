@@ -130,7 +130,7 @@ describe("orchestrator chat routes", () => {
     expect(response.statusCode).toBe(201);
     const parsed = CreateOrchestratorMessageResponse.parse(JSON.parse(response.body));
     expect(parsed.message.role).toBe("user");
-    expect(parsed.reply.role).toBe("orchestrator");
+    expect(parsed.reply?.role).toBe("orchestrator");
   });
 
   it("POST /v1/goals/:goalId/orchestrator-messages returns 409 when no model is configured", async () => {

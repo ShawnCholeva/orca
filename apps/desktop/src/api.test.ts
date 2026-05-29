@@ -719,7 +719,7 @@ describe("desktop api client", () => {
       body: "Need a rollout plan.",
     });
 
-    expect(response.reply.role).toBe("orchestrator");
+    expect(response.reply?.role).toBe("orchestrator");
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/orchestrator-messages");
     expect(init?.method).toBe("POST");
