@@ -1,8 +1,22 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { PtyHandle, PtyManager } from "../pty/types.js";
 import { extractActionBlock } from "./sentinel.js";
 import { buildShadowHookSettings } from "./shadow-hook-settings.js";
+
+// TEMP DIAGNOSTIC (revert after debugging): append shadow lifecycle to a file
+// the controller can read, since the daemon's stdout isn't accessible.
+function dbg(goalId: string, msg: string): void {
+  if (process.env["ORCA_SHADOW_DEBUG"] === "0") return;
+  try {
+    appendFileSync(
+      join(homedir(), ".orca", "shadow-debug.log"),
+      `${new Date().toISOString()} ${goalId.slice(0, 8)} ${msg}\n`,
+      "utf8",
+    );
+  } catch { /* ignore */ }
+}
 
 export interface ShadowSessionDeps {
   ptyManager: PtyManager;
@@ -64,6 +78,7 @@ export class ShadowSessionManager {
     );
 
     const cmd = this.deps.resolveSpawnCommand(dir);
+    dbg(goalId, `spawn cmd=${cmd.command} args=${JSON.stringify(cmd.args)} cwd=${cmd.cwd} port=${this.deps.daemonPort}`);
     const { handle, events } = this.deps.ptyManager.start({
       command: cmd.command,
       args: cmd.args,
@@ -82,6 +97,7 @@ export class ShadowSessionManager {
       if (readyDone) return;
       readyDone = true;
       if (readyTimer) clearTimeout(readyTimer);
+      dbg(goalId, `ready resolved (outputLen=${this.sessions.get(goalId)?.output.length ?? 0})`);
       resolveReady();
     };
     const readyHardCap = setTimeout(settleReady, this.deps.readyMaxMs ?? 8000);
@@ -102,7 +118,8 @@ export class ShadowSessionManager {
         readyTimer = setTimeout(settleReady, this.deps.readyQuietMs ?? 1200);
       }
     });
-    events.onExit(() => {
+    events.onExit((exit) => {
+      dbg(goalId, `EXIT code=${exit?.exitCode} signal=${exit?.signal} outputTail=${JSON.stringify((this.sessions.get(goalId)?.output ?? "").slice(-1000))}`);
       clearTimeout(readyHardCap);
       settleReady(); // harmless if already done; ensures ready resolves so askOnce can re-check
       const s = this.sessions.get(goalId);
@@ -155,13 +172,15 @@ export class ShadowSessionManager {
     if (!session) throw new Error(`no shadow session for goal ${goalId}`);
     await session.ready;
     const live = this.getSession(goalId);
-    if (!live) throw new Error(`shadow session for goal ${goalId} exited during startup`);
+    if (!live) { dbg(goalId, "askOnce: session gone after ready (exited during startup)"); throw new Error(`shadow session for goal ${goalId} exited during startup`); }
     const prelude = live.systemSent ? "" : input.systemPrompt + "\n\n";
     live.systemSent = true;
+    dbg(goalId, `askOnce: writing prompt (${input.userPrompt.length} chars), timeoutMs=${input.timeoutMs}`);
     live.handle.write(Buffer.from(prelude + input.userPrompt + "\r", "utf8"));
     return new Promise<{ text: string }>((resolve, reject) => {
       const timer = setTimeout(() => {
         live.pending = null;
+        dbg(goalId, "askOnce: TIMEOUT waiting for Stop hook");
         reject(new Error(`shadow orchestrator timeout for goal ${goalId}`));
       }, input.timeoutMs);
       live.pending = { resolve, reject, timer };
@@ -172,6 +191,7 @@ export class ShadowSessionManager {
   resolvePending(goalId: string, result: { text?: string; failure?: boolean }): void {
     const session = this.getSession(goalId);
     const pending = session?.pending ?? null;
+    dbg(goalId, `resolvePending hook: hasSession=${!!session} hasPending=${!!pending} failure=${!!result.failure} textLen=${(result.text ?? "").length}`);
     if (!session || !pending) return; // stray/duplicate hook -> drop
     clearTimeout(pending.timer);
     session.pending = null;
