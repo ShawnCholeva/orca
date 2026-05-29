@@ -2,24 +2,43 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FakePtyManager } from "../pty/fake.js";
 import { ShadowSessionManager } from "./shadow-session.js";
 
-function deps(root: string, ready = true) {
+function fakeTmux(paneScript: string[] = ["❯ \n auto mode on"]) {
+  const calls: Array<{ args: string[]; input?: string }> = [];
+  let paneIdx = 0;
+  const runner = {
+    calls,
+    run: async (args: string[], input?: string) => {
+      calls.push({ args, input });
+      if (args[0] === "capture-pane") {
+        const out = paneScript[Math.min(paneIdx, paneScript.length - 1)];
+        paneIdx++;
+        return { stdout: out ?? "", stderr: "", code: 0 };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    },
+  };
+  return runner;
+}
+
+function deps(root: string, tmux: ReturnType<typeof fakeTmux>, ready = true) {
   return {
-    ptyManager: new FakePtyManager(),
     shadowRoot: root,
     daemonPort: 8787,
     isReady: async () => ready,
-    resolveSpawnCommand: (cwd: string) => ({ command: "claude", args: [], env: {}, cwd }),
-    readyMaxMs: 30,
+    tmux,
+    pollMs: 1,
+    readyQuietMs: 1,
+    startupTimeoutMs: 200,
   };
 }
 
 describe("ShadowSessionManager spawn integration", () => {
   it("writes .claude/settings.local.json with the hook URL into the goal dir", async () => {
     const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
-    const m = new ShadowSessionManager(deps(root));
+    const tmux = fakeTmux();
+    const m = new ShadowSessionManager(deps(root, tmux));
     await m.spawn("G1");
     const p = join(root, "G1", ".claude", "settings.local.json");
     expect(existsSync(p)).toBe(true);
@@ -30,16 +49,43 @@ describe("ShadowSessionManager spawn integration", () => {
 
   it("readiness gate: spawn rejects when not ready", async () => {
     const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
-    const m = new ShadowSessionManager(deps(root, false));
+    const tmux = fakeTmux();
+    const m = new ShadowSessionManager(deps(root, tmux, false));
     await expect(m.spawn("G1")).rejects.toThrow(/not ready|sign in/i);
   });
 
   it("uses the current daemonPort after setDaemonPort", async () => {
     const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
-    const m = new ShadowSessionManager(deps(root));
+    const tmux = fakeTmux();
+    const m = new ShadowSessionManager(deps(root, tmux));
     m.setDaemonPort(41234);
     await m.spawn("G2");
     const cfg = JSON.parse(readFileSync(join(root, "G2", ".claude", "settings.local.json"), "utf8"));
     expect(cfg.hooks.Stop[0].hooks[0].url).toContain(":41234/");
+  });
+
+  it("issues a new-session tmux call with the goal dir as cwd", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    const tmux = fakeTmux();
+    const m = new ShadowSessionManager(deps(root, tmux));
+    await m.spawn("G3");
+    const newSession = tmux.calls.find((c) => c.args[0] === "new-session");
+    expect(newSession).toBeDefined();
+    // The goal dir should appear in the new-session args
+    const goalDir = join(root, "G3");
+    expect(newSession!.args.join(" ")).toContain(goalDir);
+  });
+
+  it("startup answers the trust prompt with Enter", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    // First capture-pane returns trust prompt; subsequent ones return ready state
+    const tmux = fakeTmux(["trust this folder", "❯ \n auto mode on"]);
+    const m = new ShadowSessionManager(deps(root, tmux));
+    await m.spawn("G4");
+    // Wait for startup to complete (readyQuietMs=1)
+    await new Promise((r) => setTimeout(r, 20));
+    const sendKeys = tmux.calls.filter((c) => c.args[0] === "send-keys" && c.args.includes("Enter"));
+    // Should have sent Enter to answer the trust prompt
+    expect(sendKeys.length).toBeGreaterThanOrEqual(1);
   });
 });

@@ -1,33 +1,48 @@
 import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { PtyHandle, PtyManager } from "../pty/types.js";
+import { execFile } from "node:child_process";
 import { extractActionBlock } from "./sentinel.js";
 import { buildShadowHookSettings } from "./shadow-hook-settings.js";
 
-// TEMP DIAGNOSTIC (revert after debugging): append shadow lifecycle to a file
-// the controller can read, since the daemon's stdout isn't accessible.
+// TEMP diagnostics (kept during bring-up; strip later).
 function dbg(goalId: string, msg: string): void {
   if (process.env["ORCA_SHADOW_DEBUG"] === "0") return;
   try {
-    appendFileSync(
-      join(homedir(), ".orca", "shadow-debug.log"),
-      `${new Date().toISOString()} ${goalId.slice(0, 8)} ${msg}\n`,
-      "utf8",
-    );
+    appendFileSync(join(homedir(), ".orca", "shadow-debug.log"),
+      `${new Date().toISOString()} ${goalId.slice(0, 8)} ${msg}\n`, "utf8");
   } catch { /* ignore */ }
 }
 
+/** Minimal tmux command runner; injectable for tests. */
+export interface TmuxRunner {
+  run(args: string[], input?: string): Promise<{ stdout: string; stderr: string; code: number }>;
+}
+
+function defaultTmuxRunner(): TmuxRunner {
+  return {
+    run: (args, input) =>
+      new Promise((resolve) => {
+        const cp = execFile("tmux", args, { maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+          const code = err && typeof (err as { code?: unknown }).code === "number"
+            ? ((err as { code: number }).code) : (err ? 1 : 0);
+          resolve({ stdout: stdout?.toString() ?? "", stderr: stderr?.toString() ?? "", code });
+        });
+        if (input !== undefined) { try { cp.stdin?.end(input); } catch { /* ignore */ } }
+      }),
+  };
+}
+
 export interface ShadowSessionDeps {
-  ptyManager: PtyManager;
   shadowRoot: string;                 // e.g. ~/.orca/shadow
   daemonPort: number;                 // bound port; mutable via setDaemonPort
-  isReady: () => Promise<boolean>;    // ()=>true in tests; ClaudeCodeAdapter.checkAuth in prod
-  resolveSpawnCommand: (cwd: string) => { command: string; args: string[]; env: Record<string, string>; cwd: string };
-  cols?: number;
-  rows?: number;
-  readyQuietMs?: number;             // resolve "ready" after this much output quiescence (default 1200)
-  readyMaxMs?: number;               // hard cap: resolve "ready" regardless after this (default 8000)
+  isReady: () => Promise<boolean>;    // ClaudeCodeAdapter.checkAuth in prod; ()=>true in tests
+  claudeBin?: string;                 // default ORCA_CLAUDE_CODE_BIN ?? "claude"
+  tmux?: TmuxRunner;                  // injectable for tests; default shells out to tmux
+  trustPattern?: RegExp;              // matches the folder-trust prompt
+  pollMs?: number;                    // capture-pane poll interval (default 300)
+  startupTimeoutMs?: number;          // max wait for trust+ready (default 20000)
+  readyQuietMs?: number;              // settle delay after trust before "ready" (default 1500)
 }
 
 interface Pending {
@@ -37,38 +52,35 @@ interface Pending {
 }
 
 interface Session {
-  handle: PtyHandle;
-  output: string;
-  disposeData: () => void;
-  systemSent: boolean;
+  name: string;            // tmux session name
+  ready: Promise<void>;
   queue: Promise<unknown>;
   pending: Pending | null;
-  ready: Promise<void>;
+  systemSent: boolean;
 }
 
-export interface AskInput {
-  systemPrompt: string;
-  userPrompt: string;
-  timeoutMs: number;
-}
+const TRUST_DEFAULT = /trust this folder|Is this a project you created or one you trust|do you trust/i;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class ShadowSessionManager {
   private readonly sessions = new Map<string, Session>();
+  private readonly tmux: TmuxRunner;
 
-  constructor(private readonly deps: ShadowSessionDeps) {}
-
-  has(goalId: string): boolean {
-    return this.sessions.has(goalId);
+  constructor(private readonly deps: ShadowSessionDeps) {
+    this.tmux = deps.tmux ?? defaultTmuxRunner();
   }
 
-  /** Spawns the goal's shadow PTY (idempotent). Returns a stable session id. */
+  has(goalId: string): boolean { return this.sessions.has(goalId); }
+  setDaemonPort(port: number): void { this.deps.daemonPort = port; }
+
+  private tmuxName(goalId: string): string { return `orca-shadow-${goalId}`; }
+
+  /** Spawns the goal's shadow tmux+claude session (idempotent). */
   async spawn(goalId: string): Promise<string> {
     if (this.sessions.has(goalId)) return shadowSessionId(goalId);
-
     if (!(await this.deps.isReady())) {
       throw new Error("orchestrator shadow not ready: sign in to Claude Code");
     }
-
     const dir = join(this.deps.shadowRoot, goalId);
     mkdirSync(join(dir, ".claude"), { recursive: true });
     writeFileSync(
@@ -76,90 +88,43 @@ export class ShadowSessionManager {
       JSON.stringify(buildShadowHookSettings({ goalId, port: this.deps.daemonPort }), null, 2),
       "utf8",
     );
-
-    const cmd = this.deps.resolveSpawnCommand(dir);
-    dbg(goalId, `spawn cmd=${cmd.command} args=${JSON.stringify(cmd.args)} cwd=${cmd.cwd} port=${this.deps.daemonPort}`);
-    const { handle, events } = this.deps.ptyManager.start({
-      command: cmd.command,
-      args: cmd.args,
-      cwd: cmd.cwd,
-      env: cmd.env,
-      cols: this.deps.cols ?? 120,
-      rows: this.deps.rows ?? 40,
-    });
-
-    // Readiness gate: resolve after quiescence OR a hard cap, whichever comes first.
-    let readyDone = false;
-    let readyTimer: ReturnType<typeof setTimeout> | null = null;
-    let resolveReady!: () => void;
-    const ready = new Promise<void>((r) => { resolveReady = r; });
-    const settleReady = () => {
-      if (readyDone) return;
-      readyDone = true;
-      if (readyTimer) clearTimeout(readyTimer);
-      dbg(goalId, `ready resolved (outputLen=${this.sessions.get(goalId)?.output.length ?? 0})`);
-      resolveReady();
-    };
-    const readyHardCap = setTimeout(settleReady, this.deps.readyMaxMs ?? 8000);
-
-    const session: Session = { handle, output: "", disposeData: () => {}, systemSent: false, queue: Promise.resolve(), pending: null, ready };
-    let trustAnswered = false;
-    session.disposeData = events.onData((chunk) => {
-      session.output += chunk.toString("utf8");
-      if (session.output.length > 200_000) session.output = session.output.slice(-100_000);
-      // Best-effort: answer the one-time folder-trust prompt so the session becomes usable.
-      if (!trustAnswered && /trust|do you want to proceed|press enter/i.test(session.output.slice(-2000))) {
-        trustAnswered = true;
-        try { handle.write(Buffer.from("\r", "utf8")); } catch { /* ignore */ }
-      }
-      // Quiescence debounce: resolve ready after output goes quiet.
-      if (!readyDone) {
-        if (readyTimer) clearTimeout(readyTimer);
-        readyTimer = setTimeout(settleReady, this.deps.readyQuietMs ?? 1200);
-      }
-    });
-    events.onExit((exit) => {
-      dbg(goalId, `EXIT code=${exit?.exitCode} signal=${exit?.signal} outputTail=${JSON.stringify((this.sessions.get(goalId)?.output ?? "").slice(-1000))}`);
-      clearTimeout(readyHardCap);
-      settleReady(); // harmless if already done; ensures ready resolves so askOnce can re-check
-      const s = this.sessions.get(goalId);
-      if (s) {
-        if (s.pending) {
-          clearTimeout(s.pending.timer);
-          const p = s.pending;
-          s.pending = null;
-          p.reject(new Error(`shadow session for goal ${goalId} exited`));
-        }
-        s.disposeData();
-      }
-      this.sessions.delete(goalId);
-    });
+    const name = this.tmuxName(goalId);
+    const bin = this.deps.claudeBin ?? process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude";
+    await this.tmux.run(["kill-session", "-t", name]); // idempotent; ignore failure
+    const started = await this.tmux.run(["new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", dir, bin]);
+    dbg(goalId, `tmux new-session code=${started.code} name=${name} bin=${bin} dir=${dir} port=${this.deps.daemonPort}`);
+    const session: Session = { name, ready: this.startup(goalId, name), queue: Promise.resolve(), pending: null, systemSent: false };
     this.sessions.set(goalId, session);
     return shadowSessionId(goalId);
   }
 
-  setDaemonPort(port: number): void {
-    this.deps.daemonPort = port;
-  }
-
-  async terminate(goalId: string): Promise<void> {
-    const session = this.sessions.get(goalId);
-    if (!session) return;
-    if (session.pending) {
-      clearTimeout(session.pending.timer);
-      const p = session.pending;
-      session.pending = null;
-      p.reject(new Error(`shadow session for goal ${goalId} terminated`));
+  /** Polls capture-pane: answer the trust prompt, then settle into the input box. */
+  private async startup(goalId: string, name: string): Promise<void> {
+    const pattern = this.deps.trustPattern ?? TRUST_DEFAULT;
+    const poll = this.deps.pollMs ?? 300;
+    const deadline = Date.now() + (this.deps.startupTimeoutMs ?? 20_000);
+    let trustAnswered = false;
+    while (Date.now() < deadline) {
+      const pane = (await this.tmux.run(["capture-pane", "-t", name, "-p"])).stdout;
+      if (!trustAnswered && pattern.test(pane)) {
+        await this.tmux.run(["send-keys", "-t", name, "Enter"]); // default highlight = "1. Yes, I trust"
+        trustAnswered = true;
+        dbg(goalId, "trust answered (Enter)");
+        await sleep(this.deps.readyQuietMs ?? 1500);
+        return;
+      }
+      // No trust prompt + an input box / status line present => ready.
+      if (!pattern.test(pane) && /(auto mode on|\? for shortcuts|\n\s*❯)/i.test(pane)) {
+        dbg(goalId, "ready (no trust, input box present)");
+        return;
+      }
+      await sleep(poll);
     }
-    session.disposeData();
-    this.sessions.delete(goalId);
-    session.handle.kill("SIGTERM");
+    dbg(goalId, "startup timeout (proceeding anyway)");
   }
 
   async ask(goalId: string, input: AskInput): Promise<{ text: string }> {
-    if (!this.sessions.has(goalId)) {
-      await this.spawn(goalId);
-    }
+    if (!this.sessions.has(goalId)) await this.spawn(goalId);
     const session = this.getSession(goalId);
     if (!session) throw new Error(`no shadow session for goal ${goalId}`);
     const next = session.queue.then(() => this.askOnce(goalId, input));
@@ -168,22 +133,27 @@ export class ShadowSessionManager {
   }
 
   private async askOnce(goalId: string, input: AskInput): Promise<{ text: string }> {
+    const pre = this.getSession(goalId);
+    if (!pre) throw new Error(`no shadow session for goal ${goalId}`);
+    await pre.ready;
     const session = this.getSession(goalId);
-    if (!session) throw new Error(`no shadow session for goal ${goalId}`);
-    await session.ready;
-    const live = this.getSession(goalId);
-    if (!live) { dbg(goalId, "askOnce: session gone after ready (exited during startup)"); throw new Error(`shadow session for goal ${goalId} exited during startup`); }
-    const prelude = live.systemSent ? "" : input.systemPrompt + "\n\n";
-    live.systemSent = true;
-    dbg(goalId, `askOnce: writing prompt (${input.userPrompt.length} chars), timeoutMs=${input.timeoutMs}`);
-    live.handle.write(Buffer.from(prelude + input.userPrompt + "\r", "utf8"));
+    if (!session) throw new Error(`shadow session for goal ${goalId} exited during startup`);
+    const text = session.systemSent ? input.userPrompt : input.systemPrompt + "\n\n" + input.userPrompt;
+    session.systemSent = true;
+    const buf = `orca-${goalId}`;
+    // Inject as a bracketed paste so multi-line content is treated as input (not submitted early),
+    // then a single Enter submits.
+    await this.tmux.run(["load-buffer", "-b", buf, "-"], text);
+    await this.tmux.run(["paste-buffer", "-b", buf, "-t", session.name, "-d", "-p"]);
+    await this.tmux.run(["send-keys", "-t", session.name, "Enter"]);
+    dbg(goalId, `prompt injected (${text.length} chars) via paste-buffer; timeoutMs=${input.timeoutMs}`);
     return new Promise<{ text: string }>((resolve, reject) => {
       const timer = setTimeout(() => {
-        live.pending = null;
-        dbg(goalId, "askOnce: TIMEOUT waiting for Stop hook");
+        session.pending = null;
+        dbg(goalId, "TIMEOUT waiting for Stop hook");
         reject(new Error(`shadow orchestrator timeout for goal ${goalId}`));
       }, input.timeoutMs);
-      live.pending = { resolve, reject, timer };
+      session.pending = { resolve, reject, timer };
     });
   }
 
@@ -201,12 +171,21 @@ export class ShadowSessionManager {
     pending.resolve({ text: block });
   }
 
-  /** Internal access for the ask() loop. */
-  protected getSession(goalId: string): Session | undefined {
-    return this.sessions.get(goalId);
+  async terminate(goalId: string): Promise<void> {
+    const session = this.sessions.get(goalId);
+    if (!session) return;
+    if (session.pending) {
+      clearTimeout(session.pending.timer);
+      const p = session.pending; session.pending = null;
+      p.reject(new Error(`shadow session for goal ${goalId} terminated`));
+    }
+    this.sessions.delete(goalId);
+    await this.tmux.run(["kill-session", "-t", session.name]);
   }
+
+  protected getSession(goalId: string): Session | undefined { return this.sessions.get(goalId); }
 }
 
-export function shadowSessionId(goalId: string): string {
-  return `orchsess-${goalId}`;
-}
+export interface AskInput { systemPrompt: string; userPrompt: string; timeoutMs: number; }
+
+export function shadowSessionId(goalId: string): string { return `orchsess-${goalId}`; }

@@ -453,10 +453,8 @@ export function createServer(
     }
   });
 
-  // Shadow PTY manager + session manager for the orchestrator-LLM.
-  const shadowPtyManager = new NodePtyManager();
+  // Shadow session manager for the orchestrator-LLM (tmux-backed).
   const shadowSessions = new ShadowSessionManager({
-    ptyManager: shadowPtyManager,
     shadowRoot: path.join(config.dataDir, "shadow"),
     daemonPort: config.port,
     isReady: async () => {
@@ -465,21 +463,7 @@ export function createServer(
       const step = await adapter.checkAuth();
       return step.ok;
     },
-    resolveSpawnCommand: (cwd) => {
-      // goalId is the basename of the shadow dir (shadowRoot/<goalId>)
-      const goalId = path.basename(cwd);
-      // Inherit the user's env so `claude` finds HOME/~/.claude (subscription auth),
-      // but never hand the shadow session the daemon's secret/mutation tokens.
-      const DENY = new Set(["ORCA_TOKEN", "ORCA_AUTH_TOKEN", "ORCA_DESKTOP_TOKEN", "ORCA_API_TOKEN", "ORCA_MUTATION_TOKEN"]);
-      const env: Record<string, string> = {};
-      for (const [k, v] of Object.entries(process.env)) {
-        if (v !== undefined && !DENY.has(k)) env[k] = v;
-      }
-      env["ORCA_GOAL_ID"] = goalId;
-      env["ORCA_SESSION_ID"] = shadowSessionId(goalId);
-      const command = process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude";
-      return { command, args: ["--dangerously-skip-permissions"], env, cwd };
-    },
+    claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
   });
   // Update the hook endpoint URL with the actual bound port after listen.
   server.addHook("onListen", async () => {
