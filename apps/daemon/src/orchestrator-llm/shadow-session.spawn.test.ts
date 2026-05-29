@@ -12,6 +12,7 @@ function deps(root: string, ready = true) {
     daemonPort: 8787,
     isReady: async () => ready,
     resolveSpawnCommand: (cwd: string) => ({ command: "claude", args: [], env: {}, cwd }),
+    readyMaxMs: 30,
   };
 }
 

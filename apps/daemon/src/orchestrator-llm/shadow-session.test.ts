@@ -14,6 +14,7 @@ function mgr() {
     daemonPort: 8787,
     isReady: async () => true,
     resolveSpawnCommand: (cwd) => ({ command: "claude", args: [], env: {}, cwd }),
+    readyMaxMs: 30,
   });
   return { pty, m };
 }

@@ -18,6 +18,7 @@ describe("shadow orchestrator wiring", () => {
       daemonPort: 8787,
       isReady: async () => true,
       resolveSpawnCommand: (cwd) => ({ command: "claude", args: [], env: {}, cwd }),
+      readyMaxMs: 30,
     });
     await mgr.spawn("G1");
     const mediator = new OrchestratorMediator({
@@ -38,8 +39,8 @@ describe("shadow orchestrator wiring", () => {
       adapterId: "claude-code", modelId: "claude-haiku-4-5",
       triggerPayload: { userMessage: "hi" },
     });
-    // Let askOnce run (it's queued via session.queue.then())
-    await Promise.resolve();
+    // Wait for the readiness gate (readyMaxMs: 30) so askOnce can run past await session.ready
+    await new Promise<void>((r) => setTimeout(r, 40));
     mgr.resolvePending("G1", {
       text: '```orca:action\n{"kind":"answer_user_directly","body":"hello"}\n```',
     });

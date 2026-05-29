@@ -12,6 +12,8 @@ export interface ShadowSessionDeps {
   resolveSpawnCommand: (cwd: string) => { command: string; args: string[]; env: Record<string, string>; cwd: string };
   cols?: number;
   rows?: number;
+  readyQuietMs?: number;             // resolve "ready" after this much output quiescence (default 1200)
+  readyMaxMs?: number;               // hard cap: resolve "ready" regardless after this (default 8000)
 }
 
 interface Pending {
@@ -27,6 +29,7 @@ interface Session {
   systemSent: boolean;
   queue: Promise<unknown>;
   pending: Pending | null;
+  ready: Promise<void>;
 }
 
 export interface AskInput {
@@ -69,7 +72,21 @@ export class ShadowSessionManager {
       cols: this.deps.cols ?? 120,
       rows: this.deps.rows ?? 40,
     });
-    const session: Session = { handle, output: "", disposeData: () => {}, systemSent: false, queue: Promise.resolve(), pending: null };
+
+    // Readiness gate: resolve after quiescence OR a hard cap, whichever comes first.
+    let readyDone = false;
+    let readyTimer: ReturnType<typeof setTimeout> | null = null;
+    let resolveReady!: () => void;
+    const ready = new Promise<void>((r) => { resolveReady = r; });
+    const settleReady = () => {
+      if (readyDone) return;
+      readyDone = true;
+      if (readyTimer) clearTimeout(readyTimer);
+      resolveReady();
+    };
+    const readyHardCap = setTimeout(settleReady, this.deps.readyMaxMs ?? 8000);
+
+    const session: Session = { handle, output: "", disposeData: () => {}, systemSent: false, queue: Promise.resolve(), pending: null, ready };
     let trustAnswered = false;
     session.disposeData = events.onData((chunk) => {
       session.output += chunk.toString("utf8");
@@ -79,8 +96,15 @@ export class ShadowSessionManager {
         trustAnswered = true;
         try { handle.write(Buffer.from("\r", "utf8")); } catch { /* ignore */ }
       }
+      // Quiescence debounce: resolve ready after output goes quiet.
+      if (!readyDone) {
+        if (readyTimer) clearTimeout(readyTimer);
+        readyTimer = setTimeout(settleReady, this.deps.readyQuietMs ?? 1200);
+      }
     });
     events.onExit(() => {
+      clearTimeout(readyHardCap);
+      settleReady(); // harmless if already done; ensures ready resolves so askOnce can re-check
       const s = this.sessions.get(goalId);
       if (s) {
         if (s.pending) {
@@ -126,18 +150,21 @@ export class ShadowSessionManager {
     return next;
   }
 
-  private askOnce(goalId: string, input: AskInput): Promise<{ text: string }> {
+  private async askOnce(goalId: string, input: AskInput): Promise<{ text: string }> {
     const session = this.getSession(goalId);
-    if (!session) return Promise.reject(new Error(`no shadow session for goal ${goalId}`));
-    const prelude = session.systemSent ? "" : input.systemPrompt + "\n\n";
-    session.systemSent = true;
-    session.handle.write(Buffer.from(prelude + input.userPrompt + "\r", "utf8"));
+    if (!session) throw new Error(`no shadow session for goal ${goalId}`);
+    await session.ready;
+    const live = this.getSession(goalId);
+    if (!live) throw new Error(`shadow session for goal ${goalId} exited during startup`);
+    const prelude = live.systemSent ? "" : input.systemPrompt + "\n\n";
+    live.systemSent = true;
+    live.handle.write(Buffer.from(prelude + input.userPrompt + "\r", "utf8"));
     return new Promise<{ text: string }>((resolve, reject) => {
       const timer = setTimeout(() => {
-        session.pending = null;
+        live.pending = null;
         reject(new Error(`shadow orchestrator timeout for goal ${goalId}`));
       }, input.timeoutMs);
-      session.pending = { resolve, reject, timer };
+      live.pending = { resolve, reject, timer };
     });
   }
 

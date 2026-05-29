@@ -478,7 +478,7 @@ export function createServer(
       env["ORCA_GOAL_ID"] = goalId;
       env["ORCA_SESSION_ID"] = shadowSessionId(goalId);
       const command = process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude";
-      return { command, args: [], env, cwd };
+      return { command, args: ["--dangerously-skip-permissions"], env, cwd };
     },
   });
   // Update the hook endpoint URL with the actual bound port after listen.
