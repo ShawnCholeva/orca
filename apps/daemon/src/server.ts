@@ -164,6 +164,11 @@ import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js'
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
+import { ShadowSessionManager, shadowSessionId } from './orchestrator-llm/shadow-session.js';
+import { ShadowSessionLlmClient } from './orchestrator-llm/shadow-llm-client.js';
+import { OrchestratorMediator } from './orchestrator-llm/mediator.js';
+import { composeOrchestratorPrompt } from './orchestrator-llm/prompts.js';
+import { buildContextFromDb } from './orchestrator-llm/build-context.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
 import { registerAgentHookRoutes } from './agent-hooks/routes.js';
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
@@ -446,6 +451,27 @@ export function createServer(
     }
   });
 
+  // Shadow PTY manager + session manager for the orchestrator-LLM.
+  const shadowPtyManager = new NodePtyManager();
+  const shadowSessions = new ShadowSessionManager({
+    ptyManager: shadowPtyManager,
+    resolveSpawn: async (goalId) => {
+      const adapter = adapterRegistry.get("claude-code");
+      if (!adapter) throw new Error("claude-code adapter not registered");
+      const ws = listWorkspacesByGoal(db, goalId)[0];
+      const workspacePath = ws?.path ?? process.cwd();
+      const spawn = await adapter.resolveSpawn({ goalId, sessionId: shadowSessionId(goalId), workspacePath });
+      return { command: spawn.command, args: spawn.args, env: spawn.env, cwd: spawn.cwd };
+    },
+  });
+  const shadowClient = new ShadowSessionLlmClient(shadowSessions, { timeoutMs: 60_000 });
+  const orchestratorMediator = new OrchestratorMediator({
+    llm: shadowClient,
+    buildContext: ({ goalId, runId, stepRunId }) =>
+      buildContextFromDb(db, { goalId, runId, stepRunId, payloadBudgetBytes: 64 * 1024 }),
+    composePrompt: composeOrchestratorPrompt,
+  });
+
   // Shared orchestrator service instance — receives sessionOutputStore so that
   // onWorkflowSessionCompleted can synthesize step output from session tails.
   const orchestratorService = new OrchestratorService(
@@ -455,11 +481,7 @@ export function createServer(
     daemonContext.workflowSessionLauncher,
     sessionOutputStore,
     daemonContext.stepDispatchCapabilities,
-    // Production orchestrator-mediator wiring (real LLM client + context builder)
-    // lands in a later sub-plan (bootstrap rewrite). Until then the mediator is
-    // unconfigured and onAgentResponseDone early-returns; behavior is proven by
-    // the agent-step unit tests which inject a fake mediator.
-    undefined,
+    orchestratorMediator,
     (sessionId: string, text: string) => {
       sessionRuntime.getHandle(sessionId)?.write(Buffer.from(text, "utf8"));
     }
@@ -496,7 +518,11 @@ export function createServer(
         // node-pty cannot reattach across restart; reconcile already marked stale
         // sessions terminal. No-op.
       },
-      respawn: async ({ runId, stepRunId }) => {
+      respawn: async ({ runId, stepRunId, goalId }) => {
+        // Best-effort: re-spawn the shadow orchestrator session for this goal.
+        void shadowSessions.spawn(goalId).catch((err) =>
+          console.error("[resume] shadow spawn failed for goal", goalId, err)
+        );
         await orchestratorService.respawnStepAgent(
           db,
           daemonContext.now ?? (() => new Date().toISOString()),
@@ -507,6 +533,13 @@ export function createServer(
       },
     }).catch((err) => console.error("[resume] boot resume failed", err));
   }
+
+  // Tear down shadow sessions when a workflow run completes (best-effort).
+  eventBus.subscribe((event) => {
+    if (event.type === "workflow.run.completed" && event.goalId) {
+      void shadowSessions.terminate(event.goalId);
+    }
+  });
 
   // Subscribe to session terminal events → drive workflow step synthesis.
   eventBus.subscribe((event) => {
@@ -547,11 +580,7 @@ export function createServer(
         { db: getDatabase(), bus: eventBus, now: daemonContext.now, idFactory: daemonContext.idFactory },
         args
       ),
-    spawnOrchestratorSessionFn: async (_goalId, _runId) => {
-      // Production orchestrator-LLM session wiring is deferred (see Sub-plan 7/later integration).
-      // Returning a placeholder keeps bootstrap functional; the first step's agent still launches.
-      return `orchsess-${_goalId}`;
-    },
+    spawnOrchestratorSessionFn: async (goalId, _runId) => shadowSessions.spawn(goalId),
     startWorkflowFirstStepFn: async (_goalId, runId) =>
       orchestratorService.startWorkflowFirstStep(
         getDatabase(),
@@ -983,6 +1012,7 @@ export function createServer(
     modelProviderRegistry: daemonContext.modelProviderRegistry,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
+    shadowAsk: (goalId, input) => shadowSessions.ask(goalId, input),
     onUserMessage: async (goalId, body) => {
       await orchestratorService.onUserMessage(
         getDatabase(),

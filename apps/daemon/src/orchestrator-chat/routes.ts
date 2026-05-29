@@ -22,6 +22,7 @@ export interface OrchestratorChatRouteDeps {
   modelProviderRegistry: ModelProviderRegistry;
   now?: () => string;
   idFactory?: () => string;
+  shadowAsk?: (goalId: string, input: { systemPrompt: string; userPrompt: string; timeoutMs: number }) => Promise<{ text: string }>;
   onUserMessage?: (goalId: string, body: string) => Promise<void>;
 }
 
@@ -68,6 +69,7 @@ export function registerOrchestratorChatRoutes(
           modelProviderRegistry: deps.modelProviderRegistry,
           now: deps.now,
           idFactory: deps.idFactory,
+          shadowAsk: deps.shadowAsk,
         },
         goalId,
         parsed.data

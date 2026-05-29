@@ -11,7 +11,7 @@ export interface ShadowSpawnCommand {
 export interface ShadowSessionDeps {
   ptyManager: PtyManager;
   /** Resolves the spawn command for the goal's orchestrator adapter (claude-code). */
-  resolveSpawn: (goalId: string) => ShadowSpawnCommand;
+  resolveSpawn: (goalId: string) => ShadowSpawnCommand | Promise<ShadowSpawnCommand>;
   cols?: number;
   rows?: number;
   pollIntervalMs?: number;
@@ -46,7 +46,7 @@ export class ShadowSessionManager {
     const existing = this.sessions.get(goalId);
     if (existing) return shadowSessionId(goalId);
 
-    const cmd = this.deps.resolveSpawn(goalId);
+    const cmd = await this.deps.resolveSpawn(goalId);
     const { handle, events } = this.deps.ptyManager.start({
       command: cmd.command,
       args: cmd.args,
