@@ -506,3 +506,51 @@
   color: var(--text-3, #8a8f98);
   font-size: 0.78rem;
 }
+
+.orca-agent-paraphrased {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.orca-agent-paraphrased-body {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.orca-agent-paraphrased-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.orca-paraphrased-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-3, #8a8f98);
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.orca-paraphrased-toggle:hover {
+  color: var(--text-2);
+}
+
+.orca-agent-raw {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--panel-2, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--hairline);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-3, #8a8f98);
+  white-space: pre-wrap;
+  overflow-x: auto;
+  max-height: 240px;
+  overflow-y: auto;
+}
