@@ -511,7 +511,7 @@ export function createServer(
     orchestratorMediator,
     // workerSpawn: resolve workspace + adapter spawn, then start the tmux worker.
     async ({ sessionId, goalId, adapterId }) => {
-      const wsRow = db.prepare("SELECT w.path AS path FROM workspaces w WHERE w.goal_id = ? ORDER BY w.created_at ASC LIMIT 1").get(goalId) as { path: string } | undefined;
+      const wsRow = db.prepare("SELECT w.path AS path FROM workspaces w WHERE w.goal_id = ? ORDER BY w.attached_at ASC LIMIT 1").get(goalId) as { path: string } | undefined;
       if (!wsRow) { console.warn(`[orchestrator] workerSpawn: no workspace for goal ${goalId}`); return; }
       const adapter = adapterRegistry.get(adapterId);
       if (!adapter) { console.warn(`[orchestrator] workerSpawn: no adapter ${adapterId}`); return; }
