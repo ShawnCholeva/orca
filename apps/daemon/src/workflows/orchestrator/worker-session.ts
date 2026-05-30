@@ -12,7 +12,9 @@ const BUSY_DEFAULT = /esc to interrupt|\bthinking\b|running .* hook|cooked for|c
 // claude renders the input box (❯) ABOVE its status/footer lines, so the prompt
 // is not at end-of-pane. Match an EMPTY prompt line (❯ followed by only spaces)
 // anywhere; combined with !busy this means the agent is idle and ready for input.
-const PROMPT_IDLE = /❯[ \t]*(?:\n|$)/;
+// NOTE: claude pads the empty input line with a non-breaking space (U+00A0), not
+// a normal space — the char class MUST include   or idle is never detected.
+const PROMPT_IDLE = /❯[ \t ]*(?:\n|$)/;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export type DeliverResult = "delivered" | "no_session" | "timeout";
