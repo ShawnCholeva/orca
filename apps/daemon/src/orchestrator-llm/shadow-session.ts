@@ -1,18 +1,8 @@
-import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { extractActionBlock } from "./sentinel.js";
 import { buildShadowHookSettings } from "./shadow-hook-settings.js";
-
-// TEMP diagnostics (kept during bring-up; strip later).
-function dbg(goalId: string, msg: string): void {
-  if (process.env["ORCA_SHADOW_DEBUG"] === "0") return;
-  try {
-    appendFileSync(join(homedir(), ".orca", "shadow-debug.log"),
-      `${new Date().toISOString()} ${goalId.slice(0, 8)} ${msg}\n`, "utf8");
-  } catch { /* ignore */ }
-}
 
 /** Minimal tmux command runner; injectable for tests. */
 export interface TmuxRunner {
@@ -92,15 +82,14 @@ export class ShadowSessionManager {
     const name = this.tmuxName(goalId);
     const bin = this.deps.claudeBin ?? process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude";
     await this.tmux.run(["kill-session", "-t", name]); // idempotent; ignore failure
-    const started = await this.tmux.run(["new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", dir, bin]);
-    dbg(goalId, `tmux new-session code=${started.code} name=${name} bin=${bin} dir=${dir} port=${this.deps.daemonPort}`);
-    const session: Session = { name, ready: this.startup(goalId, name), queue: Promise.resolve(), pending: null, systemSent: false };
+    await this.tmux.run(["new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", dir, bin]);
+    const session: Session = { name, ready: this.startup(name), queue: Promise.resolve(), pending: null, systemSent: false };
     this.sessions.set(goalId, session);
     return shadowSessionId(goalId);
   }
 
   /** Polls capture-pane: answer the trust prompt, then settle into the input box. */
-  private async startup(goalId: string, name: string): Promise<void> {
+  private async startup(name: string): Promise<void> {
     const pattern = this.deps.trustPattern ?? TRUST_DEFAULT;
     const poll = this.deps.pollMs ?? 300;
     const deadline = Date.now() + (this.deps.startupTimeoutMs ?? 20_000);
@@ -110,18 +99,15 @@ export class ShadowSessionManager {
       if (!trustAnswered && pattern.test(pane)) {
         await this.tmux.run(["send-keys", "-t", name, "Enter"]); // default highlight = "1. Yes, I trust"
         trustAnswered = true;
-        dbg(goalId, "trust answered (Enter)");
         await sleep(this.deps.readyQuietMs ?? 1500);
         return;
       }
       // No trust prompt + an input box / status line present => ready.
       if (!pattern.test(pane) && /(auto mode on|\? for shortcuts|\n\s*❯)/i.test(pane)) {
-        dbg(goalId, "ready (no trust, input box present)");
         return;
       }
       await sleep(poll);
     }
-    dbg(goalId, "startup timeout (proceeding anyway)");
   }
 
   async ask(goalId: string, input: AskInput): Promise<{ text: string }> {
@@ -147,11 +133,9 @@ export class ShadowSessionManager {
     await this.tmux.run(["load-buffer", "-b", buf, "-"], text);
     await this.tmux.run(["paste-buffer", "-b", buf, "-t", session.name, "-d", "-p"]);
     await this.tmux.run(["send-keys", "-t", session.name, "Enter"]);
-    dbg(goalId, `prompt injected (${text.length} chars) via paste-buffer; timeoutMs=${input.timeoutMs}`);
     return new Promise<{ text: string }>((resolve, reject) => {
       const timer = setTimeout(() => {
         session.pending = null;
-        dbg(goalId, "TIMEOUT waiting for Stop hook");
         reject(new Error(`shadow orchestrator timeout for goal ${goalId}`));
       }, input.timeoutMs);
       session.pending = { resolve, reject, timer };
@@ -162,7 +146,6 @@ export class ShadowSessionManager {
   resolvePending(goalId: string, result: { text?: string; failure?: boolean }): void {
     const session = this.getSession(goalId);
     const pending = session?.pending ?? null;
-    dbg(goalId, `resolvePending hook: hasSession=${!!session} hasPending=${!!pending} failure=${!!result.failure} textLen=${(result.text ?? "").length}`);
     if (!session || !pending) return; // stray/duplicate hook -> drop
     clearTimeout(pending.timer);
     session.pending = null;
