@@ -480,6 +480,11 @@ export function createServer(
     authToken: config.getAuthToken(),
     claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
     captureSink: (sessionId, chunk) => sessionOutputStore.appendChunk(sessionId, chunk),
+    markRunning: (sessionId) => {
+      db.prepare(
+        "UPDATE sessions SET status = 'running', started_at = COALESCE(started_at, ?) WHERE id = ?"
+      ).run(new Date().toISOString(), sessionId);
+    },
   });
 
   // Update the hook endpoint URLs with the actual bound port after listen.
@@ -527,10 +532,9 @@ export function createServer(
   _orchestratorServiceRef.current = orchestratorService;
 
   // Boot-time resume (production only — gated so createServer in tests is inert).
-  // reconcileSessionsOnBoot has already marked stale running/starting sessions as
-  // terminal before this point, so in practice every active run's session is dead
-  // → respawn. reattach is a no-op because node-pty children cannot survive a
-  // daemon restart; reconcile + respawn cover recovery.
+  // reconcileSessionsOnBoot skips workflow-step sessions (tmux workers may survive
+  // the restart), so those sessions still have status 'running' in DB. Here we
+  // try to reattach surviving tmux workers; if the tmux session is gone we respawn.
   if (deps?.resumeActiveRunsOnBoot) {
     void resumeActiveRuns({
       listActiveRuns: async () => {
@@ -551,11 +555,30 @@ export function createServer(
         const row = db.prepare("SELECT status FROM sessions WHERE id = ?").get(id) as { status: string } | undefined;
         return row?.status === "running" || row?.status === "starting";
       },
-      reattach: async () => {
-        // node-pty cannot reattach across restart; reconcile already marked stale
-        // sessions terminal. No-op.
+      reattach: async ({ sessionId }) => {
+        // Try to reattach a surviving tmux worker. If the tmux session is gone,
+        // reattach returns false and we fall through; the run will be picked up
+        // by a subsequent reconcile cycle or left for respawn on the next boot.
+        // For now, a failed reattach is best-effort — the worker may have exited
+        // and its StopFailure hook will drive synthesis normally.
+        const wsRow = db.prepare(
+          "SELECT w.path AS path FROM workspaces w JOIN sessions s ON s.goal_id = w.goal_id WHERE s.id = ? ORDER BY w.attached_at ASC LIMIT 1"
+        ).get(sessionId) as { path: string } | undefined;
+        if (wsRow) {
+          await workerSessions.reattach(sessionId, wsRow.path);
+        }
       },
       respawn: async ({ runId, stepRunId, goalId }) => {
+        // Prefer reattaching a surviving tmux worker over respawning a fresh one.
+        const sessionRow = db.prepare(
+          "SELECT id FROM sessions WHERE workflow_step_run_id = ? ORDER BY created_at DESC LIMIT 1"
+        ).get(stepRunId) as { id: string } | undefined;
+        if (sessionRow) {
+          const wsRow = db.prepare(
+            "SELECT w.path AS path FROM workspaces w WHERE w.goal_id = ? ORDER BY w.attached_at ASC LIMIT 1"
+          ).get(goalId) as { path: string } | undefined;
+          if (wsRow && await workerSessions.reattach(sessionRow.id, wsRow.path)) return; // adopted; no respawn
+        }
         await orchestratorService.respawnStepAgent(
           db,
           daemonContext.now ?? (() => new Date().toISOString()),

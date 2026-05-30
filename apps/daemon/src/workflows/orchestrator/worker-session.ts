@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync, watch, openSync, readSync, closeSync, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import {
-  defaultTmuxRunner, newSession, capturePane, sendEnter, paste, pipePaneToFile, killSession,
+  defaultTmuxRunner, newSession, capturePane, sendEnter, paste, pipePaneToFile, killSession, hasSession,
   type TmuxRunner,
 } from "../../tmux/runner.js";
 import { buildAgentHookSettings } from "../../agent-hooks/hook-settings.js";
@@ -33,6 +33,7 @@ export interface WorkerSessionDeps {
   claudeBin: string;
   tmux?: TmuxRunner;
   captureSink: (sessionId: string, chunk: Buffer) => void; // appends pane bytes to the output store
+  markRunning?: (sessionId: string) => void; // optional: flip DB session status to running
   trustPattern?: RegExp;
   readyPattern?: RegExp;
   pollMs?: number;
@@ -75,6 +76,7 @@ export class WorkerSessionManager {
     await pipePaneToFile(this.tmux, name, join(cfgDir, "pane.out"));
     this.startTail(input.sessionId, join(cfgDir, "pane.out"));
     this.sessions.set(input.sessionId, { name, ready: this.startup(name) });
+    this.deps.markRunning?.(input.sessionId);
   }
 
   private async startup(name: string): Promise<void> {
@@ -149,6 +151,21 @@ export class WorkerSessionManager {
     const after = await capturePane(this.tmux, s.name);
     if (/\[Pasted text/i.test(after)) { await sendEnter(this.tmux, s.name); } // retry once
     return "delivered";
+  }
+
+  async reattach(sessionId: string, _workspacePath: string): Promise<boolean> {
+    if (this.sessions.has(sessionId)) return true;
+    const name = this.name(sessionId);
+    if (!(await hasSession(this.tmux, name))) return false;
+    const cfgDir = join(this.deps.privateRoot, sessionId);
+    // Ensure the private dir exists (it may not if the daemon data dir was wiped).
+    mkdirSync(cfgDir, { recursive: true });
+    // Re-establish the output pipe + tail; the tmux session + claude survived the restart.
+    await pipePaneToFile(this.tmux, name, join(cfgDir, "pane.out"));
+    this.startTail(sessionId, join(cfgDir, "pane.out"));
+    this.sessions.set(sessionId, { name, ready: Promise.resolve() });
+    this.deps.markRunning?.(sessionId);
+    return true;
   }
 
   async terminate(sessionId: string): Promise<void> {

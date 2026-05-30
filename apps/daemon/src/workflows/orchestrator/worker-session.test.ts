@@ -89,3 +89,71 @@ describe("WorkerSessionManager.deliver", () => {
     expect(await mgr.deliver("nope", "x")).toBe("no_session");
   });
 });
+
+describe("WorkerSessionManager.reattach", () => {
+  it("adopts a surviving tmux session without respawning, and re-pipes output", async () => {
+    // fakeTmux: has-session returns code 0 (the helper returns code 0 for all calls)
+    const tmux = fakeTmux(["auto mode on"]);
+    const marked: string[] = [];
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
+      markRunning: (id) => void marked.push(id),
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+    });
+    const adopted = await mgr.reattach("sess-1", "/repo");
+    expect(adopted).toBe(true);
+    expect(tmux.calls.some((c) => c[0] === "new-session")).toBe(false); // did NOT respawn
+    expect(tmux.calls.some((c) => c[0] === "pipe-pane")).toBe(true);     // re-piped output
+    expect(marked).toContain("sess-1");
+    await mgr.terminate("sess-1");
+  });
+
+  it("returns false when the tmux session does not exist", async () => {
+    // Override the fake to return code 1 for has-session
+    const calls: string[][] = [];
+    const tmux: TmuxRunner & { calls: string[][] } = {
+      calls,
+      run: vi.fn(async (args: string[]) => {
+        calls.push(args);
+        // has-session returns code 1 (session not found); everything else returns 0
+        const code = args[0] === "has-session" ? 1 : 0;
+        return { stdout: "", stderr: "", code };
+      }),
+    } as TmuxRunner & { calls: string[][] };
+
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
+    });
+    const adopted = await mgr.reattach("sess-missing", "/repo");
+    expect(adopted).toBe(false);
+    expect(tmux.calls.some((c) => c[0] === "new-session")).toBe(false);
+  });
+
+  it("spawn still works without markRunning (optional dep)", async () => {
+    const tmux = fakeTmux(["auto mode on"]);
+    // No markRunning provided — should not throw
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+    });
+    await expect(mgr.spawn({ sessionId: "sess-1", workspacePath: "/repo", command: "claude", env: {} })).resolves.not.toThrow();
+    await mgr.terminate("sess-1");
+  });
+
+  it("spawn calls markRunning when provided", async () => {
+    const tmux = fakeTmux(["auto mode on"]);
+    const marked: string[] = [];
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
+      markRunning: (id) => void marked.push(id),
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+    });
+    await mgr.spawn({ sessionId: "sess-2", workspacePath: "/repo", command: "claude", env: {} });
+    expect(marked).toContain("sess-2");
+    await mgr.terminate("sess-2");
+  });
+});
