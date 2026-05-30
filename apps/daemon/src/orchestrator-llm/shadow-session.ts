@@ -1,27 +1,16 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { execFile } from "node:child_process";
 import { extractActionBlock } from "./sentinel.js";
 import { buildShadowHookSettings } from "./shadow-hook-settings.js";
-
-/** Minimal tmux command runner; injectable for tests. */
-export interface TmuxRunner {
-  run(args: string[], input?: string): Promise<{ stdout: string; stderr: string; code: number }>;
-}
-
-function defaultTmuxRunner(): TmuxRunner {
-  return {
-    run: (args, input) =>
-      new Promise((resolve) => {
-        const cp = execFile("tmux", args, { maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
-          const code = err && typeof (err as { code?: unknown }).code === "number"
-            ? ((err as { code: number }).code) : (err ? 1 : 0);
-          resolve({ stdout: stdout?.toString() ?? "", stderr: stderr?.toString() ?? "", code });
-        });
-        if (input !== undefined) { try { cp.stdin?.end(input); } catch { /* ignore */ } }
-      }),
-  };
-}
+import {
+  type TmuxRunner,
+  defaultTmuxRunner,
+  newSession,
+  capturePane,
+  paste,
+  sendEnter,
+  killSession,
+} from "../tmux/runner.js";
 
 export interface ShadowSessionDeps {
   shadowRoot: string;                 // e.g. ~/.orca/shadow
@@ -81,8 +70,7 @@ export class ShadowSessionManager {
     );
     const name = this.tmuxName(goalId);
     const bin = this.deps.claudeBin ?? process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude";
-    await this.tmux.run(["kill-session", "-t", name]); // idempotent; ignore failure
-    await this.tmux.run(["new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", dir, bin]);
+    await newSession(this.tmux, name, dir, bin);
     const session: Session = { name, ready: this.startup(name), queue: Promise.resolve(), pending: null, systemSent: false };
     this.sessions.set(goalId, session);
     return shadowSessionId(goalId);
@@ -95,9 +83,9 @@ export class ShadowSessionManager {
     const deadline = Date.now() + (this.deps.startupTimeoutMs ?? 20_000);
     let trustAnswered = false;
     while (Date.now() < deadline) {
-      const pane = (await this.tmux.run(["capture-pane", "-t", name, "-p"])).stdout;
+      const pane = await capturePane(this.tmux, name);
       if (!trustAnswered && pattern.test(pane)) {
-        await this.tmux.run(["send-keys", "-t", name, "Enter"]); // default highlight = "1. Yes, I trust"
+        await sendEnter(this.tmux, name); // default highlight = "1. Yes, I trust"
         trustAnswered = true;
         await sleep(this.deps.readyQuietMs ?? 1500);
         return;
@@ -130,9 +118,8 @@ export class ShadowSessionManager {
     const buf = `orca-${goalId}`;
     // Inject as a bracketed paste so multi-line content is treated as input (not submitted early),
     // then a single Enter submits.
-    await this.tmux.run(["load-buffer", "-b", buf, "-"], text);
-    await this.tmux.run(["paste-buffer", "-b", buf, "-t", session.name, "-d", "-p"]);
-    await this.tmux.run(["send-keys", "-t", session.name, "Enter"]);
+    await paste(this.tmux, session.name, buf, text);
+    await sendEnter(this.tmux, session.name);
     return new Promise<{ text: string }>((resolve, reject) => {
       const timer = setTimeout(() => {
         session.pending = null;
@@ -164,7 +151,7 @@ export class ShadowSessionManager {
       p.reject(new Error(`shadow session for goal ${goalId} terminated`));
     }
     this.sessions.delete(goalId);
-    await this.tmux.run(["kill-session", "-t", session.name]);
+    await killSession(this.tmux, session.name);
   }
 
   protected getSession(goalId: string): Session | undefined { return this.sessions.get(goalId); }
