@@ -189,11 +189,12 @@ export class OrchestratorService {
     sessionOutputStore?: SessionOutputStore,
     private readonly stepDispatch?: StepDispatchCapabilities,
     private readonly orchestratorMediator?: Pick<OrchestratorMediator, "invoke"> & Partial<Pick<OrchestratorMediator, "invokeWithBackoff">>,
-    private readonly agentInput?: (sessionId: string, text: string) => void | Promise<void>,
-    // Delivers a freshly-launched step session its composed objective via the
-    // agent's stdin (readiness-gated, paste-safe). Per the orchestrator-mediated
-    // workflows design; without it the agent boots interactive and sits idle.
-    private readonly deliverInitialPrompt?: (sessionId: string, prompt: string) => Promise<void>
+    // Spawns the tmux worker for a freshly-created step session (resolves workspace + adapter spawn in the wiring).
+    private readonly workerSpawn?: (input: { sessionId: string; goalId: string; adapterId: string }) => Promise<void>,
+    // Reliable idle-gated submit to the worker's stdin (initial objective, forwards, revise feedback).
+    private readonly workerDeliver?: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">,
+    // Best-effort worker termination when a step's session ends.
+    private readonly workerTerminate?: (sessionId: string) => Promise<void>
   ) {
     this.sessionOutputStore = sessionOutputStore ?? NULL_OUTPUT_STORE;
   }
@@ -520,8 +521,9 @@ export class OrchestratorService {
         return { postedChatReply: true };
       }
       case "forward_to_agent": {
-        if (sessionId && this.agentInput) {
-          await this.agentInput(sessionId, action.translated + "\n");
+        if (sessionId && this.workerDeliver) {
+          const r = await this.workerDeliver(sessionId, action.translated);
+          if (r !== "delivered") console.warn(`[orchestrator] forward_to_agent ${r} for session ${sessionId}`);
         } else {
           console.warn(
             `[orchestrator] forward_to_agent dropped: no live session for step ${ctx.stepRun.id} (goal ${ctx.run.goalId})`
@@ -541,6 +543,10 @@ export class OrchestratorService {
           stagedEvents
         );
         this.publish(options.bus, stagedEvents);
+        // Best-effort: terminate the tmux worker for the completed step session.
+        if (sessionId) {
+          void this.workerTerminate?.(sessionId);
+        }
         await this.advanceToNextStep(db, now, ctx.run.id, options);
         return { postedChatReply: false };
       }
@@ -560,8 +566,9 @@ export class OrchestratorService {
           );
           return { postedChatReply: true };
         }
-        if (sessionId && this.agentInput) {
-          await this.agentInput(sessionId, action.feedback + "\n");
+        if (sessionId && this.workerDeliver) {
+          const r = await this.workerDeliver(sessionId, action.feedback);
+          if (r !== "delivered") console.warn(`[orchestrator] revise_step ${r} for session ${sessionId}`);
         } else {
           console.warn(
             `[orchestrator] revise_step feedback dropped: no live session for step ${ctx.stepRun.id} (goal ${ctx.run.goalId})`
@@ -899,12 +906,9 @@ export class OrchestratorService {
       operatorKind: "agent",
       objective,
     });
-    // Hand the agent its task. The launcher started the pty; the agent is an
-    // interactive claude sitting at an empty prompt until we write the objective
-    // to its stdin (readiness-gated, paste-safe).
-    if (this.deliverInitialPrompt) {
-      await this.deliverInitialPrompt(sessionId, objective);
-    }
+    // Run the agent as a headless tmux worker, then submit its objective.
+    await this.workerSpawn?.({ sessionId, goalId: ctx.goal.id, adapterId: dispatch.adapterId });
+    await this.workerDeliver?.(sessionId, objective);
   }
 
   /**

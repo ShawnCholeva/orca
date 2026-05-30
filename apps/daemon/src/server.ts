@@ -152,7 +152,6 @@ import { registerContextRoutes } from './context/routes.js';
 import { registerAdapterExecutionModeRoutes } from './adapters/execution-modes-routes.js';
 import { createDaemonContext, type DaemonContext } from './daemon-context.js';
 import { ProductionWorkflowSessionLauncher } from './workflows/orchestrator/session-launcher-impl.js';
-import { deliverInitialPrompt, renderSessionTailText } from './workflows/orchestrator/deliver-initial-prompt.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
@@ -249,31 +248,9 @@ export function createServer(
   const extractionRunner = deps?.extractionRunner;
   const assembler = deps?.assembler ?? daemonContext.contextAssembler;
 
-  // Wire the headless pty starter into the workflow launcher now that the
-  // session runtime and output store exist. Orchestrator-dispatched agent
-  // sessions have no UI terminal to call /start, so the launcher starts them.
-  if (daemonContext.workflowSessionLauncher instanceof ProductionWorkflowSessionLauncher) {
-    daemonContext.workflowSessionLauncher.setStarter(async (sessionId, dims) => {
-      await startSession(
-        {
-          db,
-          bus: eventBus,
-          adapterRegistry,
-          sessionOutputStore,
-          sessionRuntime,
-          dataDir: config.dataDir,
-          onTerminalState: extractionRunner
-            ? (sid) => tryEnqueueForTerminalSession(
-                { db: getDatabase(), bus: eventBus, outputStore: sessionOutputStore, runner: extractionRunner },
-                sid
-              )
-            : undefined,
-        },
-        sessionId,
-        dims
-      );
-    });
-  }
+  // Note: the workflow session launcher is now used only to create the session
+  // DB row. Step agents are started as tmux workers via WorkerSessionManager,
+  // so the node-pty setStarter wiring is intentionally omitted here.
 
   const server = Fastify({
     logger: {
@@ -532,22 +509,19 @@ export function createServer(
     sessionOutputStore,
     daemonContext.stepDispatchCapabilities,
     orchestratorMediator,
-    (sessionId: string, text: string) => {
-      sessionRuntime.getHandle(sessionId)?.write(Buffer.from(text, "utf8"));
+    // workerSpawn: resolve workspace + adapter spawn, then start the tmux worker.
+    async ({ sessionId, goalId, adapterId }) => {
+      const wsRow = db.prepare("SELECT w.path AS path FROM workspaces w WHERE w.goal_id = ? ORDER BY w.created_at ASC LIMIT 1").get(goalId) as { path: string } | undefined;
+      if (!wsRow) { console.warn(`[orchestrator] workerSpawn: no workspace for goal ${goalId}`); return; }
+      const adapter = adapterRegistry.get(adapterId);
+      if (!adapter) { console.warn(`[orchestrator] workerSpawn: no adapter ${adapterId}`); return; }
+      const spawn = await adapter.resolveSpawn({ goalId, sessionId, workspacePath: wsRow.path });
+      await workerSessions.spawn({ sessionId, workspacePath: wsRow.path, command: spawn.command, env: spawn.env });
     },
-    (sessionId: string, prompt: string) =>
-      deliverInitialPrompt(
-        {
-          getHandle: (id) => sessionRuntime.getHandle(id),
-          readTailText: (id) => renderSessionTailText(sessionOutputStore.readTail(id)),
-        },
-        sessionId,
-        prompt
-      ).then((result) => {
-        if (result !== "delivered") {
-          console.warn(`[orchestrator] initial prompt ${result} for session ${sessionId}`);
-        }
-      })
+    // workerDeliver
+    (sessionId, text) => workerSessions.deliver(sessionId, text),
+    // workerTerminate
+    (sessionId) => workerSessions.terminate(sessionId)
   );
   // Wire the late-binding ref so the onChunkAppended callback is live.
   _orchestratorServiceRef.current = orchestratorService;
