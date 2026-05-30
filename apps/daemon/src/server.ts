@@ -552,8 +552,10 @@ export function createServer(
         }));
       },
       isSessionAlive: async (id) => {
-        const row = db.prepare("SELECT status FROM sessions WHERE id = ?").get(id) as { status: string } | undefined;
-        return row?.status === "running" || row?.status === "starting";
+        // Worker sessions are tmux-backed: a DB row marked 'running' is not proof
+        // of liveness (the tmux session can die independently). Check the actual
+        // tmux session so a dead worker falls through to reattach→respawn.
+        return workerSessions.isTmuxAlive(id);
       },
       reattach: async ({ sessionId }) => {
         // Try to reattach a surviving tmux worker. If the tmux session is gone,

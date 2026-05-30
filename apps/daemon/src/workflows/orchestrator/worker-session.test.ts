@@ -18,6 +18,18 @@ function fakeTmux(paneByCall: string[] = []): TmuxRunner & { calls: string[][] }
   } as TmuxRunner & { calls: string[][] };
 }
 
+describe("WorkerSessionManager.isTmuxAlive", () => {
+  it("reflects tmux has-session, not DB status", async () => {
+    const base = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const deps = { privateRoot: base, daemonPort: 8787, authToken: "tok", claudeBin: "claude", captureSink: () => {} } as const;
+    // tmux runner where has-session returns code 1 (dead) for one id, 0 (alive) otherwise.
+    const aliveTmux: TmuxRunner = { run: async (args) => ({ stdout: "", stderr: "", code: args[0] === "has-session" ? 0 : 0 }) };
+    const deadTmux: TmuxRunner = { run: async (args) => ({ stdout: "", stderr: "", code: args[0] === "has-session" ? 1 : 0 }) };
+    expect(await new WorkerSessionManager({ ...deps, tmux: aliveTmux }).isTmuxAlive("s1")).toBe(true);
+    expect(await new WorkerSessionManager({ ...deps, tmux: deadTmux }).isTmuxAlive("s1")).toBe(false);
+  });
+});
+
 describe("WorkerSessionManager.spawn", () => {
   it("writes hook settings to a private dir and starts tmux in the workspace with --settings", async () => {
     const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));

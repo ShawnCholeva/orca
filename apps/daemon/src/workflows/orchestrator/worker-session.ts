@@ -153,6 +153,16 @@ export class WorkerSessionManager {
     return "delivered";
   }
 
+  /**
+   * True iff the worker's tmux session actually exists. Used by boot-resume to
+   * decide reattach vs respawn — a DB row marked 'running' is NOT proof of
+   * liveness (the tmux session can die independently of the daemon).
+   */
+  async isTmuxAlive(sessionId: string): Promise<boolean> {
+    if (this.sessions.has(sessionId)) return true;
+    return hasSession(this.tmux, this.name(sessionId));
+  }
+
   async reattach(sessionId: string, _workspacePath: string): Promise<boolean> {
     if (this.sessions.has(sessionId)) return true;
     const name = this.name(sessionId);
