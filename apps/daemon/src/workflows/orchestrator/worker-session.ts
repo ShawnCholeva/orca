@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, watch, openSync, readSync, closeSync, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import {
   defaultTmuxRunner, newSession, capturePane, sendEnter, pipePaneToFile, killSession,
@@ -38,6 +38,7 @@ interface WorkerSession { name: string; ready: Promise<void>; }
 
 export class WorkerSessionManager {
   private readonly sessions = new Map<string, WorkerSession>();
+  private readonly tails = new Map<string, { watcher: FSWatcher; fd: number; pos: number }>();
   private readonly tmux: TmuxRunner;
   constructor(private readonly deps: WorkerSessionDeps) {
     this.tmux = deps.tmux ?? defaultTmuxRunner();
@@ -86,13 +87,30 @@ export class WorkerSessionManager {
     }
   }
 
-  // startTail: filled in Task 3.2 (tails the pane.out file into captureSink).
-  private startTail(_sessionId: string, _file: string): void { /* Task 3.2 */ }
+  // startTail: Task 3.2 — tails the pane.out file into captureSink.
+  private startTail(sessionId: string, file: string): void {
+    // Ensure the file exists before watching (pipe-pane may not have created it yet).
+    const fd = openSync(file, "a+");
+    let pos = 0;
+    const pump = () => {
+      const buf = Buffer.alloc(64 * 1024);
+      let n: number;
+      do {
+        n = readSync(fd, buf, 0, buf.length, pos);
+        if (n > 0) { pos += n; this.deps.captureSink(sessionId, Buffer.from(buf.subarray(0, n))); }
+      } while (n > 0);
+    };
+    const watcher = watch(file, { persistent: false }, () => pump());
+    pump(); // initial pump: catch bytes written before the watcher was established
+    this.tails.set(sessionId, { watcher, fd, pos });
+  }
 
   async terminate(sessionId: string): Promise<void> {
     const s = this.sessions.get(sessionId);
     if (!s) return;
     this.sessions.delete(sessionId);
+    const t = this.tails.get(sessionId);
+    if (t) { t.watcher.close(); closeSync(t.fd); this.tails.delete(sessionId); }
     await killSession(this.tmux, s.name);
   }
 }

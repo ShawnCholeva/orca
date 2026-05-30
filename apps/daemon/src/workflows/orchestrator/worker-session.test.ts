@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkerSessionManager } from "./worker-session.js";
@@ -39,5 +39,24 @@ describe("WorkerSessionManager.spawn", () => {
     expect(newSess.join(" ")).not.toContain("CLAUDE_CONFIG_DIR");
     // output pipe established
     expect(tmux.calls.some((c) => c[0] === "pipe-pane")).toBe(true);
+  });
+});
+
+describe("WorkerSessionManager.startTail", () => {
+  it("tails appended pane bytes into the capture sink", async () => {
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const chunks: string[] = [];
+    const mgr = new WorkerSessionManager({
+      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude",
+      tmux: fakeTmux(["auto mode on"]),
+      captureSink: (_sid, buf) => void chunks.push(buf.toString("utf8")),
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+    });
+    await mgr.spawn({ sessionId: "sess-1", workspacePath: "/repo", command: "claude", env: {} });
+    const paneFile = join(privateRoot, "sess-1", "pane.out");
+    appendFileSync(paneFile, "hello-pane");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(chunks.join("")).toContain("hello-pane");
+    await mgr.terminate("sess-1");
   });
 });
