@@ -124,6 +124,24 @@ one tmux session:
   bundling, cf. M4 sidecar-packaging notes). Control channel races slightly with the
   attached client's redraw (minor; capture-pane is authoritative).
 
+## Verified mechanics (2026-05-30 spikes)
+
+- **Auth: reuse the shadow pattern, do NOT set `CLAUDE_CONFIG_DIR`.** Inheriting `HOME`
+  gives claude real `~/.claude` creds. Setting `CLAUDE_CONFIG_DIR` to a private dir
+  relocates the whole config (incl. auth) → claude has no creds and won't start (spike
+  failed exactly this way).
+- **Worker hooks: `claude --settings <private-file>`.** Worker cwd must be the workspace,
+  so the shadow's project-local-`.claude` trick would pollute the repo. `--settings`
+  (confirmed in `claude --help`: "load additional settings") layers a daemon-private
+  hook file on top of real `~/.claude`, repo-safe.
+- **`tmux pipe-pane -o -t <name> 'cat >> <file>'`** streams pane bytes to a file
+  (verified). Daemon tails it into the output store.
+- **`tmux -e KEY=VAL`** env injection works (tmux 3.4) for the worker's sanitized env.
+- **Spike harness limitation:** claude renders a blank pane when spawned via tmux from
+  inside the Claude Code Bash tool (TERM/TTY artifact; affects plain claude too, not
+  `--settings`). Hook-firing via `--settings` is therefore validated at the first real
+  daemon-spawned worker, not a standalone spike.
+
 ## Reliability vs cost
 
 | | Option A (node-pty heuristic) | Option B (tmux worker) |

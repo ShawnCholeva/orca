@@ -47,77 +47,36 @@
 
 ---
 
-## Phase 0 — Spikes (resolve unknowns before building)
+## Phase 0 — Spikes (RESOLVED 2026-05-30)
 
-### Task 0.1: Verify CLAUDE_CONFIG_DIR installs hooks without touching the repo
+Phase 0 is complete. Verified mechanics (also recorded in the design note):
 
-**Why:** Worker cwd is the user's repo; we must not write `.claude/settings.local.json` there. Confirm `CLAUDE_CONFIG_DIR` makes Claude read hook settings from a daemon-private dir instead.
+- **Auth/config: reuse the shadow pattern — DO NOT set `CLAUDE_CONFIG_DIR`.** The
+  shadow gets auth by inheriting `HOME` (so claude finds real `~/.claude` creds) and
+  never relocating the config dir. A spike that set `CLAUDE_CONFIG_DIR=<empty private
+  dir>` **broke auth** (claude found no credentials and did not start). Decision:
+  worker env inherits `HOME` (already provided by `buildSpawnEnv`); `CLAUDE_CONFIG_DIR`
+  is left untouched. This is the previously-shipped pattern (`bc8d794`, shadow).
+- **Worker hooks (can't use a private cwd): `claude --settings <private-file>`.** The
+  shadow installs hooks via a project-local `.claude/settings.local.json` in its
+  *private* cwd. A worker's cwd must be the user's workspace, so that trick would
+  pollute the repo. Confirmed via `claude --help`: `--settings <file-or-json>` —
+  "load **additional** settings" — layers our hook config on top of real `~/.claude`
+  without touching the repo or auth. Worker spawn writes the hook JSON to a daemon-
+  private file and adds `--settings <that file>` to the claude command.
+- **Output capture: `tmux pipe-pane` — VERIFIED working.** `tmux pipe-pane -o -t <name>
+  'cat >> <file>'` streams raw pane bytes to a file (spike confirmed). The daemon tails
+  that file into the output store.
+- **`tmux -e KEY=VAL` env injection — VERIFIED supported** (tmux 3.4). Used by
+  `newSession` to pass the worker's sanitized env.
+- **Spike caveat:** claude could not be rendered inside a tmux session spawned from the
+  Claude Code Bash tool (blank pane for *both* plain claude and `--settings`; a
+  TERM/TTY artifact of the spike harness, not a claude/`--settings` problem — the
+  production daemon spawns claude in tmux successfully). Therefore **hook-firing via
+  `--settings` is validated at the first real worker spawn** (Task 3.1's live check /
+  Phase 5.3 E2E), not by a standalone spike.
 
-- [ ] **Step 1: Manual spike**
-
-```bash
-# Private config dir with a Stop hook that just touches a file.
-mkdir -p /tmp/orca-cfg-spike
-cat > /tmp/orca-cfg-spike/settings.json <<'JSON'
-{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "touch /tmp/orca-stop-fired" } ] } ] } }
-JSON
-rm -f /tmp/orca-stop-fired
-# Run claude headless in a scratch repo with the private config dir.
-mkdir -p /tmp/orca-scratch && cd /tmp/orca-scratch && git init -q
-CLAUDE_CONFIG_DIR=/tmp/orca-cfg-spike tmux new-session -d -s spike -x 220 -y 50 -c /tmp/orca-scratch claude
-sleep 4
-tmux send-keys -t spike Enter            # answer trust if shown
-sleep 2
-tmux load-buffer -b sp - <<< "say hi then stop"
-tmux paste-buffer -b sp -t spike -d -p
-tmux send-keys -t spike Enter
-sleep 15
-ls -la /tmp/orca-stop-fired              # exists ⇒ hook fired from private dir
-ls -la /tmp/orca-scratch/.claude 2>/dev/null   # MUST NOT exist ⇒ repo untouched
-tmux kill-session -t spike
-```
-
-Expected: `/tmp/orca-stop-fired` exists; `/tmp/orca-scratch/.claude` does **not**.
-
-- [ ] **Step 2: Record the result in the design note**
-
-If `CLAUDE_CONFIG_DIR` works, the worker sets `env CLAUDE_CONFIG_DIR=<daemon-private>` and writes `settings.json` there. If it does NOT (hooks ignored, or `.claude` still written to repo), fall back to the `--settings <file>` CLI flag; re-run the spike with `claude --settings /tmp/orca-cfg-spike/settings.json` instead and record which works. Append the verified mechanism to `docs/superpowers/specs/2026-05-30-agent-input-transport-design.md` under a new "Verified mechanics" heading. **All later tasks that install hooks use the mechanism confirmed here** (referred to below as the "private-hook-install mechanism").
-
-- [ ] **Step 3: Commit the note update**
-
-```bash
-git add docs/superpowers/specs/2026-05-30-agent-input-transport-design.md
-git commit -m "docs(spec): record verified worker hook-install mechanism"
-```
-
-### Task 0.2: Verify tmux pipe-pane streams worker output to a file
-
-**Why:** Worker output must reach the output store for tail-synthesis + memory extraction. `pipe-pane` is unused in the repo.
-
-- [ ] **Step 1: Manual spike**
-
-```bash
-mkdir -p /tmp/orca-scratch && cd /tmp/orca-scratch
-tmux new-session -d -s pp -x 220 -y 50 -c /tmp/orca-scratch bash
-tmux pipe-pane -o -t pp 'cat >> /tmp/orca-pp.out'
-tmux send-keys -t pp "echo hello-from-pane" Enter
-sleep 1
-cat /tmp/orca-pp.out          # contains "hello-from-pane"
-tmux kill-session -t pp
-```
-
-Expected: `/tmp/orca-pp.out` contains the echoed text (raw pane bytes, ANSI included).
-
-- [ ] **Step 2: Decide capture sink**
-
-Confirm the plan's Phase 3 sink: `pipe-pane -o -t <name> 'cat >> <daemon-private>/<sessionId>.out'`, and the daemon tails that file (fs.watch / interval read) appending decoded bytes to `sessionOutputStore`. Record in the design note. No code yet.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add docs/superpowers/specs/2026-05-30-agent-input-transport-design.md
-git commit -m "docs(spec): record tmux pipe-pane output-capture approach"
-```
+No Phase 0 code tasks remain. Proceed to Phase 1.
 
 ---
 
@@ -481,10 +440,12 @@ describe("WorkerSessionManager.spawn", () => {
     expect(existsSync(join(privateRoot, "sess-1", "settings.json"))).toBe(true);
     const settings = JSON.parse(readFileSync(join(privateRoot, "sess-1", "settings.json"), "utf8"));
     expect(settings.hooks.Stop[0].hooks[0].url).toContain("sessionId=sess-1");
-    // new-session used the workspace cwd and CLAUDE_CONFIG_DIR env
+    // new-session used the workspace cwd and layered hooks via --settings (NOT CLAUDE_CONFIG_DIR)
     const newSess = tmux.calls.find((c) => c[0] === "new-session")!;
     expect(newSess).toContain("/repo");
-    expect(newSess.join(" ")).toContain("CLAUDE_CONFIG_DIR=");
+    expect(newSess.join(" ")).toContain("--settings");
+    expect(newSess.join(" ")).toContain(join(privateRoot, "sess-1", "settings.json"));
+    expect(newSess.join(" ")).not.toContain("CLAUDE_CONFIG_DIR");
     // output pipe established
     expect(tmux.calls.some((c) => c[0] === "pipe-pane")).toBe(true);
   });
@@ -559,8 +520,12 @@ export class WorkerSessionManager {
       "utf8",
     );
     const name = this.name(input.sessionId);
-    const env = { ...input.env, CLAUDE_CONFIG_DIR: cfgDir };
-    await newSession(this.tmux, name, input.workspacePath, input.command, env);
+    // Auth: inherit input.env (carries HOME from buildSpawnEnv) → real ~/.claude creds.
+    // Do NOT set CLAUDE_CONFIG_DIR (it relocates config and breaks auth).
+    // Hooks: layer our private settings file via --settings (repo-safe; workspace cwd untouched).
+    const settingsPath = join(cfgDir, "settings.json");
+    const command = `${input.command} --settings ${JSON.stringify(settingsPath)}`;
+    await newSession(this.tmux, name, input.workspacePath, command, input.env);
     // Output capture sink verified in Task 0.2; pipe to a private file, daemon tails it.
     await pipePaneToFile(this.tmux, name, join(cfgDir, "pane.out"));
     this.startTail(input.sessionId, join(cfgDir, "pane.out"));
@@ -1016,7 +981,7 @@ Expected: EXIT 0.
 
 ## Self-review notes (open items for the implementer)
 
-- **Phase 0 gates everything.** If `CLAUDE_CONFIG_DIR` does not isolate hooks from the repo, switch the install mechanism to `--settings <file>` (append the flag in the worker `command`) before Phase 3; the rest is unchanged.
+- **Phase 0 resolved.** Hook install is `claude --settings <private-file>` with `HOME` inherited (no `CLAUDE_CONFIG_DIR`). Hook-firing is confirmed at the first real worker spawn (Task 3.1 live check / Phase 5.3), since claude won't render in the standalone spike harness.
 - **`one_shot` steps** (skill/model steps that don't spawn an agent) are unaffected — they never hit `spawnStepAgent`'s worker path.
 - **Secret env:** `buildSpawnEnv` already strips secrets; `WorkerSpawnInput.env` carries that sanitized env. Do NOT add the daemon auth token to the worker env — it travels only in the hook header (`buildAgentHookSettings`).
 - **Idle heuristics** (`BUSY_DEFAULT`/`PROMPT_IDLE`) are now backed by `capture-pane` (real screen) — tune the regexes against live output in Phase 5.3 if a state is misread; this is deterministic capture, not stream-quiescence guessing.
