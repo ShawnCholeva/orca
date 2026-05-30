@@ -151,6 +151,7 @@ import type { SessionPreparationAssembler } from './context/assembler.js';
 import { registerContextRoutes } from './context/routes.js';
 import { registerAdapterExecutionModeRoutes } from './adapters/execution-modes-routes.js';
 import { createDaemonContext, type DaemonContext } from './daemon-context.js';
+import { ProductionWorkflowSessionLauncher } from './workflows/orchestrator/session-launcher-impl.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
@@ -245,6 +246,32 @@ export function createServer(
     new SessionRuntime(new NodePtyManager(), config.sessionStopGraceMs, config.sessionWsBufferLimitBytes);
   const extractionRunner = deps?.extractionRunner;
   const assembler = deps?.assembler ?? daemonContext.contextAssembler;
+
+  // Wire the headless pty starter into the workflow launcher now that the
+  // session runtime and output store exist. Orchestrator-dispatched agent
+  // sessions have no UI terminal to call /start, so the launcher starts them.
+  if (daemonContext.workflowSessionLauncher instanceof ProductionWorkflowSessionLauncher) {
+    daemonContext.workflowSessionLauncher.setStarter(async (sessionId, dims) => {
+      await startSession(
+        {
+          db,
+          bus: eventBus,
+          adapterRegistry,
+          sessionOutputStore,
+          sessionRuntime,
+          dataDir: config.dataDir,
+          onTerminalState: extractionRunner
+            ? (sid) => tryEnqueueForTerminalSession(
+                { db: getDatabase(), bus: eventBus, outputStore: sessionOutputStore, runner: extractionRunner },
+                sid
+              )
+            : undefined,
+        },
+        sessionId,
+        dims
+      );
+    });
+  }
 
   const server = Fastify({
     logger: {

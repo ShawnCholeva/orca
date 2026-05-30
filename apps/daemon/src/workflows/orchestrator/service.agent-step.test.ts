@@ -138,6 +138,16 @@ function orchestratorMessageCount(db: Database.Database): number {
   ).c;
 }
 
+function lastOrchestratorMessageBody(db: Database.Database): string {
+  return (
+    db
+      .prepare(
+        "SELECT body FROM orchestrator_messages WHERE goal_id = 'goal-1' ORDER BY created_at DESC, rowid DESC LIMIT 1"
+      )
+      .get() as { body: string }
+  ).body;
+}
+
 /** Seed a workflow with an agent-capable template step */
 function setupAgentStepRun(db: Database.Database, opts: { guardrailsJson?: string } = {}) {
   const step = makeStep({
@@ -429,6 +439,33 @@ describe("OrchestratorService.onUserMessage (user_message trigger)", () => {
     const [sessionId, text] = agentInput.mock.calls[0]!;
     expect(sessionId).toBe("sess-judge");
     expect(text).toContain("please add tests");
+    // Must also acknowledge in chat so the UI "thinking" bubble clears.
+    expect(orchestratorMessageCount(db)).toBe(1);
+    expect(lastOrchestratorMessageBody(db)).toContain("Relayed your message");
+  });
+
+  it("forward_to_agent with no live session: posts a 'no session' acknowledgment instead of silently dropping", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    // NOTE: no seedAgentSession() — current step has no live session.
+
+    const agentInput = vi.fn();
+    const service = makeJudgeService(
+      fakeMediator({ kind: "forward_to_agent", translated: "please add tests" }),
+      agentInput
+    );
+
+    await service.onUserMessage(
+      db,
+      () => NOW,
+      { goalId: "goal-1", body: "add tests" },
+      { bus, idFactory }
+    );
+
+    expect(agentInput).not.toHaveBeenCalled();
+    expect(orchestratorMessageCount(db)).toBe(1);
+    expect(lastOrchestratorMessageBody(db)).toContain("no live agent session");
   });
 
   it("answer_user_directly: posts an orchestrator message and does NOT message the agent", async () => {
