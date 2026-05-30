@@ -189,7 +189,11 @@ export class OrchestratorService {
     sessionOutputStore?: SessionOutputStore,
     private readonly stepDispatch?: StepDispatchCapabilities,
     private readonly orchestratorMediator?: Pick<OrchestratorMediator, "invoke"> & Partial<Pick<OrchestratorMediator, "invokeWithBackoff">>,
-    private readonly agentInput?: (sessionId: string, text: string) => void | Promise<void>
+    private readonly agentInput?: (sessionId: string, text: string) => void | Promise<void>,
+    // Delivers a freshly-launched step session its composed objective via the
+    // agent's stdin (readiness-gated, paste-safe). Per the orchestrator-mediated
+    // workflows design; without it the agent boots interactive and sits idle.
+    private readonly deliverInitialPrompt?: (sessionId: string, prompt: string) => Promise<void>
   ) {
     this.sessionOutputStore = sessionOutputStore ?? NULL_OUTPUT_STORE;
   }
@@ -882,18 +886,25 @@ export class OrchestratorService {
       this.commitDeterministicStepSelection(db, now, ctx, dispatch, options);
     }
 
-    await this.launcher.launch({
+    const objective = composeAgentInitialPrompt({
+      stepInstructions: ctx.stepTpl.instructions,
+      outputSchema: ctx.stepTpl.outputSchema,
+      priorStepArtifacts: this.collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.ordinal),
+    });
+    const { sessionId } = await this.launcher.launch({
       goalId: ctx.goal.id,
       workflowRunId: ctx.run.id,
       workflowStepRunId: ctx.stepRun.id,
       operatorId: "agent:" + dispatch.adapterId,
       operatorKind: "agent",
-      objective: composeAgentInitialPrompt({
-        stepInstructions: ctx.stepTpl.instructions,
-        outputSchema: ctx.stepTpl.outputSchema,
-        priorStepArtifacts: this.collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.ordinal),
-      }),
+      objective,
     });
+    // Hand the agent its task. The launcher started the pty; the agent is an
+    // interactive claude sitting at an empty prompt until we write the objective
+    // to its stdin (readiness-gated, paste-safe).
+    if (this.deliverInitialPrompt) {
+      await this.deliverInitialPrompt(sessionId, objective);
+    }
   }
 
   /**

@@ -69,14 +69,20 @@ function makeLauncher(launchFn = vi.fn(async () => ({ sessionId: "sess-1" }))): 
   return { launch: launchFn, mock: launchFn };
 }
 
-function makeAgentService(launcher: WorkflowSessionLauncher): OrchestratorService {
+function makeAgentService(
+  launcher: WorkflowSessionLauncher,
+  deliverInitialPrompt?: (sessionId: string, prompt: string) => Promise<void>
+): OrchestratorService {
   return new OrchestratorService(
     fakeAgentSelector(),
     fakeBrokerNoop(),
     { async list() { return [agentOperatorDescriptor()]; } },
     launcher,
     undefined,
-    fakeStepDispatch()
+    fakeStepDispatch(),
+    undefined,
+    undefined,
+    deliverInitialPrompt
   );
 }
 
@@ -590,6 +596,23 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     expect(launchFn).toHaveBeenCalledWith(
       expect.objectContaining({ objective: expect.stringContaining("orca:step-complete") })
     );
+  });
+
+  it("startWorkflowFirstStep delivers the composed objective to the launched session", async () => {
+    const { db } = setupHarness();
+    setupFirstStepRun(db);
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-x" }));
+    const deliver = vi.fn(async (_sessionId: string, _prompt: string) => {});
+    const service = makeAgentService(makeLauncher(launchFn), deliver);
+
+    await service.startWorkflowFirstStep(db, () => NOW, "run-1");
+
+    expect(deliver).toHaveBeenCalledOnce();
+    const [sessionId, prompt] = deliver.mock.calls[0]!;
+    expect(sessionId).toBe("sess-x");
+    expect(prompt).toContain("Write the implementation.");
+    expect(prompt).toContain("orca:step-complete");
   });
 
   it("advanceToNextStep spawns the next step's agent for an intermediate step", async () => {

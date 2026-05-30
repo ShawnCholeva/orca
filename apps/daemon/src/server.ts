@@ -152,6 +152,7 @@ import { registerContextRoutes } from './context/routes.js';
 import { registerAdapterExecutionModeRoutes } from './adapters/execution-modes-routes.js';
 import { createDaemonContext, type DaemonContext } from './daemon-context.js';
 import { ProductionWorkflowSessionLauncher } from './workflows/orchestrator/session-launcher-impl.js';
+import { deliverInitialPrompt, renderSessionTailText } from './workflows/orchestrator/deliver-initial-prompt.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
@@ -521,7 +522,20 @@ export function createServer(
     orchestratorMediator,
     (sessionId: string, text: string) => {
       sessionRuntime.getHandle(sessionId)?.write(Buffer.from(text, "utf8"));
-    }
+    },
+    (sessionId: string, prompt: string) =>
+      deliverInitialPrompt(
+        {
+          getHandle: (id) => sessionRuntime.getHandle(id),
+          readTailText: (id) => renderSessionTailText(sessionOutputStore.readTail(id)),
+        },
+        sessionId,
+        prompt
+      ).then((result) => {
+        if (result !== "delivered") {
+          console.warn(`[orchestrator] initial prompt ${result} for session ${sessionId}`);
+        }
+      })
   );
   // Wire the late-binding ref so the onChunkAppended callback is live.
   _orchestratorServiceRef.current = orchestratorService;
