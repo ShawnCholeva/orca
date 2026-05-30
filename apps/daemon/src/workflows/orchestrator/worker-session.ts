@@ -1,14 +1,18 @@
 import { mkdirSync, writeFileSync, watch, openSync, readSync, closeSync, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import {
-  defaultTmuxRunner, newSession, capturePane, sendEnter, pipePaneToFile, killSession,
+  defaultTmuxRunner, newSession, capturePane, sendEnter, paste, pipePaneToFile, killSession,
   type TmuxRunner,
 } from "../../tmux/runner.js";
 import { buildAgentHookSettings } from "../../agent-hooks/hook-settings.js";
 
 const TRUST_DEFAULT = /trust this folder|Is this a project you created or one you trust|do you trust/i;
 const READY_DEFAULT = /(auto mode on|\? for shortcuts|\n\s*❯)/i;
+const BUSY_DEFAULT = /esc to interrupt|\bthinking\b|running .* hook|cooked for|churned for/i;
+const PROMPT_IDLE = /\n\s*❯\s*$|❯\s+$/;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export type DeliverResult = "delivered" | "no_session" | "timeout";
 
 export interface WorkerSpawnInput {
   sessionId: string;
@@ -103,6 +107,43 @@ export class WorkerSessionManager {
     const watcher = watch(file, { persistent: false }, () => pump());
     pump(); // initial pump: catch bytes written before the watcher was established
     this.tails.set(sessionId, { watcher, fd, pos });
+  }
+
+  async deliver(sessionId: string, text: string): Promise<DeliverResult> {
+    const s = this.sessions.get(sessionId);
+    if (!s) return "no_session";
+    await s.ready;
+    const poll = this.deps.pollMs ?? 300;
+    const idleQuiet = this.deps.idleQuietMs ?? 600;
+    const deadline = Date.now() + (this.deps.idleTimeoutMs ?? 120_000);
+
+    // Wait until the pane shows an idle prompt (not busy) for idleQuiet ms.
+    let idleSince: number | null = null;
+    let ready = false;
+    while (Date.now() < deadline) {
+      const pane = await capturePane(this.tmux, s.name);
+      const busy = BUSY_DEFAULT.test(pane);
+      const idle = !busy && PROMPT_IDLE.test(pane);
+      if (idle) {
+        if (idleSince === null) idleSince = Date.now();
+        if (Date.now() - idleSince >= idleQuiet) { ready = true; break; }
+      } else {
+        idleSince = null;
+      }
+      await sleep(poll);
+    }
+    if (!ready) return "timeout";
+
+    const buf = `orca-worker-${sessionId}`;
+    await paste(this.tmux, s.name, buf, text);
+    await sleep(this.deps.postPasteMs ?? 250);
+    await sendEnter(this.tmux, s.name);
+
+    // Confirm submission: the input box should no longer hold the pasted placeholder.
+    await sleep(poll);
+    const after = await capturePane(this.tmux, s.name);
+    if (/\[Pasted text/i.test(after)) { await sendEnter(this.tmux, s.name); } // retry once
+    return "delivered";
   }
 
   async terminate(sessionId: string): Promise<void> {

@@ -60,3 +60,32 @@ describe("WorkerSessionManager.startTail", () => {
     await mgr.terminate("sess-1");
   });
 });
+
+describe("WorkerSessionManager.deliver", () => {
+  it("deliver waits for an idle prompt, then pastes + submits", async () => {
+    // capture-pane: busy (spinner) twice, then idle prompt.
+    const tmux = fakeTmux(["auto mode on", "esc to interrupt", "esc to interrupt", "❯ "]);
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const mgr = new WorkerSessionManager({
+      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux,
+      captureSink: () => {}, startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
+    });
+    await mgr.spawn({ sessionId: "sess-1", workspacePath: "/repo", command: "claude", env: {} });
+    const result = await mgr.deliver("sess-1", "do the thing\nplease");
+    expect(result).toBe("delivered");
+    const order = tmux.calls.map((c) => c[0]);
+    expect(order).toContain("load-buffer");
+    expect(order).toContain("paste-buffer");
+    const pasteIdx = order.indexOf("paste-buffer");
+    expect(order.slice(pasteIdx).includes("send-keys")).toBe(true);
+  });
+
+  it("deliver returns no_session for an unknown session", async () => {
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux: fakeTmux(), captureSink: () => {},
+    });
+    expect(await mgr.deliver("nope", "x")).toBe("no_session");
+  });
+});
