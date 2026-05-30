@@ -36,6 +36,7 @@ function defaultTmuxRunner(): TmuxRunner {
 export interface ShadowSessionDeps {
   shadowRoot: string;                 // e.g. ~/.orca/shadow
   daemonPort: number;                 // bound port; mutable via setDaemonPort
+  authToken: string;                  // daemon Bearer token; injected into hook headers so the Stop hook clears auth
   isReady: () => Promise<boolean>;    // ClaudeCodeAdapter.checkAuth in prod; ()=>true in tests
   claudeBin?: string;                 // default ORCA_CLAUDE_CODE_BIN ?? "claude"
   tmux?: TmuxRunner;                  // injectable for tests; default shells out to tmux
@@ -85,7 +86,7 @@ export class ShadowSessionManager {
     mkdirSync(join(dir, ".claude"), { recursive: true });
     writeFileSync(
       join(dir, ".claude", "settings.local.json"),
-      JSON.stringify(buildShadowHookSettings({ goalId, port: this.deps.daemonPort }), null, 2),
+      JSON.stringify(buildShadowHookSettings({ goalId, port: this.deps.daemonPort, authToken: this.deps.authToken }), null, 2),
       "utf8",
     );
     const name = this.tmuxName(goalId);

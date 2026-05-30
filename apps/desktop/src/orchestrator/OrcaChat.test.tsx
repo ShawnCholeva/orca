@@ -380,6 +380,43 @@ describe("OrcaChat", () => {
     expect(await screen.findByText(/Confirm done/)).toBeInTheDocument();
   });
 
+  it("shows a thinking indicator while a blocking (one_shot) send is in flight, before the reply lands", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+
+    // one_shot: createOrchestratorMessage blocks until the LLM completes, then
+    // resolves with a non-null reply. Control the promise to inspect the wait.
+    let resolveSend: ((value: unknown) => void) | null = null;
+    createOrchestratorMessageMock.mockImplementation(
+      () => new Promise((resolve) => { resolveSend = resolve as (value: unknown) => void; }),
+    );
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+    await screen.findByPlaceholderText("Message Orca…");
+
+    fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
+      target: { value: "Plan the rollout." },
+    });
+    fireEvent.click(screen.getByText("Send"));
+
+    // While the request is in flight, Orca must show it is working.
+    expect(await screen.findByTestId("awaiting-reply")).toBeInTheDocument();
+
+    // Resolve with a synchronous reply (one_shot path returns reply != null).
+    expect(resolveSend).not.toBeNull();
+    resolveSend!({
+      message: { ...userMessage, id: "msg-user-1s", body: "Plan the rollout." },
+      reply: { ...orcaMessage, id: "msg-orca-1s", body: "Here is the bounded plan." },
+    });
+
+    // Once the reply lands, the indicator clears and the reply is shown.
+    await waitFor(() => {
+      expect(screen.queryByTestId("awaiting-reply")).toBeNull();
+    });
+    expect(screen.getByText("Here is the bounded plan.")).toBeInTheDocument();
+  });
+
   it("shows thinking indicator after async reply (reply:null) and clears it when orchestrator reply lands", async () => {
     getGoalDetailMock.mockResolvedValue({
       goal,
@@ -444,5 +481,48 @@ describe("OrcaChat", () => {
 
     // The orchestrator reply message is visible.
     expect(screen.getByText("I have started the plan.")).toBeInTheDocument();
+  });
+
+  it("does not flash a loading indicator or blank content on SSE-driven refresh once loaded", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [userMessage, orcaMessage] });
+
+    let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+    openEventStreamMock.mockImplementation(
+      ({ onEvent }: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+        capturedOnEvent = onEvent;
+        return { close: vi.fn() };
+      },
+    );
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(
+      <OrcaChat
+        goals={[{ ...goal, activeWorkflowRunId: "run-1" }]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    // Initial load settles: content visible, no loading indicator left over.
+    await screen.findByText("Start with a bounded verification pass.");
+    expect(screen.queryAllByText("routing")).toHaveLength(0);
+
+    // Make the refetch triggered by the SSE event hang, so any loading state
+    // that gets set would remain observable instead of resolving instantly.
+    getGoalDetailMock.mockImplementation(() => new Promise(() => {}));
+    listOrchestratorMessagesMock.mockImplementation(() => new Promise(() => {}));
+
+    // Fire an SSE refresh event (the storm source during a live turn).
+    expect(capturedOnEvent).not.toBeNull();
+    capturedOnEvent!({ type: "workflow.step_completed", goalId: "goal-1" });
+
+    // Wait past the 75ms debounce so the refresh has been kicked off.
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    // Background refresh must NOT blank content nor show a "routing" loader.
+    expect(screen.getByText("Ship Engineering workflow chat")).toBeInTheDocument();
+    expect(screen.getByText("Start with a bounded verification pass.")).toBeInTheDocument();
+    expect(screen.queryAllByText("routing")).toHaveLength(0);
   });
 });

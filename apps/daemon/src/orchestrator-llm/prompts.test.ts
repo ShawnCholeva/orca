@@ -48,4 +48,14 @@ describe("composeOrchestratorPrompt", () => {
     });
     expect(p.systemPrompt).toContain(SENTINEL_INSTRUCTION);
   });
+
+  it("specifies the exact OrchestratorAction shape: 'kind' discriminator and per-kind fields", () => {
+    const out = composeOrchestratorPrompt({ triggerKind: "user_message" } as any);
+    // Discriminator must be named exactly "kind" (model previously guessed "action").
+    expect(out.systemPrompt).toMatch(/"kind"/);
+    // answer_user_directly / paraphrase / escalate carry "body" (model previously guessed "message").
+    expect(out.systemPrompt).toMatch(/"body"/);
+    expect(out.systemPrompt).toMatch(/forward_to_agent[^]*"translated"/);
+    expect(out.systemPrompt).toMatch(/revise_step[^]*"feedback"/);
+  });
 });

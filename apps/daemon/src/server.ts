@@ -457,6 +457,7 @@ export function createServer(
   const shadowSessions = new ShadowSessionManager({
     shadowRoot: path.join(config.dataDir, "shadow"),
     daemonPort: config.port,
+    authToken: config.getAuthToken(),
     isReady: async () => {
       const adapter = adapterRegistry.get("claude-code");
       if (!adapter) return false;

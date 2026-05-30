@@ -26,6 +26,7 @@ function deps(root: string, tmux: ReturnType<typeof fakeTmux>, ready = true) {
   return {
     shadowRoot: root,
     daemonPort: 8787,
+    authToken: "test-token",
     isReady: async () => ready,
     tmux,
     pollMs: 1,

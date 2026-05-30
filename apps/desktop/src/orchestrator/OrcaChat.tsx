@@ -70,6 +70,18 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [awaitingReply, setAwaitingReply] = useState(false);
   const composerFormRef = useRef<HTMLFormElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Track which goal each data set has already loaded for, so SSE-driven
+  // refetches refresh silently (keeping stale content) instead of flipping the
+  // loading flags and flashing "routing" indicators on every event.
+  const messagesLoadedGoalRef = useRef<string | null>(null);
+  const workflowLoadedGoalRef = useRef<string | null>(null);
+  // Track which goal we've already scrolled to the bottom for, so the chat opens
+  // pinned to the latest message on first view without re-jumping on every SSE refresh.
+  const scrolledGoalRef = useRef<string | null>(null);
+  // Last message id we scrolled for, so we re-pin to the bottom when a new
+  // message arrives (user send or orca reply) but not on unrelated refreshes.
+  const scrolledMessageIdRef = useRef<string | null>(null);
 
   const selectedGoal = goals.find((goal) => goal.id === selectedGoalId) ?? null;
   const connected = connectionStatus === "open";
@@ -78,7 +90,26 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     setActionError(null);
     setMessageError(null);
     setAwaitingReply(false);
+    scrolledGoalRef.current = null;
+    scrolledMessageIdRef.current = null;
   }, [selectedGoalId]);
+
+  // Pin the scroll to the latest message on first view of a goal's chat, and
+  // again whenever a new message arrives (user send or orca reply). Unrelated
+  // SSE refreshes that don't change the last message leave scroll alone.
+  useEffect(() => {
+    if (!selectedGoalId) return;
+    if (messagesLoading) return;
+    if (messagesLoadedGoalRef.current !== selectedGoalId) return;
+    const lastId = messages[messages.length - 1]?.id ?? null;
+    const firstView = scrolledGoalRef.current !== selectedGoalId;
+    if (!firstView && scrolledMessageIdRef.current === lastId) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    scrolledGoalRef.current = selectedGoalId;
+    scrolledMessageIdRef.current = lastId;
+  }, [selectedGoalId, messagesLoading, messages]);
 
   useEffect(() => {
     if (!recoveryExpanded) return;
@@ -103,12 +134,15 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
       setMessagesLoading(false);
       setMessageError(null);
       setMessageDraft("");
+      messagesLoadedGoalRef.current = null;
       return;
     }
 
     const goalId = selectedGoalId;
     let cancelled = false;
-    setMessagesLoading(true);
+    // Only show the loader on the first load for this goal; later refetches
+    // (SSE refresh) keep the current messages on screen.
+    if (messagesLoadedGoalRef.current !== goalId) setMessagesLoading(true);
     setMessageError(null);
 
     async function loadMessages() {
@@ -116,6 +150,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
         const response = await listOrchestratorMessages(goalId);
         if (!cancelled) {
           setMessages(response.messages);
+          messagesLoadedGoalRef.current = goalId;
           const lastMsg = response.messages[response.messages.length - 1] ?? null;
           if (lastMsg && lastMsg.role !== "user") {
             setAwaitingReply(false);
@@ -142,12 +177,15 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
       setWorkflowState(EMPTY_WORKFLOW_STATE);
       setLoading(false);
       setError(null);
+      workflowLoadedGoalRef.current = null;
       return;
     }
     const goalId = selectedGoalId;
 
     let cancelled = false;
-    setLoading(true);
+    // Only block with the loader on the first load for this goal; SSE-driven
+    // refetches refresh the workflow state silently.
+    if (workflowLoadedGoalRef.current !== goalId) setLoading(true);
     setError(null);
 
     async function load() {
@@ -164,6 +202,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
             decisions: [],
             artifacts: [],
           });
+          workflowLoadedGoalRef.current = goalId;
           return;
         }
 
@@ -186,6 +225,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
           decisions: sortByCreatedAtDesc(decisionsResponse.decisions),
           artifacts: sortByCreatedAtDesc(artifactsResponse.artifacts),
         });
+        workflowLoadedGoalRef.current = goalId;
       } catch (err) {
         if (!cancelled) {
           setError(toErrorMessage(err, "Failed to load orchestrator state."));
@@ -327,7 +367,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
 
   return (
     <div className="orca-chat">
-      <div className="orca-chat-scroll scroll">
+      <div className="orca-chat-scroll scroll" ref={scrollRef}>
         {!selectedGoal && (
           <SystemCard
             title="Select a goal"
@@ -483,7 +523,10 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
               />
             )}
 
-            {awaitingReply && (
+            {/* Show Orca is working from the moment the send is in flight
+                (covers the blocking one_shot path) through the async wait for a
+                deferred reply (shadow_session / active-run, reply:null). */}
+            {(sendingMessage || awaitingReply) && (
               <div data-testid="awaiting-reply">
                 <ThinkingRow label="orchestrator" />
               </div>
