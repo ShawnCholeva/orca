@@ -9,7 +9,10 @@ import { buildAgentHookSettings } from "../../agent-hooks/hook-settings.js";
 const TRUST_DEFAULT = /trust this folder|Is this a project you created or one you trust|do you trust/i;
 const READY_DEFAULT = /(auto mode on|\? for shortcuts|\n\s*❯)/i;
 const BUSY_DEFAULT = /esc to interrupt|\bthinking\b|running .* hook|cooked for|churned for/i;
-const PROMPT_IDLE = /\n\s*❯\s*$|❯\s+$/;
+// claude renders the input box (❯) ABOVE its status/footer lines, so the prompt
+// is not at end-of-pane. Match an EMPTY prompt line (❯ followed by only spaces)
+// anywhere; combined with !busy this means the agent is idle and ready for input.
+const PROMPT_IDLE = /❯[ \t]*(?:\n|$)/;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export type DeliverResult = "delivered" | "no_session" | "timeout";
