@@ -1042,6 +1042,8 @@ export function createServer(
         idFactory: daemonContext.idFactory,
       });
     },
+    resolveAdapterForSession: (sid) =>
+      (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(sid) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code",
   });
 
   // ---- Workflow orchestrator routes ----
