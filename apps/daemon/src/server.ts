@@ -175,6 +175,7 @@ import { composeOrchestratorPrompt } from './orchestrator-llm/prompts.js';
 import { buildContextFromDb } from './orchestrator-llm/build-context.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
 import { registerAgentHookRoutes } from './agent-hooks/routes.js';
+import { WorkerSessionManager } from './workflows/orchestrator/worker-session.js';
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
 import {
   buildOrchestrationProviderCatalog,
@@ -494,11 +495,22 @@ export function createServer(
     },
     claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
   });
-  // Update the hook endpoint URL with the actual bound port after listen.
+
+  // Worker session manager for orchestrator-dispatched agent sessions (tmux-backed).
+  const workerSessions = new WorkerSessionManager({
+    privateRoot: path.join(config.dataDir, "workers"),
+    daemonPort: 0, // set after listen via setDaemonPort, mirroring the shadow
+    authToken: config.getAuthToken(),
+    claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
+    captureSink: (sessionId, chunk) => sessionOutputStore.appendChunk(sessionId, chunk),
+  });
+
+  // Update the hook endpoint URLs with the actual bound port after listen.
   server.addHook("onListen", async () => {
     const addr = server.server.address();
     if (addr && typeof addr === "object" && typeof addr.port === "number") {
       shadowSessions.setDaemonPort(addr.port);
+      workerSessions.setDaemonPort(addr.port);
     }
   });
 
