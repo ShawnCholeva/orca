@@ -56,7 +56,7 @@ import {
   type GoalDecision,
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
-  SelectWorkerQuestionOptionRequest,
+  SubmitWorkerAnswersRequest,
 } from '@orca/contracts';
 import type { Config } from './config.js';
 import { getDatabase } from './db.js';
@@ -177,6 +177,7 @@ import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
 import { registerAgentHookRoutes } from './agent-hooks/routes.js';
 import { WorkerSessionManager } from './workflows/orchestrator/worker-session.js';
 import { WorkerQuestionStore } from './workflows/orchestrator/worker-questions.js';
+import { validateAnswers, assembleAnswerReason } from './workflows/orchestrator/worker-answer-format.js';
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
 import {
   buildOrchestrationProviderCatalog,
@@ -489,6 +490,7 @@ export function createServer(
     },
   });
   const workerQuestions = new WorkerQuestionStore(daemonContext.idFactory);
+  const ELICIT_ANSWER_TIMEOUT_MS = 590_000; // slightly under the 600s hook timeout
 
   // Update the hook endpoint URLs with the actual bound port after listen.
   server.addHook("onListen", async () => {
@@ -1060,37 +1062,52 @@ export function createServer(
       (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(sid) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code",
     onWorkerQuestion: async (sessionId, payload) => {
       const goalRow = db.prepare("SELECT goal_id FROM sessions WHERE id = ?").get(sessionId) as { goal_id: string } | undefined;
-      if (!goalRow) return null;
+      if (!goalRow) return "No goal is associated with this session; proceed using your best judgment.";
       const goalId = goalRow.goal_id;
-      if (payload.questions.length !== 1 || payload.questions[0]!.multiSelect) {
-        insertMessageWithEvent(
-          { db, bus: eventBus, modelProviderRegistry: daemonContext.modelProviderRegistry, now: daemonContext.now, idFactory: daemonContext.idFactory },
-          { id: daemonContext.idFactory(), goalId, role: "orchestrator", body: "The agent asked a multi-part question that isn't supported yet — answer it directly in the worker or rephrase.", correlationId: daemonContext.idFactory(), createdAt: daemonContext.now() }
-        );
-        return null;
-      }
-      const q = payload.questions[0]!;
-      const questionId = workerQuestions.record({ sessionId, optionCount: q.options.length });
+      const { questionId, answered } = workerQuestions.record({
+        toolUseId: payload.toolUseId,
+        sessionId,
+        goalId,
+        questions: payload.questions,
+      });
       insertMessageWithEvent(
         { db, bus: eventBus, modelProviderRegistry: daemonContext.modelProviderRegistry, now: daemonContext.now, idFactory: daemonContext.idFactory },
-        { id: daemonContext.idFactory(), goalId, role: "orchestrator", body: `The agent needs your input: ${q.question}`, correlationId: daemonContext.idFactory(), createdAt: daemonContext.now(),
-          pendingQuestion: { questionId, header: q.header, question: q.question, options: q.options } }
+        {
+          id: daemonContext.idFactory(),
+          goalId,
+          role: "orchestrator",
+          body: "The agent needs your input.",
+          correlationId: daemonContext.idFactory(),
+          createdAt: daemonContext.now(),
+          pendingQuestion: { questionId, toolUseId: payload.toolUseId, questions: payload.questions },
+        }
       );
-      return questionId;
+      let timerId: ReturnType<typeof setTimeout>;
+      const timed = new Promise<string>((res) => {
+        timerId = setTimeout(() => res("No answer received from the user; proceed using your best judgment."), ELICIT_ANSWER_TIMEOUT_MS);
+      });
+      const reason = await Promise.race([answered, timed]);
+      clearTimeout(timerId!); // release the timer; harmless if it already fired
+      workerQuestions.resolveAnswers(questionId, reason); // no-op if the /answer route already resolved this
+      return reason;
     },
   });
 
-  // ---- Worker question select route ----
+  // ---- Worker question answer route ----
 
-  server.post("/v1/goals/:goalId/worker-questions/:questionId/select", async (request, reply) => {
-    const { questionId } = request.params as { goalId: string; questionId: string };
-    const parsed = SelectWorkerQuestionOptionRequest.safeParse(request.body);
+  server.post("/v1/goals/:goalId/worker-questions/:questionId/answer", async (request, reply) => {
+    const { goalId, questionId } = request.params as { goalId: string; questionId: string };
+    const parsed = SubmitWorkerAnswersRequest.safeParse(request.body);
     if (!parsed.success) { reply.status(400); return { error: "validation_failed", issues: parsed.error.issues }; }
     const pending = workerQuestions.get(questionId);
-    if (!pending) { reply.status(404); return { error: { code: "question_not_found" } }; }
-    if (parsed.data.optionIndex >= pending.optionCount) { reply.status(400); return { error: { code: "option_out_of_range" } }; }
-    await workerSessions.selectMenuOption(pending.sessionId, parsed.data.optionIndex);
-    workerQuestions.resolve(questionId);
+    // Not-found OR a goal mismatch both read as "not found" for this goal — never
+    // let a question scoped to one goal be answered through another goal's URL.
+    if (!pending || pending.goalId !== goalId) { reply.status(404); return { error: { code: "question_not_found" } }; }
+    const invalid = validateAnswers(pending.questions, parsed.data.answers);
+    if (invalid) { reply.status(400); return { error: { code: invalid } }; }
+    const reason = assembleAnswerReason(pending.questions, parsed.data.answers);
+    const ok = workerQuestions.resolveAnswers(questionId, reason);
+    if (!ok) { reply.status(409); return { error: { code: "already_answered" } }; }
     return { ok: true };
   });
 
