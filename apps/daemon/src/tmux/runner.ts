@@ -45,6 +45,10 @@ export async function sendEnter(r: TmuxRunner, name: string): Promise<void> {
   await r.run(["send-keys", "-t", name, "Enter"]);
 }
 
+export async function sendKey(r: TmuxRunner, name: string, key: string): Promise<void> {
+  await r.run(["send-keys", "-t", name, key]);
+}
+
 export async function pipePaneToFile(r: TmuxRunner, name: string, filePath: string): Promise<void> {
   await r.run(["pipe-pane", "-o", "-t", name, `cat >> ${JSON.stringify(filePath)}`]);
 }

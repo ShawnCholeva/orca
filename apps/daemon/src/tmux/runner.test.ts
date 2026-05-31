@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { capturePane, paste, sendEnter, type TmuxRunner } from "./runner.js";
+import { capturePane, paste, sendEnter, sendKey, type TmuxRunner } from "./runner.js";
 
 function fakeRunner(stdout = ""): TmuxRunner & { calls: string[][] } {
   const calls: string[][] = [];
@@ -27,5 +27,11 @@ describe("tmux runner helpers", () => {
     const r = fakeRunner();
     await sendEnter(r, "sess");
     expect(r.calls[0]).toEqual(["send-keys", "-t", "sess", "Enter"]);
+  });
+
+  it("sendKey sends an arbitrary key", async () => {
+    const r = fakeRunner();
+    await sendKey(r, "sess", "Down");
+    expect(r.calls[0]).toEqual(["send-keys", "-t", "sess", "Down"]);
   });
 });

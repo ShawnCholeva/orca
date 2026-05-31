@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync, watch, openSync, readSync, closeSync, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import {
-  defaultTmuxRunner, newSession, capturePane, sendEnter, paste, pipePaneToFile, killSession, hasSession,
+  defaultTmuxRunner, newSession, capturePane, sendEnter, sendKey, paste, pipePaneToFile, killSession, hasSession,
   type TmuxRunner,
 } from "../../tmux/runner.js";
 import { buildAgentHookSettings } from "../../agent-hooks/hook-settings.js";
@@ -151,6 +151,19 @@ export class WorkerSessionManager {
     const after = await capturePane(this.tmux, s.name);
     if (/\[Pasted text/i.test(after)) { await sendEnter(this.tmux, s.name); } // retry once
     return "delivered";
+  }
+
+  async selectMenuOption(sessionId: string, optionIndex: number): Promise<"selected" | "no_session"> {
+    const s = this.sessions.get(sessionId);
+    if (!s) return "no_session";
+    // The AskUserQuestion menu renders with the first row highlighted; Down optionIndex
+    // times reaches the target option, then Enter selects it.
+    for (let n = 0; n < optionIndex; n++) {
+      await sendKey(this.tmux, s.name, "Down");
+      await sleep(this.deps.postPasteMs ?? 80);
+    }
+    await sendEnter(this.tmux, s.name);
+    return "selected";
   }
 
   /**

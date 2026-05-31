@@ -102,6 +102,31 @@ describe("WorkerSessionManager.deliver", () => {
   });
 });
 
+describe("WorkerSessionManager.selectMenuOption", () => {
+  it("navigates to the option via Down keys then Enter", async () => {
+    const tmux = fakeTmux(["auto mode on"]);
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0, postPasteMs: 0,
+    });
+    await mgr.spawn({ sessionId: "s1", workspacePath: "/repo", command: "claude", env: {} });
+    const res = await mgr.selectMenuOption("s1", 2); // third option → Down x2 + Enter
+    expect(res).toBe("selected");
+    const sendKeys = tmux.calls.filter((c) => c[0] === "send-keys");
+    expect(sendKeys.filter((c) => c.includes("Down")).length).toBe(2);
+    expect(sendKeys.some((c) => c.includes("Enter"))).toBe(true);
+  });
+
+  it("returns no_session for an unknown session", async () => {
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux: fakeTmux(), captureSink: () => {},
+    });
+    expect(await mgr.selectMenuOption("nope", 0)).toBe("no_session");
+  });
+});
+
 describe("WorkerSessionManager.reattach", () => {
   it("adopts a surviving tmux session without respawning, and re-pipes output", async () => {
     // fakeTmux: has-session returns code 0 (the helper returns code 0 for all calls)
