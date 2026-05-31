@@ -134,8 +134,11 @@ AskUserQuestion again."`
 ### Desktop (`apps/desktop/src`)
 
 - `orchestrator/OrcaChat.tsx` — when a message has `pendingQuestion`, render each question as a block:
-  single-select → option buttons; `multiSelect` → checkboxes. A single **Submit** enables once every
-  question has at least one selection. Submit posts the assembled `answers` and disables the controls.
+  single-select → radio buttons; `multiSelect` → checkboxes. A single **Submit** enables only once
+  **every** question has at least one selection (all-required gating; no partial submit). Submit posts
+  the assembled `answers`, then disables the controls and **echoes the chosen label(s) inline** with a
+  ✓ next to each selected option (the block stays visible/readable, not collapsed). A submit that
+  returns 404 (expired) renders an inline "This question expired." notice.
 - `api.ts` — `submitWorkerAnswers(goalId, questionId, answers)`.
 - `orca-chat.css` — styling for multi-question blocks, checkboxes, submit button.
 
