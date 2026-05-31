@@ -209,6 +209,7 @@ export function insertMessageWithEvent(
     body: string;
     correlationId: string;
     createdAt: string;
+    pendingQuestion?: { questionId: string; header: string; question: string; options: { label: string; description: string }[] };
   }
 ): OrchestratorChatMessageT {
   const idFactory = ctx.idFactory ?? randomUUID;
@@ -216,8 +217,8 @@ export function insertMessageWithEvent(
     ctx.db
       .prepare(
         `INSERT INTO orchestrator_messages
-          (id, goal_id, role, kind, body, correlation_id, created_at)
-         VALUES (?, ?, ?, 'message', ?, ?, ?)`
+          (id, goal_id, role, kind, body, correlation_id, created_at, pending_question)
+         VALUES (?, ?, ?, 'message', ?, ?, ?, ?)`
       )
       .run(
         message.id,
@@ -225,7 +226,8 @@ export function insertMessageWithEvent(
         message.role,
         message.body,
         message.correlationId,
-        message.createdAt
+        message.createdAt,
+        message.pendingQuestion != null ? JSON.stringify(message.pendingQuestion) : null
       );
 
     const payload = {
@@ -261,5 +263,6 @@ export function insertMessageWithEvent(
     body: message.body,
     correlationId: message.correlationId,
     createdAt: message.createdAt,
+    ...(message.pendingQuestion != null ? { pendingQuestion: message.pendingQuestion } : {}),
   });
 }

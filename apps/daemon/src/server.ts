@@ -55,7 +55,8 @@ import {
   type GoalMemoryItem,
   type GoalDecision,
   CheckReadinessAllResponse,
-  CheckReadinessOneResponse
+  CheckReadinessOneResponse,
+  SelectWorkerQuestionOptionRequest,
 } from '@orca/contracts';
 import type { Config } from './config.js';
 import { getDatabase } from './db.js';
@@ -175,6 +176,7 @@ import { buildContextFromDb } from './orchestrator-llm/build-context.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
 import { registerAgentHookRoutes } from './agent-hooks/routes.js';
 import { WorkerSessionManager } from './workflows/orchestrator/worker-session.js';
+import { WorkerQuestionStore } from './workflows/orchestrator/worker-questions.js';
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
 import {
   buildOrchestrationProviderCatalog,
@@ -486,6 +488,7 @@ export function createServer(
       ).run(new Date().toISOString(), sessionId);
     },
   });
+  const workerQuestions = new WorkerQuestionStore(daemonContext.idFactory);
 
   // Update the hook endpoint URLs with the actual bound port after listen.
   server.addHook("onListen", async () => {
@@ -1055,6 +1058,40 @@ export function createServer(
     },
     resolveAdapterForSession: (sid) =>
       (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(sid) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code",
+    onWorkerQuestion: async (sessionId, payload) => {
+      const goalRow = db.prepare("SELECT goal_id FROM sessions WHERE id = ?").get(sessionId) as { goal_id: string } | undefined;
+      if (!goalRow) return null;
+      const goalId = goalRow.goal_id;
+      if (payload.questions.length !== 1 || payload.questions[0]!.multiSelect) {
+        insertMessageWithEvent(
+          { db, bus: eventBus, modelProviderRegistry: daemonContext.modelProviderRegistry, now: daemonContext.now, idFactory: daemonContext.idFactory },
+          { id: daemonContext.idFactory(), goalId, role: "orchestrator", body: "The agent asked a multi-part question that isn't supported yet — answer it directly in the worker or rephrase.", correlationId: daemonContext.idFactory(), createdAt: daemonContext.now() }
+        );
+        return null;
+      }
+      const q = payload.questions[0]!;
+      const questionId = workerQuestions.record({ sessionId, optionCount: q.options.length });
+      insertMessageWithEvent(
+        { db, bus: eventBus, modelProviderRegistry: daemonContext.modelProviderRegistry, now: daemonContext.now, idFactory: daemonContext.idFactory },
+        { id: daemonContext.idFactory(), goalId, role: "orchestrator", body: `The agent needs your input: ${q.question}`, correlationId: daemonContext.idFactory(), createdAt: daemonContext.now(),
+          pendingQuestion: { questionId, header: q.header, question: q.question, options: q.options } }
+      );
+      return questionId;
+    },
+  });
+
+  // ---- Worker question select route ----
+
+  server.post("/v1/goals/:goalId/worker-questions/:questionId/select", async (request, reply) => {
+    const { questionId } = request.params as { goalId: string; questionId: string };
+    const parsed = SelectWorkerQuestionOptionRequest.safeParse(request.body);
+    if (!parsed.success) { reply.status(400); return { error: "validation_failed", issues: parsed.error.issues }; }
+    const pending = workerQuestions.get(questionId);
+    if (!pending) { reply.status(404); return { error: { code: "question_not_found" } }; }
+    if (parsed.data.optionIndex >= pending.optionCount) { reply.status(400); return { error: { code: "option_out_of_range" } }; }
+    await workerSessions.selectMenuOption(pending.sessionId, parsed.data.optionIndex);
+    workerQuestions.resolve(questionId);
+    return { ok: true };
   });
 
   // ---- Workflow orchestrator routes ----

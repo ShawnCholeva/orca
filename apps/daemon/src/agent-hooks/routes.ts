@@ -15,6 +15,7 @@ export interface AgentHookRouteDeps {
   onResponseDone(payload: AgentResponseDonePayload): Promise<void>;
   // Resolve the adapter id for a session (DB lookup in prod); tags the response.
   resolveAdapterForSession(sessionId: string): string;
+  onWorkerQuestion(sessionId: string, payload: { questions: Array<{ question: string; header: string; options: Array<{ label: string; description: string }>; multiSelect: boolean }>; toolUseId: string }): Promise<string | null>;
 }
 
 export function registerAgentHookRoutes(server: FastifyInstance, deps: AgentHookRouteDeps): void {
@@ -26,6 +27,18 @@ export function registerAgentHookRoutes(server: FastifyInstance, deps: AgentHook
     }
     await deps.onResponseDone(parsed.data);
     return { ok: true };
+  });
+
+  server.post("/v1/agent-hooks/elicit", async (request, reply) => {
+    const { sessionId } = request.query as { sessionId?: string };
+    const body = (request.body ?? {}) as { tool_input?: { questions?: Array<{ question: string; header: string; options: Array<{ label: string; description: string }>; multiSelect: boolean }> }; tool_use_id?: string };
+    const questions = body.tool_input?.questions ?? [];
+    if (sessionId && questions.length > 0) {
+      await deps.onWorkerQuestion(sessionId, { questions, toolUseId: body.tool_use_id ?? "" });
+    }
+    // Always allow: the menu renders in the worker pane and the agent blocks on it;
+    // the daemon drives the selection once the user clicks a chat button.
+    return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" } };
   });
 
   server.post("/v1/agent-hooks/stop", async (request, reply) => {
