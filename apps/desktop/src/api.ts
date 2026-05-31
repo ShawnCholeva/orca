@@ -930,23 +930,23 @@ export async function createOrchestratorMessage(
   );
 }
 
-export async function selectWorkerQuestionOption(
+export async function submitWorkerAnswers(
   goalId: string,
   questionId: string,
-  optionIndex: number,
+  answers: { questionIndex: number; selectedLabels: string[] }[],
 ): Promise<void> {
   const { baseUrl, token } = await loadConfig();
   return requestVoid(
-    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/worker-questions/${encodeURIComponent(questionId)}/select`,
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/worker-questions/${encodeURIComponent(questionId)}/answer`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...authHeaders(token),
       },
-      body: JSON.stringify({ optionIndex }),
+      body: JSON.stringify({ answers }),
     },
-    "Select worker question option failed",
+    "Submit worker answers failed",
   );
 }
 
