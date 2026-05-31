@@ -22,6 +22,7 @@ import {
   listWorkflowTemplates,
   openEventStream,
   requestNextOrchestratorDecision,
+  selectWorkerQuestionOption,
   startWorkflowRun,
   toErrorMessage,
 } from "../api";
@@ -512,7 +513,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
                   />
                 );
               }
-              return <ChatMessageRow key={message.id} message={message} />;
+              return <ChatMessageRow key={message.id} message={message} goalId={selectedGoalId ?? ""} />;
             })}
 
             {showMarkDoneCard && lastMessage && (
@@ -606,7 +607,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   );
 }
 
-function ChatMessageRow({ message }: { message: OrchestratorChatMessage }) {
+function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage; goalId: string }) {
   if (message.role === "user") {
     return (
       <div className="msg msg--user">
@@ -621,6 +622,21 @@ function ChatMessageRow({ message }: { message: OrchestratorChatMessage }) {
       <div className="msg-body">
         <div className="mono msg-meta">orca</div>
         <div className="orca-chat-message">{message.body}</div>
+        {message.pendingQuestion && (
+          <div className="orca-chat-question-options">
+            {message.pendingQuestion.options.map((opt, i) => (
+              <button
+                key={i}
+                type="button"
+                className="orca-chat-option-btn"
+                onClick={() => void selectWorkerQuestionOption(goalId, message.pendingQuestion!.questionId, i)}
+              >
+                <span className="orca-chat-option-label">{opt.label}</span>
+                {opt.description ? <span className="orca-chat-option-desc">{opt.description}</span> : null}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

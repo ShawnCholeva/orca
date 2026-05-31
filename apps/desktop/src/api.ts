@@ -930,6 +930,26 @@ export async function createOrchestratorMessage(
   );
 }
 
+export async function selectWorkerQuestionOption(
+  goalId: string,
+  questionId: string,
+  optionIndex: number,
+): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  return requestVoid(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/worker-questions/${encodeURIComponent(questionId)}/select`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify({ optionIndex }),
+    },
+    "Select worker question option failed",
+  );
+}
+
 export async function listWorkflowDecisions(
   goalId: string,
   runId: string,

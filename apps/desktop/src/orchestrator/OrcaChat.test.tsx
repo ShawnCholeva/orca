@@ -18,6 +18,7 @@ const openEventStreamMock = vi.fn();
 const requestNextOrchestratorDecisionMock = vi.fn();
 const listWorkflowTemplatesMock = vi.fn();
 const startWorkflowRunMock = vi.fn();
+const selectWorkerQuestionOptionMock = vi.fn();
 
 vi.mock("../api", () => ({
   createOrchestratorMessage: (...args: unknown[]) => createOrchestratorMessageMock(...args),
@@ -31,6 +32,7 @@ vi.mock("../api", () => ({
   requestNextOrchestratorDecision: (...args: unknown[]) => requestNextOrchestratorDecisionMock(...args),
   listWorkflowTemplates: (...args: unknown[]) => listWorkflowTemplatesMock(...args),
   startWorkflowRun: (...args: unknown[]) => startWorkflowRunMock(...args),
+  selectWorkerQuestionOption: (...args: unknown[]) => selectWorkerQuestionOptionMock(...args),
   toErrorMessage: (err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback,
 }));
@@ -121,6 +123,7 @@ describe("OrcaChat", () => {
     listWorkflowTemplatesMock.mockReset();
     listWorkflowTemplatesMock.mockResolvedValue({ templates: [] });
     startWorkflowRunMock.mockReset();
+    selectWorkerQuestionOptionMock.mockReset();
     openEventStreamMock.mockReset();
     openEventStreamMock.mockReturnValue({ close: vi.fn() });
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
@@ -481,6 +484,42 @@ describe("OrcaChat", () => {
 
     // The orchestrator reply message is visible.
     expect(screen.getByText("I have started the plan.")).toBeInTheDocument();
+  });
+
+  it("renders worker question options and selects on click", async () => {
+    setupRunLoad();
+    selectWorkerQuestionOptionMock.mockResolvedValue(undefined);
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-q1",
+          goalId: "goal-1",
+          role: "orchestrator",
+          kind: "message",
+          body: "The agent needs your input: Pick",
+          correlationId: "c1",
+          createdAt: now,
+          pendingQuestion: {
+            questionId: "q1",
+            header: "Color",
+            question: "Pick",
+            options: [
+              { label: "Red", description: "Warm" },
+              { label: "Green", description: "Calm" },
+            ],
+          },
+        },
+      ],
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const btn = await screen.findByRole("button", { name: /Green/i });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(selectWorkerQuestionOptionMock).toHaveBeenCalledWith("goal-1", "q1", 1),
+    );
   });
 
   it("does not flash a loading indicator or blank content on SSE-driven refresh once loaded", async () => {
