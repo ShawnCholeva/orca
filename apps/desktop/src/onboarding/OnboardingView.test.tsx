@@ -35,6 +35,7 @@ vi.mock("../api", () => ({
   updateAgentConnection: vi.fn(),
   runReadinessCheck: vi.fn(),
   runReadinessCheckForAgent: vi.fn(),
+  runSystemReadinessCheck: vi.fn(),
 }));
 
 import * as api from "../api";
@@ -59,6 +60,13 @@ describe("OnboardingView", () => {
       status: "ready",
       steps: [],
       checkedAt: NOW,
+    });
+    vi.mocked(api.runSystemReadinessCheck).mockResolvedValue({
+      dependency: "tmux",
+      status: "ready",
+      steps: [{ name: "installed", ok: true, command: "tmux -V", detail: "tmux 3.4" }],
+      checkedAt: NOW,
+      version: "3.4",
     });
   });
 
@@ -225,5 +233,52 @@ describe("OnboardingView", () => {
     }, { timeout: 3000 });
     clickByText("Continue anyway");
     expect(onComplete).toHaveBeenCalled();
+  });
+
+  it("blocks Continue (no bypass) when tmux is missing, then unblocks on retry", async () => {
+    vi.mocked(api.runSystemReadinessCheck).mockResolvedValue({
+      dependency: "tmux",
+      status: "missing",
+      steps: [{ name: "installed", ok: false, command: "tmux -V", detail: "tmux not found on PATH" }],
+      repair: { kind: "run_command", command: "brew install tmux", label: "Install tmux (Homebrew)" },
+      checkedAt: NOW,
+    });
+    const onComplete = vi.fn();
+    await render(onComplete);
+    clickByText("Get started");
+    act(() => {
+      (container.querySelector('button[data-agent-id="claude-code"]') as HTMLButtonElement)
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    clickByText("Continue");
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    // tmux repair surfaces and the agent is ready, but Continue stays disabled
+    // and there is NO "Continue anyway" bypass while the system gate fails.
+    await waitFor(() => {
+      expect(container.textContent).toContain("tmux not found on PATH");
+    }, { timeout: 3000 });
+    const continueBtn = () => Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Continue",
+    ) as HTMLButtonElement | undefined;
+    expect(continueBtn()?.disabled).toBe(true);
+    expect(Array.from(container.querySelectorAll("button")).some(
+      (b) => b.textContent?.includes("Continue anyway"),
+    )).toBe(false);
+    expect(onComplete).not.toHaveBeenCalled();
+
+    // User installs tmux and retries → system gate passes → onboarding completes.
+    vi.mocked(api.runSystemReadinessCheck).mockResolvedValue({
+      dependency: "tmux",
+      status: "ready",
+      steps: [{ name: "installed", ok: true, command: "tmux -V", detail: "tmux 3.4" }],
+      checkedAt: NOW,
+      version: "3.4",
+    });
+    clickByText("Retry");
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledTimes(1);
+    }, { timeout: 3000 });
+    expect(onComplete.mock.calls[0][0]).toEqual(["claude-code"]);
   });
 });
