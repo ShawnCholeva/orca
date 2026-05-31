@@ -69,7 +69,8 @@ describe("runMigrations", () => {
       "0015_adapter_execution_modes.sql",
       "0016_workflow_step_runs_revise_attempts.sql",
       "0017_orchestrator_messages_chat_kinds.sql",
-      "0018_workflow_step_runs_crash_retries.sql"
+      "0018_workflow_step_runs_crash_retries.sql",
+      "0019_orchestrator_messages_pending_question.sql"
     ]);
   });
 
@@ -169,7 +170,8 @@ describe("runMigrations", () => {
       "0015_adapter_execution_modes.sql",
       "0016_workflow_step_runs_revise_attempts.sql",
       "0017_orchestrator_messages_chat_kinds.sql",
-      "0018_workflow_step_runs_crash_retries.sql"
+      "0018_workflow_step_runs_crash_retries.sql",
+      "0019_orchestrator_messages_pending_question.sql"
     ]);
 
     const goalCount = (
@@ -222,6 +224,7 @@ describe("runMigrations", () => {
       "raw_agent_text",
       "why_rationale",
       "internal_kind",
+      "pending_question",
     ]);
   });
 
@@ -335,7 +338,8 @@ describe("session tables migration", () => {
       "0015_adapter_execution_modes.sql",
       "0016_workflow_step_runs_revise_attempts.sql",
       "0017_orchestrator_messages_chat_kinds.sql",
-      "0018_workflow_step_runs_crash_retries.sql"
+      "0018_workflow_step_runs_crash_retries.sql",
+      "0019_orchestrator_messages_pending_question.sql"
     ]);
 
     const tables = (
@@ -827,7 +831,8 @@ describe("migration 0010 workflows", () => {
       "0015_adapter_execution_modes.sql",
       "0016_workflow_step_runs_revise_attempts.sql",
       "0017_orchestrator_messages_chat_kinds.sql",
-      "0018_workflow_step_runs_crash_retries.sql"
+      "0018_workflow_step_runs_crash_retries.sql",
+      "0019_orchestrator_messages_pending_question.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1357,7 +1362,8 @@ describe("migration 0012 orchestration transport", () => {
       "0015_adapter_execution_modes.sql",
       "0016_workflow_step_runs_revise_attempts.sql",
       "0017_orchestrator_messages_chat_kinds.sql",
-      "0018_workflow_step_runs_crash_retries.sql"
+      "0018_workflow_step_runs_crash_retries.sql",
+      "0019_orchestrator_messages_pending_question.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
