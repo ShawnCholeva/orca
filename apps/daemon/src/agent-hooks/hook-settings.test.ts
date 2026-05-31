@@ -31,4 +31,10 @@ describe("agent hook settings", () => {
     expect(s.hooks.Stop[0]!.hooks[0]!.url).toContain("/v1/agent-hooks/stop");
     expect(s.hooks.StopFailure[0]!.hooks[0]!.url).toContain("failure=1");
   });
+
+  it("PreToolUse AskUserQuestion hook has a long timeout for human response", () => {
+    const s = buildAgentHookSettings({ sessionId: "sess-1", port: 8787, authToken: "tok" });
+    const pre = s.hooks.PreToolUse!;
+    expect(pre[0]!.hooks[0]!.timeout).toBe(600);
+  });
 });

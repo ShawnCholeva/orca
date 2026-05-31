@@ -11,6 +11,7 @@ interface HttpHook {
   type: "http";
   url: string;
   headers: Record<string, string>;
+  timeout?: number;
 }
 
 export interface AgentHookSettings {
@@ -31,7 +32,7 @@ export function buildAgentHookSettings(args: {
     hooks: {
       Stop: [{ hooks: [{ type: "http", url: agentHookUrl(args.port, args.sessionId, false), headers }] }],
       StopFailure: [{ hooks: [{ type: "http", url: agentHookUrl(args.port, args.sessionId, true), headers }] }],
-      PreToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "http", url: elicitHookUrl(args.port, args.sessionId), headers }] }],
+      PreToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "http", url: elicitHookUrl(args.port, args.sessionId), headers, timeout: 600 }] }],
     },
   };
 }
