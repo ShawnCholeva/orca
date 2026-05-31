@@ -894,6 +894,8 @@ export class OrchestratorService {
     }
 
     const objective = composeAgentInitialPrompt({
+      goalTitle: ctx.goal.title,
+      goalDescription: ctx.goal.description,
       stepInstructions: ctx.stepTpl.instructions,
       outputSchema: ctx.stepTpl.outputSchema,
       priorStepArtifacts: this.collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.ordinal),

@@ -3,12 +3,16 @@ import { composeOrchestratorPrompt, composeAgentInitialPrompt } from "./prompts.
 import { SENTINEL_INSTRUCTION } from "./sentinel.js";
 
 describe("composeAgentInitialPrompt", () => {
-  it("includes step instructions, outputSchema, and orca-output convention", () => {
+  it("includes the goal, step instructions, outputSchema, and orca-output convention", () => {
     const out = composeAgentInitialPrompt({
+      goalTitle: "Add dark mode",
+      goalDescription: "Users want a dark theme toggle in settings.",
       stepInstructions: "Interview the user.",
       outputSchema: [{ key: "problem", type: "string", required: true }],
       priorStepArtifacts: [],
     });
+    expect(out).toMatch(/Add dark mode/);
+    expect(out).toMatch(/dark theme toggle/);
     expect(out).toMatch(/Interview the user\./);
     expect(out).toMatch(/orca:step-complete/);
     expect(out).toMatch(/problem.*string/);
@@ -16,12 +20,25 @@ describe("composeAgentInitialPrompt", () => {
 
   it("includes bounded prior step artifacts", () => {
     const out = composeAgentInitialPrompt({
+      goalTitle: "G",
+      goalDescription: "D",
       stepInstructions: "Research.",
       outputSchema: [],
       priorStepArtifacts: [{ stepId: "intake", outputJson: { problem: "P", success_outcome: "O" } }],
     });
     expect(out).toMatch(/intake/);
     expect(out).toMatch(/problem/);
+  });
+
+  it("handles an empty goal description without a dangling header", () => {
+    const out = composeAgentInitialPrompt({
+      goalTitle: "Just a title",
+      goalDescription: "",
+      stepInstructions: "Do it.",
+      outputSchema: [],
+      priorStepArtifacts: [],
+    });
+    expect(out).toMatch(/Just a title/);
   });
 });
 
