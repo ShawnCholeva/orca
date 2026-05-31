@@ -71,7 +71,7 @@ function makeLauncher(launchFn = vi.fn(async () => ({ sessionId: "sess-1" }))): 
 
 function makeAgentService(
   launcher: WorkflowSessionLauncher,
-  deliverInitialPrompt?: (sessionId: string, prompt: string) => Promise<void>
+  workerDeliver?: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">
 ): OrchestratorService {
   return new OrchestratorService(
     fakeAgentSelector(),
@@ -81,8 +81,8 @@ function makeAgentService(
     undefined,
     fakeStepDispatch(),
     undefined,
-    undefined,
-    deliverInitialPrompt
+    undefined, // workerSpawn
+    workerDeliver
   );
 }
 
@@ -106,7 +106,7 @@ function spyMediator(action: OrchestratorAction): Pick<OrchestratorMediator, "in
 
 function makeJudgeService(
   mediator: Pick<OrchestratorMediator, "invoke">,
-  agentInput: (sessionId: string, text: string) => void | Promise<void>
+  workerDeliver: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">
 ): OrchestratorService {
   return new OrchestratorService(
     fakeAgentSelector(),
@@ -116,7 +116,8 @@ function makeJudgeService(
     undefined,
     fakeStepDispatch(),
     mediator,
-    agentInput
+    undefined, // workerSpawn
+    workerDeliver
   );
 }
 
@@ -337,8 +338,8 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
 
-    const agentInput = vi.fn();
-    const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), agentInput);
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), deliver);
 
     // Schema-valid step-complete block → mediator returns approve.
     const responseText =
@@ -355,7 +356,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     expect(stepOutputCount(db)).toBe(1);
     // single terminal step → commitAdvanceOrComplete recommends completing the run
     expect(recommendationCount(db, "complete_workflow_run")).toBe(1);
-    expect(agentInput).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
   });
 
   it("revise_step under cap: bumps revise_attempts to 1 and sends feedback to the agent", async () => {
@@ -364,10 +365,10 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db, { reviseAttempts: 0 });
 
-    const agentInput = vi.fn();
+    const deliver = vi.fn(async (_sid: string, _text: string) => "delivered" as const);
     // Mediator should NOT be consulted: schema-invalid block makes judgement return revise deterministically.
     const mediator = spyMediator({ kind: "approve_step_complete" });
-    const service = makeJudgeService(mediator, agentInput);
+    const service = makeJudgeService(mediator, deliver);
 
     // Schema-INVALID block (missing required `result`) → deterministic revise.
     const responseText =
@@ -385,8 +386,8 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       .prepare("SELECT revise_attempts FROM workflow_step_runs WHERE id = 'step-1'")
       .get() as { revise_attempts: number };
     expect(row.revise_attempts).toBe(1);
-    expect(agentInput).toHaveBeenCalledTimes(1);
-    const [sessionId, text] = agentInput.mock.calls[0]!;
+    expect(deliver).toHaveBeenCalledTimes(1);
+    const [sessionId, text] = deliver.mock.calls[0]!;
     expect(sessionId).toBe("sess-judge");
     expect(text).toContain("schema validation");
     expect(stepOutputCount(db)).toBe(0);
@@ -399,8 +400,8 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     // Pre-set to REVISE_CAP - 1 so the next attempt reaches the cap.
     seedAgentSession(db, { reviseAttempts: 2 });
 
-    const agentInput = vi.fn();
-    const service = makeJudgeService(spyMediator({ kind: "approve_step_complete" }), agentInput);
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(spyMediator({ kind: "approve_step_complete" }), deliver);
 
     const responseText =
       "Attempt.\n```orca:step-complete\n" + JSON.stringify({ wrong: "field" }) + "\n```";
@@ -417,7 +418,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       .get() as { revise_attempts: number };
     expect(row.revise_attempts).toBe(3);
     expect(orchestratorMessageCount(db)).toBe(1);
-    expect(agentInput).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
   });
 });
 
@@ -428,10 +429,10 @@ describe("OrchestratorService.onUserMessage (user_message trigger)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
 
-    const agentInput = vi.fn();
+    const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(
       fakeMediator({ kind: "forward_to_agent", translated: "please add tests" }),
-      agentInput
+      deliver
     );
 
     await service.onUserMessage(
@@ -441,10 +442,8 @@ describe("OrchestratorService.onUserMessage (user_message trigger)", () => {
       { bus, idFactory }
     );
 
-    expect(agentInput).toHaveBeenCalledTimes(1);
-    const [sessionId, text] = agentInput.mock.calls[0]!;
-    expect(sessionId).toBe("sess-judge");
-    expect(text).toContain("please add tests");
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver).toHaveBeenCalledWith("sess-judge", "please add tests");
     // Must also acknowledge in chat so the UI "thinking" bubble clears.
     expect(orchestratorMessageCount(db)).toBe(1);
     expect(lastOrchestratorMessageBody(db)).toContain("Relayed your message");
@@ -456,10 +455,10 @@ describe("OrchestratorService.onUserMessage (user_message trigger)", () => {
     seedWorkspace(db);
     // NOTE: no seedAgentSession() — current step has no live session.
 
-    const agentInput = vi.fn();
+    const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(
       fakeMediator({ kind: "forward_to_agent", translated: "please add tests" }),
-      agentInput
+      deliver
     );
 
     await service.onUserMessage(
@@ -469,7 +468,7 @@ describe("OrchestratorService.onUserMessage (user_message trigger)", () => {
       { bus, idFactory }
     );
 
-    expect(agentInput).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
     expect(orchestratorMessageCount(db)).toBe(1);
     expect(lastOrchestratorMessageBody(db)).toContain("no live agent session");
   });
@@ -480,10 +479,10 @@ describe("OrchestratorService.onUserMessage (user_message trigger)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
 
-    const agentInput = vi.fn();
+    const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(
       fakeMediator({ kind: "answer_user_directly", body: "sure" }),
-      agentInput
+      deliver
     );
 
     await service.onUserMessage(
@@ -494,7 +493,7 @@ describe("OrchestratorService.onUserMessage (user_message trigger)", () => {
     );
 
     expect(orchestratorMessageCount(db)).toBe(1);
-    expect(agentInput).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
   });
 });
 
@@ -603,7 +602,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     setupFirstStepRun(db);
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-x" }));
-    const deliver = vi.fn(async (_sessionId: string, _prompt: string) => {});
+    const deliver = vi.fn(async (_sid: string, _text: string) => "delivered" as const);
     const service = makeAgentService(makeLauncher(launchFn), deliver);
 
     await service.startWorkflowFirstStep(db, () => NOW, "run-1");

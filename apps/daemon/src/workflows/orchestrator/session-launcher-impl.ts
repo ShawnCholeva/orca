@@ -60,11 +60,8 @@ export class ProductionWorkflowSessionLauncher implements WorkflowSessionLaunche
     });
     if (this.starter) {
       await this.starter(created.id, HEADLESS_TERMINAL_DIMS);
-    } else {
-      console.warn(
-        `[orchestrator] no session starter wired; session ${created.id} created but not started`
-      );
     }
+    // No starter wired: row-only mode (worker sessions start the agent externally).
     return { sessionId: created.id };
   }
 }

@@ -12,7 +12,6 @@ import {
 } from "../events/orchestration-live-refresh";
 import { WorkspaceListPanel } from "./WorkspaceListPanel";
 import { TasksPanel } from "./tasks/TasksPanel";
-import { SessionsPanel } from "./sessions/SessionsPanel";
 import { MemoryPanel } from "./memory/MemoryPanel";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { RecommendationsPanel, type CreateSessionPrefill } from "./recommendations/RecommendationsPanel";
@@ -54,8 +53,6 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
     useState<LiveGenerationNotice | null>(null);
   const [memoryRefreshKey, setMemoryRefreshKey] = useState(0);
   const [decisionsRefreshKey, setDecisionsRefreshKey] = useState(0);
-  const [summaryRefreshKey, setSummaryRefreshKey] = useState(0);
-  const [sessionsRefreshKey, setSessionsRefreshKey] = useState(0);
   const [workflowRefreshKey, setWorkflowRefreshKey] = useState(0);
   const [createSessionPrefill, setCreateSessionPrefill] =
     useState<CreateSessionPrefill | null>(null);
@@ -234,7 +231,6 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
         if (event.type === "memory.extraction.completed") {
           setMemoryRefreshKey((k) => k + 1);
           setDecisionsRefreshKey((k) => k + 1);
-          setSummaryRefreshKey((k) => k + 1);
         } else if (MEMORY_ITEM_EVENTS.has(event.type)) {
           setMemoryRefreshKey((k) => k + 1);
         } else if (DECISION_EVENTS.has(event.type)) {
@@ -247,8 +243,6 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           if (hasConnectedRef.current) {
             setMemoryRefreshKey((k) => k + 1);
             setDecisionsRefreshKey((k) => k + 1);
-            setSummaryRefreshKey((k) => k + 1);
-            setSessionsRefreshKey((k) => k + 1);
             setLiveTaskGeneration(null);
             setLiveRecommendationGeneration(null);
             scheduleTasksRefresh();
@@ -398,15 +392,6 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
             setTaskEditPrefill(null);
             setTaskSplitPrefill(null);
           }}
-        />
-
-        <SessionsPanel
-          goalId={goalId}
-          workspaces={workspaces}
-          sessionsRefreshKey={sessionsRefreshKey}
-          summaryRefreshKey={summaryRefreshKey}
-          createSessionPrefill={createSessionPrefill}
-          onCreateSessionPrefillConsumed={() => setCreateSessionPrefill(null)}
         />
 
         <RecommendationsPanel
