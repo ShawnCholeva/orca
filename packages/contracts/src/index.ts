@@ -982,6 +982,24 @@ export type OrchestratorInternalThoughtKind = z.infer<
   typeof OrchestratorInternalThoughtKind
 >;
 
+export const PendingQuestion = z
+  .object({
+    questionId: z.string().min(1),
+    header: z.string().max(120),
+    question: z.string().max(4000),
+    options: z
+      .array(
+        z.object({
+          label: z.string().min(1).max(200),
+          description: z.string().max(1000)
+        })
+      )
+      .min(1)
+      .max(12)
+  })
+  .strict();
+export type PendingQuestion = z.infer<typeof PendingQuestion>;
+
 export const OrchestratorChatMessage = z
   .object({
     id: z.string(),
@@ -993,7 +1011,8 @@ export const OrchestratorChatMessage = z
     rawAgentText: z.string().max(200_000).nullable().optional(),
     whyRationale: z.string().max(4000).nullable().optional(),
     internalKind: OrchestratorInternalThoughtKind.nullable().optional(),
-    createdAt: z.string().datetime()
+    createdAt: z.string().datetime(),
+    pendingQuestion: PendingQuestion.optional()
   })
   .strict();
 export type OrchestratorChatMessage = z.infer<typeof OrchestratorChatMessage>;
@@ -1014,6 +1033,13 @@ export const CreateOrchestratorMessageRequest = z
   .strict();
 export type CreateOrchestratorMessageRequest = z.infer<
   typeof CreateOrchestratorMessageRequest
+>;
+
+export const SelectWorkerQuestionOptionRequest = z
+  .object({ optionIndex: z.number().int().min(0).max(11) })
+  .strict();
+export type SelectWorkerQuestionOptionRequest = z.infer<
+  typeof SelectWorkerQuestionOptionRequest
 >;
 
 export const CreateOrchestratorMessageResponse = z

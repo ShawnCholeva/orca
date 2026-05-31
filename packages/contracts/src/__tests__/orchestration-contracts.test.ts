@@ -86,7 +86,8 @@ import {
   TaskUpdatedPayload,
   TriggerKind,
   UserFeedbackRecordedPayload,
-  OrchestratorChatMessage
+  OrchestratorChatMessage,
+  SelectWorkerQuestionOptionRequest
 } from "../index.js";
 
 const now = "2026-01-01T00:00:00.000Z";
@@ -852,5 +853,49 @@ describe("orchestration contracts", () => {
       createdAt: "2026-05-28T00:00:00.000Z"
     });
     expect(m.rawAgentText).toContain("raw");
+  });
+
+  it("OrchestratorChatMessage accepts an optional pendingQuestion", () => {
+    const m = OrchestratorChatMessage.parse({
+      id: "m1",
+      goalId: "g1",
+      role: "orchestrator",
+      kind: "message",
+      body: "Agent asks: pick one",
+      correlationId: "c1",
+      createdAt: new Date().toISOString(),
+      pendingQuestion: {
+        questionId: "q1",
+        header: "Color",
+        question: "Favorite color?",
+        options: [
+          { label: "Red", description: "Warm" },
+          { label: "Green", description: "Calm" }
+        ]
+      }
+    });
+    expect(m.pendingQuestion?.options).toHaveLength(2);
+  });
+
+  it("OrchestratorChatMessage still parses without pendingQuestion", () => {
+    const m = OrchestratorChatMessage.parse({
+      id: "m1",
+      goalId: "g1",
+      role: "user",
+      kind: "message",
+      body: "hi",
+      correlationId: "c1",
+      createdAt: new Date().toISOString()
+    });
+    expect(m.pendingQuestion).toBeUndefined();
+  });
+
+  it("SelectWorkerQuestionOptionRequest validates an option index", () => {
+    expect(
+      SelectWorkerQuestionOptionRequest.parse({ optionIndex: 1 }).optionIndex
+    ).toBe(1);
+    expect(() =>
+      SelectWorkerQuestionOptionRequest.parse({ optionIndex: -1 })
+    ).toThrow();
   });
 });
