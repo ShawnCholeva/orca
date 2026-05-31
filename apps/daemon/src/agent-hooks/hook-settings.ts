@@ -3,6 +3,10 @@ export function agentHookUrl(port: number, sessionId: string, failure = false): 
   return failure ? `${base}&failure=1` : base;
 }
 
+export function elicitHookUrl(port: number, sessionId: string): string {
+  return `http://127.0.0.1:${port}/v1/agent-hooks/elicit?sessionId=${encodeURIComponent(sessionId)}`;
+}
+
 interface HttpHook {
   type: "http";
   url: string;
@@ -13,6 +17,7 @@ export interface AgentHookSettings {
   hooks: {
     Stop: Array<{ hooks: HttpHook[] }>;
     StopFailure: Array<{ hooks: HttpHook[] }>;
+    PreToolUse?: Array<{ matcher: string; hooks: HttpHook[] }>;
   };
 }
 
@@ -26,6 +31,7 @@ export function buildAgentHookSettings(args: {
     hooks: {
       Stop: [{ hooks: [{ type: "http", url: agentHookUrl(args.port, args.sessionId, false), headers }] }],
       StopFailure: [{ hooks: [{ type: "http", url: agentHookUrl(args.port, args.sessionId, true), headers }] }],
+      PreToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "http", url: elicitHookUrl(args.port, args.sessionId), headers }] }],
     },
   };
 }

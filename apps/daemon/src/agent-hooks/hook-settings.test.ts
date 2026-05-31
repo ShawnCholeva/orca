@@ -17,4 +17,18 @@ describe("agent hook settings", () => {
     expect(s.hooks.Stop[0]!.hooks[0]!.url).toContain("sessionId=sess-1");
     expect(s.hooks.StopFailure[0]!.hooks[0]!.url).toContain("failure=1");
   });
+
+  it("includes a PreToolUse AskUserQuestion http hook pointing at /elicit", () => {
+    const s = buildAgentHookSettings({ sessionId: "sess-1", port: 8787, authToken: "tok" });
+    const pre = s.hooks.PreToolUse!;
+    expect(pre[0]!.matcher).toBe("AskUserQuestion");
+    expect(pre[0]!.hooks[0]!.url).toContain("/v1/agent-hooks/elicit?sessionId=sess-1");
+    expect(pre[0]!.hooks[0]!.headers).toEqual({ Authorization: "Bearer tok" });
+  });
+
+  it("still includes Stop and StopFailure hooks", () => {
+    const s = buildAgentHookSettings({ sessionId: "sess-1", port: 8787, authToken: "tok" });
+    expect(s.hooks.Stop[0]!.hooks[0]!.url).toContain("/v1/agent-hooks/stop");
+    expect(s.hooks.StopFailure[0]!.hooks[0]!.url).toContain("failure=1");
+  });
 });
