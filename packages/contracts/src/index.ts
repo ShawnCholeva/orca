@@ -982,11 +982,11 @@ export type OrchestratorInternalThoughtKind = z.infer<
   typeof OrchestratorInternalThoughtKind
 >;
 
-export const PendingQuestion = z
+export const PendingQuestionItem = z
   .object({
-    questionId: z.string().min(1),
     header: z.string().max(120),
     question: z.string().max(4000),
+    multiSelect: z.boolean(),
     options: z
       .array(
         z.object({
@@ -996,6 +996,15 @@ export const PendingQuestion = z
       )
       .min(1)
       .max(12)
+  })
+  .strict();
+export type PendingQuestionItem = z.infer<typeof PendingQuestionItem>;
+
+export const PendingQuestion = z
+  .object({
+    questionId: z.string().min(1),
+    toolUseId: z.string().min(1),
+    questions: z.array(PendingQuestionItem).min(1).max(4)
   })
   .strict();
 export type PendingQuestion = z.infer<typeof PendingQuestion>;
@@ -1035,12 +1044,18 @@ export type CreateOrchestratorMessageRequest = z.infer<
   typeof CreateOrchestratorMessageRequest
 >;
 
-export const SelectWorkerQuestionOptionRequest = z
-  .object({ optionIndex: z.number().int().min(0).max(11) })
+export const WorkerAnswer = z
+  .object({
+    questionIndex: z.number().int().min(0),
+    selectedLabels: z.array(z.string().min(1)).min(1)
+  })
   .strict();
-export type SelectWorkerQuestionOptionRequest = z.infer<
-  typeof SelectWorkerQuestionOptionRequest
->;
+export type WorkerAnswer = z.infer<typeof WorkerAnswer>;
+
+export const SubmitWorkerAnswersRequest = z
+  .object({ answers: z.array(WorkerAnswer).min(1) })
+  .strict();
+export type SubmitWorkerAnswersRequest = z.infer<typeof SubmitWorkerAnswersRequest>;
 
 export const CreateOrchestratorMessageResponse = z
   .object({
