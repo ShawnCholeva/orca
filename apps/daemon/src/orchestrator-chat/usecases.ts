@@ -11,6 +11,7 @@ import {
   type DomainEvent,
   type ModelProviderId,
   type OrchestratorChatMessage as OrchestratorChatMessageT,
+  type PendingQuestion as PendingQuestionT,
 } from "@orca/contracts";
 
 import type { EventBus } from "../events.js";
@@ -209,7 +210,7 @@ export function insertMessageWithEvent(
     body: string;
     correlationId: string;
     createdAt: string;
-    pendingQuestion?: { questionId: string; header: string; question: string; options: { label: string; description: string }[] };
+    pendingQuestion?: PendingQuestionT;
   }
 ): OrchestratorChatMessageT {
   const idFactory = ctx.idFactory ?? randomUUID;

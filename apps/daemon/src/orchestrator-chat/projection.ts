@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import {
   OrchestratorChatMessage,
+  PendingQuestion,
   type OrchestratorChatMessage as OrchestratorChatMessageT,
 } from "@orca/contracts";
 
@@ -20,7 +21,10 @@ export function listOrchestratorMessagesByGoal(
   return rows.map((row) => {
     let pendingQuestion: unknown = undefined;
     if (typeof row.pending_question === "string" && row.pending_question) {
-      try { pendingQuestion = JSON.parse(row.pending_question); } catch { /* ignore malformed */ }
+      try {
+        const parsed = JSON.parse(row.pending_question);
+        if (PendingQuestion.safeParse(parsed).success) pendingQuestion = parsed;
+      } catch { /* ignore malformed */ }
     }
     return OrchestratorChatMessage.parse({
       id: row.id,
