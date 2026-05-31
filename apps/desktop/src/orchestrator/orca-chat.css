@@ -663,3 +663,11 @@
   line-height: 1.5;
   margin-top: 2px;
 }
+
+.orca-chat-question { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.orca-chat-question-block { border: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.orca-chat-question-legend { font-size: 12px; opacity: 0.85; padding: 0; margin-bottom: 2px; }
+.orca-chat-option-row { display: flex; align-items: baseline; gap: 6px; font-size: 13px; cursor: pointer; }
+.orca-chat-option-row input { margin: 0; }
+.orca-chat-question-submit { align-self: flex-start; margin-top: 4px; }
+.orca-chat-question-submit:disabled { opacity: 0.5; cursor: default; }
