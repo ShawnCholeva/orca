@@ -1064,24 +1064,29 @@ export function createServer(
       const goalRow = db.prepare("SELECT goal_id FROM sessions WHERE id = ?").get(sessionId) as { goal_id: string } | undefined;
       if (!goalRow) return "No goal is associated with this session; proceed using your best judgment.";
       const goalId = goalRow.goal_id;
-      const { questionId, answered } = workerQuestions.record({
+      const { questionId, answered, isNew } = workerQuestions.record({
         toolUseId: payload.toolUseId,
         sessionId,
         goalId,
         questions: payload.questions,
       });
-      insertMessageWithEvent(
-        { db, bus: eventBus, modelProviderRegistry: daemonContext.modelProviderRegistry, now: daemonContext.now, idFactory: daemonContext.idFactory },
-        {
-          id: daemonContext.idFactory(),
-          goalId,
-          role: "orchestrator",
-          body: "The agent needs your input.",
-          correlationId: daemonContext.idFactory(),
-          createdAt: daemonContext.now(),
-          pendingQuestion: { questionId, toolUseId: payload.toolUseId, questions: payload.questions },
-        }
-      );
+      // Only post the chat message for a freshly recorded question. A duplicate hook
+      // fire (network/timeout retry with the same toolUseId) reuses the existing
+      // deferred — posting again would show the user a second identical question block.
+      if (isNew) {
+        insertMessageWithEvent(
+          { db, bus: eventBus, modelProviderRegistry: daemonContext.modelProviderRegistry, now: daemonContext.now, idFactory: daemonContext.idFactory },
+          {
+            id: daemonContext.idFactory(),
+            goalId,
+            role: "orchestrator",
+            body: "The agent needs your input.",
+            correlationId: daemonContext.idFactory(),
+            createdAt: daemonContext.now(),
+            pendingQuestion: { questionId, toolUseId: payload.toolUseId, questions: payload.questions },
+          }
+        );
+      }
       let timerId: ReturnType<typeof setTimeout>;
       const timed = new Promise<string>((res) => {
         timerId = setTimeout(() => res("No answer received from the user; proceed using your best judgment."), ELICIT_ANSWER_TIMEOUT_MS);

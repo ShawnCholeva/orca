@@ -19,6 +19,9 @@ export interface RecordInput {
 export interface RecordHandle {
   questionId: string;
   answered: Promise<string>;
+  /** False when a question with the same toolUseId was already recorded (duplicate
+   * hook fire) — callers use this to avoid posting a second chat message. */
+  isNew: boolean;
 }
 
 export class WorkerQuestionStore {
@@ -31,14 +34,14 @@ export class WorkerQuestionStore {
     const existingId = this.byToolUseId.get(input.toolUseId);
     if (existingId) {
       const existing = this.pending.get(existingId);
-      if (existing) return { questionId: existingId, answered: existing.answered };
+      if (existing) return { questionId: existingId, answered: existing.answered, isNew: false };
     }
     const questionId = this.idFactory();
     let resolve!: (reason: string) => void;
     const answered = new Promise<string>((res) => { resolve = res; });
     this.pending.set(questionId, { ...input, resolve, answered });
     this.byToolUseId.set(input.toolUseId, questionId);
-    return { questionId, answered };
+    return { questionId, answered, isNew: true };
   }
 
   get(questionId: string): PendingWorkerQuestion | undefined {

@@ -33,5 +33,7 @@ describe("WorkerQuestionStore", () => {
     const second = store.record(base); // same toolUseId
     expect(second.questionId).toBe(first.questionId);
     expect(second.answered).toBe(first.answered);
+    expect(first.isNew).toBe(true);
+    expect(second.isNew).toBe(false); // dedup hit → caller skips re-posting to chat
   });
 });
