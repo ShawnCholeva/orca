@@ -199,6 +199,15 @@ describe("adapter supportsModel", () => {
     expect(a.supportsModel("claude-opus-4-7")).toBe(true);
   });
 
+  it("codex supports the models exposed by the Codex model menu", () => {
+    const a = new CodexAdapter();
+    expect(a.supportsModel("gpt-5.5")).toBe(true);
+    expect(a.supportsModel("gpt-5.4")).toBe(true);
+    expect(a.supportsModel("gpt-5.4-mini")).toBe(true);
+    expect(a.supportsModel("gpt-5.3-codex")).toBe(true);
+    expect(a.supportsModel("gpt-5.2")).toBe(true);
+  });
+
   it("shell-manual rejects unknown model ids", () => {
     expect(new ShellManualAdapter().supportsModel("anything")).toBe(false);
   });

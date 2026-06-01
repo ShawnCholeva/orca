@@ -49,6 +49,22 @@ describe("composeOrchestratorPrompt", () => {
     expect(p.systemPrompt).toContain(SENTINEL_INSTRUCTION);
   });
 
+  it("tells the mediator to answer greetings and meta chat directly", () => {
+    const p = composeOrchestratorPrompt({
+      triggerKind: "user_message",
+      context: {
+        goal: { id: "G1", title: "T", description: "D", attachedWorkspaces: [] },
+        workflowRun: { templateId: "", templateVersion: 0, ordinal: 0, status: "active" },
+        currentStep: { id: "intake", instructions: "", outputSchema: [], agentAdapterId: "codex", executionMode: "shadow_session" },
+        conversation: { chatMessages: [], currentStepAgentTurns: [] },
+        priorStepArtifacts: [],
+      },
+      triggerPayload: { userMessage: "hi" },
+    });
+    expect(p.systemPrompt).toMatch(/answer simple greetings/i);
+    expect(p.systemPrompt).toMatch(/Only use forward_to_agent/i);
+  });
+
   it("specifies the exact OrchestratorAction shape: 'kind' discriminator and per-kind fields", () => {
     const out = composeOrchestratorPrompt({ triggerKind: "user_message" } as any);
     // Discriminator must be named exactly "kind" (model previously guessed "action").

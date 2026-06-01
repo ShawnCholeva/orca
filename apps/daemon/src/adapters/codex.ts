@@ -12,6 +12,7 @@ import { sanitizeOutput } from "../readiness/sanitize.js";
 import { installUrlFor, signInCommandFor } from "../readiness/repair-links.js";
 import { parseVersion } from "../readiness/version.js";
 import type { AgentReadinessStatus, CheckStep, RepairAction, ExecutionMode } from "@orca/contracts";
+import { adapterSupportsModel } from "./model-catalog.js";
 
 export type RunCheckFn = (
   command: string,
@@ -28,16 +29,8 @@ export class CodexAdapter implements AgentAdapter {
   readonly supportedExecutionModes: ExecutionMode[] = ["one_shot", "shadow_session"];
   readonly contextDelivery: AdapterContextDelivery = { mode: "preview_only", maxBytes: 32768 };
 
-  private static readonly KNOWN_MODELS = new Set([
-    "gpt-5",
-    "gpt-5-codex",
-    "gpt-4.1",
-    "o3",
-    "o4-mini",
-  ]);
-
   supportsModel(modelId: string): boolean {
-    return CodexAdapter.KNOWN_MODELS.has(modelId);
+    return adapterSupportsModel(this.id, modelId);
   }
 
   constructor(
@@ -110,7 +103,6 @@ export class CodexAdapter implements AgentAdapter {
     }
     const combined = `${r.stdout}\n${r.stderr}`;
     if (r.exitCode === 0) {
-      // Some CLIs exit 0 even when not signed in; check stdout for negative markers.
       if (NOT_LOGGED_IN.test(combined)) {
         return {
           name: "authenticated",

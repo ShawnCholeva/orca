@@ -32,7 +32,7 @@ import {
 } from '@orca/contracts';
 import type { Config } from './config.js';
 import { createServer } from './server.js';
-import { closeDatabase, openDatabase } from './db.js';
+import { closeDatabase, getDatabase, openDatabase } from './db.js';
 import { defaultMigrationsDir, runMigrations } from './migrations.js';
 import { bootstrapRegistries } from './registry/bootstrap.js';
 import { eventBus } from './events.js';
@@ -227,6 +227,26 @@ describe('server routes', () => {
     const body = CreateGoalResponse.parse(JSON.parse(response.body));
     expect(body.goal.orchestratorProvider).toBe('orca/openai');
     expect(body.goal.orchestratorModel).toBe('gpt-5');
+  });
+
+  it('POST /v1/goals accepts Codex CLI models for OpenAI orchestration', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/goals',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: {
+        title: 'with-codex-model',
+        orchestratorModel: {
+          providerId: 'orca/openai',
+          modelId: 'gpt-5.5',
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = CreateGoalResponse.parse(JSON.parse(response.body));
+    expect(body.goal.orchestratorProvider).toBe('orca/openai');
+    expect(body.goal.orchestratorModel).toBe('gpt-5.5');
   });
 
   it('POST /v1/goals returns 400 for invalid payload', async () => {
@@ -455,6 +475,29 @@ describe('server routes', () => {
       if (prevGoogle === undefined) delete process.env.GOOGLE_API_KEY;
       else process.env.GOOGLE_API_KEY = prevGoogle;
     }
+  });
+
+  it('GET /v1/model-providers filters to providers for connected agents', async () => {
+    const db = getDatabase();
+    seedAgents(db);
+    db.prepare(`UPDATE agents SET connected = 1 WHERE id = ?`).run('codex');
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/model-providers',
+      headers: AUTH_HEADERS,
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = ListModelProvidersResponse.parse(JSON.parse(response.body));
+    expect(body.providers.map((provider) => provider.id)).toEqual(['orca/openai']);
+    expect(body.providers[0]?.models.map((model) => model.id)).toEqual([
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.3-codex',
+      'gpt-5.2',
+    ]);
   });
 
   it('GET /v1/operators requires a Goal and returns operator descriptors', async () => {

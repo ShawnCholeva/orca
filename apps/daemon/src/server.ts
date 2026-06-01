@@ -54,6 +54,7 @@ import {
   type ArchiveGoalResponse,
   type GoalMemoryItem,
   type GoalDecision,
+  type ModelProviderId,
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
   CheckSystemReadinessResponse
@@ -164,11 +165,17 @@ import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js';
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
+import { ProductionWorkflowSessionLauncher } from './workflows/orchestrator/session-launcher-impl.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
 import { insertMessageWithEvent } from './orchestrator-chat/usecases.js';
 import { registerOrchestratorHookRoutes } from './orchestrator-hooks/routes.js';
 import { ShadowSessionManager, shadowSessionId } from './orchestrator-llm/shadow-session.js';
 import { ShadowSessionLlmClient } from './orchestrator-llm/shadow-llm-client.js';
+import {
+  ModelProviderOrchestratorLlmClient,
+  RoutedOrchestratorLlmClient,
+  adapterIdForProvider,
+} from './orchestrator-llm/model-provider-llm-client.js';
 import { OrchestratorMediator } from './orchestrator-llm/mediator.js';
 import { composeOrchestratorPrompt } from './orchestrator-llm/prompts.js';
 import { buildContextFromDb } from './orchestrator-llm/build-context.js';
@@ -177,6 +184,8 @@ import { registerAgentHookRoutes } from './agent-hooks/routes.js';
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
 import {
   buildOrchestrationProviderCatalog,
+  modelOverridesForConnectedAgents,
+  providerIdsForConnectedAgents,
   toModelProvidersResponse,
 } from './workflows/orchestration-transport/provider-catalog.js';
 import { NotConnectedError, UnknownAgentError } from './readiness/service.js';
@@ -248,6 +257,51 @@ export function createServer(
   const extractionRunner = deps?.extractionRunner;
   const assembler = deps?.assembler ?? daemonContext.contextAssembler;
 
+  if (daemonContext.workflowSessionLauncher instanceof ProductionWorkflowSessionLauncher) {
+    daemonContext.workflowSessionLauncher = new ProductionWorkflowSessionLauncher({
+      createSession: async (input) => {
+        const session = await createSession(
+          { db, bus: eventBus, adapterRegistry },
+          {
+            goalId: input.goalId,
+            workspaceId: input.workspaceId,
+            adapterId: input.adapterId,
+            role: input.role,
+            instruction: input.instruction,
+            title: input.title,
+          }
+        );
+        db.prepare("UPDATE sessions SET workflow_step_run_id = ? WHERE id = ?")
+          .run(input.workflowStepRunId, session.id);
+        return session;
+      },
+      firstWorkspaceId: (goalId) => {
+        const workspaces = listWorkspacesByGoal(db, goalId);
+        return workspaces[0]?.id ?? null;
+      },
+      startSession: async ({ sessionId }) => {
+        await startSession(
+          {
+            db,
+            bus: eventBus,
+            adapterRegistry,
+            sessionOutputStore,
+            sessionRuntime,
+            dataDir: config.dataDir,
+            onTerminalState: extractionRunner
+              ? (sid) => tryEnqueueForTerminalSession(
+                  { db: getDatabase(), bus: eventBus, outputStore: sessionOutputStore, runner: extractionRunner },
+                  sid
+                )
+              : undefined,
+          },
+          sessionId,
+          { terminalCols: 120, terminalRows: 40 }
+        );
+      },
+    });
+  }
+
   const server = Fastify({
     logger: {
       level: config.logLevel,
@@ -295,7 +349,15 @@ export function createServer(
   });
 
   server.get('/v1/model-providers', async (): Promise<ListModelProvidersResponse> => {
-    const catalog = await buildOrchestrationProviderCatalog(daemonContext.modelProviderRegistry);
+    const agents = listAgents(db);
+    const allowedProviderIds =
+      agents.length > 0 ? providerIdsForConnectedAgents(agents) : undefined;
+    const modelOverrides =
+      agents.length > 0 ? modelOverridesForConnectedAgents(agents) : undefined;
+    const catalog = await buildOrchestrationProviderCatalog(
+      daemonContext.modelProviderRegistry,
+      { allowedProviderIds, modelOverrides }
+    );
     const providers = toModelProvidersResponse(catalog);
     return { providers };
   });
@@ -467,13 +529,14 @@ export function createServer(
     shadowRoot: path.join(config.dataDir, "shadow"),
     daemonPort: config.port,
     authToken: config.getAuthToken(),
-    isReady: async () => {
-      const adapter = adapterRegistry.get("claude-code");
+    isReady: async (adapterId = "claude-code") => {
+      const adapter = adapterRegistry.get(adapterId);
       if (!adapter) return false;
       const step = await adapter.checkAuth();
       return step.ok;
     },
     claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
+    codexBin: process.env["ORCA_CODEX_BIN"] ?? "codex",
   });
   // Update the hook endpoint URL with the actual bound port after listen.
   server.addHook("onListen", async () => {
@@ -484,8 +547,10 @@ export function createServer(
   });
 
   const shadowClient = new ShadowSessionLlmClient(shadowSessions, { timeoutMs: 60_000 });
+  const providerClient = new ModelProviderOrchestratorLlmClient(daemonContext.modelProviderRegistry);
+  const routedOrchestratorClient = new RoutedOrchestratorLlmClient(shadowClient, providerClient);
   const orchestratorMediator = new OrchestratorMediator({
-    llm: shadowClient,
+    llm: routedOrchestratorClient,
     buildContext: ({ goalId, runId, stepRunId }) =>
       buildContextFromDb(db, { goalId, runId, stepRunId, payloadBudgetBytes: 64 * 1024 }),
     composePrompt: composeOrchestratorPrompt,
@@ -502,7 +567,10 @@ export function createServer(
     daemonContext.stepDispatchCapabilities,
     orchestratorMediator,
     (sessionId: string, text: string) => {
-      sessionRuntime.getHandle(sessionId)?.write(Buffer.from(text, "utf8"));
+      const handle = sessionRuntime.getHandle(sessionId);
+      if (!handle) return false;
+      handle.write(Buffer.from(text, "utf8"));
+      return true;
     }
   );
   // Wire the late-binding ref so the onChunkAppended callback is live.
@@ -601,7 +669,14 @@ export function createServer(
         { db: getDatabase(), bus: eventBus, now: daemonContext.now, idFactory: daemonContext.idFactory },
         args
       ),
-    spawnOrchestratorSessionFn: async (goalId, _runId) => shadowSessions.spawn(goalId),
+    spawnOrchestratorSessionFn: async (goalId, _runId) => {
+      const goal = getGoalById(getDatabase(), goalId);
+      if (!goal?.orchestratorProvider) return shadowSessionId(goalId);
+      const adapterId = adapterIdForProvider(goal.orchestratorProvider);
+      return daemonContext.stepDispatchCapabilities.resolveMode(adapterId).mode === "shadow_session"
+        ? shadowSessions.spawn(goalId, adapterId === "codex" ? "codex" : "claude-code")
+        : shadowSessionId(goalId);
+    },
     startWorkflowFirstStepFn: async (_goalId, runId) =>
       orchestratorService.startWorkflowFirstStep(
         getDatabase(),
@@ -1035,15 +1110,11 @@ export function createServer(
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
     shadowAsk: async (goalId, input) => {
-      await shadowSessions.spawn(goalId);
+      await shadowSessions.spawn(goalId, input.adapterId);
       return shadowSessions.ask(goalId, input);
     },
     resolveOrchestratorMode: (provider) => {
-      const adapterId =
-        provider === "orca/anthropic" ? "claude-code"
-        : provider === "orca/openai" ? "codex"
-        : provider === "orca/google-gemini" ? "gemini-cli"
-        : "claude-code";
+      const adapterId = adapterIdForProvider(provider as ModelProviderId);
       try {
         return daemonContext.stepDispatchCapabilities.resolveMode(adapterId).mode === "shadow_session"
           ? "shadow_session" : "one_shot";

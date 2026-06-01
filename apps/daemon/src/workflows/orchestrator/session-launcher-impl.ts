@@ -14,6 +14,7 @@ export interface ProductionLauncherDeps {
     title?: string;
   }) => Promise<{ id: string }>;
   firstWorkspaceId: (goalId: string) => string | null;
+  startSession?: (input: { sessionId: string }) => Promise<void>;
 }
 
 function adapterIdFrom(operatorId: string): string {
@@ -35,6 +36,7 @@ export class ProductionWorkflowSessionLauncher implements WorkflowSessionLaunche
       role: "engineer",
       title: `Workflow step: ${ctx.workflowStepRunId}`,
     });
+    await this.deps.startSession?.({ sessionId: created.id });
     return { sessionId: created.id };
   }
 }

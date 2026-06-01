@@ -2,10 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { ProductionWorkflowSessionLauncher } from "./session-launcher-impl.js";
 
 describe("ProductionWorkflowSessionLauncher", () => {
-  it("creates a session via createSessionUseCase with adapterId stripped from agent:<id>", async () => {
+  it("creates and starts a session with adapterId stripped from agent:<id>", async () => {
     const createSession = vi.fn(async () => ({ id: "sess-1" }));
     const firstWorkspaceId = vi.fn(() => "ws-1");
-    const launcher = new ProductionWorkflowSessionLauncher({ createSession, firstWorkspaceId });
+    const startSession = vi.fn(async () => undefined);
+    const launcher = new ProductionWorkflowSessionLauncher({ createSession, firstWorkspaceId, startSession });
     const r = await launcher.launch({
       goalId: "g", workflowRunId: "r", workflowStepRunId: "sr",
       operatorId: "agent:codex", operatorKind: "agent", objective: "do it",
@@ -15,6 +16,7 @@ describe("ProductionWorkflowSessionLauncher", () => {
       goalId: "g", workspaceId: "ws-1", adapterId: "codex",
       workflowStepRunId: "sr", instruction: "do it",
     }));
+    expect(startSession).toHaveBeenCalledWith({ sessionId: "sess-1" });
   });
 
   it("throws direct_launch_unsupported if the goal has no workspace", async () => {

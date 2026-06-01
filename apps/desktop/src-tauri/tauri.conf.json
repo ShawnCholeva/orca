@@ -5,7 +5,7 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm --filter @orca/daemon build:sidecar:dev && pnpm dev",
     "beforeBuildCommand": "pnpm build",
     "beforeBundleCommand": "pnpm --filter @orca/daemon build:sidecar"
   },

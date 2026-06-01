@@ -22,11 +22,10 @@ export const ADAPTER_EXECUTION_MODE_DEFAULTS: Record<AdapterId, AdapterExecution
   },
   codex: {
     adapterId: "codex",
-    enabledExecutionModes: [
-      { mode: "one_shot", preferred: true },
-      { mode: "shadow_session" },
+    enabledExecutionModes: [{ mode: "shadow_session", preferred: true }],
+    disabledExecutionModes: [
+      { mode: "one_shot", reason: "Codex orchestration uses interactive shadow sessions, not OpenAI API keys" },
     ],
-    disabledExecutionModes: [],
   },
   opencode: {
     adapterId: "opencode",
@@ -162,6 +161,12 @@ export function seedAdapterExecutionModes(
        (adapter_id, enabled_modes_json, disabled_modes_json, updated_at, updated_by)
      VALUES (?, ?, ?, ?, 'system_seed')`
   );
+  const select = db.prepare(
+    "SELECT enabled_modes_json, disabled_modes_json, updated_by FROM adapter_execution_modes WHERE adapter_id = ?"
+  );
+  const updateSystemSeed = db.prepare(
+    "UPDATE adapter_execution_modes SET enabled_modes_json = ?, disabled_modes_json = ?, updated_at = ? WHERE adapter_id = ? AND updated_by = 'system_seed'"
+  );
   for (const [adapterId, defaults] of Object.entries(ADAPTER_EXECUTION_MODE_DEFAULTS)) {
     const supported = supportedByAdapter[adapterId];
     if (!supported) continue;
@@ -175,5 +180,16 @@ export function seedAdapterExecutionModes(
       JSON.stringify(defaults.disabledExecutionModes),
       now()
     );
+    const row = select.get(defaults.adapterId) as
+      | { enabled_modes_json: string; disabled_modes_json: string; updated_by: string | null }
+      | undefined;
+    const enabledJson = JSON.stringify(defaults.enabledExecutionModes);
+    const disabledJson = JSON.stringify(defaults.disabledExecutionModes);
+    if (
+      row?.updated_by === "system_seed" &&
+      (row.enabled_modes_json !== enabledJson || row.disabled_modes_json !== disabledJson)
+    ) {
+      updateSystemSeed.run(enabledJson, disabledJson, now(), defaults.adapterId);
+    }
   }
 }

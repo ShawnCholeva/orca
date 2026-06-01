@@ -15,6 +15,8 @@ import {
 
 import type { EventBus } from "../events.js";
 import type { ModelProviderRegistry } from "../llm/registry.js";
+import { adapterIdForProvider } from "../orchestrator-llm/model-provider-llm-client.js";
+import type { ShadowAdapterId } from "../orchestrator-llm/shadow-session.js";
 
 export interface OrchestratorChatCtx {
   db: Database.Database;
@@ -22,7 +24,7 @@ export interface OrchestratorChatCtx {
   modelProviderRegistry: ModelProviderRegistry;
   shadowAsk?: (
     goalId: string,
-    input: { systemPrompt: string; userPrompt: string; timeoutMs: number }
+    input: { adapterId: ShadowAdapterId; systemPrompt: string; userPrompt: string; timeoutMs: number }
   ) => Promise<{ text: string }>;
   resolveOrchestratorMode?: (provider: string) => "shadow_session" | "one_shot";
   onOrchestratorReply?: (goalId: string, body: string) => void;
@@ -124,7 +126,12 @@ export async function createOrchestratorMessage(
       "Output protocol: wrap that JSON in a fenced ```orca:action block and emit nothing after the closing fence.",
     ].join("\n");
     const usr = JSON.stringify({ goal: { id: goal.id, title: goal.title, description: goal.description }, userMessage: parsed.body });
-    void ctx.shadowAsk(goalId, { systemPrompt: sys, userPrompt: usr, timeoutMs: 120_000 })
+    void ctx.shadowAsk(goalId, {
+      adapterId: toShadowAdapterId(goal.orchestrator_provider),
+      systemPrompt: sys,
+      userPrompt: usr,
+      timeoutMs: 120_000,
+    })
       .then((out) => {
         let body: string;
         try { body = GuidanceReply.parse(JSON.parse(out.text)).replyText; }
@@ -169,6 +176,11 @@ export async function createOrchestratorMessage(
     createdAt: now(),
   });
   return CreateOrchestratorMessageResponse.parse({ message: userMessage, reply: replyMessage });
+}
+
+function toShadowAdapterId(providerId: ModelProviderId): ShadowAdapterId {
+  const adapterId = adapterIdForProvider(providerId);
+  return adapterId === "codex" ? "codex" : "claude-code";
 }
 
 function readGoal(db: Database.Database, goalId: string): GoalRow | null {

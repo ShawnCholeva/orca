@@ -2,19 +2,9 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { z } from "zod";
 import type { ModelCompletionRequest, ModelCompletionResponse, ModelProvider } from "./types.js";
 import { ProviderError } from "./types.js";
+import { MODELS_BY_AGENT_ID } from "../adapters/model-catalog.js";
 
-const MODELS = [
-  {
-    id: "gemini-2.5-pro",
-    displayName: "Gemini 2.5 Pro",
-    capabilities: ["reasoning", "long_context"]
-  },
-  {
-    id: "gemini-2.5-flash",
-    displayName: "Gemini 2.5 Flash",
-    capabilities: ["fast", "cheap"]
-  }
-] as const;
+const MODELS = MODELS_BY_AGENT_ID["gemini-cli"] ?? [];
 
 const DEFAULT_MODEL = "gemini-2.5-flash";
 const DEFAULT_MAX_OUTPUT_TOKENS = 1024;

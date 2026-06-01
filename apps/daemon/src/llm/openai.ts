@@ -2,8 +2,10 @@ import OpenAI from "openai";
 import { z } from "zod";
 import type { ModelCompletionRequest, ModelCompletionResponse, ModelProvider } from "./types.js";
 import { ProviderError } from "./types.js";
+import { MODELS_BY_AGENT_ID } from "../adapters/model-catalog.js";
 
 const MODELS = [
+  ...(MODELS_BY_AGENT_ID.codex ?? []),
   {
     id: "gpt-5",
     displayName: "GPT-5",
@@ -19,7 +21,7 @@ const MODELS = [
     displayName: "GPT-4o mini",
     capabilities: ["fast", "cheap"]
   }
-] as const;
+];
 
 const DEFAULT_MODEL = "gpt-4o-mini";
 const DEFAULT_MAX_OUTPUT_TOKENS = 1024;

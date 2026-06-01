@@ -27,6 +27,8 @@ const SIGKILL_GRACE_MS = 1000;
 // (~/.claude, ~/.codex, ~/.gemini, ~/.config/gcloud, %APPDATA%, etc.).
 const CRED_ENV_KEYS = [
   "HOME",
+  "USER",
+  "LOGNAME",
   "USERPROFILE",
   "XDG_CONFIG_HOME",
   "XDG_CACHE_HOME",

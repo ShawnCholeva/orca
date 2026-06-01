@@ -1,15 +1,29 @@
 import type Database from "better-sqlite3";
 import type {
+  StepAgentChoice,
   WorkflowGuardrailConfig,
   WorkflowStepTemplate,
 } from "@orca/contracts";
 
 export const ENGINEERING_ID = "orca/engineering";
-export const ENGINEERING_VERSION = 4;
+export const ENGINEERING_VERSION = 5;
 
 const ENGINEERING_NAME = "Engineering";
 const ENGINEERING_DESCRIPTION =
   "Built-in workflow optimized for AI-assisted software delivery.";
+
+const INTAKE_AGENT_PREFERENCE: StepAgentChoice[] = [
+  { adapterId: "claude-code", modelId: "claude-haiku-4-5" },
+  { adapterId: "codex", modelId: "gpt-5.4-mini" },
+];
+const REASONING_AGENT_PREFERENCE: StepAgentChoice[] = [
+  { adapterId: "claude-code", modelId: "claude-opus-4-7" },
+  { adapterId: "codex", modelId: "gpt-5.5" },
+];
+const EXECUTION_AGENT_PREFERENCE: StepAgentChoice[] = [
+  { adapterId: "claude-code", modelId: "claude-sonnet-4-6" },
+  { adapterId: "codex", modelId: "gpt-5.3-codex" },
+];
 
 const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
   {
@@ -32,7 +46,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       { key: "relevant_workspaces", type: "array", itemType: "string", required: false },
       { key: "open_questions", type: "array", itemType: "string", required: false },
     ],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+    agentPreference: INTAKE_AGENT_PREFERENCE,
   },
   {
     id: "research",
@@ -49,7 +63,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       { key: "files_in_scope", type: "array", itemType: "string", required: true },
       { key: "risks", type: "array", itemType: "string", required: false },
     ],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-opus-4-7" }],
+    agentPreference: REASONING_AGENT_PREFERENCE,
   },
   {
     id: "prd",
@@ -65,7 +79,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       { key: "acceptance_signals", type: "array", itemType: "string", required: true },
       { key: "non_goals", type: "array", itemType: "string", required: false },
     ],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-opus-4-7" }],
+    agentPreference: REASONING_AGENT_PREFERENCE,
   },
   {
     id: "issue_breakdown",
@@ -88,7 +102,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
         ],
       },
     ],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-opus-4-7" }],
+    agentPreference: REASONING_AGENT_PREFERENCE,
   },
   {
     id: "execution",
@@ -114,7 +128,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       { key: "blocked", type: "boolean", required: true },
       { key: "blocked_reason", type: "string", required: false },
     ],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-sonnet-4-6" }],
+    agentPreference: EXECUTION_AGENT_PREFERENCE,
   },
   {
     id: "qa",
@@ -138,7 +152,10 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       },
       { key: "verdict", type: "string", required: true },
     ],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-sonnet-4-6" }],
+    agentPreference: [
+      { adapterId: "claude-code", modelId: "claude-sonnet-4-6" },
+      { adapterId: "codex", modelId: "gpt-5.4-mini" },
+    ],
   },
   {
     id: "review",
@@ -153,7 +170,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       { key: "approved", type: "boolean", required: true },
       { key: "change_requests", type: "array", itemType: "string", required: false },
     ],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-opus-4-7" }],
+    agentPreference: REASONING_AGENT_PREFERENCE,
   },
   {
     id: "done",
@@ -166,7 +183,7 @@ const ENGINEERING_STEPS: WorkflowStepTemplate[] = [
       { key: "summary", type: "string", required: true },
       { key: "memory_items", type: "array", itemType: "string", required: false },
     ],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+    agentPreference: INTAKE_AGENT_PREFERENCE,
   },
 ];
 

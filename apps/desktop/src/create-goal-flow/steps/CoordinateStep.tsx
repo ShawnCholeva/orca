@@ -4,6 +4,7 @@ import type { FlowAction, FlowState, PendingWorkspace } from "../state";
 import type { ModelProviderInfo, WorkflowTemplate } from "@orca/contracts";
 import { inspectWorkspace, listModelProviders, listWorkflowTemplates, toErrorMessage } from "../../api";
 import type { ApiError } from "../../api";
+import { defaultModelForProvider } from "../orchestratorDefaults";
 
 type Props = {
   state: Extract<FlowState, { phase: "coordinate" }>;
@@ -84,11 +85,18 @@ function OrchestratorPicker({
   const selectable = providers.filter((p) => p.models.length > 0);
   const selectedProvider = value ? selectable.find((p) => p.id === value.providerId) ?? null : null;
 
+  useEffect(() => {
+    if (value || selectable.length !== 1) return;
+    const provider = selectable[0]!;
+    const defaultModel = defaultModelForProvider(provider);
+    if (defaultModel) onChange({ providerId: provider.id, modelId: defaultModel.id });
+  }, [selectable, value, onChange]);
+
   function onProviderChange(providerId: string) {
     if (!providerId) { onChange(null); return; }
     const provider = selectable.find((p) => p.id === providerId);
-    const firstModel = provider?.models[0];
-    onChange(firstModel ? { providerId, modelId: firstModel.id } : null);
+    const defaultModel = provider ? defaultModelForProvider(provider) : null;
+    onChange(defaultModel ? { providerId, modelId: defaultModel.id } : null);
   }
 
   function onModelChange(modelId: string) {

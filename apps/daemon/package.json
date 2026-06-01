@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "build:sidecar": "node scripts/build-sidecar.mjs",
+    "build:sidecar:dev": "node scripts/build-sidecar-dev.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },
@@ -17,7 +18,7 @@
     "@fastify/websocket": "^11.2.0",
     "@google/generative-ai": "^0.24.1",
     "@orca/contracts": "workspace:*",
-    "better-sqlite3": "^11.8.1",
+    "better-sqlite3": "^12.6.2",
     "fastify": "^5.2.1",
     "node-pty": "^1.0.0",
     "openai": "^6.0.0",
