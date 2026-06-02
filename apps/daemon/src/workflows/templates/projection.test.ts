@@ -40,10 +40,13 @@ function seedTemplate(
     name: string;
     isBuiltIn: boolean;
     isLocked: boolean;
+    scope?: string;
+    scopeName?: string;
+    graphJson?: string | null;
   }
 ): void {
   db.prepare(
-    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at, scope, scope_name, graph_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ).run(
     row.id,
     row.name,
@@ -63,7 +66,10 @@ function seedTemplate(
     ]),
     JSON.stringify([]),
     NOW,
-    NOW
+    NOW,
+    row.scope ?? "global",
+    row.scopeName ?? "",
+    row.graphJson ?? null
   );
 }
 
@@ -104,5 +110,63 @@ describe("workflow template projection", () => {
       "custom/a",
       "custom/b",
     ]);
+  });
+
+  it("rowToTemplate maps scope, scopeName, and graph from row", () => {
+    const db = setup();
+    const graph = {
+      nodes: [{ id: "n1", type: "step" as const, name: "Step 1", stepId: "intake" }],
+      edges: [["n1", "n1"]] as [string, string][],
+      positions: { n1: { x: 10, y: 20 } },
+    };
+    seedTemplate(db, {
+      id: "custom/scope-test",
+      name: "Scope Test",
+      isBuiltIn: false,
+      isLocked: false,
+      scope: "goal",
+      scopeName: "my-goal",
+      graphJson: JSON.stringify(graph),
+    });
+
+    const template = getTemplateById(db, "custom/scope-test");
+    expect(template).not.toBeNull();
+    expect(template?.scope).toBe("goal");
+    expect(template?.scopeName).toBe("my-goal");
+    expect(template?.graph).toEqual(graph);
+  });
+
+  it("rowToTemplate returns scope=global and graph=null for rows with defaults", () => {
+    const db = setup();
+    // Insert without the new columns (back-compat: only old columns)
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "custom/legacy",
+      "Legacy",
+      "desc",
+      1,
+      0,
+      0,
+      JSON.stringify([
+        {
+          id: "step-1",
+          ordinal: 0,
+          name: "Step 1",
+          instructions: "Do something.",
+          outputSchema: [{ key: "summary", type: "string", required: true }],
+          agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+        },
+      ]),
+      JSON.stringify([]),
+      NOW,
+      NOW
+    );
+
+    const template = getTemplateById(db, "custom/legacy");
+    expect(template).not.toBeNull();
+    expect(template?.scope).toBe("global");
+    expect(template?.scopeName).toBe("");
+    expect(template?.graph).toBeNull();
   });
 });

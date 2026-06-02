@@ -54,7 +54,7 @@ export function createCustomTemplate(
   const staged = ctx.db.transaction(() => {
     ctx.db
       .prepare(
-        "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES (?, ?, ?, 1, 0, 0, ?, ?, ?, ?)"
+        "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at, scope, scope_name, graph_json) VALUES (?, ?, ?, 1, 0, 0, ?, ?, ?, ?, ?, ?, ?)"
       )
       .run(
         templateId,
@@ -63,7 +63,10 @@ export function createCustomTemplate(
         JSON.stringify(steps),
         JSON.stringify(req.guardrails),
         now,
-        now
+        now,
+        req.scope ?? "global",
+        req.scopeName ?? "",
+        req.graph ? JSON.stringify(req.graph) : null
       );
     const event = appendWorkflowEvent(
       ctx.db,
@@ -93,7 +96,7 @@ export function updateCustomTemplate(
   const staged = ctx.db.transaction(() => {
     ctx.db
       .prepare(
-        "UPDATE workflow_templates SET name = ?, description = ?, version = version + 1, steps_json = ?, guardrails_json = ?, updated_at = ? WHERE id = ?"
+        "UPDATE workflow_templates SET name = ?, description = ?, version = version + 1, steps_json = ?, guardrails_json = ?, updated_at = ?, scope = ?, scope_name = ?, graph_json = ? WHERE id = ?"
       )
       .run(
         req.name,
@@ -101,6 +104,9 @@ export function updateCustomTemplate(
         JSON.stringify(steps),
         JSON.stringify(req.guardrails),
         now,
+        req.scope ?? "global",
+        req.scopeName ?? "",
+        req.graph ? JSON.stringify(req.graph) : null,
         id
       );
     const next = getTemplateById(ctx.db, id)!;
@@ -130,7 +136,7 @@ export function duplicateTemplate(
   const staged = ctx.db.transaction(() => {
     ctx.db
       .prepare(
-        "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES (?, ?, ?, 1, 0, 0, ?, ?, ?, ?)"
+        "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at, scope, scope_name, graph_json) VALUES (?, ?, ?, 1, 0, 0, ?, ?, ?, ?, ?, ?, ?)"
       )
       .run(
         templateId,
@@ -139,7 +145,10 @@ export function duplicateTemplate(
         JSON.stringify(source.steps),
         JSON.stringify(source.guardrails),
         now,
-        now
+        now,
+        source.scope,
+        source.scopeName,
+        source.graph ? JSON.stringify(source.graph) : null
       );
     const event = appendWorkflowEvent(
       ctx.db,

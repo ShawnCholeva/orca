@@ -31,6 +31,7 @@ export const migrationFiles = [
   "0018_workflow_step_runs_crash_retries.sql",
   "0019_orchestrator_messages_pending_question.sql",
   "0020_drop_removed_provider_execution_modes.sql",
+  "0021_workflow_template_scope_graph.sql",
 ] as const;
 
 export function runMigrations(

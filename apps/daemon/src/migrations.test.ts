@@ -71,7 +71,8 @@ describe("runMigrations", () => {
       "0017_orchestrator_messages_chat_kinds.sql",
       "0018_workflow_step_runs_crash_retries.sql",
       "0019_orchestrator_messages_pending_question.sql",
-      "0020_drop_removed_provider_execution_modes.sql"
+      "0020_drop_removed_provider_execution_modes.sql",
+      "0021_workflow_template_scope_graph.sql"
     ]);
   });
 
@@ -173,7 +174,8 @@ describe("runMigrations", () => {
       "0017_orchestrator_messages_chat_kinds.sql",
       "0018_workflow_step_runs_crash_retries.sql",
       "0019_orchestrator_messages_pending_question.sql",
-      "0020_drop_removed_provider_execution_modes.sql"
+      "0020_drop_removed_provider_execution_modes.sql",
+      "0021_workflow_template_scope_graph.sql"
     ]);
 
     const goalCount = (
@@ -342,7 +344,8 @@ describe("session tables migration", () => {
       "0017_orchestrator_messages_chat_kinds.sql",
       "0018_workflow_step_runs_crash_retries.sql",
       "0019_orchestrator_messages_pending_question.sql",
-      "0020_drop_removed_provider_execution_modes.sql"
+      "0020_drop_removed_provider_execution_modes.sql",
+      "0021_workflow_template_scope_graph.sql"
     ]);
 
     const tables = (
@@ -836,7 +839,8 @@ describe("migration 0010 workflows", () => {
       "0017_orchestrator_messages_chat_kinds.sql",
       "0018_workflow_step_runs_crash_retries.sql",
       "0019_orchestrator_messages_pending_question.sql",
-      "0020_drop_removed_provider_execution_modes.sql"
+      "0020_drop_removed_provider_execution_modes.sql",
+      "0021_workflow_template_scope_graph.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -907,6 +911,49 @@ describe("migration 0010 workflows", () => {
       .prepare("SELECT type FROM recommendations WHERE id = 'rec-1'")
       .get() as { type: string };
     expect(row.type).toBe("advance_workflow_step");
+  });
+});
+
+describe("migration 0021 workflow_template scope and graph", () => {
+  it("adds scope, scope_name, graph_json columns to workflow_templates", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    const cols = (db.prepare("PRAGMA table_info(workflow_templates)").all() as { name: string }[]).map(
+      (c) => c.name
+    );
+    expect(cols).toContain("scope");
+    expect(cols).toContain("scope_name");
+    expect(cols).toContain("graph_json");
+  });
+
+  it("rows inserted without new columns get back-compat defaults", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    // Insert using only the original column set
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "custom/back-compat",
+      "Back Compat",
+      "desc",
+      1,
+      0,
+      0,
+      "[]",
+      "[]",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z"
+    );
+
+    const row = db
+      .prepare("SELECT scope, scope_name, graph_json FROM workflow_templates WHERE id = ?")
+      .get("custom/back-compat") as { scope: string; scope_name: string; graph_json: string | null };
+
+    expect(row.scope).toBe("global");
+    expect(row.scope_name).toBe("");
+    expect(row.graph_json).toBeNull();
   });
 });
 
@@ -1368,7 +1415,8 @@ describe("migration 0012 orchestration transport", () => {
       "0017_orchestrator_messages_chat_kinds.sql",
       "0018_workflow_step_runs_crash_retries.sql",
       "0019_orchestrator_messages_pending_question.sql",
-      "0020_drop_removed_provider_execution_modes.sql"
+      "0020_drop_removed_provider_execution_modes.sql",
+      "0021_workflow_template_scope_graph.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

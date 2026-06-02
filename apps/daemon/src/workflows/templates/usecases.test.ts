@@ -110,6 +110,9 @@ describe("workflow template usecases", () => {
         },
       ],
       guardrails: [],
+      scope: "global",
+      scopeName: "",
+      graph: null,
     });
     expect(created.id.startsWith("custom/")).toBe(true);
     expect(created.version).toBe(1);
@@ -129,6 +132,9 @@ describe("workflow template usecases", () => {
         },
       ],
       guardrails: [],
+      scope: "global",
+      scopeName: "",
+      graph: null,
     });
     expect(updated.version).toBe(2);
     expect(updated.steps[0]?.ordinal).toBe(3);
@@ -167,8 +173,128 @@ describe("workflow template usecases", () => {
           },
         ],
         guardrails: [],
+        scope: "global",
+        scopeName: "",
+        graph: null,
       })
     ).toThrow(WorkflowTemplateLockedError);
     expect(getTemplateById(db, "orca/engineering")?.version).toBe(1);
+  });
+
+  it("createCustomTemplate persists scope, scopeName, graph", () => {
+    const { ctx } = setup();
+    const graph = {
+      nodes: [{ id: "n1", type: "step" as const, name: "Step 1", stepId: "intake" }],
+      edges: [["n1", "n1"]] as [string, string][],
+      positions: { n1: { x: 0, y: 0 } },
+    };
+
+    const created = createCustomTemplate(ctx, {
+      name: "Scoped Template",
+      description: "desc",
+      steps: [
+        {
+          id: "intake",
+          name: "Intake",
+          instructions: "Ask user input.",
+          outputSchema: [{ key: "summary", type: "string", required: true }],
+          agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+        },
+      ],
+      guardrails: [],
+      scope: "workspace",
+      scopeName: "my-workspace",
+      graph,
+    });
+
+    expect(created.scope).toBe("workspace");
+    expect(created.scopeName).toBe("my-workspace");
+    expect(created.graph).toEqual(graph);
+  });
+
+  it("updateCustomTemplate changes scope, scopeName, graph", () => {
+    const { ctx } = setup();
+
+    const created = createCustomTemplate(ctx, {
+      name: "Template",
+      description: "desc",
+      steps: [
+        {
+          id: "intake",
+          name: "Intake",
+          instructions: "Ask user input.",
+          outputSchema: [{ key: "summary", type: "string", required: true }],
+          agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+        },
+      ],
+      guardrails: [],
+      scope: "global",
+      scopeName: "",
+      graph: null,
+    });
+
+    const graph = {
+      nodes: [{ id: "n1", type: "step" as const, name: "Step 1", stepId: "intake" }],
+      edges: [] as [string, string][],
+      positions: { n1: { x: 5, y: 5 } },
+    };
+
+    const updated = updateCustomTemplate(ctx, created.id, {
+      name: "Template",
+      description: "desc",
+      steps: [
+        {
+          id: "intake",
+          name: "Intake",
+          instructions: "Ask user input.",
+          outputSchema: [{ key: "summary", type: "string", required: true }],
+          agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+        },
+      ],
+      guardrails: [],
+      scope: "goal",
+      scopeName: "goal-123",
+      graph,
+    });
+
+    expect(updated.scope).toBe("goal");
+    expect(updated.scopeName).toBe("goal-123");
+    expect(updated.graph).toEqual(graph);
+  });
+
+  it("duplicateTemplate copies scope, scopeName, graph from source", () => {
+    const { ctx } = setup();
+    const graph = {
+      nodes: [{ id: "n1", type: "step" as const, name: "Step 1", stepId: "intake" }],
+      edges: [] as [string, string][],
+      positions: { n1: { x: 1, y: 2 } },
+    };
+
+    const source = createCustomTemplate(ctx, {
+      name: "Source",
+      description: "desc",
+      steps: [
+        {
+          id: "intake",
+          name: "Intake",
+          instructions: "Ask user input.",
+          outputSchema: [{ key: "summary", type: "string", required: true }],
+          agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+        },
+      ],
+      guardrails: [],
+      scope: "workspace",
+      scopeName: "ws-abc",
+      graph,
+    });
+
+    const duped = duplicateTemplate(ctx, {
+      sourceTemplateId: source.id,
+      name: "Source Copy",
+    });
+
+    expect(duped.scope).toBe("workspace");
+    expect(duped.scopeName).toBe("ws-abc");
+    expect(duped.graph).toEqual(graph);
   });
 });

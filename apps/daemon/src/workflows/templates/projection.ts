@@ -12,6 +12,9 @@ interface WorkflowTemplateRow {
   guardrails_json: string;
   created_at: string;
   updated_at: string;
+  scope: string;
+  scope_name: string;
+  graph_json: string | null;
 }
 
 let _db: Database.Database | null = null;
@@ -25,10 +28,10 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
     _db = db;
     _stmts = {
       getById: db.prepare(
-        "SELECT id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at FROM workflow_templates WHERE id = ?"
+        "SELECT id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at, scope, scope_name, graph_json FROM workflow_templates WHERE id = ?"
       ),
       listAll: db.prepare(
-        "SELECT id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at FROM workflow_templates ORDER BY is_built_in DESC, name ASC"
+        "SELECT id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at, scope, scope_name, graph_json FROM workflow_templates ORDER BY is_built_in DESC, name ASC"
       ),
     };
   }
@@ -52,6 +55,9 @@ function rowToTemplate(row: WorkflowTemplateRow): WorkflowTemplateT {
     guardrails: JSON.parse(row.guardrails_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    scope: row.scope,
+    scopeName: row.scope_name,
+    graph: row.graph_json ? JSON.parse(row.graph_json) : null,
   });
 }
 

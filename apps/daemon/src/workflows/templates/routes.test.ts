@@ -164,6 +164,53 @@ describe("workflow template routes", () => {
     expect(duplicated.template.isLocked).toBe(false);
   });
 
+  it("POST create with scope, scopeName, graph in body persists and is returned", async () => {
+    const graph = {
+      nodes: [{ id: "n1", type: "step", name: "Intake", stepId: "intake" }],
+      edges: [],
+      positions: { n1: { x: 0, y: 0 } },
+    };
+
+    const createdResp = await server.inject({
+      method: "POST",
+      url: "/v1/workflow-templates",
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+      payload: {
+        name: "Scoped Template",
+        description: "desc",
+        steps: [
+          {
+            id: "intake",
+            name: "Intake",
+            instructions: "Ask the user for input and capture a goal brief.",
+            outputSchema: [{ key: "goal_brief", type: "string", required: true }],
+            agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+          },
+        ],
+        guardrails: [],
+        scope: "workspace",
+        scopeName: "ws-abc",
+        graph,
+      },
+    });
+    expect(createdResp.statusCode).toBe(201);
+    const created = WorkflowTemplateResponse.parse(JSON.parse(createdResp.body));
+    expect(created.template.scope).toBe("workspace");
+    expect(created.template.scopeName).toBe("ws-abc");
+    expect(created.template.graph).toEqual(graph);
+
+    const getResp = await server.inject({
+      method: "GET",
+      url: `/v1/workflow-templates/${encodeURIComponent(created.template.id)}`,
+      headers: AUTH_HEADERS,
+    });
+    expect(getResp.statusCode).toBe(200);
+    const fetched = JSON.parse(getResp.body) as { template: { scope: string; scopeName: string; graph: unknown } };
+    expect(fetched.template.scope).toBe("workspace");
+    expect(fetched.template.scopeName).toBe("ws-abc");
+    expect(fetched.template.graph).toEqual(graph);
+  });
+
   it("updating built-in template returns 409", async () => {
     seedTemplate(db, { id: "orca/engineering", name: "Engineering", isBuiltIn: true, isLocked: true });
 
