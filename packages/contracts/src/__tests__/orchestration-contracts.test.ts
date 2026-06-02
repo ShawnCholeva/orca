@@ -86,7 +86,9 @@ import {
   TaskUpdatedPayload,
   TriggerKind,
   UserFeedbackRecordedPayload,
-  OrchestratorChatMessage
+  OrchestratorChatMessage,
+  PendingQuestion,
+  SubmitWorkerAnswersRequest,
 } from "../index.js";
 
 const now = "2026-01-01T00:00:00.000Z";
@@ -852,5 +854,99 @@ describe("orchestration contracts", () => {
       createdAt: "2026-05-28T00:00:00.000Z"
     });
     expect(m.rawAgentText).toContain("raw");
+  });
+
+  it("OrchestratorChatMessage accepts an optional pendingQuestion", () => {
+    const m = OrchestratorChatMessage.parse({
+      id: "m1",
+      goalId: "g1",
+      role: "orchestrator",
+      kind: "message",
+      body: "Agent asks: pick one",
+      correlationId: "c1",
+      createdAt: new Date().toISOString(),
+      pendingQuestion: {
+        questionId: "q1",
+        toolUseId: "toolu_1",
+        questions: [
+          {
+            header: "Color",
+            question: "Favorite color?",
+            multiSelect: false,
+            options: [
+              { label: "Red", description: "Warm" },
+              { label: "Green", description: "Calm" }
+            ]
+          }
+        ]
+      }
+    });
+    expect(m.pendingQuestion?.questions[0]!.options).toHaveLength(2);
+  });
+
+  it("OrchestratorChatMessage still parses without pendingQuestion", () => {
+    const m = OrchestratorChatMessage.parse({
+      id: "m1",
+      goalId: "g1",
+      role: "user",
+      kind: "message",
+      body: "hi",
+      correlationId: "c1",
+      createdAt: new Date().toISOString()
+    });
+    expect(m.pendingQuestion).toBeUndefined();
+  });
+
+});
+
+describe("PendingQuestion (multi-question)", () => {
+  it("parses multiple questions with multiSelect flags", () => {
+    const p = PendingQuestion.parse({
+      questionId: "q1",
+      toolUseId: "toolu_1",
+      questions: [
+        { header: "Color", question: "favorite color?", multiSelect: false,
+          options: [{ label: "Red", description: "" }, { label: "Blue", description: "" }] },
+        { header: "Feat", question: "which features?", multiSelect: true,
+          options: [{ label: "A", description: "" }, { label: "B", description: "" }] },
+      ],
+    });
+    expect(p.questions).toHaveLength(2);
+    expect(p.questions[1]!.multiSelect).toBe(true);
+  });
+
+  it("rejects more than 4 questions", () => {
+    const q = { header: "h", question: "x", multiSelect: false, options: [{ label: "A", description: "" }] };
+    expect(() => PendingQuestion.parse({ questionId: "q", toolUseId: "t", questions: [q, q, q, q, q] })).toThrow();
+  });
+
+  it("requires toolUseId", () => {
+    // Valid questions array so the only violation is the missing toolUseId.
+    const q = { header: "h", question: "x", multiSelect: false, options: [{ label: "A", description: "" }] };
+    expect(() => PendingQuestion.parse({ questionId: "q", questions: [q] })).toThrow();
+  });
+
+  it("OrchestratorChatMessage accepts a multi-question pendingQuestion", () => {
+    const m = OrchestratorChatMessage.parse({
+      id: "m1", goalId: "g1", role: "orchestrator", kind: "message", body: "Agent asks",
+      correlationId: "c1", createdAt: new Date().toISOString(),
+      pendingQuestion: { questionId: "q1", toolUseId: "t1", questions: [
+        { header: "H", question: "Q?", multiSelect: false, options: [{ label: "A", description: "" }] },
+      ] },
+    });
+    expect(m.pendingQuestion?.questions[0]!.header).toBe("H");
+  });
+});
+
+describe("SubmitWorkerAnswersRequest", () => {
+  it("parses answers with selected labels", () => {
+    const r = SubmitWorkerAnswersRequest.parse({ answers: [{ questionIndex: 0, selectedLabels: ["Red"] }] });
+    expect(r.answers[0]!.selectedLabels).toEqual(["Red"]);
+  });
+  it("rejects an answer with no labels", () => {
+    expect(() => SubmitWorkerAnswersRequest.parse({ answers: [{ questionIndex: 0, selectedLabels: [] }] })).toThrow();
+  });
+  it("rejects empty answers", () => {
+    expect(() => SubmitWorkerAnswersRequest.parse({ answers: [] })).toThrow();
   });
 });

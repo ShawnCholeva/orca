@@ -189,7 +189,12 @@ export class OrchestratorService {
     sessionOutputStore?: SessionOutputStore,
     private readonly stepDispatch?: StepDispatchCapabilities,
     private readonly orchestratorMediator?: Pick<OrchestratorMediator, "invoke"> & Partial<Pick<OrchestratorMediator, "invokeWithBackoff">>,
-    private readonly agentInput?: (sessionId: string, text: string) => void | Promise<void>
+    // Spawns the tmux worker for a freshly-created step session (resolves workspace + adapter spawn in the wiring).
+    private readonly workerSpawn?: (input: { sessionId: string; goalId: string; adapterId: string }) => Promise<void>,
+    // Reliable idle-gated submit to the worker's stdin (initial objective, forwards, revise feedback).
+    private readonly workerDeliver?: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">,
+    // Best-effort worker termination when a step's session ends.
+    private readonly workerTerminate?: (sessionId: string) => Promise<void>
   ) {
     this.sessionOutputStore = sessionOutputStore ?? NULL_OUTPUT_STORE;
   }
@@ -507,19 +512,24 @@ export class OrchestratorService {
     responseText: string,
     action: OrchestratorAction,
     options: RequestNextDecisionOptions
-  ): Promise<void> {
+  ): Promise<{ postedChatReply: boolean }> {
     switch (action.kind) {
       case "paraphrase_agent_message":
       case "answer_user_directly":
       case "escalate_to_user": {
         this.postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options);
-        return;
+        return { postedChatReply: true };
       }
       case "forward_to_agent": {
-        if (sessionId && this.agentInput) {
-          await this.agentInput(sessionId, action.translated + "\n");
+        if (sessionId && this.workerDeliver) {
+          const r = await this.workerDeliver(sessionId, action.translated);
+          if (r !== "delivered") console.warn(`[orchestrator] forward_to_agent ${r} for session ${sessionId}`);
+        } else {
+          console.warn(
+            `[orchestrator] forward_to_agent dropped: no live session for step ${ctx.stepRun.id} (goal ${ctx.run.goalId})`
+          );
         }
-        return;
+        return { postedChatReply: false };
       }
       case "approve_step_complete": {
         const block = extractOrcaStepCompleteBlock(responseText);
@@ -533,8 +543,12 @@ export class OrchestratorService {
           stagedEvents
         );
         this.publish(options.bus, stagedEvents);
+        // Best-effort: terminate the tmux worker for the completed step session.
+        if (sessionId) {
+          void this.workerTerminate?.(sessionId);
+        }
         await this.advanceToNextStep(db, now, ctx.run.id, options);
-        return;
+        return { postedChatReply: false };
       }
       case "revise_step": {
         const counter = incrementReviseAttempt(ctx.stepRun.revise_attempts ?? 0);
@@ -550,11 +564,47 @@ export class OrchestratorService {
             `Step needs help after ${REVISE_CAP} revision attempts:\n${action.feedback}`,
             options
           );
-        } else if (sessionId && this.agentInput) {
-          await this.agentInput(sessionId, action.feedback + "\n");
+          return { postedChatReply: true };
         }
-        return;
+        if (sessionId && this.workerDeliver) {
+          const r = await this.workerDeliver(sessionId, action.feedback);
+          if (r !== "delivered") console.warn(`[orchestrator] revise_step ${r} for session ${sessionId}`);
+        } else {
+          console.warn(
+            `[orchestrator] revise_step feedback dropped: no live session for step ${ctx.stepRun.id} (goal ${ctx.run.goalId})`
+          );
+        }
+        return { postedChatReply: false };
       }
+    }
+  }
+
+  /**
+   * Builds a short user-facing acknowledgment for a user_message-triggered
+   * action that did NOT itself post a chat reply (forward_to_agent,
+   * approve_step_complete, revise_step under cap). Without this the chat UI's
+   * "thinking" indicator never clears, because it only stops once a non-user
+   * message lands. `sessionId` is null when no live agent session exists for the
+   * current step (e.g. after a daemon restart) — surface that to the user
+   * instead of letting the relay silently no-op.
+   */
+  private acknowledgeUserMessageAction(
+    action: OrchestratorAction,
+    sessionId: string | null
+  ): string {
+    switch (action.kind) {
+      case "forward_to_agent":
+        return sessionId
+          ? "Relayed your message to the agent working the current step."
+          : "Couldn't relay your message — no live agent session for the current step. It may need to be respawned.";
+      case "approve_step_complete":
+        return "Approved the current step from your message — advancing the workflow.";
+      case "revise_step":
+        return sessionId
+          ? "Sent your feedback to the agent as a revision."
+          : "Couldn't send your feedback — no live agent session for the current step. It may need to be respawned.";
+      default:
+        return "Working on it.";
     }
   }
 
@@ -636,7 +686,20 @@ export class OrchestratorService {
       )?.id ?? null;
 
     const ctx = { run, stepRun, stepTpl, template, goal };
-    await this.applyOrchestratorAction(db, now, ctx, sessionId, "", action, options);
+    const { postedChatReply } = await this.applyOrchestratorAction(
+      db, now, ctx, sessionId, "", action, options
+    );
+    // The chat UI clears its "thinking" indicator only when a non-user message
+    // arrives. Actions that route to the agent (forward_to_agent) or advance the
+    // workflow (approve_step_complete) post nothing to chat, so acknowledge them
+    // here — otherwise the user's bubble spins forever.
+    if (!postedChatReply) {
+      this.postOrchestratorMessage(
+        db, now, run.goalId,
+        this.acknowledgeUserMessageAction(action, sessionId),
+        options
+      );
+    }
   }
 
   /**
@@ -830,18 +893,24 @@ export class OrchestratorService {
       this.commitDeterministicStepSelection(db, now, ctx, dispatch, options);
     }
 
-    await this.launcher.launch({
+    const objective = composeAgentInitialPrompt({
+      goalTitle: ctx.goal.title,
+      goalDescription: ctx.goal.description,
+      stepInstructions: ctx.stepTpl.instructions,
+      outputSchema: ctx.stepTpl.outputSchema,
+      priorStepArtifacts: this.collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.ordinal),
+    });
+    const { sessionId } = await this.launcher.launch({
       goalId: ctx.goal.id,
       workflowRunId: ctx.run.id,
       workflowStepRunId: ctx.stepRun.id,
       operatorId: "agent:" + dispatch.adapterId,
       operatorKind: "agent",
-      objective: composeAgentInitialPrompt({
-        stepInstructions: ctx.stepTpl.instructions,
-        outputSchema: ctx.stepTpl.outputSchema,
-        priorStepArtifacts: this.collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.ordinal),
-      }),
+      objective,
     });
+    // Run the agent as a headless tmux worker, then submit its objective.
+    await this.workerSpawn?.({ sessionId, goalId: ctx.goal.id, adapterId: dispatch.adapterId });
+    await this.workerDeliver?.(sessionId, objective);
   }
 
   /**

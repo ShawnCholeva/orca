@@ -56,6 +56,7 @@ import {
   type GoalDecision,
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
+  SubmitWorkerAnswersRequest,
   CheckSystemReadinessResponse
 } from '@orca/contracts';
 import type { Config } from './config.js';
@@ -152,6 +153,7 @@ import type { SessionPreparationAssembler } from './context/assembler.js';
 import { registerContextRoutes } from './context/routes.js';
 import { registerAdapterExecutionModeRoutes } from './adapters/execution-modes-routes.js';
 import { createDaemonContext, type DaemonContext } from './daemon-context.js';
+import { ProductionWorkflowSessionLauncher } from './workflows/orchestrator/session-launcher-impl.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
@@ -174,6 +176,9 @@ import { composeOrchestratorPrompt } from './orchestrator-llm/prompts.js';
 import { buildContextFromDb } from './orchestrator-llm/build-context.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
 import { registerAgentHookRoutes } from './agent-hooks/routes.js';
+import { WorkerSessionManager } from './workflows/orchestrator/worker-session.js';
+import { WorkerQuestionStore } from './workflows/orchestrator/worker-questions.js';
+import { validateAnswers, assembleAnswerReason } from './workflows/orchestrator/worker-answer-format.js';
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
 import {
   buildOrchestrationProviderCatalog,
@@ -247,6 +252,10 @@ export function createServer(
     new SessionRuntime(new NodePtyManager(), config.sessionStopGraceMs, config.sessionWsBufferLimitBytes);
   const extractionRunner = deps?.extractionRunner;
   const assembler = deps?.assembler ?? daemonContext.contextAssembler;
+
+  // Note: the workflow session launcher is now used only to create the session
+  // DB row. Step agents are started as tmux workers via WorkerSessionManager,
+  // so the node-pty setStarter wiring is intentionally omitted here.
 
   const server = Fastify({
     logger: {
@@ -475,11 +484,29 @@ export function createServer(
     },
     claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
   });
-  // Update the hook endpoint URL with the actual bound port after listen.
+
+  // Worker session manager for orchestrator-dispatched agent sessions (tmux-backed).
+  const workerSessions = new WorkerSessionManager({
+    privateRoot: path.join(config.dataDir, "workers"),
+    daemonPort: 0, // set after listen via setDaemonPort, mirroring the shadow
+    authToken: config.getAuthToken(),
+    claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
+    captureSink: (sessionId, chunk) => sessionOutputStore.appendChunk(sessionId, chunk),
+    markRunning: (sessionId) => {
+      db.prepare(
+        "UPDATE sessions SET status = 'running', started_at = COALESCE(started_at, ?) WHERE id = ?"
+      ).run(new Date().toISOString(), sessionId);
+    },
+  });
+  const workerQuestions = new WorkerQuestionStore(daemonContext.idFactory);
+  const ELICIT_ANSWER_TIMEOUT_MS = 590_000; // slightly under the 600s hook timeout
+
+  // Update the hook endpoint URLs with the actual bound port after listen.
   server.addHook("onListen", async () => {
     const addr = server.server.address();
     if (addr && typeof addr === "object" && typeof addr.port === "number") {
       shadowSessions.setDaemonPort(addr.port);
+      workerSessions.setDaemonPort(addr.port);
     }
   });
 
@@ -501,18 +528,27 @@ export function createServer(
     sessionOutputStore,
     daemonContext.stepDispatchCapabilities,
     orchestratorMediator,
-    (sessionId: string, text: string) => {
-      sessionRuntime.getHandle(sessionId)?.write(Buffer.from(text, "utf8"));
-    }
+    // workerSpawn: resolve workspace + adapter spawn, then start the tmux worker.
+    async ({ sessionId, goalId, adapterId }) => {
+      const wsRow = db.prepare("SELECT w.path AS path FROM workspaces w WHERE w.goal_id = ? ORDER BY w.attached_at ASC LIMIT 1").get(goalId) as { path: string } | undefined;
+      if (!wsRow) { console.warn(`[orchestrator] workerSpawn: no workspace for goal ${goalId}`); return; }
+      const adapter = adapterRegistry.get(adapterId);
+      if (!adapter) { console.warn(`[orchestrator] workerSpawn: no adapter ${adapterId}`); return; }
+      const spawn = await adapter.resolveSpawn({ goalId, sessionId, workspacePath: wsRow.path });
+      await workerSessions.spawn({ sessionId, workspacePath: wsRow.path, command: spawn.command, env: spawn.env });
+    },
+    // workerDeliver
+    (sessionId, text) => workerSessions.deliver(sessionId, text),
+    // workerTerminate
+    (sessionId) => workerSessions.terminate(sessionId)
   );
   // Wire the late-binding ref so the onChunkAppended callback is live.
   _orchestratorServiceRef.current = orchestratorService;
 
   // Boot-time resume (production only — gated so createServer in tests is inert).
-  // reconcileSessionsOnBoot has already marked stale running/starting sessions as
-  // terminal before this point, so in practice every active run's session is dead
-  // → respawn. reattach is a no-op because node-pty children cannot survive a
-  // daemon restart; reconcile + respawn cover recovery.
+  // reconcileSessionsOnBoot skips workflow-step sessions (tmux workers may survive
+  // the restart), so those sessions still have status 'running' in DB. Here we
+  // try to reattach surviving tmux workers; if the tmux session is gone we respawn.
   if (deps?.resumeActiveRunsOnBoot) {
     void resumeActiveRuns({
       listActiveRuns: async () => {
@@ -530,14 +566,35 @@ export function createServer(
         }));
       },
       isSessionAlive: async (id) => {
-        const row = db.prepare("SELECT status FROM sessions WHERE id = ?").get(id) as { status: string } | undefined;
-        return row?.status === "running" || row?.status === "starting";
+        // Worker sessions are tmux-backed: a DB row marked 'running' is not proof
+        // of liveness (the tmux session can die independently). Check the actual
+        // tmux session so a dead worker falls through to reattach→respawn.
+        return workerSessions.isTmuxAlive(id);
       },
-      reattach: async () => {
-        // node-pty cannot reattach across restart; reconcile already marked stale
-        // sessions terminal. No-op.
+      reattach: async ({ sessionId }) => {
+        // Try to reattach a surviving tmux worker. If the tmux session is gone,
+        // reattach returns false and we fall through; the run will be picked up
+        // by a subsequent reconcile cycle or left for respawn on the next boot.
+        // For now, a failed reattach is best-effort — the worker may have exited
+        // and its StopFailure hook will drive synthesis normally.
+        const wsRow = db.prepare(
+          "SELECT w.path AS path FROM workspaces w JOIN sessions s ON s.goal_id = w.goal_id WHERE s.id = ? ORDER BY w.attached_at ASC LIMIT 1"
+        ).get(sessionId) as { path: string } | undefined;
+        if (wsRow) {
+          await workerSessions.reattach(sessionId, wsRow.path);
+        }
       },
       respawn: async ({ runId, stepRunId, goalId }) => {
+        // Prefer reattaching a surviving tmux worker over respawning a fresh one.
+        const sessionRow = db.prepare(
+          "SELECT id FROM sessions WHERE workflow_step_run_id = ? ORDER BY created_at DESC LIMIT 1"
+        ).get(stepRunId) as { id: string } | undefined;
+        if (sessionRow) {
+          const wsRow = db.prepare(
+            "SELECT w.path AS path FROM workspaces w WHERE w.goal_id = ? ORDER BY w.attached_at ASC LIMIT 1"
+          ).get(goalId) as { path: string } | undefined;
+          if (wsRow && await workerSessions.reattach(sessionRow.id, wsRow.path)) return; // adopted; no respawn
+        }
         await orchestratorService.respawnStepAgent(
           db,
           daemonContext.now ?? (() => new Date().toISOString()),
@@ -1010,6 +1067,62 @@ export function createServer(
         idFactory: daemonContext.idFactory,
       });
     },
+    resolveAdapterForSession: (sid) =>
+      (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(sid) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code",
+    onWorkerQuestion: async (sessionId, payload) => {
+      const goalRow = db.prepare("SELECT goal_id FROM sessions WHERE id = ?").get(sessionId) as { goal_id: string } | undefined;
+      if (!goalRow) return "No goal is associated with this session; proceed using your best judgment.";
+      const goalId = goalRow.goal_id;
+      const { questionId, answered, isNew } = workerQuestions.record({
+        toolUseId: payload.toolUseId,
+        sessionId,
+        goalId,
+        questions: payload.questions,
+      });
+      // Only post the chat message for a freshly recorded question. A duplicate hook
+      // fire (network/timeout retry with the same toolUseId) reuses the existing
+      // deferred — posting again would show the user a second identical question block.
+      if (isNew) {
+        insertMessageWithEvent(
+          { db, bus: eventBus, modelProviderRegistry: daemonContext.modelProviderRegistry, now: daemonContext.now, idFactory: daemonContext.idFactory },
+          {
+            id: daemonContext.idFactory(),
+            goalId,
+            role: "orchestrator",
+            body: "The agent needs your input.",
+            correlationId: daemonContext.idFactory(),
+            createdAt: daemonContext.now(),
+            pendingQuestion: { questionId, toolUseId: payload.toolUseId, questions: payload.questions },
+          }
+        );
+      }
+      let timerId: ReturnType<typeof setTimeout>;
+      const timed = new Promise<string>((res) => {
+        timerId = setTimeout(() => res("No answer received from the user; proceed using your best judgment."), ELICIT_ANSWER_TIMEOUT_MS);
+      });
+      const reason = await Promise.race([answered, timed]);
+      clearTimeout(timerId!); // release the timer; harmless if it already fired
+      workerQuestions.resolveAnswers(questionId, reason); // no-op if the /answer route already resolved this
+      return reason;
+    },
+  });
+
+  // ---- Worker question answer route ----
+
+  server.post("/v1/goals/:goalId/worker-questions/:questionId/answer", async (request, reply) => {
+    const { goalId, questionId } = request.params as { goalId: string; questionId: string };
+    const parsed = SubmitWorkerAnswersRequest.safeParse(request.body);
+    if (!parsed.success) { reply.status(400); return { error: "validation_failed", issues: parsed.error.issues }; }
+    const pending = workerQuestions.get(questionId);
+    // Not-found OR a goal mismatch both read as "not found" for this goal — never
+    // let a question scoped to one goal be answered through another goal's URL.
+    if (!pending || pending.goalId !== goalId) { reply.status(404); return { error: { code: "question_not_found" } }; }
+    const invalid = validateAnswers(pending.questions, parsed.data.answers);
+    if (invalid) { reply.status(400); return { error: { code: invalid } }; }
+    const reason = assembleAnswerReason(pending.questions, parsed.data.answers);
+    const ok = workerQuestions.resolveAnswers(questionId, reason);
+    if (!ok) { reply.status(409); return { error: { code: "already_answered" } }; }
+    return { ok: true };
   });
 
   // ---- Workflow orchestrator routes ----

@@ -315,7 +315,7 @@ describe("GoalDetailView", () => {
     expect(items[1]?.textContent).toBe("beta");
   });
 
-  it("renders sessions panel", async () => {
+  it("does not render the Sessions panel", async () => {
     mockDetail({ goal, refinement: null, workspaces: [ws1] });
     const { GoalDetailView } = await import("./GoalDetailView");
 
@@ -325,74 +325,7 @@ describe("GoalDetailView", () => {
       );
     });
 
-    expect(container.querySelector(".sessions-panel")).toBeTruthy();
-  });
-
-  it("wires accepted recommendation create-session prefill into the sessions panel", async () => {
-    let sessionsPrefill: unknown = null;
-
-    vi.doMock("../api", () => ({
-      getGoalDetail: vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [ws1] }),
-      ...makeBaseApiMock(),
-    }));
-    vi.doMock("./sessions/SessionsPanel", () => ({
-      SessionsPanel: (props: { createSessionPrefill?: unknown }) => {
-        sessionsPrefill = props.createSessionPrefill ?? null;
-        return <div className="sessions-panel" />;
-      },
-    }));
-    vi.doMock("./sessions/SessionTerminalView", () => ({
-      SessionTerminalView: ({ sessionId }: { sessionId: string }) => (
-        <div className="session-terminal" data-session-id={sessionId} />
-      ),
-    }));
-    vi.doMock("./recommendations/RecommendationsPanel", () => ({
-      RecommendationsPanel: (props: {
-        onOpenCreateSession?: (prefill: {
-          adapterId: string;
-          role: string;
-          objective: string;
-          taskId?: string;
-          fromRecommendationId: string;
-        }) => void;
-      }) => (
-        <button
-          type="button"
-          className="test-open-session-prefill"
-          onClick={() =>
-            props.onOpenCreateSession?.({
-              adapterId: "shell-manual",
-              role: "engineer",
-              objective: "Validate implementation",
-              taskId: "task-1",
-              fromRecommendationId: "rec-1",
-            })
-          }
-        >
-          accept
-        </button>
-      ),
-    }));
-
-    const { GoalDetailView } = await import("./GoalDetailView");
-
-    await act(async () => {
-      createRoot(container).render(
-        <GoalDetailView goalId="goal-1" onBack={vi.fn()} refreshKey={0} />,
-      );
-    });
-
-    await act(async () => {
-      (container.querySelector(".test-open-session-prefill") as HTMLButtonElement).click();
-    });
-
-    expect(sessionsPrefill).toMatchObject({
-      adapterId: "shell-manual",
-      role: "engineer",
-      objective: "Validate implementation",
-      taskId: "task-1",
-      fromRecommendationId: "rec-1",
-    });
+    expect(container.querySelector(".sessions-panel")).toBeNull();
   });
 
   it("calls getGoalDetail again when refreshKey changes", async () => {

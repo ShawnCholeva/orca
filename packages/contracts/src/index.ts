@@ -982,6 +982,33 @@ export type OrchestratorInternalThoughtKind = z.infer<
   typeof OrchestratorInternalThoughtKind
 >;
 
+export const PendingQuestionItem = z
+  .object({
+    header: z.string().max(120),
+    question: z.string().max(4000),
+    multiSelect: z.boolean(),
+    options: z
+      .array(
+        z.object({
+          label: z.string().min(1).max(200),
+          description: z.string().max(1000)
+        })
+      )
+      .min(1)
+      .max(12)
+  })
+  .strict();
+export type PendingQuestionItem = z.infer<typeof PendingQuestionItem>;
+
+export const PendingQuestion = z
+  .object({
+    questionId: z.string().min(1),
+    toolUseId: z.string().min(1),
+    questions: z.array(PendingQuestionItem).min(1).max(4)
+  })
+  .strict();
+export type PendingQuestion = z.infer<typeof PendingQuestion>;
+
 export const OrchestratorChatMessage = z
   .object({
     id: z.string(),
@@ -993,7 +1020,8 @@ export const OrchestratorChatMessage = z
     rawAgentText: z.string().max(200_000).nullable().optional(),
     whyRationale: z.string().max(4000).nullable().optional(),
     internalKind: OrchestratorInternalThoughtKind.nullable().optional(),
-    createdAt: z.string().datetime()
+    createdAt: z.string().datetime(),
+    pendingQuestion: PendingQuestion.optional()
   })
   .strict();
 export type OrchestratorChatMessage = z.infer<typeof OrchestratorChatMessage>;
@@ -1015,6 +1043,19 @@ export const CreateOrchestratorMessageRequest = z
 export type CreateOrchestratorMessageRequest = z.infer<
   typeof CreateOrchestratorMessageRequest
 >;
+
+export const WorkerAnswer = z
+  .object({
+    questionIndex: z.number().int().min(0),
+    selectedLabels: z.array(z.string().min(1)).min(1)
+  })
+  .strict();
+export type WorkerAnswer = z.infer<typeof WorkerAnswer>;
+
+export const SubmitWorkerAnswersRequest = z
+  .object({ answers: z.array(WorkerAnswer).min(1) })
+  .strict();
+export type SubmitWorkerAnswersRequest = z.infer<typeof SubmitWorkerAnswersRequest>;
 
 export const CreateOrchestratorMessageResponse = z
   .object({

@@ -123,6 +123,22 @@ for (const { name, envKey, defaultBin, create } of ADAPTER_CASES) {
         expect(result.env["ORCA_INSTRUCTION"]).toBe("Fix the bug");
       });
 
+      it("passes HOME and interactive vars so ~/.claude auth/hooks resolve", async () => {
+        const prevHome = process.env["HOME"];
+        const prevTerm = process.env["TERM"];
+        process.env["HOME"] = "/home/test-user";
+        process.env["TERM"] = "xterm-256color";
+        try {
+          const adapter = create(makeResolve({ resolvedPath: "/usr/local/bin/tool" }));
+          const result = await adapter.resolveSpawn(INPUT);
+          expect(result.env["HOME"]).toBe("/home/test-user");
+          expect(result.env["TERM"]).toBe("xterm-256color");
+        } finally {
+          if (prevHome === undefined) delete process.env["HOME"]; else process.env["HOME"] = prevHome;
+          if (prevTerm === undefined) delete process.env["TERM"]; else process.env["TERM"] = prevTerm;
+        }
+      });
+
       it("throws with code command_not_found when binary not found", async () => {
         const adapter = create(makeResolve({ error: "not_found", tried: [defaultBin] }));
         await expect(adapter.resolveSpawn(INPUT)).rejects.toMatchObject({ code: "command_not_found" });

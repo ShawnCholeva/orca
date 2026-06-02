@@ -8,7 +8,7 @@ function setup() {
     CREATE TABLE goals (id TEXT PRIMARY KEY, title TEXT, description TEXT,
       orchestrator_provider TEXT, orchestrator_model TEXT, active_workflow_run_id TEXT, archived_at TEXT);
     CREATE TABLE orchestrator_messages (id TEXT PRIMARY KEY, goal_id TEXT, role TEXT, kind TEXT,
-      body TEXT, correlation_id TEXT, created_at TEXT);
+      body TEXT, correlation_id TEXT, created_at TEXT, pending_question TEXT);
     CREATE TABLE events (id TEXT, type TEXT, goal_id TEXT, payload TEXT, created_at TEXT);
     INSERT INTO goals VALUES ('G1','T','D','orca/anthropic','claude-haiku-4-5',NULL,NULL);
   `);

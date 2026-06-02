@@ -22,6 +22,7 @@ import {
   listWorkflowTemplates,
   openEventStream,
   requestNextOrchestratorDecision,
+  submitWorkerAnswers,
   startWorkflowRun,
   toErrorMessage,
 } from "../api";
@@ -512,7 +513,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
                   />
                 );
               }
-              return <ChatMessageRow key={message.id} message={message} />;
+              return <ChatMessageRow key={message.id} message={message} goalId={selectedGoalId ?? ""} />;
             })}
 
             {showMarkDoneCard && lastMessage && (
@@ -606,7 +607,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   );
 }
 
-function ChatMessageRow({ message }: { message: OrchestratorChatMessage }) {
+function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage; goalId: string }) {
   if (message.role === "user") {
     return (
       <div className="msg msg--user">
@@ -621,7 +622,82 @@ function ChatMessageRow({ message }: { message: OrchestratorChatMessage }) {
       <div className="msg-body">
         <div className="mono msg-meta">orca</div>
         <div className="orca-chat-message">{message.body}</div>
+        {message.pendingQuestion && (
+          <WorkerQuestionForm goalId={goalId} pending={message.pendingQuestion} />
+        )}
       </div>
+    </div>
+  );
+}
+
+function WorkerQuestionForm({
+  goalId,
+  pending,
+}: {
+  goalId: string;
+  pending: NonNullable<OrchestratorChatMessage["pendingQuestion"]>;
+}) {
+  const [selections, setSelections] = useState<Record<number, string[]>>({});
+  const [submitted, setSubmitted] = useState(false);
+  const [expired, setExpired] = useState(false);
+
+  function toggle(qIndex: number, label: string, multi: boolean) {
+    setSelections((prev) => {
+      const current = prev[qIndex] ?? [];
+      if (multi) {
+        const next = current.includes(label) ? current.filter((l) => l !== label) : [...current, label];
+        return { ...prev, [qIndex]: next };
+      }
+      return { ...prev, [qIndex]: [label] };
+    });
+  }
+
+  const allAnswered = pending.questions.every((_, i) => (selections[i]?.length ?? 0) > 0);
+
+  async function handleSubmit() {
+    const answers = pending.questions.map((_, i) => ({ questionIndex: i, selectedLabels: selections[i] ?? [] }));
+    setSubmitted(true);
+    try {
+      await submitWorkerAnswers(goalId, pending.questionId, answers);
+    } catch {
+      setSubmitted(false);
+      setExpired(true);
+    }
+  }
+
+  return (
+    <div className="orca-chat-question">
+      {pending.questions.map((q, qi) => (
+        <fieldset key={qi} className="orca-chat-question-block" disabled={submitted}>
+          <legend className="orca-chat-question-legend">
+            {pending.questions.length > 1 && <span>{qi + 1} · </span>}<span>{q.question}</span>
+          </legend>
+          {q.options.map((opt, oi) => {
+            const chosen = (selections[qi] ?? []).includes(opt.label);
+            return (
+              <label key={oi} className="orca-chat-option-row">
+                <input
+                  type={q.multiSelect ? "checkbox" : "radio"}
+                  name={`${pending.questionId}-${qi}`}
+                  checked={chosen}
+                  onChange={() => toggle(qi, opt.label, q.multiSelect)}
+                />
+                <span className="orca-chat-option-label">{submitted && chosen ? "✓ " : ""}{opt.label}</span>
+                {opt.description ? <span className="orca-chat-option-desc">{opt.description}</span> : null}
+              </label>
+            );
+          })}
+        </fieldset>
+      ))}
+      <button
+        type="button"
+        className="submit-button orca-chat-question-submit"
+        disabled={submitted || !allAnswered}
+        onClick={() => void handleSubmit()}
+      >
+        {submitted ? "Submitted" : "Submit"}
+      </button>
+      {expired && <p className="form-error" role="alert">This question expired.</p>}
     </div>
   );
 }

@@ -17,6 +17,37 @@ describe("ProductionWorkflowSessionLauncher", () => {
     }));
   });
 
+  it("starts the created session headlessly via the wired starter", async () => {
+    const createSession = vi.fn(async () => ({ id: "sess-1" }));
+    const launcher = new ProductionWorkflowSessionLauncher({
+      createSession,
+      firstWorkspaceId: () => "ws-1",
+    });
+    const starter = vi.fn(async () => {});
+    launcher.setStarter(starter);
+
+    await launcher.launch({
+      goalId: "g", workflowRunId: "r", workflowStepRunId: "sr",
+      operatorId: "agent:claude-code", operatorKind: "agent", objective: "do it",
+    });
+
+    expect(starter).toHaveBeenCalledTimes(1);
+    expect(starter).toHaveBeenCalledWith("sess-1", { terminalCols: 80, terminalRows: 24 });
+  });
+
+  it("does not start when no starter is wired (session left in 'created')", async () => {
+    const createSession = vi.fn(async () => ({ id: "sess-1" }));
+    const launcher = new ProductionWorkflowSessionLauncher({
+      createSession,
+      firstWorkspaceId: () => "ws-1",
+    });
+    const r = await launcher.launch({
+      goalId: "g", workflowRunId: "r", workflowStepRunId: "sr",
+      operatorId: "agent:claude-code", operatorKind: "agent", objective: "do it",
+    });
+    expect(r.sessionId).toBe("sess-1");
+  });
+
   it("throws direct_launch_unsupported if the goal has no workspace", async () => {
     const launcher = new ProductionWorkflowSessionLauncher({
       createSession: vi.fn(),

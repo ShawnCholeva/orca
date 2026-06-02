@@ -17,8 +17,10 @@ export function reconcileSessionsOnBoot(
   bus: EventBus,
   now: string
 ): void {
+  // Skip sessions owned by a workflow step — those are tmux-backed workers that may
+  // have survived the restart. resume/reattach handles them immediately after boot.
   const rows = db
-    .prepare("SELECT id, goal_id FROM sessions WHERE status IN ('starting', 'running')")
+    .prepare("SELECT id, goal_id FROM sessions WHERE status IN ('starting', 'running') AND workflow_step_run_id IS NULL")
     .all() as StaleSessionRow[];
 
   if (rows.length === 0) return;

@@ -944,6 +944,26 @@ export async function createOrchestratorMessage(
   );
 }
 
+export async function submitWorkerAnswers(
+  goalId: string,
+  questionId: string,
+  answers: { questionIndex: number; selectedLabels: string[] }[],
+): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  return requestVoid(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/worker-questions/${encodeURIComponent(questionId)}/answer`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify({ answers }),
+    },
+    "Submit worker answers failed",
+  );
+}
+
 export async function listWorkflowDecisions(
   goalId: string,
   runId: string,

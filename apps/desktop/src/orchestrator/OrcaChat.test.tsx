@@ -18,6 +18,7 @@ const openEventStreamMock = vi.fn();
 const requestNextOrchestratorDecisionMock = vi.fn();
 const listWorkflowTemplatesMock = vi.fn();
 const startWorkflowRunMock = vi.fn();
+const submitWorkerAnswersMock = vi.fn();
 
 vi.mock("../api", () => ({
   createOrchestratorMessage: (...args: unknown[]) => createOrchestratorMessageMock(...args),
@@ -31,6 +32,7 @@ vi.mock("../api", () => ({
   requestNextOrchestratorDecision: (...args: unknown[]) => requestNextOrchestratorDecisionMock(...args),
   listWorkflowTemplates: (...args: unknown[]) => listWorkflowTemplatesMock(...args),
   startWorkflowRun: (...args: unknown[]) => startWorkflowRunMock(...args),
+  submitWorkerAnswers: (...args: unknown[]) => submitWorkerAnswersMock(...args),
   toErrorMessage: (err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback,
 }));
@@ -121,6 +123,8 @@ describe("OrcaChat", () => {
     listWorkflowTemplatesMock.mockReset();
     listWorkflowTemplatesMock.mockResolvedValue({ templates: [] });
     startWorkflowRunMock.mockReset();
+    submitWorkerAnswersMock.mockReset();
+    submitWorkerAnswersMock.mockResolvedValue(undefined);
     openEventStreamMock.mockReset();
     openEventStreamMock.mockReturnValue({ close: vi.fn() });
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
@@ -481,6 +485,71 @@ describe("OrcaChat", () => {
 
     // The orchestrator reply message is visible.
     expect(screen.getByText("I have started the plan.")).toBeInTheDocument();
+  });
+
+  const pendingMsg: OrchestratorChatMessage = {
+    id: "msg-q", goalId: "goal-1", role: "orchestrator", kind: "message",
+    body: "The agent needs your input.", correlationId: "c1", createdAt: now,
+    pendingQuestion: {
+      questionId: "q1", toolUseId: "t1",
+      questions: [
+        { header: "Color", question: "favorite color?", multiSelect: false,
+          options: [{ label: "Red", description: "Warm" }, { label: "Blue", description: "Calm" }] },
+        { header: "Feat", question: "which features?", multiSelect: true,
+          options: [{ label: "A", description: "" }, { label: "B", description: "" }] },
+      ],
+    },
+  };
+
+  it("submits multi-question answers (radio + checkbox) and disables after", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [pendingMsg] });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("favorite color?");
+    fireEvent.click(screen.getByRole("radio", { name: /Red/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^A/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^B/i }));
+    const submit = screen.getByRole("button", { name: /submit/i });
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+    await waitFor(() => expect(submitWorkerAnswersMock).toHaveBeenCalledWith("goal-1", "q1", [
+      { questionIndex: 0, selectedLabels: ["Red"] },
+      { questionIndex: 1, selectedLabels: ["A", "B"] },
+    ]));
+    await waitFor(() => expect(screen.getByRole("button", { name: /submit/i })).toBeDisabled());
+  });
+
+  it("keeps Submit disabled until every question is answered", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [pendingMsg] });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("favorite color?");
+    fireEvent.click(screen.getByRole("radio", { name: /Red/i })); // Q2 still unanswered
+    expect(screen.getByRole("button", { name: /submit/i })).toBeDisabled();
+  });
+
+  it("shows an expired notice and re-enables Submit when the answer is rejected", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [pendingMsg] });
+    submitWorkerAnswersMock.mockRejectedValueOnce(new Error("question_not_found"));
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("favorite color?");
+    fireEvent.click(screen.getByRole("radio", { name: /Red/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^A/i }));
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    await screen.findByText("This question expired.");
+    // Controls came back: Submit is enabled again (selections still satisfy the gate).
+    expect(screen.getByRole("button", { name: /submit/i })).toBeEnabled();
   });
 
   it("does not flash a loading indicator or blank content on SSE-driven refresh once loaded", async () => {
