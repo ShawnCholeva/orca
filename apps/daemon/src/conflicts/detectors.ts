@@ -75,7 +75,7 @@ interface SummaryRow {
   created_at: string;
 }
 
-export interface DetectorSession {
+interface DetectorSession {
   id: string;
   workspaceId: string;
   taskId: string | null;
@@ -85,13 +85,13 @@ export interface DetectorSession {
   exitedAt: string | null;
 }
 
-export interface DetectorSummary {
+interface DetectorSummary {
   id: string;
   sessionId: string;
   createdAt: string;
 }
 
-export interface DetectorTask {
+interface DetectorTask {
   id: string;
   workspaceId: string | null;
   status: string;
@@ -99,7 +99,7 @@ export interface DetectorTask {
   updatedAt: string;
 }
 
-export interface DetectorMemoryItem {
+interface DetectorMemoryItem {
   id: string;
   type: string;
   status: string;
@@ -108,7 +108,7 @@ export interface DetectorMemoryItem {
   updatedAt: string;
 }
 
-export interface DetectorDecision {
+interface DetectorDecision {
   id: string;
   title: string;
   decisionText: string;
@@ -117,7 +117,7 @@ export interface DetectorDecision {
   updatedAt: string;
 }
 
-export interface DetectorWorkspace {
+interface DetectorWorkspace {
   id: string;
   attachedAt: string;
 }
@@ -167,7 +167,7 @@ export function resetPreparedStatements(): void {
   _stmts = null;
 }
 
-export function buildConflictSnapshot(db: Database.Database, goalId: string): ConflictSnapshot {
+function buildConflictSnapshot(db: Database.Database, goalId: string): ConflictSnapshot {
   const stmts = ensureStmts(db);
   const sessionRows = stmts.listSessions.all(goalId, MAX_SESSIONS) as SessionRow[];
   const summaryRows = stmts.listSummaries.all(goalId, MAX_SUMMARIES) as SummaryRow[];
