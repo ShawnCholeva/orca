@@ -10,13 +10,12 @@ import {
   type RecommendationType,
 } from "@orca/contracts";
 
-import type { EventBus } from "../../events.js";
 import { redactSecrets } from "../../memory/normalize.js";
 import {
   canonicalizeProposedActionJson,
   recommendationFingerprint,
 } from "../../recommendations/fingerprint.js";
-import { appendWorkflowEvent, publishStagedWorkflowEvents } from "../events.js";
+import { appendWorkflowEvent } from "../events.js";
 
 export type WorkflowRecommendationType = Extract<
   RecommendationType,
@@ -40,11 +39,6 @@ export interface CreateWorkflowRecommendationInput {
 export interface CreateWorkflowRecommendationInTxOptions {
   idFactory?: () => string;
   stagedEvents?: DomainEvent[];
-}
-
-export interface CreateWorkflowRecommendationOptions {
-  idFactory?: () => string;
-  bus?: EventBus;
 }
 
 const TITLE_BY_TYPE: Record<WorkflowRecommendationType, string> = {
@@ -141,22 +135,3 @@ export function createRecommendationForWorkflowInTx(
   return id;
 }
 
-export function createRecommendationForWorkflow(
-  db: Database.Database,
-  now: () => string,
-  input: CreateWorkflowRecommendationInput,
-  options: CreateWorkflowRecommendationOptions = {}
-): string {
-  const stagedEvents: DomainEvent[] = [];
-  const id = db.transaction(() =>
-    createRecommendationForWorkflowInTx(db, now, input, {
-      idFactory: options.idFactory,
-      stagedEvents,
-    })
-  )();
-
-  if (options.bus) {
-    publishStagedWorkflowEvents(options.bus, stagedEvents);
-  }
-  return id;
-}

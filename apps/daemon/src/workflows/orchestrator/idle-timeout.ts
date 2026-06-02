@@ -9,8 +9,6 @@ export interface IdleWatcherArgs {
   idleMs: number;
 }
 
-export const DEFAULT_IDLE_MS = 90_000;
-
 export function startIdleTimeoutWatcher(args: IdleWatcherArgs): IdleWatcher {
   let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(args.onIdle, args.idleMs);
   return {

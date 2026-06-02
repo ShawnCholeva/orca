@@ -70,14 +70,6 @@ interface HumanReviewLinkRow {
   id: string;
 }
 
-export interface LinkTransportAttemptDecisionInput {
-  attemptId: string;
-  decisionId: string;
-  goalId: string;
-  workflowRunId: string;
-  stepRunId: string | null;
-}
-
 function truncateUtf8(input: string, maxBytes: number): string {
   if (Buffer.byteLength(input, "utf8") <= maxBytes) return input;
   const truncated = Buffer.from(input, "utf8").subarray(0, maxBytes);
@@ -316,21 +308,3 @@ function loadDecisionTransportSummary(
   });
 }
 
-export function linkTransportAttemptDecisionInTx(
-  db: Database.Database,
-  input: LinkTransportAttemptDecisionInput
-): boolean {
-  const result = db
-    .prepare(
-      "UPDATE orchestration_transport_attempts SET decision_id = ? WHERE id = ? AND goal_id = ? AND workflow_run_id = ? AND COALESCE(step_run_id, '') = COALESCE(?, '') AND status = 'succeeded' AND (decision_id IS NULL OR decision_id = ?)"
-    )
-    .run(
-      input.decisionId,
-      input.attemptId,
-      input.goalId,
-      input.workflowRunId,
-      input.stepRunId,
-      input.decisionId
-    );
-  return result.changes > 0;
-}

@@ -60,9 +60,3 @@ export async function killSession(r: TmuxRunner, name: string): Promise<void> {
 export async function hasSession(r: TmuxRunner, name: string): Promise<boolean> {
   return (await r.run(["has-session", "-t", name])).code === 0;
 }
-
-export async function listOrcaSessions(r: TmuxRunner, prefix: string): Promise<string[]> {
-  const out = await r.run(["list-sessions", "-F", "#{session_name}"]);
-  if (out.code !== 0) return [];
-  return out.stdout.split("\n").map((s) => s.trim()).filter((s) => s.startsWith(prefix));
-}
