@@ -6,6 +6,7 @@ import { runMigrations } from "./migrations.js";
 import { AdapterRegistry } from "./adapters/registry.js";
 import { ClaudeCodeAdapter } from "./adapters/claude-code.js";
 import { CodexAdapter } from "./adapters/codex.js";
+import { AntigravityAdapter } from "./adapters/antigravity.js";
 import {
   seedAdapterExecutionModes,
   getAdapterExecutionModeConfig,
@@ -23,6 +24,7 @@ describe("daemon boot wiring: seed adapter execution modes from registered adapt
     const registry = new AdapterRegistry();
     registry.register(new ClaudeCodeAdapter());
     registry.register(new CodexAdapter());
+    registry.register(new AntigravityAdapter());
 
     const supportedByAdapter: Record<string, ExecutionMode[]> = {};
     for (const adapter of registry.listAgentAdapters()) {
@@ -31,7 +33,7 @@ describe("daemon boot wiring: seed adapter execution modes from registered adapt
 
     seedAdapterExecutionModes(db, () => "2026-05-28T00:00:00.000Z", supportedByAdapter);
 
-    for (const id of ["claude-code", "codex"]) {
+    for (const id of ["claude-code", "codex", "antigravity"]) {
       const cfg = getAdapterExecutionModeConfig(db, id);
       expect(cfg, `config for ${id}`).not.toBeNull();
     }

@@ -11,6 +11,7 @@ import { internalConflictDetectionSkill } from '../skills/internal-conflict-dete
 import { AdapterRegistry, adapterRegistry } from '../adapters/registry.js';
 import { ClaudeCodeAdapter } from '../adapters/claude-code.js';
 import { CodexAdapter } from '../adapters/codex.js';
+import { AntigravityAdapter } from '../adapters/antigravity.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -48,6 +49,7 @@ export function bootstrapRegistries(registries?: {
 
     adapters.register(new ClaudeCodeAdapter());
     adapters.register(new CodexAdapter());
+    adapters.register(new AntigravityAdapter());
 
     plugins.freeze();
     skills.freeze();

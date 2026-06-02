@@ -27,6 +27,16 @@ export const ADAPTER_EXECUTION_MODE_DEFAULTS: Record<AdapterId, AdapterExecution
       { mode: "one_shot", reason: "Codex orchestration uses interactive shadow sessions, not OpenAI API keys" },
     ],
   },
+  antigravity: {
+    adapterId: "antigravity",
+    enabledExecutionModes: [{ mode: "shadow_session", preferred: true }],
+    disabledExecutionModes: [
+      {
+        mode: "one_shot",
+        reason: "Antigravity orchestration uses interactive shadow sessions, not direct one-shot probes",
+      },
+    ],
+  },
 };
 
 interface Row {
