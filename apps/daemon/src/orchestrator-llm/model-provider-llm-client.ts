@@ -4,11 +4,13 @@ import {
 } from "@orca/contracts";
 import type { ModelProviderRegistry } from "../llm/registry.js";
 import type { OrchestratorLlmClient } from "./mediator.js";
+import { resolveShadowProvider } from "./providers/registry.js";
+import type { ShadowAdapterId } from "./providers/types.js";
 
-const PROVIDER_BY_ADAPTER_ID: Record<string, ModelProviderId | undefined> = {
-  "claude-code": "orca/anthropic",
-  codex: "orca/openai",
-};
+function providerIdForAdapter(adapterId: string): ModelProviderId | undefined {
+  if (adapterId !== "claude-code" && adapterId !== "codex") return undefined;
+  return resolveShadowProvider(adapterId as ShadowAdapterId).modelProviderId as ModelProviderId;
+}
 
 export class ModelProviderOrchestratorLlmClient implements OrchestratorLlmClient {
   constructor(private readonly registry: ModelProviderRegistry) {}
@@ -20,7 +22,7 @@ export class ModelProviderOrchestratorLlmClient implements OrchestratorLlmClient
     systemPrompt: string;
     userPrompt: string;
   }): Promise<{ text: string }> {
-    const providerId = PROVIDER_BY_ADAPTER_ID[input.adapterId];
+    const providerId = providerIdForAdapter(input.adapterId);
     if (!providerId) {
       throw new Error(`No model provider mapped for adapter ${input.adapterId}`);
     }

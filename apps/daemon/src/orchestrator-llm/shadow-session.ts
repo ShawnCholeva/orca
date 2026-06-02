@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { extractActionBlock } from "./sentinel.js";
-import { buildShadowHookSettings } from "./shadow-hook-settings.js";
+import { dirname, join } from "node:path";
+import { resolveShadowProvider } from "./providers/registry.js";
+import type { ShadowProvider } from "./providers/types.js";
 import {
   type TmuxRunner,
   defaultTmuxRunner,
@@ -14,7 +14,8 @@ import {
   killSession,
 } from "../tmux/runner.js";
 
-export type ShadowAdapterId = "claude-code" | "codex";
+export type { ShadowAdapterId } from "./providers/types.js";
+import type { ShadowAdapterId } from "./providers/types.js";
 
 // TEMP diagnostics (kept during bring-up; strip later).
 function dbg(goalId: string, msg: string): void {
@@ -48,6 +49,7 @@ interface Pending {
 
 interface Session {
   adapterId: ShadowAdapterId;
+  provider: ShadowProvider;
   name: string;            // tmux session name
   ready: Promise<void>;
   queue: Promise<unknown>;
@@ -57,11 +59,6 @@ interface Session {
 
 const TRUST_DEFAULT = /trust this folder|Is this a project you created or one you trust|do you trust/i;
 const HOOK_TRUST_PROMPT = /hook needs review|hooks need review|press t to trust|new hook - review required/i;
-const CODEX_MODEL_SWITCH_PROMPT = /approaching rate limits[\s\S]*switch to .*for lower credit usage/i;
-const CODEX_USAGE_LIMIT =
-  /hit your usage limit|less than \d+% of your 5h limit|purchase more credits|try again at \d{1,2}:\d{2}\s*(?:AM|PM)?/i;
-const CODEX_AUTH_LOST =
-  /\bnot\s+(?:signed|logged)\s+in\b|\blogin required\b|\bauth(?:entication)?\s+(?:required|expired|failed)\b/i;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class ShadowSessionManager {
@@ -82,16 +79,17 @@ export class ShadowSessionManager {
     const existing = this.sessions.get(goalId);
     if (existing?.adapterId === adapterId) return shadowSessionId(goalId);
     if (existing) await this.terminate(goalId);
+    const provider = resolveShadowProvider(adapterId);
     if (!(await this.deps.isReady(adapterId))) {
-      throw new Error(`orchestrator shadow not ready: sign in to ${adapterDisplayName(adapterId)}`);
+      throw new Error(`orchestrator shadow not ready: sign in to ${provider.displayName}`);
     }
     const dir = join(this.deps.shadowRoot, goalId);
-    this.writeHookConfig(adapterId, goalId, dir);
+    this.writeHookConfig(provider, goalId, dir);
     const name = this.tmuxName(goalId);
-    const bin = this.binFor(adapterId);
+    const bin = provider.launch({ binOverride: this.binOverride(adapterId) }).bin;
     const started = await newSession(this.tmux, name, dir, bin);
     dbg(goalId, `tmux new-session code=${started.code} adapter=${adapterId} name=${name} bin=${bin} dir=${dir} port=${this.deps.daemonPort}`);
-    const session: Session = { adapterId, name, ready: this.startup(goalId, name), queue: Promise.resolve(), pending: null, systemSent: false };
+    const session: Session = { adapterId, provider, name, ready: this.startup(goalId, name), queue: Promise.resolve(), pending: null, systemSent: false };
     this.sessions.set(goalId, session);
     return shadowSessionId(goalId);
   }
@@ -157,8 +155,12 @@ export class ShadowSessionManager {
     ].join("\n");
     session.systemSent = true;
     const buf = `orca-${goalId}`;
-    if (session.adapterId === "codex") {
-      await this.dismissCodexModelSwitchPrompt(goalId, session.name);
+    if (session.provider.beforeSubmit) {
+      await session.provider.beforeSubmit({
+        tmux: this.tmux,
+        sessionName: session.name,
+        dbg: (msg) => dbg(goalId, msg),
+      });
     }
     // Inject as a bracketed paste so multi-line content is treated as input (not submitted early),
     // then a single Enter submits.
@@ -171,7 +173,9 @@ export class ShadowSessionManager {
         reject(new Error(`shadow orchestrator timeout for goal ${goalId}`));
       }, input.timeoutMs);
       const pending: Pending = { resolve, reject, timer };
-      if (session.adapterId === "codex") {
+      const capture = session.provider.captureMode();
+      if (capture.kind === "pane-poll") {
+        const parser = session.provider.turnParser();
         let polling = false;
         pending.pollTimer = setInterval(() => {
           if (polling) return;
@@ -179,45 +183,23 @@ export class ShadowSessionManager {
           void this.tmux.run(["capture-pane", "-t", session.name, "-p"])
             .then((pane) => {
               if (session.pending !== pending) return;
-              const text = pane.stdout;
-              const turnText = textAfterTurnMarker(text, transportMarker);
+              const turnText = textAfterTurnMarker(pane.stdout, transportMarker);
               if (turnText === null) return;
-              const action = extractActionBlock(turnText);
+              const action = parser.parseAction(turnText);
               if (action !== null) {
                 this.settlePending(goalId, pending, { text: action });
                 return;
               }
-              const codexAction = extractCodexPaneAction(turnText);
-              if (codexAction !== null) {
-                this.settlePending(goalId, pending, { text: codexAction });
-                return;
-              }
-              if (CODEX_USAGE_LIMIT.test(turnText)) {
-                this.settlePending(goalId, pending, {
-                  error: new Error("codex usage limit reached; retry when Codex quota resets"),
-                });
-                return;
-              }
-              if (CODEX_AUTH_LOST.test(turnText)) {
-                this.settlePending(goalId, pending, {
-                  error: new Error("codex authentication required; run codex login"),
-                });
+              const error = parser.detectError?.(turnText) ?? null;
+              if (error !== null) {
+                this.settlePending(goalId, pending, { error });
               }
             })
             .finally(() => { polling = false; });
-        }, 1000);
+        }, capture.intervalMs);
       }
       session.pending = pending;
     });
-  }
-
-  private async dismissCodexModelSwitchPrompt(goalId: string, name: string): Promise<void> {
-    const pane = (await this.tmux.run(["capture-pane", "-t", name, "-p"])).stdout;
-    if (!CODEX_MODEL_SWITCH_PROMPT.test(pane)) return;
-    await this.tmux.run(["send-keys", "-t", name, "2"]);
-    await this.tmux.run(["send-keys", "-t", name, "Enter"]);
-    dbg(goalId, "codex model-switch prompt dismissed (keep current model)");
-    await sleep(250);
   }
 
   /** Called by the hook endpoint when the goal's shadow session emits Stop/StopFailure. */
@@ -229,7 +211,7 @@ export class ShadowSessionManager {
       this.settlePending(goalId, pending, { error: new Error("shadow orchestrator StopFailure") });
       return;
     }
-    const block = extractActionBlock(result.text ?? "");
+    const block = session.provider.turnParser().parseAction(result.text ?? "");
     if (block === null) {
       this.settlePending(goalId, pending, {
         error: new Error("shadow orchestrator: no orca:action block (unparseable)"),
@@ -272,32 +254,21 @@ export class ShadowSessionManager {
     pending.resolve({ text: result.text });
   }
 
-  private binFor(adapterId: ShadowAdapterId): string {
-    if (adapterId === "codex") return this.deps.codexBin ?? process.env["ORCA_CODEX_BIN"] ?? "codex";
-    return this.deps.claudeBin ?? process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude";
+  private binOverride(adapterId: ShadowAdapterId): string | undefined {
+    const overrides: Record<ShadowAdapterId, string | undefined> = {
+      "claude-code": this.deps.claudeBin,
+      codex: this.deps.codexBin,
+    };
+    return overrides[adapterId];
   }
 
-  private writeHookConfig(adapterId: ShadowAdapterId, goalId: string, dir: string): void {
-    if (adapterId === "codex") {
-      mkdirSync(join(dir, ".codex"), { recursive: true });
-      writeFileSync(
-        join(dir, ".codex", "config.toml"),
-        "[features]\nhooks = true\n",
-        "utf8",
-      );
-      writeFileSync(
-        join(dir, ".codex", "hooks.json"),
-        JSON.stringify(buildCodexHookSettings({ goalId, port: this.deps.daemonPort, authToken: this.deps.authToken }), null, 2),
-        "utf8",
-      );
-      return;
+  private writeHookConfig(provider: ShadowProvider, goalId: string, dir: string): void {
+    const { files } = provider.hookConfig({ goalId, port: this.deps.daemonPort, authToken: this.deps.authToken });
+    for (const file of files) {
+      const target = join(dir, file.relPath);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, file.contents, "utf8");
     }
-    mkdirSync(join(dir, ".claude"), { recursive: true });
-    writeFileSync(
-      join(dir, ".claude", "settings.local.json"),
-      JSON.stringify(buildShadowHookSettings({ goalId, port: this.deps.daemonPort, authToken: this.deps.authToken }), null, 2),
-      "utf8",
-    );
   }
 }
 
@@ -305,64 +276,8 @@ export interface AskInput { adapterId?: ShadowAdapterId; systemPrompt: string; u
 
 export function shadowSessionId(goalId: string): string { return `orchsess-${goalId}`; }
 
-function adapterDisplayName(adapterId: ShadowAdapterId): string {
-  return adapterId === "codex" ? "Codex" : "Claude Code";
-}
-
-function buildCodexHookSettings(args: { goalId: string; port: number; authToken: string }): unknown {
-  const commandFor = (failure: boolean) => [
-    "curl",
-    "-fsS",
-    "-X", "POST",
-    "-H", shellArg(`Authorization: Bearer ${args.authToken}`),
-    "-H", shellArg("Content-Type: application/json"),
-    "--data-binary", "@-",
-    shellArg(
-      `http://127.0.0.1:${args.port}/v1/orchestrator-hooks/stop?goalId=${encodeURIComponent(args.goalId)}${failure ? "&failure=1" : ""}`,
-    ),
-  ].join(" ");
-  return {
-    hooks: {
-      Stop: [{ hooks: [{ type: "command", command: commandFor(false) }] }],
-      StopFailure: [{ hooks: [{ type: "command", command: commandFor(true) }] }],
-    },
-  };
-}
-
-function shellArg(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
 function textAfterTurnMarker(output: string, marker: string): string | null {
   const idx = output.lastIndexOf(marker);
   if (idx < 0) return null;
   return output.slice(idx + marker.length);
-}
-
-function extractCodexPaneAction(output: string): string | null {
-  const starts = [...output.matchAll(/(?:^|\n)\s*•\s*\{/g)];
-  for (let i = starts.length - 1; i >= 0; i--) {
-    const match = starts[i];
-    if (match?.index === undefined) continue;
-    const braceStart = output.indexOf("{", match.index);
-    if (braceStart < 0) continue;
-    const raw = output.slice(braceStart);
-    const promptIdx = raw.search(/\n\s*›/);
-    const nextBulletIdx = raw.slice(1).search(/\n\s*•\s*\{/) + 1;
-    const endCandidates = [promptIdx, nextBulletIdx].filter((idx) => idx > 0);
-    const candidate = raw
-      .slice(0, endCandidates.length > 0 ? Math.min(...endCandidates) : undefined)
-      .trim();
-    const compact = candidate.replace(/\n\s*/g, " ");
-    const end = compact.lastIndexOf("}");
-    if (end < 0) continue;
-    const json = compact.slice(0, end + 1);
-    try {
-      JSON.parse(json);
-      return json;
-    } catch {
-      continue;
-    }
-  }
-  return null;
 }
