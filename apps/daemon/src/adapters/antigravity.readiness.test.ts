@@ -61,6 +61,21 @@ describe("AntigravityAdapter.checkAuth", () => {
     expect(step.authStatus).toBe("needs_auth");
   });
 
+  it.each(["Sign in required", "you need to sign in", "sign-in required"])(
+    "%s means needs_auth",
+    async (stderr) => {
+      const run = vi.fn().mockResolvedValue({
+        exitCode: 1,
+        stdout: "",
+        stderr,
+        durationMs: 1,
+        timedOut: false,
+      });
+      const step = await a(run).checkAuth();
+      expect(step.authStatus).toBe("needs_auth");
+    },
+  );
+
   it("unexpected failure means misconfigured", async () => {
     const run = vi.fn().mockResolvedValue({
       exitCode: 2,

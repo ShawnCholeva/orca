@@ -22,7 +22,7 @@ export type RunCheckFn = (
 
 const AUTH_PROBE_PROMPT = "Reply exactly: ORCA_AUTH_OK";
 const NOT_AUTHENTICATED =
-  /\bnot (?:yet |currently )?(?:logged in|signed in|authenticated)\b|\b(?:please (?:log|sign) in|login required|authentication required|unauthorized)\b|google sign-in|sign in with google/i;
+  /\bnot (?:yet |currently )?(?:logged in|signed in|authenticated)\b|\b(?:please (?:log|sign) in|login required|authentication required|unauthorized|sign[- ]in required)\b|\byou need to sign[- ]in\b|google sign-in|sign in with google/i;
 
 export class AntigravityAdapter implements AgentAdapter {
   readonly id = "antigravity" as const;
