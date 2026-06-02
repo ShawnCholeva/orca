@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Agent, AgentReadinessReport } from "@orca/contracts";
-import { listAgents, updateAgentConnection, runReadinessCheckForAgent } from "../api";
+import type { Agent, AgentReadinessReport, SystemReadinessReport } from "@orca/contracts";
+import {
+  listAgents,
+  updateAgentConnection,
+  runReadinessCheckForAgent,
+  runSystemReadinessCheck,
+} from "../api";
 import { RepairBlock } from "./RepairBlock";
 import { openExternal } from "../utils/openExternal";
 import {
@@ -32,7 +37,11 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [readinessState, setReadinessState] = useState({ readyCount: 0, settled: false });
+  const [readinessState, setReadinessState] = useState({
+    settled: false,
+    systemReady: false,
+    agentReadyCount: 0,
+  });
   const [connectionsSaved, setConnectionsSaved] = useState(false);
   const { theme } = useTheme();
   const mode = theme.mode;
@@ -76,7 +85,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
     if (step !== 2) return;
     let cancelled = false;
     setConnectionsSaved(false);
-    setReadinessState({ readyCount: 0, settled: false });
+    setReadinessState({ settled: false, systemReady: false, agentReadyCount: 0 });
     (async () => {
       try {
         const updated = await Promise.all(
@@ -193,6 +202,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
               agents={agents.filter((a) => selected[a.id])}
               connectionsSaved={connectionsSaved}
               runOne={runReadinessCheckForAgent}
+              runSystem={runSystemReadinessCheck}
               onOpenUrl={openExternal}
               onComplete={(ids) => onComplete(ids)}
               onChange={setReadinessState}
@@ -249,7 +259,11 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
                 Back
               </button>
               <div style={{ flex: 1 }} />
-              {readinessState.settled && readinessState.readyCount === 0 && (
+              {/* tmux (system) readiness is a hard gate: only offer the agent
+                  bypass once the environment itself is ready. */}
+              {readinessState.settled &&
+                readinessState.systemReady &&
+                readinessState.agentReadyCount === 0 && (
                 <button
                   type="button"
                   className="ob-btn ob-btn--secondary"
@@ -262,7 +276,11 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
                 type="button"
                 className="ob-btn ob-btn--primary"
                 onClick={() => onComplete(agents.filter((a) => selected[a.id]).map((a) => a.id))}
-                disabled={!readinessState.settled || readinessState.readyCount === 0}
+                disabled={
+                  !readinessState.settled ||
+                  !readinessState.systemReady ||
+                  readinessState.agentReadyCount === 0
+                }
               >
                 Continue
                 <ArrowRightIcon />
@@ -275,10 +293,33 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
   );
 }
 
+// Identifies the host-environment (tmux) gate in the reports/checking maps,
+// distinct from any agent id.
+const SYSTEM_GATE_KEY = "__system__";
+
+// A readiness check that gates onboarding — either a connected agent's CLI or a
+// host dependency like tmux. Both report the same status/steps/repair shape.
+type GateOutcome = Pick<AgentReadinessReport, "status" | "steps" | "repair">;
+
+interface GateCheck {
+  key: string;
+  run: () => Promise<GateOutcome>;
+}
+
+interface SetupTask {
+  id: string;
+  label: string;
+  detail: string;
+  // When present, this step blocks the animation on a real readiness check and
+  // must report `ready` for onboarding to proceed; otherwise it just animates.
+  gate?: GateCheck;
+}
+
 function SetupPanel({
   agents,
   connectionsSaved,
   runOne,
+  runSystem,
   onOpenUrl,
   onComplete,
   onChange,
@@ -286,56 +327,99 @@ function SetupPanel({
   agents: Agent[];
   connectionsSaved: boolean;
   runOne: (id: string) => Promise<AgentReadinessReport>;
+  runSystem: () => Promise<SystemReadinessReport>;
   onOpenUrl: (url: string) => Promise<void>;
   onComplete: (agentIds: string[]) => void;
-  onChange: (s: { readyCount: number; settled: boolean }) => void;
+  onChange: (s: { settled: boolean; systemReady: boolean; agentReadyCount: number }) => void;
 }) {
-  const tasks = useMemo(() => [
-    { id: "conductor", label: "Initializing Orca", detail: "Loading orchestration runtime", agentId: null as string | null },
-    ...agents.map((a) => ({ id: `rt-${a.id}`, label: `Registering ${a.name}`, detail: a.shortLabel, agentId: a.id })),
-    { id: "memory",    label: "Provisioning shared memory", detail: "Goal memory store + indices", agentId: null },
-    { id: "roles",     label: "Loading default roles",      detail: "Architect · Engineer · Reviewer · QA", agentId: null },
-    { id: "workflows", label: "Loading default workflows",  detail: "Brainstorm", agentId: null },
-    { id: "ready",     label: "Finalizing workspace",       detail: "Almost there", agentId: null },
+  const runOneRef = useRef(runOne);
+  const runSystemRef = useRef(runSystem);
+  runOneRef.current = runOne;
+  runSystemRef.current = runSystem;
+
+  const tasks = useMemo<SetupTask[]>(() => [
+    {
+      id: "conductor",
+      label: "Initializing Orca",
+      detail: "Checking tmux + orchestration runtime",
+      gate: { key: SYSTEM_GATE_KEY, run: () => runSystemRef.current() },
+    },
+    ...agents.map((a) => ({
+      id: `rt-${a.id}`,
+      label: `Registering ${a.name}`,
+      detail: a.shortLabel,
+      gate: { key: a.id, run: () => runOneRef.current(a.id) },
+    })),
+    { id: "memory",    label: "Provisioning shared memory", detail: "Goal memory store + indices" },
+    { id: "roles",     label: "Loading default roles",      detail: "Architect · Engineer · Reviewer · QA" },
+    { id: "workflows", label: "Loading default workflows",  detail: "Brainstorm" },
+    { id: "ready",     label: "Finalizing workspace",       detail: "Almost there" },
   ], [agents]);
 
   const [animIdx, setAnimIdx] = useState(0);
   const [animDoneIdx, setAnimDoneIdx] = useState(-1);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [agentReports, setAgentReports] = useState<Record<string, AgentReadinessReport | null>>({});
-  const [agentChecking, setAgentChecking] = useState<Record<string, boolean>>({});
+  // Outcomes + in-flight flags keyed by gate key (agent id or SYSTEM_GATE_KEY).
+  const [reports, setReports] = useState<Record<string, GateOutcome | null>>({});
+  const [checking, setChecking] = useState<Record<string, boolean>>({});
+  // Mirror of `reports` so handlers can compute the next map without doing side
+  // effects (parent setState via settle) inside a render-phase state updater.
+  const reportsRef = useRef(reports);
+  reportsRef.current = reports;
 
   const onCompleteRef = useRef(onComplete);
   const onChangeRef = useRef(onChange);
-  const runOneRef = useRef(runOne);
   const connectionsSavedRef = useRef(connectionsSaved);
   const hasCompletedRef = useRef(false);
   onCompleteRef.current = onComplete;
   onChangeRef.current = onChange;
-  runOneRef.current = runOne;
   connectionsSavedRef.current = connectionsSaved;
 
   const animationDone = animIdx >= tasks.length;
 
-  // Animation loop: timer for infra tasks, runOne() for agent tasks (blocks until resolved)
+  // Emit settled state to the parent and auto-complete when every gate is ready
+  // (tmux installed AND all selected agents ready).
+  function settle(next: Record<string, GateOutcome | null>) {
+    const systemReady = next[SYSTEM_GATE_KEY]?.status === "ready";
+    const readyAgents = agents.filter((a) => next[a.id]?.status === "ready").map((a) => a.id);
+    onChangeRef.current({ settled: true, systemReady, agentReadyCount: readyAgents.length });
+    if (
+      systemReady &&
+      readyAgents.length === agents.length &&
+      agents.length > 0 &&
+      connectionsSavedRef.current &&
+      !hasCompletedRef.current
+    ) {
+      hasCompletedRef.current = true;
+      onCompleteRef.current(readyAgents);
+    }
+  }
+  const settleRef = useRef(settle);
+  settleRef.current = settle;
+
+  // Animation loop: timer for infra tasks, the gate's check for gated tasks
+  // (blocks until resolved).
   useEffect(() => {
     if (animationDone) return;
     const task = tasks[animIdx];
     if (!task) return;
     let cancelled = false;
 
-    if (task.agentId) {
-      setAgentChecking((prev) => ({ ...prev, [task.agentId!]: true }));
-      runOneRef.current(task.agentId)
+    if (task.gate) {
+      const { key, run } = task.gate;
+      setChecking((prev) => ({ ...prev, [key]: true }));
+      run()
         .then((report) => {
           if (cancelled) return;
-          setAgentReports((prev) => ({ ...prev, [task.agentId!]: report }));
+          const next = { ...reportsRef.current, [key]: report };
+          reportsRef.current = next;
+          setReports(next);
         })
         .catch(() => {})
         .finally(() => {
           if (cancelled) return;
-          setAgentChecking((prev) => ({ ...prev, [task.agentId!]: false }));
+          setChecking((prev) => ({ ...prev, [key]: false }));
           setAnimDoneIdx(animIdx);
           setAnimIdx((i) => i + 1);
         });
@@ -353,33 +437,22 @@ function SetupPanel({
     };
   }, [animIdx, animationDone, tasks]);
 
-  // When animation completes: report settled state + auto-complete if all ready
+  // When animation completes: report settled state + auto-complete if all ready.
   useEffect(() => {
     if (!animationDone) return;
-    const readyIds = agents.filter((a) => agentReports[a.id]?.status === "ready").map((a) => a.id);
-    onChangeRef.current({ readyCount: readyIds.length, settled: true });
-    if (readyIds.length === agents.length && agents.length > 0 && connectionsSaved && !hasCompletedRef.current) {
-      hasCompletedRef.current = true;
-      onCompleteRef.current(readyIds);
-    }
-  }, [animationDone, connectionsSaved, agentReports, agents]);
+    settleRef.current(reports);
+  }, [animationDone, connectionsSaved, reports]);
 
-  function handleRetry(agentId: string) {
-    setAgentChecking((prev) => ({ ...prev, [agentId]: true }));
-    runOneRef.current(agentId)
+  function handleRetry(gate: GateCheck) {
+    setChecking((prev) => ({ ...prev, [gate.key]: true }));
+    gate.run()
       .then((report) => {
-        setAgentReports((prev) => {
-          const next = { ...prev, [agentId]: report };
-          const readyIds = agents.filter((a) => next[a.id]?.status === "ready").map((a) => a.id);
-          onChangeRef.current({ readyCount: readyIds.length, settled: true });
-          if (readyIds.length === agents.length && agents.length > 0 && connectionsSavedRef.current && !hasCompletedRef.current) {
-            hasCompletedRef.current = true;
-            onCompleteRef.current(readyIds);
-          }
-          return next;
-        });
+        const next = { ...reportsRef.current, [gate.key]: report };
+        reportsRef.current = next;
+        setReports(next);
+        settleRef.current(next);
       })
-      .finally(() => setAgentChecking((prev) => ({ ...prev, [agentId]: false })));
+      .finally(() => setChecking((prev) => ({ ...prev, [gate.key]: false })));
   }
 
   const progress = Math.min(1, (animDoneIdx + 1) / tasks.length);
@@ -419,11 +492,12 @@ function SetupPanel({
 
       <div className="setup-tasks">
         {tasks.map((t, i) => {
-          const report = t.agentId ? (agentReports[t.agentId] ?? null) : null;
+          const gate = t.gate;
+          const report = gate ? (reports[gate.key] ?? null) : null;
           let iconState: "pending" | "running" | "done" | "checking" | "ready" | "failed";
 
-          if (t.agentId) {
-            if (agentChecking[t.agentId]) {
+          if (gate) {
+            if (checking[gate.key]) {
               iconState = "checking";
             } else if (i < animIdx) {
               iconState = report?.status === "ready" ? "ready" : report ? "failed" : "done";
@@ -466,7 +540,7 @@ function SetupPanel({
               <div className="setup-task-body">
                 <div className="setup-task-label">{t.label}</div>
                 <div className="mono setup-task-detail">{t.detail}</div>
-                {isFailed && report && (
+                {isFailed && report && gate && (
                   <div className="setup-task-repair">
                     {report.steps.filter((s) => !s.ok).map((s, si) => (
                       <div key={si} className="setup-task-step-fail">
@@ -478,14 +552,14 @@ function SetupPanel({
                       <RepairBlock
                         repair={report.repair}
                         onOpenUrl={onOpenUrl}
-                        onActionTaken={() => handleRetry(t.agentId!)}
+                        onActionTaken={() => handleRetry(gate)}
                       />
                     )}
                     <button
                       type="button"
                       className="setup-task-retry-btn"
-                      onClick={() => handleRetry(t.agentId!)}
-                      disabled={!!agentChecking[t.agentId!]}
+                      onClick={() => handleRetry(gate)}
+                      disabled={!!checking[gate.key]}
                     >
                       Retry
                     </button>

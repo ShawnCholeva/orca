@@ -11,6 +11,7 @@ import {
   AttachWorkspaceResponse,
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
+  CheckSystemReadinessResponse,
   CreateContextPackageRequest,
   CreateContextPackageResponse,
   CreateGoalDecisionRequest,
@@ -106,6 +107,7 @@ import {
   WorkflowStepRunResponse,
   WorkflowTemplateResponse,
   type AgentReadinessReport,
+  type SystemReadinessReport,
   type PluginSummary,
   type SessionErrorFrame as SessionErrorFrameData,
   type SessionInputFrame as SessionInputFrameData,
@@ -395,6 +397,18 @@ export async function runReadinessCheckForAgent(id: string): Promise<AgentReadin
   });
   if (!res.ok) throw new ApiError(`Readiness check for ${id} failed (${res.status})`);
   const body = await parseResponse(res, CheckReadinessOneResponse);
+  return body.report;
+}
+
+export async function runSystemReadinessCheck(): Promise<SystemReadinessReport> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/system/readiness:check`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...authHeaders(token) },
+    body: "{}",
+  });
+  if (!res.ok) throw new ApiError(`System readiness check failed (${res.status})`);
+  const body = await parseResponse(res, CheckSystemReadinessResponse);
   return body.report;
 }
 

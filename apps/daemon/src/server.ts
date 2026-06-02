@@ -57,6 +57,7 @@ import {
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
   SubmitWorkerAnswersRequest,
+  CheckSystemReadinessResponse
 } from '@orca/contracts';
 import type { Config } from './config.js';
 import { getDatabase } from './db.js';
@@ -184,6 +185,7 @@ import {
   toModelProvidersResponse,
 } from './workflows/orchestration-transport/provider-catalog.js';
 import { NotConnectedError, UnknownAgentError } from './readiness/service.js';
+import { checkTmuxReadiness } from './readiness/system.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -366,6 +368,13 @@ export function createServer(
   server.post('/v1/agents/readiness:check', async () => {
     const reports = await daemonContext.readinessService.checkSelected();
     return CheckReadinessAllResponse.parse({ reports });
+  });
+
+  // Host-level dependency probe (tmux). Gates onboarding the same way a missing
+  // agent CLI does, but applies to Orca itself rather than a connected agent.
+  server.post('/v1/system/readiness:check', async () => {
+    const report = await checkTmuxReadiness();
+    return CheckSystemReadinessResponse.parse({ report });
   });
 
   server.post<{ Params: { id: string } }>(

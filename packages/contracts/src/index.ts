@@ -3074,6 +3074,25 @@ export type CheckReadinessAllResponse = z.infer<typeof CheckReadinessAllResponse
 export const CheckReadinessOneResponse = z.object({ report: AgentReadinessReport });
 export type CheckReadinessOneResponse = z.infer<typeof CheckReadinessOneResponse>;
 
+// ---------- system (environment) readiness ----------
+//
+// Host-level dependencies Orca itself needs (e.g. tmux for shadow sessions),
+// as opposed to per-agent CLIs. Shares the status/step/repair shape with agent
+// readiness so the onboarding UI can render and retry them identically.
+
+export const SystemReadinessReport = z.object({
+  dependency: z.string(),
+  status: AgentReadinessStatus,
+  steps: z.array(CheckStep),
+  repair: RepairAction.optional(),
+  checkedAt: z.string().datetime(),
+  version: z.string().optional()
+});
+export type SystemReadinessReport = z.infer<typeof SystemReadinessReport>;
+
+export const CheckSystemReadinessResponse = z.object({ report: SystemReadinessReport });
+export type CheckSystemReadinessResponse = z.infer<typeof CheckSystemReadinessResponse>;
+
 export {
   ExecutionMode,
   EnabledExecutionModeEntry,
