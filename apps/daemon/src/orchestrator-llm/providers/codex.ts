@@ -83,7 +83,7 @@ function buildCodexHookSettings(args: { goalId: string; port: number; authToken:
     "-H", shellArg("Content-Type: application/json"),
     "--data-binary", "@-",
     shellArg(
-      `http://127.0.0.1:${args.port}/v1/orchestrator-hooks/stop?goalId=${encodeURIComponent(args.goalId)}${failure ? "&failure=1" : ""}`,
+      `http://127.0.0.1:${args.port}/v1/shadow-hooks/stop?goalId=${encodeURIComponent(args.goalId)}${failure ? "&failure=1" : ""}`,
     ),
   ].join(" ");
   return {

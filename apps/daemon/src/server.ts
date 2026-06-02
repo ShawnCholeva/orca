@@ -168,7 +168,7 @@ import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js'
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
 import { insertMessageWithEvent } from './orchestrator-chat/usecases.js';
-import { registerOrchestratorHookRoutes } from './orchestrator-hooks/routes.js';
+import { registerShadowHookRoutes } from './shadow-hooks/routes.js';
 import { ShadowSessionManager, shadowSessionId } from './orchestrator-llm/shadow-session.js';
 import { ShadowSessionLlmClient } from './orchestrator-llm/shadow-llm-client.js';
 import {
@@ -1201,7 +1201,7 @@ export function createServer(
 
   // ---- Orchestrator hook endpoint ----
 
-  registerOrchestratorHookRoutes(server, {
+  registerShadowHookRoutes(server, {
     resolvePending: (goalId, result) => shadowSessions.resolvePending(goalId, result),
   });
 

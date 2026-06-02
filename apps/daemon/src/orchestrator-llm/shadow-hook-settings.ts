@@ -1,5 +1,5 @@
 export function shadowHookUrl(port: number, goalId: string, failure = false): string {
-  const base = `http://127.0.0.1:${port}/v1/orchestrator-hooks/stop?goalId=${encodeURIComponent(goalId)}`;
+  const base = `http://127.0.0.1:${port}/v1/shadow-hooks/stop?goalId=${encodeURIComponent(goalId)}`;
   return failure ? `${base}&failure=1` : base;
 }
 

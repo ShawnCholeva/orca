@@ -4,8 +4,8 @@ export interface OrchestratorHookRouteDeps {
   resolvePending: (goalId: string, result: { text: string; failure: boolean }) => void;
 }
 
-export function registerOrchestratorHookRoutes(server: FastifyInstance, deps: OrchestratorHookRouteDeps): void {
-  server.post("/v1/orchestrator-hooks/stop", async (request, reply) => {
+export function registerShadowHookRoutes(server: FastifyInstance, deps: OrchestratorHookRouteDeps): void {
+  server.post("/v1/shadow-hooks/stop", async (request, reply) => {
     const q = request.query as { goalId?: string; failure?: string };
     const goalId = q.goalId;
     if (!goalId) {

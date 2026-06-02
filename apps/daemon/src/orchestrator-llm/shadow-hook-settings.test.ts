@@ -7,8 +7,8 @@ describe("shadow hook settings", () => {
     const stopUrl = cfg.hooks.Stop[0].hooks[0].url as string;
     const failUrl = cfg.hooks.StopFailure[0].hooks[0].url as string;
     expect(cfg.hooks.Stop[0].hooks[0].type).toBe("http");
-    expect(stopUrl).toBe("http://127.0.0.1:8787/v1/orchestrator-hooks/stop?goalId=G1");
-    expect(failUrl).toBe("http://127.0.0.1:8787/v1/orchestrator-hooks/stop?goalId=G1&failure=1");
+    expect(stopUrl).toBe("http://127.0.0.1:8787/v1/shadow-hooks/stop?goalId=G1");
+    expect(failUrl).toBe("http://127.0.0.1:8787/v1/shadow-hooks/stop?goalId=G1&failure=1");
   });
 
   it("includes the daemon Authorization header so the hook clears auth (not 401)", () => {
@@ -18,6 +18,6 @@ describe("shadow hook settings", () => {
   });
 
   it("shadowHookUrl encodes the goalId", () => {
-    expect(shadowHookUrl(8787, "a/b")).toBe("http://127.0.0.1:8787/v1/orchestrator-hooks/stop?goalId=a%2Fb");
+    expect(shadowHookUrl(8787, "a/b")).toBe("http://127.0.0.1:8787/v1/shadow-hooks/stop?goalId=a%2Fb");
   });
 });
