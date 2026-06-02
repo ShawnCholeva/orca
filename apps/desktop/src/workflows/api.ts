@@ -1,7 +1,6 @@
 import {
   createWorkflowTemplate,
   duplicateWorkflowTemplate,
-  getWorkflowTemplate,
   listWorkflowTemplates,
   updateWorkflowTemplate,
 } from "../api";
@@ -16,10 +15,6 @@ export type TemplateResult = {
 
 export async function listTemplates() {
   return listWorkflowTemplates();
-}
-
-export async function getTemplate(id: string) {
-  return getWorkflowTemplate(id);
 }
 
 export async function createTemplate(input: WorkflowTemplateInput): Promise<TemplateResult> {

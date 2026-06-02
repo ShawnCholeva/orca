@@ -24,26 +24,26 @@ export interface RunGenerationCtx {
   idFactory?: () => string;
 }
 
-export interface RunTaskGenerationOutput {
+interface RunTaskGenerationOutput {
   taskIds: string[];
   sparse: boolean;
   data?: unknown;
 }
 
-export interface RunRecommendationGenerationOutput {
+interface RunRecommendationGenerationOutput {
   recommendationIds: string[];
   supersededIds: string[];
   sparse: boolean;
   data?: unknown;
 }
 
-export interface RunTaskGenerationCommitResult {
+interface RunTaskGenerationCommitResult {
   taskIds: string[];
   sparse: boolean;
   events?: DomainEvent[];
 }
 
-export interface RunRecommendationGenerationCommitResult {
+interface RunRecommendationGenerationCommitResult {
   recommendationIds: string[];
   supersededIds: string[];
   sparse: boolean;
