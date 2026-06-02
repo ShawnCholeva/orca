@@ -70,7 +70,8 @@ describe("runMigrations", () => {
       "0016_workflow_step_runs_revise_attempts.sql",
       "0017_orchestrator_messages_chat_kinds.sql",
       "0018_workflow_step_runs_crash_retries.sql",
-      "0019_orchestrator_messages_pending_question.sql"
+      "0019_orchestrator_messages_pending_question.sql",
+      "0020_drop_removed_provider_execution_modes.sql"
     ]);
   });
 
@@ -171,7 +172,8 @@ describe("runMigrations", () => {
       "0016_workflow_step_runs_revise_attempts.sql",
       "0017_orchestrator_messages_chat_kinds.sql",
       "0018_workflow_step_runs_crash_retries.sql",
-      "0019_orchestrator_messages_pending_question.sql"
+      "0019_orchestrator_messages_pending_question.sql",
+      "0020_drop_removed_provider_execution_modes.sql"
     ]);
 
     const goalCount = (
@@ -277,7 +279,7 @@ describe("session tables migration", () => {
   function seedSession(db: ReturnType<typeof freshDb>, id: string, goalId: string, workspaceId: string) {
     db.prepare(
       "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    ).run(id, goalId, workspaceId, "shell-manual", "Test Session", "created", "2026-01-01T00:00:00.000Z");
+    ).run(id, goalId, workspaceId, "claude-code", "Test Session", "created", "2026-01-01T00:00:00.000Z");
   }
 
   function seedOutputChunk(db: ReturnType<typeof freshDb>, sessionId: string, seq: number) {
@@ -339,7 +341,8 @@ describe("session tables migration", () => {
       "0016_workflow_step_runs_revise_attempts.sql",
       "0017_orchestrator_messages_chat_kinds.sql",
       "0018_workflow_step_runs_crash_retries.sql",
-      "0019_orchestrator_messages_pending_question.sql"
+      "0019_orchestrator_messages_pending_question.sql",
+      "0020_drop_removed_provider_execution_modes.sql"
     ]);
 
     const tables = (
@@ -423,7 +426,7 @@ describe("memory tables migration", () => {
   function seedSession(db: ReturnType<typeof freshDb>, id: string, goalId: string, workspaceId: string) {
     db.prepare(
       "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    ).run(id, goalId, workspaceId, "shell-manual", "Memory Session", "exited", "2026-01-01T00:00:00.000Z");
+    ).run(id, goalId, workspaceId, "claude-code", "Memory Session", "exited", "2026-01-01T00:00:00.000Z");
   }
 
   function insertExtraction(
@@ -832,7 +835,8 @@ describe("migration 0010 workflows", () => {
       "0016_workflow_step_runs_revise_attempts.sql",
       "0017_orchestrator_messages_chat_kinds.sql",
       "0018_workflow_step_runs_crash_retries.sql",
-      "0019_orchestrator_messages_pending_question.sql"
+      "0019_orchestrator_messages_pending_question.sql",
+      "0020_drop_removed_provider_execution_modes.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1363,7 +1367,8 @@ describe("migration 0012 orchestration transport", () => {
       "0016_workflow_step_runs_revise_attempts.sql",
       "0017_orchestrator_messages_chat_kinds.sql",
       "0018_workflow_step_runs_crash_retries.sql",
-      "0019_orchestrator_messages_pending_question.sql"
+      "0019_orchestrator_messages_pending_question.sql",
+      "0020_drop_removed_provider_execution_modes.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

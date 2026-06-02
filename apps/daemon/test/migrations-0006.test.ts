@@ -58,7 +58,7 @@ function seedWorkspace(db: Database.Database, id: string, goalId: string): void 
 function seedSession(db: Database.Database, id: string, goalId: string, workspaceId: string): void {
   db.prepare(
     'INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, goalId, workspaceId, 'shell-manual', 'Session', 'created', '2026-01-01T00:00:00.000Z');
+  ).run(id, goalId, workspaceId, 'claude-code', 'Session', 'created', '2026-01-01T00:00:00.000Z');
 }
 
 function insertContextPackage(db: Database.Database, params?: { id?: string; role?: string; status?: string }): void {
@@ -72,7 +72,7 @@ function insertContextPackage(db: Database.Database, params?: { id?: string; rol
     params?.id ?? 'pkg-1',
     'goal-1',
     null,
-    'shell-manual',
+    'claude-code',
     'ws-1',
     params?.role ?? 'engineer',
     'objective',
@@ -106,7 +106,7 @@ function insertContextAssembly(
     'goal-1',
     null,
     null,
-    'shell-manual',
+    'claude-code',
     'ws-1',
     'engineer',
     'objective-hash',
@@ -154,6 +154,7 @@ describe('context migration 0006_context.sql', () => {
       '0017_orchestrator_messages_chat_kinds.sql',
       '0018_workflow_step_runs_crash_retries.sql',
       '0019_orchestrator_messages_pending_question.sql',
+      '0020_drop_removed_provider_execution_modes.sql',
     ]);
 
     const tables = (
@@ -234,6 +235,7 @@ describe('context migration 0006_context.sql', () => {
       '0017_orchestrator_messages_chat_kinds.sql',
       '0018_workflow_step_runs_crash_retries.sql',
       '0019_orchestrator_messages_pending_question.sql',
+      '0020_drop_removed_provider_execution_modes.sql',
     ]);
 
     const counts = {
