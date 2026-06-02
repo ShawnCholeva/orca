@@ -430,6 +430,7 @@ describe("workflow contracts", () => {
   it("maps model provider ids to stable product display names", () => {
     expect(getModelProviderDisplayName("orca/anthropic")).toBe("Claude");
     expect(getModelProviderDisplayName("orca/openai")).toBe("OpenAI");
+    expect(getModelProviderDisplayName("orca/google")).toBe("Google");
   });
 
   it("extends existing M1-M7 contracts only with optional M8 fields", () => {

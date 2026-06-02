@@ -504,6 +504,7 @@ describe("session contracts", () => {
 
   it("parses session/adapters enums and rejects unknown literals", () => {
     expect(AdapterId.parse("codex")).toBe("codex");
+    expect(AdapterId.parse("antigravity")).toBe("antigravity");
     expect(SessionStatus.parse("running")).toBe("running");
     expect(SessionErrorCode.parse("adapter_not_found")).toBe("adapter_not_found");
 
