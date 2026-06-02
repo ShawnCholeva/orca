@@ -496,6 +496,28 @@ describe('server routes', () => {
     ]);
   });
 
+  it('GET /v1/model-providers exposes Antigravity when connected', async () => {
+    const db = getDatabase();
+    seedAgents(db);
+    db.prepare(`UPDATE agents SET connected = 1 WHERE id = ?`).run('antigravity');
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/model-providers',
+      headers: AUTH_HEADERS,
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = ListModelProvidersResponse.parse(JSON.parse(response.body));
+    expect(body.providers.map((provider) => provider.id)).toEqual(['orca/google']);
+    expect(body.providers[0]?.models.map((model) => model.id)).toEqual([
+      'gemini-3.5-flash',
+      'gemini-3.1-pro-high',
+      'gemini-3.1-pro-low',
+      'gemini-3-flash',
+    ]);
+  });
+
   it('GET /v1/operators requires a Goal and returns operator descriptors', async () => {
     await server.close();
     closeDatabase();
@@ -1444,7 +1466,7 @@ describe('session and adapter routes', () => {
     expect(res.statusCode).toBe(200);
     const body = ListAdaptersResponse.parse(JSON.parse(res.body));
     expect(body.adapters.map((a) => a.id).sort()).toEqual(
-      ['claude-code', 'codex']
+      ['antigravity', 'claude-code', 'codex']
     );
   });
 

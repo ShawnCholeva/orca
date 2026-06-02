@@ -98,6 +98,7 @@ function makeRegistry(statuses: Record<string, AgentReadinessStatus> = {}): Oper
   const adapters = new AdapterRegistry();
   adapters.register(new FakeAdapter("claude-code", "Claude Code"));
   adapters.register(new FakeAdapter("codex", "Codex", false, false));
+  adapters.register(new FakeAdapter("antigravity", "Antigravity"));
 
   const models = new ModelProviderRegistry();
   models.register(
@@ -121,6 +122,7 @@ describe("OperatorRegistry", () => {
     expect(operators.map((operator) => operator.id)).toEqual([
       "agent:claude-code",
       "agent:codex",
+      "agent:antigravity",
       "orca/openai:gpt-5.1",
       "orca/openai:gpt-5.1-mini",
       "human",
@@ -143,6 +145,14 @@ describe("OperatorRegistry", () => {
       notReadyReason: "needs_auth",
       supportsRepoEditing: false,
       supportsTerminal: false,
+    });
+    expect(operators.find((operator) => operator.id === "agent:antigravity")).toMatchObject({
+      kind: "agent",
+      displayName: "Antigravity",
+      capabilities: ["repo_navigation", "planning", "implementation", "test_fixing", "code_editing"],
+      ready: true,
+      supportsRepoEditing: true,
+      supportsTerminal: true,
     });
   });
 

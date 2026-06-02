@@ -9,6 +9,7 @@ export type AdapterModelInfo = {
 export const PROVIDER_BY_AGENT_ID: Record<string, ModelProviderId | undefined> = {
   "claude-code": "orca/anthropic",
   codex: "orca/openai",
+  antigravity: "orca/google",
 };
 
 export const MODELS_BY_AGENT_ID: Record<string, AdapterModelInfo[] | undefined> = {
@@ -54,6 +55,28 @@ export const MODELS_BY_AGENT_ID: Record<string, AdapterModelInfo[] | undefined> 
       id: "gpt-5.2",
       displayName: "GPT-5.2",
       capabilities: ["reasoning", "tool_use"],
+    },
+  ],
+  antigravity: [
+    {
+      id: "gemini-3.5-flash",
+      displayName: "Gemini 3.5 Flash",
+      capabilities: ["reasoning", "long_context", "tool_use", "code_editing"],
+    },
+    {
+      id: "gemini-3.1-pro-high",
+      displayName: "Gemini 3.1 Pro (high)",
+      capabilities: ["reasoning", "long_context", "tool_use", "code_editing"],
+    },
+    {
+      id: "gemini-3.1-pro-low",
+      displayName: "Gemini 3.1 Pro (low)",
+      capabilities: ["reasoning", "tool_use", "code_editing"],
+    },
+    {
+      id: "gemini-3-flash",
+      displayName: "Gemini 3 Flash",
+      capabilities: ["fast", "tool_use", "code_editing"],
     },
   ],
 };

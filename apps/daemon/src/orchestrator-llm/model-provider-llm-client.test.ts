@@ -58,13 +58,16 @@ describe("ModelProviderOrchestratorLlmClient", () => {
 
     await routed.request({ goalId: "g", adapterId: "claude-code", modelId: "claude-haiku-4-5", systemPrompt: "s", userPrompt: "u" });
     await routed.request({ goalId: "g", adapterId: "codex", modelId: "gpt-5.4-mini", systemPrompt: "s", userPrompt: "u" });
+    await routed.request({ goalId: "g", adapterId: "antigravity", modelId: "gemini-3.5-flash", systemPrompt: "s", userPrompt: "u" });
 
-    expect(shadow.request).toHaveBeenCalledTimes(2);
+    expect(shadow.request).toHaveBeenCalledTimes(3);
+    expect(shadow.request.mock.calls.map(([input]) => input.adapterId)).toContain("antigravity");
     expect(providerClient.request).not.toHaveBeenCalled();
   });
 
   it("maps providers to backing adapters", () => {
     expect(adapterIdForProvider("orca/anthropic")).toBe("claude-code");
     expect(adapterIdForProvider("orca/openai")).toBe("codex");
+    expect(adapterIdForProvider("orca/google")).toBe("antigravity");
   });
 });

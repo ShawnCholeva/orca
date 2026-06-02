@@ -43,6 +43,18 @@ describe("orchestrator defaults", () => {
     ).toBe("gpt-5.4-mini");
   });
 
+  it("defaults Google to Gemini 3.5 Flash when available", () => {
+    expect(defaultModelForProvider({
+      id: "orca/google",
+      displayName: "Google",
+      available: true,
+      models: [
+        { id: "gemini-3.1-pro-high", displayName: "Gemini 3.1 Pro (high)", capabilities: [] },
+        { id: "gemini-3.5-flash", displayName: "Gemini 3.5 Flash", capabilities: [] },
+      ],
+    })).toMatchObject({ id: "gemini-3.5-flash" });
+  });
+
   it("falls back to the first model when the preferred default is unavailable", () => {
     expect(
       defaultModelForProvider(

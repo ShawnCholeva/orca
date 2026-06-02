@@ -10,7 +10,8 @@ const MAX_REASON_CHARS = 256;
 
 const PRODUCT_DISPLAY_NAMES: Record<ModelProviderId, string> = {
   "orca/openai": "OpenAI",
-  "orca/anthropic": "Claude"
+  "orca/anthropic": "Claude",
+  "orca/google": "Google",
 };
 
 export interface OrchestrationProviderCatalogEntry {
@@ -65,7 +66,7 @@ export async function buildOrchestrationProviderCatalog(
   const allowedProviderIds = opts.allowedProviderIds;
   const modelOverrides = opts.modelOverrides;
 
-  return providers
+  const direct = providers
     .filter((provider) => !allowedProviderIds || allowedProviderIds.has(provider.id))
     .map((provider) => ({
       id: provider.id,
@@ -79,6 +80,24 @@ export async function buildOrchestrationProviderCatalog(
         capabilities: [...model.capabilities],
       }))
     }));
+
+  const directIds = new Set(direct.map((provider) => provider.id));
+  const virtual = [...(modelOverrides?.entries() ?? [])]
+    .filter(([providerId]) => !directIds.has(providerId))
+    .filter(([providerId]) => !allowedProviderIds || allowedProviderIds.has(providerId))
+    .map(([providerId, models]) => ({
+      id: providerId,
+      displayName: PRODUCT_DISPLAY_NAMES[providerId],
+      selectable: true as const,
+      automatedAvailable: true,
+      models: models.map((model) => ({
+        id: model.id,
+        displayName: model.displayName,
+        capabilities: [...model.capabilities],
+      })),
+    }));
+
+  return [...direct, ...virtual];
 }
 
 export function toModelProvidersResponse(
