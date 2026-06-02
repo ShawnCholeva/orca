@@ -3,9 +3,9 @@
 // `data-theme` and (optionally) `data-look` on <html>, which CSS selectors in
 // theme.css read.
 
-export type ThemeMode = "dark" | "light";
+type ThemeMode = "dark" | "light";
 
-export type ThemeTokens = Readonly<Record<string, string>>;
+type ThemeTokens = Readonly<Record<string, string>>;
 
 export interface ThemeDefinition {
   id: string;

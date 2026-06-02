@@ -1,34 +1,34 @@
 import type { AgentAdapter } from "../adapters/types.js";
 
-export interface OrchestratorSessionSpawnInput {
+interface OrchestratorSessionSpawnInput {
   goalId: string;
   adapterId: string;
   modelId: string;
 }
 
-export interface OrchestratorOneShotInput {
+interface OrchestratorOneShotInput {
   adapterId: string;
   modelId: string;
   systemPrompt: string;
   userPrompt: string;
 }
 
-export interface OrchestratorOneShotResult {
+interface OrchestratorOneShotResult {
   text: string;
 }
 
-export interface OrchestratorOneShotClient {
+interface OrchestratorOneShotClient {
   request(input: OrchestratorOneShotInput): Promise<OrchestratorOneShotResult>;
 }
 
-export interface OrchestratorSpawnCommand {
+interface OrchestratorSpawnCommand {
   command: string;
   args: string[];
   env: Record<string, string>;
   cwd: string;
 }
 
-export interface OrchestratorSessionHandle {
+interface OrchestratorSessionHandle {
   sessionId: string;
 }
 
@@ -36,13 +36,13 @@ export interface OrchestratorSessionHandle {
  * Local PTY runtime interface for orchestrator-LLM shadow sessions.
  * Production wiring adapts the daemon's PTY runtime to this surface.
  */
-export interface OrchestratorSessionRuntime {
+interface OrchestratorSessionRuntime {
   spawnPty(input: OrchestratorSpawnCommand): Promise<OrchestratorSessionHandle>;
   sendStdin(sessionId: string, input: string): Promise<void>;
   terminate(sessionId: string): Promise<void>;
 }
 
-export interface OrchestratorSessionDeps {
+interface OrchestratorSessionDeps {
   adapter: AgentAdapter;
   runtime: OrchestratorSessionRuntime;
   oneShotClient?: OrchestratorOneShotClient;

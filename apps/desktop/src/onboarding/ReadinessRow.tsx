@@ -1,7 +1,7 @@
 import type { Agent, AgentReadinessReport } from "@orca/contracts";
 import { RepairBlock } from "./RepairBlock";
 
-export type RowState = "checking" | "settled";
+type RowState = "checking" | "settled";
 
 interface ReadinessRowProps {
   agent: Agent;

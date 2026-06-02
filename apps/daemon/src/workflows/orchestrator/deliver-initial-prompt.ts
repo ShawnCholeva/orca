@@ -9,7 +9,7 @@
 //      claude submits on the first newline. Bracketed paste makes the TUI treat
 //      the whole blob as one pasted input, then a single Enter submits.
 
-export interface InitialPromptHandle {
+interface InitialPromptHandle {
   write(data: Buffer): void;
 }
 

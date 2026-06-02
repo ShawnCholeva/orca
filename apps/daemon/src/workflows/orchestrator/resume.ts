@@ -1,4 +1,4 @@
-export interface ResumeRunRow {
+interface ResumeRunRow {
   runId: string;
   goalId: string;
   currentStepRunId: string;

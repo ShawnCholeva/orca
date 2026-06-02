@@ -4,7 +4,7 @@ import type {
   WorkflowStepOutputSchema,
 } from "@orca/contracts";
 
-export interface WorkspaceRef {
+interface WorkspaceRef {
   id: string;
   name: string;
   root: string;

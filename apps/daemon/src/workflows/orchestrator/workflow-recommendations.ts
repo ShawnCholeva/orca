@@ -17,7 +17,7 @@ import {
 } from "../../recommendations/fingerprint.js";
 import { appendWorkflowEvent } from "../events.js";
 
-export type WorkflowRecommendationType = Extract<
+type WorkflowRecommendationType = Extract<
   RecommendationType,
   | "advance_workflow_step"
   | "launch_workflow_session"
