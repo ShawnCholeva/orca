@@ -13,16 +13,15 @@ function makeRegistries() {
 }
 
 describe('bootstrapRegistries', () => {
-  it('registers exactly 3 plugins with correct ids (sorted)', () => {
+  it('registers exactly 2 plugins with correct ids (sorted)', () => {
     const { plugins, skills, adapters } = makeRegistries();
 
     bootstrapRegistries({ plugins, skills, adapters });
 
     const list = plugins.list();
-    expect(list).toHaveLength(3);
+    expect(list).toHaveLength(2);
     expect(list.map((p) => p.id)).toEqual([
       'orca.default-skills',
-      'orca.shell-manual',
       'orca.sqlite',
     ]);
   });
@@ -34,7 +33,6 @@ describe('bootstrapRegistries', () => {
 
     expect(plugins.byId('orca.sqlite')?.capabilities).toEqual(['storage']);
     expect(plugins.byId('orca.default-skills')?.capabilities).toEqual(['skill.provider']);
-    expect(plugins.byId('orca.shell-manual')?.capabilities).toEqual(['agent.adapter']);
   });
 
   it('registers exactly 2 public skills with correct ids and extensionPoints', () => {
@@ -66,16 +64,13 @@ describe('bootstrapRegistries', () => {
     }
   });
 
-  it('registers all five agent adapters', () => {
+  it('registers both agent adapters', () => {
     const { plugins, skills, adapters } = makeRegistries();
 
     bootstrapRegistries({ plugins, skills, adapters });
 
-    expect(adapters.get('shell-manual')).toBeDefined();
     expect(adapters.get('claude-code')).toBeDefined();
-    expect(adapters.get('opencode')).toBeDefined();
     expect(adapters.get('codex')).toBeDefined();
-    expect(adapters.get('gemini-cli')).toBeDefined();
   });
 
   it('registered adapters have correct ids', async () => {
@@ -85,7 +80,7 @@ describe('bootstrapRegistries', () => {
 
     const list = await adapters.list();
     const ids = list.map((a) => a.id).sort();
-    expect(ids).toEqual(['claude-code', 'codex', 'gemini-cli', 'opencode', 'shell-manual']);
+    expect(ids).toEqual(['claude-code', 'codex']);
   });
 
   it('freezes both plugin and skill registries after bootstrap', () => {

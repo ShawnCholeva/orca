@@ -66,6 +66,5 @@ describe("ModelProviderOrchestratorLlmClient", () => {
   it("maps providers to backing adapters", () => {
     expect(adapterIdForProvider("orca/anthropic")).toBe("claude-code");
     expect(adapterIdForProvider("orca/openai")).toBe("codex");
-    expect(adapterIdForProvider("orca/google-gemini")).toBe("gemini-cli");
   });
 });

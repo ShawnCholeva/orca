@@ -79,7 +79,7 @@ function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
     id: "sess-1",
     goalId: "goal-1",
     workspaceId: "ws-1",
-    adapterId: "shell-manual",
+    adapterId: "claude-code",
     taskId: "task-1",
     fromRecommendationId: null,
     role: null,

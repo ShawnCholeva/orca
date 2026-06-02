@@ -10,8 +10,7 @@ const MAX_REASON_CHARS = 256;
 
 const PRODUCT_DISPLAY_NAMES: Record<ModelProviderId, string> = {
   "orca/openai": "OpenAI",
-  "orca/anthropic": "Claude",
-  "orca/google-gemini": "Gemini"
+  "orca/anthropic": "Claude"
 };
 
 export interface OrchestrationProviderCatalogEntry {

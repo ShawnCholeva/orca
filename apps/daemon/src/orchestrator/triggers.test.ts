@@ -74,7 +74,7 @@ function seedSession(
 ): void {
   db.prepare(
     `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, role, title, status, created_at)
-     VALUES (?, ?, ?, 'shell-manual', NULL, ?, ?, ?)`
+     VALUES (?, ?, ?, 'claude-code', NULL, ?, ?, ?)`
   ).run(input.id, input.goalId, input.workspaceId, input.id, input.status, NOW);
 }
 

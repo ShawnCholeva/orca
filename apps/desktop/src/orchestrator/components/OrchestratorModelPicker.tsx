@@ -12,7 +12,6 @@ type Props = {
 const PROVIDER_LABELS: Record<string, string> = {
   "orca/openai": "OpenAI",
   "orca/anthropic": "Claude",
-  "orca/google-gemini": "Gemini",
 };
 
 function providerLabel(provider: ModelProviderInfo): string {

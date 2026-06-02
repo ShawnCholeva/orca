@@ -115,7 +115,7 @@ describe("orchestration contracts", () => {
   it("keeps baseline session/context create request shapes compatible and accepts orchestration extensions", () => {
     const baselineSessionRequest = {
       workspaceId: "ws-1",
-      adapterId: "shell-manual"
+      adapterId: "claude-code"
     };
     expect(CreateSessionRequest.parse(baselineSessionRequest)).toEqual(
       baselineSessionRequest
@@ -131,7 +131,7 @@ describe("orchestration contracts", () => {
     );
 
     const baselineContextRequest = {
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
       role: "engineer",
       objective: "Summarize context"
     };
@@ -154,7 +154,7 @@ describe("orchestration contracts", () => {
       sessionId: "sess-1",
       goalId: "goal-1",
       workspaceId: "ws-1",
-      adapterId: "shell-manual" as const,
+      adapterId: "claude-code" as const,
       contextPackageId: "pkg-1",
       taskId: "task-1",
       fromRecommendationId: "rec-1"
@@ -166,7 +166,7 @@ describe("orchestration contracts", () => {
     const contextCreatedPayload = {
       packageId: "pkg-1",
       goalId: "goal-1",
-      adapterId: "shell-manual" as const,
+      adapterId: "claude-code" as const,
       role: "engineer" as const,
       taskId: "task-1",
       fromRecommendationId: "rec-1",
@@ -181,7 +181,7 @@ describe("orchestration contracts", () => {
       id: "pkg-1",
       goalId: "goal-1",
       supersedesPackageId: null,
-      adapterId: "shell-manual" as const,
+      adapterId: "claude-code" as const,
       workspaceId: "ws-1",
       taskId: "task-1",
       fromRecommendationId: "rec-1",
@@ -216,12 +216,12 @@ describe("orchestration contracts", () => {
     const validCases: unknown[] = [
       {
         kind: "create_session",
-        adapterId: "shell-manual",
+        adapterId: "claude-code",
         workspaceId: "ws-1",
         role: "engineer",
         objective: "Implement task",
         contextRequest: {
-          adapterId: "shell-manual",
+          adapterId: "claude-code",
           role: "engineer",
           objective: "Build context",
           workspaceId: "ws-1"
@@ -520,7 +520,7 @@ describe("orchestration contracts", () => {
       rationale: "Task is ready",
       proposedAction: {
         kind: "create_session",
-        adapterId: "shell-manual",
+        adapterId: "claude-code",
         role: "engineer",
         objective: "Implement endpoint"
       },
@@ -719,7 +719,7 @@ describe("orchestration contracts", () => {
       rationale: "Task is open and ready",
       proposedAction: {
         kind: "create_session",
-        adapterId: "shell-manual",
+        adapterId: "claude-code",
         role: "engineer",
         objective: "Implement task"
       },

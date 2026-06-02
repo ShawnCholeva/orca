@@ -80,7 +80,7 @@ function seedRecommendation(
 ): void {
   const proposedAction = JSON.stringify({
     kind: 'create_session',
-    adapterId: 'shell-manual',
+    adapterId: 'claude-code',
     role: 'engineer',
     objective: 'Implement feature',
   });
@@ -97,7 +97,7 @@ function seedRecommendation(
 function baseInput(goalId: string, overrides: Partial<RequestContextPackageInput> = {}): RequestContextPackageInput {
   return {
     goalId,
-    adapterId: 'shell-manual',
+    adapterId: 'claude-code',
     workspaceId: null,
     role: 'engineer',
     objective: 'Implement the feature',

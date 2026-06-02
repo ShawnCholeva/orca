@@ -69,7 +69,7 @@ describe('insertSession + getSessionDetail round-trip', () => {
       id: 'sess-1',
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       role: 'Engineer',
       instruction: 'do stuff',
       title: 'My Session',
@@ -82,7 +82,7 @@ describe('insertSession + getSessionDetail round-trip', () => {
     expect(detail!.id).toBe('sess-1');
     expect(detail!.goalId).toBe('g1');
     expect(detail!.workspaceId).toBe('ws1');
-    expect(detail!.adapterId).toBe('shell-manual');
+    expect(detail!.adapterId).toBe('claude-code');
     expect(detail!.role).toBe('Engineer');
     expect(detail!.instruction).toBe('do stuff');
     expect(detail!.title).toBe('My Session');
@@ -113,7 +113,7 @@ describe('listSessionsByGoal', () => {
       id: 'sess-a',
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       title: 'A',
       status: 'created',
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -122,7 +122,7 @@ describe('listSessionsByGoal', () => {
       id: 'sess-b',
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       title: 'B',
       status: 'created',
       createdAt: '2026-01-03T00:00:00.000Z',
@@ -131,7 +131,7 @@ describe('listSessionsByGoal', () => {
       id: 'sess-c',
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       title: 'C',
       status: 'created',
       createdAt: '2026-01-02T00:00:00.000Z',
@@ -158,7 +158,7 @@ describe('listSessionsByGoal', () => {
       id: 'sess-g1',
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       title: 'for g1',
       status: 'created',
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -167,7 +167,7 @@ describe('listSessionsByGoal', () => {
       id: 'sess-g2',
       goalId: 'g2',
       workspaceId: 'ws2',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       title: 'for g2',
       status: 'created',
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -187,7 +187,7 @@ describe('listSessionsByGoal', () => {
       id: 'sess-1',
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       title: 'Session with extraction',
       status: 'exited',
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -301,7 +301,7 @@ describe('listSessionsByGoal', () => {
       id: 'sess-1',
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       title: 'Session without extraction',
       status: 'created',
       createdAt: '2026-01-01T00:00:00.000Z',

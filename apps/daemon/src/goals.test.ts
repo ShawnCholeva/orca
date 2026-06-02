@@ -72,7 +72,6 @@ function buildRegistry(): ModelProviderRegistry {
   });
   registry.register(mk("orca/anthropic", ["claude-sonnet-4-6"]));
   registry.register(mk("orca/openai", ["gpt-5", "gpt-4o-mini"]));
-  registry.register(mk("orca/google-gemini", ["gemini-2.5-flash"]));
   return registry;
 }
 

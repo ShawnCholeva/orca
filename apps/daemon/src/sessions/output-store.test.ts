@@ -48,7 +48,7 @@ function seedSession(db: Database.Database, sessionId: string, goalId = 'g1', wo
     `INSERT INTO sessions (
       id, goal_id, workspace_id, adapter_id, role, instruction, title, status,
       created_at, output_seq, output_bytes_kept, output_offset_first
-    ) VALUES (?, ?, ?, 'shell-manual', null, null, 'Session', 'created', ?, 0, 0, 0)`
+    ) VALUES (?, ?, ?, 'claude-code', null, null, 'Session', 'created', ?, 0, 0, 0)`
   ).run(sessionId, goalId, workspaceId, now);
 }
 

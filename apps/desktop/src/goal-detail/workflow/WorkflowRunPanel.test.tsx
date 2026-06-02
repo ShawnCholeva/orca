@@ -156,7 +156,7 @@ describe("WorkflowRunPanel", () => {
           id: "session-1",
           goalId: "goal-1",
           workspaceId: "ws-1",
-          adapterId: "shell-manual",
+          adapterId: "claude-code",
           contextPackageId: null,
           taskId: "task-1",
           fromRecommendationId: null,

@@ -36,13 +36,6 @@ describe("ADAPTER_EXECUTION_MODE_DEFAULTS", () => {
     expect(preferred?.mode).toBe("shadow_session");
     expect(cfg.disabledExecutionModes.find((e) => e.mode === "one_shot")?.reason).toMatch(/API keys/i);
   });
-
-  it("opencode preferred shadow_session, disabled one_shot", () => {
-    const cfg = ADAPTER_EXECUTION_MODE_DEFAULTS["opencode"];
-    const preferred = cfg.enabledExecutionModes.find((e) => e.preferred === true);
-    expect(preferred?.mode).toBe("shadow_session");
-    expect(cfg.disabledExecutionModes.find((e) => e.mode === "one_shot")).toBeDefined();
-  });
 });
 
 describe("adapter execution-mode repository", () => {
@@ -51,9 +44,6 @@ describe("adapter execution-mode repository", () => {
     const supportedByAdapter: Record<string, ("shadow_session"|"one_shot")[]> = {
       "claude-code": ["shadow_session", "one_shot"],
       codex: ["one_shot", "shadow_session"],
-      opencode: ["shadow_session"],
-      "gemini-cli": ["one_shot"],
-      "shell-manual": ["shadow_session"],
     };
     const now = () => "2026-05-28T00:00:00.000Z";
     seedAdapterExecutionModes(db, now, supportedByAdapter);

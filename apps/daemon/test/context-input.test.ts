@@ -159,7 +159,7 @@ function seedSession(
        (id, goal_id, workspace_id, adapter_id, role, instruction, title, status,
         pid, command, args_json, cwd, terminal_cols, terminal_rows, exit_code,
         exit_signal, failure_reason, failure_detail, created_at, started_at, exited_at, archived_at)
-     VALUES (?, ?, ?, 'shell-manual', NULL, NULL, 'Test Session', 'exited',
+     VALUES (?, ?, ?, 'claude-code', NULL, NULL, 'Test Session', 'exited',
              NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, ?, NULL, ?, ?)`
   ).run(sessionId, goalId, wsId, NOW, NOW, archivedAt);
 }
@@ -194,7 +194,7 @@ function makeRequest(overrides: Partial<Parameters<typeof buildContextAssemblyIn
     goalId: 'goal-1',
     workspaceId: null,
     role: 'engineer' as const,
-    adapterId: 'shell-manual',
+    adapterId: 'claude-code',
     objective: 'Fix the rendering bug',
     objectiveHash: 'abc123',
     ...overrides,

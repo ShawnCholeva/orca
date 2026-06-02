@@ -169,7 +169,7 @@ function seedEngineerSession(
     INSERT INTO sessions (
       id, goal_id, workspace_id, adapter_id, role, instruction, title,
       status, created_at, started_at, exited_at
-    ) VALUES (?, ?, ?, 'shell-manual', 'engineer', NULL, 'Engineer session', 'exited', ?, ?, ?)
+    ) VALUES (?, ?, ?, 'claude-code', 'engineer', NULL, 'Engineer session', 'exited', ?, ?, ?)
   `).run(sessionId, goalId, workspaceId, now, now, now);
 
   db.prepare(`
@@ -212,7 +212,7 @@ function seedRunningSession(
     INSERT INTO sessions (
       id, goal_id, workspace_id, adapter_id, role, instruction, title,
       status, created_at, started_at, exited_at
-    ) VALUES (?, ?, ?, 'shell-manual', 'engineer', NULL, 'Running session', 'running', ?, ?, NULL)
+    ) VALUES (?, ?, ?, 'claude-code', 'engineer', NULL, 'Running session', 'running', ?, ?, NULL)
   `).run(sessionId, goalId, workspaceId, now, now);
 }
 

@@ -43,14 +43,14 @@ describe("orchestrator defaults", () => {
     ).toBe("gpt-5.4-mini");
   });
 
-  it("falls back to the first model for providers without a preferred default", () => {
+  it("falls back to the first model when the preferred default is unavailable", () => {
     expect(
       defaultModelForProvider(
-        provider("orca/google-gemini", [
-          { id: "gemini-2.5-pro" },
-          { id: "gemini-2.5-flash" },
+        provider("orca/anthropic", [
+          { id: "claude-opus-4-7" },
+          { id: "claude-sonnet-4-6" },
         ]),
       )?.id,
-    ).toBe("gemini-2.5-pro");
+    ).toBe("claude-opus-4-7");
   });
 });

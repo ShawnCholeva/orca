@@ -53,9 +53,9 @@ describe("agents", () => {
     const db = setup();
     seedAgents(db);
     const first = listAgents(db);
-    expect(first.length).toBe(4);
+    expect(first.length).toBe(2);
     const ids = first.map((a) => a.id).sort();
-    expect(ids).toEqual(["claude-code", "codex", "gemini-cli", "opencode"]);
+    expect(ids).toEqual(["claude-code", "codex"]);
 
     // Run seed again — count should not change.
     seedAgents(db);
@@ -77,12 +77,12 @@ describe("agents", () => {
     expect(listAgents(db).map((a) => a.id)).not.toContain("cursor");
   });
 
-  it("marks claude-code, codex, and gemini-cli as recommended", () => {
+  it("marks claude-code and codex as recommended", () => {
     const db = setup();
     seedAgents(db);
     const agents = listAgents(db);
     const recommendedIds = agents.filter((a) => a.recommended).map((a) => a.id).sort();
-    expect(recommendedIds).toEqual(["claude-code", "codex", "gemini-cli"]);
+    expect(recommendedIds).toEqual(["claude-code", "codex"]);
   });
 
   it("setAgentConnected toggles connected and preserves through reseed", () => {

@@ -34,6 +34,9 @@ import { createSessionOutputStore } from '../src/sessions/output-store.js';
 import { FakePtyManager, controlFakePty } from '../src/pty/fake.js';
 
 beforeAll(() => {
+  // The claude-code adapter spawns this binary with no args; point it at an
+  // interactive shell so the proof loop can drive a real PTY session.
+  process.env.ORCA_CLAUDE_CODE_BIN = '/bin/sh';
   bootstrapRegistries();
 });
 
@@ -84,7 +87,7 @@ function resetPreparedStatements(): void {
 function seedSiblingSummary(db: Database.Database, goalId: string, workspaceId: string): void {
   db.prepare(
     `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, role, instruction, title, status, created_at, started_at, exited_at)
-     VALUES (?, ?, ?, 'shell-manual', 'engineer', null, 'Sibling session', 'exited', ?, ?, ?)`
+     VALUES (?, ?, ?, 'claude-code', 'engineer', null, 'Sibling session', 'exited', ?, ?, ?)`
   ).run('sibling-session-1', goalId, workspaceId, NOW, NOW, NOW);
 
   db.prepare(
@@ -228,7 +231,7 @@ describe.sequential('context package proof loop', () => {
       url: `/v1/goals/${goal.id}/context-packages`,
       headers: AUTH,
       payload: {
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         workspaceId: workspace.id,
         role: 'engineer',
         objective: 'Implement the restart-safe context proof loop.',
@@ -280,7 +283,7 @@ describe.sequential('context package proof loop', () => {
       headers: AUTH,
       payload: {
         workspaceId: workspace.id,
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         contextPackageId: contextPackage.id,
       },
     });
@@ -311,9 +314,10 @@ describe.sequential('context package proof loop', () => {
     const handle = runtime.getHandle(session.id);
     expect(handle).toBeDefined();
     const control = controlFakePty(handle!);
+    // claude-code uses preview_only delivery: the rendered context is linked to
+    // the session but never streamed into the PTY or the spawn argv/command.
     const written = Buffer.concat(control.writtenChunks as Buffer[]).toString('utf8');
-    expect(written).toContain(contextPackage.renderedContext);
-    expect(written).toContain('# END ORCA CONTEXT\n');
+    expect(written).not.toContain(contextPackage.renderedContext);
 
     const startedRow = db
       .prepare('SELECT args_json, command FROM sessions WHERE id = ?')

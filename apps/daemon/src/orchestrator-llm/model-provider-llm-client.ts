@@ -8,7 +8,6 @@ import type { OrchestratorLlmClient } from "./mediator.js";
 const PROVIDER_BY_ADAPTER_ID: Record<string, ModelProviderId | undefined> = {
   "claude-code": "orca/anthropic",
   codex: "orca/openai",
-  "gemini-cli": "orca/google-gemini",
 };
 
 export class ModelProviderOrchestratorLlmClient implements OrchestratorLlmClient {
@@ -74,7 +73,5 @@ export function adapterIdForProvider(providerId: ModelProviderId): string {
       return "claude-code";
     case "orca/openai":
       return "codex";
-    case "orca/google-gemini":
-      return "gemini-cli";
   }
 }

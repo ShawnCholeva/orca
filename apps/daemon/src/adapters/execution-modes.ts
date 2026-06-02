@@ -27,23 +27,6 @@ export const ADAPTER_EXECUTION_MODE_DEFAULTS: Record<AdapterId, AdapterExecution
       { mode: "one_shot", reason: "Codex orchestration uses interactive shadow sessions, not OpenAI API keys" },
     ],
   },
-  opencode: {
-    adapterId: "opencode",
-    enabledExecutionModes: [{ mode: "shadow_session", preferred: true }],
-    disabledExecutionModes: [
-      { mode: "one_shot", reason: "adapter does not implement one-shot yet" },
-    ],
-  },
-  "gemini-cli": {
-    adapterId: "gemini-cli",
-    enabledExecutionModes: [{ mode: "one_shot", preferred: true }],
-    disabledExecutionModes: [],
-  },
-  "shell-manual": {
-    adapterId: "shell-manual",
-    enabledExecutionModes: [{ mode: "shadow_session", preferred: true }],
-    disabledExecutionModes: [],
-  },
 };
 
 interface Row {

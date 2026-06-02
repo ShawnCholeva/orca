@@ -97,7 +97,7 @@ describe("registry hardening", () => {
   it("rejects duplicate adapter id before freeze", () => {
     const adapters = new AdapterRegistry();
     adapters.register({
-      id: 'shell-manual' as const,
+      id: 'claude-code' as const,
       title: 'First',
       supportedExecutionModes: ["shadow_session"] as const,
       contextDelivery: { mode: 'preview_only' as const, maxBytes: 32768 },
@@ -111,7 +111,7 @@ describe("registry hardening", () => {
 
     expect(() =>
       adapters.register({
-        id: 'shell-manual' as const,
+        id: 'claude-code' as const,
         title: 'Duplicate',
         supportedExecutionModes: ["shadow_session"] as const,
         contextDelivery: { mode: 'preview_only' as const, maxBytes: 32768 },
@@ -122,6 +122,6 @@ describe("registry hardening", () => {
         repairFor: () => undefined,
         supportsModel: () => false,
       })
-    ).toThrowError("Duplicate adapter id: shell-manual");
+    ).toThrowError("Duplicate adapter id: claude-code");
   });
 });

@@ -86,13 +86,13 @@ describe.sequential('registry/event-loop scenarios 1–6', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('S1 — boot: GET /v1/health returns registries: { plugins: 3, skills: 1 }', async () => {
+  it('S1 — boot: GET /v1/health returns registries: { plugins: 2, skills: 2 }', async () => {
     const res = await server.inject({ method: 'GET', url: '/v1/health' });
 
     expect(res.statusCode).toBe(200);
     const body = HealthResponse.parse(JSON.parse(res.body));
     expect(body.status).toBe('ok');
-    expect(body.registries).toEqual({ plugins: 3, skills: 2 });
+    expect(body.registries).toEqual({ plugins: 2, skills: 2 });
   });
 
   it('S2a — registry: GET /v1/plugins returns three built-in ids in sorted order', async () => {
@@ -106,7 +106,6 @@ describe.sequential('registry/event-loop scenarios 1–6', () => {
     const body = ListPluginsResponse.parse(JSON.parse(res.body));
     expect(body.plugins.map((p) => p.id)).toEqual([
       'orca.default-skills',
-      'orca.shell-manual',
       'orca.sqlite'
     ]);
   });

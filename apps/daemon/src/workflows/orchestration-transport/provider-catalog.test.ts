@@ -35,10 +35,9 @@ describe("orchestration transport provider catalog", () => {
     const registry = new ModelProviderRegistry();
     registry.register(provider("orca/openai", "OpenAI", true));
     registry.register(provider("orca/anthropic", "Anthropic", false, "ANTHROPIC_API_KEY not set"));
-    registry.register(provider("orca/google-gemini", "Google Gemini", false, "GOOGLE_API_KEY not set"));
 
     const catalog = await buildOrchestrationProviderCatalog(registry);
-    expect(catalog).toHaveLength(3);
+    expect(catalog).toHaveLength(2);
 
     expect(catalog.find((p) => p.id === "orca/openai")).toMatchObject({
       displayName: "OpenAI",
@@ -50,12 +49,6 @@ describe("orchestration transport provider catalog", () => {
       selectable: true,
       automatedAvailable: false,
       readinessReason: "ANTHROPIC_API_KEY not set"
-    });
-    expect(catalog.find((p) => p.id === "orca/google-gemini")).toMatchObject({
-      displayName: "Gemini",
-      selectable: true,
-      automatedAvailable: false,
-      readinessReason: "GOOGLE_API_KEY not set"
     });
 
     const responseProviders = toModelProvidersResponse(catalog);
@@ -74,17 +67,14 @@ describe("orchestration transport provider catalog", () => {
     const registry = new ModelProviderRegistry();
     registry.register(provider("orca/openai", "OpenAI", true));
     registry.register(provider("orca/anthropic", "Anthropic", true));
-    registry.register(provider("orca/google-gemini", "Google Gemini", true));
 
     const allowedProviderIds = providerIdsForConnectedAgents([
       { id: "claude-code", connected: false },
       { id: "codex", connected: true },
-      { id: "gemini-cli", connected: false },
     ]);
     const modelOverrides = modelOverridesForConnectedAgents([
       { id: "claude-code", connected: false },
       { id: "codex", connected: true },
-      { id: "gemini-cli", connected: false },
     ]);
     const catalog = await buildOrchestrationProviderCatalog(registry, {
       allowedProviderIds,

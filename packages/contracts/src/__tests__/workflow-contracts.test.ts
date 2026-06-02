@@ -165,14 +165,14 @@ const decision = {
       effect: "required" as const
     }
   ],
-  alternativesConsidered: ["agent:shell-manual"],
+  alternativesConsidered: ["agent:claude-code"],
   confidence: 0.8,
   operatorSelectionJson: {
     operatorId: "human",
     operatorKind: "human" as const,
     reason: "Human input is required",
     requiredCapabilities: ["judgment"],
-    alternativesConsidered: ["agent:shell-manual"],
+    alternativesConsidered: ["agent:claude-code"],
     confidence: 0.8,
     requiresUserApproval: true
   },
@@ -427,7 +427,6 @@ describe("workflow contracts", () => {
   it("maps model provider ids to stable product display names", () => {
     expect(getModelProviderDisplayName("orca/anthropic")).toBe("Claude");
     expect(getModelProviderDisplayName("orca/openai")).toBe("OpenAI");
-    expect(getModelProviderDisplayName("orca/google-gemini")).toBe("Gemini");
   });
 
   it("extends existing M1-M7 contracts only with optional M8 fields", () => {
@@ -458,13 +457,13 @@ describe("workflow contracts", () => {
     expect(
       CreateSessionRequest.parse({
         workspaceId: "ws-1",
-        adapterId: "shell-manual",
+        adapterId: "claude-code",
         workflowStepRunId: "step-run-1"
       })
     ).toMatchObject({ workflowStepRunId: "step-run-1" });
     expect(
       CreateContextPackageRequest.parse({
-        adapterId: "shell-manual",
+        adapterId: "claude-code",
         role: "engineer",
         objective: "Build context",
         workflowStepRunId: "step-run-1"
@@ -490,7 +489,7 @@ describe("workflow contracts", () => {
       {
         kind: "launch_workflow_session",
         workflowStepRunId: "step-run-1",
-        operatorId: "agent:shell-manual",
+        operatorId: "agent:claude-code",
         operatorKind: "agent",
         objective: "Implement the step"
       },
@@ -522,7 +521,7 @@ describe("workflow contracts", () => {
       ProposedAction.parse({
         kind: "launch_workflow_session",
         workflowStepRunId: "step-run-1",
-        operatorId: "agent:shell-manual",
+        operatorId: "agent:claude-code",
         objective: "missing operator kind"
       })
     ).toThrow();
@@ -901,7 +900,7 @@ describe("workflow contracts", () => {
       proposedAction: {
         kind: "launch_workflow_session" as const,
         workflowStepRunId: "step-run-1",
-        operatorId: "agent:shell-manual",
+        operatorId: "agent:claude-code",
         operatorKind: "agent" as const,
         objective: "Implement issue"
       },

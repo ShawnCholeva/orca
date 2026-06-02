@@ -85,7 +85,7 @@ function seedSession(
   db.prepare(
     `INSERT INTO sessions
       (id, goal_id, workspace_id, adapter_id, role, title, status, created_at, exited_at, task_id)
-     VALUES (?, ?, ?, 'shell-manual', ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, 'claude-code', ?, ?, ?, ?, ?, ?)`
   ).run(
     input.id,
     input.goalId,

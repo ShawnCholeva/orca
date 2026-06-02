@@ -111,7 +111,7 @@ function seedContextPackage(
 
 // Build a test adapter with a real AdapterId and specific delivery mode.
 function makeTestAdapter(
-  id: 'shell-manual' | 'claude-code' | 'opencode' | 'codex',
+  id: 'claude-code' | 'codex',
   cwd: string,
   delivery: AdapterContextDelivery,
   argsOverride?: string[]
@@ -259,7 +259,7 @@ describe('sweepOrphanContextFiles', () => {
 async function setupSession(
   db: Database.Database,
   wsDir: string,
-  adapterId: 'shell-manual' | 'claude-code' | 'opencode' | 'codex',
+  adapterId: 'claude-code' | 'codex',
   delivery: AdapterContextDelivery,
   pkgId: string,
   argsOverride?: string[]
@@ -298,7 +298,7 @@ describe('initial_input delivery (shell/manual)', () => {
     const db = freshDb(dataDir);
 
     const delivery: AdapterContextDelivery = { mode: 'initial_input', maxBytes: 32768 };
-    const { registry, sessionId } = await setupSession(db, wsDir, 'shell-manual', delivery, 'pkg-1');
+    const { registry, sessionId } = await setupSession(db, wsDir, 'claude-code', delivery, 'pkg-1');
 
     const ptyMgr = new FakePtyManager();
     const ctx = makeStartCtx(db, registry, ptyMgr, dataDir);
@@ -320,7 +320,7 @@ describe('initial_input delivery (shell/manual)', () => {
     const db = freshDb(dataDir);
 
     const delivery: AdapterContextDelivery = { mode: 'initial_input', maxBytes: 32768 };
-    const { registry, sessionId } = await setupSession(db, wsDir, 'shell-manual', delivery, 'pkg-2');
+    const { registry, sessionId } = await setupSession(db, wsDir, 'claude-code', delivery, 'pkg-2');
 
     let capturedArgs: string[] = [];
     let capturedEnv: Record<string, string> = {};
@@ -442,7 +442,7 @@ describe('context_file delivery', () => {
       contextFileEnvVar: 'ORCA_CONTEXT_FILE',
       maxBytes: 32768,
     };
-    const { registry, sessionId } = await setupSession(db, wsDir, 'opencode', delivery, 'pkg-7');
+    const { registry, sessionId } = await setupSession(db, wsDir, 'codex', delivery, 'pkg-7');
 
     let capturedArgs: string[] = [];
     let capturedEnv: Record<string, string> = {};
@@ -499,7 +499,7 @@ describe('defensive argv/env check', () => {
     const delivery: AdapterContextDelivery = { mode: 'initial_input', maxBytes: 32768 };
     // argsOverride pre-fills args with the rendered context bytes
     const { registry, sessionId } = await setupSession(
-      db, wsDir, 'shell-manual', delivery, 'pkg-def', [RENDERED_CONTEXT]
+      db, wsDir, 'claude-code', delivery, 'pkg-def', [RENDERED_CONTEXT]
     );
 
     const ptyMgr = new FakePtyManager();

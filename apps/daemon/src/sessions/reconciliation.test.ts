@@ -53,7 +53,7 @@ function seedWorkspace(db: Database.Database, id: string, goalId: string): void 
 function seedSession(db: Database.Database, id: string, goalId: string, status: string): void {
   db.prepare(
     `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at)
-     VALUES (?, ?, 'ws1', 'shell-manual', 'S', ?, ?)`
+     VALUES (?, ?, 'ws1', 'claude-code', 'S', ?, ?)`
   ).run(id, goalId, status, NOW);
 }
 

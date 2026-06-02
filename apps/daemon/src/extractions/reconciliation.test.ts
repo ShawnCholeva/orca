@@ -67,7 +67,7 @@ function seedSession(
     id: sessionId,
     goalId,
     workspaceId,
-    adapterId: 'shell-manual',
+    adapterId: 'claude-code',
     title: sessionId,
     status: 'exited',
     createdAt: '2026-01-01T00:00:00.000Z',

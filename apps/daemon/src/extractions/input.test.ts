@@ -64,7 +64,7 @@ function seedSession(
     id: sessionId,
     goalId,
     workspaceId: wsId,
-    adapterId: 'shell-manual',
+    adapterId: 'claude-code',
     title: 'Test Session',
     status: 'exited',
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -306,7 +306,7 @@ describe('buildSessionExtractionInput', () => {
     expect(result.goal.archived).toBe(false);
     expect(result.refinement).toBeNull();
     expect(result.session.id).toBe(SESSION_ID);
-    expect(result.session.adapterId).toBe('shell-manual');
+    expect(result.session.adapterId).toBe('claude-code');
     expect(result.session.exitCode).toBe(0);
     expect(result.extractorVersion).toBe('test-1.0.0');
     expect(result.outputTail.text).toBe('hello world\n');

@@ -82,7 +82,7 @@ function seedWorkspace(db: Database.Database, id: string, goalId: string): void 
 function seedSession(db: Database.Database, id: string, goalId: string, workspaceId: string): void {
   db.prepare(
     `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at)
-     VALUES (?, ?, ?, 'shell-manual', 'test session', 'created', '2026-01-01T00:00:00.000Z')`
+     VALUES (?, ?, ?, 'claude-code', 'test session', 'created', '2026-01-01T00:00:00.000Z')`
   ).run(id, goalId, workspaceId);
 }
 
@@ -91,7 +91,7 @@ function seedContextPackage(db: Database.Database, id: string, goalId: string): 
     `INSERT INTO context_packages (id, goal_id, adapter_id, role, objective, status,
       rendered_context, rendered_bytes, estimated_tokens, truncated, sparse,
       source_count, sources_json, warnings_json, source_fingerprint, assembler_version, created_at)
-     VALUES (?, ?, 'shell-manual', 'engineer', 'obj', 'ready', '', 0, 0, 0, 0, 0, '[]', '[]', 'fp', '0.1.0', '2026-01-01T00:00:00.000Z')`
+     VALUES (?, ?, 'claude-code', 'engineer', 'obj', 'ready', '', 0, 0, 0, 0, 0, '[]', '[]', 'fp', '0.1.0', '2026-01-01T00:00:00.000Z')`
   ).run(id, goalId);
 }
 

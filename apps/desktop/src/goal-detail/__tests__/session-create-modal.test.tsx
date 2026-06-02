@@ -29,7 +29,7 @@ const workspace: Workspace = {
 };
 
 const adapters = [
-  { id: "shell-manual" as AdapterId, title: "Shell / Manual", availability: "available" as const },
+  { id: "claude-code" as AdapterId, title: "Shell / Manual", availability: "available" as const },
   { id: "claude-code" as AdapterId, title: "Claude Code", availability: "unavailable" as const, detail: "not in PATH; set ORCA_CLAUDE_CODE_BIN" },
 ];
 
@@ -37,9 +37,9 @@ const sessionDetail = {
   id: "sess-new",
   goalId: "goal-1",
   workspaceId: "ws-1",
-  adapterId: "shell-manual" as AdapterId,
+  adapterId: "claude-code" as AdapterId,
   role: null,
-  title: "shell-manual session",
+  title: "claude-code session",
   status: "created" as const,
   createdAt: now,
   startedAt: null,
@@ -62,7 +62,7 @@ const pkg: ContextPackage = {
   id: "pkg-1",
   goalId: "goal-1",
   supersedesPackageId: null,
-  adapterId: "shell-manual",
+  adapterId: "claude-code",
   workspaceId: "ws-1",
   role: "engineer",
   objective: "Summarize the goal before starting",
@@ -85,7 +85,7 @@ const assembly: ContextAssembly = {
   goalId: "goal-1",
   packageId: "pkg-1",
   replacePackageId: null,
-  adapterId: "shell-manual",
+  adapterId: "claude-code",
   workspaceId: "ws-1",
   role: "engineer",
   objectiveHash: "obj-hash",
@@ -195,7 +195,7 @@ describe("CreateSessionDialog - context controls", () => {
 
     expect(createSession).toHaveBeenCalledWith("goal-1", expect.objectContaining({
       workspaceId: "ws-1",
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
     }));
     expect(startSession).toHaveBeenCalledWith("sess-new", { terminalCols: 80, terminalRows: 24 });
     expect(onCreated).toHaveBeenCalledWith("sess-new");
@@ -217,7 +217,7 @@ describe("CreateSessionDialog - context controls", () => {
           onCreated={vi.fn()}
           onClose={vi.fn()}
           prefill={{
-            adapterId: "shell-manual",
+            adapterId: "claude-code",
             role: "engineer",
             objective: "Validate implementation",
             taskId: "task-1",
@@ -281,7 +281,7 @@ describe("CreateSessionDialog - context controls", () => {
     });
 
     expect(createContextPackage).toHaveBeenCalledWith("goal-1", expect.objectContaining({
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
       role: "engineer",
       workspaceId: "ws-1",
     }));
@@ -303,7 +303,7 @@ describe("CreateSessionDialog - context controls", () => {
           onCreated={vi.fn()}
           onClose={vi.fn()}
           prefill={{
-            adapterId: "shell-manual",
+            adapterId: "claude-code",
             role: "engineer",
             objective: "Prepare validation context",
             taskId: "task-1",

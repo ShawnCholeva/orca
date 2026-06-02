@@ -168,11 +168,11 @@ function mapToContextRole(
 function preferredAdapterForWorkspace(
   workspaceId: string,
   sessions: SessionInput[]
-): 'claude-code' | 'shell-manual' {
-  const completedClaudeCode = sessions.some(
-    (s) => s.workspaceId === workspaceId && s.exitedAt !== null && s.adapterId === 'claude-code'
+): 'claude-code' | 'codex' {
+  const completedCodex = sessions.some(
+    (s) => s.workspaceId === workspaceId && s.exitedAt !== null && s.adapterId === 'codex'
   );
-  return completedClaudeCode ? 'claude-code' : 'shell-manual';
+  return completedCodex ? 'codex' : 'claude-code';
 }
 
 export function createSessionRule(input: RecommendationInput): RecommendationCandidate[] {
@@ -188,7 +188,7 @@ export function createSessionRule(input: RecommendationInput): RecommendationCan
     const workspaceId = task.workspaceId ?? undefined;
     const adapterId = workspaceId
       ? preferredAdapterForWorkspace(workspaceId, input.sessions)
-      : 'shell-manual';
+      : 'claude-code';
 
     const role = mapToContextRole(task.role);
     const objective = task.title.slice(0, 4000);
@@ -196,7 +196,7 @@ export function createSessionRule(input: RecommendationInput): RecommendationCan
       task.acceptanceCriteria.length > 0 ? 0.85 : 0.7;
 
     const contextRequest = {
-      adapterId: adapterId as 'claude-code' | 'shell-manual',
+      adapterId: adapterId as 'claude-code' | 'codex',
       role,
       objective,
       ...(workspaceId ? { workspaceId } : {}),
@@ -204,7 +204,7 @@ export function createSessionRule(input: RecommendationInput): RecommendationCan
 
     const proposedAction = {
       kind: 'create_session' as const,
-      adapterId: adapterId as 'claude-code' | 'opencode' | 'codex' | 'shell-manual',
+      adapterId: adapterId as 'claude-code' | 'codex',
       ...(workspaceId ? { workspaceId } : {}),
       role: task.role as 'architect' | 'engineer' | 'reviewer' | 'qa' | 'generalist',
       objective,

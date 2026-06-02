@@ -187,7 +187,7 @@ describe("transport fallback proof integration", () => {
   it("requests human review after automated transports fail", async () => {
     const { broker, db, events, attemptCtx } = setup();
 
-    const result = await broker.propose(request("orca/google-gemini"), {
+    const result = await broker.propose(request("orca/openai"), {
       runOneShot: async () => ({
         status: "failed",
         failureReason: "one_shot_rate_limited",
@@ -231,7 +231,7 @@ describe("transport fallback proof integration", () => {
         id: "session-visible",
         goalId: "goal-1",
         workspaceId: "ws-1",
-        adapterId: "shell-manual",
+        adapterId: "claude-code",
         title: "Visible session",
         status: "created",
         createdAt: NOW,

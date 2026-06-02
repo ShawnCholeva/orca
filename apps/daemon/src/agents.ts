@@ -82,25 +82,6 @@ const SEED_AGENTS: SeedAgent[] = [
     recommended: 1,
     sort_order: 20,
   },
-  {
-    id: "gemini-cli",
-    name: "Gemini CLI",
-    short_label: "Google · CLI",
-    description: "Massive context window. Good for repo-wide search, indexing, and Q/A.",
-    swatch: "#4F8AFE",
-    recommended: 1,
-    sort_order: 30,
-  },
-  {
-    id: "opencode",
-    name: "OpenCode",
-    short_label: "Open source · CLI",
-    description:
-      "Self-hosted runner. Bring your own model. Great for local-only sessions.",
-    swatch: "#A78BFA",
-    recommended: 0,
-    sort_order: 40,
-  },
 ];
 
 export class AgentNotFoundError extends Error {

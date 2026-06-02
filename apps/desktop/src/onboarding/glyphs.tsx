@@ -19,20 +19,6 @@ export function glyphFor(id: string, color: string): ReactElement {
           <circle cx="16" cy="16" r="2.5" fill={color} />
         </svg>
       );
-    case "gemini-cli":
-      return (
-        <svg viewBox="0 0 32 32" width="32" height="32" fill="none">
-          <rect x="2" y="2" width="28" height="28" rx="8" fill={color} opacity="0.18" />
-          <path d="M16 8 L18 14 L24 16 L18 18 L16 24 L14 18 L8 16 L14 14 Z" fill={color} />
-        </svg>
-      );
-    case "opencode":
-      return (
-        <svg viewBox="0 0 32 32" width="32" height="32" fill="none">
-          <rect x="2" y="2" width="28" height="28" rx="8" fill={color} opacity="0.18" />
-          <path d="M12 11 L8 16 L12 21 M20 11 L24 16 L20 21 M18 9 L14 23" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-        </svg>
-      );
     default:
       return (
         <svg viewBox="0 0 32 32" width="32" height="32" fill="none">

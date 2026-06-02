@@ -16,9 +16,6 @@ function newApp() {
   const supported: Record<string, ("shadow_session" | "one_shot")[]> = {
     "claude-code": ["shadow_session", "one_shot"],
     codex: ["one_shot", "shadow_session"],
-    opencode: ["shadow_session"],
-    "gemini-cli": ["one_shot"],
-    "shell-manual": ["shadow_session"],
   };
   seedAdapterExecutionModes(db, () => "2026-05-28T00:00:00.000Z", supported);
   const app = Fastify();
@@ -37,7 +34,7 @@ describe("adapter execution-modes routes", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as { configs: Array<{ adapterId: string }> };
     expect(body.configs.map((c) => c.adapterId)).toEqual(
-      expect.arrayContaining(["claude-code", "codex", "opencode"])
+      expect.arrayContaining(["claude-code", "codex"])
     );
   });
 

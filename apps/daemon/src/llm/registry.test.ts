@@ -39,7 +39,6 @@ describe("ModelProviderRegistry", () => {
     registry.register(openai);
 
     expect(registry.get("orca/anthropic")).toBe(anthropic);
-    expect(registry.get("orca/google-gemini")).toBeUndefined();
     expect(registry.list().map((p) => p.id)).toEqual([
       "orca/anthropic",
       "orca/openai",
@@ -58,14 +57,14 @@ describe("ModelProviderRegistry", () => {
   it("describe returns provider availability and models", async () => {
     const registry = new ModelProviderRegistry();
     registry.register(
-      makeProvider("orca/google-gemini", {
-        displayName: "Google Gemini",
+      makeProvider("orca/openai", {
+        displayName: "OpenAI",
         available: false,
-        reason: "GOOGLE_API_KEY not set",
+        reason: "OPENAI_API_KEY not set",
         models: [
           {
-            id: "gemini-2.5-flash",
-            displayName: "Gemini 2.5 Flash",
+            id: "gpt-5",
+            displayName: "GPT-5",
             capabilities: ["fast", "cheap"],
           },
         ],
@@ -74,14 +73,14 @@ describe("ModelProviderRegistry", () => {
 
     await expect(registry.describe()).resolves.toEqual([
       {
-        id: "orca/google-gemini",
-        displayName: "Google Gemini",
+        id: "orca/openai",
+        displayName: "OpenAI",
         available: false,
-        reason: "GOOGLE_API_KEY not set",
+        reason: "OPENAI_API_KEY not set",
         models: [
           {
-            id: "gemini-2.5-flash",
-            displayName: "Gemini 2.5 Flash",
+            id: "gpt-5",
+            displayName: "GPT-5",
             capabilities: ["fast", "cheap"],
           },
         ],

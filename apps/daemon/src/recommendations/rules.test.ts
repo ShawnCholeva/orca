@@ -142,7 +142,7 @@ describe('createSessionRule', () => {
         },
       ],
       sessions: [
-        { id: 's-1', workspaceId: 'ws-1', taskId: 't-1', status: 'running', role: 'engineer', adapterId: 'shell-manual', exitedAt: null },
+        { id: 's-1', workspaceId: 'ws-1', taskId: 't-1', status: 'running', role: 'engineer', adapterId: 'claude-code', exitedAt: null },
       ],
     });
     const candidates = createSessionRule(input);
@@ -207,7 +207,7 @@ describe('continueSessionRule', () => {
         },
       ],
       sessions: [
-        { id: 's-1', workspaceId: 'ws-1', taskId: 't-1', status: 'running', role: 'engineer', adapterId: 'shell-manual', exitedAt: null },
+        { id: 's-1', workspaceId: 'ws-1', taskId: 't-1', status: 'running', role: 'engineer', adapterId: 'claude-code', exitedAt: null },
       ],
     });
     const candidates = continueSessionRule(input);
@@ -226,7 +226,7 @@ describe('continueSessionRule', () => {
         },
       ],
       sessions: [
-        { id: 's-1', workspaceId: 'ws-1', taskId: 't-1', status: 'running', role: 'engineer', adapterId: 'shell-manual', exitedAt: null },
+        { id: 's-1', workspaceId: 'ws-1', taskId: 't-1', status: 'running', role: 'engineer', adapterId: 'claude-code', exitedAt: null },
       ],
       sessionSummaries: [
         { id: 'sum-1', sessionId: 's-1', summaryText: 'Work is completed and all tests pass', headline: 'Done', createdAt: '2025-01-01T00:00:00.000Z' },
@@ -244,7 +244,7 @@ describe('continueSessionRule', () => {
         },
       ],
       sessions: [
-        { id: 's-1', workspaceId: 'ws-1', taskId: null, status: 'running', role: null, adapterId: 'shell-manual', exitedAt: null },
+        { id: 's-1', workspaceId: 'ws-1', taskId: null, status: 'running', role: null, adapterId: 'claude-code', exitedAt: null },
       ],
     });
     expect(continueSessionRule(input)).toHaveLength(0);
@@ -358,7 +358,7 @@ describe('updatePlanRule', () => {
         },
       ],
       sessions: [
-        { id: 's-1', workspaceId: 'ws-1', taskId: 't-1', status: 'exited', role: 'engineer', adapterId: 'shell-manual', exitedAt: '2025-01-01T00:00:00.000Z' },
+        { id: 's-1', workspaceId: 'ws-1', taskId: 't-1', status: 'exited', role: 'engineer', adapterId: 'claude-code', exitedAt: '2025-01-01T00:00:00.000Z' },
       ],
       memoryItems: [
         { id: 'm-1', type: 'blocker', status: 'observed', content: 'OAuth server down', sourceSessionId: 's-1', updatedAt: '2025-01-01T00:00:00.000Z' },
@@ -442,8 +442,8 @@ describe('markCompleteRule', () => {
         },
       ],
       sessions: [
-        { id: 's-impl', workspaceId: 'ws-1', taskId: 't-1', status: 'exited', role: 'engineer', adapterId: 'shell-manual', exitedAt: '2025-01-01T00:00:00.000Z' },
-        { id: 's-rev', workspaceId: 'ws-1', taskId: 't-1', status: 'exited', role: 'reviewer', adapterId: 'shell-manual', exitedAt: '2025-01-01T01:00:00.000Z' },
+        { id: 's-impl', workspaceId: 'ws-1', taskId: 't-1', status: 'exited', role: 'engineer', adapterId: 'claude-code', exitedAt: '2025-01-01T00:00:00.000Z' },
+        { id: 's-rev', workspaceId: 'ws-1', taskId: 't-1', status: 'exited', role: 'reviewer', adapterId: 'claude-code', exitedAt: '2025-01-01T01:00:00.000Z' },
       ],
       sessionSummaries: [
         { id: 'sum-1', sessionId: 's-impl', summaryText: 'Implemented the login form and it works correctly', headline: 'Done', createdAt: '2025-01-01T00:00:00.000Z' },
@@ -466,7 +466,7 @@ describe('markCompleteRule', () => {
         },
       ],
       sessions: [
-        { id: 's-1', workspaceId: 'ws-1', taskId: 't-1', status: 'exited', role: 'engineer', adapterId: 'shell-manual', exitedAt: '2025-01-01T00:00:00.000Z' },
+        { id: 's-1', workspaceId: 'ws-1', taskId: 't-1', status: 'exited', role: 'engineer', adapterId: 'claude-code', exitedAt: '2025-01-01T00:00:00.000Z' },
       ],
       sessionSummaries: [
         { id: 'sum-1', sessionId: 's-1', summaryText: 'login works now', headline: 'Done', createdAt: '2025-01-01T00:00:00.000Z' },

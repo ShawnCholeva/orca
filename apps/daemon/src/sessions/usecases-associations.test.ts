@@ -95,7 +95,7 @@ function seedRecommendation(
 ): void {
   const proposedAction = JSON.stringify({
     kind: 'create_session',
-    adapterId: 'shell-manual',
+    adapterId: 'claude-code',
     role: 'engineer',
     objective: 'Implement feature',
   });
@@ -111,7 +111,7 @@ function seedRecommendation(
 
 function makeAdapterRegistry(): AdapterRegistry {
   return {
-    get: (id: string) => (id === 'shell-manual' ? ({ id } as never) : undefined),
+    get: (id: string) => (id === 'claude-code' ? ({ id } as never) : undefined),
     list: async () => [],
     clearCache: () => {},
     register: () => {},
@@ -143,7 +143,7 @@ describe('session create: no task or recommendation association', () => {
     const detail = await createSession(ctx, {
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
     });
 
     expect(detail.taskId).toBeNull();
@@ -198,7 +198,7 @@ describe('session create associations: with taskId only', () => {
     const detail = await createSession(ctx, {
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       taskId: 'task-1',
     });
 
@@ -244,7 +244,7 @@ describe('session create associations: with fromRecommendationId only', () => {
     const detail = await createSession(ctx, {
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       fromRecommendationId: 'rec-1',
     });
 
@@ -281,7 +281,7 @@ describe('session create associations: with both taskId and fromRecommendationId
     const detail = await createSession(ctx, {
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       taskId: 'task-1',
       fromRecommendationId: 'rec-1',
     });
@@ -317,7 +317,7 @@ describe('session create associations: validation errors', () => {
       createSession(ctx, {
         goalId: 'g1',
         workspaceId: 'ws1',
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         taskId: 'no-such-task',
       })
     ).rejects.toThrow(TaskNotFoundError);
@@ -337,7 +337,7 @@ describe('session create associations: validation errors', () => {
       createSession(ctx, {
         goalId: 'g1',
         workspaceId: 'ws1',
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         taskId: 'task-g2',
       })
     ).rejects.toThrow(AssociationGoalMismatchError);
@@ -356,7 +356,7 @@ describe('session create associations: validation errors', () => {
       createSession(ctx, {
         goalId: 'g1',
         workspaceId: 'ws1',
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         taskId: 'task-archived',
       })
     ).rejects.toThrow(ArchivedTargetError);
@@ -374,7 +374,7 @@ describe('session create associations: validation errors', () => {
       createSession(ctx, {
         goalId: 'g1',
         workspaceId: 'ws1',
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         fromRecommendationId: 'no-such-rec',
       })
     ).rejects.toThrow(RecommendationNotFoundError);
@@ -394,7 +394,7 @@ describe('session create associations: validation errors', () => {
       createSession(ctx, {
         goalId: 'g1',
         workspaceId: 'ws1',
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         fromRecommendationId: 'rec-g2',
       })
     ).rejects.toThrow(AssociationGoalMismatchError);
@@ -414,7 +414,7 @@ describe('session create associations: validation errors', () => {
         createSession(ctx, {
           goalId: 'g1',
           workspaceId: 'ws1',
-          adapterId: 'shell-manual',
+          adapterId: 'claude-code',
           fromRecommendationId: `rec-${status}`,
         })
       ).rejects.toThrow(InvalidRecommendationStateError);
@@ -436,7 +436,7 @@ describe('session create associations: validation errors', () => {
       createSession(ctx, {
         goalId: 'g1',
         workspaceId: 'ws1',
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         taskId: 'task-archived',
       })
     ).rejects.toThrow(ArchivedTargetError);
@@ -471,7 +471,7 @@ describe('session create associations: validation errors', () => {
     await createSession(ctx, {
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       taskId: 'task-1',
     });
 

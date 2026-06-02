@@ -95,34 +95,34 @@ describe("ReadinessService.checkAgent", () => {
 
   it("adapter throws → persisted failed report (not stale)", async () => {
     const registry = new AdapterRegistry();
-    registry.register(makeAdapter("opencode", {
-      install: { name: "installed", ok: true, command: "opencode --version" },
-      auth: { name: "authenticated", ok: true, authStatus: "ready", command: "opencode auth list" },
+    registry.register(makeAdapter("codex", {
+      install: { name: "installed", ok: true, command: "codex --version" },
+      auth: { name: "authenticated", ok: true, authStatus: "ready", command: "codex login status" },
       throws: true,
     }));
-    setAgentConnected(db, "opencode", true);
+    setAgentConnected(db, "codex", true);
     const svc = new ReadinessService(db, registry, () => "2026-05-22T00:00:00.000Z");
-    const report = await svc.checkAgent("opencode");
+    const report = await svc.checkAgent("codex");
     expect(report.status).toBe("failed");
-    const row = listAgents(db).find((a) => a.id === "opencode")!;
+    const row = listAgents(db).find((a) => a.id === "codex")!;
     expect(row.readiness?.status).toBe("failed");
   });
 
   it("adapter throws without failed repair → report remains contract-valid", async () => {
     const registry = new AdapterRegistry();
     registry.register({
-      ...makeAdapter("opencode", {
-        install: { name: "installed", ok: true, command: "opencode --version" },
-        auth: { name: "authenticated", ok: true, authStatus: "ready", command: "opencode auth list" },
+      ...makeAdapter("codex", {
+        install: { name: "installed", ok: true, command: "codex --version" },
+        auth: { name: "authenticated", ok: true, authStatus: "ready", command: "codex login status" },
         throws: true,
       }),
       repairFor() {
         return undefined;
       },
     });
-    setAgentConnected(db, "opencode", true);
+    setAgentConnected(db, "codex", true);
     const svc = new ReadinessService(db, registry, () => "2026-05-22T00:00:00.000Z");
-    const report = await svc.checkAgent("opencode");
+    const report = await svc.checkAgent("codex");
     expect(() => AgentReadinessReport.parse(report)).not.toThrow();
     expect(report.repair).toBeUndefined();
   });
@@ -166,7 +166,6 @@ describe("ReadinessService.checkSelected", () => {
     }));
     setAgentConnected(db, "claude-code", true);
     setAgentConnected(db, "codex", true);
-    // gemini-cli + opencode left disconnected
     const svc = new ReadinessService(db, registry, () => "2026-05-22T00:00:00.000Z");
     const reports = await svc.checkSelected();
     expect(reports.map((r) => r.agentId).sort()).toEqual(["claude-code", "codex"]);

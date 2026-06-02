@@ -101,7 +101,7 @@ describe('context-routes', () => {
         url: '/v1/goals/goal-1/context-packages',
         headers: AUTH,
         payload: {
-          adapterId: 'shell-manual',
+          adapterId: 'claude-code',
           role: 'engineer',
           objective: 'Fix the rendering bug',
         },
@@ -112,7 +112,7 @@ describe('context-routes', () => {
       expect(body.reused).toBe(false);
       expect(body.assembly.status).toBe('succeeded');
       expect(body.assembly.goalId).toBe('goal-1');
-      expect(body.assembly.adapterId).toBe('shell-manual');
+      expect(body.assembly.adapterId).toBe('claude-code');
       expect(body.assembly.role).toBe('engineer');
       expect(body.package).not.toBeNull();
       expect(body.package!.status).toBe('ready');
@@ -125,7 +125,7 @@ describe('context-routes', () => {
       seedGoal(db, 'goal-1');
 
       const payload = {
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         role: 'engineer',
         objective: 'Fix the rendering bug',
       };
@@ -155,7 +155,7 @@ describe('context-routes', () => {
     it('duplicate create emits no new events', async () => {
       seedGoal(db, 'goal-1');
       const payload = {
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         role: 'engineer',
         objective: 'Fix the rendering bug',
       };
@@ -179,7 +179,7 @@ describe('context-routes', () => {
     it('returns 200 + new assembly id on retry after failed assembly', async () => {
       seedGoal(db, 'goal-1');
       const payload = {
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         role: 'engineer',
         objective: 'Fix the rendering bug',
       };
@@ -214,7 +214,7 @@ describe('context-routes', () => {
     it('regenerate path: replacePackageId produces package with supersedesPackageId set', async () => {
       seedGoal(db, 'goal-1');
       const payload = {
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         role: 'engineer',
         objective: 'Fix the rendering bug',
       };
@@ -250,7 +250,7 @@ describe('context-routes', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/context-packages',
         headers: AUTH,
-        payload: { adapterId: 'shell-manual', role: 'wizard', objective: 'do stuff' },
+        payload: { adapterId: 'claude-code', role: 'wizard', objective: 'do stuff' },
       });
       expect(res.statusCode).toBe(400);
     });
@@ -261,7 +261,7 @@ describe('context-routes', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/context-packages',
         headers: AUTH,
-        payload: { adapterId: 'shell-manual', role: 'engineer' },
+        payload: { adapterId: 'claude-code', role: 'engineer' },
       });
       expect(res.statusCode).toBe(400);
     });
@@ -271,7 +271,7 @@ describe('context-routes', () => {
         method: 'POST',
         url: '/v1/goals/no-such-goal/context-packages',
         headers: AUTH,
-        payload: { adapterId: 'shell-manual', role: 'engineer', objective: 'do stuff' },
+        payload: { adapterId: 'claude-code', role: 'engineer', objective: 'do stuff' },
       });
       expect(res.statusCode).toBe(404);
       const body = JSON.parse(res.body) as { error: { code: string } };
@@ -284,7 +284,7 @@ describe('context-routes', () => {
         method: 'POST',
         url: '/v1/goals/goal-archived/context-packages',
         headers: AUTH,
-        payload: { adapterId: 'shell-manual', role: 'engineer', objective: 'do stuff' },
+        payload: { adapterId: 'claude-code', role: 'engineer', objective: 'do stuff' },
       });
       expect(res.statusCode).toBe(409);
       const body = JSON.parse(res.body) as { error: { code: string } };
@@ -312,7 +312,7 @@ describe('context-routes', () => {
         method: 'POST',
         url: '/v1/goals/goal-adapter-test/context-packages',
         headers: AUTH,
-        payload: { adapterId: 'shell-manual', role: 'engineer', objective: 'do stuff' },
+        payload: { adapterId: 'claude-code', role: 'engineer', objective: 'do stuff' },
       });
       await mini.close();
       expect(res.statusCode).toBe(404);
@@ -327,7 +327,7 @@ describe('context-routes', () => {
         url: '/v1/goals/goal-1/context-packages',
         headers: AUTH,
         payload: {
-          adapterId: 'shell-manual',
+          adapterId: 'claude-code',
           role: 'engineer',
           objective: 'do stuff',
           workspaceId: 'ws-foreign',
@@ -346,7 +346,7 @@ describe('context-routes', () => {
         method: 'POST',
         url: '/v1/goals/goal-2/context-packages',
         headers: AUTH,
-        payload: { adapterId: 'shell-manual', role: 'engineer', objective: 'other goal work' },
+        payload: { adapterId: 'claude-code', role: 'engineer', objective: 'other goal work' },
       });
       expect(res1.statusCode).toBe(201);
       const body1 = CreateContextPackageResponse.parse(JSON.parse(res1.body));
@@ -357,7 +357,7 @@ describe('context-routes', () => {
         url: '/v1/goals/goal-1/context-packages',
         headers: AUTH,
         payload: {
-          adapterId: 'shell-manual',
+          adapterId: 'claude-code',
           role: 'engineer',
           objective: 'do stuff',
           replacePackageId: foreignPkgId,
@@ -377,7 +377,7 @@ describe('context-routes', () => {
         url: '/v1/goals/goal-1/context-packages',
         headers: AUTH,
         payload: {
-          adapterId: 'shell-manual',
+          adapterId: 'claude-code',
           role: 'engineer',
           objective: 'do stuff',
           workspaceId: 'ws-1',
@@ -401,13 +401,13 @@ describe('context-routes', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/context-packages',
         headers: AUTH,
-        payload: { adapterId: 'shell-manual', role: 'engineer', objective: 'task one' },
+        payload: { adapterId: 'claude-code', role: 'engineer', objective: 'task one' },
       });
       await server.inject({
         method: 'POST',
         url: '/v1/goals/goal-1/context-packages',
         headers: AUTH,
-        payload: { adapterId: 'shell-manual', role: 'architect', objective: 'task two' },
+        payload: { adapterId: 'claude-code', role: 'architect', objective: 'task two' },
       });
 
       const res = await server.inject({
@@ -430,7 +430,7 @@ describe('context-routes', () => {
           url: '/v1/goals/goal-1/context-packages',
           headers: AUTH,
           payload: {
-            adapterId: 'shell-manual',
+            adapterId: 'claude-code',
             role: 'engineer',
             objective: `objective ${i}`,
           },
@@ -483,7 +483,7 @@ describe('context-routes', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/context-packages',
         headers: AUTH,
-        payload: { adapterId: 'shell-manual', role: 'engineer', objective: 'Fix bug' },
+        payload: { adapterId: 'claude-code', role: 'engineer', objective: 'Fix bug' },
       });
       expect(createRes.statusCode).toBe(201);
       const createBody = CreateContextPackageResponse.parse(JSON.parse(createRes.body));
@@ -531,7 +531,7 @@ describe('context-routes', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/context-packages',
         headers: AUTH,
-        payload: { adapterId: 'shell-manual', role: 'engineer', objective: 'Fix bug' },
+        payload: { adapterId: 'claude-code', role: 'engineer', objective: 'Fix bug' },
       });
 
       unsub();
@@ -552,7 +552,7 @@ describe('context-routes', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/context-packages',
         headers: AUTH,
-        payload: { adapterId: 'shell-manual', role: 'engineer', objective: 'Fix bug' },
+        payload: { adapterId: 'claude-code', role: 'engineer', objective: 'Fix bug' },
       });
 
       unsub();

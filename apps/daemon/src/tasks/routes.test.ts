@@ -103,7 +103,7 @@ describe('task routes', () => {
   function seedSession(id: string, goalId: string, workspaceId: string): void {
     db.prepare(
       `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at)
-       VALUES (?, ?, ?, 'shell-manual', 'session', 'created', '2026-01-01T00:00:00.000Z')`
+       VALUES (?, ?, ?, 'claude-code', 'session', 'created', '2026-01-01T00:00:00.000Z')`
     ).run(id, goalId, workspaceId);
   }
 

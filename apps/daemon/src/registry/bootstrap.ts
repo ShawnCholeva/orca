@@ -9,11 +9,8 @@ import { internalRecommendationGenerationSkill } from '../skills/internal-recomm
 import { internalTaskGenerationSkill } from '../skills/internal-task-generation.js';
 import { internalConflictDetectionSkill } from '../skills/internal-conflict-detection.js';
 import { AdapterRegistry, adapterRegistry } from '../adapters/registry.js';
-import { ShellManualAdapter } from '../adapters/shell-manual.js';
 import { ClaudeCodeAdapter } from '../adapters/claude-code.js';
-import { OpenCodeAdapter } from '../adapters/opencode.js';
 import { CodexAdapter } from '../adapters/codex.js';
-import { GeminiAdapter } from '../adapters/gemini.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -42,7 +39,6 @@ export function bootstrapRegistries(registries?: {
   try {
     plugins.register({ id: 'orca.sqlite', name: 'Orca SQLite', version, capabilities: ['storage'] });
     plugins.register({ id: 'orca.default-skills', name: 'Orca Default Skills', version, capabilities: ['skill.provider'] });
-    plugins.register({ id: 'orca.shell-manual', name: 'Shell (Manual)', version, capabilities: ['agent.adapter'] });
 
     skills.register(quickGoalSkill);
     skills.register(guidedGoalRefinementSkill);
@@ -50,11 +46,8 @@ export function bootstrapRegistries(registries?: {
     skills.register(internalTaskGenerationSkill);
     skills.register(internalConflictDetectionSkill);
 
-    adapters.register(new ShellManualAdapter());
     adapters.register(new ClaudeCodeAdapter());
-    adapters.register(new OpenCodeAdapter());
     adapters.register(new CodexAdapter());
-    adapters.register(new GeminiAdapter());
 
     plugins.freeze();
     skills.freeze();

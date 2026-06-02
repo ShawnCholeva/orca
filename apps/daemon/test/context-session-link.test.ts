@@ -90,7 +90,7 @@ describe('context-session-link', () => {
 
   async function createPackage(
     goalId: string,
-    adapterId = 'shell-manual',
+    adapterId = 'claude-code',
     role = 'engineer',
     workspaceId?: string
   ): Promise<string> {
@@ -119,7 +119,7 @@ describe('context-session-link', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/sessions',
         headers: AUTH,
-        payload: { workspaceId: 'ws-1', adapterId: 'shell-manual' },
+        payload: { workspaceId: 'ws-1', adapterId: 'claude-code' },
       });
 
       expect(res.statusCode).toBe(201);
@@ -135,7 +135,7 @@ describe('context-session-link', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/sessions',
         headers: AUTH,
-        payload: { workspaceId: 'ws-1', adapterId: 'shell-manual' },
+        payload: { workspaceId: 'ws-1', adapterId: 'claude-code' },
       });
       expect(createRes.statusCode).toBe(201);
       const { session } = CreateSessionResponse.parse(JSON.parse(createRes.body));
@@ -166,7 +166,7 @@ describe('context-session-link', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/sessions',
         headers: AUTH,
-        payload: { workspaceId: 'ws-1', adapterId: 'shell-manual', contextPackageId: pkgId },
+        payload: { workspaceId: 'ws-1', adapterId: 'claude-code', contextPackageId: pkgId },
       });
 
       expect(res.statusCode).toBe(201);
@@ -194,7 +194,7 @@ describe('context-session-link', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/sessions',
         headers: AUTH,
-        payload: { workspaceId: 'ws-1', adapterId: 'shell-manual', contextPackageId: pkgId },
+        payload: { workspaceId: 'ws-1', adapterId: 'claude-code', contextPackageId: pkgId },
       });
       expect(createRes.statusCode).toBe(201);
       const { session } = CreateSessionResponse.parse(JSON.parse(createRes.body));
@@ -225,7 +225,7 @@ describe('context-session-link', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/sessions',
         headers: AUTH,
-        payload: { workspaceId: 'ws-1', adapterId: 'shell-manual', contextPackageId: 'nonexistent-pkg' },
+        payload: { workspaceId: 'ws-1', adapterId: 'claude-code', contextPackageId: 'nonexistent-pkg' },
       });
 
       expect(res.statusCode).toBe(404);
@@ -244,7 +244,7 @@ describe('context-session-link', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/sessions',
         headers: AUTH,
-        payload: { workspaceId: 'ws-1', adapterId: 'shell-manual', contextPackageId: pkgId },
+        payload: { workspaceId: 'ws-1', adapterId: 'claude-code', contextPackageId: pkgId },
       });
 
       expect(res.statusCode).toBe(400);
@@ -256,33 +256,20 @@ describe('context-session-link', () => {
       seedGoal(db, 'goal-1');
       seedWorkspace(db, 'ws-1', 'goal-1', wsDir);
 
-      // Create package for shell-manual, attempt session with different adapter
-      // Since all adapters need to be registered, we seed the package directly via DB
+      // Seed a package bound to codex, then request a session with a different
+      // (also registered) adapter to trigger the adapterId mismatch check.
       db.prepare(
         `INSERT INTO context_packages (id, goal_id, supersedes_package_id, adapter_id, workspace_id, role, objective,
            status, rendered_context, rendered_bytes, estimated_tokens, truncated, sparse, source_count,
            sources_json, warnings_json, source_fingerprint, assembler_version, created_at)
-         VALUES (?, ?, null, 'shell-manual', null, 'engineer', 'obj', 'ready', 'ctx', 3, 1, 0, 1, 0, '[]', '[]', 'fp1', 'v1', ?)`
-      ).run('pkg-adapter-mismatch', 'goal-1', NOW);
-
-      // Inject with adapterId that differs from package's adapterId
-      // We need an adapter that's registered. All adapters are registered via bootstrapRegistries.
-      // The test just needs the adapters table to differ - we can pass a fake adapterId if it won't
-      // fail at adapter lookup first. Let's check via the seeded package's adapterId vs request adapterId.
-      // shell-manual package, but we can't use a different adapter since it'll fail adapter_not_found.
-      // Instead, seed a claude-code package and try with shell-manual.
-      db.prepare(
-        `INSERT INTO context_packages (id, goal_id, supersedes_package_id, adapter_id, workspace_id, role, objective,
-           status, rendered_context, rendered_bytes, estimated_tokens, truncated, sparse, source_count,
-           sources_json, warnings_json, source_fingerprint, assembler_version, created_at)
-         VALUES (?, ?, null, 'claude-code', null, 'engineer', 'obj', 'ready', 'ctx', 3, 1, 0, 1, 0, '[]', '[]', 'fp2', 'v1', ?)`
-      ).run('pkg-claude-code', 'goal-1', NOW);
+         VALUES (?, ?, null, 'codex', null, 'engineer', 'obj', 'ready', 'ctx', 3, 1, 0, 1, 0, '[]', '[]', 'fp2', 'v1', ?)`
+      ).run('pkg-codex', 'goal-1', NOW);
 
       const res = await server.inject({
         method: 'POST',
         url: '/v1/goals/goal-1/sessions',
         headers: AUTH,
-        payload: { workspaceId: 'ws-1', adapterId: 'shell-manual', contextPackageId: 'pkg-claude-code' },
+        payload: { workspaceId: 'ws-1', adapterId: 'claude-code', contextPackageId: 'pkg-codex' },
       });
 
       expect(res.statusCode).toBe(400);
@@ -302,7 +289,7 @@ describe('context-session-link', () => {
         `INSERT INTO context_packages (id, goal_id, supersedes_package_id, adapter_id, workspace_id, role, objective,
            status, rendered_context, rendered_bytes, estimated_tokens, truncated, sparse, source_count,
            sources_json, warnings_json, source_fingerprint, assembler_version, created_at)
-         VALUES (?, ?, null, 'shell-manual', 'ws-2', 'engineer', 'obj', 'ready', 'ctx', 3, 1, 0, 1, 0, '[]', '[]', 'fp3', 'v1', ?)`
+         VALUES (?, ?, null, 'claude-code', 'ws-2', 'engineer', 'obj', 'ready', 'ctx', 3, 1, 0, 1, 0, '[]', '[]', 'fp3', 'v1', ?)`
       ).run('pkg-ws-mismatch', 'goal-1', NOW);
 
       // Session created for ws-1, package tied to ws-2
@@ -310,7 +297,7 @@ describe('context-session-link', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/sessions',
         headers: AUTH,
-        payload: { workspaceId: 'ws-1', adapterId: 'shell-manual', contextPackageId: 'pkg-ws-mismatch' },
+        payload: { workspaceId: 'ws-1', adapterId: 'claude-code', contextPackageId: 'pkg-ws-mismatch' },
       });
 
       expect(res.statusCode).toBe(400);
@@ -329,7 +316,7 @@ describe('context-session-link', () => {
         method: 'POST',
         url: '/v1/goals/goal-1/sessions',
         headers: AUTH,
-        payload: { workspaceId: 'ws-1', adapterId: 'shell-manual', contextPackageId: pkgId },
+        payload: { workspaceId: 'ws-1', adapterId: 'claude-code', contextPackageId: pkgId },
       });
 
       expect(res.statusCode).toBe(201);
@@ -351,7 +338,7 @@ describe('context-session-link', () => {
         method: 'POST',
         url: '/v1/goals/goal-archived/sessions',
         headers: AUTH,
-        payload: { workspaceId: 'ws-arc', adapterId: 'shell-manual' },
+        payload: { workspaceId: 'ws-arc', adapterId: 'claude-code' },
       });
 
       expect(res.statusCode).toBe(409);

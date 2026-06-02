@@ -14,7 +14,6 @@ import { adapterRegistry } from './adapters/registry.js';
 import { ModelProviderRegistry } from './llm/registry.js';
 import { createAnthropicProvider } from './llm/anthropic.js';
 import { createOpenAIProvider } from './llm/openai.js';
-import { createGeminiProvider } from './llm/gemini.js';
 import { OperatorRegistry } from './workflows/operators/registry.js';
 import { OperatorSelector } from './workflows/operators/selector.js';
 import { OrchestrationTransportBroker, execModeToTransport } from './workflows/orchestration-transport/broker.js';
@@ -52,7 +51,6 @@ function createDefaultModelProviderRegistry(): ModelProviderRegistry {
   const registry = new ModelProviderRegistry();
   registry.register(createAnthropicProvider());
   registry.register(createOpenAIProvider());
-  registry.register(createGeminiProvider());
   return registry;
 }
 

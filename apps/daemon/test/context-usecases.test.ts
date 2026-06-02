@@ -56,7 +56,7 @@ function seedGoal(db: Database.Database, goalId: string, archived = false): void
 function makeBaseInput(overrides: Partial<Parameters<typeof requestContextPackage>[1]> = {}) {
   return {
     goalId: 'goal-1',
-    adapterId: 'shell-manual' as const,
+    adapterId: 'claude-code' as const,
     workspaceId: null,
     role: 'engineer',
     objective: 'Fix the rendering bug',
@@ -95,7 +95,7 @@ describe('context-usecases: happy path', () => {
     expect(result.reused).toBe(false);
     expect(result.assembly.status).toBe('succeeded');
     expect(result.assembly.goalId).toBe('goal-1');
-    expect(result.assembly.adapterId).toBe('shell-manual');
+    expect(result.assembly.adapterId).toBe('claude-code');
     expect(result.assembly.role).toBe('engineer');
     expect(result.assembly.packageId).toBeTruthy();
 

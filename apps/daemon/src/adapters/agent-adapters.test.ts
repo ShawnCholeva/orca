@@ -3,10 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ClaudeCodeAdapter } from "./claude-code.js";
-import { OpenCodeAdapter } from "./opencode.js";
 import { CodexAdapter } from "./codex.js";
-import { GeminiAdapter } from "./gemini.js";
-import { ShellManualAdapter } from "./shell-manual.js";
 import type { AgentAdapter } from "./types.js";
 import { resolveBinary } from "./resolve.js";
 import type { ResolveBinaryResult, ResolveFn } from "./resolve.js";
@@ -43,12 +40,6 @@ const ADAPTER_CASES: AdapterCase[] = [
     envKey: "ORCA_CLAUDE_CODE_BIN",
     defaultBin: "claude",
     create: (fn) => new ClaudeCodeAdapter(fn),
-  },
-  {
-    name: "OpenCodeAdapter",
-    envKey: "ORCA_OPENCODE_BIN",
-    defaultBin: "opencode",
-    create: (fn) => new OpenCodeAdapter(fn),
   },
   {
     name: "CodexAdapter",
@@ -224,8 +215,8 @@ describe("adapter supportsModel", () => {
     expect(a.supportsModel("gpt-5.2")).toBe(true);
   });
 
-  it("shell-manual rejects unknown model ids", () => {
-    expect(new ShellManualAdapter().supportsModel("anything")).toBe(false);
+  it("codex rejects unknown model ids", () => {
+    expect(new CodexAdapter().supportsModel("anything")).toBe(false);
   });
 });
 
@@ -239,12 +230,5 @@ describe("adapter supportedExecutionModes", () => {
     expect(new CodexAdapter().supportedExecutionModes).toEqual(
       expect.arrayContaining(["one_shot", "shadow_session"])
     );
-  });
-  it("opencode declares shadow_session", () => {
-    expect(new OpenCodeAdapter().supportedExecutionModes).toContain("shadow_session");
-  });
-  it("gemini and shell-manual declare at least one mode", () => {
-    expect(new GeminiAdapter().supportedExecutionModes.length).toBeGreaterThan(0);
-    expect(new ShellManualAdapter().supportedExecutionModes.length).toBeGreaterThan(0);
   });
 });

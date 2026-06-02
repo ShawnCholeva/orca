@@ -67,7 +67,7 @@ function seedWorkspace(db: Database.Database, id: string, goalId: string): void 
 function seedSession(db: Database.Database, id: string, goalId: string, workspaceId: string): void {
   db.prepare(
     `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at)
-     VALUES (?, ?, ?, 'shell-manual', 'Session', 'created', '2026-01-01T00:00:00.000Z')`
+     VALUES (?, ?, ?, 'claude-code', 'Session', 'created', '2026-01-01T00:00:00.000Z')`
   ).run(id, goalId, workspaceId);
 }
 
@@ -76,7 +76,7 @@ function makePackageInput(overrides: Partial<InsertContextPackageInput> = {}): I
     id: overrides.id ?? 'pkg-1',
     goalId: overrides.goalId ?? 'goal-1',
     supersedesPackageId: overrides.supersedesPackageId ?? null,
-    adapterId: overrides.adapterId ?? 'shell-manual',
+    adapterId: overrides.adapterId ?? 'claude-code',
     workspaceId: overrides.workspaceId ?? 'ws-1',
     role: overrides.role ?? 'engineer',
     objective: overrides.objective ?? 'Fix the bug',
@@ -109,7 +109,7 @@ function makeAssemblyInput(overrides: Partial<InsertContextAssemblyInput> = {}):
     goalId: overrides.goalId ?? 'goal-1',
     packageId: overrides.packageId ?? null,
     replacePackageId: overrides.replacePackageId ?? null,
-    adapterId: overrides.adapterId ?? 'shell-manual',
+    adapterId: overrides.adapterId ?? 'claude-code',
     workspaceId: overrides.workspaceId ?? 'ws-1',
     role: overrides.role ?? 'engineer',
     objectiveHash: overrides.objectiveHash ?? 'obj-hash',
@@ -156,7 +156,7 @@ describe('context-projection: package insert and read', () => {
     expect(pkg).not.toBeNull();
     expect(pkg!.id).toBe('pkg-1');
     expect(pkg!.goalId).toBe('goal-1');
-    expect(pkg!.adapterId).toBe('shell-manual');
+    expect(pkg!.adapterId).toBe('claude-code');
     expect(pkg!.role).toBe('engineer');
     expect(pkg!.objective).toBe('Fix the bug');
     expect(pkg!.status).toBe('ready');
@@ -328,7 +328,7 @@ describe('context-projection: listContextPackagesByGoal', () => {
     seedGoal(db, 'goal-1');
     seedWorkspace(db, 'ws-1', 'goal-1');
 
-    insertContextPackage(db, makePackageInput({ id: 'pkg-1', adapterId: 'shell-manual' }));
+    insertContextPackage(db, makePackageInput({ id: 'pkg-1', adapterId: 'codex' }));
     insertContextPackage(db, makePackageInput({ id: 'pkg-2', adapterId: 'claude-code' }));
 
     const { packages } = listContextPackagesByGoal(db, 'goal-1', { adapterId: 'claude-code', limit: 20 });

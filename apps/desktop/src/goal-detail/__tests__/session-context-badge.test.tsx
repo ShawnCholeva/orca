@@ -11,15 +11,19 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 const now = "2026-01-01T00:00:00.000Z";
 
+// No surviving adapter delivers context directly (all are preview-only), but the
+// badge logic still supports a non-preview adapter; exercise it with a synthetic id.
+const directAdapter = "direct-context-adapter" as unknown as AdapterId;
+
 function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
     id: "sess-1",
     goalId: "goal-1",
     workspaceId: "ws-1",
-    adapterId: "shell-manual" as AdapterId,
+    adapterId: "claude-code" as AdapterId,
     contextPackageId: null,
     role: null,
-    title: "shell-manual session",
+    title: "claude-code session",
     status: "running" as const,
     createdAt: now,
     startedAt: null,
@@ -33,7 +37,7 @@ function makePkg(overrides: Partial<ContextPackage> = {}): ContextPackage {
     id: "pkg-1",
     goalId: "goal-1",
     supersedesPackageId: null,
-    adapterId: "shell-manual" as AdapterId,
+    adapterId: "claude-code" as AdapterId,
     workspaceId: "ws-1",
     role: "engineer",
     objective: "test objective",
@@ -69,7 +73,7 @@ const workspace = {
 };
 
 const adapters = [
-  { id: "shell-manual" as AdapterId, title: "Shell / Manual", availability: "available" as const },
+  { id: "claude-code" as AdapterId, title: "Claude Code", availability: "available" as const },
 ];
 
 function mockApi(overrides: Record<string, unknown> = {}) {
@@ -131,33 +135,27 @@ describe("getContextBadgeState", () => {
     expect(getContextBadgeState(session, pkg)).toBe("preview-only");
   });
 
-  it("returns preview-only for opencode adapter", () => {
-    const session = makeSession({ contextPackageId: "pkg-1", adapterId: "opencode" as AdapterId });
-    const pkg = makePkg({ adapterId: "opencode" as AdapterId });
-    expect(getContextBadgeState(session, pkg)).toBe("preview-only");
-  });
-
   it("returns preview-only for codex adapter", () => {
     const session = makeSession({ contextPackageId: "pkg-1", adapterId: "codex" as AdapterId });
     const pkg = makePkg({ adapterId: "codex" as AdapterId });
     expect(getContextBadgeState(session, pkg)).toBe("preview-only");
   });
 
-  it("returns sparse for shell-manual sparse package", () => {
-    const session = makeSession({ contextPackageId: "pkg-1" });
-    const pkg = makePkg({ sparse: true, truncated: false });
+  it("returns sparse for a context-delivering adapter with a sparse package", () => {
+    const session = makeSession({ contextPackageId: "pkg-1", adapterId: directAdapter });
+    const pkg = makePkg({ adapterId: directAdapter, sparse: true, truncated: false });
     expect(getContextBadgeState(session, pkg)).toBe("sparse");
   });
 
-  it("returns truncated for shell-manual truncated package", () => {
-    const session = makeSession({ contextPackageId: "pkg-1" });
-    const pkg = makePkg({ sparse: false, truncated: true });
+  it("returns truncated for a context-delivering adapter with a truncated package", () => {
+    const session = makeSession({ contextPackageId: "pkg-1", adapterId: directAdapter });
+    const pkg = makePkg({ adapterId: directAdapter, sparse: false, truncated: true });
     expect(getContextBadgeState(session, pkg)).toBe("truncated");
   });
 
-  it("returns ready for shell-manual non-sparse non-truncated package", () => {
-    const session = makeSession({ contextPackageId: "pkg-1" });
-    const pkg = makePkg({ sparse: false, truncated: false });
+  it("returns ready for a context-delivering adapter with a non-sparse non-truncated package", () => {
+    const session = makeSession({ contextPackageId: "pkg-1", adapterId: directAdapter });
+    const pkg = makePkg({ adapterId: directAdapter, sparse: false, truncated: false });
     expect(getContextBadgeState(session, pkg)).toBe("ready");
   });
 
@@ -185,7 +183,7 @@ describe("SessionContextBadge in SessionsPanel", () => {
   });
 
   it("renders ready badge with KiB and source count for session with context package", async () => {
-    const pkg = makePkg({ renderedBytes: 12698, sourceCount: 9 });
+    const pkg = makePkg({ adapterId: directAdapter, renderedBytes: 12698, sourceCount: 9 });
     mockApi({
       listSessions: vi.fn().mockResolvedValue({
         sessions: [makeSession({ contextPackageId: "pkg-1" })],
@@ -208,7 +206,7 @@ describe("SessionContextBadge in SessionsPanel", () => {
   });
 
   it("renders sparse badge for sparse package", async () => {
-    const pkg = makePkg({ sparse: true });
+    const pkg = makePkg({ adapterId: directAdapter, sparse: true });
     mockApi({
       listSessions: vi.fn().mockResolvedValue({
         sessions: [makeSession({ contextPackageId: "pkg-1" })],
@@ -227,7 +225,7 @@ describe("SessionContextBadge in SessionsPanel", () => {
   });
 
   it("renders truncated badge for truncated package", async () => {
-    const pkg = makePkg({ truncated: true });
+    const pkg = makePkg({ adapterId: directAdapter, truncated: true });
     mockApi({
       listSessions: vi.fn().mockResolvedValue({
         sessions: [makeSession({ contextPackageId: "pkg-1" })],
@@ -288,7 +286,7 @@ describe("SessionContextBadge in SessionsPanel", () => {
       goalId: "goal-1",
       packageId: "pkg-1",
       replacePackageId: null,
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
       workspaceId: "ws-1",
       role: "engineer",
       objectiveHash: "hash",
@@ -369,7 +367,7 @@ describe("SessionContextBadge in SessionsPanel", () => {
       goalId: "goal-1",
       packageId: null,
       replacePackageId: null,
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
       workspaceId: "ws-1",
       role: "engineer",
       objectiveHash: "hash",

@@ -282,12 +282,6 @@ describe("goal refinement and workspace contracts", () => {
   });
 });
 
-describe("AdapterId now includes gemini-cli", () => {
-  it("accepts gemini-cli", () => {
-    expect(AdapterId.parse("gemini-cli")).toBe("gemini-cli");
-  });
-});
-
 describe("agent readiness contracts", () => {
   it("accepts every persisted status", () => {
     for (const s of ["unchecked", "ready", "missing", "needs_auth", "misconfigured", "failed"] as const) {
@@ -462,7 +456,7 @@ describe("session contracts", () => {
     id: "sess-1",
     goalId: "goal-1",
     workspaceId: "ws-1",
-    adapterId: "shell-manual",
+    adapterId: "claude-code",
     role: null,
     title: "Shell session",
     status: "created",
@@ -520,7 +514,7 @@ describe("session contracts", () => {
 
   it("parses adapter schemas", () => {
     const adapter = {
-      id: "shell-manual" as const,
+      id: "claude-code" as const,
       title: "Shell",
       availability: "available" as const,
       detail: "Ready"
@@ -726,7 +720,7 @@ describe("session contracts", () => {
       sessionId: "sess-1",
       goalId: "goal-1",
       workspaceId: "ws-1",
-      adapterId: "shell-manual" as const,
+      adapterId: "claude-code" as const,
       contextPackageId: "pkg-1"
     };
     expectRoundTrip(
@@ -739,7 +733,7 @@ describe("session contracts", () => {
       sessionId: "sess-2",
       goalId: "goal-1",
       workspaceId: "ws-1",
-      adapterId: "shell-manual" as const
+      adapterId: "claude-code" as const
     };
     expectRoundTrip(
       SessionCreatedEventPayload.parse,
@@ -888,7 +882,7 @@ describe("memory contracts", () => {
       ],
       session: {
         id: "sess-1",
-        adapterId: "shell-manual" as const,
+        adapterId: "claude-code" as const,
         role: null,
         instructions: "run tests",
         exitCode: 0,
@@ -1161,7 +1155,7 @@ describe("memory contracts", () => {
       id: "sess-2",
       goalId: "goal-1",
       workspaceId: "ws-1",
-      adapterId: "shell-manual" as const,
+      adapterId: "claude-code" as const,
       role: null,
       title: "Shell session",
       status: "exited" as const,
@@ -1203,7 +1197,7 @@ describe("Context package contracts", () => {
     id: "pkg-1",
     goalId: "goal-1",
     supersedesPackageId: null,
-    adapterId: "shell-manual" as const,
+    adapterId: "claude-code" as const,
     workspaceId: "ws-1",
     role: "engineer" as const,
     objective: "Ship bounded context package",
@@ -1226,7 +1220,7 @@ describe("Context package contracts", () => {
     goalId: "goal-1",
     packageId: "pkg-1",
     replacePackageId: null,
-    adapterId: "shell-manual" as const,
+    adapterId: "claude-code" as const,
     workspaceId: "ws-1",
     role: "engineer" as const,
     objectiveHash: "obj-1",
@@ -1248,7 +1242,7 @@ describe("Context package contracts", () => {
     expectRoundTrip(ContextAssembly.parse, assemblyFixture, assemblyFixture);
 
     const request = {
-      adapterId: "shell-manual" as const,
+      adapterId: "claude-code" as const,
       role: "architect" as const,
       objective: "Plan deterministic assembly",
       workspaceId: "ws-1"
@@ -1283,7 +1277,7 @@ describe("Context package contracts", () => {
         {
           assemblyId: "asm-1",
           goalId: "goal-1",
-          adapterId: "shell-manual",
+          adapterId: "claude-code",
           role: "engineer"
         }
       ],
@@ -1311,7 +1305,7 @@ describe("Context package contracts", () => {
         {
           packageId: "pkg-1",
           goalId: "goal-1",
-          adapterId: "shell-manual",
+          adapterId: "claude-code",
           role: "engineer",
           sourceCount: 4,
           renderedBytes: 1024
@@ -1362,7 +1356,7 @@ describe("Context package contracts", () => {
       ContextPackageCreatedEventPayload.parse({
         packageId: "pkg-1",
         goalId: "goal-1",
-        adapterId: "shell-manual",
+        adapterId: "claude-code",
         role: "engineer",
         sourceCount: 2,
         renderedBytes: 256,
@@ -1420,7 +1414,7 @@ describe("Context package contracts", () => {
         dirty: false
       },
       role: "reviewer" as const,
-      adapterId: "shell-manual" as const,
+      adapterId: "claude-code" as const,
       objective: "Validate context package contracts only",
       memory: [
         {
@@ -1638,7 +1632,7 @@ describe("ExecutionMode and AdapterExecutionModeConfig", () => {
 
   it("allows disabled mode not in supportedExecutionModes (policy log)", () => {
     const config: AdapterExecutionModeConfig = {
-      adapterId: "opencode",
+      adapterId: "claude-code",
       enabledExecutionModes: [{ mode: "shadow_session", preferred: true }],
       disabledExecutionModes: [{ mode: "one_shot", reason: "adapter does not implement one-shot yet" }],
     };

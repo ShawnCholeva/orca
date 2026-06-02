@@ -25,6 +25,7 @@ import { createServer } from '../src/server.js';
 import { reconcileSessionsOnBoot } from '../src/sessions/reconciliation.js';
 
 beforeAll(() => {
+  process.env.ORCA_CLAUDE_CODE_BIN = '/bin/sh';
   bootstrapRegistries();
 });
 
@@ -34,6 +35,7 @@ const ORCA_ENV_KEYS = [
   'ORCA_LOG_LEVEL',
   'ORCA_TOKEN',
   'ORCA_SHELL',
+  'ORCA_CLAUDE_CODE_BIN',
 ] as const;
 const TOKEN = 'shell-session-token';
 const AUTH_HEADERS = { authorization: `Bearer ${TOKEN}` } as const;
@@ -57,6 +59,9 @@ function resetOrcaEnv(dataDir: string): void {
   process.env.ORCA_LOG_LEVEL = 'silent';
   process.env.ORCA_TOKEN = TOKEN;
   process.env.ORCA_SHELL = '/bin/sh';
+  // The claude-code adapter spawns this binary with no args; point it at an
+  // interactive shell so the vertical slice can drive a real PTY session.
+  process.env.ORCA_CLAUDE_CODE_BIN = '/bin/sh';
 }
 
 async function boot(dataDir: string): Promise<BootResult> {
@@ -156,7 +161,7 @@ afterAll(() => {
 });
 
 describe.sequential('real shell session vertical slice', () => {
-  it('runs shell-manual through HTTP + WS, persists output, and preserves it after restart', async () => {
+  it('runs claude-code through HTTP + WS, persists output, and preserves it after restart', async () => {
     const rootDir = createTempDir('orca-shell-session-');
     const workspaceDir = path.join(rootDir, 'workspace');
     const dbDir = path.join(rootDir, 'daemon-db');
@@ -188,11 +193,11 @@ describe.sequential('real shell session vertical slice', () => {
       const adaptersResponse = await getJson(boot1.baseUrl, '/v1/adapters');
       expect(adaptersResponse.status).toBe(200);
       const adapters = ListAdaptersResponse.parse(await adaptersResponse.json()).adapters;
-      expect(adapters.find((adapter) => adapter.id === 'shell-manual')?.availability).toBe('available');
+      expect(adapters.find((adapter) => adapter.id === 'claude-code')?.availability).toBe('available');
 
       const createSessionResponse = await postJson(boot1.baseUrl, `/v1/goals/${goal.id}/sessions`, {
         workspaceId,
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         title: 'Manual shell',
       });
       expect(createSessionResponse.status).toBe(201);
@@ -305,7 +310,7 @@ describe.sequential('real shell session vertical slice', () => {
 
       const createSessionResponse = await postJson(boot1.baseUrl, `/v1/goals/${goalId}/sessions`, {
         workspaceId,
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
       });
       const sessionId = CreateSessionResponse.parse(await createSessionResponse.json()).session.id;
 

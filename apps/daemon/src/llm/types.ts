@@ -1,4 +1,4 @@
-export type ModelProviderId = "orca/anthropic" | "orca/openai" | "orca/google-gemini";
+export type ModelProviderId = "orca/anthropic" | "orca/openai";
 
 export interface ModelCompletionRequest {
   model: string;

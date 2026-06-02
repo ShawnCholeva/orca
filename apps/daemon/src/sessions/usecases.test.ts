@@ -10,7 +10,7 @@ import { closeDatabase, openDatabase } from '../db.js';
 import { defaultMigrationsDir, runMigrations } from '../migrations.js';
 import { eventBus } from '../events.js';
 import { AdapterRegistry } from '../adapters/registry.js';
-import { ShellManualAdapter } from '../adapters/shell-manual.js';
+import { ClaudeCodeAdapter } from '../adapters/claude-code.js';
 import type { PtyHandle, PtyEvents, PtyManager, PtyStartOptions } from '../pty/types.js';
 import { FakePtyManager, controlFakePty } from '../pty/fake.js';
 import {
@@ -80,7 +80,7 @@ function seedWorkspace(db: Database.Database, id: string, goalId: string, wsPath
   ).run(id, goalId, wsPath);
 }
 
-function makeAdapterRegistry(ids: string[] = ['shell-manual']): AdapterRegistry {
+function makeAdapterRegistry(ids: string[] = ['claude-code']): AdapterRegistry {
   return {
     get: (id: string) => (ids.includes(id) ? ({ id } as never) : undefined),
     list: async () => [],
@@ -115,18 +115,18 @@ describe('createSession', () => {
     const detail = await createSession(ctx, {
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       role: 'Engineer',
       instruction: 'do the thing',
     });
 
     expect(detail.goalId).toBe('g1');
     expect(detail.workspaceId).toBe('ws1');
-    expect(detail.adapterId).toBe('shell-manual');
+    expect(detail.adapterId).toBe('claude-code');
     expect(detail.role).toBe('Engineer');
     expect(detail.instruction).toBe('do the thing');
     expect(detail.status).toBe('created');
-    expect(detail.title).toBe('shell-manual session');
+    expect(detail.title).toBe('claude-code session');
     expect(detail.pid).toBeNull();
 
     // Session row exists in DB
@@ -157,7 +157,7 @@ describe('createSession', () => {
     const detail = await createSession(ctx, {
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
       title: 'Custom Title',
     });
     expect(detail.title).toBe('Custom Title');
@@ -168,7 +168,7 @@ describe('createSession', () => {
     const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry: makeAdapterRegistry() };
 
     await expect(
-      createSession(ctx, { goalId: 'missing', workspaceId: 'ws1', adapterId: 'shell-manual' })
+      createSession(ctx, { goalId: 'missing', workspaceId: 'ws1', adapterId: 'claude-code' })
     ).rejects.toThrow(GoalNotFoundError);
   });
 
@@ -178,7 +178,7 @@ describe('createSession', () => {
     const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry: makeAdapterRegistry() };
 
     await expect(
-      createSession(ctx, { goalId: 'g-archived', workspaceId: 'ws1', adapterId: 'shell-manual' })
+      createSession(ctx, { goalId: 'g-archived', workspaceId: 'ws1', adapterId: 'claude-code' })
     ).rejects.toThrow(GoalArchivedError);
   });
 
@@ -188,7 +188,7 @@ describe('createSession', () => {
     const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry: makeAdapterRegistry() };
 
     await expect(
-      createSession(ctx, { goalId: 'g1', workspaceId: 'no-such-ws', adapterId: 'shell-manual' })
+      createSession(ctx, { goalId: 'g1', workspaceId: 'no-such-ws', adapterId: 'claude-code' })
     ).rejects.toThrow(WorkspaceNotFoundError);
   });
 
@@ -202,7 +202,7 @@ describe('createSession', () => {
 
     const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry: makeAdapterRegistry() };
     await expect(
-      createSession(ctx, { goalId: 'g1', workspaceId: 'ws-for-g2', adapterId: 'shell-manual' })
+      createSession(ctx, { goalId: 'g1', workspaceId: 'ws-for-g2', adapterId: 'claude-code' })
     ).rejects.toThrow(WorkspaceNotAttachedError);
   });
 
@@ -213,7 +213,7 @@ describe('createSession', () => {
 
     const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry: makeAdapterRegistry() };
     await expect(
-      createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'shell-manual' })
+      createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'claude-code' })
     ).rejects.toThrow(WorkspaceUnavailableError);
   });
 
@@ -228,7 +228,7 @@ describe('createSession', () => {
     const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry: emptyRegistry };
 
     await expect(
-      createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'shell-manual' })
+      createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'claude-code' })
     ).rejects.toThrow(AdapterNotFoundError);
   });
 
@@ -258,7 +258,7 @@ describe('createSession', () => {
     await createSession(ctx, {
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
     });
 
     expect(sessionExistedAtPublish).toBe(true);
@@ -270,7 +270,7 @@ describe('createSession', () => {
     const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry: makeAdapterRegistry() };
 
     await expect(
-      createSession(ctx, { goalId: 'missing', workspaceId: 'ws1', adapterId: 'shell-manual' })
+      createSession(ctx, { goalId: 'missing', workspaceId: 'ws1', adapterId: 'claude-code' })
     ).rejects.toThrow(GoalNotFoundError);
 
     expect(publishSpy).not.toHaveBeenCalled();
@@ -288,8 +288,8 @@ describe('listSessionsForGoal', () => {
     seedWorkspace(db, 'ws1', 'g1', wsDir);
 
     const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry: makeAdapterRegistry() };
-    const s1 = await createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'shell-manual' });
-    const s2 = await createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'shell-manual' });
+    const s1 = await createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'claude-code' });
+    const s2 = await createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'claude-code' });
 
     const sessions = listSessionsForGoal(db, 'g1');
     expect(sessions).toHaveLength(2);
@@ -313,7 +313,7 @@ describe('getSession', () => {
     seedWorkspace(db, 'ws1', 'g1', wsDir);
 
     const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry: makeAdapterRegistry() };
-    const created = await createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'shell-manual' });
+    const created = await createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'claude-code' });
 
     const { session, output } = getSession(db, created.id);
     expect(session.id).toBe(created.id);
@@ -341,7 +341,7 @@ describe('getSession', () => {
     const created = await createSession(ctx, {
       goalId: 'g1',
       workspaceId: 'ws1',
-      adapterId: 'shell-manual',
+      adapterId: 'claude-code',
     });
 
     const store = createSessionOutputStore(db, { tailBytes: 1024 });
@@ -373,7 +373,7 @@ class CapturingPtyManager implements PtyManager {
 function makeStartRegistry(cwd: string): AdapterRegistry {
   const registry = new AdapterRegistry();
   registry.register({
-    id: 'shell-manual' as const,
+    id: 'claude-code' as const,
     title: 'Shell (Manual)',
     supportedExecutionModes: ["shadow_session"] as const,
     contextDelivery: { mode: 'preview_only' as const, maxBytes: 32768 },
@@ -399,7 +399,7 @@ function makeStartRegistry(cwd: string): AdapterRegistry {
 
 function makeFailingShellRegistry(): AdapterRegistry {
   const registry = new AdapterRegistry();
-  const failingAdapter = new ShellManualAdapter(() =>
+  const failingAdapter = new ClaudeCodeAdapter(() =>
     Promise.resolve({ error: 'not_found', tried: ['/no/such/binary'] })
   );
   registry.register(failingAdapter);
@@ -414,7 +414,7 @@ async function seedAndCreateSession(
   seedGoal(db, 'g1');
   seedWorkspace(db, 'ws1', 'g1', wsDir);
   const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry };
-  const detail = await createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'shell-manual' });
+  const detail = await createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'claude-code' });
   return detail.id;
 }
 
@@ -501,7 +501,7 @@ describe('startSession', () => {
     seedGoal(db, 'g1');
     seedWorkspace(db, 'ws1', 'g1', wsDir);
     const createCtx: SessionCtx = { db, bus: eventBus, adapterRegistry: registry };
-    const detail = await createSession(createCtx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'shell-manual' });
+    const detail = await createSession(createCtx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'claude-code' });
 
     // Remove workspace dir to make it unavailable
     rmSync(wsDir, { recursive: true, force: true });
@@ -781,7 +781,7 @@ describe('stopSession', () => {
     seedGoal(db, 'g1');
     seedWorkspace(db, 'ws1', 'g1', wsDir);
     const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry: registry };
-    const detail = await createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'shell-manual' });
+    const detail = await createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'claude-code' });
 
     const runtime = new SessionRuntime(new FakePtyManager());
     const stopCtx: StopSessionCtx = { db, sessionRuntime: runtime };

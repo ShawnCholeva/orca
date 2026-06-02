@@ -42,7 +42,7 @@ const pkg: ContextPackage = {
   id: "pkg-1",
   goalId: "goal-1",
   supersedesPackageId: null,
-  adapterId: "shell-manual",
+  adapterId: "claude-code",
   workspaceId: "ws-1",
   role: "engineer",
   objective: "Summarize goal context before session start",
@@ -82,7 +82,7 @@ const assembly: ContextAssembly = {
   goalId: "goal-1",
   packageId: "pkg-1",
   replacePackageId: null,
-  adapterId: "shell-manual",
+  adapterId: "claude-code",
   workspaceId: "ws-1",
   role: "engineer",
   objectiveHash: "obj-hash-1",
@@ -120,7 +120,7 @@ describe("context api wrappers", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(201, { package: pkg, assembly, reused: false }));
 
     const response = await api.createContextPackage("goal-1", {
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
       workspaceId: "ws-1",
       role: "engineer",
       objective: "Summarize goal context before session start",
@@ -133,7 +133,7 @@ describe("context api wrappers", () => {
     expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/context-packages");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
       workspaceId: "ws-1",
       role: "engineer",
       objective: "Summarize goal context before session start",
@@ -145,7 +145,7 @@ describe("context api wrappers", () => {
 
     const response = await api.listContextPackages("goal-1", {
       sessionId: "sess-1",
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
       limit: 5,
     });
 
@@ -156,7 +156,7 @@ describe("context api wrappers", () => {
     const parsedUrl = new URL(String(url));
     expect(parsedUrl.pathname).toBe("/v1/goals/goal-1/context-packages");
     expect(parsedUrl.searchParams.get("sessionId")).toBe("sess-1");
-    expect(parsedUrl.searchParams.get("adapterId")).toBe("shell-manual");
+    expect(parsedUrl.searchParams.get("adapterId")).toBe("claude-code");
     expect(parsedUrl.searchParams.get("limit")).toBe("5");
     expect(init?.method).toBeUndefined();
   });
@@ -180,7 +180,7 @@ describe("context api wrappers", () => {
 
     await expect(
       api.createContextPackage("goal-1", {
-        adapterId: "shell-manual",
+        adapterId: "claude-code",
         role: "engineer",
         objective: "assemble",
       }),

@@ -109,7 +109,7 @@ describe('session WS frames', () => {
     const sessRes = await server.inject({
       method: 'POST', url: `/v1/goals/${goalId}/sessions`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { workspaceId, adapterId: 'shell-manual' },
+      payload: { workspaceId, adapterId: 'claude-code' },
     });
     sessionId = CreateSessionResponse.parse(JSON.parse(sessRes.body)).session.id;
 

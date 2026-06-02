@@ -16,7 +16,6 @@ const SOFT_CAP = 8;
 const PROVIDER_LABELS: Record<string, string> = {
   "orca/openai": "OpenAI",
   "orca/anthropic": "Claude",
-  "orca/google-gemini": "Gemini",
 };
 
 function providerLabel(p: ModelProviderInfo): string {

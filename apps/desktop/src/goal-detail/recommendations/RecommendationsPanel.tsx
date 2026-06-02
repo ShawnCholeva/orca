@@ -206,7 +206,7 @@ export function RecommendationsPanel({
         break;
       case "review_output":
         onOpenCreateSession?.({
-          adapterId: "shell-manual",
+          adapterId: "claude-code",
           role: action.reviewerRole ?? "reviewer",
           objective: "",
           fromRecommendationId: recommendationId,
@@ -220,7 +220,7 @@ export function RecommendationsPanel({
         break;
       case "run_validation":
         onOpenCreateSession?.({
-          adapterId: "shell-manual",
+          adapterId: "claude-code",
           role: action.suggestedRole,
           objective: action.objective,
           taskId: action.taskId,

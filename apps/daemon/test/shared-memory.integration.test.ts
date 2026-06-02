@@ -146,7 +146,7 @@ async function getJson(baseUrl: string, urlPath: string): Promise<Response> {
 
 const FIXTURE_OUTPUT: SessionExtractionOutput = {
   summary: {
-    headline: 'shell-manual session completed',
+    headline: 'claude-code session completed',
     text: 'Session ran integration tests and all steps completed successfully.',
     truncated: false,
   },
@@ -229,7 +229,7 @@ describe.sequential('shared memory daemon proof-loop integration', () => {
 
       const createSessionResp = await postJson(baseUrl, `/v1/goals/${goalId}/sessions`, {
         workspaceId,
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         title: 'Shared Memory Integration Test Session',
       });
       expect(createSessionResp.status).toBe(201);
@@ -287,7 +287,7 @@ describe.sequential('shared memory daemon proof-loop integration', () => {
       const summaryResp = await getJson(baseUrl, `/v1/sessions/${sessionId}/summary`);
       expect(summaryResp.status).toBe(200);
       const summaryBody = (await summaryResp.json()) as { summary: { headline: string; truncated: boolean } };
-      expect(summaryBody.summary.headline).toBe('shell-manual session completed');
+      expect(summaryBody.summary.headline).toBe('claude-code session completed');
       expect(summaryBody.summary.truncated).toBe(false);
 
       const dupResp = await postJson(baseUrl, `/v1/sessions/${sessionId}/extract-memory`, {});
@@ -363,7 +363,7 @@ describe.sequential('shared memory daemon proof-loop integration', () => {
       const summaryAfterRestart = (await summaryAfterRestartResp.json()) as {
         summary: { headline: string };
       };
-      expect(summaryAfterRestart.summary.headline).toBe('shell-manual session completed');
+      expect(summaryAfterRestart.summary.headline).toBe('claude-code session completed');
 
       await stop(b2.server, b2.runner);
       b2 = undefined;
@@ -422,7 +422,7 @@ describe.sequential('memory privacy redaction integration', () => {
 
       const createSessionResp = await postJson(baseUrl, `/v1/goals/${goal.id}/sessions`, {
         workspaceId: workspaces[0]!.id,
-        adapterId: 'shell-manual',
+        adapterId: 'claude-code',
         title: 'Memory Redaction Test Session',
       });
       expect(createSessionResp.status).toBe(201);

@@ -61,7 +61,7 @@ function seedAssembly(
     goalId,
     packageId: null,
     replacePackageId: null,
-    adapterId: 'shell-manual',
+    adapterId: 'claude-code',
     workspaceId: null,
     role: 'engineer',
     objectiveHash: 'hash-' + id,

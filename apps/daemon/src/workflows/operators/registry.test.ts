@@ -110,16 +110,6 @@ function makeRegistry(statuses: Record<string, AgentReadinessStatus> = {}): Oper
       ],
     })
   );
-  models.register(
-    fakeProvider("orca/google-gemini", {
-      displayName: "Google Gemini",
-      available: false,
-      reason: "missing api key",
-      models: [
-        { id: "gemini-2.5-pro", displayName: "Gemini 2.5 Pro", capabilities: ["review"] },
-      ],
-    })
-  );
 
   return new OperatorRegistry(adapters, models, new FakeReadiness(statuses));
 }
@@ -133,7 +123,6 @@ describe("OperatorRegistry", () => {
       "agent:codex",
       "orca/openai:gpt-5.1",
       "orca/openai:gpt-5.1-mini",
-      "orca/google-gemini:gemini-2.5-pro",
       "human",
     ]);
   });
@@ -167,10 +156,6 @@ describe("OperatorRegistry", () => {
       ready: true,
       supportsRepoEditing: false,
       supportsTerminal: false,
-    });
-    expect(operators.find((operator) => operator.id === "orca/google-gemini:gemini-2.5-pro")).toMatchObject({
-      ready: false,
-      notReadyReason: "missing api key",
     });
   });
 

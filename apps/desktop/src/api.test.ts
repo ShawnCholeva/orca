@@ -250,7 +250,7 @@ const contextPackage = {
   id: "pkg-1",
   goalId: "goal-1",
   supersedesPackageId: null,
-  adapterId: "shell-manual" as const,
+  adapterId: "claude-code" as const,
   workspaceId: "ws-1",
   taskId: "task-1",
   fromRecommendationId: "rec-1",
@@ -284,7 +284,7 @@ const contextAssembly = {
   goalId: "goal-1",
   packageId: "pkg-1",
   replacePackageId: null,
-  adapterId: "shell-manual" as const,
+  adapterId: "claude-code" as const,
   workspaceId: "ws-1",
   role: "engineer" as const,
   objectiveHash: "objective-hash",
@@ -598,7 +598,7 @@ describe("desktop api client", () => {
 
   it("listAdapters fetches adapter list", async () => {
     const adapters = [
-      { id: "shell-manual" as AdapterId, title: "Shell / Manual", availability: "available" as const },
+      { id: "claude-code" as AdapterId, title: "Shell / Manual", availability: "available" as const },
       { id: "claude-code" as AdapterId, title: "Claude Code", availability: "unavailable" as const, detail: "binary not found" },
     ];
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { adapters }));
@@ -606,7 +606,7 @@ describe("desktop api client", () => {
     const response = await api.listAdapters();
 
     expect(response.adapters).toHaveLength(2);
-    expect(response.adapters[0]!.id).toBe("shell-manual");
+    expect(response.adapters[0]!.id).toBe("claude-code");
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("http://127.0.0.1:8787/v1/adapters");
     expect(init?.method).toBeUndefined();
@@ -618,9 +618,9 @@ describe("desktop api client", () => {
         id: "sess-1",
         goalId: "goal-1",
         workspaceId: "ws-1",
-        adapterId: "shell-manual" as AdapterId,
+        adapterId: "claude-code" as AdapterId,
         role: null,
-        title: "shell-manual session",
+        title: "claude-code session",
         status: "created" as const,
         createdAt: now,
         startedAt: null,
@@ -731,9 +731,9 @@ describe("desktop api client", () => {
       id: "sess-1",
       goalId: "goal-1",
       workspaceId: "ws-1",
-      adapterId: "shell-manual" as AdapterId,
+      adapterId: "claude-code" as AdapterId,
       role: null,
-      title: "shell-manual session",
+      title: "claude-code session",
       status: "created" as const,
       createdAt: now,
       startedAt: null,
@@ -755,7 +755,7 @@ describe("desktop api client", () => {
 
     const response = await api.createSession("goal-1", {
       workspaceId: "ws-1",
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
     });
 
     expect(response.session.id).toBe("sess-1");
@@ -764,7 +764,7 @@ describe("desktop api client", () => {
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toMatchObject({
       workspaceId: "ws-1",
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
     });
   });
 
@@ -773,10 +773,10 @@ describe("desktop api client", () => {
       id: "sess-ctx-1",
       goalId: "goal-1",
       workspaceId: "ws-1",
-      adapterId: "shell-manual" as AdapterId,
+      adapterId: "claude-code" as AdapterId,
       contextPackageId: "pkg-1",
       role: null,
-      title: "shell-manual session",
+      title: "claude-code session",
       status: "created" as const,
       createdAt: now,
       startedAt: null,
@@ -798,7 +798,7 @@ describe("desktop api client", () => {
 
     const response = await api.createSession("goal-1", {
       workspaceId: "ws-1",
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
       contextPackageId: "pkg-1",
     });
 
@@ -806,7 +806,7 @@ describe("desktop api client", () => {
     const [, init] = fetchMock.mock.calls[0]!;
     expect(JSON.parse(String(init?.body))).toMatchObject({
       workspaceId: "ws-1",
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
       contextPackageId: "pkg-1",
     });
   });
@@ -816,12 +816,12 @@ describe("desktop api client", () => {
       id: "sess-linked-1",
       goalId: "goal-1",
       workspaceId: "ws-1",
-      adapterId: "shell-manual" as AdapterId,
+      adapterId: "claude-code" as AdapterId,
       contextPackageId: "pkg-1",
       taskId: "task-1",
       fromRecommendationId: "rec-1",
       role: null,
-      title: "shell-manual session",
+      title: "claude-code session",
       status: "created" as const,
       createdAt: now,
       startedAt: null,
@@ -843,7 +843,7 @@ describe("desktop api client", () => {
 
     const response = await api.createSession("goal-1", {
       workspaceId: "ws-1",
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
       contextPackageId: "pkg-1",
       taskId: "task-1",
       fromRecommendationId: "rec-1",
@@ -854,7 +854,7 @@ describe("desktop api client", () => {
     const [, init] = fetchMock.mock.calls[0]!;
     expect(JSON.parse(String(init?.body))).toMatchObject({
       workspaceId: "ws-1",
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
       contextPackageId: "pkg-1",
       taskId: "task-1",
       fromRecommendationId: "rec-1",
@@ -866,9 +866,9 @@ describe("desktop api client", () => {
       id: "sess-1",
       goalId: "goal-1",
       workspaceId: "ws-1",
-      adapterId: "shell-manual" as AdapterId,
+      adapterId: "claude-code" as AdapterId,
       role: null,
-      title: "shell-manual session",
+      title: "claude-code session",
       status: "running" as const,
       createdAt: now,
       startedAt: now,
@@ -902,9 +902,9 @@ describe("desktop api client", () => {
       id: "sess-1",
       goalId: "goal-1",
       workspaceId: "ws-1",
-      adapterId: "shell-manual" as AdapterId,
+      adapterId: "claude-code" as AdapterId,
       role: null,
-      title: "shell-manual session",
+      title: "claude-code session",
       status: "stopped" as const,
       createdAt: now,
       startedAt: now,
@@ -1081,7 +1081,7 @@ describe("desktop api client", () => {
     );
 
     await expect(
-      api.createSession("goal-1", { workspaceId: "ws-1", adapterId: "shell-manual" }),
+      api.createSession("goal-1", { workspaceId: "ws-1", adapterId: "claude-code" }),
     ).rejects.toMatchObject({
       name: "ApiError",
       code: "workspace_unavailable",
@@ -1098,7 +1098,7 @@ describe("desktop api client", () => {
     );
 
     const response = await api.createContextPackage("goal-1", {
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
       role: "engineer",
       objective: "Implement wrapper and verify",
       workspaceId: "ws-1",
@@ -1111,7 +1111,7 @@ describe("desktop api client", () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/context-packages");
     expect(JSON.parse(String(init?.body))).toMatchObject({
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
       role: "engineer",
       objective: "Implement wrapper and verify",
       workspaceId: "ws-1",

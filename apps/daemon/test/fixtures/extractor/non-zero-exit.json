@@ -10,7 +10,7 @@
     "workspaces": [],
     "session": {
       "id": "session-fail",
-      "adapterId": "shell-manual",
+      "adapterId": "claude-code",
       "role": null,
       "instructions": null,
       "exitCode": 2,

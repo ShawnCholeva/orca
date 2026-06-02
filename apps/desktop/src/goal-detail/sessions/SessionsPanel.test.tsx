@@ -27,9 +27,9 @@ function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
     id: "sess-1",
     goalId: "goal-1",
     workspaceId: "ws-1",
-    adapterId: "shell-manual" as AdapterId,
+    adapterId: "claude-code" as AdapterId,
     role: null,
-    title: "shell-manual session",
+    title: "claude-code session",
     status: "created" as const,
     createdAt: now,
     startedAt: null,
@@ -39,9 +39,7 @@ function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
 }
 
 const adapters = [
-  { id: "shell-manual" as AdapterId, title: "Shell / Manual", availability: "available" as const },
-  { id: "claude-code" as AdapterId, title: "Claude Code", availability: "unavailable" as const, detail: "not in PATH; set ORCA_CLAUDE_CODE_BIN" },
-  { id: "opencode" as AdapterId, title: "opencode", availability: "unavailable" as const, detail: "not in PATH; set ORCA_OPENCODE_BIN" },
+  { id: "claude-code" as AdapterId, title: "Claude Code", availability: "available" as const },
   { id: "codex" as AdapterId, title: "Codex", availability: "unavailable" as const, detail: "not in PATH; set ORCA_CODEX_BIN" },
 ];
 
@@ -701,11 +699,11 @@ describe("CreateSessionDialog", () => {
       );
     });
 
-    // Select the unavailable claude-code adapter
+    // Select the unavailable codex adapter
     const adapterSelect = container.querySelector<HTMLSelectElement>("#create-session-adapter");
     await act(async () => {
       if (adapterSelect) {
-        adapterSelect.value = "claude-code";
+        adapterSelect.value = "codex";
         adapterSelect.dispatchEvent(new Event("change", { bubbles: true }));
       }
     });
@@ -714,7 +712,14 @@ describe("CreateSessionDialog", () => {
   });
 
   it("shows unavailable labels and env override hints for all agent adapters", async () => {
-    mockApi();
+    mockApi({
+      listAdapters: vi.fn().mockResolvedValue({
+        adapters: [
+          { id: "claude-code" as AdapterId, title: "Claude Code", availability: "unavailable" as const, detail: "not in PATH; set ORCA_CLAUDE_CODE_BIN" },
+          { id: "codex" as AdapterId, title: "Codex", availability: "unavailable" as const, detail: "not in PATH; set ORCA_CODEX_BIN" },
+        ],
+      }),
+    });
     const { CreateSessionDialog } = await import("./CreateSessionDialog");
 
     await act(async () => {
@@ -730,12 +735,10 @@ describe("CreateSessionDialog", () => {
 
     const adapterSelect = container.querySelector<HTMLSelectElement>("#create-session-adapter");
     expect(adapterSelect?.textContent).toContain("Claude Code (unavailable)");
-    expect(adapterSelect?.textContent).toContain("opencode (unavailable)");
     expect(adapterSelect?.textContent).toContain("Codex (unavailable)");
 
     for (const [adapterId, envKey] of [
       ["claude-code", "ORCA_CLAUDE_CODE_BIN"],
-      ["opencode", "ORCA_OPENCODE_BIN"],
       ["codex", "ORCA_CODEX_BIN"],
     ] as const) {
       await act(async () => {
@@ -753,9 +756,9 @@ describe("CreateSessionDialog", () => {
       id: "sess-new",
       goalId: "goal-1",
       workspaceId: "ws-1",
-      adapterId: "shell-manual" as AdapterId,
+      adapterId: "claude-code" as AdapterId,
       role: null,
-      title: "shell-manual session",
+      title: "claude-code session",
       status: "created" as const,
       createdAt: now,
       startedAt: null,
@@ -797,7 +800,7 @@ describe("CreateSessionDialog", () => {
 
     expect(createSession).toHaveBeenCalledWith("goal-1", expect.objectContaining({
       workspaceId: "ws-1",
-      adapterId: "shell-manual",
+      adapterId: "claude-code",
     }));
     expect(startSession).toHaveBeenCalledWith("sess-new", { terminalCols: 80, terminalRows: 24 });
     expect(onCreated).toHaveBeenCalledWith("sess-new");
@@ -841,7 +844,7 @@ describe("CreateSessionDialog", () => {
       form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     });
 
-    expect(container.textContent).toContain("ORCA_SHELL_MANUAL_BIN");
+    expect(container.textContent).toContain("ORCA_CLAUDE_CODE_BIN");
   });
 
   it("shows workspace_unavailable error distinctly", async () => {

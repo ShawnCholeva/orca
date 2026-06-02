@@ -9,7 +9,6 @@ export type AdapterModelInfo = {
 export const PROVIDER_BY_AGENT_ID: Record<string, ModelProviderId | undefined> = {
   "claude-code": "orca/anthropic",
   codex: "orca/openai",
-  "gemini-cli": "orca/google-gemini",
 };
 
 export const MODELS_BY_AGENT_ID: Record<string, AdapterModelInfo[] | undefined> = {
@@ -55,23 +54,6 @@ export const MODELS_BY_AGENT_ID: Record<string, AdapterModelInfo[] | undefined> 
       id: "gpt-5.2",
       displayName: "GPT-5.2",
       capabilities: ["reasoning", "tool_use"],
-    },
-  ],
-  "gemini-cli": [
-    {
-      id: "gemini-2.5-pro",
-      displayName: "Gemini 2.5 Pro",
-      capabilities: ["reasoning", "long_context"],
-    },
-    {
-      id: "gemini-2.5-flash",
-      displayName: "Gemini 2.5 Flash",
-      capabilities: ["fast", "cheap"],
-    },
-    {
-      id: "gemini-2.0-pro",
-      displayName: "Gemini 2.0 Pro",
-      capabilities: ["reasoning", "long_context"],
     },
   ],
 };

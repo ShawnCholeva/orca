@@ -137,7 +137,7 @@ describe('server routes', () => {
     expect(body.status).toBe('ok');
     expect(typeof body.version).toBe('string');
     expect(typeof body.startedAt).toBe('string');
-    expect(body.registries).toEqual({ plugins: 3, skills: 2 });
+    expect(body.registries).toEqual({ plugins: 2, skills: 2 });
   });
 
   it('GET /v1/plugins returns built-in plugins in sorted order', async () => {
@@ -151,7 +151,6 @@ describe('server routes', () => {
     const body = ListPluginsResponse.parse(JSON.parse(response.body));
     expect(body.plugins.map((plugin) => plugin.id)).toEqual([
       'orca.default-skills',
-      'orca.shell-manual',
       'orca.sqlite'
     ]);
   });
@@ -419,7 +418,7 @@ describe('server routes', () => {
     expect(response.statusCode).toBe(404);
   });
 
-  it('GET /v1/model-providers returns three providers', async () => {
+  it('GET /v1/model-providers returns two providers', async () => {
     const response = await server.inject({
       method: 'GET',
       url: '/v1/model-providers',
@@ -428,17 +427,15 @@ describe('server routes', () => {
 
     expect(response.statusCode).toBe(200);
     const body = ListModelProvidersResponse.parse(JSON.parse(response.body));
-    expect(body.providers).toHaveLength(3);
+    expect(body.providers).toHaveLength(2);
     expect(body.providers.map((provider) => provider.id).sort()).toEqual([
       'orca/anthropic',
-      'orca/google-gemini',
       'orca/openai',
     ]);
     expect(
       Object.fromEntries(body.providers.map((provider) => [provider.id, provider.displayName]))
     ).toEqual({
       'orca/anthropic': 'Claude',
-      'orca/google-gemini': 'Gemini',
       'orca/openai': 'OpenAI',
     });
     expect(body.providers.every((provider) => provider.available)).toBe(true);
@@ -463,7 +460,6 @@ describe('server routes', () => {
       const body = ListModelProvidersResponse.parse(JSON.parse(response.body));
       expect(body.providers.map((provider) => provider.id).sort()).toEqual([
         'orca/anthropic',
-        'orca/google-gemini',
         'orca/openai',
       ]);
       expect(body.providers.every((provider) => provider.available)).toBe(true);
@@ -724,8 +720,6 @@ function fakeRegistry(): AdapterRegistry {
   const r = new AdapterRegistry();
   r.register(fakeAdapter('claude-code', true));
   r.register(fakeAdapter('codex', false));
-  r.register(fakeAdapter('opencode', true));
-  r.register(fakeAdapter('gemini-cli', false));
   return r;
 }
 
@@ -1441,7 +1435,7 @@ describe('session and adapter routes', () => {
   });
 
   // GET /v1/adapters
-  it('GET /v1/adapters returns all five adapters', async () => {
+  it('GET /v1/adapters returns all adapters', async () => {
     const res = await server.inject({
       method: 'GET',
       url: '/v1/adapters',
@@ -1450,7 +1444,7 @@ describe('session and adapter routes', () => {
     expect(res.statusCode).toBe(200);
     const body = ListAdaptersResponse.parse(JSON.parse(res.body));
     expect(body.adapters.map((a) => a.id).sort()).toEqual(
-      ['claude-code', 'codex', 'gemini-cli', 'opencode', 'shell-manual']
+      ['claude-code', 'codex']
     );
   });
 
@@ -1465,13 +1459,13 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: `/v1/goals/${goalId}/sessions`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { workspaceId, adapterId: 'shell-manual', role: 'Engineer', title: 'My Session' }
+      payload: { workspaceId, adapterId: 'claude-code', role: 'Engineer', title: 'My Session' }
     });
     expect(res.statusCode).toBe(201);
     const body = CreateSessionResponse.parse(JSON.parse(res.body));
     expect(body.session.goalId).toBe(goalId);
     expect(body.session.workspaceId).toBe(workspaceId);
-    expect(body.session.adapterId).toBe('shell-manual');
+    expect(body.session.adapterId).toBe('claude-code');
     expect(body.session.role).toBe('Engineer');
     expect(body.session.title).toBe('My Session');
     expect(body.session.status).toBe('created');
@@ -1482,11 +1476,11 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: `/v1/goals/${goalId}/sessions`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { workspaceId, adapterId: 'shell-manual' }
+      payload: { workspaceId, adapterId: 'claude-code' }
     });
     expect(res.statusCode).toBe(201);
     const body = CreateSessionResponse.parse(JSON.parse(res.body));
-    expect(body.session.title).toBe('shell-manual session');
+    expect(body.session.title).toBe('claude-code session');
   });
 
   it('POST /v1/goals/:goalId/sessions returns 400 for invalid body', async () => {
@@ -1494,7 +1488,7 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: `/v1/goals/${goalId}/sessions`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { adapterId: 'shell-manual' } // missing workspaceId
+      payload: { adapterId: 'claude-code' } // missing workspaceId
     });
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body) as { error: string };
@@ -1506,7 +1500,7 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: `/v1/goals/${goalId}/sessions`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { workspaceId, adapterId: 'shell-manual', extraField: 'sneaked' }
+      payload: { workspaceId, adapterId: 'claude-code', extraField: 'sneaked' }
     });
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body) as { error: string };
@@ -1518,7 +1512,7 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: '/v1/goals/no-such-goal/sessions',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { workspaceId, adapterId: 'shell-manual' }
+      payload: { workspaceId, adapterId: 'claude-code' }
     });
     expect(res.statusCode).toBe(404);
     const body = JSON.parse(res.body) as { error: { code: string } };
@@ -1536,7 +1530,7 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: `/v1/goals/${goalId}/sessions`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { workspaceId, adapterId: 'shell-manual' }
+      payload: { workspaceId, adapterId: 'claude-code' }
     });
     expect(res.statusCode).toBe(409);
     const body = JSON.parse(res.body) as { error: { code: string } };
@@ -1548,7 +1542,7 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: `/v1/goals/${goalId}/sessions`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { workspaceId: 'not-attached-ws', adapterId: 'shell-manual' }
+      payload: { workspaceId: 'not-attached-ws', adapterId: 'claude-code' }
     });
     expect(res.statusCode).toBe(422);
     const body = JSON.parse(res.body) as { error: { code: string } };
@@ -1560,7 +1554,7 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: `/v1/goals/${goalId}/sessions`,
       headers: { 'content-type': 'application/json' },
-      payload: { workspaceId, adapterId: 'shell-manual' }
+      payload: { workspaceId, adapterId: 'claude-code' }
     });
     expect(res.statusCode).toBe(401);
   });
@@ -1571,7 +1565,7 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: `/v1/goals/${goalId}/sessions`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { workspaceId, adapterId: 'shell-manual' }
+      payload: { workspaceId, adapterId: 'claude-code' }
     });
 
     const res = await server.inject({
@@ -1582,7 +1576,7 @@ describe('session and adapter routes', () => {
     expect(res.statusCode).toBe(200);
     const body = ListSessionsResponse.parse(JSON.parse(res.body));
     expect(body.sessions).toHaveLength(1);
-    expect(body.sessions[0]!.adapterId).toBe('shell-manual');
+    expect(body.sessions[0]!.adapterId).toBe('claude-code');
   });
 
   it('GET /v1/goals/:goalId/sessions returns empty list for unknown goal', async () => {
@@ -1607,7 +1601,7 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: `/v1/goals/${goalId}/sessions`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { workspaceId, adapterId: 'shell-manual' }
+      payload: { workspaceId, adapterId: 'claude-code' }
     });
     const sessionId = (CreateSessionResponse.parse(JSON.parse(createRes.body))).session.id;
 
@@ -2102,7 +2096,7 @@ describe('session summary and extract-memory routes', () => {
       method: 'POST',
       url: `/v1/goals/${goalId}/sessions`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { workspaceId, adapterId: 'shell-manual', title },
+      payload: { workspaceId, adapterId: 'claude-code', title },
     });
     expect(response.statusCode).toBe(201);
     return CreateSessionResponse.parse(JSON.parse(response.body)).session.id;

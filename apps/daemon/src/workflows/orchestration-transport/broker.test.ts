@@ -120,7 +120,7 @@ afterEach(() => {
 });
 
 describe("OrchestrationTransportBroker fallback", () => {
-  it.each<ModelProviderId>(["orca/openai", "orca/google-gemini"])(
+  it.each<ModelProviderId>(["orca/openai"])(
     "tries one-shot, hidden interactive, then human review for %s",
     async (providerId) => {
       const { broker, db, events, attemptCtx } = setup();
