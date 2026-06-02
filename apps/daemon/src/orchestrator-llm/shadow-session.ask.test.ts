@@ -290,6 +290,30 @@ describe("ShadowSessionManager.ask (hook-resolved)", () => {
     expect(m.has("G1")).toBe(false);
   });
 
+  it("rejects the ask when startup never reaches a ready prompt (timeout throws, not silent resolve)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    // Pane never matches a ready input prompt.
+    const tmux = fakeTmux(["loading...\nplease wait"]);
+    const m = new ShadowSessionManager({ ...deps(root, tmux), startupTimeoutMs: 20 });
+    await m.spawn("G1");
+    await expect(
+      m.ask("G1", { systemPrompt: "S", userPrompt: "q", timeoutMs: 1000 }),
+    ).rejects.toThrow(/startup timed out.*never reached a ready input prompt/i);
+  });
+
+  it("does not false-ready on a codex update-available interstitial (then times out)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    // Pane contains the codex update nag plus a `›` glyph — must NOT count as ready.
+    const tmux = fakeTmux([
+      ["Update available!", "› 1. Update now", "  2. Skip"].join("\n"),
+    ]);
+    const m = new ShadowSessionManager({ ...deps(root, tmux), startupTimeoutMs: 20 });
+    await m.spawn("G1", "codex");
+    await expect(
+      m.ask("G1", { adapterId: "codex", systemPrompt: "S", userPrompt: "q", timeoutMs: 1000 }),
+    ).rejects.toThrow(/startup timed out.*never reached a ready input prompt/i);
+  });
+
   it("ask auto-spawns when no session exists yet", async () => {
     const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
     const tmux = fakeTmux();

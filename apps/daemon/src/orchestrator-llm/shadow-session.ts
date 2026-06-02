@@ -59,6 +59,9 @@ interface Session {
 
 const TRUST_DEFAULT = /trust this folder|Is this a project you created or one you trust|do you trust/i;
 const HOOK_TRUST_PROMPT = /hook needs review|hooks need review|press t to trust|new hook - review required/i;
+// Panes matching this are blocking interstitials/menus (e.g. codex's update nag),
+// not a real ready input prompt — must NOT satisfy the ready branch.
+const BLOCKING_INTERSTITIAL = /update available|press enter to continue|\b\d+\.\s*(update now|skip)\b/i;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class ShadowSessionManager {
@@ -89,16 +92,21 @@ export class ShadowSessionManager {
     const bin = provider.launch({ binOverride: this.binOverride(adapterId) }).bin;
     const started = await newSession(this.tmux, name, dir, bin);
     dbg(goalId, `tmux new-session code=${started.code} adapter=${adapterId} name=${name} bin=${bin} dir=${dir} port=${this.deps.daemonPort}`);
-    const session: Session = { adapterId, provider, name, ready: this.startup(goalId, name), queue: Promise.resolve(), pending: null, systemSent: false };
+    const ready = this.startup(goalId, name, provider);
+    // Prevent an unhandled-rejection warning when nobody is awaiting `ready` yet
+    // (askOnce still observes the rejection via `await pre.ready`).
+    ready.catch(() => undefined);
+    const session: Session = { adapterId, provider, name, ready, queue: Promise.resolve(), pending: null, systemSent: false };
     this.sessions.set(goalId, session);
     return shadowSessionId(goalId);
   }
 
   /** Polls capture-pane: answer the trust prompt, then settle into the input box. */
-  private async startup(goalId: string, name: string): Promise<void> {
+  private async startup(goalId: string, name: string, provider: ShadowProvider): Promise<void> {
     const pattern = this.deps.trustPattern ?? TRUST_DEFAULT;
     const poll = this.deps.pollMs ?? 300;
-    const deadline = Date.now() + (this.deps.startupTimeoutMs ?? 20_000);
+    const timeoutMs = this.deps.startupTimeoutMs ?? 20_000;
+    const deadline = Date.now() + timeoutMs;
     let trustAnswered = false;
     let hookTrustAnswered = false;
     while (Date.now() < deadline) {
@@ -121,12 +129,21 @@ export class ShadowSessionManager {
         continue;
       }
       // No trust prompt + an input box / status line present => ready.
-      if (!pattern.test(pane) && /(auto mode on|\? for shortcuts|\n\s*❯|\n\s*›|\bcodex\b.*\bready\b|\n\s*>)/i.test(pane)) {
+      // But a blocking interstitial/menu (e.g. codex update nag) is NOT ready — keep polling.
+      if (
+        !pattern.test(pane) &&
+        !BLOCKING_INTERSTITIAL.test(pane) &&
+        /(auto mode on|\? for shortcuts|\n\s*❯|\n\s*›|\bcodex\b.*\bready\b|\n\s*>)/i.test(pane)
+      ) {
         dbg(goalId, "ready (no trust, input box present)");
         return;
       }
       await sleep(poll);
     }
+    dbg(goalId, `startup timed out after ${timeoutMs}ms (never reached ready)`);
+    throw new Error(
+      `shadow orchestrator startup timed out for goal ${goalId}: ${provider.displayName} never reached a ready input prompt within ${timeoutMs}ms`,
+    );
   }
 
   async ask(goalId: string, input: AskInput): Promise<{ text: string }> {
