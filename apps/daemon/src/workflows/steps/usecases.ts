@@ -24,7 +24,7 @@ interface WorkflowStepRunRow {
   fingerprint: string;
 }
 
-export class WorkflowStepNotFoundError extends Error {
+class WorkflowStepNotFoundError extends Error {
   readonly code = "workflow_step_run_not_found" as const;
 
   constructor(stepRunId: string) {
@@ -33,21 +33,12 @@ export class WorkflowStepNotFoundError extends Error {
   }
 }
 
-export class WorkflowStepInvalidTransitionError extends Error {
+class WorkflowStepInvalidTransitionError extends Error {
   readonly code = "workflow_step_invalid_transition" as const;
 
   constructor(stepRunId: string, fromStatus: string, action: string) {
     super(`Workflow step run ${stepRunId} cannot ${action} from status ${fromStatus}`);
     this.name = "WorkflowStepInvalidTransitionError";
-  }
-}
-
-export class WorkflowStepExitCriteriaIncompleteError extends Error {
-  readonly code = "workflow_step_exit_criteria_incomplete" as const;
-
-  constructor(stepRunId: string) {
-    super(`Workflow step run ${stepRunId} has outstanding exit criteria`);
-    this.name = "WorkflowStepExitCriteriaIncompleteError";
   }
 }
 
@@ -313,37 +304,6 @@ export function failStep(
     emitEvent(
       db,
       "workflow.step.failed",
-      {
-        goalId: row.goalId,
-        workflowRunId: row.workflowRunId,
-        stepRunId,
-        stepTemplateId: row.stepTemplateId,
-      },
-      timestamp,
-      eventOptions
-    );
-    return readStep(db, stepRunId);
-  })();
-}
-
-export function skipStep(
-  db: Database.Database,
-  now: () => string,
-  stepRunId: string,
-  eventOptions?: StepEventOptions
-): WorkflowStepRunT {
-  return db.transaction(() => {
-    const row = readStep(db, stepRunId);
-    if (row.status !== "active" && row.status !== "blocked") {
-      throw new WorkflowStepInvalidTransitionError(stepRunId, row.status, "skip");
-    }
-    const timestamp = now();
-    db.prepare(
-      "UPDATE workflow_step_runs SET status = 'skipped', finished_at = ? WHERE id = ?"
-    ).run(timestamp, stepRunId);
-    emitEvent(
-      db,
-      "workflow.step.skipped",
       {
         goalId: row.goalId,
         workflowRunId: row.workflowRunId,
