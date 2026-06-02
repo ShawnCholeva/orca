@@ -161,7 +161,17 @@ export function ScopePicker({ scope, scopeName, onChange, goalOptions }: ScopePi
         return (
           <div
             key={o.id}
-            onClick={() => onChange({ scope: o.id, scopeName: o.id === "global" ? "" : scopeName })}
+            role="button"
+            tabIndex={0}
+            onClick={() => {
+              if (scope !== o.id) onChange({ scope: o.id, scopeName: "" });
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                if (scope !== o.id) onChange({ scope: o.id, scopeName: "" });
+              }
+            }}
             style={{
               display: "flex",
               alignItems: "flex-start",

@@ -53,18 +53,6 @@ export const ChevronLeftIcon = ic(<path d="M15 6l-6 6 6 6" />);
 
 export const ChevronRightIcon = ic(<path d="M9 6l6 6-6 6" />);
 
-export const CheckIcon = ic(<path d="M5 12l4.5 4.5L19 7" />);
-
-export const DragIcon = ic(
-  <>
-    <circle cx="9" cy="6" r="0.8" fill="currentColor" />
-    <circle cx="9" cy="12" r="0.8" fill="currentColor" />
-    <circle cx="9" cy="18" r="0.8" fill="currentColor" />
-    <circle cx="15" cy="6" r="0.8" fill="currentColor" />
-    <circle cx="15" cy="12" r="0.8" fill="currentColor" />
-    <circle cx="15" cy="18" r="0.8" fill="currentColor" />
-  </>,
-);
 
 /** Diamond shape used for gate nodes. */
 export function GateGlyph({ size = 14 }: { size?: number }) {

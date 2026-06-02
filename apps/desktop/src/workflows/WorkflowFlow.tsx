@@ -37,7 +37,7 @@ export function WorkflowFlow({
     y: number;
     overId: string | null;
   } | null>(null);
-  const [hoverEdge, setHoverEdge] = useState<number | null>(null);
+  const [hoverEdge, setHoverEdge] = useState<string | null>(null);
 
   const { nodes, edges, positions } = graph;
 
@@ -86,15 +86,35 @@ export function WorkflowFlow({
       }
     };
 
-    const handleUp = () => {
+    const handleUp = (e: MouseEvent) => {
       if (drag) {
-        if (!drag.moved) onOpenNode(drag.id);
+        const moved = Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) > 4;
+        if (!moved) onOpenNode(drag.id);
       }
-      if (linkDrag && linkDrag.overId != null) {
-        const from = linkDrag.fromId;
-        const to = linkDrag.overId;
-        if (!graph.edges.some(([a, b]) => (a === from && b === to) || (a === to && b === from))) {
-          onGraphChange({ ...graph, edges: [...graph.edges, [from, to]] });
+      if (linkDrag) {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          const scrollLeft = containerRef.current?.scrollLeft ?? 0;
+          const scrollTop = containerRef.current?.scrollTop ?? 0;
+          const px = e.clientX - rect.left + scrollLeft;
+          const py = e.clientY - rect.top + scrollTop;
+          let overId: string | null = null;
+          for (const n of nodes) {
+            if (n.id === linkDrag.fromId) continue;
+            const p = positions[n.id];
+            if (!p) continue;
+            if (px >= p.x && px <= p.x + NODE_W && py >= p.y && py <= p.y + NODE_H) {
+              overId = n.id;
+              break;
+            }
+          }
+          if (overId != null) {
+            const from = linkDrag.fromId;
+            const to = overId;
+            if (!graph.edges.some(([a, b]) => (a === from && b === to) || (a === to && b === from))) {
+              onGraphChange({ ...graph, edges: [...graph.edges, [from, to]] });
+            }
+          }
         }
       }
       setDrag(null);
@@ -241,15 +261,16 @@ export function WorkflowFlow({
             </defs>
 
             {edges.map(([from, to], i) => {
-              const isHot = hoverEdge === i;
+              const edgeKey = `${from}-${to}`;
+              const isHot = hoverEdge === edgeKey;
               const d = pathFor(from, to);
               if (!d) return null;
               return (
                 <g
-                  key={i}
+                  key={edgeKey}
                   style={{ pointerEvents: "all", cursor: "pointer" }}
-                  onMouseEnter={() => setHoverEdge(i)}
-                  onMouseLeave={() => setHoverEdge((h) => (h === i ? null : h))}
+                  onMouseEnter={() => setHoverEdge(edgeKey)}
+                  onMouseLeave={() => setHoverEdge((h) => (h === edgeKey ? null : h))}
                   onClick={() => removeEdge(i)}
                 >
                   <path d={d} stroke="transparent" strokeWidth={16} fill="none" />

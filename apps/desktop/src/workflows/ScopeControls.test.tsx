@@ -138,6 +138,22 @@ describe("ScopePicker", () => {
     expect(onChange).toHaveBeenCalledWith({ scope: "workspace", scopeName: "gravitas/edge" });
   });
 
+  it("clicking a different scope row clears scopeName", () => {
+    const onChange = vi.fn();
+    render(
+      <ScopePicker
+        scope="goal"
+        scopeName="sprint-42"
+        onChange={onChange}
+        goalOptions={goalOptions}
+      />,
+    );
+
+    // Click the Workspace row (different scope) → scopeName must be cleared
+    fireEvent.click(screen.getByText("Workspace"));
+    expect(onChange).toHaveBeenCalledWith({ scope: "workspace", scopeName: "" });
+  });
+
   it("selecting from the goal dropdown calls onChange", () => {
     const onChange = vi.fn();
     render(

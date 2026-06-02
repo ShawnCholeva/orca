@@ -107,8 +107,56 @@ describe("WorkflowFlow", () => {
     expect(nodeEl).toBeTruthy();
 
     fireEvent.mouseDown(nodeEl, { button: 0, clientX: 100, clientY: 60 });
-    // No mousemove means drag.moved stays false → onOpenNode fires on mouseup
-    fireEvent.mouseUp(window);
+    // mouseup at the same position → not a drag → onOpenNode fires
+    fireEvent.mouseUp(window, { clientX: 100, clientY: 60 });
+
+    expect(onOpenNode).toHaveBeenCalledWith("n1");
+  });
+
+  it("does NOT call onOpenNode when mousedown then mousemove past 4px threshold then mouseup", () => {
+    const onOpenNode = vi.fn();
+    const { container } = render(
+      <WorkflowFlow
+        graph={makeGraph()}
+        onGraphChange={vi.fn()}
+        onOpenNode={onOpenNode}
+        onAddNode={vi.fn()}
+        onRemoveNode={vi.fn()}
+        onResetLayout={vi.fn()}
+      />,
+    );
+
+    const nodeEl = container.querySelector("[data-node-id='n1']") as HTMLElement;
+    expect(nodeEl).toBeTruthy();
+
+    // mousedown to start drag
+    fireEvent.mouseDown(nodeEl, { button: 0, clientX: 100, clientY: 60 });
+    // mousemove past the 4px threshold
+    fireEvent.mouseMove(window, { clientX: 110, clientY: 65 });
+    // mouseup — moved, so onOpenNode should NOT fire
+    fireEvent.mouseUp(window, { clientX: 110, clientY: 65 });
+
+    expect(onOpenNode).not.toHaveBeenCalled();
+  });
+
+  it("calls onOpenNode when mousedown then mouseup with no move", () => {
+    const onOpenNode = vi.fn();
+    const { container } = render(
+      <WorkflowFlow
+        graph={makeGraph()}
+        onGraphChange={vi.fn()}
+        onOpenNode={onOpenNode}
+        onAddNode={vi.fn()}
+        onRemoveNode={vi.fn()}
+        onResetLayout={vi.fn()}
+      />,
+    );
+
+    const nodeEl = container.querySelector("[data-node-id='n1']") as HTMLElement;
+    expect(nodeEl).toBeTruthy();
+
+    fireEvent.mouseDown(nodeEl, { button: 0, clientX: 100, clientY: 60 });
+    fireEvent.mouseUp(window, { clientX: 100, clientY: 60 });
 
     expect(onOpenNode).toHaveBeenCalledWith("n1");
   });

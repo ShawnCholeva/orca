@@ -187,11 +187,11 @@ export function NodeDetailModal({
             borderTop: "1px solid var(--hairline)",
           }}
         >
-          <FooterBtn onClick={onPrev ?? undefined} disabled={!onPrev} iconLeft>
+          <FooterBtn onClick={onPrev ?? undefined} disabled={!onPrev}>
             <ChevronLeftIcon size={13} />
             Prev
           </FooterBtn>
-          <FooterBtn onClick={onNext ?? undefined} disabled={!onNext} iconRight>
+          <FooterBtn onClick={onNext ?? undefined} disabled={!onNext}>
             Next
             <ChevronRightIcon size={13} />
           </FooterBtn>
@@ -301,8 +301,6 @@ interface FooterBtnProps {
   onClick?: () => void;
   disabled?: boolean;
   primary?: boolean;
-  iconLeft?: boolean;
-  iconRight?: boolean;
   children: React.ReactNode;
 }
 
@@ -320,7 +318,7 @@ function FooterBtn({ onClick, disabled, primary, children }: FooterBtnProps) {
         padding: "0 10px",
         borderRadius: 7,
         background: primary ? "var(--accent)" : "transparent",
-        border: primary ? "1px solid transparent" : "1px solid transparent",
+        border: "1px solid transparent",
         color: primary ? "#FFFFFF" : "var(--text-2)",
         fontFamily: "inherit",
         fontSize: 12,
