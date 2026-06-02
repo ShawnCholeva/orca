@@ -96,11 +96,13 @@ Expected behavior:
 
 - `launch()` returns `ORCA_ANTIGRAVITY_BIN`, injected `antigravityBin`, or `agy`.
 - `hookConfig()` writes Antigravity hook configuration under `.agents/hooks.json` in the goal shadow directory.
-- `captureMode()` uses hook capture. Antigravity's Stop hook receives JSON on stdin with `transcriptPath`, `terminationReason`, `error`, and idle state. The hook command posts enough data to Orca's `/v1/shadow-hooks/stop` endpoint for the daemon to resolve the last assistant turn.
+- `captureMode()` uses hook capture, not pane polling, for completed turns.
+- Antigravity's Stop hook receives JSON on stdin with `transcriptPath`, `terminationReason`, `error`, and idle state. The hook command reads the transcript JSONL identified by `transcriptPath`, extracts the latest assistant/model message for the current execution, and posts it to Orca's `/v1/shadow-hooks/stop` endpoint as the last assistant turn.
+- If Stop reports an execution error or non-idle terminal state, the hook posts a failure signal and the daemon rejects the pending turn with the sanitized hook error rather than scraping terminal output.
 - `turnParser()` extracts the same structured `orca:action` block used by Claude Code and Codex.
-- `detectError()` recognizes common Antigravity auth, quota, and provider failure output.
+- Provider error handling recognizes common Antigravity auth, quota, and execution-failure output from hook payloads or transcript content.
 
-The shared `ShadowSessionManager` stays provider-neutral. Antigravity-specific hook schema, prompt readiness patterns, modal dismissal, or pane parsing stays in `AntigravityShadowProvider` unless a shared abstraction is clearly needed.
+The shared `ShadowSessionManager` stays provider-neutral. Existing startup readiness checks may still observe the tmux pane to detect trust prompts and input readiness, as Claude Code and Codex already do. Turn completion and turn content for Antigravity must come from hooks and transcript data, not pane scraping.
 
 ## UI And User Flow
 
@@ -140,7 +142,7 @@ Add or update focused tests matching the Claude Code and Codex coverage style:
 - Registry tests: bootstrap registers Antigravity.
 - Execution-mode tests: Antigravity defaults are seeded and valid.
 - Model catalog/operator tests: Antigravity models and capabilities are exposed.
-- Shadow provider tests: registry resolution, launch override, hook config path/content, parser behavior, and error detection.
+- Shadow provider tests: registry resolution, launch override, hook config path/content, hook capture mode, transcript-backed Stop behavior, parser behavior, and error handling.
 - Session tests: manual session creation/start uses the common adapter path.
 - Optional real smoke tests gated by an env var, matching current Claude/Codex smoke-test style.
 
