@@ -50,6 +50,6 @@ describe("createDaemonContext: AdapterDispatcher wiring", () => {
     const cc = ctx.adapterDispatcher.resolveMode("claude-code");
     expect(cc.mode).toBe("shadow_session");
     const cx = ctx.adapterDispatcher.resolveMode("codex");
-    expect(cx.mode).toBe("one_shot");
+    expect(cx.mode).toBe("shadow_session");
   });
 });

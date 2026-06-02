@@ -14,6 +14,7 @@ export interface ProductionLauncherDeps {
     title?: string;
   }) => Promise<{ id: string }>;
   firstWorkspaceId: (goalId: string) => string | null;
+  startSession?: (input: { sessionId: string }) => Promise<void>;
 }
 
 /**
@@ -60,8 +61,10 @@ export class ProductionWorkflowSessionLauncher implements WorkflowSessionLaunche
     });
     if (this.starter) {
       await this.starter(created.id, HEADLESS_TERMINAL_DIMS);
+    } else {
+      await this.deps.startSession?.({ sessionId: created.id });
     }
-    // No starter wired: row-only mode (worker sessions start the agent externally).
+    // With no starter/startSession wired, this stays row-only; tmux workers start the agent externally.
     return { sessionId: created.id };
   }
 }

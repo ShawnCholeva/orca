@@ -55,7 +55,17 @@ describe("runCheckCommand", () => {
 
 describe("inheritCredEnv", () => {
   const saved: Record<string, string | undefined> = {};
-  const keys = ["HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA"];
+  const keys = [
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "USERPROFILE",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_DATA_HOME",
+    "APPDATA",
+    "LOCALAPPDATA",
+  ];
   for (const k of keys) saved[k] = process.env[k];
 
   afterEach(() => {
@@ -68,9 +78,16 @@ describe("inheritCredEnv", () => {
   it("returns only credential-locating env vars that are actually set", () => {
     for (const k of keys) delete process.env[k];
     process.env["HOME"] = "/home/x";
+    process.env["USER"] = "orca";
+    process.env["LOGNAME"] = "orca";
     process.env["XDG_CONFIG_HOME"] = "/home/x/.config";
     const env = inheritCredEnv();
-    expect(env).toEqual({ HOME: "/home/x", XDG_CONFIG_HOME: "/home/x/.config" });
+    expect(env).toEqual({
+      HOME: "/home/x",
+      USER: "orca",
+      LOGNAME: "orca",
+      XDG_CONFIG_HOME: "/home/x/.config",
+    });
   });
 
   it("returns empty when no cred env vars are set", () => {

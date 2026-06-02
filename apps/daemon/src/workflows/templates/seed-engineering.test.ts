@@ -139,8 +139,8 @@ describe("seedEngineeringTemplate", () => {
 });
 
 describe("engineering seed (production instructions)", () => {
-  it("version is bumped to 4", () => {
-    expect(ENGINEERING_VERSION).toBe(4);
+  it("version is bumped to 5", () => {
+    expect(ENGINEERING_VERSION).toBe(5);
   });
 
   it("all steps validate and have non-placeholder instructions + non-trivial schemas", () => {
@@ -159,8 +159,8 @@ describe("engineering seed (production instructions)", () => {
   });
 });
 
-it("engineering template seeds at v4 with agentPreference per step", () => {
-  expect(ENGINEERING_VERSION).toBe(4);
+it("engineering template seeds at v5 with Codex fallbacks per step", () => {
+  expect(ENGINEERING_VERSION).toBe(5);
   const db = new DatabaseCtor(":memory:");
   runMigrations(db, MIG_DIR);
   seedEngineeringTemplate(db, () => "2026-05-28T00:00:00.000Z");
@@ -168,10 +168,13 @@ it("engineering template seeds at v4 with agentPreference per step", () => {
   const steps = JSON.parse(row.steps_json) as Array<{ id: string; agentPreference: Array<{ adapterId: string; modelId: string }> }>;
   const intake = steps.find((s) => s.id === "intake")!;
   expect(intake.agentPreference[0]).toEqual({ adapterId: "claude-code", modelId: "claude-haiku-4-5" });
+  expect(intake.agentPreference[1]).toEqual({ adapterId: "codex", modelId: "gpt-5.4-mini" });
   const research = steps.find((s) => s.id === "research")!;
   expect(research.agentPreference[0].modelId).toBe("claude-opus-4-7");
+  expect(research.agentPreference[1]).toEqual({ adapterId: "codex", modelId: "gpt-5.5" });
   const execution = steps.find((s) => s.id === "execution")!;
   expect(execution.agentPreference[0].modelId).toBe("claude-sonnet-4-6");
+  expect(execution.agentPreference[1]).toEqual({ adapterId: "codex", modelId: "gpt-5.3-codex" });
   const guards = JSON.parse(row.guardrails_json) as Array<{ id: string }>;
   expect(guards.find((g) => g.id === "approval_launch_agent")).toBeUndefined();
 });

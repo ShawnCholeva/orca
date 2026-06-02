@@ -48,6 +48,28 @@ describe("ShadowSessionManager spawn integration", () => {
     expect(cfg.hooks.StopFailure[0].hooks[0].url).toContain("failure=1");
   });
 
+  it("writes Codex project-local hook config when spawning a codex shadow session", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    const tmux = fakeTmux();
+    const m = new ShadowSessionManager(deps(root, tmux));
+    await m.spawn("G1", "codex");
+    const configPath = join(root, "G1", ".codex", "config.toml");
+    const hooksPath = join(root, "G1", ".codex", "hooks.json");
+    expect(readFileSync(configPath, "utf8")).toContain("hooks = true");
+    const hooks = JSON.parse(readFileSync(hooksPath, "utf8"));
+    expect(hooks.hooks.Stop[0].hooks[0].command).toContain("goalId=G1");
+    expect(hooks.hooks.StopFailure[0].hooks[0].command).toContain("failure=1");
+  });
+
+  it("uses the codex binary when spawning a codex shadow session", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    const tmux = fakeTmux();
+    const m = new ShadowSessionManager({ ...deps(root, tmux), codexBin: "/bin/codex-test" });
+    await m.spawn("G3", "codex");
+    const newSession = tmux.calls.find((c) => c.args[0] === "new-session");
+    expect(newSession?.args).toContain("/bin/codex-test");
+  });
+
   it("readiness gate: spawn rejects when not ready", async () => {
     const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
     const tmux = fakeTmux();
@@ -88,5 +110,17 @@ describe("ShadowSessionManager spawn integration", () => {
     const sendKeys = tmux.calls.filter((c) => c.args[0] === "send-keys" && c.args.includes("Enter"));
     // Should have sent Enter to answer the trust prompt
     expect(sendKeys.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("startup trusts Codex project hooks with t before reporting ready", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    const tmux = fakeTmux(["1 hook needs review before it can run. Press t to trust", "codex ready\n>"]);
+    const m = new ShadowSessionManager(deps(root, tmux));
+    await m.spawn("G5", "codex");
+    await new Promise((r) => setTimeout(r, 300));
+    const trust = tmux.calls.find((c) => c.args[0] === "send-keys" && c.args.includes("t"));
+    expect(trust).toBeDefined();
+    const escapes = tmux.calls.filter((c) => c.args[0] === "send-keys" && c.args.includes("Escape"));
+    expect(escapes.length).toBeGreaterThanOrEqual(2);
   });
 });

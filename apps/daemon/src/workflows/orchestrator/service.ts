@@ -9,6 +9,7 @@ import {
   type ModelProviderId,
   type OperatorDescriptor,
   type OrchestratorAction,
+  type StepAgentChoice,
   type WorkflowDecisionTrace,
   type WorkflowRun as WorkflowRunT,
   type WorkflowStepTemplate,
@@ -52,6 +53,7 @@ import { extractOrcaStepCompleteBlock } from "./orca-output.js";
 import { incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
 import { incrementCrashRetry, CRASH_RETRY_CAP } from "./crash-retry.js";
 import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
+import { adapterIdForProvider } from "../../orchestrator-llm/model-provider-llm-client.js";
 import { randomUUID } from "node:crypto";
 
 export interface StepDispatchCapabilities {
@@ -66,6 +68,19 @@ interface GoalRow {
   description: string;
   orchestrator_provider: ModelProviderId | null;
   orchestrator_model: string | null;
+}
+
+function preferencesForGoal(
+  preferences: StepAgentChoice[],
+  orchestratorProvider: GoalRow["orchestrator_provider"]
+): StepAgentChoice[] {
+  if (!orchestratorProvider) return preferences;
+  const preferredAdapterId = adapterIdForProvider(orchestratorProvider);
+  if (!preferences.some((pref) => pref.adapterId === preferredAdapterId)) return preferences;
+  return [
+    ...preferences.filter((pref) => pref.adapterId === preferredAdapterId),
+    ...preferences.filter((pref) => pref.adapterId !== preferredAdapterId),
+  ];
 }
 
 interface StepRunRow {
@@ -458,8 +473,9 @@ export class OrchestratorService {
     const goal = readGoal(db, run.goalId);
     if (!this.orchestratorMediator) return; // not configured
 
-    const adapterId = (stepRun.selected_operator_id ?? "").replace(/^agent:/, "");
-    const modelId = stepRun.selected_model_id ?? "";
+    if (!goal.orchestrator_provider || !goal.orchestrator_model) return;
+    const adapterId = adapterIdForProvider(goal.orchestrator_provider);
+    const modelId = goal.orchestrator_model;
 
     const action = await judgeAgentResponse({
       mediator: this.orchestratorMediator as OrchestratorMediator,
@@ -523,11 +539,27 @@ export class OrchestratorService {
       case "forward_to_agent": {
         if (sessionId && this.workerDeliver) {
           const r = await this.workerDeliver(sessionId, action.translated);
-          if (r !== "delivered") console.warn(`[orchestrator] forward_to_agent ${r} for session ${sessionId}`);
+          if (r !== "delivered") {
+            this.postOrchestratorMessage(
+              db,
+              now,
+              ctx.run.goalId,
+              r === "timeout"
+                ? "Unable to forward the message because the step agent did not become idle in time."
+                : "Unable to forward the message because the step agent session is not running.",
+              options
+            );
+            return { postedChatReply: true };
+          }
         } else {
-          console.warn(
-            `[orchestrator] forward_to_agent dropped: no live session for step ${ctx.stepRun.id} (goal ${ctx.run.goalId})`
+          this.postOrchestratorMessage(
+            db,
+            now,
+            ctx.run.goalId,
+            "Unable to forward the message because no step agent session is available.",
+            options
           );
+          return { postedChatReply: true };
         }
         return { postedChatReply: false };
       }
@@ -568,11 +600,27 @@ export class OrchestratorService {
         }
         if (sessionId && this.workerDeliver) {
           const r = await this.workerDeliver(sessionId, action.feedback);
-          if (r !== "delivered") console.warn(`[orchestrator] revise_step ${r} for session ${sessionId}`);
+          if (r !== "delivered") {
+            this.postOrchestratorMessage(
+              db,
+              now,
+              ctx.run.goalId,
+              r === "timeout"
+                ? "Unable to send revision feedback because the step agent did not become idle in time."
+                : "Unable to send revision feedback because the step agent session is not running.",
+              options
+            );
+            return { postedChatReply: true };
+          }
         } else {
-          console.warn(
-            `[orchestrator] revise_step feedback dropped: no live session for step ${ctx.stepRun.id} (goal ${ctx.run.goalId})`
+          this.postOrchestratorMessage(
+            db,
+            now,
+            ctx.run.goalId,
+            "Unable to send revision feedback because no step agent session is available.",
+            options
           );
+          return { postedChatReply: true };
         }
         return { postedChatReply: false };
       }
@@ -650,8 +698,9 @@ export class OrchestratorService {
       .get(run.goalId) as GoalRow | undefined;
     if (!goal) return;
 
-    const adapterId = (stepRun.selected_operator_id ?? "").replace(/^agent:/, "");
-    const modelId = stepRun.selected_model_id ?? "";
+    if (!goal.orchestrator_provider || !goal.orchestrator_model) return;
+    const adapterId = adapterIdForProvider(goal.orchestrator_provider);
+    const modelId = goal.orchestrator_model;
 
     const invoke = this.orchestratorMediator.invokeWithBackoff?.bind(this.orchestratorMediator) ?? this.orchestratorMediator.invoke.bind(this.orchestratorMediator);
 
@@ -881,7 +930,7 @@ export class OrchestratorService {
   ): Promise<void> {
     if (!this.stepDispatch) throw new Error("step dispatch capabilities not configured");
     const dispatch = await resolveStepDispatch({
-      preferences: ctx.stepTpl.agentPreference,
+      preferences: preferencesForGoal(ctx.stepTpl.agentPreference, ctx.goal.orchestrator_provider),
       isAdapterReady: (id) => this.stepDispatch!.isAdapterReady(id),
       supportsModel: (id, mid) => this.stepDispatch!.supportsModel(id, mid),
       resolveMode: (id) => this.stepDispatch!.resolveMode(id),
@@ -889,7 +938,7 @@ export class OrchestratorService {
 
     // Persist selection only when the step has not already been operator-selected
     // (commitAdvanceOrComplete's recursion may have selected it already).
-    if (!ctx.stepRun.selected_operator_id) {
+    if (ctx.stepRun.selected_operator_id !== `agent:${dispatch.adapterId}`) {
       this.commitDeterministicStepSelection(db, now, ctx, dispatch, options);
     }
 
@@ -900,17 +949,40 @@ export class OrchestratorService {
       outputSchema: ctx.stepTpl.outputSchema,
       priorStepArtifacts: this.collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.ordinal),
     });
-    const { sessionId } = await this.launcher.launch({
-      goalId: ctx.goal.id,
-      workflowRunId: ctx.run.id,
-      workflowStepRunId: ctx.stepRun.id,
-      operatorId: "agent:" + dispatch.adapterId,
-      operatorKind: "agent",
-      objective,
-    });
-    // Run the agent as a headless tmux worker, then submit its objective.
-    await this.workerSpawn?.({ sessionId, goalId: ctx.goal.id, adapterId: dispatch.adapterId });
-    await this.workerDeliver?.(sessionId, objective);
+
+    try {
+      const { sessionId } = await this.launcher.launch({
+        goalId: ctx.goal.id,
+        workflowRunId: ctx.run.id,
+        workflowStepRunId: ctx.stepRun.id,
+        operatorId: "agent:" + dispatch.adapterId,
+        operatorKind: "agent",
+        objective,
+      });
+
+      // Run the agent as a headless tmux worker, then submit its objective.
+      await this.workerSpawn?.({ sessionId, goalId: ctx.goal.id, adapterId: dispatch.adapterId });
+      const delivered = await this.workerDeliver?.(sessionId, objective);
+      if (delivered && delivered !== "delivered") {
+        this.postOrchestratorMessage(
+          db,
+          now,
+          ctx.goal.id,
+          delivered === "timeout"
+            ? `Unable to submit the initial step objective (${dispatch.adapterId}): the step agent did not become idle in time.`
+            : `Unable to submit the initial step objective (${dispatch.adapterId}): the step agent session is not running.`,
+          options
+        );
+      }
+    } catch (err) {
+      this.postOrchestratorMessage(
+        db,
+        now,
+        ctx.goal.id,
+        `Unable to start the step agent (${dispatch.adapterId}): ${err instanceof Error ? err.message : "unknown error"}`,
+        options
+      );
+    }
   }
 
   /**
@@ -1004,7 +1076,7 @@ export class OrchestratorService {
         return this.blockRun(db, now, ctx, "step dispatch capabilities not configured", options);
       }
       const dispatch = await resolveStepDispatch({
-        preferences: stepTpl.agentPreference,
+        preferences: preferencesForGoal(stepTpl.agentPreference, goal.orchestrator_provider),
         isAdapterReady: (id) => this.stepDispatch!.isAdapterReady(id),
         supportsModel: (id, mid) => this.stepDispatch!.supportsModel(id, mid),
         resolveMode: (id) => this.stepDispatch!.resolveMode(id),

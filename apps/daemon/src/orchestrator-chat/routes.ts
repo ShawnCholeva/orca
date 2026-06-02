@@ -15,6 +15,7 @@ import {
   OrchestratorChatGoalNotFoundError,
   OrchestratorChatProviderUnavailableError,
 } from "./usecases.js";
+import type { ShadowAdapterId } from "../orchestrator-llm/shadow-session.js";
 
 export interface OrchestratorChatRouteDeps {
   db: Database.Database;
@@ -22,7 +23,10 @@ export interface OrchestratorChatRouteDeps {
   modelProviderRegistry: ModelProviderRegistry;
   now?: () => string;
   idFactory?: () => string;
-  shadowAsk?: (goalId: string, input: { systemPrompt: string; userPrompt: string; timeoutMs: number }) => Promise<{ text: string }>;
+  shadowAsk?: (
+    goalId: string,
+    input: { adapterId: ShadowAdapterId; systemPrompt: string; userPrompt: string; timeoutMs: number }
+  ) => Promise<{ text: string }>;
   resolveOrchestratorMode?: (provider: string) => "shadow_session" | "one_shot";
   onOrchestratorReply?: (goalId: string, body: string) => void;
   onUserMessage?: (goalId: string, body: string) => Promise<void>;
@@ -80,7 +84,7 @@ export function registerOrchestratorChatRoutes(
       );
       if (deps.onUserMessage) {
         // Best-effort orchestrator-LLM trigger; never block the chat reply.
-        await deps.onUserMessage(goalId, parsed.data.body).catch(() => {});
+        void deps.onUserMessage(goalId, parsed.data.body).catch(() => {});
       }
       reply.status(201);
       return CreateOrchestratorMessageResponse.parse(response);

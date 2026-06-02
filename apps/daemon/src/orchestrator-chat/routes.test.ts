@@ -4,6 +4,7 @@ import path from "node:path";
 
 import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
+import Fastify from "fastify";
 import {
   CreateOrchestratorMessageResponse,
   ListOrchestratorMessagesResponse,
@@ -18,6 +19,7 @@ import { ModelProviderRegistry } from "../llm/registry.js";
 import type { ModelCompletionRequest, ModelProvider } from "../llm/types.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import { createServer } from "../server.js";
+import { registerOrchestratorChatRoutes } from "./routes.js";
 
 const tempDirs: string[] = [];
 const AUTH_HEADERS = { authorization: "Bearer test-token" } as const;
@@ -144,5 +146,36 @@ describe("orchestrator chat routes", () => {
     });
 
     expect(response.statusCode).toBe(409);
+  });
+
+  it("POST /v1/goals/:goalId/orchestrator-messages does not wait for onUserMessage", async () => {
+    seedGoal(db, "goal-1");
+    const app = Fastify();
+    let invoked = false;
+    registerOrchestratorChatRoutes(app, {
+      db,
+      bus: eventBus,
+      modelProviderRegistry: fakeRegistry(),
+      now: () => NOW,
+      idFactory: (() => {
+        let nextId = 0;
+        return () => `direct-id-${++nextId}`;
+      })(),
+      onUserMessage: async () => {
+        invoked = true;
+        await new Promise(() => undefined);
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/goals/goal-1/orchestrator-messages",
+      headers: { "content-type": "application/json" },
+      payload: { body: "Need a rollout plan." },
+    });
+    await app.close();
+
+    expect(invoked).toBe(true);
+    expect(response.statusCode).toBe(201);
   });
 });

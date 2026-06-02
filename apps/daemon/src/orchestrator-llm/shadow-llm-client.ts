@@ -15,6 +15,7 @@ export class ShadowSessionLlmClient implements OrchestratorLlmClient {
     userPrompt: string;
   }): Promise<{ text: string }> {
     return this.manager.ask(input.goalId, {
+      adapterId: input.adapterId === "codex" ? "codex" : "claude-code",
       systemPrompt: input.systemPrompt,
       userPrompt: input.userPrompt,
       timeoutMs: this.opts.timeoutMs,

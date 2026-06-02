@@ -15,6 +15,7 @@ import { sanitizeOutput } from "../readiness/sanitize.js";
 import { installUrlFor, signInCommandFor } from "../readiness/repair-links.js";
 import { parseVersion } from "../readiness/version.js";
 import type { AgentReadinessStatus, CheckStep, RepairAction, ExecutionMode } from "@orca/contracts";
+import { adapterSupportsModel } from "./model-catalog.js";
 
 export type RunCheckFn = (
   command: string,
@@ -32,14 +33,8 @@ export class GeminiAdapter implements AgentAdapter {
   readonly supportedExecutionModes: ExecutionMode[] = ["one_shot"];
   readonly contextDelivery: AdapterContextDelivery = { mode: "preview_only", maxBytes: 32768 };
 
-  private static readonly KNOWN_MODELS = new Set([
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-2.0-pro",
-  ]);
-
   supportsModel(modelId: string): boolean {
-    return GeminiAdapter.KNOWN_MODELS.has(modelId);
+    return adapterSupportsModel(this.id, modelId);
   }
 
   constructor(

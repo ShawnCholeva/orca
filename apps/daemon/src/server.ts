@@ -54,6 +54,7 @@ import {
   type ArchiveGoalResponse,
   type GoalMemoryItem,
   type GoalDecision,
+  type ModelProviderId,
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
   SubmitWorkerAnswersRequest,
@@ -153,7 +154,6 @@ import type { SessionPreparationAssembler } from './context/assembler.js';
 import { registerContextRoutes } from './context/routes.js';
 import { registerAdapterExecutionModeRoutes } from './adapters/execution-modes-routes.js';
 import { createDaemonContext, type DaemonContext } from './daemon-context.js';
-import { ProductionWorkflowSessionLauncher } from './workflows/orchestrator/session-launcher-impl.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
@@ -171,6 +171,11 @@ import { insertMessageWithEvent } from './orchestrator-chat/usecases.js';
 import { registerOrchestratorHookRoutes } from './orchestrator-hooks/routes.js';
 import { ShadowSessionManager, shadowSessionId } from './orchestrator-llm/shadow-session.js';
 import { ShadowSessionLlmClient } from './orchestrator-llm/shadow-llm-client.js';
+import {
+  ModelProviderOrchestratorLlmClient,
+  RoutedOrchestratorLlmClient,
+  adapterIdForProvider,
+} from './orchestrator-llm/model-provider-llm-client.js';
 import { OrchestratorMediator } from './orchestrator-llm/mediator.js';
 import { composeOrchestratorPrompt } from './orchestrator-llm/prompts.js';
 import { buildContextFromDb } from './orchestrator-llm/build-context.js';
@@ -182,6 +187,8 @@ import { validateAnswers, assembleAnswerReason } from './workflows/orchestrator/
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
 import {
   buildOrchestrationProviderCatalog,
+  modelOverridesForConnectedAgents,
+  providerIdsForConnectedAgents,
   toModelProvidersResponse,
 } from './workflows/orchestration-transport/provider-catalog.js';
 import { NotConnectedError, UnknownAgentError } from './readiness/service.js';
@@ -304,7 +311,15 @@ export function createServer(
   });
 
   server.get('/v1/model-providers', async (): Promise<ListModelProvidersResponse> => {
-    const catalog = await buildOrchestrationProviderCatalog(daemonContext.modelProviderRegistry);
+    const agents = listAgents(db);
+    const allowedProviderIds =
+      agents.length > 0 ? providerIdsForConnectedAgents(agents) : undefined;
+    const modelOverrides =
+      agents.length > 0 ? modelOverridesForConnectedAgents(agents) : undefined;
+    const catalog = await buildOrchestrationProviderCatalog(
+      daemonContext.modelProviderRegistry,
+      { allowedProviderIds, modelOverrides }
+    );
     const providers = toModelProvidersResponse(catalog);
     return { providers };
   });
@@ -476,13 +491,14 @@ export function createServer(
     shadowRoot: path.join(config.dataDir, "shadow"),
     daemonPort: config.port,
     authToken: config.getAuthToken(),
-    isReady: async () => {
-      const adapter = adapterRegistry.get("claude-code");
+    isReady: async (adapterId = "claude-code") => {
+      const adapter = adapterRegistry.get(adapterId);
       if (!adapter) return false;
       const step = await adapter.checkAuth();
       return step.ok;
     },
     claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
+    codexBin: process.env["ORCA_CODEX_BIN"] ?? "codex",
   });
 
   // Worker session manager for orchestrator-dispatched agent sessions (tmux-backed).
@@ -511,8 +527,10 @@ export function createServer(
   });
 
   const shadowClient = new ShadowSessionLlmClient(shadowSessions, { timeoutMs: 60_000 });
+  const providerClient = new ModelProviderOrchestratorLlmClient(daemonContext.modelProviderRegistry);
+  const routedOrchestratorClient = new RoutedOrchestratorLlmClient(shadowClient, providerClient);
   const orchestratorMediator = new OrchestratorMediator({
-    llm: shadowClient,
+    llm: routedOrchestratorClient,
     buildContext: ({ goalId, runId, stepRunId }) =>
       buildContextFromDb(db, { goalId, runId, stepRunId, payloadBudgetBytes: 64 * 1024 }),
     composePrompt: composeOrchestratorPrompt,
@@ -658,7 +676,14 @@ export function createServer(
         { db: getDatabase(), bus: eventBus, now: daemonContext.now, idFactory: daemonContext.idFactory },
         args
       ),
-    spawnOrchestratorSessionFn: async (goalId, _runId) => shadowSessions.spawn(goalId),
+    spawnOrchestratorSessionFn: async (goalId, _runId) => {
+      const goal = getGoalById(getDatabase(), goalId);
+      if (!goal?.orchestratorProvider) return shadowSessionId(goalId);
+      const adapterId = adapterIdForProvider(goal.orchestratorProvider);
+      return daemonContext.stepDispatchCapabilities.resolveMode(adapterId).mode === "shadow_session"
+        ? shadowSessions.spawn(goalId, adapterId === "codex" ? "codex" : "claude-code")
+        : shadowSessionId(goalId);
+    },
     startWorkflowFirstStepFn: async (_goalId, runId) =>
       orchestratorService.startWorkflowFirstStep(
         getDatabase(),
@@ -1148,15 +1173,11 @@ export function createServer(
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
     shadowAsk: async (goalId, input) => {
-      await shadowSessions.spawn(goalId);
+      await shadowSessions.spawn(goalId, input.adapterId);
       return shadowSessions.ask(goalId, input);
     },
     resolveOrchestratorMode: (provider) => {
-      const adapterId =
-        provider === "orca/anthropic" ? "claude-code"
-        : provider === "orca/openai" ? "codex"
-        : provider === "orca/google-gemini" ? "gemini-cli"
-        : "claude-code";
+      const adapterId = adapterIdForProvider(provider as ModelProviderId);
       try {
         return daemonContext.stepDispatchCapabilities.resolveMode(adapterId).mode === "shadow_session"
           ? "shadow_session" : "one_shot";

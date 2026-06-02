@@ -7,24 +7,9 @@ import Anthropic, {
 import { z } from "zod";
 import type { ModelCompletionRequest, ModelCompletionResponse, ModelProvider } from "./types.js";
 import { ProviderError } from "./types.js";
+import { MODELS_BY_AGENT_ID } from "../adapters/model-catalog.js";
 
-const MODELS = [
-  {
-    id: "claude-opus-4-7",
-    displayName: "Claude Opus 4.7",
-    capabilities: ["reasoning", "long_context", "tool_use"]
-  },
-  {
-    id: "claude-sonnet-4-6",
-    displayName: "Claude Sonnet 4.6",
-    capabilities: ["reasoning", "tool_use"]
-  },
-  {
-    id: "claude-haiku-4-5",
-    displayName: "Claude Haiku 4.5",
-    capabilities: ["fast", "cheap"]
-  }
-] as const;
+const MODELS = MODELS_BY_AGENT_ID["claude-code"] ?? [];
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const DEFAULT_MAX_OUTPUT_TOKENS = 1024;

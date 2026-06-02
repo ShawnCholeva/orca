@@ -24,7 +24,7 @@ describe("AdapterDispatcher.resolveMode", () => {
     const db = makeDb();
     const d = new AdapterDispatcher({ db });
     expect(d.resolveMode("claude-code")).toEqual({ adapterId: "claude-code", mode: "shadow_session", fallbacks: [] });
-    expect(d.resolveMode("codex")).toEqual({ adapterId: "codex", mode: "one_shot", fallbacks: ["shadow_session"] });
+    expect(d.resolveMode("codex")).toEqual({ adapterId: "codex", mode: "shadow_session", fallbacks: [] });
   });
 
   it("throws when adapter has no config", () => {

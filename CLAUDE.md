@@ -17,19 +17,17 @@ Before implementing anything, read the relevant spec:
 - `docs/PRODUCT.md` — Vision, core concepts, user-facing features
 - `docs/MVP.md` — Detailed MVP specification for Levels 1–3 (~1,100 lines)
 - `docs/TECHNICAL.md` — Full technical design and architecture (~1,770 lines)
-- `docs/LEVEL_4.md` — Level 4 supervised execution specification (~870 lines)
 
 ## Core Domain Model
 
 ```
 Goal            — the unit of work; all memory and sessions are Goal-scoped
 Workspace       — a repo/folder attached to a Goal (many per Goal)
-Task            — a decomposed unit of work within a Goal, assigned a Role
-Session         — a disposable PTY execution environment running an agent
+Workflow        - instructions that guide the orchestration of the goal
+Step            — a decomposed unit of work within a workflow
 MemoryItem      — extracted reasoning: decision | assumption | constraint | risk |
                   blocker | architecture_note | session_summary | validation_result | open_question
 Recommendation  — orchestrator suggestion: next_session | review | validation | etc.
-Role            — Architect | Engineer | Reviewer | QA | Debugger | etc.
 ```
 
 Memory lifecycle: `observed → extracted → promoted → canonical`
@@ -88,15 +86,20 @@ MVP targets Levels 1–3:
 | 4 | Supervised | Orca proposes full workflows with confirmation gates |
 | 5 | Autonomous | Full self-directed orchestration (out of scope for MVP) |
 
-## Implementation Milestones (Planned Order)
+## Shadow session interactions
 
-1. Local Runtime Foundation — app + daemon boot, Goal CRUD
-2. Plugin & Skill Foundation — registry systems, internal plugins
-3. Goal Creation & Workspaces — multi-workspace refinement flow
-4. Embedded Sessions — PTY terminal, agent adapters
-5. Shared Memory — extraction, promotion, memory views
-6. Context Assembly — relevant memory injection, sibling awareness
-7. Suggested Orchestration — task generation, recommendations, conflict detection
+Below you will find relevant files based on the provider building on in Orca.
+
+- Always prefer to utilize hooks instead of parsing the shadow workers/sessions
+
+# Claude
+
+Hooks: https://code.claude.com/docs/en/hooks
+
+# Codex
+
+Hooks: https://developers.openai.com/codex/hooks
+
 
 ## Context Assembly (Token Efficiency)
 

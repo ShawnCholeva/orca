@@ -120,6 +120,9 @@ describe("orchestrator-mediated workflow e2e (service-level happy path)", () => 
         }),
       ],
     });
+    db.prepare(
+      "UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-haiku-4-5' WHERE id = 'goal-1'"
+    ).run();
     seedWorkspace(db);
 
     // ---- Boundary fakes: spy launcher (PTY) + fake mediator (LLM). ----
@@ -143,7 +146,7 @@ describe("orchestrator-mediated workflow e2e (service-level happy path)", () => 
       invoke: vi.fn(async () => mediatorResponses[Math.min(call++, mediatorResponses.length - 1)]),
     };
 
-    const agentInput = vi.fn();
+    const workerDeliver = vi.fn(async () => "delivered" as const);
 
     const service = new OrchestratorService(
       fakeSelector(),
@@ -153,7 +156,8 @@ describe("orchestrator-mediated workflow e2e (service-level happy path)", () => 
       undefined,
       fakeStepDispatch(),
       mediator as unknown as Pick<OrchestratorMediator, "invoke">,
-      agentInput
+      undefined,
+      workerDeliver
     );
 
     // ===== 1. Start the workflow's first step (spawns step-1 agent). =====

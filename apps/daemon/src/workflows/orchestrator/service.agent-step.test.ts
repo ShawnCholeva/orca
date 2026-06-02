@@ -6,7 +6,7 @@ import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { resetWorkflowStepProjectionPreparedStatements } from "../steps/projection.js";
 import type { OperatorDescriptor, OperatorSelection } from "@orca/contracts";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
-import { OrchestratorService } from "./service.js";
+import { OrchestratorService, type StepDispatchCapabilities } from "./service.js";
 import {
   cleanupHarness,
   NOW,
@@ -104,6 +104,18 @@ function spyMediator(action: OrchestratorAction): Pick<OrchestratorMediator, "in
   return spy as Pick<OrchestratorMediator, "invoke"> & { calls: number };
 }
 
+function recordingMediator(action: OrchestratorAction): Pick<OrchestratorMediator, "invoke"> & { inputs: unknown[] } {
+  const recorder = { inputs: [] as unknown[] } as {
+    inputs: unknown[];
+    invoke: OrchestratorMediator["invoke"];
+  };
+  recorder.invoke = (async (input) => {
+    recorder.inputs.push(input);
+    return action;
+  }) as OrchestratorMediator["invoke"];
+  return recorder;
+}
+
 function makeJudgeService(
   mediator: Pick<OrchestratorMediator, "invoke">,
   workerDeliver: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">
@@ -123,6 +135,9 @@ function makeJudgeService(
 
 /** Mark the active step run as agent-selected and link a session to it */
 function seedAgentSession(db: Database.Database, opts: { reviseAttempts?: number } = {}) {
+  db.prepare(
+    "UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-haiku-4-5' WHERE id = 'goal-1'"
+  ).run();
   db.prepare(
     "UPDATE workflow_step_runs SET selected_operator_id = 'agent:claude-code', selected_provider_id = NULL, selected_model_id = 'claude-haiku-4-5', operator_selected_at = ?, revise_attempts = ? WHERE id = 'step-1'"
   ).run(NOW, opts.reviseAttempts ?? 0);
@@ -454,6 +469,9 @@ describe("OrchestratorService.onUserMessage (user_message trigger)", () => {
     setupAgentStepRun(db, { guardrailsJson: "[]" });
     seedWorkspace(db);
     // NOTE: no seedAgentSession() — current step has no live session.
+    db.prepare(
+      "UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-haiku-4-5' WHERE id = 'goal-1'"
+    ).run();
 
     const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(
@@ -470,7 +488,31 @@ describe("OrchestratorService.onUserMessage (user_message trigger)", () => {
 
     expect(deliver).not.toHaveBeenCalled();
     expect(orchestratorMessageCount(db)).toBe(1);
-    expect(lastOrchestratorMessageBody(db)).toContain("no live agent session");
+    expect(lastOrchestratorMessageBody(db)).toMatch(/no step agent session/i);
+  });
+
+  it("forward_to_agent: posts a visible error when delivery reports no running session", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+
+    const deliver = vi.fn(async () => "no_session" as const);
+    const service = makeJudgeService(
+      fakeMediator({ kind: "forward_to_agent", translated: "please add tests" }),
+      deliver
+    );
+
+    await service.onUserMessage(
+      db,
+      () => NOW,
+      { goalId: "goal-1", body: "add tests" },
+      { bus, idFactory }
+    );
+
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(orchestratorMessageCount(db)).toBe(1);
+    expect(lastOrchestratorMessageBody(db)).toMatch(/step agent session is not running/i);
   });
 
   it("answer_user_directly: posts an orchestrator message and does NOT message the agent", async () => {
@@ -494,6 +536,31 @@ describe("OrchestratorService.onUserMessage (user_message trigger)", () => {
 
     expect(orchestratorMessageCount(db)).toBe(1);
     expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("invokes the mediator with the goal orchestrator model, not the step agent model", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    db.prepare(
+      "UPDATE goals SET orchestrator_provider = 'orca/openai', orchestrator_model = 'gpt-5.4-mini' WHERE id = 'goal-1'"
+    ).run();
+
+    const mediator = recordingMediator({ kind: "answer_user_directly", body: "sure" });
+    const service = makeJudgeService(mediator, vi.fn());
+
+    await service.onUserMessage(
+      db,
+      () => NOW,
+      { goalId: "goal-1", body: "what model are you?" },
+      { bus, idFactory }
+    );
+
+    expect(mediator.inputs[0]).toMatchObject({
+      adapterId: "codex",
+      modelId: "gpt-5.4-mini",
+    });
   });
 });
 
@@ -612,6 +679,71 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     expect(sessionId).toBe("sess-x");
     expect(prompt).toContain("Write the implementation.");
     expect(prompt).toContain("orca:step-complete");
+  });
+
+  it("startWorkflowFirstStep contains launcher failures and posts a visible message", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupFirstStepRun(db);
+
+    const launchFn = vi.fn(async () => {
+      throw new Error("PTY spawn failed: spawn_failed");
+    });
+    const launcher = makeLauncher(launchFn);
+    const service = makeAgentService(launcher);
+
+    await expect(
+      service.startWorkflowFirstStep(db, () => NOW, "run-1", { bus, idFactory })
+    ).resolves.toBeUndefined();
+
+    const row = db
+      .prepare("SELECT body FROM orchestrator_messages WHERE goal_id = 'goal-1' AND role = 'orchestrator'")
+      .get() as { body: string } | undefined;
+    expect(launchFn).toHaveBeenCalledOnce();
+    expect(row?.body).toMatch(/unable to start the step agent/i);
+    expect(row?.body).toContain("spawn_failed");
+  });
+
+  it("startWorkflowFirstStep prefers Codex worker when the goal orchestrator is OpenAI", async () => {
+    const { db } = setupHarness();
+    setupFirstStepRun(db);
+    db.prepare(
+      "UPDATE goals SET orchestrator_provider = 'orca/openai', orchestrator_model = 'gpt-5.4-mini' WHERE id = 'goal-1'"
+    ).run();
+    const row = db.prepare("SELECT steps_json FROM workflow_templates WHERE id = 'orca/engineering'").get() as { steps_json: string };
+    const steps = JSON.parse(row.steps_json) as Array<{ id: string; agentPreference: Array<{ adapterId: string; modelId: string }> }>;
+    steps[0]!.agentPreference = [
+      { adapterId: "claude-code", modelId: "claude-haiku-4-5" },
+      { adapterId: "codex", modelId: "gpt-5.4-mini" },
+    ];
+    db.prepare("UPDATE workflow_templates SET steps_json = ? WHERE id = 'orca/engineering'").run(JSON.stringify(steps));
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-codex" }));
+    const stepDispatch: StepDispatchCapabilities = {
+      isAdapterReady: async (adapterId) => adapterId === "claude-code" || adapterId === "codex",
+      supportsModel: (adapterId, modelId) =>
+        (adapterId === "claude-code" && modelId === "claude-haiku-4-5") ||
+        (adapterId === "codex" && modelId === "gpt-5.4-mini"),
+      resolveMode: (adapterId) => ({ adapterId, mode: "shadow_session", fallbacks: [] }),
+    };
+    const service = new OrchestratorService(
+      fakeAgentSelector(),
+      fakeBrokerNoop(),
+      { async list() { return [agentOperatorDescriptor()]; } },
+      makeLauncher(launchFn),
+      undefined,
+      stepDispatch
+    );
+
+    await service.startWorkflowFirstStep(db, () => NOW, "run-1");
+
+    expect(launchFn).toHaveBeenCalledWith(expect.objectContaining({ operatorId: "agent:codex" }));
+    const selected = db
+      .prepare("SELECT selected_operator_id, selected_model_id FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { selected_operator_id: string; selected_model_id: string };
+    expect(selected).toMatchObject({
+      selected_operator_id: "agent:codex",
+      selected_model_id: "gpt-5.4-mini",
+    });
   });
 
   it("advanceToNextStep spawns the next step's agent for an intermediate step", async () => {
