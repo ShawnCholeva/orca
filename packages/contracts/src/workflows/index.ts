@@ -38,6 +38,10 @@ export const WORKFLOW_DECISION_MAX_INFLUENCES = 32;
 export const WORKFLOW_OPERATOR_SELECTION_MAX_ALTERNATIVES = 8;
 export const WORKFLOW_EVENT_MAX_PAYLOAD_BYTES = 4096;
 export const WORKFLOW_FAILURE_MAX_MESSAGE_CHARS = 256;
+export const WORKFLOW_TEMPLATE_MAX_SCOPE_NAME_CHARS = 200;
+export const WORKFLOW_GRAPH_MAX_NODES = 64;
+export const WORKFLOW_GRAPH_MAX_EDGES = 128;
+export const WORKFLOW_GATE_MAX_CONDITION_CHARS = 2048;
 export const ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES = 65536;
 export const ORCHESTRATION_DIAGNOSTICS_MAX_BYTES = 4096;
 export const ORCHESTRATION_HUMAN_REVIEW_MAX_SUMMARY_BYTES = 4096;
@@ -280,19 +284,19 @@ export const WorkflowGraphNode = z
     type: z.enum(["step", "gate"]),
     name: z.string().max(100).default(""),
     stepId: Id100.optional(),
-    condition: z.string().max(2048).optional(),
+    condition: z.string().max(WORKFLOW_GATE_MAX_CONDITION_CHARS).optional(),
   })
   .strict();
 export type WorkflowGraphNode = z.infer<typeof WorkflowGraphNode>;
 
-export const WorkflowGraphEdge = z.tuple([z.string().min(1).max(100), z.string().min(1).max(100)]);
+export const WorkflowGraphEdge = z.tuple([Id100, Id100]);
 export type WorkflowGraphEdge = z.infer<typeof WorkflowGraphEdge>;
 
 export const WorkflowGraph = z
   .object({
-    nodes: z.array(WorkflowGraphNode).max(64),
-    edges: z.array(WorkflowGraphEdge).max(128),
-    positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() }).strict()),
+    nodes: z.array(WorkflowGraphNode).max(WORKFLOW_GRAPH_MAX_NODES),
+    edges: z.array(WorkflowGraphEdge).max(WORKFLOW_GRAPH_MAX_EDGES),
+    positions: z.record(Id100, z.object({ x: z.number(), y: z.number() }).strict()),
   })
   .strict();
 export type WorkflowGraph = z.infer<typeof WorkflowGraph>;
@@ -313,7 +317,7 @@ export const WorkflowTemplate = z
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
     scope: WorkflowScope.default("global"),
-    scopeName: z.string().max(200).default(""),
+    scopeName: z.string().max(WORKFLOW_TEMPLATE_MAX_SCOPE_NAME_CHARS).default(""),
     graph: WorkflowGraph.nullable().default(null),
   })
   .strict();
@@ -783,7 +787,7 @@ export const CreateWorkflowTemplateRequest = z
     steps: z.array(CreateWorkflowStepTemplate).min(1).max(20),
     guardrails: z.array(WorkflowGuardrailConfig).max(20),
     scope: WorkflowScope.default("global"),
-    scopeName: z.string().max(200).default(""),
+    scopeName: z.string().max(WORKFLOW_TEMPLATE_MAX_SCOPE_NAME_CHARS).default(""),
     graph: WorkflowGraph.nullable().default(null),
   })
   .strict();

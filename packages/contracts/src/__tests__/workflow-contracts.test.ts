@@ -1004,6 +1004,14 @@ describe("WorkflowScope + WorkflowGraph schemas", () => {
     ).toThrow();
   });
 
+  it("WorkflowGraph accepts exactly 64 nodes and 128 edges (boundary)", () => {
+    const nodes = Array.from({ length: 64 }, (_, i) => ({ id: `n${i}`, type: "step" as const }));
+    const edges = Array.from({ length: 128 }, (_, i) => [`n${i}`, `n${i + 1}`]);
+    const result = WorkflowGraph.parse({ nodes, edges, positions: {} });
+    expect(result.nodes).toHaveLength(64);
+    expect(result.edges).toHaveLength(128);
+  });
+
   it("WorkflowGraphEdge is a 2-tuple of ids", () => {
     expect(WorkflowGraphEdge.parse(["a", "b"])).toEqual(["a", "b"]);
     expect(() => WorkflowGraphEdge.parse(["a"])).toThrow();

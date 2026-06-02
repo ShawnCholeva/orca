@@ -321,18 +321,6 @@ export default function App() {
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={activeTab === "reasoning"}
-                  className={`orchestrator-tab${activeTab === "reasoning" ? " orchestrator-tab--active" : ""}`}
-                  onClick={() => setActiveTab("reasoning")}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" /><circle cx="12" cy="12" r="4" />
-                  </svg>
-                  Reasoning
-                </button>
-                <button
-                  type="button"
-                  role="tab"
                   aria-selected={activeTab === "workflows"}
                   className={`orchestrator-tab${activeTab === "workflows" ? " orchestrator-tab--active" : ""}`}
                   onClick={() => setActiveTab("workflows")}
@@ -341,6 +329,18 @@ export default function App() {
                     <rect x="3" y="3" width="6" height="6" rx="1" /><rect x="15" y="3" width="6" height="6" rx="1" /><rect x="9" y="15" width="6" height="6" rx="1" /><path d="M6 9v3h12V9M12 12v3" />
                   </svg>
                   Workflows
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "reasoning"}
+                  className={`orchestrator-tab${activeTab === "reasoning" ? " orchestrator-tab--active" : ""}`}
+                  onClick={() => setActiveTab("reasoning")}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" /><circle cx="12" cy="12" r="4" />
+                  </svg>
+                  Metrics
                 </button>
               </div>
 
@@ -377,7 +377,7 @@ export default function App() {
                 />
               </section>
             ) : activeTab === "reasoning" ? (
-              <section className="reasoning-pane" role="tabpanel" aria-label="Reasoning">
+              <section className="reasoning-pane" role="tabpanel" aria-label="Metrics">
                 <div className="reasoning-card">
                   <div className="reasoning-card-header">
                     <h2 className="reasoning-card-title">Runtime Diagnostics</h2>
