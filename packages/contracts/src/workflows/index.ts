@@ -271,6 +271,32 @@ export const WorkflowStepTemplate = z
   .strict();
 export type WorkflowStepTemplate = z.infer<typeof WorkflowStepTemplate>;
 
+export const WorkflowScope = z.enum(["global", "workspace", "goal"]);
+export type WorkflowScope = z.infer<typeof WorkflowScope>;
+
+export const WorkflowGraphNode = z
+  .object({
+    id: Id100,
+    type: z.enum(["step", "gate"]),
+    name: z.string().max(100).default(""),
+    stepId: Id100.optional(),
+    condition: z.string().max(2048).optional(),
+  })
+  .strict();
+export type WorkflowGraphNode = z.infer<typeof WorkflowGraphNode>;
+
+export const WorkflowGraphEdge = z.tuple([z.string().min(1).max(100), z.string().min(1).max(100)]);
+export type WorkflowGraphEdge = z.infer<typeof WorkflowGraphEdge>;
+
+export const WorkflowGraph = z
+  .object({
+    nodes: z.array(WorkflowGraphNode).max(64),
+    edges: z.array(WorkflowGraphEdge).max(128),
+    positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() }).strict()),
+  })
+  .strict();
+export type WorkflowGraph = z.infer<typeof WorkflowGraph>;
+
 export const WorkflowTemplate = z
   .object({
     id: Id100,
@@ -285,7 +311,10 @@ export const WorkflowTemplate = z
     steps: z.array(WorkflowStepTemplate).min(1).max(20),
     guardrails: z.array(WorkflowGuardrailConfig).max(20),
     createdAt: z.string().datetime(),
-    updatedAt: z.string().datetime()
+    updatedAt: z.string().datetime(),
+    scope: WorkflowScope.default("global"),
+    scopeName: z.string().max(200).default(""),
+    graph: WorkflowGraph.nullable().default(null),
   })
   .strict();
 export type WorkflowTemplate = z.infer<typeof WorkflowTemplate>;
@@ -752,7 +781,10 @@ export const CreateWorkflowTemplateRequest = z
       "description"
     ),
     steps: z.array(CreateWorkflowStepTemplate).min(1).max(20),
-    guardrails: z.array(WorkflowGuardrailConfig).max(20)
+    guardrails: z.array(WorkflowGuardrailConfig).max(20),
+    scope: WorkflowScope.default("global"),
+    scopeName: z.string().max(200).default(""),
+    graph: WorkflowGraph.nullable().default(null),
   })
   .strict();
 export type CreateWorkflowTemplateRequest = z.infer<

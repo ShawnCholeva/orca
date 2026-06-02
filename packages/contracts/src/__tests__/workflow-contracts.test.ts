@@ -40,6 +40,8 @@ import {
   WorkflowDecisionTrace,
   WorkflowEvent,
   WorkflowEventType,
+  WorkflowGraph,
+  WorkflowGraphEdge,
   WorkflowGuardrailConfig,
   WorkflowGuardrailEvaluatedEventPayload,
   WorkflowGuardrailEvaluation,
@@ -82,7 +84,8 @@ import {
   WORKFLOW_ARTIFACT_MAX_BODY_BYTES,
   WORKFLOW_EVENT_MAX_PAYLOAD_BYTES,
   WORKFLOW_GUARDRAIL_MAX_CONFIG_BYTES,
-  OrchestratorAction
+  OrchestratorAction,
+  CreateWorkflowTemplateRequest,
 } from "../index.js";
 
 const now = "2026-01-01T00:00:00.000Z";
@@ -196,7 +199,7 @@ describe("workflow contracts", () => {
       createdAt: now
     };
 
-    expect(WorkflowTemplate.parse(template)).toEqual(template);
+    expect(WorkflowTemplate.parse(template)).toMatchObject(template);
     expect(WorkflowRun.parse(run)).toEqual(run);
     expect(WorkflowStepRun.parse(stepRun)).toEqual(stepRun);
     expect(WorkflowArtifact.parse(artifact)).toEqual(artifact);
@@ -952,5 +955,106 @@ describe("StepAgentChoice + agentPreference", () => {
       agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
     });
     expect(r.success).toBe(true);
+  });
+});
+
+describe("WorkflowScope + WorkflowGraph schemas", () => {
+  it("WorkflowTemplate applies defaults for scope/scopeName/graph when fields are omitted (back-compat)", () => {
+    const result = WorkflowTemplate.parse(template);
+    expect(result.scope).toBe("global");
+    expect(result.scopeName).toBe("");
+    expect(result.graph).toBeNull();
+  });
+
+  it("WorkflowTemplate round-trips with scope/scopeName/graph populated", () => {
+    const graph = {
+      nodes: [
+        { id: "n1", type: "step" as const, name: "Intake step", stepId: "intake" },
+        { id: "n2", type: "gate" as const, name: "Quality gate", condition: "output.goal_brief.length > 0" },
+      ],
+      edges: [["n1", "n2"] as [string, string]],
+      positions: {
+        n1: { x: 0, y: 0 },
+        n2: { x: 200, y: 0 },
+      },
+    };
+    const input = {
+      ...template,
+      scope: "goal" as const,
+      scopeName: "my-workspace/my-goal",
+      graph,
+    };
+    const result = WorkflowTemplate.parse(input);
+    expect(result.scope).toBe("goal");
+    expect(result.scopeName).toBe("my-workspace/my-goal");
+    expect(result.graph).toEqual(graph);
+  });
+
+  it("WorkflowGraph rejects more than 64 nodes", () => {
+    const nodes = Array.from({ length: 65 }, (_, i) => ({ id: `n${i}`, type: "step" as const }));
+    expect(() =>
+      WorkflowGraph.parse({ nodes, edges: [], positions: {} })
+    ).toThrow();
+  });
+
+  it("WorkflowGraph rejects more than 128 edges", () => {
+    const edges = Array.from({ length: 129 }, (_, i) => [`n${i}`, `n${i + 1}`]);
+    expect(() =>
+      WorkflowGraph.parse({ nodes: [], edges, positions: {} })
+    ).toThrow();
+  });
+
+  it("WorkflowGraphEdge is a 2-tuple of ids", () => {
+    expect(WorkflowGraphEdge.parse(["a", "b"])).toEqual(["a", "b"]);
+    expect(() => WorkflowGraphEdge.parse(["a"])).toThrow();
+    expect(() => WorkflowGraphEdge.parse(["a", "b", "c"])).toThrow();
+    expect(() => WorkflowGraphEdge.parse(["", "b"])).toThrow();
+  });
+
+  it("CreateWorkflowTemplateRequest applies defaults when scope/scopeName/graph are omitted", () => {
+    const req = {
+      name: "My Workflow",
+      description: "A test workflow",
+      steps: [{
+        id: "intake",
+        name: "Intake",
+        instructions: "Clarify the goal.",
+        outputSchema: [{ key: "goal_brief", type: "string" as const, required: true }],
+        agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }],
+      }],
+      guardrails: [],
+    };
+    const result = CreateWorkflowTemplateRequest.parse(req);
+    expect(result.scope).toBe("global");
+    expect(result.scopeName).toBe("");
+    expect(result.graph).toBeNull();
+  });
+
+  it("CreateWorkflowTemplateRequest accepts scope/scopeName/graph when provided", () => {
+    const req = {
+      name: "Scoped Workflow",
+      description: "A scoped test workflow",
+      steps: [{
+        id: "intake",
+        name: "Intake",
+        instructions: "Clarify the goal.",
+        outputSchema: [{ key: "goal_brief", type: "string" as const, required: true }],
+        agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }],
+      }],
+      guardrails: [],
+      scope: "workspace" as const,
+      scopeName: "my-workspace",
+      graph: null,
+    };
+    const result = CreateWorkflowTemplateRequest.parse(req);
+    expect(result.scope).toBe("workspace");
+    expect(result.scopeName).toBe("my-workspace");
+    expect(result.graph).toBeNull();
+  });
+
+  it("WorkflowTemplate rejects unknown top-level keys (.strict())", () => {
+    expect(() =>
+      WorkflowTemplate.parse({ ...template, unknownField: "not allowed" })
+    ).toThrow();
   });
 });
