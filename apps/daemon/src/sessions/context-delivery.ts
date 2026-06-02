@@ -6,7 +6,7 @@ import type Database from 'better-sqlite3';
 const CONTEXT_FILENAME = 'context.txt';
 const INITIAL_INPUT_TERMINATOR = '# END ORCA CONTEXT\n';
 
-export function sessionContextDir(dataDir: string, sessionId: string): string {
+function sessionContextDir(dataDir: string, sessionId: string): string {
   return path.join(dataDir, 'sessions', sessionId);
 }
 

@@ -36,10 +36,6 @@ export class EventBus {
 
 export const eventBus = new EventBus();
 
-export function emitCommitted(event: DomainEvent): void {
-  eventBus.publish(event);
-}
-
 interface EventRow {
   seq: number;
   id: string;

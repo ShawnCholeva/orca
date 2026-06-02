@@ -92,11 +92,6 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
   return _stmts!;
 }
 
-export function resetPreparedStatements(): void {
-  _db = null;
-  _stmts = null;
-}
-
 export function createSessionOutputStore(
   db: Database.Database,
   options?: SessionOutputStoreOptions

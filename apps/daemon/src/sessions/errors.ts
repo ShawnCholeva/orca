@@ -1,4 +1,4 @@
-export class SessionError extends Error {
+class SessionError extends Error {
   constructor(public readonly code: string, message: string) {
     super(message);
     this.name = 'SessionError';
