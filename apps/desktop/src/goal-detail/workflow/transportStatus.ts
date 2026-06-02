@@ -6,7 +6,7 @@ import {
   type OrchestrationTransportAttemptStatus,
 } from "@orca/contracts";
 
-export type WorkflowTransportStatusTone = "success" | "warning" | "danger" | "neutral";
+type WorkflowTransportStatusTone = "success" | "warning" | "danger" | "neutral";
 
 export type WorkflowTransportStatusSummary = {
   label: string;
@@ -88,7 +88,7 @@ export function didFallback(attempts: OrchestrationTransportAttempt[]): boolean 
   return attempts.some((attempt) => attempt.status === "fallback") || attempts.length > 1;
 }
 
-export function didFallbackToInteractiveWorker(
+function didFallbackToInteractiveWorker(
   attempts: OrchestrationTransportAttempt[],
 ): boolean {
   return attempts.some((attempt) => attempt.transport === "hidden_interactive") &&
