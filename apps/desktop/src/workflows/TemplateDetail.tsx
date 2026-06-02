@@ -1,62 +1,180 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CreateWorkflowTemplateRequest,
   type CreateWorkflowTemplateRequest as CreateWorkflowTemplateInput,
+  type WorkflowGraph,
+  type WorkflowGraphNode,
+  type WorkflowScope,
   type WorkflowTemplate,
 } from "@orca/contracts";
 import { toErrorMessage } from "../api";
-import { duplicateTemplate, saveTemplate } from "./api";
-import { GuardrailEditor, type GuardrailDraft } from "./GuardrailEditor";
+import { createTemplate, duplicateTemplate, saveTemplate } from "./api";
+import { type GuardrailDraft } from "./GuardrailEditor";
+import { NodeDetailModal, type NodeDetail } from "./NodeDetailModal";
+import { ScopePicker } from "./ScopeControls";
 import { StepEditor, type WorkflowStepDraft } from "./StepEditor";
+import { WorkflowFlow } from "./WorkflowFlow";
+import { buildInitialGraph, reconcileGraph } from "./graph-sync";
 
-interface TemplateDetailProps {
-  template: WorkflowTemplate;
-  onTemplateSaved: (template: WorkflowTemplate) => void;
-  onTemplateDuplicated: (template: WorkflowTemplate) => void;
-}
+// ─── Draft types ──────────────────────────────────────────────────────────────
 
 interface TemplateDraft {
   name: string;
   description: string;
+  scope: WorkflowScope;
+  scopeName: string;
   steps: WorkflowStepDraft[];
-  guardrails: GuardrailDraft[];
+  graph: WorkflowGraph;
 }
+
+// ─── Props ────────────────────────────────────────────────────────────────────
+
+interface TemplateDetailProps {
+  template: WorkflowTemplate;
+  isNew?: boolean;
+  goalOptions?: string[];
+  onTemplateSaved: (template: WorkflowTemplate) => void;
+  onTemplateDuplicated: (template: WorkflowTemplate) => void;
+  /** Called when a draft is discarded (only relevant when isNew=true) */
+  onDiscard?: () => void;
+  /** Called when a new template is created (replaces draft in parent) */
+  onTemplateCreated?: (template: WorkflowTemplate) => void;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function toDraft(template: WorkflowTemplate): TemplateDraft {
+  const steps: WorkflowStepDraft[] = template.steps.map((step) => ({ ...step }));
+  const graph =
+    template.graph != null ? template.graph : buildInitialGraph(steps);
+  return {
+    name: template.name,
+    description: template.description,
+    scope: template.scope ?? "global",
+    scopeName: template.scopeName ?? "",
+    steps,
+    graph,
+  };
+}
+
+function buildTemplateInput(
+  draft: TemplateDraft,
+  guardrails: WorkflowTemplate["guardrails"],
+): CreateWorkflowTemplateInput {
+  const parsed = CreateWorkflowTemplateRequest.safeParse({
+    name: draft.name.trim(),
+    description: draft.description.trim(),
+    scope: draft.scope,
+    scopeName: draft.scope === "global" ? "" : draft.scopeName,
+    steps: draft.steps.map((step, index) => ({
+      id: step.id,
+      ordinal: index,
+      name: step.name.trim(),
+      instructions: step.instructions,
+      outputSchema: step.outputSchema,
+      agentPreference: step.agentPreference,
+    })),
+    guardrails,
+    graph: reconcileGraph(draft.steps, draft.graph),
+  });
+
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues[0]?.message ?? "Workflow template validation failed.");
+  }
+  return parsed.data;
+}
+
+function buildDuplicateName(name: string): string {
+  return name.endsWith(" Copy") ? `${name} 2` : `${name} Copy`;
+}
+
+function createDefaultStep(steps: WorkflowStepDraft[]): WorkflowStepDraft {
+  const numericSuffixes = steps
+    .map((step) => /^step-(\d+)$/.exec(step.id)?.[1])
+    .map((value) => Number(value ?? "0"));
+  const nextIndex = (numericSuffixes.length === 0 ? 0 : Math.max(...numericSuffixes)) + 1;
+  return {
+    id: `step-${nextIndex}`,
+    ordinal: steps.length,
+    name: "New step",
+    instructions: "",
+    outputSchema: [{ key: "result", type: "string" as const, required: true }],
+    agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }],
+  };
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export function TemplateDetail({
   template,
+  isNew = false,
+  goalOptions = [],
   onTemplateSaved,
   onTemplateDuplicated,
+  onDiscard,
+  onTemplateCreated,
 }: TemplateDetailProps) {
   const locked = template.isBuiltIn || template.isLocked;
   const [draft, setDraft] = useState<TemplateDraft>(() => toDraft(template));
+  const [editing, setEditing] = useState(isNew);
   const [saving, setSaving] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [openNodeId, setOpenNodeId] = useState<string | null>(null);
 
+  // Keep a ref to the latest draft.graph for callbacks that close over stale state
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
+  // Reset when template changes (e.g., selecting a different template)
   useEffect(() => {
     setDraft(toDraft(template));
+    setEditing(isNew);
     setError(null);
     setWarnings([]);
     setSaving(false);
     setDuplicating(false);
-  }, [template]);
+    setOpenNodeId(null);
+  }, [template, isNew]);
 
-  const guardrailCountLabel = useMemo(
-    () => `${draft.guardrails.length} guardrail${draft.guardrails.length === 1 ? "" : "s"}`,
-    [draft.guardrails.length],
+  // Materialize the graph: reconcile steps into the working graph
+  const materializedGraph = useMemo(
+    () => reconcileGraph(draft.steps, draft.graph),
+    [draft.steps, draft.graph],
   );
+
+  // ── Save / Duplicate / Discard / Create ────────────────────────────────────
 
   async function handleSave() {
     setSaving(true);
     setError(null);
     setWarnings([]);
     try {
-      const result = await saveTemplate(template.id, buildTemplateInput(draft));
+      const payload = buildTemplateInput(draft, template.guardrails);
+      const result = await saveTemplate(template.id, payload);
       if (result.warnings.length > 0) setWarnings(result.warnings);
+      setEditing(false);
       onTemplateSaved(result.template);
     } catch (err) {
       setError(toErrorMessage(err, "Failed to save workflow template."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleCreate() {
+    setSaving(true);
+    setError(null);
+    setWarnings([]);
+    try {
+      const payload = buildTemplateInput(draft, []);
+      const result = await createTemplate(payload);
+      if (result.warnings.length > 0) setWarnings(result.warnings);
+      setEditing(false);
+      onTemplateCreated?.(result.template);
+    } catch (err) {
+      setError(toErrorMessage(err, "Failed to create workflow template."));
     } finally {
       setSaving(false);
     }
@@ -77,36 +195,268 @@ export function TemplateDetail({
     }
   }
 
+  function handleCancel() {
+    if (isNew) {
+      onDiscard?.();
+    } else {
+      // restore draft from current template
+      setDraft(toDraft(template));
+      setEditing(false);
+      setError(null);
+      setWarnings([]);
+    }
+  }
+
+  // ── Graph callbacks ─────────────────────────────────────────────────────────
+
+  function handleGraphChange(next: WorkflowGraph) {
+    if (locked) return;
+    setDraft((current) => {
+      // Keep step-nodes in sync; accept gate nodes + positions + edges from next
+      const stepNodes = current.steps.map((s) => {
+        const existing = next.nodes.find((n) => n.id === s.id);
+        return existing ?? { id: s.id, type: "step" as const, name: s.name, stepId: s.id };
+      });
+      const gateNodes = next.nodes.filter((n) => n.type === "gate");
+      return {
+        ...current,
+        graph: {
+          nodes: [...stepNodes, ...gateNodes],
+          edges: next.edges,
+          positions: next.positions,
+        },
+      };
+    });
+  }
+
+  function handleAddNode(type: "step" | "gate") {
+    if (locked) return;
+    if (type === "step") {
+      setDraft((current) => {
+        const newStep = createDefaultStep(current.steps);
+        const nextSteps = [...current.steps, newStep];
+        const nextGraph = reconcileGraph(nextSteps, current.graph);
+        // schedule opening the new node
+        setTimeout(() => setOpenNodeId(newStep.id), 0);
+        return { ...current, steps: nextSteps, graph: nextGraph };
+      });
+    } else {
+      // gate
+      setDraft((current) => {
+        const id = `gate-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000)}`;
+        const ys = Object.values(current.graph.positions).map((p) => p.y);
+        const maxY = ys.length ? Math.max(...ys) : 0;
+        const pos = { x: 110, y: maxY + 92 };
+        const gateNode: WorkflowGraphNode = {
+          id,
+          type: "gate",
+          name: "New gate",
+          condition: "",
+        };
+        const nextGraph: WorkflowGraph = {
+          ...current.graph,
+          nodes: [...current.graph.nodes, gateNode],
+          positions: { ...current.graph.positions, [id]: pos },
+        };
+        setTimeout(() => setOpenNodeId(id), 0);
+        return { ...current, graph: nextGraph };
+      });
+    }
+  }
+
+  function handleRemoveNode(id: string) {
+    if (locked) return;
+    setDraft((current) => {
+      // Is this a step node?
+      const isStep = current.steps.some((s) => s.id === id);
+      const nextSteps = isStep ? current.steps.filter((s) => s.id !== id) : current.steps;
+      const { [id]: _drop, ...restPositions } = current.graph.positions;
+      const nextGraph: WorkflowGraph = {
+        nodes: current.graph.nodes.filter((n) => n.id !== id),
+        edges: current.graph.edges.filter(([a, b]) => a !== id && b !== id),
+        positions: restPositions,
+      };
+      return {
+        ...current,
+        steps: nextSteps,
+        graph: isStep ? reconcileGraph(nextSteps, nextGraph) : nextGraph,
+      };
+    });
+    if (openNodeId === id) setOpenNodeId(null);
+  }
+
+  function handleResetLayout() {
+    setDraft((current) => ({
+      ...current,
+      graph: buildInitialGraph(current.steps),
+    }));
+  }
+
+  // ── Node modal data ─────────────────────────────────────────────────────────
+
+  const openNodeDetail: NodeDetail | null = useMemo(() => {
+    if (!openNodeId) return null;
+    const allNodes = materializedGraph.nodes;
+    const node = allNodes.find((n) => n.id === openNodeId);
+    if (!node) return null;
+
+    if (node.type === "step") {
+      const step = draft.steps.find((s) => s.id === node.id);
+      if (!step) return null;
+      return {
+        kind: "step",
+        name: step.name,
+        instructions: step.instructions,
+        outputSchema: step.outputSchema,
+        onChange: (patch) => {
+          setDraft((current) => {
+            const nextSteps = current.steps.map((s) =>
+              s.id === step.id ? { ...s, ...patch } : s,
+            );
+            // If name changed, reconcile to sync node name
+            const nextGraph =
+              patch.name !== undefined
+                ? reconcileGraph(nextSteps, current.graph)
+                : current.graph;
+            return { ...current, steps: nextSteps, graph: nextGraph };
+          });
+        },
+      };
+    } else {
+      // gate
+      return {
+        kind: "gate",
+        name: node.name,
+        condition: node.condition ?? "",
+        onChange: (patch) => {
+          setDraft((current) => ({
+            ...current,
+            graph: {
+              ...current.graph,
+              nodes: current.graph.nodes.map((n) =>
+                n.id === openNodeId ? { ...n, ...patch } : n,
+              ),
+            },
+          }));
+        },
+      };
+    }
+  }, [openNodeId, materializedGraph.nodes, draft.steps]);
+
+  const openNodeIndex = useMemo(() => {
+    if (!openNodeId) return -1;
+    return materializedGraph.nodes.findIndex((n) => n.id === openNodeId);
+  }, [openNodeId, materializedGraph.nodes]);
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+
   return (
-    <section className="workflow-detail-panel" aria-label="Workflow template detail">
+    <section
+      className="workflow-detail-panel"
+      aria-label="Workflow template detail"
+      style={{ position: "relative" }}
+    >
+      {/* Header */}
       <div className="workflow-detail-panel__header">
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div className="workflow-detail-panel__eyebrow mono">
-            {locked ? "Built-in Workflow" : "Custom Workflow"}
+            {locked ? "Built-in Workflow" : isNew ? "New Workflow" : "Custom Workflow"}
           </div>
-          <h2 className="workflow-detail-panel__title">{draft.name || template.name}</h2>
+          {editing ? (
+            <input
+              type="text"
+              value={draft.name}
+              onChange={(e) => setDraft((c) => ({ ...c, name: e.target.value }))}
+              autoFocus
+              aria-label="Template Name"
+              maxLength={100}
+              style={{
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                color: "var(--text)",
+                fontFamily: "inherit",
+                fontSize: 20,
+                fontWeight: 700,
+                padding: 0,
+                borderBottom: "1px dashed var(--hairline-strong)",
+                width: "100%",
+                maxWidth: 400,
+              }}
+            />
+          ) : (
+            <h2 className="workflow-detail-panel__title">{draft.name || template.name}</h2>
+          )}
           <p className="workflow-detail-panel__meta">
-            Version {template.version} · {draft.steps.length} steps · {guardrailCountLabel}
+            Version {template.version} · {draft.steps.length} step{draft.steps.length !== 1 ? "s" : ""}
           </p>
         </div>
+
         <div className="workflow-detail-panel__actions">
-          <button
-            type="button"
-            className="workflow-primary-btn"
-            onClick={handleDuplicate}
-            disabled={duplicating || saving}
-          >
-            {duplicating ? "Duplicating…" : "Duplicate to Custom"}
-          </button>
-          {!locked && (
+          {/* Duplicate to Custom — always available */}
+          {!isNew && (
             <button
               type="button"
-              className="workflow-primary-btn workflow-primary-btn--secondary"
-              onClick={handleSave}
-              disabled={saving || duplicating}
+              className="workflow-primary-btn"
+              onClick={handleDuplicate}
+              disabled={duplicating || saving}
             >
-              {saving ? "Saving…" : "Save Changes"}
+              {duplicating ? "Duplicating…" : "Duplicate to Custom"}
             </button>
+          )}
+
+          {/* Edit/Save/Cancel — only for non-locked */}
+          {!locked && !isNew && (
+            editing ? (
+              <>
+                <button
+                  type="button"
+                  className="workflow-primary-btn workflow-primary-btn--secondary"
+                  onClick={handleCancel}
+                  disabled={saving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="workflow-primary-btn"
+                  onClick={handleSave}
+                  disabled={saving || duplicating}
+                >
+                  {saving ? "Saving…" : "Save Changes"}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="workflow-primary-btn workflow-primary-btn--secondary"
+                onClick={() => setEditing(true)}
+              >
+                Edit
+              </button>
+            )
+          )}
+
+          {/* Draft footer — Discard / Create */}
+          {isNew && (
+            <>
+              <button
+                type="button"
+                className="workflow-primary-btn workflow-primary-btn--secondary"
+                onClick={handleCancel}
+                disabled={saving}
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                className="workflow-primary-btn"
+                onClick={handleCreate}
+                disabled={saving || duplicating}
+              >
+                {saving ? "Creating…" : "Create workflow"}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -124,231 +474,110 @@ export function TemplateDetail({
         </div>
       )}
 
-      <div className="workflow-field-grid">
-        <Field label="Template Name">
+      {/* Description */}
+      <div style={{ marginBottom: 12 }}>
+        {editing ? (
           <input
             type="text"
-            value={draft.name}
-            onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-            disabled={locked}
-            maxLength={100}
+            value={draft.description}
+            onChange={(e) => setDraft((c) => ({ ...c, description: e.target.value }))}
+            placeholder="Short description — what this workflow does, in one sentence."
+            aria-label="Description"
+            style={{
+              width: "100%",
+              background: "transparent",
+              border: "none",
+              borderBottom: "1px dashed var(--hairline-strong)",
+              outline: "none",
+              color: "var(--text)",
+              fontFamily: "inherit",
+              fontSize: 13,
+              padding: "4px 2px",
+              boxSizing: "border-box",
+            }}
           />
-        </Field>
+        ) : (
+          <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.55, margin: 0 }}>
+            {draft.description || (
+              <span style={{ color: "var(--text-4)", fontStyle: "italic" }}>No description.</span>
+            )}
+          </p>
+        )}
       </div>
 
-      <Field label="Description">
-        <textarea
-          value={draft.description}
-          onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
-          disabled={locked}
-          rows={4}
+      {/* Scope picker — only in edit mode */}
+      {editing && (
+        <div style={{ marginBottom: 18 }}>
+          <div
+            className="mono"
+            style={{ fontSize: 10, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 8 }}
+          >
+            Workflow scope
+          </div>
+          <ScopePicker
+            scope={draft.scope}
+            scopeName={draft.scopeName}
+            onChange={({ scope, scopeName }) => setDraft((c) => ({ ...c, scope, scopeName }))}
+            goalOptions={goalOptions}
+          />
+        </div>
+      )}
+
+      {/* Steps or canvas */}
+      <div className="workflow-section">
+        <div className="workflow-section__header">
+          <h3>{editing ? "Steps" : "Flow"}</h3>
+        </div>
+
+        {editing ? (
+          <StepEditor
+            steps={draft.steps}
+            onChange={(nextSteps) =>
+              setDraft((current) => ({
+                ...current,
+                steps: nextSteps,
+                graph: reconcileGraph(nextSteps, current.graph),
+              }))
+            }
+            disabled={locked}
+          />
+        ) : (
+          <WorkflowFlow
+            graph={materializedGraph}
+            onGraphChange={handleGraphChange}
+            onOpenNode={(id) => setOpenNodeId(id)}
+            onAddNode={handleAddNode}
+            onRemoveNode={handleRemoveNode}
+            onResetLayout={handleResetLayout}
+            readOnly={locked}
+          />
+        )}
+      </div>
+
+      {/* Node detail modal */}
+      {openNodeDetail && openNodeIndex >= 0 && (
+        <NodeDetailModal
+          detail={openNodeDetail}
+          index={openNodeIndex}
+          total={materializedGraph.nodes.length}
+          onPrev={
+            openNodeIndex > 0
+              ? () => setOpenNodeId(materializedGraph.nodes[openNodeIndex - 1].id)
+              : null
+          }
+          onNext={
+            openNodeIndex < materializedGraph.nodes.length - 1
+              ? () => setOpenNodeId(materializedGraph.nodes[openNodeIndex + 1].id)
+              : null
+          }
+          onClose={() => setOpenNodeId(null)}
+          onDelete={() => {
+            handleRemoveNode(openNodeId!);
+            setOpenNodeId(null);
+          }}
+          readOnly={locked}
         />
-      </Field>
-
-      <div className="workflow-section">
-        <div className="workflow-section__header">
-          <h3>Steps</h3>
-          {!locked && (
-            <button
-              type="button"
-              className="workflow-quiet-btn"
-              onClick={() =>
-                setDraft((current) => ({
-                  ...current,
-                  steps: [...current.steps, createStepDraft(current.steps)],
-                }))}
-            >
-              Add Step
-            </button>
-          )}
-        </div>
-        <div className="workflow-stack">
-          {draft.steps.map((step, index) => (
-            <StepEditor
-              key={step.id}
-              step={step}
-              index={index}
-              locked={locked}
-              onChange={(nextStep) =>
-                setDraft((current) => ({
-                  ...current,
-                  steps: current.steps.map((entry, entryIndex) =>
-                    entryIndex === index ? nextStep : entry,
-                  ),
-                }))}
-              onMoveUp={
-                index > 0
-                  ? () =>
-                      setDraft((current) => ({
-                        ...current,
-                        steps: moveItem(current.steps, index, index - 1),
-                      }))
-                  : undefined
-              }
-              onMoveDown={
-                index < draft.steps.length - 1
-                  ? () =>
-                      setDraft((current) => ({
-                        ...current,
-                        steps: moveItem(current.steps, index, index + 1),
-                      }))
-                  : undefined
-              }
-              onRemove={() =>
-                setDraft((current) => ({
-                  ...current,
-                  steps: current.steps.filter((_, entryIndex) => entryIndex !== index),
-                }))}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="workflow-section">
-        <div className="workflow-section__header">
-          <h3>Guardrails</h3>
-          {!locked && (
-            <button
-              type="button"
-              className="workflow-quiet-btn"
-              onClick={() =>
-                setDraft((current) => ({
-                  ...current,
-                  guardrails: [...current.guardrails, createGuardrailDraft(current.guardrails)],
-                }))}
-            >
-              Add Guardrail
-            </button>
-          )}
-        </div>
-        <div className="workflow-stack">
-          {draft.guardrails.length === 0 ? (
-            <p className="workflow-section__empty">No guardrails configured.</p>
-          ) : (
-            draft.guardrails.map((guardrail, index) => (
-              <GuardrailEditor
-                key={guardrail.id}
-                guardrail={guardrail}
-                locked={locked}
-                onChange={(nextGuardrail) =>
-                  setDraft((current) => ({
-                    ...current,
-                    guardrails: current.guardrails.map((entry, entryIndex) =>
-                      entryIndex === index ? nextGuardrail : entry,
-                    ),
-                  }))}
-                onRemove={() =>
-                  setDraft((current) => ({
-                    ...current,
-                    guardrails: current.guardrails.filter((_, entryIndex) => entryIndex !== index),
-                  }))}
-              />
-            ))
-          )}
-        </div>
-      </div>
+      )}
     </section>
-  );
-}
-
-function toDraft(template: WorkflowTemplate): TemplateDraft {
-  return {
-    name: template.name,
-    description: template.description,
-    steps: template.steps.map((step) => ({ ...step })),
-    guardrails: template.guardrails.map((guardrail) => ({
-      id: guardrail.id,
-      kind: guardrail.kind,
-      label: guardrail.label,
-      configText: JSON.stringify(guardrail.configJson, null, 2),
-    })),
-  };
-}
-
-function buildTemplateInput(draft: TemplateDraft): CreateWorkflowTemplateInput {
-  const parsed = CreateWorkflowTemplateRequest.safeParse({
-    name: draft.name.trim(),
-    description: draft.description.trim(),
-    steps: draft.steps.map((step, index) => ({
-      id: step.id,
-      ordinal: index,
-      name: step.name.trim(),
-      instructions: step.instructions,
-      outputSchema: step.outputSchema,
-      agentPreference: step.agentPreference,
-    })),
-    guardrails: draft.guardrails.map((guardrail) => ({
-      id: guardrail.id,
-      kind: guardrail.kind,
-      label: guardrail.label.trim(),
-      configJson: parseJson(guardrail.configText, `Invalid JSON for guardrail "${guardrail.id}"`),
-    })),
-  });
-
-  if (!parsed.success) {
-    throw new Error(parsed.error.issues[0]?.message ?? "Workflow template validation failed.");
-  }
-  return parsed.data;
-}
-
-function buildDuplicateName(name: string): string {
-  return name.endsWith(" Copy") ? `${name} 2` : `${name} Copy`;
-}
-
-function parseJson(value: string, fallbackMessage: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    throw new Error(fallbackMessage);
-  }
-}
-
-function moveItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
-  const next = items.slice();
-  const [moved] = next.splice(fromIndex, 1);
-  next.splice(toIndex, 0, moved);
-  return next;
-}
-
-function createStepDraft(steps: WorkflowStepDraft[]): WorkflowStepDraft {
-  const numericSuffixes = steps
-    .map((step) => /^step-(\d+)$/.exec(step.id)?.[1])
-    .map((value) => Number(value ?? "0"));
-  const nextIndex = (numericSuffixes.length === 0 ? 0 : Math.max(...numericSuffixes)) + 1;
-  return {
-    id: `step-${nextIndex}`,
-    ordinal: steps.length,
-    name: `Step ${nextIndex}`,
-    instructions: "Describe what this step does.",
-    outputSchema: [{ key: "result", type: "string" as const, required: true }],
-    agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }],
-  };
-}
-
-function createGuardrailDraft(guardrails: GuardrailDraft[]): GuardrailDraft {
-  const numericSuffixes = guardrails
-    .map((guardrail) => /^guardrail-(\d+)$/.exec(guardrail.id)?.[1])
-    .map((value) => Number(value ?? "0"));
-  const nextIndex = (numericSuffixes.length === 0 ? 0 : Math.max(...numericSuffixes)) + 1;
-  return {
-    id: `guardrail-${nextIndex}`,
-    kind: "approval_required",
-    label: `Guardrail ${nextIndex}`,
-    configText: JSON.stringify({}, null, 2),
-  };
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <label className="workflow-field">
-      <span>{label}</span>
-      {children}
-    </label>
   );
 }

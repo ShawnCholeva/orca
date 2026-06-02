@@ -9,6 +9,7 @@ export interface WorkflowFlowProps {
   onAddNode: (type: "step" | "gate") => void;
   onRemoveNode: (id: string) => void;
   onResetLayout: () => void;
+  readOnly?: boolean;
 }
 
 const NODE_W = 240;
@@ -21,6 +22,7 @@ export function WorkflowFlow({
   onAddNode,
   onRemoveNode,
   onResetLayout,
+  readOnly = false,
 }: WorkflowFlowProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{
@@ -148,55 +150,57 @@ export function WorkflowFlow({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {/* Toolbar */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <button
-          type="button"
-          onClick={() => onAddNode("step")}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 5,
-            height: 22, padding: "0 8px", borderRadius: 7,
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid var(--hairline)",
-            color: "var(--text)", fontFamily: "inherit",
-            fontSize: 11.5, fontWeight: 500, cursor: "pointer",
-          }}
-        >
-          <PlusIcon size={13} />
-          Add step
-        </button>
-        <button
-          type="button"
-          onClick={() => onAddNode("gate")}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 5,
-            height: 22, padding: "0 8px", borderRadius: 7,
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid var(--hairline)",
-            color: "var(--text)", fontFamily: "inherit",
-            fontSize: 11.5, fontWeight: 500, cursor: "pointer",
-          }}
-        >
-          <GateGlyph size={12} />
-          Add gate
-        </button>
-        <div style={{ flex: 1 }} />
-        <button
-          type="button"
-          onClick={onResetLayout}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 5,
-            height: 22, padding: "0 8px", borderRadius: 7,
-            background: "transparent", border: "1px solid transparent",
-            color: "var(--text-2)", fontFamily: "inherit",
-            fontSize: 11.5, fontWeight: 500, cursor: "pointer",
-          }}
-        >
-          Reset layout
-        </button>
-      </div>
+      {!readOnly && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => onAddNode("step")}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              height: 22, padding: "0 8px", borderRadius: 7,
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid var(--hairline)",
+              color: "var(--text)", fontFamily: "inherit",
+              fontSize: 11.5, fontWeight: 500, cursor: "pointer",
+            }}
+          >
+            <PlusIcon size={13} />
+            Add step
+          </button>
+          <button
+            type="button"
+            onClick={() => onAddNode("gate")}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              height: 22, padding: "0 8px", borderRadius: 7,
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid var(--hairline)",
+              color: "var(--text)", fontFamily: "inherit",
+              fontSize: 11.5, fontWeight: 500, cursor: "pointer",
+            }}
+          >
+            <GateGlyph size={12} />
+            Add gate
+          </button>
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            onClick={onResetLayout}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              height: 22, padding: "0 8px", borderRadius: 7,
+              background: "transparent", border: "1px solid transparent",
+              color: "var(--text-2)", fontFamily: "inherit",
+              fontSize: 11.5, fontWeight: 500, cursor: "pointer",
+            }}
+          >
+            Reset layout
+          </button>
+        </div>
+      )}
 
       {/* Hint row */}
-      <div style={{ fontSize: 11, color: "var(--text-3)", lineHeight: 1.5 }}>
+      {!readOnly && <div style={{ fontSize: 11, color: "var(--text-3)", lineHeight: 1.5 }}>
         Drag a node to move it · drag the{" "}
         <span
           style={{
@@ -210,7 +214,7 @@ export function WorkflowFlow({
           +
         </span>{" "}
         port onto another node to link · click a line to unlink · click a node to edit
-      </div>
+      </div>}
 
       {/* Canvas */}
       <div
@@ -337,7 +341,7 @@ export function WorkflowFlow({
                   zIndex: isDragging ? 5 : 1,
                 }}
                 onMouseDown={(e) => {
-                  if (e.button !== 0) return;
+                  if (readOnly || e.button !== 0) return;
                   const rect = e.currentTarget.getBoundingClientRect();
                   setDrag({
                     id: n.id,
@@ -347,6 +351,12 @@ export function WorkflowFlow({
                     startY: e.clientY,
                     moved: false,
                   });
+                }}
+                onClick={(e) => {
+                  if (!readOnly) return;
+                  // In readOnly mode there's no drag, so click always opens the node
+                  e.stopPropagation();
+                  onOpenNode(n.id);
                 }}
               >
                 {isGate ? (
@@ -389,47 +399,49 @@ export function WorkflowFlow({
 
                 {!isGate && <ArrowRightIcon size={11} color="var(--text-4)" />}
 
-                {/* link-out port */}
-                <button
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    if (e.button !== 0) return;
-                    setLinkDrag({
-                      fromId: n.id,
-                      x: p.x + NODE_W / 2,
-                      y: p.y + NODE_H,
-                      overId: null,
-                    });
-                  }}
-                  title="Drag to another node to connect"
-                  style={{
-                    position: "absolute",
-                    bottom: -9,
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    width: 18,
-                    height: 18,
-                    borderRadius: 9,
-                    background: "var(--panel)",
-                    border: "1px solid var(--hairline-strong)",
-                    color: "var(--text-2)",
-                    cursor: "crosshair",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: 0,
-                    fontFamily: "inherit",
-                    fontSize: 13,
-                    lineHeight: "1",
-                    fontWeight: 500,
-                  }}
-                >
-                  +
-                </button>
+                {/* link-out port — hidden in readOnly */}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      if (e.button !== 0) return;
+                      setLinkDrag({
+                        fromId: n.id,
+                        x: p.x + NODE_W / 2,
+                        y: p.y + NODE_H,
+                        overId: null,
+                      });
+                    }}
+                    title="Drag to another node to connect"
+                    style={{
+                      position: "absolute",
+                      bottom: -9,
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      width: 18,
+                      height: 18,
+                      borderRadius: 9,
+                      background: "var(--panel)",
+                      border: "1px solid var(--hairline-strong)",
+                      color: "var(--text-2)",
+                      cursor: "crosshair",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 0,
+                      fontFamily: "inherit",
+                      fontSize: 13,
+                      lineHeight: "1",
+                      fontWeight: 500,
+                    }}
+                  >
+                    +
+                  </button>
+                )}
 
-                {/* delete button */}
-                <NodeDeleteButton onDelete={() => onRemoveNode(n.id)} />
+                {/* delete button — hidden in readOnly */}
+                {!readOnly && <NodeDeleteButton onDelete={() => onRemoveNode(n.id)} />}
               </div>
             );
           })}

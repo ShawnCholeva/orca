@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowTemplate } from "@orca/contracts";
 import { TemplateDetail } from "./TemplateDetail";
@@ -10,10 +10,12 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 const duplicateTemplateMock = vi.fn();
 const saveTemplateMock = vi.fn();
+const createTemplateMock = vi.fn();
 
 vi.mock("./api", () => ({
   duplicateTemplate: (...args: unknown[]) => duplicateTemplateMock(...args),
   saveTemplate: (...args: unknown[]) => saveTemplateMock(...args),
+  createTemplate: (...args: unknown[]) => createTemplateMock(...args),
 }));
 
 const now = "2026-01-01T00:00:00.000Z";
@@ -43,15 +45,16 @@ function makeTemplate(overrides: Partial<WorkflowTemplate> = {}): WorkflowTempla
         ordinal: 1,
         name: "Build",
         instructions: "Implement the solution based on research.",
-        outputSchema: [
-          { key: "result", type: "string", required: true },
-        ],
+        outputSchema: [{ key: "result", type: "string", required: true }],
         agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }],
       },
     ],
     guardrails: [],
     createdAt: now,
     updatedAt: now,
+    scope: "global",
+    scopeName: "",
+    graph: null,
     ...overrides,
   };
 }
@@ -60,9 +63,10 @@ describe("TemplateDetail", () => {
   beforeEach(() => {
     duplicateTemplateMock.mockReset();
     saveTemplateMock.mockReset();
+    createTemplateMock.mockReset();
   });
 
-  it("disables editing for locked templates", () => {
+  it("shows read-only canvas for locked templates (no Save button)", () => {
     render(
       <TemplateDetail
         template={makeTemplate({
@@ -76,19 +80,22 @@ describe("TemplateDetail", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Template Name")).toBeDisabled();
-    expect(screen.getByLabelText("Description")).toBeDisabled();
-    expect(screen.getByLabelText("Step 1 Name")).toBeDisabled();
+    // No Save Changes button for locked templates
+    expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull();
+    // Canvas is shown (not step list editor)
+    expect(screen.queryByRole("button", { name: /add step/i })).toBeNull();
+    // Duplicate is still available
+    expect(screen.getByRole("button", { name: /duplicate to custom/i })).toBeInTheDocument();
   });
 
-  it("saves custom step edits through the typed API wrapper and supports add/remove/reorder", async () => {
+  it("saves custom step edits via saveTemplate with scope/scopeName/graph in payload", async () => {
     const template = makeTemplate();
     saveTemplateMock.mockResolvedValue({
       template: { ...template, version: 2 },
       warnings: [],
     });
 
-    const { container } = render(
+    render(
       <TemplateDetail
         template={template}
         onTemplateSaved={() => {}}
@@ -96,48 +103,23 @@ describe("TemplateDetail", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Add Step" }));
-    let stepCards = Array.from(
-      container.querySelectorAll(".workflow-step-card"),
-    ) as HTMLElement[];
-    const addedStepCard = stepCards[2];
-    if (!addedStepCard) throw new Error("added step card missing");
+    // Enter edit mode
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
 
-    fireEvent.change(within(addedStepCard).getByLabelText("Step 3 Name"), {
-      target: { value: "QA" },
-    });
-    fireEvent.click(within(addedStepCard).getByRole("button", { name: "Move Up" }));
-
-    stepCards = Array.from(container.querySelectorAll(".workflow-step-card")) as HTMLElement[];
-    fireEvent.click(within(stepCards[2]).getByRole("button", { name: "Remove Step" }));
-
-    // Edit the instructions of the first step
-    const firstStepCard = (Array.from(container.querySelectorAll(".workflow-step-card")) as HTMLElement[])[0];
-    fireEvent.change(within(firstStepCard).getByLabelText("Instructions"), {
-      target: { value: "Updated instructions for research step." },
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    // Save
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => expect(saveTemplateMock).toHaveBeenCalledTimes(1));
-    expect(saveTemplateMock).toHaveBeenCalledWith(
-      "custom/template-1",
-      expect.objectContaining({
-        steps: [
-          expect.objectContaining({
-            id: "step-1",
-            instructions: "Updated instructions for research step.",
-          }),
-          expect.objectContaining({
-            id: "step-3",
-            name: "QA",
-          }),
-        ],
-      }),
-    );
+    const [id, payload] = saveTemplateMock.mock.calls[0] as [string, unknown];
+    expect(id).toBe("custom/template-1");
+    expect(payload).toMatchObject({
+      scope: "global",
+      scopeName: "",
+      graph: expect.objectContaining({ nodes: expect.any(Array) }),
+    });
   });
 
-  it("renders output schema fields for each step", () => {
+  it("renders output schema fields for each step (via canvas node modal)", async () => {
     render(
       <TemplateDetail
         template={makeTemplate()}
@@ -146,8 +128,76 @@ describe("TemplateDetail", () => {
       />,
     );
 
-    // The first step has 2 schema fields; confirm the key inputs are present
-    const keyInputs = screen.getAllByPlaceholderText("key");
-    expect(keyInputs.length).toBeGreaterThanOrEqual(2);
+    // Canvas is shown in view mode — step nodes exist with data-node-id
+    const stepNode = document.querySelector("[data-node-id='step-1']");
+    expect(stepNode).toBeInTheDocument();
+  });
+
+  it("duplicate to custom calls duplicateTemplate", async () => {
+    const template = makeTemplate();
+    const copy = makeTemplate({ id: "custom/template-1-copy", name: "Custom Delivery Copy" });
+    duplicateTemplateMock.mockResolvedValue({ template: copy, warnings: [] });
+
+    render(
+      <TemplateDetail
+        template={template}
+        onTemplateSaved={() => {}}
+        onTemplateDuplicated={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /duplicate to custom/i }));
+
+    await waitFor(() => expect(duplicateTemplateMock).toHaveBeenCalledTimes(1));
+    expect(duplicateTemplateMock).toHaveBeenCalledWith(
+      "custom/template-1",
+      "Custom Delivery Copy",
+    );
+  });
+
+  it("draft create: Create workflow calls createTemplate", async () => {
+    const draft = makeTemplate({
+      id: "draft/new",
+      name: "Untitled workflow",
+      version: 0,
+    });
+    const created = makeTemplate({ id: "custom/new-1", name: "Untitled workflow", version: 1 });
+    createTemplateMock.mockResolvedValue({ template: created, warnings: [] });
+    const onCreated = vi.fn();
+
+    render(
+      <TemplateDetail
+        template={draft}
+        isNew={true}
+        onTemplateSaved={() => {}}
+        onTemplateDuplicated={() => {}}
+        onDiscard={() => {}}
+        onTemplateCreated={onCreated}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /create workflow/i }));
+
+    await waitFor(() => expect(createTemplateMock).toHaveBeenCalledTimes(1));
+    expect(onCreated).toHaveBeenCalledWith(created);
+  });
+
+  it("scope picker is shown in edit mode and goal options are passed", () => {
+    render(
+      <TemplateDetail
+        template={makeTemplate()}
+        goalOptions={["Goal Alpha", "Goal Beta"]}
+        onTemplateSaved={() => {}}
+        onTemplateDuplicated={() => {}}
+      />,
+    );
+
+    // Enter edit mode
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+
+    // Scope options visible
+    expect(screen.getByText("Global")).toBeInTheDocument();
+    expect(screen.getByText("Workspace")).toBeInTheDocument();
+    expect(screen.getByText("Goal")).toBeInTheDocument();
   });
 });

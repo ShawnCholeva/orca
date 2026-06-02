@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkflowTemplate } from "@orca/contracts";
 import { TemplateList } from "./TemplateList";
@@ -31,12 +31,15 @@ function makeTemplate(overrides: Partial<WorkflowTemplate> = {}): WorkflowTempla
     guardrails: [],
     createdAt: now,
     updatedAt: now,
+    scope: "global",
+    scopeName: "",
+    graph: null,
     ...overrides,
   };
 }
 
 describe("TemplateList", () => {
-  it("shows a lock badge for built-in templates", () => {
+  it("shows a lock badge for locked templates", () => {
     render(
       <TemplateList
         templates={[makeTemplate()]}
@@ -45,6 +48,53 @@ describe("TemplateList", () => {
       />,
     );
 
-    expect(screen.getByText("Locked")).toBeInTheDocument();
+    expect(screen.getByText("locked")).toBeInTheDocument();
+  });
+
+  it("shows a scope badge for each template", () => {
+    render(
+      <TemplateList
+        templates={[makeTemplate({ scope: "global" })]}
+        selectedId="orca/engineering"
+        onSelect={() => {}}
+      />,
+    );
+    expect(screen.getByText("global")).toBeInTheDocument();
+  });
+
+  it("shows step count", () => {
+    render(
+      <TemplateList
+        templates={[makeTemplate()]}
+        selectedId="orca/engineering"
+        onSelect={() => {}}
+      />,
+    );
+    expect(screen.getByText("1 step")).toBeInTheDocument();
+  });
+
+  it("shows draft badge for the draftId template", () => {
+    render(
+      <TemplateList
+        templates={[makeTemplate({ id: "draft/new", name: "Untitled workflow" })]}
+        selectedId="draft/new"
+        onSelect={() => {}}
+        draftId="draft/new"
+      />,
+    );
+    expect(screen.getByText("draft")).toBeInTheDocument();
+  });
+
+  it("calls onSelect when a template row is clicked", () => {
+    const onSelect = vi.fn();
+    render(
+      <TemplateList
+        templates={[makeTemplate()]}
+        selectedId={null}
+        onSelect={onSelect}
+      />,
+    );
+    fireEvent.click(screen.getByText("Engineering"));
+    expect(onSelect).toHaveBeenCalledWith("orca/engineering");
   });
 });

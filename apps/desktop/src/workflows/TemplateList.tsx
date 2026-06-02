@@ -1,78 +1,82 @@
 import type { WorkflowTemplate } from "@orca/contracts";
+import { ScopeBadge } from "./ScopeControls";
 
 interface TemplateListProps {
   templates: WorkflowTemplate[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  draftId?: string | null;
 }
 
-export function TemplateList({ templates, selectedId, onSelect }: TemplateListProps) {
-  const builtIn = templates.filter((template) => template.isBuiltIn);
-  const custom = templates.filter((template) => !template.isBuiltIn);
-
+export function TemplateList({ templates, selectedId, onSelect, draftId }: TemplateListProps) {
   return (
-    <aside className="workflow-list-panel" aria-label="Workflow templates">
-      <Section
-        title="Built-in"
-        templates={builtIn}
-        selectedId={selectedId}
-        onSelect={onSelect}
-        emptyLabel="No built-in workflows."
-      />
-      <Section
-        title="Custom Workflows"
-        templates={custom}
-        selectedId={selectedId}
-        onSelect={onSelect}
-        emptyLabel="No custom workflows yet."
-      />
-    </aside>
-  );
-}
-
-interface SectionProps {
-  title: string;
-  templates: WorkflowTemplate[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  emptyLabel: string;
-}
-
-function Section({ title, templates, selectedId, onSelect, emptyLabel }: SectionProps) {
-  return (
-    <section className="workflow-list-section">
-      <div className="workflow-list-section__header">
-        <h2>{title}</h2>
-        <span className="mono workflow-list-section__count">{templates.length}</span>
-      </div>
+    <div className="workflow-list-panel" role="list" aria-label="Workflow templates">
       {templates.length === 0 ? (
-        <p className="workflow-list-section__empty">{emptyLabel}</p>
+        <p className="workflow-list-section__empty" style={{ padding: 18 }}>
+          No workflows yet.
+        </p>
       ) : (
-        <ul className="workflow-list">
-          {templates.map((template) => {
-            const selected = template.id === selectedId;
-            return (
-              <li key={template.id}>
-                <button
-                  type="button"
-                  className={`workflow-list-item ${selected ? "workflow-list-item--selected" : ""}`}
-                  onClick={() => onSelect(template.id)}
+        templates.map((template) => {
+          const selected = template.id === selectedId;
+          const isDraft = template.id === draftId;
+          return (
+            <div
+              key={template.id}
+              role="listitem"
+              onClick={() => onSelect(template.id)}
+              style={{
+                padding: "12px 14px",
+                borderBottom: "1px solid var(--hairline)",
+                background: selected ? "rgba(255,255,255,0.03)" : "transparent",
+                cursor: "pointer",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span
+                  style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 >
-                  <div className="workflow-list-item__row">
-                    <span className="workflow-list-item__name">{template.name}</span>
-                    {template.isLocked && <span className="workflow-lock-badge">Locked</span>}
-                  </div>
-                  <div className="workflow-list-item__meta">
-                    <span className="mono">v{template.version}</span>
-                    <span>{template.steps.length} steps</span>
-                    <span>{template.guardrails.length} guardrails</span>
-                  </div>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                  {template.name}
+                </span>
+                {isDraft && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      padding: "2px 6px",
+                      borderRadius: 999,
+                      background: "var(--accent-soft)",
+                      color: "var(--accent)",
+                      border: "1px solid var(--accent-line)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    draft
+                  </span>
+                )}
+                <ScopeBadge scope={template.scope} scopeName={template.scopeName} size="xs" />
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 4 }}>
+                {template.steps.length} step{template.steps.length !== 1 ? "s" : ""}
+                {template.isLocked && (
+                  <span
+                    style={{
+                      marginLeft: 8,
+                      fontSize: 10,
+                      padding: "1px 5px",
+                      borderRadius: 4,
+                      background: "var(--warn-soft)",
+                      color: "var(--warn)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    locked
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })
       )}
-    </section>
+    </div>
   );
 }

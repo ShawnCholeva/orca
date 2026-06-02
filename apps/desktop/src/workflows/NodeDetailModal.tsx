@@ -30,6 +30,7 @@ export interface NodeDetailModalProps {
   onNext: (() => void) | null;
   onClose: () => void;
   onDelete: () => void;
+  readOnly?: boolean;
 }
 
 export function NodeDetailModal({
@@ -40,6 +41,7 @@ export function NodeDetailModal({
   onNext,
   onClose,
   onDelete,
+  readOnly = false,
 }: NodeDetailModalProps) {
   const isGate = detail.kind === "gate";
 
@@ -124,7 +126,8 @@ export function NodeDetailModal({
             </div>
             <input
               value={detail.name ?? ""}
-              onChange={(e) => detail.onChange({ name: e.target.value })}
+              onChange={(e) => !readOnly && detail.onChange({ name: e.target.value })}
+              readOnly={readOnly}
               placeholder={isGate ? "Gate name" : "Step name"}
               style={{
                 width: "100%",
@@ -171,9 +174,9 @@ export function NodeDetailModal({
           }}
         >
           {isGate ? (
-            <GateBody detail={detail as Extract<NodeDetail, { kind: "gate" }>} />
+            <GateBody detail={detail as Extract<NodeDetail, { kind: "gate" }>} readOnly={readOnly} />
           ) : (
-            <StepBody detail={detail as Extract<NodeDetail, { kind: "step" }>} />
+            <StepBody detail={detail as Extract<NodeDetail, { kind: "step" }>} readOnly={readOnly} />
           )}
         </div>
 
@@ -196,7 +199,7 @@ export function NodeDetailModal({
             <ChevronRightIcon size={13} />
           </FooterBtn>
           <div style={{ flex: 1 }} />
-          <FooterBtn onClick={onDelete}>Delete</FooterBtn>
+          {!readOnly && <FooterBtn onClick={onDelete}>Delete</FooterBtn>}
           <FooterBtn onClick={onClose} primary>
             Done
           </FooterBtn>
@@ -206,7 +209,7 @@ export function NodeDetailModal({
   );
 }
 
-function GateBody({ detail }: { detail: Extract<NodeDetail, { kind: "gate" }> }) {
+function GateBody({ detail, readOnly }: { detail: Extract<NodeDetail, { kind: "gate" }>; readOnly?: boolean }) {
   return (
     <div>
       <div
@@ -223,7 +226,8 @@ function GateBody({ detail }: { detail: Extract<NodeDetail, { kind: "gate" }> })
       </div>
       <textarea
         value={detail.condition ?? ""}
-        onChange={(e) => detail.onChange({ condition: e.target.value })}
+        onChange={(e) => !readOnly && detail.onChange({ condition: e.target.value })}
+        readOnly={readOnly}
         placeholder="e.g. verification.pass === true && critique.risks.length < 3"
         rows={5}
         style={{
@@ -250,7 +254,7 @@ function GateBody({ detail }: { detail: Extract<NodeDetail, { kind: "gate" }> })
   );
 }
 
-function StepBody({ detail }: { detail: Extract<NodeDetail, { kind: "step" }> }) {
+function StepBody({ detail, readOnly }: { detail: Extract<NodeDetail, { kind: "step" }>; readOnly?: boolean }) {
   return (
     <>
       <div>
@@ -268,7 +272,8 @@ function StepBody({ detail }: { detail: Extract<NodeDetail, { kind: "step" }> })
         </div>
         <textarea
           value={detail.instructions ?? ""}
-          onChange={(e) => detail.onChange({ instructions: e.target.value })}
+          onChange={(e) => !readOnly && detail.onChange({ instructions: e.target.value })}
+          readOnly={readOnly}
           placeholder="What this step should accomplish."
           rows={5}
           style={{
@@ -291,7 +296,8 @@ function StepBody({ detail }: { detail: Extract<NodeDetail, { kind: "step" }> })
 
       <OutputSchemaEditor
         schema={detail.outputSchema}
-        onChange={(next) => detail.onChange({ outputSchema: next })}
+        onChange={(next) => !readOnly && detail.onChange({ outputSchema: next })}
+        disabled={readOnly}
       />
     </>
   );
