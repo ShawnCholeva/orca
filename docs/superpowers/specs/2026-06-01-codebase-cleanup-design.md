@@ -25,13 +25,13 @@ Concrete pivot fingerprints (daemon):
   (`hidden-worker/drivers/{claude,codex}.ts`, `one-shot/codex.ts`,
   `orchestrator-llm/model-provider-llm-client.ts`)
 - Five adapters present (`claude-code`, `codex`, `opencode`, `gemini`,
-  `shell-manual`); only `claude-code` and `codex` are wanted going forward
+  `shell-manual`); only `claude-code` and `codex` are kept going forward
 
 ## Goals
 
 1. Delete genuinely dead / orphaned code across all three packages.
 2. Collapse duplicate subsystems to a single surviving variant each.
-3. Drop unwanted providers (`opencode`, `gemini`; `shell-manual` TBD at audit).
+3. Drop unwanted providers: `opencode`, `gemini`, `shell-manual`.
 4. Unify the surviving Claude and Codex shadow paths behind one provider
    interface so adding a provider = implement one interface.
 5. Restructure directory/naming to match the surviving architecture.
@@ -65,7 +65,7 @@ prior phase passes **both** gates (defined below).
                    propose pivot winners + unified provider design   → SIGN-OFF
 2  PRUNE ORPHANS   delete tool-confirmed dead leaves
 3  CONSOLIDATE     remove duplicate-subsystem losers (picks winning shadow system)
-4  DROP PROVIDERS  opencode, gemini (shell-manual: decided at audit)
+4  DROP PROVIDERS  opencode, gemini, shell-manual
 5  UNIFY PROVIDERS one provider interface; Claude + Codex implement it;
                    prove "add provider = implement 1 interface"
 6  RESTRUCTURE     rename/move dirs to match surviving architecture
@@ -107,7 +107,7 @@ artifact every later deletion traces to. Contents:
    false-positive (keep, with reason); spans daemon + desktop + contracts.
 4. **Provider inventory** — per provider (claude-code / codex / opencode /
    gemini / shell-manual): adapter, readiness, smoke tests, execution-modes,
-   model-catalog refs. Drop-list for Phase 4. shell-manual flagged for decision.
+   model-catalog refs. Drop-list for Phase 4 = opencode, gemini, shell-manual.
 5. **Proposed unified provider design** — the Phase 5 target interface, where
    current code forks needlessly, and an "add a 3rd provider" walkthrough
    proving the abstraction.
@@ -130,7 +130,7 @@ end (routes, reconcilers, contracts, desktop clients).
 
 ### Phase 4 — Drop providers
 
-Remove `opencode` and `gemini` (and `shell-manual` if the audit decided so):
+Remove `opencode`, `gemini`, and `shell-manual`:
 adapters, readiness, smoke/auth tests, execution-mode seeds, model-catalog
 entries, registry registrations, contract enums, and desktop UI references.
 
