@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { computeGenerationRequestFingerprint } from '../orchestrator/fingerprint.js';
+import { computeGenerationRequestFingerprint } from '../generation/fingerprint.js';
 
 function sortKeysDeep(val: unknown): unknown {
   if (Array.isArray(val)) return val.map(sortKeysDeep);

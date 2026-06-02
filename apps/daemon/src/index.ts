@@ -19,8 +19,8 @@ import { DeterministicExtractor } from './extractions/deterministic-extractor.js
 import { reconcileStaleAssemblies } from './context/reconcile.js';
 import { sweepOrphanContextFiles } from './sessions/context-delivery.js';
 import { createDaemonContext } from './daemon-context.js';
-import { subscribeOrchestrationTriggers } from './orchestrator/triggers.js';
-import { reconcileInFlightGenerations } from './orchestrator/reconcile.js';
+import { subscribeOrchestrationTriggers } from './generation/triggers.js';
+import { reconcileInFlightGenerations } from './generation/reconcile.js';
 import { seedEngineeringTemplate } from './workflows/templates/seed-engineering.js';
 import { reconcileWorkflowsOnBoot } from './workflows/reconcile.js';
 

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { computeGenerationRequestFingerprint } from '../orchestrator/fingerprint.js';
+import { computeGenerationRequestFingerprint } from '../generation/fingerprint.js';
 
 /**
  * Fingerprint for deduplicating generator-origin tasks.

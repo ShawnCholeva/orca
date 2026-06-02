@@ -16,7 +16,7 @@ import {
 } from '@orca/contracts';
 import type { EventBus } from '../events.js';
 import { redactSecrets } from '../memory/normalize.js';
-import { runGeneration } from '../orchestrator/runner.js';
+import { runGeneration } from '../generation/runner.js';
 import { appendWorkflowEvent } from '../workflows/events.js';
 import { getWorkflowRunById } from '../workflows/runs/projection.js';
 import {

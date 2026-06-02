@@ -23,7 +23,7 @@ import {
 } from '@orca/contracts';
 import type { EventBus } from '../events.js';
 import { redactSecrets } from '../memory/normalize.js';
-import { runGeneration, SchemaValidationError } from '../orchestrator/runner.js';
+import { runGeneration, SchemaValidationError } from '../generation/runner.js';
 import {
   insertTask,
   updateTaskRow,

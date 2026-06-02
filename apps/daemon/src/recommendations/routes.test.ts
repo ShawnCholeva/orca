@@ -21,7 +21,7 @@ import { defaultMigrationsDir, runMigrations } from '../migrations.js';
 import { bootstrapRegistries } from '../registry/bootstrap.js';
 import { createDaemonContext } from '../daemon-context.js';
 import { createServer } from '../server.js';
-import { resetRunnerState } from '../orchestrator/runner.js';
+import { resetRunnerState } from '../generation/runner.js';
 import { FakeRecommendationProvider } from './provider.js';
 import {
   insertRecommendation,
