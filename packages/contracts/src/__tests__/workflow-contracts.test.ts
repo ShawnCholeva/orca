@@ -233,9 +233,14 @@ describe("workflow contracts", () => {
     expect(WorkflowTemplate.parse(template)).toMatchObject(template);
     expect(WorkflowRun.parse(run)).toEqual(run);
     expect(WorkflowStepRun.parse(stepRun)).toEqual(stepRun);
-    expect(WorkflowStepRun.parse({ ...stepRun, stepResult: scoredResult })).toMatchObject({
-      stepResult: scoredResult
-    });
+    expect(
+      WorkflowStepRun.parse({
+        ...stepRun,
+        status: "passed",
+        finishedAt: now,
+        stepResult: scoredResult
+      })
+    ).toMatchObject({ stepResult: scoredResult });
     expect(WorkflowArtifact.parse(artifact)).toEqual(artifact);
     expect(WorkflowDecisionTrace.parse(decision)).toEqual(decision);
     expect(
