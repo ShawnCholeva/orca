@@ -306,6 +306,20 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   const lastMessage = messages[messages.length - 1] ?? null;
   const showMarkDoneCard = lastMessage?.internalKind === "mark_done_ready";
 
+  // Show a "step is starting…" indicator during the agent's first-turn latency:
+  // the run and step are active but neither Orca nor the agent has paraphrased
+  // anything into the chat yet. Clears automatically once the first turn lands.
+  const orcaHasSpoken = messages.some(
+    (m) => m.role === "orchestrator" || m.role === "agent_paraphrased",
+  );
+  const showStarting =
+    workflowState.run?.status === "active" &&
+    workflowState.stepRun?.status === "active" &&
+    !orcaHasSpoken;
+  const startingLabel = workflowState.stepRun
+    ? `Step ${workflowState.stepRun.ordinal + 1} — starting (this can take ~30–60s)…`
+    : "";
+
   async function handleRecoveryStart() {
     if (!selectedGoalId || !recoveryTemplateId) return;
     setStarting(true);
@@ -483,6 +497,12 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
             )}
 
             {messagesLoading && <ThinkingRow label="routing" />}
+
+            {showStarting && (
+              <div data-testid="step-starting">
+                <ThinkingRow label={startingLabel} />
+              </div>
+            )}
 
             {messages.map((message) => {
               if (message.role === "internal_thought") {

@@ -145,6 +145,42 @@ describe("OrcaChat", () => {
     expect(screen.queryByPlaceholderText("Message Orca…")).toBeNull();
   });
 
+  it("shows the starting indicator while run and step are active and Orca has not spoken", async () => {
+    setupRunLoad();
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    const indicator = await screen.findByTestId("step-starting");
+    // ordinal is 4 → "Step 5"; name suffix is added in a later task.
+    expect(indicator).toHaveTextContent("Step 5");
+    expect(indicator).toHaveTextContent("starting");
+  });
+
+  it("hides the starting indicator once an orchestrator message exists", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [orcaMessage] });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    // Wait for the orchestrator message to land, then assert the indicator is absent.
+    expect(await screen.findByText("Start with a bounded verification pass.")).toBeInTheDocument();
+    expect(screen.queryByTestId("step-starting")).toBeNull();
+  });
+
   it("does not render the goal title/description header card", async () => {
     setupRunLoad();
     const { OrcaChat } = await import("./OrcaChat");
