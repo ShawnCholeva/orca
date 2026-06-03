@@ -116,7 +116,8 @@ export type OperatorKind = z.infer<typeof OperatorKind>;
 
 export const ModelProviderId = z.enum([
   "orca/anthropic",
-  "orca/openai"
+  "orca/openai",
+  "orca/google"
 ]);
 export type ModelProviderId = z.infer<typeof ModelProviderId>;
 
@@ -126,6 +127,8 @@ export function getModelProviderDisplayName(providerId: ModelProviderId): string
       return "Claude";
     case "orca/openai":
       return "OpenAI";
+    case "orca/google":
+      return "Google";
   }
 }
 

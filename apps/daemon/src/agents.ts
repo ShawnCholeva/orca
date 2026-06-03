@@ -82,6 +82,15 @@ const SEED_AGENTS: SeedAgent[] = [
     recommended: 1,
     sort_order: 20,
   },
+  {
+    id: "antigravity",
+    name: "Antigravity",
+    short_label: "Google · CLI",
+    description: "Google agent runtime for long-horizon planning, coding, and multi-surface work.",
+    swatch: "#4285F4",
+    recommended: 1,
+    sort_order: 30,
+  },
 ];
 
 export class AgentNotFoundError extends Error {

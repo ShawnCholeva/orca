@@ -1,5 +1,5 @@
 import type { OrchestratorLlmClient } from "./mediator.js";
-import type { ShadowSessionManager } from "./shadow-session.js";
+import type { ShadowAdapterId, ShadowSessionManager } from "./shadow-session.js";
 
 export class ShadowSessionLlmClient implements OrchestratorLlmClient {
   constructor(
@@ -14,11 +14,18 @@ export class ShadowSessionLlmClient implements OrchestratorLlmClient {
     systemPrompt: string;
     userPrompt: string;
   }): Promise<{ text: string }> {
+    if (!isShadowAdapterId(input.adapterId)) {
+      throw new Error(`unsupported shadow adapter: ${input.adapterId}`);
+    }
     return this.manager.ask(input.goalId, {
-      adapterId: input.adapterId === "codex" ? "codex" : "claude-code",
+      adapterId: input.adapterId,
       systemPrompt: input.systemPrompt,
       userPrompt: input.userPrompt,
       timeoutMs: this.opts.timeoutMs,
     });
   }
+}
+
+function isShadowAdapterId(adapterId: string): adapterId is ShadowAdapterId {
+  return adapterId === "claude-code" || adapterId === "codex" || adapterId === "antigravity";
 }

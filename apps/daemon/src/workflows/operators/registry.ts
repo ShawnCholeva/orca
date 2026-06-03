@@ -11,6 +11,7 @@ type ReadinessChecker = Pick<ReadinessService, "checkAgent">;
 const AGENT_CAPABILITIES: Record<string, string[]> = {
   "claude-code": ["repo_navigation", "architecture", "refactoring", "planning", "code_editing"],
   codex: ["implementation", "patching", "test_fixing", "code_editing"],
+  antigravity: ["repo_navigation", "planning", "implementation", "test_fixing", "code_editing"],
 };
 
 function boundedReason(value: string | undefined, fallback: string): string {

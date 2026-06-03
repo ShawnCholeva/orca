@@ -1,7 +1,7 @@
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { AdapterRegistry } from './adapters/registry.js';
 import type { AgentAdapter } from './adapters/types.js';
@@ -50,6 +50,9 @@ import {
   insertExtraction,
   insertSummary,
 } from './extractions/projection.js';
+import { ShadowSessionManager, shadowSessionId } from './orchestrator-llm/shadow-session.js';
+import type { ModelProvider } from './llm/types.js';
+import { seedEngineeringTemplate } from './workflows/templates/seed-engineering.js';
 
 // Populate the skill registry once for the file — mirrors the daemon boot sequence.
 // createGoal resolves quick-goal from the registry.
@@ -78,6 +81,7 @@ function createConfig(dataDir: string): Config {
 async function startServer(opts?: {
   adapterRegistry?: AdapterRegistry;
   operatorRegistry?: ReturnType<typeof createDaemonContext>['operatorRegistry'];
+  configureDaemonContext?: (daemonContext: ReturnType<typeof createDaemonContext>) => void;
 }): Promise<{
   server: FastifyInstance;
   token: string;
@@ -97,6 +101,7 @@ async function startServer(opts?: {
   if (opts?.operatorRegistry) {
     daemonContext.operatorRegistry = opts.operatorRegistry;
   }
+  opts?.configureDaemonContext?.(daemonContext);
   const server = createServer(config, { daemonContext });
 
   return {
@@ -496,6 +501,28 @@ describe('server routes', () => {
     ]);
   });
 
+  it('GET /v1/model-providers exposes Antigravity when connected', async () => {
+    const db = getDatabase();
+    seedAgents(db);
+    db.prepare(`UPDATE agents SET connected = 1 WHERE id = ?`).run('antigravity');
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/model-providers',
+      headers: AUTH_HEADERS,
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = ListModelProvidersResponse.parse(JSON.parse(response.body));
+    expect(body.providers.map((provider) => provider.id)).toEqual(['orca/google']);
+    expect(body.providers[0]?.models.map((model) => model.id)).toEqual([
+      'gemini-3.5-flash',
+      'gemini-3.1-pro-high',
+      'gemini-3.1-pro-low',
+      'gemini-3-flash',
+    ]);
+  });
+
   it('GET /v1/operators requires a Goal and returns operator descriptors', async () => {
     await server.close();
     closeDatabase();
@@ -695,6 +722,52 @@ describe('server routes', () => {
   });
 });
 
+describe('server orchestrator bootstrap routing', () => {
+  it('preserves Antigravity shadow adapter routing', async () => {
+    const spawnSpy = vi
+      .spyOn(ShadowSessionManager.prototype, 'spawn')
+      .mockImplementation(async (goalId) => shadowSessionId(goalId));
+    const { server, token, dataDir } = await startServer({
+      configureDaemonContext: (daemonContext) => {
+        seedEngineeringTemplate(daemonContext.db, () => '2026-06-02T00:00:00.000Z');
+        daemonContext.modelProviderRegistry.register(fakeModelProvider('orca/google', 'gemini-3.5-flash'));
+        daemonContext.stepDispatchCapabilities = {
+          ...daemonContext.stepDispatchCapabilities,
+          resolveMode: (adapterId) => ({
+            adapterId,
+            mode: 'shadow_session' as const,
+            fallbacks: [],
+          }),
+        };
+      },
+    });
+
+    try {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/v1/goals/create-and-start-workflow',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        payload: {
+          title: 'antigravity-bootstrap',
+          workflowTemplateId: 'orca/engineering',
+          orchestratorModel: {
+            providerId: 'orca/google',
+            modelId: 'gemini-3.5-flash',
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(spawnSpy).toHaveBeenCalledWith(expect.any(String), 'antigravity');
+    } finally {
+      spawnSpy.mockRestore();
+      await server.close();
+      closeDatabase();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
 function fakeAdapter(id: string, ready: boolean): AgentAdapter {
   return {
     id: id as never,
@@ -721,6 +794,23 @@ function fakeRegistry(): AdapterRegistry {
   r.register(fakeAdapter('claude-code', true));
   r.register(fakeAdapter('codex', false));
   return r;
+}
+
+function fakeModelProvider(id: string, modelId: string): ModelProvider {
+  return {
+    id,
+    displayName: id,
+    version: 'test',
+    async isAvailable() {
+      return { available: true };
+    },
+    async listModels() {
+      return [{ id: modelId, displayName: modelId, capabilities: ['chat'] }];
+    },
+    async complete() {
+      throw new Error('unused');
+    },
+  } as ModelProvider;
 }
 
 describe('agent readiness routes (with fake adapters)', () => {
@@ -1444,7 +1534,7 @@ describe('session and adapter routes', () => {
     expect(res.statusCode).toBe(200);
     const body = ListAdaptersResponse.parse(JSON.parse(res.body));
     expect(body.adapters.map((a) => a.id).sort()).toEqual(
-      ['claude-code', 'codex']
+      ['antigravity', 'claude-code', 'codex']
     );
   });
 

@@ -28,6 +28,18 @@ describe("POST /v1/shadow-hooks/stop", () => {
     expect(resolvePending).toHaveBeenCalledWith("G1", { text: "", failure: true });
   });
 
+  it("passes hook failure text through to resolvePending", async () => {
+    const resolvePending = vi.fn();
+    const f = app(resolvePending);
+    const res = await f.inject({
+      method: "POST",
+      url: "/v1/shadow-hooks/stop?goalId=g1&failure=1",
+      payload: { last_assistant_message: "quota exceeded" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(resolvePending).toHaveBeenCalledWith("g1", { text: "quota exceeded", failure: true });
+  });
+
   it("missing goalId -> 200 no-op (drops stray hook)", async () => {
     const resolvePending = vi.fn();
     const f = app(resolvePending);

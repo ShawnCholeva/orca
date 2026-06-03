@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ClaudeCodeAdapter } from "./claude-code.js";
 import { CodexAdapter } from "./codex.js";
+import { MODELS_BY_AGENT_ID, PROVIDER_BY_AGENT_ID, adapterSupportsModel } from "./model-catalog.js";
 import type { AgentAdapter } from "./types.js";
 import { resolveBinary } from "./resolve.js";
 import type { ResolveBinaryResult, ResolveFn } from "./resolve.js";
@@ -199,6 +200,17 @@ for (const { name, envKey, defaultBin, create } of ADAPTER_CASES) {
 }
 
 describe("adapter supportsModel", () => {
+  it("maps Antigravity to Google provider metadata", () => {
+    expect(PROVIDER_BY_AGENT_ID.antigravity).toBe("orca/google");
+    expect(MODELS_BY_AGENT_ID.antigravity?.map((m) => m.id)).toEqual([
+      "gemini-3.5-flash",
+      "gemini-3.1-pro-high",
+      "gemini-3.1-pro-low",
+      "gemini-3-flash",
+    ]);
+    expect(adapterSupportsModel("antigravity", "gemini-3.5-flash")).toBe(true);
+  });
+
   it("claude-code supports the haiku/sonnet/opus models referenced by engineering v4", () => {
     const a = new ClaudeCodeAdapter();
     expect(a.supportsModel("claude-haiku-4-5")).toBe(true);

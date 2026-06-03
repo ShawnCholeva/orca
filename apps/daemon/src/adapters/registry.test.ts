@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import { AdapterRegistry } from "./registry.js";
 import { ClaudeCodeAdapter } from "./claude-code.js";
 import { CodexAdapter } from "./codex.js";
+import { AntigravityAdapter } from "./antigravity.js";
 import type { ResolveBinaryResult, ResolveFn } from "./resolve.js";
 
 function makeResolve(result: ResolveBinaryResult): ResolveFn {
@@ -15,6 +16,7 @@ function makeRegistry(): AdapterRegistry {
   const registry = new AdapterRegistry();
   registry.register(new ClaudeCodeAdapter(available));
   registry.register(new CodexAdapter(unavailable));
+  registry.register(new AntigravityAdapter(available));
   return registry;
 }
 
@@ -25,10 +27,10 @@ describe("AdapterRegistry", () => {
     registry = makeRegistry();
   });
 
-  it("lists exactly the two registered adapter ids", async () => {
+  it("lists exactly the registered adapter ids", async () => {
     const summaries = await registry.list();
     const ids = summaries.map((s) => s.id).sort();
-    expect(ids).toEqual(["claude-code", "codex"]);
+    expect(ids).toEqual(["antigravity", "claude-code", "codex"]);
   });
 
   it("get returns the adapter by id", () => {

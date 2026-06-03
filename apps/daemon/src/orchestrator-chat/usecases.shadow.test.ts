@@ -40,6 +40,24 @@ describe("createOrchestratorMessage shadow path", () => {
     expect(inserted).toEqual(["hi async"]);
   });
 
+  it("shadow_session mode: routes Google provider through antigravity", async () => {
+    const db = setup();
+    db.exec(`UPDATE goals SET orchestrator_provider = 'orca/google', orchestrator_model = 'gemini-3.5-flash' WHERE id = 'G1'`);
+    const ask = vi.fn().mockResolvedValue({ text: '{"replyText":"hi async"}' });
+    let idN = 0;
+    const ctx: any = {
+      db, bus: { publish: vi.fn() },
+      modelProviderRegistry: { get: vi.fn(() => { throw new Error("SDK must not be used"); }) },
+      shadowAsk: ask,
+      resolveOrchestratorMode: () => "shadow_session",
+      onOrchestratorReply: vi.fn(),
+      now: () => "2026-05-29T00:00:00Z",
+      idFactory: () => `id${++idN}`,
+    };
+    await createOrchestratorMessage(ctx, "G1", { body: "hello" });
+    expect(ask.mock.calls[0]?.[1].adapterId).toBe("antigravity");
+  });
+
   it("shadow_session mode: posts fallback message when shadowAsk rejects", async () => {
     const db = setup();
     const inserted: string[] = [];

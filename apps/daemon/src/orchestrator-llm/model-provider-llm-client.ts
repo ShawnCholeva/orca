@@ -4,12 +4,18 @@ import {
 } from "@orca/contracts";
 import type { ModelProviderRegistry } from "../llm/registry.js";
 import type { OrchestratorLlmClient } from "./mediator.js";
-import { resolveShadowProvider } from "./providers/registry.js";
-import type { ShadowAdapterId } from "./providers/types.js";
 
 function providerIdForAdapter(adapterId: string): ModelProviderId | undefined {
-  if (adapterId !== "claude-code" && adapterId !== "codex") return undefined;
-  return resolveShadowProvider(adapterId as ShadowAdapterId).modelProviderId as ModelProviderId;
+  switch (adapterId) {
+    case "claude-code":
+      return "orca/anthropic";
+    case "codex":
+      return "orca/openai";
+    case "antigravity":
+      return "orca/google";
+    default:
+      return undefined;
+  }
 }
 
 export class ModelProviderOrchestratorLlmClient implements OrchestratorLlmClient {
@@ -62,7 +68,7 @@ export class RoutedOrchestratorLlmClient implements OrchestratorLlmClient {
     systemPrompt: string;
     userPrompt: string;
   }): Promise<{ text: string }> {
-    if (input.adapterId === "claude-code" || input.adapterId === "codex") {
+    if (input.adapterId === "claude-code" || input.adapterId === "codex" || input.adapterId === "antigravity") {
       return this.shadowClient.request(input);
     }
     return this.providerClient.request(input);
@@ -75,5 +81,7 @@ export function adapterIdForProvider(providerId: ModelProviderId): string {
       return "claude-code";
     case "orca/openai":
       return "codex";
+    case "orca/google":
+      return "antigravity";
   }
 }

@@ -17,4 +17,8 @@ describe("orchestration transport policy", () => {
       "human_review",
     ]);
   });
+
+  it("skips one-shot for Google in v1", () => {
+    expect(resolveTransportPlan("orca/google")).toEqual(["hidden_interactive", "human_review"]);
+  });
 });

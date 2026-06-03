@@ -44,4 +44,23 @@ describe("ShadowSessionLlmClient", () => {
     });
     expect(calls[0].input.adapterId).toBe("codex");
   });
+
+  it("passes antigravity adapter id through to the manager", async () => {
+    const calls: any[] = [];
+    const fakeManager = {
+      ask: async (goalId: string, input: any) => {
+        calls.push({ goalId, input });
+        return { text: '{"kind":"answer_user_directly","body":"ok"}' };
+      },
+    };
+    const client = new ShadowSessionLlmClient(fakeManager as any, { timeoutMs: 5000 });
+    await client.request({
+      goalId: "G1",
+      adapterId: "antigravity",
+      modelId: "gemini-3.5-flash",
+      systemPrompt: "SYS",
+      userPrompt: "USR",
+    });
+    expect(calls[0].input.adapterId).toBe("antigravity");
+  });
 });

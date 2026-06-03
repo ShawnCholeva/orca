@@ -24,6 +24,13 @@ describe("resolveShadowProvider", () => {
     expect(typeof provider.turnParser).toBe("function");
   });
 
+  it("returns the antigravity provider exposing the interface members", () => {
+    const provider = resolveShadowProvider("antigravity");
+    expect(provider.id).toBe("antigravity");
+    expect(provider.modelProviderId).toBe("orca/google");
+    expect(provider.captureMode()).toEqual({ kind: "hook" });
+  });
+
   it("throws on an unknown adapter id", () => {
     // @ts-expect-error exercising the runtime guard with an invalid id
     expect(() => resolveShadowProvider("nope")).toThrow();

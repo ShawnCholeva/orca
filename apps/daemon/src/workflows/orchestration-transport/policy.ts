@@ -8,5 +8,7 @@ export function resolveTransportPlan(
       return ["one_shot", "hidden_interactive", "human_review"];
     case "orca/anthropic":
       return ["hidden_interactive", "human_review"];
+    case "orca/google":
+      return ["hidden_interactive", "human_review"];
   }
 }

@@ -169,7 +169,7 @@ import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
 import { insertMessageWithEvent } from './orchestrator-chat/usecases.js';
 import { registerShadowHookRoutes } from './shadow-hooks/routes.js';
-import { ShadowSessionManager, shadowSessionId } from './orchestrator-llm/shadow-session.js';
+import { ShadowSessionManager, shadowSessionId, type ShadowAdapterId } from './orchestrator-llm/shadow-session.js';
 import { ShadowSessionLlmClient } from './orchestrator-llm/shadow-llm-client.js';
 import {
   ModelProviderOrchestratorLlmClient,
@@ -209,6 +209,10 @@ function readPackageVersion(): string {
 const pkg = { version: readPackageVersion() };
 
 const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+function isShadowAdapterId(adapterId: string): adapterId is ShadowAdapterId {
+  return adapterId === "claude-code" || adapterId === "codex" || adapterId === "antigravity";
+}
 
 const CORS_ORIGINS = [
   'http://localhost:5173',
@@ -499,6 +503,7 @@ export function createServer(
     },
     claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
     codexBin: process.env["ORCA_CODEX_BIN"] ?? "codex",
+    antigravityBin: process.env["ORCA_ANTIGRAVITY_BIN"] ?? "agy",
   });
 
   // Worker session manager for orchestrator-dispatched agent sessions (tmux-backed).
@@ -680,9 +685,13 @@ export function createServer(
       const goal = getGoalById(getDatabase(), goalId);
       if (!goal?.orchestratorProvider) return shadowSessionId(goalId);
       const adapterId = adapterIdForProvider(goal.orchestratorProvider);
-      return daemonContext.stepDispatchCapabilities.resolveMode(adapterId).mode === "shadow_session"
-        ? shadowSessions.spawn(goalId, adapterId === "codex" ? "codex" : "claude-code")
-        : shadowSessionId(goalId);
+      if (daemonContext.stepDispatchCapabilities.resolveMode(adapterId).mode !== "shadow_session") {
+        return shadowSessionId(goalId);
+      }
+      if (!isShadowAdapterId(adapterId)) {
+        throw new Error(`unsupported shadow adapter: ${adapterId}`);
+      }
+      return shadowSessions.spawn(goalId, adapterId);
     },
     startWorkflowFirstStepFn: async (_goalId, runId) =>
       orchestratorService.startWorkflowFirstStep(

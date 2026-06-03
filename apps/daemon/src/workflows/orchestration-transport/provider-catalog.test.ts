@@ -90,4 +90,27 @@ describe("orchestration transport provider catalog", () => {
       "gpt-5.2",
     ]);
   });
+
+  it("includes connected agent-backed providers without a direct API provider", async () => {
+    const registry = new ModelProviderRegistry();
+    registry.register(provider("orca/openai", "OpenAI", true));
+    const catalog = await buildOrchestrationProviderCatalog(registry, {
+      allowedProviderIds: new Set(["orca/google"]),
+      modelOverrides: new Map([
+        [
+          "orca/google",
+          [{ id: "gemini-3.5-flash", displayName: "Gemini 3.5 Flash", capabilities: ["tool_use"] }],
+        ],
+      ]),
+    });
+    expect(catalog).toEqual([
+      {
+        id: "orca/google",
+        displayName: "Google",
+        selectable: true,
+        automatedAvailable: true,
+        models: [{ id: "gemini-3.5-flash", displayName: "Gemini 3.5 Flash", capabilities: ["tool_use"] }],
+      },
+    ]);
+  });
 });
