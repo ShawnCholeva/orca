@@ -49,6 +49,7 @@ export const ORCHESTRATION_WORKER_OUTPUT_TAIL_MAX_BYTES = 4096;
 
 const Id100 = z.string().min(1).max(100);
 const Id = z.string().min(1);
+const Score01 = z.number().min(0).max(1);
 const BoundedString = (maxBytes: number, label: string) =>
   z.string().refine(
     (value) => utf8ByteLength(value) <= maxBytes,
@@ -142,6 +143,7 @@ export type OrchestrationTransport = z.infer<typeof OrchestrationTransport>;
 export const OrchestrationDecisionKind = z.enum([
   "select_operator",
   "score_transition",
+  "score_step_result",
   "repair_artifact",
   "run_audit",
   "run_step_skill",
@@ -341,6 +343,66 @@ export const WorkflowRun = z
   .strict();
 export type WorkflowRun = z.infer<typeof WorkflowRun>;
 
+export const WorkflowStepResultStatus = z.enum([
+  "completed",
+  "failed",
+  "blocked",
+  "skipped"
+]);
+export type WorkflowStepResultStatus = z.infer<typeof WorkflowStepResultStatus>;
+
+export const WorkflowStepResultEvaluationStatus = z.enum(["scored", "failed"]);
+export type WorkflowStepResultEvaluationStatus = z.infer<
+  typeof WorkflowStepResultEvaluationStatus
+>;
+
+export const WorkflowStepResultQuality = z
+  .object({
+    outputCompleteness: Score01,
+    outputCorrectness: Score01,
+    instructionAdherence: Score01,
+    downstreamReadiness: Score01,
+    riskLevel: Score01
+  })
+  .strict();
+export type WorkflowStepResultQuality = z.infer<typeof WorkflowStepResultQuality>;
+
+export const WorkflowStepResultPerformance = z
+  .object({
+    durationSeconds: z.number().nonnegative(),
+    retries: z.number().int().nonnegative(),
+    totalTurns: z.number().int().nonnegative().optional(),
+    toolCalls: z.number().int().nonnegative().optional()
+  })
+  .strict();
+export type WorkflowStepResultPerformance = z.infer<
+  typeof WorkflowStepResultPerformance
+>;
+
+export const WorkflowStepResultOutcome = z
+  .object({
+    reason: z.string().max(WORKFLOW_FAILURE_MAX_MESSAGE_CHARS),
+    producedArtifactsCount: z.number().int().nonnegative(),
+    blockingIssuesCount: z.number().int().nonnegative(),
+    warningsCount: z.number().int().nonnegative(),
+    handoffReady: z.boolean()
+  })
+  .strict();
+export type WorkflowStepResultOutcome = z.infer<typeof WorkflowStepResultOutcome>;
+
+export const WorkflowStepResult = z
+  .object({
+    stepId: Id,
+    stepStatus: WorkflowStepResultStatus,
+    evaluationStatus: WorkflowStepResultEvaluationStatus,
+    successScore: Score01,
+    quality: WorkflowStepResultQuality,
+    performance: WorkflowStepResultPerformance,
+    outcome: WorkflowStepResultOutcome
+  })
+  .strict();
+export type WorkflowStepResult = z.infer<typeof WorkflowStepResult>;
+
 export const WorkflowStepRun = z
   .object({
     id: Id,
@@ -357,6 +419,7 @@ export const WorkflowStepRun = z
     selectedProviderId: ModelProviderId.nullable().optional(),
     selectedModelId: z.string().min(1).max(80).nullable().optional(),
     operatorSelectedAt: z.string().datetime().nullable().optional(),
+    stepResult: WorkflowStepResult.nullable(),
   })
   .strict();
 export type WorkflowStepRun = z.infer<typeof WorkflowStepRun>;
@@ -610,6 +673,58 @@ export const SynthesisProposal = z
   .object({ output: z.record(z.unknown()) })
   .strict();
 export type SynthesisProposal = z.infer<typeof SynthesisProposal>;
+
+export const StepResultScoringFacts = z
+  .object({
+    stepId: Id,
+    stepStatus: WorkflowStepResultStatus,
+    performance: WorkflowStepResultPerformance,
+    outcome: z
+      .object({
+        producedArtifactsCount: z.number().int().nonnegative(),
+        blockingIssuesCount: z.number().int().nonnegative(),
+        warningsCount: z.number().int().nonnegative()
+      })
+      .strict()
+  })
+  .strict();
+export type StepResultScoringFacts = z.infer<typeof StepResultScoringFacts>;
+
+export const StepResultScoringRequest = z
+  .object({
+    step: z
+      .object({
+        id: Id,
+        templateId: Id100,
+        name: z.string().min(1).max(100),
+        instructions: BoundedString(
+          WORKFLOW_STEP_MAX_INSTRUCTIONS_BYTES,
+          "instructions"
+        ),
+        status: WorkflowStepRunStatus
+      })
+      .strict(),
+    goal: z
+      .object({
+        id: Id,
+        description: z.string().max(4000)
+      })
+      .strict(),
+    output: z.record(z.unknown()).nullable(),
+    facts: StepResultScoringFacts
+  })
+  .strict();
+export type StepResultScoringRequest = z.infer<typeof StepResultScoringRequest>;
+
+export const StepResultScoringProposal = z
+  .object({
+    successScore: Score01,
+    quality: WorkflowStepResultQuality,
+    reason: z.string().max(WORKFLOW_FAILURE_MAX_MESSAGE_CHARS),
+    handoffReady: z.boolean()
+  })
+  .strict();
+export type StepResultScoringProposal = z.infer<typeof StepResultScoringProposal>;
 
 export const StepSkillProposal = z.discriminatedUnion("action", [
   z.object({

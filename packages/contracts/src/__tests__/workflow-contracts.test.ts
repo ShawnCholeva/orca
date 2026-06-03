@@ -87,6 +87,11 @@ import {
   OrchestratorAction,
   CreateWorkflowTemplateRequest,
 } from "../index.js";
+import {
+  StepResultScoringProposal,
+  StepResultScoringRequest,
+  WorkflowStepResult,
+} from "../workflows/index.js";
 
 const now = "2026-01-01T00:00:00.000Z";
 
@@ -149,7 +154,33 @@ const stepRun = {
   selectedOperatorId: null,
   selectedProviderId: null,
   selectedModelId: null,
-  operatorSelectedAt: null
+  operatorSelectedAt: null,
+  stepResult: null
+};
+
+const scoredResult = {
+  stepId: "step-run-1",
+  stepStatus: "completed",
+  evaluationStatus: "scored",
+  successScore: 0.92,
+  quality: {
+    outputCompleteness: 0.95,
+    outputCorrectness: 0.9,
+    instructionAdherence: 0.88,
+    downstreamReadiness: 0.91,
+    riskLevel: 0.12
+  },
+  performance: {
+    durationSeconds: 42,
+    retries: 1
+  },
+  outcome: {
+    reason: "Output satisfies the step instructions and is ready for the next step.",
+    producedArtifactsCount: 1,
+    blockingIssuesCount: 0,
+    warningsCount: 1,
+    handoffReady: true
+  }
 };
 
 const decision = {
@@ -202,6 +233,9 @@ describe("workflow contracts", () => {
     expect(WorkflowTemplate.parse(template)).toMatchObject(template);
     expect(WorkflowRun.parse(run)).toEqual(run);
     expect(WorkflowStepRun.parse(stepRun)).toEqual(stepRun);
+    expect(WorkflowStepRun.parse({ ...stepRun, stepResult: scoredResult })).toMatchObject({
+      stepResult: scoredResult
+    });
     expect(WorkflowArtifact.parse(artifact)).toEqual(artifact);
     expect(WorkflowDecisionTrace.parse(decision)).toEqual(decision);
     expect(
@@ -924,6 +958,100 @@ describe("workflow contracts", () => {
 
     expect(Task.parse(task)).toEqual(task);
     expect(Recommendation.parse(recommendation)).toEqual(recommendation);
+  });
+});
+
+describe("WorkflowStepResult", () => {
+  it("accepts a fully scored result", () => {
+    expect(WorkflowStepResult.parse(scoredResult)).toEqual(scoredResult);
+  });
+
+  it("accepts an explicit evaluation-failed result", () => {
+    const result = {
+      ...scoredResult,
+      evaluationStatus: "failed",
+      successScore: 0,
+      quality: {
+        outputCompleteness: 0,
+        outputCorrectness: 0,
+        instructionAdherence: 0,
+        downstreamReadiness: 0,
+        riskLevel: 1
+      },
+      outcome: {
+        ...scoredResult.outcome,
+        reason: "step result evaluation failed: evaluation proposal did not validate",
+        handoffReady: false
+      }
+    };
+    expect(WorkflowStepResult.parse(result)).toEqual(result);
+  });
+
+  it("rejects scores outside 0 through 1", () => {
+    const parsed = WorkflowStepResult.safeParse({
+      ...scoredResult,
+      successScore: 1.2
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects missing required quality fields", () => {
+    const parsed = WorkflowStepResult.safeParse({
+      ...scoredResult,
+      quality: {
+        outputCompleteness: 0.95,
+        outputCorrectness: 0.9,
+        instructionAdherence: 0.88,
+        downstreamReadiness: 0.91
+      }
+    });
+    expect(parsed.success).toBe(false);
+  });
+});
+
+describe("step result scoring contracts", () => {
+  it("accepts scoring requests and proposals", () => {
+    const request = {
+      step: {
+        id: "step-run-1",
+        templateId: "execution",
+        name: "Execution",
+        instructions: "Implement the approved plan.",
+        status: "passed"
+      },
+      goal: {
+        id: "goal-1",
+        description: "Build the feature."
+      },
+      output: { summary: "Implemented." },
+      facts: {
+        stepId: "step-run-1",
+        stepStatus: "completed",
+        performance: { durationSeconds: 42, retries: 0 },
+        outcome: {
+          producedArtifactsCount: 1,
+          blockingIssuesCount: 0,
+          warningsCount: 0
+        }
+      }
+    };
+
+    expect(StepResultScoringRequest.parse(request)).toEqual(request);
+
+    const proposal = {
+      successScore: 0.9,
+      quality: {
+        outputCompleteness: 0.9,
+        outputCorrectness: 0.85,
+        instructionAdherence: 0.95,
+        downstreamReadiness: 0.8,
+        riskLevel: 0.1
+      },
+      reason: "Implementation output is complete enough for downstream QA.",
+      handoffReady: true
+    };
+
+    expect(StepResultScoringProposal.parse(proposal)).toEqual(proposal);
   });
 });
 
