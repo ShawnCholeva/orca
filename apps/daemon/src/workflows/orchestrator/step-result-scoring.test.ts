@@ -72,19 +72,21 @@ describe("scoreStepResult", () => {
 
   it("returns failure for invalid proposals", async () => {
     const propose = vi.fn(async (_req, options) => {
-      const validated = await options.validateProposal({ successScore: 2 });
+      await options.validateProposal({ successScore: 2 });
       return {
         status: "needs_human_review" as const,
         attemptId: "attempt-1",
         reviewPayloadId: "review-1",
-        failureMessage: validated.accepted ? null : validated.failureMessage,
       };
     });
 
     const result = await scoreStepResult({ broker: { propose } }, input);
 
     expect(result.ok).toBe(false);
-    expect(result.ok === false && result.reason).toMatch(/invalid step result scoring proposal/i);
+    expect(propose).toHaveBeenCalledTimes(2);
+    expect(result.ok === false && result.reason).toMatch(
+      /invalid step result scoring proposal: invalid step result scoring proposal structure/i
+    );
   });
 
   it("returns failure for non-proposed broker result", async () => {
@@ -97,6 +99,7 @@ describe("scoreStepResult", () => {
     const result = await scoreStepResult({ broker: { propose } }, input);
 
     expect(result.ok).toBe(false);
+    expect(propose).toHaveBeenCalledTimes(2);
     expect(result.ok === false && result.reason).toMatch(/step result scoring did not produce/i);
   });
 });

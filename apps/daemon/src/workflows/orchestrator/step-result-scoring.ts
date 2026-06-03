@@ -60,47 +60,58 @@ export async function scoreStepResult(
     payload: requestPayload,
   });
 
-  const result = await deps.broker.propose(request, {
-    validateProposal: (raw) => {
-      const proposal = StepResultScoringProposal.safeParse(raw);
-      if (!proposal.success) {
-        return {
-          accepted: false,
-          failureMessage: "invalid step result scoring proposal structure",
-        };
-      }
+  let lastValidationFailure: string | null = null;
 
-      const stepResult = WorkflowStepResult.parse({
-        stepId: input.facts.stepId,
-        stepStatus: input.facts.stepStatus,
-        evaluationStatus: "scored",
-        successScore: proposal.data.successScore,
-        quality: proposal.data.quality,
-        performance: input.facts.performance,
-        outcome: {
-          reason: proposal.data.reason,
-          producedArtifactsCount: input.facts.outcome.producedArtifactsCount,
-          blockingIssuesCount: input.facts.outcome.blockingIssuesCount,
-          warningsCount: input.facts.outcome.warningsCount,
-          handoffReady: proposal.data.handoffReady,
-        },
-      });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await deps.broker.propose(request, {
+      validateProposal: (raw) => {
+        const proposal = StepResultScoringProposal.safeParse(raw);
+        if (!proposal.success) {
+          lastValidationFailure = "invalid step result scoring proposal structure";
+          return {
+            accepted: false,
+            failureMessage: lastValidationFailure,
+          };
+        }
 
-      return { accepted: true, parsed: stepResult };
-    },
-  });
+        const stepResult = WorkflowStepResult.parse({
+          stepId: input.facts.stepId,
+          stepStatus: input.facts.stepStatus,
+          evaluationStatus: "scored",
+          successScore: proposal.data.successScore,
+          quality: proposal.data.quality,
+          performance: input.facts.performance,
+          outcome: {
+            reason: proposal.data.reason,
+            producedArtifactsCount: input.facts.outcome.producedArtifactsCount,
+            blockingIssuesCount: input.facts.outcome.blockingIssuesCount,
+            warningsCount: input.facts.outcome.warningsCount,
+            handoffReady: proposal.data.handoffReady,
+          },
+        });
 
-  if (result.status !== "proposed") {
-    if ("failureMessage" in result && typeof result.failureMessage === "string" && result.failureMessage.length > 0) {
-      return { ok: false, reason: result.failureMessage };
+        return { accepted: true, parsed: stepResult };
+      },
+    });
+
+    if (result.status !== "proposed") {
+      continue;
     }
-    return { ok: false, reason: "step result scoring did not produce a proposal" };
+
+    const parsed = WorkflowStepResult.safeParse(result.parsed);
+    if (!parsed.success) {
+      return { ok: false, reason: "invalid step result scoring proposal result" };
+    }
+
+    return { ok: true, stepResult: parsed.data };
   }
 
-  const parsed = WorkflowStepResult.safeParse(result.parsed);
-  if (!parsed.success) {
-    return { ok: false, reason: "invalid step result scoring proposal result" };
+  if (lastValidationFailure) {
+    return {
+      ok: false,
+      reason: `invalid step result scoring proposal: ${lastValidationFailure}`,
+    };
   }
 
-  return { ok: true, stepResult: parsed.data };
+  return { ok: false, reason: "step result scoring did not produce a proposal" };
 }
