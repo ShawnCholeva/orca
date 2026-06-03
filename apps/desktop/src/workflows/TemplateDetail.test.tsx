@@ -110,13 +110,18 @@ describe("TemplateDetail", () => {
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => expect(saveTemplateMock).toHaveBeenCalledTimes(1));
-    const [id, payload] = saveTemplateMock.mock.calls[0] as [string, unknown];
+    const [id, payload] = saveTemplateMock.mock.calls[0] as [
+      string,
+      { graph: { nodes: { type: string; stepId?: string }[] }; steps: { id: string }[]; scope: string; scopeName: string },
+    ];
     expect(id).toBe("custom/template-1");
-    expect(payload).toMatchObject({
-      scope: "global",
-      scopeName: "",
-      graph: expect.objectContaining({ nodes: expect.any(Array) }),
-    });
+    expect(payload.scope).toBe("global");
+    expect(payload.scopeName).toBe("");
+    // Graph must have one step-node per step with matching stepIds
+    const stepNodes = payload.graph.nodes.filter((n) => n.type === "step");
+    expect(stepNodes.length).toBe(payload.steps.length);
+    const stepIds = payload.steps.map((s) => s.id);
+    expect(stepNodes.map((n) => n.stepId).sort()).toEqual(stepIds.sort());
   });
 
   it("renders output schema fields for each step (via canvas node modal)", async () => {

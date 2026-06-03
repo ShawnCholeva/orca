@@ -50,7 +50,7 @@ function ChevronDownIcon({ size = 14 }: { size?: number }) {
   );
 }
 
-function createStepDraft(steps: WorkflowStepDraft[]): WorkflowStepDraft {
+export function createStepDraft(steps: WorkflowStepDraft[]): WorkflowStepDraft {
   const numericSuffixes = steps
     .map((step) => /^step-(\d+)$/.exec(step.id)?.[1])
     .map((value) => Number(value ?? "0"));

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   CreateWorkflowTemplateRequest,
   type CreateWorkflowTemplateRequest as CreateWorkflowTemplateInput,
@@ -9,10 +9,9 @@ import {
 } from "@orca/contracts";
 import { toErrorMessage } from "../api";
 import { createTemplate, duplicateTemplate, saveTemplate } from "./api";
-import { type GuardrailDraft } from "./GuardrailEditor";
 import { NodeDetailModal, type NodeDetail } from "./NodeDetailModal";
 import { ScopePicker } from "./ScopeControls";
-import { StepEditor, type WorkflowStepDraft } from "./StepEditor";
+import { StepEditor, createStepDraft, type WorkflowStepDraft } from "./StepEditor";
 import { WorkflowFlow } from "./WorkflowFlow";
 import { buildInitialGraph, reconcileGraph } from "./graph-sync";
 
@@ -60,6 +59,7 @@ function toDraft(template: WorkflowTemplate): TemplateDraft {
 function buildTemplateInput(
   draft: TemplateDraft,
   guardrails: WorkflowTemplate["guardrails"],
+  graph: WorkflowGraph,
 ): CreateWorkflowTemplateInput {
   const parsed = CreateWorkflowTemplateRequest.safeParse({
     name: draft.name.trim(),
@@ -75,7 +75,7 @@ function buildTemplateInput(
       agentPreference: step.agentPreference,
     })),
     guardrails,
-    graph: reconcileGraph(draft.steps, draft.graph),
+    graph,
   });
 
   if (!parsed.success) {
@@ -86,21 +86,6 @@ function buildTemplateInput(
 
 function buildDuplicateName(name: string): string {
   return name.endsWith(" Copy") ? `${name} 2` : `${name} Copy`;
-}
-
-function createDefaultStep(steps: WorkflowStepDraft[]): WorkflowStepDraft {
-  const numericSuffixes = steps
-    .map((step) => /^step-(\d+)$/.exec(step.id)?.[1])
-    .map((value) => Number(value ?? "0"));
-  const nextIndex = (numericSuffixes.length === 0 ? 0 : Math.max(...numericSuffixes)) + 1;
-  return {
-    id: `step-${nextIndex}`,
-    ordinal: steps.length,
-    name: "New step",
-    instructions: "",
-    outputSchema: [{ key: "result", type: "string" as const, required: true }],
-    agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }],
-  };
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -123,21 +108,6 @@ export function TemplateDetail({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [openNodeId, setOpenNodeId] = useState<string | null>(null);
 
-  // Keep a ref to the latest draft.graph for callbacks that close over stale state
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-
-  // Reset when template changes (e.g., selecting a different template)
-  useEffect(() => {
-    setDraft(toDraft(template));
-    setEditing(isNew);
-    setError(null);
-    setWarnings([]);
-    setSaving(false);
-    setDuplicating(false);
-    setOpenNodeId(null);
-  }, [template, isNew]);
-
   // Materialize the graph: reconcile steps into the working graph
   const materializedGraph = useMemo(
     () => reconcileGraph(draft.steps, draft.graph),
@@ -151,7 +121,7 @@ export function TemplateDetail({
     setError(null);
     setWarnings([]);
     try {
-      const payload = buildTemplateInput(draft, template.guardrails);
+      const payload = buildTemplateInput(draft, template.guardrails, materializedGraph);
       const result = await saveTemplate(template.id, payload);
       if (result.warnings.length > 0) setWarnings(result.warnings);
       setEditing(false);
@@ -168,7 +138,7 @@ export function TemplateDetail({
     setError(null);
     setWarnings([]);
     try {
-      const payload = buildTemplateInput(draft, []);
+      const payload = buildTemplateInput(draft, [], materializedGraph);
       const result = await createTemplate(payload);
       if (result.warnings.length > 0) setWarnings(result.warnings);
       setEditing(false);
@@ -233,7 +203,7 @@ export function TemplateDetail({
     if (locked) return;
     if (type === "step") {
       setDraft((current) => {
-        const newStep = createDefaultStep(current.steps);
+        const newStep = createStepDraft(current.steps);
         const nextSteps = [...current.steps, newStep];
         const nextGraph = reconcileGraph(nextSteps, current.graph);
         // schedule opening the new node
@@ -536,7 +506,7 @@ export function TemplateDetail({
               setDraft((current) => ({
                 ...current,
                 steps: nextSteps,
-                graph: reconcileGraph(nextSteps, current.graph),
+                graph: current.graph,
               }))
             }
             disabled={locked}
@@ -549,7 +519,7 @@ export function TemplateDetail({
             onAddNode={handleAddNode}
             onRemoveNode={handleRemoveNode}
             onResetLayout={handleResetLayout}
-            readOnly={locked}
+            readOnly={locked || !editing}
           />
         )}
       </div>
@@ -573,9 +543,8 @@ export function TemplateDetail({
           onClose={() => setOpenNodeId(null)}
           onDelete={() => {
             handleRemoveNode(openNodeId!);
-            setOpenNodeId(null);
           }}
-          readOnly={locked}
+          readOnly={locked || !editing}
         />
       )}
     </section>

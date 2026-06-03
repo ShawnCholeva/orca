@@ -4,7 +4,6 @@ import { listGoals, toErrorMessage } from "../api";
 import { listTemplates } from "./api";
 import { ScopeBadge, ScopeFilter } from "./ScopeControls";
 import { TemplateDetail } from "./TemplateDetail";
-import { TemplateList } from "./TemplateList";
 import "./workflows.css";
 
 const DRAFT_ID = "draft/new";
