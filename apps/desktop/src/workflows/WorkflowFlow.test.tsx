@@ -181,4 +181,47 @@ describe("WorkflowFlow", () => {
     fireEvent.click(removeBtns[0]);
     expect(onRemoveNode).toHaveBeenCalledWith("n1");
   });
+
+  it("zoom controls change the scale label", () => {
+    render(
+      <WorkflowFlow
+        graph={makeGraph()}
+        onGraphChange={vi.fn()}
+        onOpenNode={vi.fn()}
+        onAddNode={vi.fn()}
+        onRemoveNode={vi.fn()}
+        onResetLayout={vi.fn()}
+      />,
+    );
+
+    const reset = screen.getByRole("button", { name: /reset zoom/i });
+    expect(reset.textContent).toBe("100%");
+
+    fireEvent.click(screen.getByRole("button", { name: /zoom in/i }));
+    expect(reset.textContent).toBe("110%");
+
+    fireEvent.click(screen.getByRole("button", { name: /reset zoom/i }));
+    expect(reset.textContent).toBe("100%");
+
+    fireEvent.click(screen.getByRole("button", { name: /zoom out/i }));
+    expect(reset.textContent).toBe("91%");
+  });
+
+  it("exposes zoom controls even in readOnly mode", () => {
+    render(
+      <WorkflowFlow
+        graph={makeGraph()}
+        onGraphChange={vi.fn()}
+        onOpenNode={vi.fn()}
+        onAddNode={vi.fn()}
+        onRemoveNode={vi.fn()}
+        onResetLayout={vi.fn()}
+        readOnly
+      />,
+    );
+    expect(screen.getByRole("button", { name: /zoom in/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /zoom out/i })).toBeDefined();
+    // editing affordances stay hidden
+    expect(screen.queryByRole("button", { name: /add step/i })).toBeNull();
+  });
 });

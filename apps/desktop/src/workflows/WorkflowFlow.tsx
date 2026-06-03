@@ -14,6 +14,9 @@ export interface WorkflowFlowProps {
 
 const NODE_W = 240;
 const NODE_H = 64;
+const VIEWPORT_H = 460;
+const MIN_SCALE = 0.4;
+const MAX_SCALE = 2;
 
 export function WorkflowFlow({
   graph,
@@ -40,6 +43,15 @@ export function WorkflowFlow({
     overId: string | null;
   } | null>(null);
   const [hoverEdge, setHoverEdge] = useState<string | null>(null);
+  // Pan: drag on the empty canvas to scroll the viewport.
+  const [pan, setPan] = useState<{
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
+  // Zoom: scale applied to the canvas content layer.
+  const [scale, setScale] = useState(1);
 
   const { nodes, edges, positions } = graph;
 
@@ -47,16 +59,40 @@ export function WorkflowFlow({
   const canvasHeight = Math.max(320, ...posList.map((p) => p.y + NODE_H + 60));
   const canvasWidth = Math.max(520, ...posList.map((p) => p.x + NODE_W + 40));
 
+  // Adjust scale while keeping the viewport center fixed in content space.
+  function zoomTo(nextScaleRaw: number) {
+    const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, nextScaleRaw));
+    const el = containerRef.current;
+    if (el) {
+      const cx = (el.scrollLeft + el.clientWidth / 2) / scale;
+      const cy = (el.scrollTop + el.clientHeight / 2) / scale;
+      // Apply scroll after the scale paints.
+      requestAnimationFrame(() => {
+        if (!containerRef.current) return;
+        containerRef.current.scrollLeft = cx * next - containerRef.current.clientWidth / 2;
+        containerRef.current.scrollTop = cy * next - containerRef.current.clientHeight / 2;
+      });
+    }
+    setScale(next);
+  }
+
   useEffect(() => {
-    if (!drag && !linkDrag) return;
+    if (!drag && !linkDrag && !pan) return;
 
     const handleMove = (e: MouseEvent) => {
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const scrollLeft = containerRef.current?.scrollLeft ?? 0;
-      const scrollTop = containerRef.current?.scrollTop ?? 0;
-      const px = e.clientX - rect.left + scrollLeft;
-      const py = e.clientY - rect.top + scrollTop;
+      const el = containerRef.current;
+      const rect = el?.getBoundingClientRect();
+      if (!el || !rect) return;
+
+      if (pan) {
+        el.scrollLeft = pan.scrollLeft - (e.clientX - pan.startX);
+        el.scrollTop = pan.scrollTop - (e.clientY - pan.startY);
+        return;
+      }
+
+      // Pointer position in content (graph) space, accounting for scroll + zoom.
+      const px = (e.clientX - rect.left + el.scrollLeft) / scale;
+      const py = (e.clientY - rect.top + el.scrollTop) / scale;
 
       if (drag) {
         const dx = e.clientX - drag.startX;
@@ -94,12 +130,11 @@ export function WorkflowFlow({
         if (!moved) onOpenNode(drag.id);
       }
       if (linkDrag) {
-        const rect = containerRef.current?.getBoundingClientRect();
-        if (rect) {
-          const scrollLeft = containerRef.current?.scrollLeft ?? 0;
-          const scrollTop = containerRef.current?.scrollTop ?? 0;
-          const px = e.clientX - rect.left + scrollLeft;
-          const py = e.clientY - rect.top + scrollTop;
+        const el = containerRef.current;
+        const rect = el?.getBoundingClientRect();
+        if (el && rect) {
+          const px = (e.clientX - rect.left + el.scrollLeft) / scale;
+          const py = (e.clientY - rect.top + el.scrollTop) / scale;
           let overId: string | null = null;
           for (const n of nodes) {
             if (n.id === linkDrag.fromId) continue;
@@ -125,6 +160,7 @@ export function WorkflowFlow({
       }
       setDrag(null);
       setLinkDrag(null);
+      setPan(null);
     };
 
     window.addEventListener("mousemove", handleMove);
@@ -133,7 +169,7 @@ export function WorkflowFlow({
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     };
-  }, [drag, linkDrag, graph, nodes, positions, onGraphChange, onOpenNode]);
+  }, [drag, linkDrag, pan, scale, graph, nodes, positions, onGraphChange, onOpenNode]);
 
   function pathFor(fromId: string, toId: string): string {
     const a = positions[fromId];
@@ -150,6 +186,43 @@ export function WorkflowFlow({
   function removeEdge(i: number) {
     onGraphChange({ ...graph, edges: graph.edges.filter((_, ei) => ei !== i) });
   }
+
+  // Start a pan when the drag begins on empty canvas (not on a node/port/edge).
+  function handleCanvasMouseDown(e: React.MouseEvent) {
+    if (e.button !== 0) return;
+    const el = containerRef.current;
+    if (!el) return;
+    setPan({
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollLeft: el.scrollLeft,
+      scrollTop: el.scrollTop,
+    });
+  }
+
+  // Ctrl/Cmd + wheel zooms; plain wheel keeps native scroll.
+  function handleWheel(e: React.WheelEvent) {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    zoomTo(scale * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+  }
+
+  const zoomBtnStyle: React.CSSProperties = {
+    width: 24,
+    height: 24,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "var(--panel)",
+    border: "1px solid var(--hairline)",
+    borderRadius: 6,
+    color: "var(--text-2)",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: 14,
+    lineHeight: 1,
+    padding: 0,
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -217,238 +290,297 @@ export function WorkflowFlow({
         >
           +
         </span>{" "}
-        port onto another node to link · click a line to unlink · click a node to edit
+        port onto another node to link · click a line to unlink · drag the canvas to pan · ⌘/Ctrl-scroll to zoom
       </div>}
 
-      {/* Canvas */}
-      <div
-        ref={containerRef}
-        style={{
-          position: "relative",
-          width: "100%",
-          height: canvasHeight,
-          minWidth: 0,
-          background: "var(--bg)",
-          border: "1px solid var(--hairline)",
-          borderRadius: 10,
-          overflow: "auto",
-          backgroundImage:
-            "radial-gradient(circle at 1px 1px, rgba(255,255,255,0.05) 1px, transparent 0)",
-          backgroundSize: "14px 14px",
-        }}
-      >
-        <div style={{ position: "relative", width: canvasWidth, height: canvasHeight }}>
-          <svg
-            width={canvasWidth}
-            height={canvasHeight}
-            style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
-          >
-            <defs>
-              <marker
-                id="wf-arrow"
-                viewBox="0 0 10 10"
-                refX="9"
-                refY="5"
-                markerWidth="7"
-                markerHeight="7"
-                orient="auto-start-reverse"
+      {/* Canvas viewport (relative wrapper hosts the zoom controls) */}
+      <div style={{ position: "relative" }}>
+        <div
+          ref={containerRef}
+          onMouseDown={handleCanvasMouseDown}
+          onWheel={handleWheel}
+          style={{
+            position: "relative",
+            width: "100%",
+            height: VIEWPORT_H,
+            minWidth: 0,
+            background: "var(--bg)",
+            border: "1px solid var(--hairline)",
+            borderRadius: 10,
+            overflow: "auto",
+            cursor: pan ? "grabbing" : "grab",
+            backgroundImage:
+              "radial-gradient(circle at 1px 1px, rgba(255,255,255,0.05) 1px, transparent 0)",
+            backgroundSize: `${14 * scale}px ${14 * scale}px`,
+          }}
+        >
+          {/* Sizer reserves scaled scroll area; inner layer is scaled via transform. */}
+          <div style={{ width: canvasWidth * scale, height: canvasHeight * scale }}>
+            <div
+              style={{
+                position: "relative",
+                width: canvasWidth,
+                height: canvasHeight,
+                transform: `scale(${scale})`,
+                transformOrigin: "0 0",
+              }}
+            >
+              <svg
+                width={canvasWidth}
+                height={canvasHeight}
+                style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
               >
-                <path d="M0,0 L10,5 L0,10 z" fill="var(--text-3)" />
-              </marker>
-              <marker
-                id="wf-arrow-hot"
-                viewBox="0 0 10 10"
-                refX="9"
-                refY="5"
-                markerWidth="7"
-                markerHeight="7"
-                orient="auto-start-reverse"
-              >
-                <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)" />
-              </marker>
-            </defs>
+                <defs>
+                  <marker
+                    id="wf-arrow"
+                    viewBox="0 0 10 10"
+                    refX="9"
+                    refY="5"
+                    markerWidth="7"
+                    markerHeight="7"
+                    orient="auto-start-reverse"
+                  >
+                    <path d="M0,0 L10,5 L0,10 z" fill="var(--text-3)" />
+                  </marker>
+                  <marker
+                    id="wf-arrow-hot"
+                    viewBox="0 0 10 10"
+                    refX="9"
+                    refY="5"
+                    markerWidth="7"
+                    markerHeight="7"
+                    orient="auto-start-reverse"
+                  >
+                    <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)" />
+                  </marker>
+                </defs>
 
-            {edges.map(([from, to], i) => {
-              const edgeKey = `${from}-${to}`;
-              const isHot = hoverEdge === edgeKey;
-              const d = pathFor(from, to);
-              if (!d) return null;
-              return (
-                <g
-                  key={edgeKey}
-                  style={{ pointerEvents: "all", cursor: "pointer" }}
-                  onMouseEnter={() => setHoverEdge(edgeKey)}
-                  onMouseLeave={() => setHoverEdge((h) => (h === edgeKey ? null : h))}
-                  onClick={() => removeEdge(i)}
-                >
-                  <path d={d} stroke="transparent" strokeWidth={16} fill="none" />
+                {edges.map(([from, to], i) => {
+                  const edgeKey = `${from}-${to}`;
+                  const isHot = hoverEdge === edgeKey;
+                  const d = pathFor(from, to);
+                  if (!d) return null;
+                  return (
+                    <g
+                      key={edgeKey}
+                      style={{ pointerEvents: "all", cursor: "pointer" }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onMouseEnter={() => setHoverEdge(edgeKey)}
+                      onMouseLeave={() => setHoverEdge((h) => (h === edgeKey ? null : h))}
+                      onClick={() => removeEdge(i)}
+                    >
+                      <path d={d} stroke="transparent" strokeWidth={16} fill="none" />
+                      <path
+                        d={d}
+                        stroke={isHot ? "var(--accent)" : "var(--text-3)"}
+                        strokeWidth={isHot ? 2 : 1.4}
+                        fill="none"
+                        markerEnd={isHot ? "url(#wf-arrow-hot)" : "url(#wf-arrow)"}
+                      />
+                    </g>
+                  );
+                })}
+
+                {linkDrag && positions[linkDrag.fromId] && (
                   <path
-                    d={d}
-                    stroke={isHot ? "var(--accent)" : "var(--text-3)"}
-                    strokeWidth={isHot ? 2 : 1.4}
+                    d={`M ${positions[linkDrag.fromId].x + NODE_W / 2} ${positions[linkDrag.fromId].y + NODE_H} L ${linkDrag.x} ${linkDrag.y}`}
+                    stroke="var(--accent)"
+                    strokeWidth={1.6}
                     fill="none"
-                    markerEnd={isHot ? "url(#wf-arrow-hot)" : "url(#wf-arrow)"}
+                    strokeDasharray="5 4"
                   />
-                </g>
-              );
-            })}
-
-            {linkDrag && positions[linkDrag.fromId] && (
-              <path
-                d={`M ${positions[linkDrag.fromId].x + NODE_W / 2} ${positions[linkDrag.fromId].y + NODE_H} L ${linkDrag.x} ${linkDrag.y}`}
-                stroke="var(--accent)"
-                strokeWidth={1.6}
-                fill="none"
-                strokeDasharray="5 4"
-              />
-            )}
-          </svg>
-
-          {nodes.map((n, i) => {
-            const p = positions[n.id];
-            if (!p) return null;
-            const isDragging = drag?.id === n.id;
-            const isLinkTarget = linkDrag != null && linkDrag.overId === n.id;
-            const isGate = n.type === "gate";
-            const baseBg = isGate ? "rgba(255, 160, 100, 0.06)" : "var(--panel-2)";
-            const baseBorder = isGate ? "var(--accent-line)" : "var(--hairline)";
-
-            return (
-              <div
-                key={n.id}
-                data-node-id={n.id}
-                style={{
-                  position: "absolute",
-                  left: p.x,
-                  top: p.y,
-                  width: NODE_W,
-                  height: NODE_H,
-                  background: isLinkTarget ? "var(--accent-soft)" : baseBg,
-                  border:
-                    "1px solid " +
-                    (isLinkTarget
-                      ? "var(--accent-line)"
-                      : isDragging
-                        ? "var(--hairline-strong)"
-                        : baseBorder),
-                  borderRadius: isGate ? 28 : 8,
-                  padding: "0 12px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  cursor: isDragging ? "grabbing" : "grab",
-                  userSelect: "none",
-                  boxShadow: isDragging ? "0 8px 24px rgba(0,0,0,0.45)" : "none",
-                  transition: isDragging
-                    ? "none"
-                    : "border-color 120ms ease, background 120ms ease, box-shadow 120ms ease",
-                  zIndex: isDragging ? 5 : 1,
-                }}
-                onMouseDown={(e) => {
-                  if (readOnly || e.button !== 0) return;
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  setDrag({
-                    id: n.id,
-                    offsetX: e.clientX - rect.left,
-                    offsetY: e.clientY - rect.top,
-                    startX: e.clientX,
-                    startY: e.clientY,
-                    moved: false,
-                  });
-                }}
-                onClick={(e) => {
-                  if (!readOnly) return;
-                  // In readOnly mode there's no drag, so click always opens the node
-                  e.stopPropagation();
-                  onOpenNode(n.id);
-                }}
-              >
-                {isGate ? (
-                  <span style={{ display: "inline-flex", flexShrink: 0, color: "var(--accent)" }}>
-                    <GateGlyph size={13} />
-                  </span>
-                ) : (
-                  <span
-                    className="mono"
-                    style={{ fontSize: 10, color: "var(--text-4)", flexShrink: 0 }}
-                  >
-                    {String(i + 1).padStart(2, "0")}
-                  </span>
                 )}
+              </svg>
 
-                <div
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 2,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 12.5,
-                      fontWeight: 500,
-                      color: isGate ? "var(--accent)" : "var(--text)",
-                      minWidth: 0,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      letterSpacing: isGate ? 0.2 : 0,
-                    }}
-                  >
-                    {n.name || (isGate ? "Gate" : "Step")}
-                  </span>
-                </div>
+              {nodes.map((n, i) => {
+                const p = positions[n.id];
+                if (!p) return null;
+                const isDragging = drag?.id === n.id;
+                const isLinkTarget = linkDrag != null && linkDrag.overId === n.id;
+                const isGate = n.type === "gate";
+                const baseBg = isGate ? "rgba(255, 160, 100, 0.06)" : "var(--panel-2)";
+                const baseBorder = isGate ? "var(--accent-line)" : "var(--hairline)";
 
-                {!isGate && <ArrowRightIcon size={11} color="var(--text-4)" />}
-
-                {/* link-out port — hidden in readOnly */}
-                {!readOnly && (
-                  <button
-                    type="button"
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      if (e.button !== 0) return;
-                      setLinkDrag({
-                        fromId: n.id,
-                        x: p.x + NODE_W / 2,
-                        y: p.y + NODE_H,
-                        overId: null,
-                      });
-                    }}
-                    title="Drag to another node to connect"
+                return (
+                  <div
+                    key={n.id}
+                    data-node-id={n.id}
                     style={{
                       position: "absolute",
-                      bottom: -9,
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      width: 18,
-                      height: 18,
-                      borderRadius: 9,
-                      background: "var(--panel)",
-                      border: "1px solid var(--hairline-strong)",
-                      color: "var(--text-2)",
-                      cursor: "crosshair",
+                      left: p.x,
+                      top: p.y,
+                      width: NODE_W,
+                      height: NODE_H,
+                      background: isLinkTarget ? "var(--accent-soft)" : baseBg,
+                      border:
+                        "1px solid " +
+                        (isLinkTarget
+                          ? "var(--accent-line)"
+                          : isDragging
+                            ? "var(--hairline-strong)"
+                            : baseBorder),
+                      borderRadius: isGate ? 28 : 8,
+                      padding: "0 12px",
                       display: "flex",
                       alignItems: "center",
-                      justifyContent: "center",
-                      padding: 0,
-                      fontFamily: "inherit",
-                      fontSize: 13,
-                      lineHeight: "1",
-                      fontWeight: 500,
+                      gap: 8,
+                      cursor: isDragging ? "grabbing" : "grab",
+                      userSelect: "none",
+                      boxShadow: isDragging ? "0 8px 24px rgba(0,0,0,0.45)" : "none",
+                      transition: isDragging
+                        ? "none"
+                        : "border-color 120ms ease, background 120ms ease, box-shadow 120ms ease",
+                      zIndex: isDragging ? 5 : 1,
+                    }}
+                    onMouseDown={(e) => {
+                      // Never let a node mousedown start a canvas pan.
+                      e.stopPropagation();
+                      if (readOnly || e.button !== 0) return;
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setDrag({
+                        id: n.id,
+                        offsetX: (e.clientX - rect.left) / scale,
+                        offsetY: (e.clientY - rect.top) / scale,
+                        startX: e.clientX,
+                        startY: e.clientY,
+                        moved: false,
+                      });
+                    }}
+                    onClick={(e) => {
+                      if (!readOnly) return;
+                      // In readOnly mode there's no drag, so click always opens the node
+                      e.stopPropagation();
+                      onOpenNode(n.id);
                     }}
                   >
-                    +
-                  </button>
-                )}
+                    {isGate ? (
+                      <span style={{ display: "inline-flex", flexShrink: 0, color: "var(--accent)" }}>
+                        <GateGlyph size={13} />
+                      </span>
+                    ) : (
+                      <span
+                        className="mono"
+                        style={{ fontSize: 10, color: "var(--text-4)", flexShrink: 0 }}
+                      >
+                        {String(i + 1).padStart(2, "0")}
+                      </span>
+                    )}
 
-                {/* delete button — hidden in readOnly */}
-                {!readOnly && <NodeDeleteButton onDelete={() => onRemoveNode(n.id)} />}
-              </div>
-            );
-          })}
+                    <div
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 2,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: 500,
+                          color: isGate ? "var(--accent)" : "var(--text)",
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          letterSpacing: isGate ? 0.2 : 0,
+                        }}
+                      >
+                        {n.name || (isGate ? "Gate" : "Step")}
+                      </span>
+                    </div>
+
+                    {!isGate && <ArrowRightIcon size={11} color="var(--text-4)" />}
+
+                    {/* link-out port — hidden in readOnly */}
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          if (e.button !== 0) return;
+                          setLinkDrag({
+                            fromId: n.id,
+                            x: p.x + NODE_W / 2,
+                            y: p.y + NODE_H,
+                            overId: null,
+                          });
+                        }}
+                        title="Drag to another node to connect"
+                        style={{
+                          position: "absolute",
+                          bottom: -9,
+                          left: "50%",
+                          transform: "translateX(-50%)",
+                          width: 18,
+                          height: 18,
+                          borderRadius: 9,
+                          background: "var(--panel)",
+                          border: "1px solid var(--hairline-strong)",
+                          color: "var(--text-2)",
+                          cursor: "crosshair",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: 0,
+                          fontFamily: "inherit",
+                          fontSize: 13,
+                          lineHeight: "1",
+                          fontWeight: 500,
+                        }}
+                      >
+                        +
+                      </button>
+                    )}
+
+                    {/* delete button — hidden in readOnly */}
+                    {!readOnly && <NodeDeleteButton onDelete={() => onRemoveNode(n.id)} />}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Zoom controls — available even in readOnly so viewers can zoom/pan */}
+        <div
+          style={{
+            position: "absolute",
+            right: 10,
+            bottom: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          <button
+            type="button"
+            title="Zoom out"
+            aria-label="Zoom out"
+            onClick={() => zoomTo(scale / 1.1)}
+            style={zoomBtnStyle}
+          >
+            −
+          </button>
+          <button
+            type="button"
+            title="Reset zoom"
+            aria-label="Reset zoom"
+            onClick={() => zoomTo(1)}
+            style={{ ...zoomBtnStyle, width: 46, fontSize: 11, fontVariantNumeric: "tabular-nums" }}
+          >
+            {Math.round(scale * 100)}%
+          </button>
+          <button
+            type="button"
+            title="Zoom in"
+            aria-label="Zoom in"
+            onClick={() => zoomTo(scale * 1.1)}
+            style={zoomBtnStyle}
+          >
+            +
+          </button>
         </div>
       </div>
     </div>
