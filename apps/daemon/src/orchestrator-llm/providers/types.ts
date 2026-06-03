@@ -1,6 +1,6 @@
 import type { TmuxRunner } from "../../tmux/runner.js";
 
-export type ShadowAdapterId = "claude-code" | "codex";
+export type ShadowAdapterId = "claude-code" | "codex" | "antigravity";
 
 export interface ShadowLaunch {
   /** Executable invoked by `tmux new-session` for this provider. */

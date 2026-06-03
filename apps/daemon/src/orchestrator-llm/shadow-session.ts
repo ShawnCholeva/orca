@@ -33,6 +33,7 @@ export interface ShadowSessionDeps {
   isReady: (adapterId?: ShadowAdapterId) => Promise<boolean>; // adapter.checkAuth in prod; ()=>true in tests
   claudeBin?: string;                 // default ORCA_CLAUDE_CODE_BIN ?? "claude"
   codexBin?: string;                  // default ORCA_CODEX_BIN ?? "codex"
+  antigravityBin?: string;            // default ORCA_ANTIGRAVITY_BIN ?? "agy"
   tmux?: TmuxRunner;                  // injectable for tests; default shells out to tmux
   trustPattern?: RegExp;              // matches the folder-trust prompt
   pollMs?: number;                    // capture-pane poll interval (default 300)
@@ -225,7 +226,9 @@ export class ShadowSessionManager {
     const pending = session?.pending ?? null;
     if (!session || !pending) return; // stray/duplicate hook -> drop
     if (result.failure) {
-      this.settlePending(goalId, pending, { error: new Error("shadow orchestrator StopFailure") });
+      this.settlePending(goalId, pending, {
+        error: new Error(result.text || "shadow orchestrator StopFailure"),
+      });
       return;
     }
     const block = session.provider.turnParser().parseAction(result.text ?? "");
@@ -275,6 +278,7 @@ export class ShadowSessionManager {
     const overrides: Record<ShadowAdapterId, string | undefined> = {
       "claude-code": this.deps.claudeBin,
       codex: this.deps.codexBin,
+      antigravity: this.deps.antigravityBin,
     };
     return overrides[adapterId];
   }

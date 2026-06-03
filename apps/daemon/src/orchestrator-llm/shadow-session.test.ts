@@ -35,6 +35,8 @@ function deps(root: string, tmux: ReturnType<typeof fakeTmux>, ready = true) {
   };
 }
 
+const waitReady = () => new Promise((r) => setTimeout(r, 20));
+
 describe("ShadowSessionManager spawn", () => {
   it("spawns one tmux session per goal and is idempotent", async () => {
     const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
@@ -59,5 +61,25 @@ describe("ShadowSessionManager spawn", () => {
     const kills = tmux.calls.filter((c) => c.args[0] === "kill-session");
     // kill-session called during spawn (idempotent pre-kill) and during terminate
     expect(kills.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("uses the antigravity binary override when spawning an antigravity shadow session", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    const tmux = fakeTmux();
+    const m = new ShadowSessionManager({ ...deps(root, tmux), antigravityBin: "/bin/agy-test" });
+    await m.spawn("G3", "antigravity");
+    const newSession = tmux.calls.find((c) => c.args[0] === "new-session");
+    expect(newSession?.args).toContain("/bin/agy-test");
+  });
+
+  it("uses hook failure text when rejecting a pending ask", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    const tmux = fakeTmux();
+    const m = new ShadowSessionManager(deps(root, tmux));
+    await m.spawn("G1");
+    const p = m.ask("G1", { systemPrompt: "S", userPrompt: "q", timeoutMs: 1000 });
+    await waitReady();
+    m.resolvePending("G1", { text: "quota exceeded", failure: true });
+    await expect(p).rejects.toThrow("quota exceeded");
   });
 });
