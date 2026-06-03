@@ -17,6 +17,7 @@ import { getTemplateById } from "../templates/projection.js";
 import {
   buildEvaluationFailedStepResult,
   mapStepRunStatusToResultStatus,
+  sanitizeStepResult,
   serializeStepResult,
 } from "./step-result.js";
 
@@ -113,10 +114,24 @@ function terminalStepResult(
   finishedAt: string,
   supplied?: WorkflowStepResult
 ): WorkflowStepResult {
-  if (supplied) return WorkflowStepResultSchema.parse(supplied);
+  const expectedStatus = mapStepRunStatusToResultStatus(terminalStatus);
+  if (supplied) {
+    const parsed = WorkflowStepResultSchema.parse(supplied);
+    if (parsed.stepId !== row.id) {
+      throw new Error(
+        `supplied step result stepId mismatch: expected ${row.id}, received ${parsed.stepId}`
+      );
+    }
+    if (parsed.stepStatus !== expectedStatus) {
+      throw new Error(
+        `supplied step result stepStatus mismatch: expected ${expectedStatus}, received ${parsed.stepStatus}`
+      );
+    }
+    return sanitizeStepResult(parsed);
+  }
   return buildEvaluationFailedStepResult({
     stepId: row.id,
-    stepStatus: mapStepRunStatusToResultStatus(terminalStatus),
+    stepStatus: expectedStatus,
     startedAt: row.started_at,
     finishedAt,
     retries: retryCount(row),

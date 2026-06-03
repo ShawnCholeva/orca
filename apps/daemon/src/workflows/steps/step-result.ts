@@ -91,6 +91,16 @@ export function buildEvaluationFailedStepResult(
   });
 }
 
+export function sanitizeStepResult(result: WorkflowStepResultT): WorkflowStepResultT {
+  return WorkflowStepResult.parse({
+    ...result,
+    outcome: {
+      ...result.outcome,
+      reason: sanitizeStepResultReason(result.outcome.reason),
+    },
+  });
+}
+
 export function serializeStepResult(result: WorkflowStepResultT): string {
   return JSON.stringify(WorkflowStepResult.parse(result));
 }

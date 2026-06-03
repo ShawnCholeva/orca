@@ -86,6 +86,33 @@ function readStepResultJson(db: Database.Database, id: string) {
   return JSON.parse(row.step_result_json!) as unknown;
 }
 
+function scoredStepResult(stepId: string): WorkflowStepResult {
+  return {
+    stepId,
+    stepStatus: "completed",
+    evaluationStatus: "scored",
+    successScore: 0.87,
+    quality: {
+      outputCompleteness: 0.9,
+      outputCorrectness: 0.8,
+      instructionAdherence: 0.9,
+      downstreamReadiness: 0.85,
+      riskLevel: 0.2,
+    },
+    performance: {
+      durationSeconds: 0,
+      retries: 0,
+    },
+    outcome: {
+      reason: "Ready for the next step.",
+      producedArtifactsCount: 0,
+      blockingIssuesCount: 0,
+      warningsCount: 0,
+      handoffReady: true,
+    },
+  };
+}
+
 function setup(): {
   db: Database.Database;
   events: DomainEvent[];
@@ -217,34 +244,62 @@ describe("workflow step usecases", () => {
     seedEngineeringTemplate(db, () => NOW);
     const run = startWorkflowRun(runCtx, { goalId: "goal-1", templateId: ENGINEERING_ID });
     const first = getStep(db, run.currentStepRunId!)!;
+    const scored = scoredStepResult(first.id);
+
+    advanceToNextStep(db, () => NOW, first.id, undefined, scored);
+
+    expect(readStepResultJson(db, first.id)).toEqual(scored);
+  });
+
+  it("advanceToNextStep rejects supplied step result for a different step", () => {
+    const { db, runCtx } = setup();
+    seedGoal(db, "goal-1");
+    seedEngineeringTemplate(db, () => NOW);
+    const run = startWorkflowRun(runCtx, { goalId: "goal-1", templateId: ENGINEERING_ID });
+    const first = getStep(db, run.currentStepRunId!)!;
+
+    expect(() =>
+      advanceToNextStep(db, () => NOW, first.id, undefined, scoredStepResult("other-step"))
+    ).toThrow(/stepId/);
+  });
+
+  it("advanceToNextStep rejects supplied step result with mismatched status", () => {
+    const { db, runCtx } = setup();
+    seedGoal(db, "goal-1");
+    seedEngineeringTemplate(db, () => NOW);
+    const run = startWorkflowRun(runCtx, { goalId: "goal-1", templateId: ENGINEERING_ID });
+    const first = getStep(db, run.currentStepRunId!)!;
     const scored: WorkflowStepResult = {
-      stepId: first.id,
-      stepStatus: "completed",
-      evaluationStatus: "scored",
-      successScore: 0.87,
-      quality: {
-        outputCompleteness: 0.9,
-        outputCorrectness: 0.8,
-        instructionAdherence: 0.9,
-        downstreamReadiness: 0.85,
-        riskLevel: 0.2,
-      },
-      performance: {
-        durationSeconds: 0,
-        retries: 0,
-      },
+      ...scoredStepResult(first.id),
+      stepStatus: "blocked",
+    };
+
+    expect(() =>
+      advanceToNextStep(db, () => NOW, first.id, undefined, scored)
+    ).toThrow(/stepStatus/);
+  });
+
+  it("advanceToNextStep redacts supplied step result reason before persisting", () => {
+    const { db, runCtx } = setup();
+    seedGoal(db, "goal-1");
+    seedEngineeringTemplate(db, () => NOW);
+    const run = startWorkflowRun(runCtx, { goalId: "goal-1", templateId: ENGINEERING_ID });
+    const first = getStep(db, run.currentStepRunId!)!;
+    const scored: WorkflowStepResult = {
+      ...scoredStepResult(first.id),
       outcome: {
-        reason: "Ready for the next step.",
-        producedArtifactsCount: 0,
-        blockingIssuesCount: 0,
-        warningsCount: 0,
-        handoffReady: true,
+        ...scoredStepResult(first.id).outcome,
+        reason: "Ready with password=supersecret123",
       },
     };
 
     advanceToNextStep(db, () => NOW, first.id, undefined, scored);
 
-    expect(readStepResultJson(db, first.id)).toEqual(scored);
+    expect(readStepResultJson(db, first.id)).toMatchObject({
+      outcome: {
+        reason: "Ready with password=[redacted]",
+      },
+    });
   });
 
   it("markStepBlocked persists daemon evaluation-failed step result", () => {
