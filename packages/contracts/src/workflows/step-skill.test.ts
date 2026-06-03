@@ -46,6 +46,7 @@ it("step run drops exit criteria, adds selection fields", () => {
     selectedOperatorId: "orca/anthropic:claude-sonnet-4-6",
     selectedProviderId: "orca/anthropic", selectedModelId: "claude-sonnet-4-6",
     operatorSelectedAt: "2026-05-27T00:00:00.000Z",
+    stepResult: null,
   });
   expect(s.selectedModelId).toBe("claude-sonnet-4-6");
   expect("satisfiedExitCriteria" in s).toBe(false);
