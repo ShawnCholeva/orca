@@ -14,6 +14,9 @@ import {
   setupHarness,
   makeStep,
   fakeStepDispatch,
+  fakeSelector,
+  fakeRegistry,
+  MODEL_OPERATOR_ID,
 } from "./skill-step-test-helpers.js";
 import type { SelectorInput } from "../operators/selector.js";
 import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
@@ -258,6 +261,95 @@ afterEach(() => {
 });
 
 describe("OrchestratorService agent step", () => {
+  it("scores and persists step_result after model step completion", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedSkillWorkflow(db, {
+      steps: [
+        makeStep({
+          id: "plan",
+          ordinal: 0,
+          name: "Plan",
+          instructions: "Plan the work.",
+          outputSchema: [{ key: "problem", type: "string", required: true }],
+        }),
+      ],
+      selectedOperatorId: MODEL_OPERATOR_ID,
+      selectedProviderId: "orca/anthropic",
+      selectedModelId: "claude-sonnet-4-6",
+      operatorSelectedAt: NOW,
+    });
+    db.prepare(
+      "UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-sonnet-4-6' WHERE id = 'goal-1'"
+    ).run();
+
+    const propose = vi.fn(async (request: unknown, options?: import("../orchestration-transport/broker.js").BrokerCompatibilityOptions) => {
+      if ((request as { kind?: string }).kind === "score_step_result") {
+        const proposal = {
+          successScore: 0.82,
+          quality: {
+            outputCompleteness: 0.8,
+            outputCorrectness: 0.8,
+            instructionAdherence: 0.85,
+            downstreamReadiness: 0.8,
+            riskLevel: 0.2,
+          },
+          reason: "Ready for next step.",
+          handoffReady: true,
+        };
+        const validated = options?.validateProposal
+          ? await options.validateProposal(proposal)
+          : { accepted: true as const, parsed: proposal };
+        return {
+          status: "proposed" as const,
+          attemptId: "score-attempt",
+          transport: "one_shot" as const,
+          parsed: Object.prototype.hasOwnProperty.call(validated, "parsed")
+            ? (validated as { parsed: unknown }).parsed
+            : proposal,
+          rawTextLength: null,
+          latencyMs: 1,
+        };
+      }
+      const raw = {
+        action: "complete" as const,
+        output: { problem: "solved" },
+        completion: {
+          confidence: "high" as const,
+          assumptions: [],
+          openQuestions: [],
+          whyComplete: "Done.",
+        },
+      };
+      const validated = options?.validateProposal
+        ? await options.validateProposal(raw)
+        : { accepted: true as const, parsed: raw };
+      return {
+        status: "proposed" as const,
+        attemptId: "skill-attempt",
+        transport: "one_shot" as const,
+        parsed: Object.prototype.hasOwnProperty.call(validated, "parsed")
+          ? (validated as { parsed: unknown }).parsed
+          : raw,
+        rawTextLength: null,
+        latencyMs: 1,
+      };
+    });
+    const service = new OrchestratorService(
+      fakeSelector(),
+      { propose },
+      fakeRegistry(),
+      makeLauncher()
+    );
+
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    expect(readPersistedStepResult(db, "step-1")).toMatchObject({
+      stepId: "step-1",
+      stepStatus: "completed",
+      evaluationStatus: "scored",
+    });
+  });
+
   it("selects agent operator, evaluates approval guardrail, emits launch_workflow_session recommendation, does NOT call launcher", async () => {
     const { db, bus, idFactory } = setupHarness();
 

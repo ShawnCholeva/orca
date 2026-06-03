@@ -275,6 +275,14 @@ function readPersistedStepResult(db: Database.Database, stepRunId: string) {
   return JSON.parse(row.step_result_json!);
 }
 
+function readStepFinishedAt(db: Database.Database, stepRunId: string): string | null {
+  return (
+    db
+      .prepare("SELECT finished_at FROM workflow_step_runs WHERE id = ?")
+      .get(stepRunId) as { finished_at: string | null }
+  ).finished_at;
+}
+
 function getArtifact(db: Database.Database, type: string) {
   return db
     .prepare("SELECT * FROM workflow_artifacts WHERE type = ?")
@@ -422,6 +430,75 @@ describe("OrchestratorService.onWorkflowSessionCompleted", () => {
         handoffReady: false,
       },
     });
+  });
+
+  it("persists evaluation-failed step_result and advances when scoring throws", async () => {
+    const { db } = setupHarness();
+    const { sessionId, stepRunId } = seedWorkflowWithSession(db);
+    const propose = vi.fn(async (request: unknown, options?: BrokerCompatibilityOptions) => {
+      if ((request as { kind?: string }).kind === "score_step_result") {
+        throw new Error("scoring transport down");
+      }
+      const validated = options?.validateProposal
+        ? await options.validateProposal({ output: { problem: "solved" } })
+        : { accepted: true as const, parsed: { output: { problem: "solved" } } };
+      return {
+        status: "proposed" as const,
+        attemptId: "synth-attempt",
+        transport: "one_shot" as const,
+        parsed: Object.prototype.hasOwnProperty.call(validated, "parsed")
+          ? (validated as { parsed: unknown }).parsed
+          : { output: { problem: "solved" } },
+        rawTextLength: null,
+        latencyMs: 1,
+      };
+    });
+    const service = makeService(
+      { propose },
+      fakeOutputStore((id) => snapshotWithText(id, "done"))
+    );
+
+    await service.onWorkflowSessionCompleted(db, () => NOW, { sessionId, goalId: "goal-1" });
+
+    expect(readPersistedStepResult(db, stepRunId)).toMatchObject({
+      stepId: stepRunId,
+      stepStatus: "completed",
+      evaluationStatus: "failed",
+      outcome: {
+        handoffReady: false,
+      },
+    });
+    const decisions = db
+      .prepare("SELECT decision_type FROM workflow_decisions ORDER BY rowid DESC LIMIT 1")
+      .get() as { decision_type: string } | undefined;
+    expect(decisions?.decision_type).toBe("mark_run_complete");
+  });
+
+  it("uses the same finished_at timestamp for scoring facts and terminalization", async () => {
+    const { db } = setupHarness();
+    const { sessionId, stepRunId } = seedWorkflowWithSession(db);
+    const broker = fakeSynthesisBroker({ problem: "solved" });
+    const service = makeService(
+      broker.broker,
+      fakeOutputStore((id) => snapshotWithText(id, "done"))
+    );
+    const timestamps = [
+      "2026-01-01T00:00:10.000Z",
+      "2026-01-01T00:00:20.000Z",
+      "2026-01-01T00:00:30.000Z",
+      "2026-01-01T00:00:40.000Z",
+    ];
+    let i = 0;
+    const changingNow = () => timestamps[i++] ?? "2026-01-01T00:00:50.000Z";
+
+    await service.onWorkflowSessionCompleted(db, changingNow, { sessionId, goalId: "goal-1" });
+
+    const stepResult = readPersistedStepResult(db, stepRunId);
+    const finishedAt = readStepFinishedAt(db, stepRunId);
+    expect(finishedAt).toBeTruthy();
+    expect(stepResult.performance.durationSeconds).toBe(
+      Math.floor((Date.parse(finishedAt!) - Date.parse(NOW)) / 1000)
+    );
   });
 
   it("synthesize twice invalid: broker returns schema-invalid twice → run blocked, reason matches /schema/i", async () => {
@@ -598,6 +675,33 @@ describe("OrchestratorService.onWorkflowSessionCompleted", () => {
       `INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at)
        VALUES ('art-pre', ?, ?, ?, 'step_output', 'Plan', '{"problem":"pre-existing"}', 'agent', NULL, NULL, NULL, ?)`
     ).run(goalId, runId, stepRunId, NOW);
+    db.prepare("UPDATE workflow_step_runs SET step_result_json = ? WHERE id = ?").run(
+      JSON.stringify({
+        stepId: stepRunId,
+        stepStatus: "completed",
+        evaluationStatus: "scored",
+        successScore: 0.82,
+        quality: {
+          outputCompleteness: 0.8,
+          outputCorrectness: 0.8,
+          instructionAdherence: 0.85,
+          downstreamReadiness: 0.8,
+          riskLevel: 0.2,
+        },
+        performance: {
+          durationSeconds: 0,
+          retries: 0,
+        },
+        outcome: {
+          reason: "Already scored.",
+          producedArtifactsCount: 1,
+          blockingIssuesCount: 0,
+          warningsCount: 0,
+          handoffReady: true,
+        },
+      }),
+      stepRunId
+    );
 
     const brokerSpy = vi.fn();
     const outputStore = fakeOutputStore();
@@ -619,5 +723,34 @@ describe("OrchestratorService.onWorkflowSessionCompleted", () => {
       .prepare("SELECT decision_type FROM workflow_decisions ORDER BY rowid DESC LIMIT 1")
       .get() as { decision_type: string } | undefined;
     expect(decisions?.decision_type).toBe("mark_run_complete");
+  });
+
+  it("already has step_output without step_result: scores before advancing", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, runId, stepRunId } = seedWorkflowWithSession(db);
+
+    db.prepare(
+      `INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at)
+       VALUES ('art-pre', ?, ?, ?, 'step_output', 'Plan', '{"problem":"pre-existing"}', 'agent', NULL, NULL, NULL, ?)`
+    ).run(goalId, runId, stepRunId, NOW);
+
+    const broker = fakeSynthesisBroker({ problem: "unused" });
+    const outputStore = fakeOutputStore();
+    const service = makeService(broker.broker, outputStore);
+
+    await service.onWorkflowSessionCompleted(
+      db,
+      () => NOW,
+      { sessionId, goalId },
+      { bus, idFactory }
+    );
+
+    expect(artifactCount(db, "step_output")).toBe(1);
+    expect(readPersistedStepResult(db, stepRunId)).toMatchObject({
+      stepId: stepRunId,
+      stepStatus: "completed",
+      evaluationStatus: "scored",
+    });
+    expect(broker.callCount()).toBe(1);
   });
 });

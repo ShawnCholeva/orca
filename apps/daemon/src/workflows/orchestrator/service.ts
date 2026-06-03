@@ -104,12 +104,14 @@ interface StepRunRow {
   selected_model_id: string | null;
   revise_attempts: number;
   crash_retries: number;
+  step_result_json: string | null;
 }
 
 export interface RequestNextDecisionOptions {
   bus?: EventBus;
   idFactory?: () => string;
   stepResultByStepRunId?: Record<string, WorkflowStepResult>;
+  terminalFinishedAtByStepRunId?: Record<string, string>;
 }
 
 export class OrchestratorRunNotFoundError extends Error {
@@ -190,6 +192,28 @@ function requestEventPayload(args: {
   };
 }
 
+function nowWithFirstTimestamp(now: () => string, fixed: string): () => string {
+  let first = true;
+  return () => {
+    if (first) {
+      first = false;
+      return fixed;
+    }
+    return now();
+  };
+}
+
+function parsedObjectOrNull(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Minimal no-op output store used when sessionOutputStore is not injected */
 const NULL_OUTPUT_STORE: SessionOutputStore = {
   appendChunk: () => { throw new Error("appendChunk not supported on null output store"); },
@@ -256,11 +280,44 @@ export class OrchestratorService {
     // (3) Idempotency: skip synthesis if step_output exists, but still advance.
     const existing = db
       .prepare(
-        "SELECT 1 FROM workflow_artifacts WHERE step_run_id = ? AND type = 'step_output' LIMIT 1"
+        "SELECT body FROM workflow_artifacts WHERE step_run_id = ? AND type = 'step_output' LIMIT 1"
       )
-      .get(stepRun.id);
+      .get(stepRun.id) as { body: string } | undefined;
     if (existing) {
-      await this.requestNextDecision(db, now, stepRun.workflow_run_id, options).catch(() => {});
+      if (stepRun.step_result_json) {
+        await this.requestNextDecision(db, now, stepRun.workflow_run_id, options).catch(() => {});
+        return;
+      }
+      const run = getWorkflowRunById(db, stepRun.workflow_run_id);
+      if (!run || run.status !== "active") return;
+      const template = getTemplateById(db, run.templateId);
+      if (!template) return;
+      const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+      if (!stepTpl) return;
+      const goal = readGoal(db, run.goalId);
+      const finishedAt = now();
+      const stepResult = await this.scoreCompletedStepResult(
+        db,
+        { run, stepRun, stepTpl, goal },
+        parsedObjectOrNull(existing.body),
+        finishedAt
+      );
+      await this.requestNextDecision(
+        db,
+        nowWithFirstTimestamp(now, finishedAt),
+        stepRun.workflow_run_id,
+        {
+          ...options,
+          stepResultByStepRunId: {
+            ...options.stepResultByStepRunId,
+            [stepRun.id]: stepResult,
+          },
+          terminalFinishedAtByStepRunId: {
+            ...options.terminalFinishedAtByStepRunId,
+            [stepRun.id]: finishedAt,
+          },
+        }
+      ).catch(() => {});
       return;
     }
 
@@ -391,15 +448,23 @@ export class OrchestratorService {
     this.publish(options.bus, stagedEvents);
 
     // (10) Drive advancement to the next step / completion.
+    const finishedAt = now();
     const stepResult = await this.scoreCompletedStepResult(
       db,
-      now,
       { run, stepRun, stepTpl, goal },
-      result.output
+      result.output,
+      finishedAt
     );
-    await this.requestNextDecision(db, now, run.id, {
+    await this.requestNextDecision(db, nowWithFirstTimestamp(now, finishedAt), run.id, {
       ...options,
-      stepResultByStepRunId: { [stepRun.id]: stepResult },
+      stepResultByStepRunId: {
+        ...options.stepResultByStepRunId,
+        [stepRun.id]: stepResult,
+      },
+      terminalFinishedAtByStepRunId: {
+        ...options.terminalFinishedAtByStepRunId,
+        [stepRun.id]: finishedAt,
+      },
     });
   }
 
@@ -602,10 +667,18 @@ export class OrchestratorService {
         const output = block && typeof block === "object" && !Array.isArray(block)
           ? (block as Record<string, unknown>)
           : null;
-        const stepResult = await this.scoreCompletedStepResult(db, now, ctx, output);
-        await this.advanceToNextStep(db, now, ctx.run.id, {
+        const finishedAt = now();
+        const stepResult = await this.scoreCompletedStepResult(db, ctx, output, finishedAt);
+        await this.advanceToNextStep(db, nowWithFirstTimestamp(now, finishedAt), ctx.run.id, {
           ...options,
-          stepResultByStepRunId: { [ctx.stepRun.id]: stepResult },
+          stepResultByStepRunId: {
+            ...options.stepResultByStepRunId,
+            [ctx.stepRun.id]: stepResult,
+          },
+          terminalFinishedAtByStepRunId: {
+            ...options.terminalFinishedAtByStepRunId,
+            [ctx.stepRun.id]: finishedAt,
+          },
         });
         return { postedChatReply: false };
       }
@@ -1202,7 +1275,29 @@ export class OrchestratorService {
     const artifactEvents: DomainEvent[] = [];
     this.createStepOutputArtifact(db, now, ctx, body, options, artifactEvents);
     this.publish(options.bus, artifactEvents);
-    return this.commitAdvanceOrComplete(db, now, ctx, options);
+    const finishedAt = now();
+    const stepResult = await this.scoreCompletedStepResult(
+      db,
+      ctx,
+      proposal.output,
+      finishedAt
+    );
+    return this.commitAdvanceOrComplete(
+      db,
+      nowWithFirstTimestamp(now, finishedAt),
+      ctx,
+      {
+        ...options,
+        stepResultByStepRunId: {
+          ...options.stepResultByStepRunId,
+          [stepRun.id]: stepResult,
+        },
+        terminalFinishedAtByStepRunId: {
+          ...options.terminalFinishedAtByStepRunId,
+          [stepRun.id]: finishedAt,
+        },
+      }
+    );
   }
 
   private stepRunIdsByTemplateId(
@@ -1258,16 +1353,15 @@ export class OrchestratorService {
 
   private async scoreCompletedStepResult(
     db: Database.Database,
-    now: () => string,
     ctx: {
       run: WorkflowRunT;
       stepRun: StepRunRow;
       stepTpl: WorkflowStepTemplate;
       goal: GoalRow;
     },
-    output: Record<string, unknown> | null
+    output: Record<string, unknown> | null,
+    finishedAt: string
   ): Promise<WorkflowStepResult> {
-    const finishedAt = now();
     const facts = this.scoringFacts(db, ctx.stepRun, "passed", finishedAt);
     if (!ctx.goal.orchestrator_provider || !ctx.goal.orchestrator_model) {
       return buildEvaluationFailedStepResult({
@@ -1283,26 +1377,41 @@ export class OrchestratorService {
       });
     }
 
-    const result = await scoreStepResult(
-      { broker: this.broker },
-      {
-        goalId: ctx.goal.id,
-        workflowRunId: ctx.run.id,
-        stepRunId: ctx.stepRun.id,
-        providerId: ctx.goal.orchestrator_provider,
-        modelId: ctx.goal.orchestrator_model,
-        goal: { id: ctx.goal.id, description: ctx.goal.description },
-        step: {
-          id: ctx.stepRun.id,
-          templateId: ctx.stepTpl.id,
-          name: ctx.stepTpl.name,
-          instructions: ctx.stepTpl.instructions,
-          status: "passed",
-        },
-        output,
-        facts,
-      }
-    );
+    let result;
+    try {
+      result = await scoreStepResult(
+        { broker: this.broker },
+        {
+          goalId: ctx.goal.id,
+          workflowRunId: ctx.run.id,
+          stepRunId: ctx.stepRun.id,
+          providerId: ctx.goal.orchestrator_provider,
+          modelId: ctx.goal.orchestrator_model,
+          goal: { id: ctx.goal.id, description: ctx.goal.description },
+          step: {
+            id: ctx.stepRun.id,
+            templateId: ctx.stepTpl.id,
+            name: ctx.stepTpl.name,
+            instructions: ctx.stepTpl.instructions,
+            status: "passed",
+          },
+          output,
+          facts,
+        }
+      );
+    } catch (err) {
+      return buildEvaluationFailedStepResult({
+        stepId: ctx.stepRun.id,
+        stepStatus: facts.stepStatus,
+        startedAt: ctx.stepRun.started_at,
+        finishedAt,
+        retries: facts.performance.retries,
+        producedArtifactsCount: facts.outcome.producedArtifactsCount,
+        blockingIssuesCount: facts.outcome.blockingIssuesCount,
+        warningsCount: facts.outcome.warningsCount,
+        reason: err instanceof Error ? err.message : "step result scoring threw",
+      });
+    }
 
     if (result.ok) return result.stepResult;
 
@@ -1672,9 +1781,10 @@ export class OrchestratorService {
 
     if (nextStepTpl) {
       const stagedEvents: DomainEvent[] = [];
+      const terminalFinishedAt = options.terminalFinishedAtByStepRunId?.[stepRun.id];
       advanceToNextStep(
         db,
-        now,
+        terminalFinishedAt ? nowWithFirstTimestamp(now, terminalFinishedAt) : now,
         stepRun.id,
         {
           idFactory: options.idFactory,
@@ -1691,10 +1801,11 @@ export class OrchestratorService {
     const output = db.transaction(() => {
       const stepResult = options.stepResultByStepRunId?.[stepRun.id];
       if (stepResult) {
-        db.prepare("UPDATE workflow_step_runs SET step_result_json = ? WHERE id = ?").run(
-          JSON.stringify(stepResult),
-          stepRun.id
-        );
+        const terminalFinishedAt =
+          options.terminalFinishedAtByStepRunId?.[stepRun.id] ?? now();
+        db.prepare(
+          "UPDATE workflow_step_runs SET finished_at = ?, step_result_json = ? WHERE id = ?"
+        ).run(terminalFinishedAt, JSON.stringify(stepResult), stepRun.id);
       }
       this.appendDecisionRequested(
         db,
