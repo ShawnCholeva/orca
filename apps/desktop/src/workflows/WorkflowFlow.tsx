@@ -113,7 +113,11 @@ export function WorkflowFlow({
           if (overId != null) {
             const from = linkDrag.fromId;
             const to = overId;
-            if (!graph.edges.some(([a, b]) => (a === from && b === to) || (a === to && b === from))) {
+            // Block self-loops and exact-duplicate directed edges, but allow a
+            // directed back-edge (B→A when A→B already exists) — DAGs need it for
+            // feedback/retry flows.
+            const exists = graph.edges.some(([a, b]) => a === from && b === to);
+            if (from !== to && !exists) {
               onGraphChange({ ...graph, edges: [...graph.edges, [from, to]] });
             }
           }
