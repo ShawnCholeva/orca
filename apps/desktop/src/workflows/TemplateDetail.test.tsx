@@ -102,6 +102,28 @@ describe("TemplateDetail", () => {
     expect(screen.queryByRole("button", { name: /add step/i })).toBeNull();
   });
 
+  it("locked template shows a read-only notice pointing to Duplicate", () => {
+    render(
+      <TemplateDetail
+        template={makeTemplate({ isBuiltIn: true, isLocked: true })}
+        onTemplateSaved={() => {}}
+        onTemplateDuplicated={() => {}}
+      />,
+    );
+    expect(screen.getByText(/built-in workflow — read-only/i)).toBeTruthy();
+  });
+
+  it("unlocked template shows no read-only notice", () => {
+    render(
+      <TemplateDetail
+        template={makeTemplate({ isBuiltIn: false, isLocked: false })}
+        onTemplateSaved={() => {}}
+        onTemplateDuplicated={() => {}}
+      />,
+    );
+    expect(screen.queryByText(/built-in workflow — read-only/i)).toBeNull();
+  });
+
   // ── Unlocked custom in VIEW mode (canvas interactive) ─────────────────────
 
   it("unlocked view mode: canvas is interactive (Add step / Add gate present)", () => {

@@ -9,6 +9,7 @@ import {
 } from "@orca/contracts";
 import { toErrorMessage } from "../api";
 import { createTemplate, duplicateTemplate, saveTemplate } from "./api";
+import { LockIcon } from "./icons";
 import { NodeDetailModal, type NodeDetail } from "./NodeDetailModal";
 import { ScopePicker } from "./ScopeControls";
 import { StepEditor, createStepDraft, type WorkflowStepDraft } from "./StepEditor";
@@ -483,6 +484,16 @@ export function TemplateDetail({
         </div>
       </div>
 
+      {locked && (
+        <div className="workflow-locked-notice" role="note">
+          <LockIcon />
+          <span>
+            <strong>Built-in workflow — read-only.</strong> Its steps and flow can&apos;t be
+            edited. Click <em>Duplicate to Custom</em> to make an editable copy.
+          </span>
+        </div>
+      )}
+
       {error && <div className="workflow-error-banner">{error}</div>}
 
       {warnings.length > 0 && (
@@ -548,7 +559,10 @@ export function TemplateDetail({
       {/* Steps or canvas */}
       <div className="workflow-section">
         <div className="workflow-section__header">
-          <h3>{editing ? "Steps" : "Flow"}</h3>
+          <h3>
+            {editing ? "Steps" : "Flow"}
+            {locked && <span className="workflow-section__readonly"> · read-only</span>}
+          </h3>
         </div>
 
         {editing ? (
