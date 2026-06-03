@@ -16,7 +16,7 @@ export interface ThemeDefinition {
 
 const operationalDark: ThemeDefinition = {
   id: "operational-dark",
-  label: "Operational · Dark",
+  label: "Midnight",
   mode: "dark",
   tokens: {
     "--bg": "#0B1020",
@@ -67,7 +67,7 @@ const operationalDark: ThemeDefinition = {
 
 const operationalLight: ThemeDefinition = {
   id: "operational-light",
-  label: "Operational · Light",
+  label: "Light",
   mode: "light",
   tokens: {
     ...operationalDark.tokens,
@@ -81,6 +81,27 @@ const operationalLight: ThemeDefinition = {
     "--text-2": "rgba(15,23,42,0.66)",
     "--text-3": "rgba(15,23,42,0.46)",
     "--text-4": "rgba(15,23,42,0.24)",
+  },
+};
+
+// Neutral near-black dark — same accent + state colors as Midnight, but the
+// navy surfaces/text are desaturated to a true-dark grey scale so it reads as a
+// distinct option rather than a dimmer navy.
+const neutralDark: ThemeDefinition = {
+  id: "neutral-dark",
+  label: "Dark",
+  mode: "dark",
+  tokens: {
+    ...operationalDark.tokens,
+    "--bg": "#0B0B0D",
+    "--panel": "#161618",
+    "--panel-2": "#1C1C1F",
+    "--raised": "#242427",
+    "--overlay": "rgba(10, 10, 12, 0.85)",
+    "--text": "#ECECEE",
+    "--text-2": "rgba(236,236,238,0.66)",
+    "--text-3": "rgba(236,236,238,0.46)",
+    "--text-4": "rgba(236,236,238,0.24)",
   },
 };
 
@@ -110,3 +131,4 @@ export const DEFAULT_THEME_ID = operationalDark.id;
 
 registerTheme(operationalDark);
 registerTheme(operationalLight);
+registerTheme(neutralDark);

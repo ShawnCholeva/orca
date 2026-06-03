@@ -3,6 +3,10 @@ import type { WorkflowStepOutputField, WorkflowStepOutputSchema } from "@orca/co
 
 const pad = (depth: number) => "  ".repeat(depth);
 
+function quoteLiteral(value: string): string {
+  return JSON.stringify(value);
+}
+
 function renderField(f: WorkflowStepOutputField, depth: number): string {
   const opt = f.required ? "" : "?";
   if (f.type === "object" && f.fields) {
@@ -14,6 +18,8 @@ function renderField(f: WorkflowStepOutputField, depth: number): string {
   let typ = "";
   if (f.type === "array") {
     typ = f.itemType ? `: ${f.itemType}[]` : "[]";
+  } else if (f.type === "string" && f.enum) {
+    typ = `: ${f.enum.map(quoteLiteral).join(" | ")}`;
   } else if (f.type !== "string") {
     typ = `: ${f.type}`;
   }
@@ -35,8 +41,9 @@ export type ParseResult =
 
 type Tok =
   | { t: "{" } | { t: "}" } | { t: "[" } | { t: "]" }
-  | { t: ":" } | { t: "?" } | { t: "," }
+  | { t: ":" } | { t: "?" } | { t: "," } | { t: "|" }
   | { t: "name"; v: string }
+  | { t: "str"; v: string }
   | { t: "desc"; v: string };
 
 class ParseErr extends Error {}
@@ -57,9 +64,30 @@ function tokenize(src: string): Tok[] {
       continue;
     }
     if (/\s/.test(c)) { i++; continue; }
-    if (c === "{" || c === "}" || c === "[" || c === "]" || c === ":" || c === "?" || c === ",") {
+    if (c === "{" || c === "}" || c === "[" || c === "]" || c === ":" || c === "?" || c === "," || c === "|") {
       toks.push({ t: c });
       i++;
+      continue;
+    }
+    if (c === "\"") {
+      let j = i + 1;
+      let value = "";
+      while (j < src.length) {
+        const ch = src[j];
+        if (ch === "\"") break;
+        if (ch === "\\") {
+          const nextChar = src[j + 1];
+          if (!nextChar) throw new ParseErr("Unterminated string literal");
+          value += nextChar;
+          j += 2;
+          continue;
+        }
+        value += ch;
+        j++;
+      }
+      if (src[j] !== "\"") throw new ParseErr("Unterminated string literal");
+      toks.push({ t: "str", v: value });
+      i = j + 1;
       continue;
     }
     if (/[A-Za-z_]/.test(c)) {
@@ -97,6 +125,18 @@ export function parseOutputSchemaText(text: string): ParseResult {
     return fields;
   }
 
+  function parseStringLiterals(): string[] {
+    const values: string[] = [];
+    while (true) {
+      const literal = next();
+      if (!literal || literal.t !== "str") throw new ParseErr("Expected string literal");
+      values.push(literal.v);
+      if (peek()?.t !== "|") break;
+      next();
+    }
+    return values;
+  }
+
   function parseField(): WorkflowStepOutputField {
     const nameTok = next();
     if (!nameTok || nameTok.t !== "name") throw new ParseErr("Expected field name");
@@ -109,6 +149,8 @@ export function parseOutputSchemaText(text: string): ParseResult {
       const after = peek();
       if (after?.t === "{") {
         field = { ...field, type: "object", fields: parseBraced() };
+      } else if (after?.t === "str") {
+        field = { ...field, type: "string", enum: parseStringLiterals() };
       } else if (after?.t === "name") {
         const word = (next() as { t: "name"; v: string }).v;
         if (!(PRIMS as readonly string[]).includes(word)) throw new ParseErr(`Unknown type '${word}'`);

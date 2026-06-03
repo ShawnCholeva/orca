@@ -8,6 +8,7 @@ export type WorkflowStepOutputField = {
   type: z.infer<typeof PrimitiveType>;
   required: boolean;
   description?: string;
+  enum?: string[];
   itemType?: z.infer<typeof ItemType>;
   fields?: WorkflowStepOutputField[];
 };
@@ -18,9 +19,18 @@ export const WorkflowStepOutputField: z.ZodType<WorkflowStepOutputField> = z.laz
     type: PrimitiveType,
     required: z.boolean(),
     description: z.string().max(256).optional(),
+    enum: z.array(z.string().min(1).max(128)).min(1).max(32).optional(),
     itemType: ItemType.optional(),
     fields: z.array(WorkflowStepOutputField).max(32).optional(),
-  }).strict()
+  }).strict().superRefine((field, ctx) => {
+    if (field.enum && field.type !== "string") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "enum is only supported for string fields",
+        path: ["enum"],
+      });
+    }
+  })
 );
 
 export const WorkflowStepOutputSchema = z.array(WorkflowStepOutputField).min(1).max(32);
@@ -51,6 +61,9 @@ function checkField(
   if (actual !== field.type) {
     errors.push(`${path}: expected ${field.type}, got ${actual}`);
     return;
+  }
+  if (field.type === "string" && field.enum && !field.enum.includes(value as string)) {
+    errors.push(`${path}: expected one of ${field.enum.map((v) => JSON.stringify(v)).join(", ")}`);
   }
   if (field.type === "array" && field.itemType) {
     (value as unknown[]).forEach((el, i) => {

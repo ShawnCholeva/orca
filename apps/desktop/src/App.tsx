@@ -7,6 +7,7 @@ import {
   listPlugins,
   listSkills,
   updateGoal,
+  updateAgentConnection,
   archiveGoal,
   openEventStream,
   ApiError,
@@ -21,6 +22,7 @@ import { NoReadyAgentsBanner } from "./chrome/NoReadyAgentsBanner";
 import { OrcaChat } from "./orchestrator/OrcaChat";
 import { WorkflowsPage } from "./workflows/WorkflowsPage";
 import { EmptyGoalsView } from "./empty-state/EmptyGoalsView";
+import { SettingsModal, GearIcon } from "./settings/SettingsModal";
 import "./orchestrator/orchestrator.css";
 import "./styles.css";
 
@@ -48,6 +50,7 @@ export default function App() {
   const [currentGoalId, setCurrentGoalId] = useState<string | null>(null);
   const [detailRefreshKey, setDetailRefreshKey] = useState(0);
   const [showCreateFlow, setShowCreateFlow] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [selectedOrchestratorGoalId, setSelectedOrchestratorGoalId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("orchestrator");
@@ -85,6 +88,13 @@ export default function App() {
     } catch {
       // connection status banner communicates the problem
     }
+  }
+
+  // Source of truth for connected agents is the daemon's agents table. Persist
+  // the change, then refresh so the rest of the app (banner, onboarding) agrees.
+  async function toggleAgentConnection(id: string, connected: boolean) {
+    await updateAgentConnection(id, connected);
+    await refreshAgents();
   }
 
   // Health poll — primary driver of connection status indicator
@@ -282,6 +292,16 @@ export default function App() {
                 ))}
               </ul>
             )}
+            <div className="orchestrator-rail-footer">
+              <button
+                type="button"
+                className="orchestrator-rail-settings-btn"
+                onClick={() => setShowSettings(true)}
+              >
+                <GearIcon size={15} />
+                <span>Settings</span>
+              </button>
+            </div>
           </aside>
 
           {/* ── Main area: topbar + pane ── */}
@@ -425,6 +445,14 @@ export default function App() {
           connectionStatus={connectionStatus}
           onClose={() => setShowCreateFlow(false)}
           onDone={handleCreateFlowDone}
+        />
+      )}
+
+      {showSettings && (
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
+          agents={agents}
+          onToggleAgent={toggleAgentConnection}
         />
       )}
     </div>

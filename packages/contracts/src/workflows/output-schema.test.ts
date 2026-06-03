@@ -22,6 +22,15 @@ describe("validateStepOutput", () => {
     expect(r.ok).toBe(false);
     expect(r.ok === false && r.errors.join()).toMatch(/problem/);
   });
+  it("rejects string values outside the allowed literals", () => {
+    const literalSchema = WorkflowStepOutputSchema.parse([
+      { key: "confidence", type: "string", required: true, enum: ["low", "medium", "high"] },
+    ]);
+    expect(validateStepOutput(literalSchema, { confidence: "medium" }).ok).toBe(true);
+    const r = validateStepOutput(literalSchema, { confidence: "unknown" });
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.errors.join()).toMatch(/confidence/);
+  });
   it("rejects wrong array item type", () => {
     const r = validateStepOutput(schema, { problem: "x", constraints: [1, 2] });
     expect(r.ok).toBe(false);

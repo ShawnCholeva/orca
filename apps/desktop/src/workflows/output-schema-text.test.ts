@@ -53,6 +53,13 @@ describe("serializeOutputSchema", () => {
     ];
     expect(serializeOutputSchema(schema)).toBe("goal  # primary objective");
   });
+
+  it("renders string literal unions", () => {
+    const schema: WorkflowStepOutputSchema = [
+      { key: "confidence", type: "string", required: true, enum: ["low", "medium", "high"] },
+    ];
+    expect(serializeOutputSchema(schema)).toBe('confidence: "low" | "medium" | "high"');
+  });
 });
 
 describe("parseOutputSchemaText", () => {
@@ -115,6 +122,21 @@ describe("parseOutputSchemaText", () => {
         required: true,
         description: "primary objective",
       });
+    }
+  });
+
+  it("parses string literal unions", () => {
+    const r = parseOutputSchemaText('confidence: "low" | "medium" | "high"');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.schema).toEqual([
+        {
+          key: "confidence",
+          type: "string",
+          required: true,
+          enum: ["low", "medium", "high"],
+        },
+      ]);
     }
   });
 
