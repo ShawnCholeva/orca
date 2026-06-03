@@ -231,7 +231,10 @@ describe("WorkflowsPage", () => {
       expect(within(detail as HTMLElement).queryByRole("button", { name: /edit/i })).not.toBeNull(),
     );
 
-    fireEvent.click(within(detail as HTMLElement).getByRole("button", { name: /edit/i }));
+    fireEvent.click(within(detail as HTMLElement).getByRole("button", { name: /^edit$/i }));
+    // Edit the name to make the draft dirty (Save is disabled until there are unsaved changes)
+    const nameInput = within(detail as HTMLElement).getByRole("textbox", { name: /template name/i });
+    fireEvent.change(nameInput, { target: { value: "My Custom Updated" } });
     fireEvent.click(within(detail as HTMLElement).getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => expect(saveTemplateMock).toHaveBeenCalledTimes(1));

@@ -26,6 +26,17 @@ interface TemplateDraft {
   graph: WorkflowGraph;
 }
 
+// Persisted-shape: the fields that are round-tripped through save/load.
+// Used for dirty-tracking — positions are included via the graph.
+interface PersistedShape {
+  name: string;
+  description: string;
+  scope: WorkflowScope;
+  scopeName: string;
+  steps: WorkflowStepDraft[];
+  graph: WorkflowGraph;
+}
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface TemplateDetailProps {
@@ -53,6 +64,17 @@ function toDraft(template: WorkflowTemplate): TemplateDraft {
     scopeName: template.scopeName ?? "",
     steps,
     graph,
+  };
+}
+
+function toPersistedShape(draft: TemplateDraft, materializedGraph: WorkflowGraph): PersistedShape {
+  return {
+    name: draft.name,
+    description: draft.description,
+    scope: draft.scope,
+    scopeName: draft.scopeName,
+    steps: draft.steps,
+    graph: materializedGraph,
   };
 }
 
@@ -114,6 +136,26 @@ export function TemplateDetail({
     [draft.steps, draft.graph],
   );
 
+  // ── Dirty tracking ──────────────────────────────────────────────────────────
+
+  // baseline is the persisted-shape at last save (or initial load).
+  // Component remounts on template switch (key={selected.id} in WorkflowsPage),
+  // so this initialization is correct for the switch case.
+  // On save we update baseline explicitly (see handleSave).
+  const initialDraft = useMemo(() => toDraft(template), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const initialMaterializedGraph = useMemo(
+    () => reconcileGraph(initialDraft.steps, initialDraft.graph),
+    [initialDraft],
+  );
+  const [baseline, setBaseline] = useState<PersistedShape>(() =>
+    toPersistedShape(initialDraft, initialMaterializedGraph),
+  );
+
+  const dirty = useMemo(() => {
+    const current = toPersistedShape(draft, materializedGraph);
+    return JSON.stringify(current) !== JSON.stringify(baseline);
+  }, [draft, materializedGraph, baseline]);
+
   // ── Save / Duplicate / Discard / Create ────────────────────────────────────
 
   async function handleSave() {
@@ -124,6 +166,8 @@ export function TemplateDetail({
       const payload = buildTemplateInput(draft, template.guardrails, materializedGraph);
       const result = await saveTemplate(template.id, payload);
       if (result.warnings.length > 0) setWarnings(result.warnings);
+      // Update baseline to current shape so dirty clears
+      setBaseline(toPersistedShape(draft, materializedGraph));
       setEditing(false);
       onTemplateSaved(result.template);
     } catch (err) {
@@ -165,12 +209,15 @@ export function TemplateDetail({
     }
   }
 
-  function handleCancel() {
+  function handleDiscard() {
     if (isNew) {
       onDiscard?.();
     } else {
-      // restore draft from current template
-      setDraft(toDraft(template));
+      // Revert draft to baseline (re-derive from template prop)
+      const reverted = toDraft(template);
+      setDraft(reverted);
+      const revertedGraph = reconcileGraph(reverted.steps, reverted.graph);
+      setBaseline(toPersistedShape(reverted, revertedGraph));
       setEditing(false);
       setError(null);
       setWarnings([]);
@@ -363,7 +410,7 @@ export function TemplateDetail({
         </div>
 
         <div className="workflow-detail-panel__actions">
-          {/* Duplicate to Custom — always available */}
+          {/* Duplicate to Custom — always available for non-new */}
           {!isNew && (
             <button
               type="button"
@@ -375,36 +422,41 @@ export function TemplateDetail({
             </button>
           )}
 
-          {/* Edit/Save/Cancel — only for non-locked */}
+          {/* Unlocked non-new: Edit/Done toggle + Save Changes + Discard */}
           {!locked && !isNew && (
-            editing ? (
-              <>
-                <button
-                  type="button"
-                  className="workflow-primary-btn workflow-primary-btn--secondary"
-                  onClick={handleCancel}
-                  disabled={saving}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="workflow-primary-btn"
-                  onClick={handleSave}
-                  disabled={saving || duplicating}
-                >
-                  {saving ? "Saving…" : "Save Changes"}
-                </button>
-              </>
-            ) : (
+            <>
+              {/* Edit toggles the meta/list editor; Done exits back to canvas view */}
               <button
                 type="button"
                 className="workflow-primary-btn workflow-primary-btn--secondary"
-                onClick={() => setEditing(true)}
+                onClick={() => setEditing((e) => !e)}
+                disabled={saving}
               >
-                Edit
+                {editing ? "Done" : "Edit"}
               </button>
-            )
+
+              {/* Discard — only when there are unsaved changes */}
+              {dirty && (
+                <button
+                  type="button"
+                  className="workflow-primary-btn workflow-primary-btn--secondary"
+                  onClick={handleDiscard}
+                  disabled={saving}
+                >
+                  Discard changes
+                </button>
+              )}
+
+              {/* Save Changes — always present for non-locked non-new, disabled when clean */}
+              <button
+                type="button"
+                className="workflow-primary-btn"
+                onClick={handleSave}
+                disabled={!dirty || saving || duplicating}
+              >
+                {saving ? "Saving…" : "Save Changes"}
+              </button>
+            </>
           )}
 
           {/* Draft footer — Discard / Create */}
@@ -413,7 +465,7 @@ export function TemplateDetail({
               <button
                 type="button"
                 className="workflow-primary-btn workflow-primary-btn--secondary"
-                onClick={handleCancel}
+                onClick={handleDiscard}
                 disabled={saving}
               >
                 Discard
@@ -519,7 +571,7 @@ export function TemplateDetail({
             onAddNode={handleAddNode}
             onRemoveNode={handleRemoveNode}
             onResetLayout={handleResetLayout}
-            readOnly={locked || !editing}
+            readOnly={locked}
           />
         )}
       </div>
@@ -544,7 +596,7 @@ export function TemplateDetail({
           onDelete={() => {
             handleRemoveNode(openNodeId!);
           }}
-          readOnly={locked || !editing}
+          readOnly={locked}
         />
       )}
     </section>
