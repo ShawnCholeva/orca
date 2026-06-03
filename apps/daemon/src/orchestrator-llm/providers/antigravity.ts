@@ -71,11 +71,10 @@ function buildAntigravityHookSettings(): unknown {
 
 function buildStopHookRelay(args: { goalId: string; port: number; authToken: string }): string {
   const url = `http://127.0.0.1:${args.port}/v1/shadow-hooks/stop?goalId=${encodeURIComponent(args.goalId)}`;
-  const token = args.authToken.replace(/\\/g, "\\\\").replace(/`/g, "\\`");
   return `const fs = require("node:fs");
 
-const ORCA_URL = \`${url}\`;
-const ORCA_TOKEN = \`${token}\`;
+const ORCA_URL = ${JSON.stringify(url)};
+const ORCA_TOKEN = ${JSON.stringify(args.authToken)};
 
 let raw = "";
 process.stdin.setEncoding("utf8");
@@ -109,22 +108,39 @@ process.stdin.on("end", async () => {
 });
 
 function readLatestAssistantText(transcriptPath) {
-  if (!transcriptPath || typeof transcriptPath !== "string") return "";
+  if (!transcriptPath || typeof transcriptPath !== "string") throw new Error("missing transcriptPath");
   const rawTranscript = fs.readFileSync(transcriptPath, "utf8");
   const lines = rawTranscript.trim().split(/\\r?\\n/).filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const entry = JSON.parse(lines[i]);
-      const text = textFromEntry(entry);
-      if (text) return text;
-    } catch {
-      continue;
-    }
+    const entry = parseTranscriptLine(lines[i], i + 1);
+    const text = textFromEntry(entry);
+    if (text) return text;
   }
   return "";
 }
 
+function parseTranscriptLine(line, lineNumber) {
+  try {
+    return JSON.parse(line);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error("malformed transcript entry at line " + lineNumber + ": " + message);
+  }
+}
+
 function textFromEntry(entry) {
+  const discriminatorFields = ["role", "type", "kind", "source"];
+  let hasDiscriminator = false;
+  let hasAssistantDiscriminator = false;
+  for (const field of discriminatorFields) {
+    if (!Object.prototype.hasOwnProperty.call(entry ?? {}, field)) continue;
+    hasDiscriminator = true;
+    const discriminator = String(entry[field]).toLowerCase();
+    if (/^(user|tool|system|human|function)$/.test(discriminator)) return "";
+    if (/^(assistant|model|agent)$/.test(discriminator)) hasAssistantDiscriminator = true;
+  }
+  if (hasDiscriminator && !hasAssistantDiscriminator) return "";
+
   const candidates = [
     entry?.assistant,
     entry?.message,
@@ -133,7 +149,6 @@ function textFromEntry(entry) {
     entry?.modelMessage,
     entry?.model_message,
   ];
-  if (entry?.role && !/assistant|model/i.test(String(entry.role))) return "";
   for (const candidate of candidates) {
     const text = normalizeText(candidate);
     if (text) return text;
