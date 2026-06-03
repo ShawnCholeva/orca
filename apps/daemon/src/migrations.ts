@@ -32,6 +32,7 @@ export const migrationFiles = [
   "0019_orchestrator_messages_pending_question.sql",
   "0020_drop_removed_provider_execution_modes.sql",
   "0021_workflow_template_scope_graph.sql",
+  "0022_workflow_step_result.sql",
 ] as const;
 
 export function runMigrations(

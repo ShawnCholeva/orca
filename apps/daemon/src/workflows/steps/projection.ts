@@ -1,5 +1,9 @@
 import type Database from "better-sqlite3";
-import { WorkflowStepRun, type WorkflowStepRun as WorkflowStepRunT } from "@orca/contracts";
+import {
+  WorkflowStepResult,
+  WorkflowStepRun,
+  type WorkflowStepRun as WorkflowStepRunT,
+} from "@orca/contracts";
 
 interface WorkflowStepRunRow {
   id: string;
@@ -16,6 +20,7 @@ interface WorkflowStepRunRow {
   selected_provider_id: string | null;
   selected_model_id: string | null;
   operator_selected_at: string | null;
+  step_result_json: string | null;
 }
 
 let _db: Database.Database | null = null;
@@ -25,7 +30,7 @@ function ensureStmt(db: Database.Database): Database.Statement {
   if (_db !== db || !_stmt) {
     _db = db;
     _stmt = db.prepare(
-      "SELECT id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, started_at, finished_at, blocked_reason, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at FROM workflow_step_runs WHERE id = ?"
+      "SELECT id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, started_at, finished_at, blocked_reason, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at, step_result_json FROM workflow_step_runs WHERE id = ?"
     );
   }
   return _stmt;
@@ -37,6 +42,10 @@ export function resetWorkflowStepProjectionPreparedStatements(): void {
 }
 
 function rowToStepRun(row: WorkflowStepRunRow): WorkflowStepRunT {
+  const stepResult = row.step_result_json
+    ? WorkflowStepResult.parse(JSON.parse(row.step_result_json))
+    : null;
+
   return WorkflowStepRun.parse({
     id: row.id,
     goalId: row.goal_id,
@@ -52,7 +61,7 @@ function rowToStepRun(row: WorkflowStepRunRow): WorkflowStepRunT {
     selectedProviderId: row.selected_provider_id as never,
     selectedModelId: row.selected_model_id,
     operatorSelectedAt: row.operator_selected_at,
-    stepResult: null,
+    stepResult,
   });
 }
 

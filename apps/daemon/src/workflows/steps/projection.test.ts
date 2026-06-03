@@ -9,6 +9,30 @@ import { resetWorkflowStepProjectionPreparedStatements, getWorkflowStepRunById, 
 
 const tempDirs: string[] = [];
 const NOW = "2026-01-01T00:00:00.000Z";
+const scoredStepResult = {
+  stepId: "sr1",
+  stepStatus: "completed",
+  evaluationStatus: "scored",
+  successScore: 0.9,
+  quality: {
+    outputCompleteness: 0.9,
+    outputCorrectness: 0.8,
+    instructionAdherence: 0.95,
+    downstreamReadiness: 0.85,
+    riskLevel: 0.1,
+  },
+  performance: {
+    durationSeconds: 60,
+    retries: 0,
+  },
+  outcome: {
+    reason: "Ready for downstream use.",
+    producedArtifactsCount: 1,
+    blockingIssuesCount: 0,
+    warningsCount: 0,
+    handoffReady: true,
+  },
+};
 
 function createConfig(dataDir: string) {
   return {
@@ -79,5 +103,30 @@ describe("recordOperatorSelection", () => {
     expect(result!.selectedOperatorId).toBe("agent:codex");
     expect(result!.selectedProviderId).toBeNull();
     expect(result!.selectedModelId).toBeNull();
+  });
+});
+
+describe("getWorkflowStepRunById", () => {
+  it("returns null stepResult for active steps", () => {
+    const db = setup();
+    seedGoal(db, "goal-1");
+    insertMinimalStepRun(db, "sr1");
+
+    const result = getWorkflowStepRunById(db, "sr1");
+    expect(result?.stepResult).toBeNull();
+  });
+
+  it("parses step_result_json for terminal steps", () => {
+    const db = setup();
+    seedGoal(db, "goal-1");
+    insertMinimalStepRun(db, "sr1");
+
+    db.prepare("UPDATE workflow_step_runs SET status = 'passed', step_result_json = ? WHERE id = ?")
+      .run(JSON.stringify(scoredStepResult), "sr1");
+
+    resetWorkflowStepProjectionPreparedStatements();
+
+    const result = getWorkflowStepRunById(db, "sr1");
+    expect(result?.stepResult).toEqual(scoredStepResult);
   });
 });

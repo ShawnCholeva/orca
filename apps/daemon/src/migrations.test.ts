@@ -72,7 +72,8 @@ describe("runMigrations", () => {
       "0018_workflow_step_runs_crash_retries.sql",
       "0019_orchestrator_messages_pending_question.sql",
       "0020_drop_removed_provider_execution_modes.sql",
-      "0021_workflow_template_scope_graph.sql"
+      "0021_workflow_template_scope_graph.sql",
+      "0022_workflow_step_result.sql"
     ]);
   });
 
@@ -175,7 +176,8 @@ describe("runMigrations", () => {
       "0018_workflow_step_runs_crash_retries.sql",
       "0019_orchestrator_messages_pending_question.sql",
       "0020_drop_removed_provider_execution_modes.sql",
-      "0021_workflow_template_scope_graph.sql"
+      "0021_workflow_template_scope_graph.sql",
+      "0022_workflow_step_result.sql"
     ]);
 
     const goalCount = (
@@ -241,6 +243,7 @@ describe("runMigrations", () => {
     expect(names).toContain("selected_provider_id");
     expect(names).toContain("selected_model_id");
     expect(names).toContain("operator_selected_at");
+    expect(names).toContain("step_result_json");
   });
 
   it("enforces foreign keys for workspaces.goal_id", () => {
@@ -345,7 +348,8 @@ describe("session tables migration", () => {
       "0018_workflow_step_runs_crash_retries.sql",
       "0019_orchestrator_messages_pending_question.sql",
       "0020_drop_removed_provider_execution_modes.sql",
-      "0021_workflow_template_scope_graph.sql"
+      "0021_workflow_template_scope_graph.sql",
+      "0022_workflow_step_result.sql"
     ]);
 
     const tables = (
@@ -840,7 +844,8 @@ describe("migration 0010 workflows", () => {
       "0018_workflow_step_runs_crash_retries.sql",
       "0019_orchestrator_messages_pending_question.sql",
       "0020_drop_removed_provider_execution_modes.sql",
-      "0021_workflow_template_scope_graph.sql"
+      "0021_workflow_template_scope_graph.sql",
+      "0022_workflow_step_result.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1416,7 +1421,8 @@ describe("migration 0012 orchestration transport", () => {
       "0018_workflow_step_runs_crash_retries.sql",
       "0019_orchestrator_messages_pending_question.sql",
       "0020_drop_removed_provider_execution_modes.sql",
-      "0021_workflow_template_scope_graph.sql"
+      "0021_workflow_template_scope_graph.sql",
+      "0022_workflow_step_result.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
