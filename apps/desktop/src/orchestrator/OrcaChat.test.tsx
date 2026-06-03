@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Goal, OrchestratorChatMessage } from "@orca/contracts";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -134,6 +134,10 @@ describe("OrcaChat", () => {
     openEventStreamMock.mockReset();
     openEventStreamMock.mockReturnValue({ close: vi.fn() });
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks(); // undo any Date.now() spy so elapsed-time tests don't leak
   });
 
   it("shows a goal prompt and no composer when no goal is selected", async () => {
@@ -634,6 +638,24 @@ describe("OrcaChat", () => {
     expect(indicator).not.toHaveTextContent("·");
   });
 
+  it("shows the elapsed time since the step started, not the static hint", async () => {
+    setupRunLoad(); // stepRun.startedAt === now ("2026-01-01T00:00:00.000Z")
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse(now) + 45_000);
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    const indicator = await screen.findByTestId("step-starting");
+    expect(indicator).toHaveTextContent("starting 0:45");
+    expect(indicator).not.toHaveTextContent("~30");
+  });
+
   it("does not flash a loading indicator or blank content on SSE-driven refresh once loaded", async () => {
     setupRunLoad();
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [userMessage, orcaMessage] });
@@ -675,5 +697,16 @@ describe("OrcaChat", () => {
     expect(screen.getByPlaceholderText("Message Orca…")).toBeInTheDocument();
     expect(screen.getByText("Start with a bounded verification pass.")).toBeInTheDocument();
     expect(screen.queryAllByText("routing")).toHaveLength(0);
+  });
+});
+
+describe("formatElapsed", () => {
+  it("formats durations as M:SS and floors negatives to 0:00", async () => {
+    const { formatElapsed } = await import("./OrcaChat");
+    expect(formatElapsed(0)).toBe("0:00");
+    expect(formatElapsed(5_000)).toBe("0:05");
+    expect(formatElapsed(65_000)).toBe("1:05");
+    expect(formatElapsed(600_000)).toBe("10:00");
+    expect(formatElapsed(-1_000)).toBe("0:00");
   });
 });

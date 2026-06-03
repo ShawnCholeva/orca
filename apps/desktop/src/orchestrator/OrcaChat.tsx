@@ -59,6 +59,7 @@ const EMPTY_WORKFLOW_STATE: WorkflowState = {
 export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   const [workflowState, setWorkflowState] = useState<WorkflowState>(EMPTY_WORKFLOW_STATE);
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -338,10 +339,21 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     workflowState.run?.status === "active" &&
     workflowState.stepRun?.status === "active" &&
     !orcaHasSpoken;
+  // While the indicator is up, tick once a second so the elapsed time advances.
+  useEffect(() => {
+    if (!showStarting) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [showStarting]);
+
+  const startingElapsed =
+    workflowState.stepRun?.startedAt != null
+      ? formatElapsed(nowMs - Date.parse(workflowState.stepRun.startedAt))
+      : null;
   const startingLabel = workflowState.stepRun
     ? `Step ${workflowState.stepRun.ordinal + 1}${
         workflowState.stepName ? ` · ${workflowState.stepName}` : ""
-      } — starting (this can take ~30–60s)…`
+      } — starting${startingElapsed ? ` ${startingElapsed}` : "…"}`
     : "";
 
   async function handleRecoveryStart() {
@@ -786,6 +798,13 @@ function OrcaMark() {
       </svg>
     </div>
   );
+}
+
+export function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function sortByCreatedAtDesc<T extends { createdAt: string }>(items: T[]): T[] {
