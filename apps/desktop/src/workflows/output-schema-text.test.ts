@@ -153,7 +153,7 @@ const BUILTIN_SCHEMAS: WorkflowStepOutputSchema[] = [
     { key: "summary", type: "string", required: true },
     { key: "changed_files", type: "array", itemType: "string", required: true },
     {
-      key: "test_results",
+      key: "validation",
       type: "object",
       required: true,
       fields: [
