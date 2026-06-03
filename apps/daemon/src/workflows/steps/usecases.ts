@@ -1,12 +1,24 @@
 import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import type { DomainEvent, WorkflowStepRun as WorkflowStepRunT } from "@orca/contracts";
-import { WORKFLOW_FAILURE_MAX_MESSAGE_CHARS, WorkflowStepRun } from "@orca/contracts";
+import type {
+  DomainEvent,
+  WorkflowStepResult,
+  WorkflowStepRun as WorkflowStepRunT,
+} from "@orca/contracts";
+import {
+  WORKFLOW_FAILURE_MAX_MESSAGE_CHARS,
+  WorkflowStepResult as WorkflowStepResultSchema,
+} from "@orca/contracts";
 import { redactSecrets } from "../../memory/normalize.js";
 import { appendWorkflowEvent } from "../events.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import { getWorkflowStepRunById } from "./projection.js";
 import { getTemplateById } from "../templates/projection.js";
+import {
+  buildEvaluationFailedStepResult,
+  mapStepRunStatusToResultStatus,
+  serializeStepResult,
+} from "./step-result.js";
 
 interface WorkflowStepRunRow {
   id: string;
@@ -22,6 +34,9 @@ interface WorkflowStepRunRow {
   started_at: string | null;
   finished_at: string | null;
   fingerprint: string;
+  revise_attempts?: number;
+  crash_retries?: number;
+  step_result_json: string | null;
 }
 
 class WorkflowStepNotFoundError extends Error {
@@ -73,6 +88,43 @@ function readStepRow(db: Database.Database, id: string): WorkflowStepRunRow {
     .get(id) as WorkflowStepRunRow | undefined;
   if (!row) throw new WorkflowStepNotFoundError(id);
   return row;
+}
+
+function retryCount(row: WorkflowStepRunRow): number {
+  return Math.max(row.attempt - 1, 0) + (row.revise_attempts ?? 0) + (row.crash_retries ?? 0);
+}
+
+function artifactCountForStep(db: Database.Database, stepRunId: string): number {
+  return (
+    db
+      .prepare("SELECT COUNT(*) AS count FROM workflow_artifacts WHERE step_run_id = ?")
+      .get(stepRunId) as { count: number }
+  ).count;
+}
+
+function terminalIssueCount(status: string): number {
+  return status === "blocked" || status === "failed" ? 1 : 0;
+}
+
+function terminalStepResult(
+  db: Database.Database,
+  row: WorkflowStepRunRow,
+  terminalStatus: "passed" | "blocked" | "failed" | "skipped",
+  finishedAt: string,
+  supplied?: WorkflowStepResult
+): WorkflowStepResult {
+  if (supplied) return WorkflowStepResultSchema.parse(supplied);
+  return buildEvaluationFailedStepResult({
+    stepId: row.id,
+    stepStatus: mapStepRunStatusToResultStatus(terminalStatus),
+    startedAt: row.started_at,
+    finishedAt,
+    retries: retryCount(row),
+    producedArtifactsCount: artifactCountForStep(db, row.id),
+    blockingIssuesCount: terminalIssueCount(terminalStatus),
+    warningsCount: 0,
+    reason: "orchestrator scoring not supplied",
+  });
 }
 
 function emitEvent(
@@ -190,7 +242,8 @@ export function advanceToNextStep(
   db: Database.Database,
   now: () => string,
   currentStepRunId: string,
-  eventOptions?: StepEventOptions
+  eventOptions?: StepEventOptions,
+  suppliedStepResult?: WorkflowStepResult
 ): WorkflowStepRunT | null {
   return db.transaction(() => {
     const current = readStep(db, currentStepRunId);
@@ -207,9 +260,11 @@ export function advanceToNextStep(
     if (!template) throw new Error("template_not_found");
 
     const timestamp = now();
+    const row = readStepRow(db, currentStepRunId);
+    const result = terminalStepResult(db, row, "passed", timestamp, suppliedStepResult);
     db.prepare(
-      "UPDATE workflow_step_runs SET status = 'passed', finished_at = ?, blocked_reason = NULL WHERE id = ?"
-    ).run(timestamp, currentStepRunId);
+      "UPDATE workflow_step_runs SET status = 'passed', finished_at = ?, blocked_reason = NULL, step_result_json = ? WHERE id = ?"
+    ).run(timestamp, serializeStepResult(result), currentStepRunId);
     emitEvent(
       db,
       "workflow.step.completed",
@@ -267,9 +322,12 @@ export function markStepBlocked(
     if (row.status !== "active") {
       throw new WorkflowStepInvalidTransitionError(stepRunId, row.status, "mark blocked");
     }
+    const timestamp = now();
+    const raw = readStepRow(db, stepRunId);
+    const result = terminalStepResult(db, raw, "blocked", timestamp);
     db.prepare(
-      "UPDATE workflow_step_runs SET status = 'blocked', blocked_reason = ? WHERE id = ?"
-    ).run(sanitizeReason(reason), stepRunId);
+      "UPDATE workflow_step_runs SET status = 'blocked', blocked_reason = ?, finished_at = ?, step_result_json = ? WHERE id = ?"
+    ).run(sanitizeReason(reason), timestamp, serializeStepResult(result), stepRunId);
     emitEvent(
       db,
       "workflow.step.blocked",
@@ -279,7 +337,7 @@ export function markStepBlocked(
         stepRunId,
         stepTemplateId: row.stepTemplateId,
       },
-      now(),
+      timestamp,
       eventOptions
     );
     return readStep(db, stepRunId);
@@ -298,9 +356,11 @@ export function failStep(
       throw new WorkflowStepInvalidTransitionError(stepRunId, row.status, "fail");
     }
     const timestamp = now();
+    const raw = readStepRow(db, stepRunId);
+    const result = terminalStepResult(db, raw, "failed", timestamp);
     db.prepare(
-      "UPDATE workflow_step_runs SET status = 'failed', finished_at = ? WHERE id = ?"
-    ).run(timestamp, stepRunId);
+      "UPDATE workflow_step_runs SET status = 'failed', finished_at = ?, step_result_json = ? WHERE id = ?"
+    ).run(timestamp, serializeStepResult(result), stepRunId);
     emitEvent(
       db,
       "workflow.step.failed",

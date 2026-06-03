@@ -4,7 +4,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
-import type { DomainEvent } from "@orca/contracts";
+import type { DomainEvent, WorkflowStepResult } from "@orca/contracts";
 import type { Config } from "../../config.js";
 import { closeDatabase, openDatabase } from "../../db.js";
 import { EventBus } from "../../events.js";
@@ -56,7 +56,7 @@ function seedGoal(db: Database.Database, id: string): void {
 function getStep(db: Database.Database, id: string) {
   return db
     .prepare(
-      "SELECT id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, started_at, finished_at, blocked_reason, fingerprint FROM workflow_step_runs WHERE id = ?"
+      "SELECT id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, started_at, finished_at, blocked_reason, fingerprint, step_result_json FROM workflow_step_runs WHERE id = ?"
     )
     .get(id) as
     | {
@@ -73,8 +73,17 @@ function getStep(db: Database.Database, id: string) {
         finished_at: string | null;
         blocked_reason: string | null;
         fingerprint: string;
+        step_result_json: string | null;
       }
     | undefined;
+}
+
+function readStepResultJson(db: Database.Database, id: string) {
+  const row = db
+    .prepare("SELECT step_result_json FROM workflow_step_runs WHERE id = ?")
+    .get(id) as { step_result_json: string | null };
+  expect(row.step_result_json).toBeTruthy();
+  return JSON.parse(row.step_result_json!) as unknown;
 }
 
 function setup(): {
@@ -200,6 +209,86 @@ describe("workflow step usecases", () => {
         .prepare("SELECT current_step_run_id FROM workflow_runs WHERE id = ?")
         .get(run.id) as { current_step_run_id: string | null }
     ).toEqual({ current_step_run_id: retried.id });
+  });
+
+  it("advanceToNextStep persists provided scored step result", () => {
+    const { db, runCtx } = setup();
+    seedGoal(db, "goal-1");
+    seedEngineeringTemplate(db, () => NOW);
+    const run = startWorkflowRun(runCtx, { goalId: "goal-1", templateId: ENGINEERING_ID });
+    const first = getStep(db, run.currentStepRunId!)!;
+    const scored: WorkflowStepResult = {
+      stepId: first.id,
+      stepStatus: "completed",
+      evaluationStatus: "scored",
+      successScore: 0.87,
+      quality: {
+        outputCompleteness: 0.9,
+        outputCorrectness: 0.8,
+        instructionAdherence: 0.9,
+        downstreamReadiness: 0.85,
+        riskLevel: 0.2,
+      },
+      performance: {
+        durationSeconds: 0,
+        retries: 0,
+      },
+      outcome: {
+        reason: "Ready for the next step.",
+        producedArtifactsCount: 0,
+        blockingIssuesCount: 0,
+        warningsCount: 0,
+        handoffReady: true,
+      },
+    };
+
+    advanceToNextStep(db, () => NOW, first.id, undefined, scored);
+
+    expect(readStepResultJson(db, first.id)).toEqual(scored);
+  });
+
+  it("markStepBlocked persists daemon evaluation-failed step result", () => {
+    const { db, runCtx } = setup();
+    seedGoal(db, "goal-1");
+    seedEngineeringTemplate(db, () => NOW);
+    const run = startWorkflowRun(runCtx, { goalId: "goal-1", templateId: ENGINEERING_ID });
+    const first = getStep(db, run.currentStepRunId!)!;
+
+    markStepBlocked(db, () => NOW, first.id, "Need input");
+
+    expect(readStepResultJson(db, first.id)).toMatchObject({
+      stepId: first.id,
+      stepStatus: "blocked",
+      evaluationStatus: "failed",
+      successScore: 0,
+      outcome: {
+        reason: "step result evaluation failed: orchestrator scoring not supplied",
+        blockingIssuesCount: 1,
+        handoffReady: false,
+      },
+    });
+  });
+
+  it("failStep persists daemon evaluation-failed step result", () => {
+    const { db, runCtx } = setup();
+    seedGoal(db, "goal-1");
+    seedEngineeringTemplate(db, () => NOW);
+    const run = startWorkflowRun(runCtx, { goalId: "goal-1", templateId: ENGINEERING_ID });
+    const first = getStep(db, run.currentStepRunId!)!;
+
+    failStep(db, () => NOW, first.id);
+
+    expect(readStepResultJson(db, first.id)).toMatchObject({
+      stepId: first.id,
+      stepStatus: "failed",
+      evaluationStatus: "failed",
+      successScore: 0,
+      outcome: {
+        reason: "step result evaluation failed: orchestrator scoring not supplied",
+        blockingIssuesCount: 1,
+        handoffReady: false,
+      },
+    });
   });
 
   it("step fingerprint uses sha256(run:step:attempt)", () => {
