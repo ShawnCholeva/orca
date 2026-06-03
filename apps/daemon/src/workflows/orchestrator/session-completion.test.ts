@@ -74,10 +74,37 @@ function fakeSynthesisBroker(
   const failTimes = opts.failTimes ?? 0;
 
   async function _propose(
-    _req: unknown,
+    request: unknown,
     options?: BrokerCompatibilityOptions
   ): Promise<BrokerResult> {
     calls++;
+    if ((request as { kind?: string }).kind === "score_step_result") {
+      const proposal = {
+        successScore: 0.82,
+        quality: {
+          outputCompleteness: 0.8,
+          outputCorrectness: 0.8,
+          instructionAdherence: 0.85,
+          downstreamReadiness: 0.8,
+          riskLevel: 0.2,
+        },
+        reason: "Ready for next step.",
+        handoffReady: true,
+      };
+      const validated = options?.validateProposal
+        ? await options.validateProposal(proposal)
+        : { accepted: true as const, parsed: proposal };
+      return {
+        status: "proposed",
+        attemptId: `attempt-${calls}`,
+        transport: "one_shot",
+        parsed: Object.prototype.hasOwnProperty.call(validated, "parsed")
+          ? (validated as { parsed: unknown }).parsed
+          : proposal,
+        rawTextLength: null,
+        latencyMs: 1,
+      };
+    }
     if (calls <= failTimes) {
       return { status: "needs_human_review", attemptId: `attempt-${calls}`, reviewPayloadId: "r-1" };
     }
@@ -240,6 +267,14 @@ function artifactCount(db: Database.Database, type: string): number {
   ).c;
 }
 
+function readPersistedStepResult(db: Database.Database, stepRunId: string) {
+  const row = db
+    .prepare("SELECT step_result_json FROM workflow_step_runs WHERE id = ?")
+    .get(stepRunId) as { step_result_json: string | null };
+  expect(row.step_result_json).toBeTruthy();
+  return JSON.parse(row.step_result_json!);
+}
+
 function getArtifact(db: Database.Database, type: string) {
   return db
     .prepare("SELECT * FROM workflow_artifacts WHERE type = ?")
@@ -322,6 +357,71 @@ describe("OrchestratorService.onWorkflowSessionCompleted", () => {
     const artifact = getArtifact(db, "step_output")!;
     expect(artifact.source).toBe("orchestrator");
     expect(artifact.linked_session_id).toBe(sessionId);
+  });
+
+  it("scores and persists step_result after session completion", async () => {
+    const { db } = setupHarness();
+    const { sessionId, stepRunId } = seedWorkflowWithSession(db);
+    const broker = fakeSynthesisBroker({ problem: "solved" });
+    const service = makeService(
+      broker.broker,
+      fakeOutputStore((id) => snapshotWithText(id, "done"))
+    );
+
+    await service.onWorkflowSessionCompleted(db, () => NOW, { sessionId, goalId: "goal-1" });
+
+    expect(readPersistedStepResult(db, stepRunId)).toMatchObject({
+      stepId: stepRunId,
+      stepStatus: "completed",
+      evaluationStatus: "scored",
+    });
+  });
+
+  it("persists evaluation-failed step_result when scoring fails", async () => {
+    const { db } = setupHarness();
+    const { sessionId, stepRunId } = seedWorkflowWithSession(db);
+    const propose = vi.fn(async (request: unknown, options?: BrokerCompatibilityOptions) => {
+      if ((request as { kind?: string }).kind === "score_step_result") {
+        const validated = options?.validateProposal
+          ? await options.validateProposal({ successScore: 2 })
+          : { accepted: false as const };
+        return {
+          status: "needs_human_review" as const,
+          attemptId: "score-attempt",
+          reviewPayloadId: "review-1",
+          failureMessage: validated.accepted ? null : validated.failureMessage,
+        };
+      }
+      const validated = options?.validateProposal
+        ? await options.validateProposal({ output: { problem: "solved" } })
+        : { accepted: true as const, parsed: { output: { problem: "solved" } } };
+      return {
+        status: "proposed" as const,
+        attemptId: "synth-attempt",
+        transport: "one_shot" as const,
+        parsed: Object.prototype.hasOwnProperty.call(validated, "parsed")
+          ? (validated as { parsed: unknown }).parsed
+          : { output: { problem: "solved" } },
+        rawTextLength: null,
+        latencyMs: 1,
+      };
+    });
+    const service = makeService(
+      { propose },
+      fakeOutputStore((id) => snapshotWithText(id, "done"))
+    );
+
+    await service.onWorkflowSessionCompleted(db, () => NOW, { sessionId, goalId: "goal-1" });
+
+    expect(readPersistedStepResult(db, stepRunId)).toMatchObject({
+      stepId: stepRunId,
+      stepStatus: "completed",
+      evaluationStatus: "failed",
+      successScore: 0,
+      outcome: {
+        handoffReady: false,
+      },
+    });
   });
 
   it("synthesize twice invalid: broker returns schema-invalid twice → run blocked, reason matches /schema/i", async () => {

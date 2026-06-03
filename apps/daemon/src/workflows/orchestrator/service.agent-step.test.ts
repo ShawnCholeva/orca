@@ -52,7 +52,34 @@ function fakeAgentSelector(): Pick<{ select: (db: Database.Database, now: () => 
 
 function fakeBrokerNoop(): Pick<import("../orchestration-transport/broker.js").OrchestrationTransportBroker, "propose"> {
   return {
-    async propose() {
+    async propose(request: unknown, options?: import("../orchestration-transport/broker.js").BrokerCompatibilityOptions) {
+      if ((request as { kind?: string }).kind === "score_step_result") {
+        const proposal = {
+          successScore: 0.82,
+          quality: {
+            outputCompleteness: 0.8,
+            outputCorrectness: 0.8,
+            instructionAdherence: 0.85,
+            downstreamReadiness: 0.8,
+            riskLevel: 0.2,
+          },
+          reason: "Ready for next step.",
+          handoffReady: true,
+        };
+        const validated = options?.validateProposal
+          ? await options.validateProposal(proposal)
+          : { accepted: true as const, parsed: proposal };
+        return {
+          status: "proposed" as const,
+          attemptId: "attempt-1",
+          transport: "one_shot" as const,
+          parsed: Object.prototype.hasOwnProperty.call(validated, "parsed")
+            ? (validated as { parsed: unknown }).parsed
+            : proposal,
+          rawTextLength: null,
+          latencyMs: 1,
+        };
+      }
       return {
         status: "proposed" as const,
         attemptId: "attempt-1",
@@ -152,6 +179,14 @@ function stepOutputCount(db: Database.Database): number {
       .prepare("SELECT COUNT(*) AS c FROM workflow_artifacts WHERE step_run_id = 'step-1' AND type = 'step_output'")
       .get() as { c: number }
   ).c;
+}
+
+function readPersistedStepResult(db: Database.Database, stepRunId: string) {
+  const row = db
+    .prepare("SELECT step_result_json FROM workflow_step_runs WHERE id = ?")
+    .get(stepRunId) as { step_result_json: string | null };
+  expect(row.step_result_json).toBeTruthy();
+  return JSON.parse(row.step_result_json!);
 }
 
 function orchestratorMessageCount(db: Database.Database): number {
@@ -371,6 +406,11 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     expect(stepOutputCount(db)).toBe(1);
     // single terminal step → commitAdvanceOrComplete recommends completing the run
     expect(recommendationCount(db, "complete_workflow_run")).toBe(1);
+    expect(readPersistedStepResult(db, "step-1")).toMatchObject({
+      stepId: "step-1",
+      stepStatus: "completed",
+      evaluationStatus: "scored",
+    });
     expect(deliver).not.toHaveBeenCalled();
   });
 

@@ -9,9 +9,11 @@ import {
   type ModelProviderId,
   type OperatorDescriptor,
   type OrchestratorAction,
+  type StepResultScoringFacts,
   type StepAgentChoice,
   type WorkflowDecisionTrace,
   type WorkflowRun as WorkflowRunT,
+  type WorkflowStepResult,
   type WorkflowStepTemplate,
   type WorkflowTemplate as WorkflowTemplateT,
 } from "@orca/contracts";
@@ -52,6 +54,12 @@ import { judgeAgentResponse } from "./judgement.js";
 import { extractOrcaStepCompleteBlock } from "./orca-output.js";
 import { incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
 import { incrementCrashRetry, CRASH_RETRY_CAP } from "./crash-retry.js";
+import { scoreStepResult } from "./step-result-scoring.js";
+import {
+  buildEvaluationFailedStepResult,
+  durationSeconds,
+  mapStepRunStatusToResultStatus,
+} from "../steps/step-result.js";
 import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
 import { adapterIdForProvider } from "../../orchestrator-llm/model-provider-llm-client.js";
 import { randomUUID } from "node:crypto";
@@ -89,7 +97,9 @@ interface StepRunRow {
   workflow_run_id: string;
   step_template_id: string;
   ordinal: number;
+  attempt: number;
   status: string;
+  started_at: string | null;
   selected_operator_id: string | null;
   selected_model_id: string | null;
   revise_attempts: number;
@@ -99,6 +109,7 @@ interface StepRunRow {
 export interface RequestNextDecisionOptions {
   bus?: EventBus;
   idFactory?: () => string;
+  stepResultByStepRunId?: Record<string, WorkflowStepResult>;
 }
 
 export class OrchestratorRunNotFoundError extends Error {
@@ -380,7 +391,16 @@ export class OrchestratorService {
     this.publish(options.bus, stagedEvents);
 
     // (10) Drive advancement to the next step / completion.
-    await this.requestNextDecision(db, now, run.id, options);
+    const stepResult = await this.scoreCompletedStepResult(
+      db,
+      now,
+      { run, stepRun, stepTpl, goal },
+      result.output
+    );
+    await this.requestNextDecision(db, now, run.id, {
+      ...options,
+      stepResultByStepRunId: { [stepRun.id]: stepResult },
+    });
   }
 
   /**
@@ -579,7 +599,14 @@ export class OrchestratorService {
         if (sessionId) {
           void this.workerTerminate?.(sessionId);
         }
-        await this.advanceToNextStep(db, now, ctx.run.id, options);
+        const output = block && typeof block === "object" && !Array.isArray(block)
+          ? (block as Record<string, unknown>)
+          : null;
+        const stepResult = await this.scoreCompletedStepResult(db, now, ctx, output);
+        await this.advanceToNextStep(db, now, ctx.run.id, {
+          ...options,
+          stepResultByStepRunId: { [ctx.stepRun.id]: stepResult },
+        });
         return { postedChatReply: false };
       }
       case "revise_step": {
@@ -1192,6 +1219,106 @@ export class OrchestratorService {
     return out;
   }
 
+  private artifactCountForStep(db: Database.Database, stepRunId: string): number {
+    return (
+      db
+        .prepare("SELECT COUNT(*) AS count FROM workflow_artifacts WHERE step_run_id = ?")
+        .get(stepRunId) as { count: number }
+    ).count;
+  }
+
+  private retryCount(stepRun: StepRunRow): number {
+    return (
+      Math.max(stepRun.attempt - 1, 0) +
+      (stepRun.revise_attempts ?? 0) +
+      (stepRun.crash_retries ?? 0)
+    );
+  }
+
+  private scoringFacts(
+    db: Database.Database,
+    stepRun: StepRunRow,
+    terminalStatus: "passed" | "blocked" | "failed" | "skipped",
+    finishedAt: string
+  ): StepResultScoringFacts {
+    return {
+      stepId: stepRun.id,
+      stepStatus: mapStepRunStatusToResultStatus(terminalStatus),
+      performance: {
+        durationSeconds: durationSeconds(stepRun.started_at, finishedAt),
+        retries: this.retryCount(stepRun),
+      },
+      outcome: {
+        producedArtifactsCount: this.artifactCountForStep(db, stepRun.id),
+        blockingIssuesCount: terminalStatus === "blocked" || terminalStatus === "failed" ? 1 : 0,
+        warningsCount: 0,
+      },
+    };
+  }
+
+  private async scoreCompletedStepResult(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      goal: GoalRow;
+    },
+    output: Record<string, unknown> | null
+  ): Promise<WorkflowStepResult> {
+    const finishedAt = now();
+    const facts = this.scoringFacts(db, ctx.stepRun, "passed", finishedAt);
+    if (!ctx.goal.orchestrator_provider || !ctx.goal.orchestrator_model) {
+      return buildEvaluationFailedStepResult({
+        stepId: ctx.stepRun.id,
+        stepStatus: facts.stepStatus,
+        startedAt: ctx.stepRun.started_at,
+        finishedAt,
+        retries: facts.performance.retries,
+        producedArtifactsCount: facts.outcome.producedArtifactsCount,
+        blockingIssuesCount: facts.outcome.blockingIssuesCount,
+        warningsCount: facts.outcome.warningsCount,
+        reason: "orchestrator model not configured",
+      });
+    }
+
+    const result = await scoreStepResult(
+      { broker: this.broker },
+      {
+        goalId: ctx.goal.id,
+        workflowRunId: ctx.run.id,
+        stepRunId: ctx.stepRun.id,
+        providerId: ctx.goal.orchestrator_provider,
+        modelId: ctx.goal.orchestrator_model,
+        goal: { id: ctx.goal.id, description: ctx.goal.description },
+        step: {
+          id: ctx.stepRun.id,
+          templateId: ctx.stepTpl.id,
+          name: ctx.stepTpl.name,
+          instructions: ctx.stepTpl.instructions,
+          status: "passed",
+        },
+        output,
+        facts,
+      }
+    );
+
+    if (result.ok) return result.stepResult;
+
+    return buildEvaluationFailedStepResult({
+      stepId: ctx.stepRun.id,
+      stepStatus: facts.stepStatus,
+      startedAt: ctx.stepRun.started_at,
+      finishedAt,
+      retries: facts.performance.retries,
+      producedArtifactsCount: facts.outcome.producedArtifactsCount,
+      blockingIssuesCount: facts.outcome.blockingIssuesCount,
+      warningsCount: facts.outcome.warningsCount,
+      reason: result.reason,
+    });
+  }
+
   private hasActiveUnansweredQuestion(
     db: Database.Database,
     stepArtifacts: ReturnType<typeof listArtifactsForRun>,
@@ -1545,10 +1672,16 @@ export class OrchestratorService {
 
     if (nextStepTpl) {
       const stagedEvents: DomainEvent[] = [];
-      advanceToNextStep(db, now, stepRun.id, {
-        idFactory: options.idFactory,
-        stagedEvents,
-      });
+      advanceToNextStep(
+        db,
+        now,
+        stepRun.id,
+        {
+          idFactory: options.idFactory,
+          stagedEvents,
+        },
+        options.stepResultByStepRunId?.[stepRun.id]
+      );
       this.publish(options.bus, stagedEvents);
       // recursion depth is bounded by the number of consecutive auto-completing intermediate steps (template step count).
       return this.requestNextDecision(db, now, run.id, options);
@@ -1556,6 +1689,13 @@ export class OrchestratorService {
 
     const stagedEvents: DomainEvent[] = [];
     const output = db.transaction(() => {
+      const stepResult = options.stepResultByStepRunId?.[stepRun.id];
+      if (stepResult) {
+        db.prepare("UPDATE workflow_step_runs SET step_result_json = ? WHERE id = ?").run(
+          JSON.stringify(stepResult),
+          stepRun.id
+        );
+      }
       this.appendDecisionRequested(
         db,
         now,
