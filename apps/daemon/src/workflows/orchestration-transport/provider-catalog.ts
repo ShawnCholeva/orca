@@ -66,7 +66,7 @@ export async function buildOrchestrationProviderCatalog(
   const allowedProviderIds = opts.allowedProviderIds;
   const modelOverrides = opts.modelOverrides;
 
-  const direct = providers
+  const direct: OrchestrationProviderCatalogEntry[] = providers
     .filter((provider) => !allowedProviderIds || allowedProviderIds.has(provider.id))
     .map((provider) => ({
       id: provider.id,
@@ -82,7 +82,7 @@ export async function buildOrchestrationProviderCatalog(
     }));
 
   const directIds = new Set(direct.map((provider) => provider.id));
-  const virtual = [...(modelOverrides?.entries() ?? [])]
+  const virtual: OrchestrationProviderCatalogEntry[] = [...(modelOverrides?.entries() ?? [])]
     .filter(([providerId]) => !directIds.has(providerId))
     .filter(([providerId]) => !allowedProviderIds || allowedProviderIds.has(providerId))
     .map(([providerId, models]) => ({

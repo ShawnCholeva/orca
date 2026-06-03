@@ -180,8 +180,7 @@ export async function createOrchestratorMessage(
 }
 
 function toShadowAdapterId(providerId: ModelProviderId): ShadowAdapterId {
-  const adapterId = adapterIdForProvider(providerId);
-  return adapterId === "codex" ? "codex" : "claude-code";
+  return adapterIdForProvider(providerId) as ShadowAdapterId;
 }
 
 function readGoal(db: Database.Database, goalId: string): GoalRow | null {

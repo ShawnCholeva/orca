@@ -681,7 +681,7 @@ export function createServer(
       if (!goal?.orchestratorProvider) return shadowSessionId(goalId);
       const adapterId = adapterIdForProvider(goal.orchestratorProvider);
       return daemonContext.stepDispatchCapabilities.resolveMode(adapterId).mode === "shadow_session"
-        ? shadowSessions.spawn(goalId, adapterId === "codex" ? "codex" : "claude-code")
+        ? shadowSessions.spawn(goalId, adapterId as never)
         : shadowSessionId(goalId);
     },
     startWorkflowFirstStepFn: async (_goalId, runId) =>

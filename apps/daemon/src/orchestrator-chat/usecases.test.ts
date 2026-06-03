@@ -4,7 +4,7 @@ import path from "node:path";
 
 import type Database from "better-sqlite3";
 import type { DomainEvent } from "@orca/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Config } from "../config.js";
 import { closeDatabase, openDatabase } from "../db.js";
@@ -202,5 +202,24 @@ describe("orchestrator chat usecases", () => {
       count: number;
     };
     expect(afterCount.count).toBe(beforeCount.count);
+  });
+
+  it("routes Google provider shadow chat through antigravity", async () => {
+    const { db, ctx } = setup();
+    db.prepare("UPDATE goals SET orchestrator_provider = 'orca/google', orchestrator_model = 'gemini-3.5-flash' WHERE id = 'goal-1'").run();
+    const shadowAsk = vi.fn().mockResolvedValue({ text: '{"replyText":"Start small."}' });
+
+    await createOrchestratorMessage(
+      {
+        ...ctx,
+        shadowAsk,
+        resolveOrchestratorMode: () => "shadow_session",
+        onOrchestratorReply: vi.fn(),
+      },
+      "goal-1",
+      { body: "Need a rollout plan." }
+    );
+
+    expect(shadowAsk.mock.calls[0]?.[1].adapterId).toBe("antigravity");
   });
 });

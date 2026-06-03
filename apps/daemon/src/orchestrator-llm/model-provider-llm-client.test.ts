@@ -52,7 +52,14 @@ describe("ModelProviderOrchestratorLlmClient", () => {
   });
 
   it("routes claude-code and codex to shadow sessions", async () => {
-    const shadow = { request: vi.fn(async () => ({ text: '{"kind":"approve_step_complete"}' })) };
+    type RoutedInput = Parameters<RoutedOrchestratorLlmClient["request"]>[0];
+    const shadowInputs: RoutedInput[] = [];
+    const shadow = {
+      request: vi.fn(async (input: RoutedInput) => {
+        shadowInputs.push(input);
+        return { text: '{"kind":"approve_step_complete"}' };
+      }),
+    };
     const providerClient = { request: vi.fn(async () => ({ text: '{"kind":"answer_user_directly","body":"hi"}' })) };
     const routed = new RoutedOrchestratorLlmClient(shadow, providerClient);
 
@@ -61,7 +68,7 @@ describe("ModelProviderOrchestratorLlmClient", () => {
     await routed.request({ goalId: "g", adapterId: "antigravity", modelId: "gemini-3.5-flash", systemPrompt: "s", userPrompt: "u" });
 
     expect(shadow.request).toHaveBeenCalledTimes(3);
-    expect(shadow.request.mock.calls.map(([input]) => input.adapterId)).toContain("antigravity");
+    expect(shadowInputs.map((input) => input.adapterId)).toContain("antigravity");
     expect(providerClient.request).not.toHaveBeenCalled();
   });
 
