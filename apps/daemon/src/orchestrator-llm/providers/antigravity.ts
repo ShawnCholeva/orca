@@ -141,14 +141,20 @@ function textFromEntry(entry) {
   }
   if (hasDiscriminator && !hasAssistantDiscriminator) return "";
 
-  const candidates = [
-    entry?.assistant,
-    entry?.message,
-    entry?.content,
-    entry?.text,
-    entry?.modelMessage,
-    entry?.model_message,
-  ];
+  const candidates = hasAssistantDiscriminator
+    ? [
+        entry?.assistant,
+        entry?.message,
+        entry?.content,
+        entry?.text,
+        entry?.modelMessage,
+        entry?.model_message,
+      ]
+    : [
+        entry?.assistant,
+        entry?.modelMessage,
+        entry?.model_message,
+      ];
   for (const candidate of candidates) {
     const text = normalizeText(candidate);
     if (text) return text;

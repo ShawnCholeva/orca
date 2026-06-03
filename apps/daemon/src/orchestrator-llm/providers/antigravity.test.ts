@@ -55,6 +55,7 @@ describe("AntigravityShadowProvider", () => {
           JSON.stringify({ role: "user", message: "later user" }),
           JSON.stringify({ kind: "tool", text: "later tool" }),
           JSON.stringify({ source: "system", content: "later system" }),
+          JSON.stringify({ text: "not assistant" }),
         ].join("\n"),
       );
 
@@ -63,6 +64,26 @@ describe("AntigravityShadowProvider", () => {
       expect(requests).toHaveLength(1);
       expect(requests[0]!.url).toBe("/v1/shadow-hooks/stop?goalId=g1");
       expect(requests[0]!.body.last_assistant_message).toBe("latest model");
+    });
+  });
+
+  it("relay accepts undiscriminated assistant-shaped transcript fields", async () => {
+    await withHookServer(async ({ port, requests }) => {
+      const cwd = await writeRelay({ port, authToken: "tok" });
+      const transcriptPath = join(cwd, "transcript.jsonl");
+      await writeFile(
+        transcriptPath,
+        [
+          JSON.stringify({ role: "assistant", message: "older assistant" }),
+          JSON.stringify({ text: "not assistant" }),
+          JSON.stringify({ modelMessage: "model field" }),
+        ].join("\n"),
+      );
+
+      await runRelay(cwd, { transcriptPath });
+
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.body.last_assistant_message).toBe("model field");
     });
   });
 
