@@ -378,14 +378,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
 
         {selectedGoal && (
           <>
-            <SystemCard
-              title={selectedGoal.title}
-              body={
-                selectedGoal.description ||
-                "This goal is ready for supervised workflow orchestration."
-              }
-            />
-
             {loading && <ThinkingRow label="routing" />}
 
             {!loading && error && (

@@ -145,7 +145,7 @@ describe("OrcaChat", () => {
     expect(screen.queryByPlaceholderText("Message Orca…")).toBeNull();
   });
 
-  it("shows the selected goal SystemCard and composer when a goal is selected", async () => {
+  it("does not render the goal title/description header card", async () => {
     setupRunLoad();
     const { OrcaChat } = await import("./OrcaChat");
 
@@ -157,8 +157,12 @@ describe("OrcaChat", () => {
       />,
     );
 
-    expect(await screen.findByText("Ship Engineering workflow chat")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Message Orca…")).toBeInTheDocument();
+    // Composer is the reliable "goal is selected" signal now that the header
+    // card is gone (the goal title lives in the goal rail, not in OrcaChat).
+    expect(await screen.findByPlaceholderText("Message Orca…")).toBeInTheDocument();
+    // The goal title/description header card no longer renders inside the chat.
+    expect(screen.queryByText("Ship Engineering workflow chat")).toBeNull();
+    expect(screen.queryByText("Goal description")).toBeNull();
   });
 
   it("shows the no-model SystemCard when the goal lacks an orchestrator model", async () => {
@@ -590,7 +594,7 @@ describe("OrcaChat", () => {
     await new Promise((resolve) => setTimeout(resolve, 120));
 
     // Background refresh must NOT blank content nor show a "routing" loader.
-    expect(screen.getByText("Ship Engineering workflow chat")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Message Orca…")).toBeInTheDocument();
     expect(screen.getByText("Start with a bounded verification pass.")).toBeInTheDocument();
     expect(screen.queryAllByText("routing")).toHaveLength(0);
   });
