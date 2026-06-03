@@ -11,6 +11,7 @@ const createOrchestratorMessageMock = vi.fn();
 const getGoalDetailMock = vi.fn();
 const getWorkflowRunMock = vi.fn();
 const getWorkflowStepRunMock = vi.fn();
+const getWorkflowTemplateMock = vi.fn();
 const listOrchestratorMessagesMock = vi.fn();
 const listWorkflowDecisionsMock = vi.fn();
 const listWorkflowRunArtifactsMock = vi.fn();
@@ -25,6 +26,7 @@ vi.mock("../api", () => ({
   getGoalDetail: (...args: unknown[]) => getGoalDetailMock(...args),
   getWorkflowRun: (...args: unknown[]) => getWorkflowRunMock(...args),
   getWorkflowStepRun: (...args: unknown[]) => getWorkflowStepRunMock(...args),
+  getWorkflowTemplate: (...args: unknown[]) => getWorkflowTemplateMock(...args),
   listOrchestratorMessages: (...args: unknown[]) => listOrchestratorMessagesMock(...args),
   listWorkflowDecisions: (...args: unknown[]) => listWorkflowDecisionsMock(...args),
   listWorkflowRunArtifacts: (...args: unknown[]) => listWorkflowRunArtifactsMock(...args),
@@ -116,6 +118,10 @@ describe("OrcaChat", () => {
     getGoalDetailMock.mockReset();
     getWorkflowRunMock.mockReset();
     getWorkflowStepRunMock.mockReset();
+    getWorkflowTemplateMock.mockReset();
+    getWorkflowTemplateMock.mockResolvedValue({
+      template: { steps: [{ id: "execution", ordinal: 4, name: "Build It" }] },
+    });
     listOrchestratorMessagesMock.mockReset();
     listWorkflowDecisionsMock.mockReset();
     listWorkflowRunArtifactsMock.mockReset();
@@ -158,7 +164,7 @@ describe("OrcaChat", () => {
     );
 
     const indicator = await screen.findByTestId("step-starting");
-    // ordinal is 4 → "Step 5"; name suffix is added in a later task.
+    // ordinal is 4 → "Step 5"; the resolved-name variant is covered separately.
     expect(indicator).toHaveTextContent("Step 5");
     expect(indicator).toHaveTextContent("starting");
   });
@@ -590,6 +596,42 @@ describe("OrcaChat", () => {
     await screen.findByText("This question expired.");
     // Controls came back: Submit is enabled again (selections still satisfy the gate).
     expect(screen.getByRole("button", { name: /submit/i })).toBeEnabled();
+  });
+
+  it("labels the starting indicator with the resolved step name", async () => {
+    setupRunLoad();
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    const indicator = await screen.findByTestId("step-starting");
+    expect(indicator).toHaveTextContent("Step 5 · Build It");
+    expect(indicator).toHaveTextContent("— starting");
+  });
+
+  it("falls back to an ordinal-only label when the template fetch fails", async () => {
+    setupRunLoad();
+    getWorkflowTemplateMock.mockRejectedValue(new Error("nope"));
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    const indicator = await screen.findByTestId("step-starting");
+    expect(indicator).toHaveTextContent("Step 5 — starting");
+    expect(indicator).not.toHaveTextContent("Build It");
+    expect(indicator).not.toHaveTextContent("·");
   });
 
   it("does not flash a loading indicator or blank content on SSE-driven refresh once loaded", async () => {

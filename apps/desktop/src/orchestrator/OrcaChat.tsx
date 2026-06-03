@@ -16,6 +16,7 @@ import {
   getGoalDetail,
   getWorkflowRun,
   getWorkflowStepRun,
+  getWorkflowTemplate,
   listOrchestratorMessages,
   listWorkflowDecisions,
   listWorkflowRunArtifacts,
@@ -41,6 +42,7 @@ type WorkflowState = {
   detail: GoalDetailResponse | null;
   run: WorkflowRun | null;
   stepRun: WorkflowStepRun | null;
+  stepName: string | null;
   decisions: WorkflowDecisionTrace[];
   artifacts: WorkflowArtifact[];
 };
@@ -49,6 +51,7 @@ const EMPTY_WORKFLOW_STATE: WorkflowState = {
   detail: null,
   run: null,
   stepRun: null,
+  stepName: null,
   decisions: [],
   artifacts: [],
 };
@@ -200,6 +203,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
             detail,
             run: null,
             stepRun: null,
+            stepName: null,
             decisions: [],
             artifacts: [],
           });
@@ -219,10 +223,28 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
           : null;
         if (cancelled) return;
 
+        // Resolve the step's human name (e.g. "Build It") from the template.
+        // Non-critical enrichment: on any failure we leave stepName null and the
+        // starting indicator falls back to an ordinal-only label.
+        let stepName: string | null = null;
+        if (stepRun) {
+          try {
+            const templateResponse = await getWorkflowTemplate(runResponse.run.templateId);
+            if (cancelled) return;
+            stepName =
+              templateResponse.template.steps.find(
+                (step) => step.id === stepRun.stepTemplateId,
+              )?.name ?? null;
+          } catch {
+            stepName = null;
+          }
+        }
+
         setWorkflowState({
           detail,
           run: runResponse.run,
           stepRun,
+          stepName,
           decisions: sortByCreatedAtDesc(decisionsResponse.decisions),
           artifacts: sortByCreatedAtDesc(artifactsResponse.artifacts),
         });
@@ -317,7 +339,9 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     workflowState.stepRun?.status === "active" &&
     !orcaHasSpoken;
   const startingLabel = workflowState.stepRun
-    ? `Step ${workflowState.stepRun.ordinal + 1} — starting (this can take ~30–60s)…`
+    ? `Step ${workflowState.stepRun.ordinal + 1}${
+        workflowState.stepName ? ` · ${workflowState.stepName}` : ""
+      } — starting (this can take ~30–60s)…`
     : "";
 
   async function handleRecoveryStart() {
