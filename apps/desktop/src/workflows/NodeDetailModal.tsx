@@ -31,6 +31,7 @@ export interface NodeDetailModalProps {
   onClose: () => void;
   onDelete: () => void;
   readOnly?: boolean;
+  onOutputSchemaValidityChange?: (invalid: boolean) => void;
 }
 
 export function NodeDetailModal({
@@ -42,6 +43,7 @@ export function NodeDetailModal({
   onClose,
   onDelete,
   readOnly = false,
+  onOutputSchemaValidityChange,
 }: NodeDetailModalProps) {
   const isGate = detail.kind === "gate";
 
@@ -176,7 +178,11 @@ export function NodeDetailModal({
           {isGate ? (
             <GateBody detail={detail as Extract<NodeDetail, { kind: "gate" }>} readOnly={readOnly} />
           ) : (
-            <StepBody detail={detail as Extract<NodeDetail, { kind: "step" }>} readOnly={readOnly} />
+            <StepBody
+              detail={detail as Extract<NodeDetail, { kind: "step" }>}
+              readOnly={readOnly}
+              onOutputSchemaValidityChange={onOutputSchemaValidityChange}
+            />
           )}
         </div>
 
@@ -254,7 +260,15 @@ function GateBody({ detail, readOnly }: { detail: Extract<NodeDetail, { kind: "g
   );
 }
 
-function StepBody({ detail, readOnly }: { detail: Extract<NodeDetail, { kind: "step" }>; readOnly?: boolean }) {
+function StepBody({
+  detail,
+  readOnly,
+  onOutputSchemaValidityChange,
+}: {
+  detail: Extract<NodeDetail, { kind: "step" }>;
+  readOnly?: boolean;
+  onOutputSchemaValidityChange?: (invalid: boolean) => void;
+}) {
   return (
     <>
       <div>
@@ -298,6 +312,7 @@ function StepBody({ detail, readOnly }: { detail: Extract<NodeDetail, { kind: "s
         schema={detail.outputSchema}
         onChange={(next) => !readOnly && detail.onChange({ outputSchema: next })}
         disabled={readOnly}
+        onValidityChange={(valid) => onOutputSchemaValidityChange?.(!valid)}
       />
     </>
   );

@@ -130,6 +130,9 @@ export function TemplateDetail({
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [openNodeId, setOpenNodeId] = useState<string | null>(null);
+  // True while any on-screen output-schema text is unparseable. Gates Save so
+  // we never silently persist the last valid schema over visibly-invalid text.
+  const [schemaInvalid, setSchemaInvalid] = useState(false);
 
   // Materialize the graph: reconcile steps into the working graph
   const materializedGraph = useMemo(
@@ -453,7 +456,7 @@ export function TemplateDetail({
                 type="button"
                 className="workflow-primary-btn"
                 onClick={handleSave}
-                disabled={!dirty || saving || duplicating}
+                disabled={!dirty || saving || duplicating || schemaInvalid}
               >
                 {saving ? "Saving…" : "Save Changes"}
               </button>
@@ -576,6 +579,7 @@ export function TemplateDetail({
               }))
             }
             disabled={locked}
+            onOutputSchemaValidityChange={setSchemaInvalid}
           />
         ) : (
           <WorkflowFlow
@@ -606,11 +610,17 @@ export function TemplateDetail({
               ? () => setOpenNodeId(materializedGraph.nodes[openNodeIndex + 1].id)
               : null
           }
-          onClose={() => setOpenNodeId(null)}
+          onClose={() => {
+            setOpenNodeId(null);
+            // The modal's invalid text leaves the screen on close; clear the gate
+            // so a closed modal can't keep Save disabled.
+            setSchemaInvalid(false);
+          }}
           onDelete={() => {
             handleRemoveNode(openNodeId!);
           }}
           readOnly={locked}
+          onOutputSchemaValidityChange={setSchemaInvalid}
         />
       )}
     </section>

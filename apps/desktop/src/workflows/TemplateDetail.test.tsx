@@ -334,6 +334,46 @@ describe("TemplateDetail", () => {
     expect(screen.queryByRole("textbox", { name: /template name/i })).toBeNull();
   });
 
+  // ── Output schema validity gates Save ─────────────────────────────────────
+
+  it("Save Changes is disabled while output schema text is invalid, re-enables when fixed", async () => {
+    render(
+      <TemplateDetail
+        template={makeTemplate()}
+        onTemplateSaved={() => {}}
+        onTemplateDuplicated={() => {}}
+      />,
+    );
+
+    // Enter edit mode (renders the step list editor)
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+
+    // Make the template dirty via the name so Save isn't gated by !dirty —
+    // this isolates the output-schema validity gate.
+    fireEvent.change(screen.getByRole("textbox", { name: /template name/i }), {
+      target: { value: "Renamed" },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /save changes/i })).not.toBeDisabled(),
+    );
+
+    // Expand the first step's details to reveal its Output Schema editor
+    fireEvent.click(screen.getAllByRole("button", { name: /details/i })[0]);
+    const schemaField = screen.getByLabelText("Output Schema");
+
+    // Type unparseable schema text → Save disabled
+    fireEvent.change(schemaField, { target: { value: "a {" } });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /save changes/i })).toBeDisabled(),
+    );
+
+    // Fix the text → Save re-enabled (still dirty from the rename)
+    fireEvent.change(schemaField, { target: { value: "a" } });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /save changes/i })).not.toBeDisabled(),
+    );
+  });
+
   // ── Scope picker ──────────────────────────────────────────────────────────
 
   it("scope picker is shown in edit mode and goal options are passed", () => {
