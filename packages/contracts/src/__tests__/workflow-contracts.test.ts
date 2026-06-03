@@ -992,6 +992,22 @@ describe("WorkflowStepResult", () => {
     expect(WorkflowStepResult.parse(result)).toEqual(result);
   });
 
+  it("uses cancelled instead of skipped for cancelled step results", () => {
+    expect(
+      WorkflowStepResult.parse({
+        ...scoredResult,
+        stepStatus: "cancelled"
+      }).stepStatus
+    ).toBe("cancelled");
+
+    expect(
+      WorkflowStepResult.safeParse({
+        ...scoredResult,
+        stepStatus: "skipped"
+      }).success
+    ).toBe(false);
+  });
+
   it("rejects scores outside 0 through 1", () => {
     const parsed = WorkflowStepResult.safeParse({
       ...scoredResult,

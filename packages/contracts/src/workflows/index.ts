@@ -347,7 +347,7 @@ export const WorkflowStepResultStatus = z.enum([
   "completed",
   "failed",
   "blocked",
-  "skipped"
+  "cancelled"
 ]);
 export type WorkflowStepResultStatus = z.infer<typeof WorkflowStepResultStatus>;
 
