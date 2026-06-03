@@ -76,10 +76,17 @@ export function reconcileGraph(
     ...existingGates.map((n) => n.id),
   ]);
 
-  // Drop edges where either endpoint no longer exists
-  const nextEdges = graph.edges.filter(
-    ([a, b]) => validNodeIds.has(a) && validNodeIds.has(b),
-  );
+  // Drop edges where either endpoint no longer exists, self-loops, and
+  // duplicate directed pairs (guards against programmatically-seeded or
+  // directly DB-edited graphs producing duplicate React keys downstream).
+  const seenEdges = new Set<string>();
+  const nextEdges = graph.edges.filter(([a, b]) => {
+    if (!validNodeIds.has(a) || !validNodeIds.has(b) || a === b) return false;
+    const key = `${a}->${b}`;
+    if (seenEdges.has(key)) return false;
+    seenEdges.add(key);
+    return true;
+  });
 
   // Ensure all gates have positions (gate nodes are never auto-created here,
   // but we guard in case something slipped through)

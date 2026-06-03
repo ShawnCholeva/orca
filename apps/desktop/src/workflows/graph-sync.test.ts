@@ -130,4 +130,23 @@ describe("reconcileGraph", () => {
     const graph = buildInitialGraph(steps);
     expect(graph.edges).toEqual([["a", "b"], ["b", "c"]]);
   });
+
+  it("drops self-loops and duplicate directed edges, keeps back-edges", () => {
+    const steps = [makeStep("s1"), makeStep("s2")];
+    const graph = {
+      nodes: buildInitialGraph(steps).nodes,
+      edges: [
+        ["s1", "s2"],
+        ["s1", "s2"], // exact duplicate -> dropped
+        ["s2", "s1"], // directed back-edge -> kept
+        ["s1", "s1"], // self-loop -> dropped
+      ] as [string, string][],
+      positions: buildInitialGraph(steps).positions,
+    };
+    const result = reconcileGraph(steps, graph);
+    expect(result.edges).toEqual([
+      ["s1", "s2"],
+      ["s2", "s1"],
+    ]);
+  });
 });

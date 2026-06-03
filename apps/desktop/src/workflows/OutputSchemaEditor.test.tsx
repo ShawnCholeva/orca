@@ -8,85 +8,53 @@ const baseSchema: WorkflowStepOutputSchema = [
   { key: "count", type: "number", required: false },
 ];
 
+function getTextarea(): HTMLTextAreaElement {
+  return screen.getByLabelText("Output Schema") as HTMLTextAreaElement;
+}
+
 describe("OutputSchemaEditor", () => {
-  it("renders existing fields", () => {
+  it("seeds the text area from the schema", () => {
     render(<OutputSchemaEditor schema={baseSchema} onChange={vi.fn()} />);
-
-    expect(screen.getByDisplayValue("summary")).toBeDefined();
-    expect(screen.getByDisplayValue("count")).toBeDefined();
+    expect(getTextarea().value).toBe("summary,\ncount?: number");
   });
 
-  it("calls onChange with a new field when Add field is clicked", () => {
+  it("emits onChange with the parsed schema on valid edits", () => {
     const onChange = vi.fn();
     render(<OutputSchemaEditor schema={baseSchema} onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /add field/i }));
-    expect(onChange).toHaveBeenCalledTimes(1);
-    const next = onChange.mock.calls[0][0] as WorkflowStepOutputSchema;
-    expect(next.length).toBe(3);
-    expect(next[2]).toMatchObject({ key: "field", type: "string", required: true });
+    fireEvent.change(getTextarea(), { target: { value: "goal, audience" } });
+
+    expect(onChange).toHaveBeenLastCalledWith([
+      { key: "goal", type: "string", required: true },
+      { key: "audience", type: "string", required: true },
+    ]);
   });
 
-  it("calls onChange without removed field when Remove is clicked", () => {
+  it("shows an error and suppresses onChange on invalid input", () => {
     const onChange = vi.fn();
     render(<OutputSchemaEditor schema={baseSchema} onChange={onChange} />);
 
-    const removeBtns = screen.getAllByTitle("Remove field");
-    // Remove the second field ("count")
-    fireEvent.click(removeBtns[1]);
-    expect(onChange).toHaveBeenCalledTimes(1);
-    const next = onChange.mock.calls[0][0] as WorkflowStepOutputSchema;
-    expect(next.length).toBe(1);
-    expect(next[0].key).toBe("summary");
+    fireEvent.change(getTextarea(), { target: { value: "goal, goal" } });
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByText(/Duplicate key 'goal'/)).toBeDefined();
   });
 
-  it("does not allow removing when only one field remains", () => {
-    const onChange = vi.fn();
+  it("reports validity changes", () => {
+    const onValidityChange = vi.fn();
     render(
-      <OutputSchemaEditor
-        schema={[{ key: "only", type: "string", required: true }]}
-        onChange={onChange}
-      />,
+      <OutputSchemaEditor schema={baseSchema} onChange={vi.fn()} onValidityChange={onValidityChange} />,
     );
 
-    const removeBtn = screen.getByTitle("Remove field") as HTMLButtonElement;
-    expect(removeBtn.disabled).toBe(true);
+    fireEvent.change(getTextarea(), { target: { value: "a {" } });
+    expect(onValidityChange).toHaveBeenLastCalledWith(false);
+
+    fireEvent.change(getTextarea(), { target: { value: "a" } });
+    expect(onValidityChange).toHaveBeenLastCalledWith(true);
   });
 
-  it("reveals itemType select when type is changed to array", () => {
-    const onChange = vi.fn();
-    const { rerender } = render(
-      <OutputSchemaEditor schema={baseSchema} onChange={onChange} />,
-    );
-
-    // Change type of first field to "array"
-    const typeSelects = screen.getAllByLabelText(/Field \d+ type/i);
-    fireEvent.change(typeSelects[0], { target: { value: "array" } });
-
-    expect(onChange).toHaveBeenCalledTimes(1);
-    const next = onChange.mock.calls[0][0] as WorkflowStepOutputSchema;
-
-    // Rerender with updated schema to verify item type select appears
-    rerender(
-      <OutputSchemaEditor
-        schema={next}
-        onChange={onChange}
-      />,
-    );
-
-    expect(screen.getByLabelText(/Field 1 item type/i)).toBeDefined();
-  });
-
-  it("hides Add field button and Remove buttons when disabled", () => {
-    render(
-      <OutputSchemaEditor
-        schema={baseSchema}
-        onChange={vi.fn()}
-        disabled
-      />,
-    );
-
-    expect(screen.queryByRole("button", { name: /add field/i })).toBeNull();
-    expect(screen.queryByTitle("Remove field")).toBeNull();
+  it("renders read-only when disabled", () => {
+    render(<OutputSchemaEditor schema={baseSchema} onChange={vi.fn()} disabled />);
+    expect(getTextarea().readOnly).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CreateWorkflowTemplateRequest } from "@orca/contracts";
 import { OutputSchemaEditor } from "./OutputSchemaEditor";
 import { CloseIcon, PlusIcon } from "./icons";
@@ -9,6 +9,7 @@ export interface StepListEditorProps {
   steps: WorkflowStepDraft[];
   onChange: (next: WorkflowStepDraft[]) => void;
   disabled?: boolean;
+  onOutputSchemaValidityChange?: (invalid: boolean) => void;
 }
 
 // ── Drag icon (6-dot grid) ────────────────────────────────────────────────────
@@ -50,7 +51,7 @@ function ChevronDownIcon({ size = 14 }: { size?: number }) {
   );
 }
 
-function createStepDraft(steps: WorkflowStepDraft[]): WorkflowStepDraft {
+export function createStepDraft(steps: WorkflowStepDraft[]): WorkflowStepDraft {
   const numericSuffixes = steps
     .map((step) => /^step-(\d+)$/.exec(step.id)?.[1])
     .map((value) => Number(value ?? "0"));
@@ -65,9 +66,27 @@ function createStepDraft(steps: WorkflowStepDraft[]): WorkflowStepDraft {
   };
 }
 
-export function StepEditor({ steps, onChange, disabled = false }: StepListEditorProps) {
+export function StepEditor({
+  steps,
+  onChange,
+  disabled = false,
+  onOutputSchemaValidityChange,
+}: StepListEditorProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  // Track step ids whose output-schema text is currently invalid. Keyed by id
+  // (not index) so reorder/removal can't leave a stale entry behind.
+  const [invalidStepIds, setInvalidStepIds] = useState<Set<string>>(() => new Set());
   const dragIdx = useRef<number | null>(null);
+
+  // Report aggregate validity upward; prune ids for steps that no longer exist.
+  useEffect(() => {
+    const liveIds = new Set(steps.map((s) => s.id));
+    let anyInvalid = false;
+    for (const id of invalidStepIds) {
+      if (liveIds.has(id)) anyInvalid = true;
+    }
+    onOutputSchemaValidityChange?.(anyInvalid);
+  }, [invalidStepIds, steps, onOutputSchemaValidityChange]);
 
   function toggleExpand(id: string) {
     setExpanded((prev) => {
@@ -125,7 +144,7 @@ export function StepEditor({ steps, onChange, disabled = false }: StepListEditor
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <div style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
       {steps.map((step, i) => {
         const isOpen = expanded.has(step.id);
         return (
@@ -356,6 +375,14 @@ export function StepEditor({ steps, onChange, disabled = false }: StepListEditor
                   schema={step.outputSchema}
                   onChange={(nextSchema) => updateStep(i, { outputSchema: nextSchema })}
                   disabled={disabled}
+                  onValidityChange={(valid) =>
+                    setInvalidStepIds((prev) => {
+                      const nextSet = new Set(prev);
+                      if (valid) nextSet.delete(step.id);
+                      else nextSet.add(step.id);
+                      return nextSet;
+                    })
+                  }
                 />
               </div>
             )}

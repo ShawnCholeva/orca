@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   CreateWorkflowTemplateRequest,
   type CreateWorkflowTemplateRequest as CreateWorkflowTemplateInput,
@@ -9,16 +9,27 @@ import {
 } from "@orca/contracts";
 import { toErrorMessage } from "../api";
 import { createTemplate, duplicateTemplate, saveTemplate } from "./api";
-import { type GuardrailDraft } from "./GuardrailEditor";
+import { LockIcon } from "./icons";
 import { NodeDetailModal, type NodeDetail } from "./NodeDetailModal";
 import { ScopePicker } from "./ScopeControls";
-import { StepEditor, type WorkflowStepDraft } from "./StepEditor";
+import { StepEditor, createStepDraft, type WorkflowStepDraft } from "./StepEditor";
 import { WorkflowFlow } from "./WorkflowFlow";
 import { buildInitialGraph, reconcileGraph } from "./graph-sync";
 
 // ─── Draft types ──────────────────────────────────────────────────────────────
 
 interface TemplateDraft {
+  name: string;
+  description: string;
+  scope: WorkflowScope;
+  scopeName: string;
+  steps: WorkflowStepDraft[];
+  graph: WorkflowGraph;
+}
+
+// Persisted-shape: the fields that are round-tripped through save/load.
+// Used for dirty-tracking — positions are included via the graph.
+interface PersistedShape {
   name: string;
   description: string;
   scope: WorkflowScope;
@@ -57,9 +68,21 @@ function toDraft(template: WorkflowTemplate): TemplateDraft {
   };
 }
 
+function toPersistedShape(draft: TemplateDraft, materializedGraph: WorkflowGraph): PersistedShape {
+  return {
+    name: draft.name,
+    description: draft.description,
+    scope: draft.scope,
+    scopeName: draft.scopeName,
+    steps: draft.steps,
+    graph: materializedGraph,
+  };
+}
+
 function buildTemplateInput(
   draft: TemplateDraft,
   guardrails: WorkflowTemplate["guardrails"],
+  graph: WorkflowGraph,
 ): CreateWorkflowTemplateInput {
   const parsed = CreateWorkflowTemplateRequest.safeParse({
     name: draft.name.trim(),
@@ -75,7 +98,7 @@ function buildTemplateInput(
       agentPreference: step.agentPreference,
     })),
     guardrails,
-    graph: reconcileGraph(draft.steps, draft.graph),
+    graph,
   });
 
   if (!parsed.success) {
@@ -86,21 +109,6 @@ function buildTemplateInput(
 
 function buildDuplicateName(name: string): string {
   return name.endsWith(" Copy") ? `${name} 2` : `${name} Copy`;
-}
-
-function createDefaultStep(steps: WorkflowStepDraft[]): WorkflowStepDraft {
-  const numericSuffixes = steps
-    .map((step) => /^step-(\d+)$/.exec(step.id)?.[1])
-    .map((value) => Number(value ?? "0"));
-  const nextIndex = (numericSuffixes.length === 0 ? 0 : Math.max(...numericSuffixes)) + 1;
-  return {
-    id: `step-${nextIndex}`,
-    ordinal: steps.length,
-    name: "New step",
-    instructions: "",
-    outputSchema: [{ key: "result", type: "string" as const, required: true }],
-    agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }],
-  };
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -122,27 +130,35 @@ export function TemplateDetail({
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [openNodeId, setOpenNodeId] = useState<string | null>(null);
-
-  // Keep a ref to the latest draft.graph for callbacks that close over stale state
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-
-  // Reset when template changes (e.g., selecting a different template)
-  useEffect(() => {
-    setDraft(toDraft(template));
-    setEditing(isNew);
-    setError(null);
-    setWarnings([]);
-    setSaving(false);
-    setDuplicating(false);
-    setOpenNodeId(null);
-  }, [template, isNew]);
+  // True while any on-screen output-schema text is unparseable. Gates Save so
+  // we never silently persist the last valid schema over visibly-invalid text.
+  const [schemaInvalid, setSchemaInvalid] = useState(false);
 
   // Materialize the graph: reconcile steps into the working graph
   const materializedGraph = useMemo(
     () => reconcileGraph(draft.steps, draft.graph),
     [draft.steps, draft.graph],
   );
+
+  // ── Dirty tracking ──────────────────────────────────────────────────────────
+
+  // baseline is the persisted-shape at last save (or initial load).
+  // Component remounts on template switch (key={selected.id} in WorkflowsPage),
+  // so this initialization is correct for the switch case.
+  // On save we update baseline explicitly (see handleSave).
+  const initialDraft = useMemo(() => toDraft(template), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const initialMaterializedGraph = useMemo(
+    () => reconcileGraph(initialDraft.steps, initialDraft.graph),
+    [initialDraft],
+  );
+  const [baseline, setBaseline] = useState<PersistedShape>(() =>
+    toPersistedShape(initialDraft, initialMaterializedGraph),
+  );
+
+  const dirty = useMemo(() => {
+    const current = toPersistedShape(draft, materializedGraph);
+    return JSON.stringify(current) !== JSON.stringify(baseline);
+  }, [draft, materializedGraph, baseline]);
 
   // ── Save / Duplicate / Discard / Create ────────────────────────────────────
 
@@ -151,9 +167,11 @@ export function TemplateDetail({
     setError(null);
     setWarnings([]);
     try {
-      const payload = buildTemplateInput(draft, template.guardrails);
+      const payload = buildTemplateInput(draft, template.guardrails, materializedGraph);
       const result = await saveTemplate(template.id, payload);
       if (result.warnings.length > 0) setWarnings(result.warnings);
+      // Update baseline to current shape so dirty clears
+      setBaseline(toPersistedShape(draft, materializedGraph));
       setEditing(false);
       onTemplateSaved(result.template);
     } catch (err) {
@@ -168,7 +186,7 @@ export function TemplateDetail({
     setError(null);
     setWarnings([]);
     try {
-      const payload = buildTemplateInput(draft, []);
+      const payload = buildTemplateInput(draft, [], materializedGraph);
       const result = await createTemplate(payload);
       if (result.warnings.length > 0) setWarnings(result.warnings);
       setEditing(false);
@@ -195,12 +213,15 @@ export function TemplateDetail({
     }
   }
 
-  function handleCancel() {
+  function handleDiscard() {
     if (isNew) {
       onDiscard?.();
     } else {
-      // restore draft from current template
-      setDraft(toDraft(template));
+      // Revert draft to baseline (re-derive from template prop)
+      const reverted = toDraft(template);
+      setDraft(reverted);
+      const revertedGraph = reconcileGraph(reverted.steps, reverted.graph);
+      setBaseline(toPersistedShape(reverted, revertedGraph));
       setEditing(false);
       setError(null);
       setWarnings([]);
@@ -233,7 +254,7 @@ export function TemplateDetail({
     if (locked) return;
     if (type === "step") {
       setDraft((current) => {
-        const newStep = createDefaultStep(current.steps);
+        const newStep = createStepDraft(current.steps);
         const nextSteps = [...current.steps, newStep];
         const nextGraph = reconcileGraph(nextSteps, current.graph);
         // schedule opening the new node
@@ -393,7 +414,7 @@ export function TemplateDetail({
         </div>
 
         <div className="workflow-detail-panel__actions">
-          {/* Duplicate to Custom — always available */}
+          {/* Duplicate to Custom — always available for non-new */}
           {!isNew && (
             <button
               type="button"
@@ -405,36 +426,41 @@ export function TemplateDetail({
             </button>
           )}
 
-          {/* Edit/Save/Cancel — only for non-locked */}
+          {/* Unlocked non-new: Edit/Done toggle + Save Changes + Discard */}
           {!locked && !isNew && (
-            editing ? (
-              <>
-                <button
-                  type="button"
-                  className="workflow-primary-btn workflow-primary-btn--secondary"
-                  onClick={handleCancel}
-                  disabled={saving}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="workflow-primary-btn"
-                  onClick={handleSave}
-                  disabled={saving || duplicating}
-                >
-                  {saving ? "Saving…" : "Save Changes"}
-                </button>
-              </>
-            ) : (
+            <>
+              {/* Edit toggles the meta/list editor; Done exits back to canvas view */}
               <button
                 type="button"
                 className="workflow-primary-btn workflow-primary-btn--secondary"
-                onClick={() => setEditing(true)}
+                onClick={() => setEditing((e) => !e)}
+                disabled={saving}
               >
-                Edit
+                {editing ? "Done" : "Edit"}
               </button>
-            )
+
+              {/* Discard — only when there are unsaved changes */}
+              {dirty && (
+                <button
+                  type="button"
+                  className="workflow-primary-btn workflow-primary-btn--secondary"
+                  onClick={handleDiscard}
+                  disabled={saving}
+                >
+                  Discard changes
+                </button>
+              )}
+
+              {/* Save Changes — always present for non-locked non-new, disabled when clean */}
+              <button
+                type="button"
+                className="workflow-primary-btn"
+                onClick={handleSave}
+                disabled={!dirty || saving || duplicating || schemaInvalid}
+              >
+                {saving ? "Saving…" : "Save Changes"}
+              </button>
+            </>
           )}
 
           {/* Draft footer — Discard / Create */}
@@ -443,7 +469,7 @@ export function TemplateDetail({
               <button
                 type="button"
                 className="workflow-primary-btn workflow-primary-btn--secondary"
-                onClick={handleCancel}
+                onClick={handleDiscard}
                 disabled={saving}
               >
                 Discard
@@ -460,6 +486,16 @@ export function TemplateDetail({
           )}
         </div>
       </div>
+
+      {locked && (
+        <div className="workflow-locked-notice" role="note">
+          <LockIcon />
+          <span>
+            <strong>Built-in workflow — read-only.</strong> Its steps and flow can&apos;t be
+            edited. Click <em>Duplicate to Custom</em> to make an editable copy.
+          </span>
+        </div>
+      )}
 
       {error && <div className="workflow-error-banner">{error}</div>}
 
@@ -526,7 +562,10 @@ export function TemplateDetail({
       {/* Steps or canvas */}
       <div className="workflow-section">
         <div className="workflow-section__header">
-          <h3>{editing ? "Steps" : "Flow"}</h3>
+          <h3>
+            {editing ? "Steps" : "Flow"}
+            {locked && <span className="workflow-section__readonly"> · read-only</span>}
+          </h3>
         </div>
 
         {editing ? (
@@ -536,10 +575,11 @@ export function TemplateDetail({
               setDraft((current) => ({
                 ...current,
                 steps: nextSteps,
-                graph: reconcileGraph(nextSteps, current.graph),
+                graph: current.graph,
               }))
             }
             disabled={locked}
+            onOutputSchemaValidityChange={setSchemaInvalid}
           />
         ) : (
           <WorkflowFlow
@@ -570,12 +610,17 @@ export function TemplateDetail({
               ? () => setOpenNodeId(materializedGraph.nodes[openNodeIndex + 1].id)
               : null
           }
-          onClose={() => setOpenNodeId(null)}
+          onClose={() => {
+            setOpenNodeId(null);
+            // The modal's invalid text leaves the screen on close; clear the gate
+            // so a closed modal can't keep Save disabled.
+            setSchemaInvalid(false);
+          }}
           onDelete={() => {
             handleRemoveNode(openNodeId!);
-            setOpenNodeId(null);
           }}
           readOnly={locked}
+          onOutputSchemaValidityChange={setSchemaInvalid}
         />
       )}
     </section>
