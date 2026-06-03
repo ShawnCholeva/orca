@@ -52,6 +52,7 @@ function rowToStepRun(row: WorkflowStepRunRow): WorkflowStepRunT {
     selectedProviderId: row.selected_provider_id as never,
     selectedModelId: row.selected_model_id,
     operatorSelectedAt: row.operator_selected_at,
+    stepResult: null,
   });
 }
 
