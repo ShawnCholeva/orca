@@ -713,7 +713,15 @@ export const StepResultScoringRequest = z
     output: z.record(z.unknown()).nullable(),
     facts: StepResultScoringFacts
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!hasMaxSerializedBytes(value, ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `StepResultScoringRequest must be at most ${ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES} bytes when serialized`,
+      });
+    }
+  });
 export type StepResultScoringRequest = z.infer<typeof StepResultScoringRequest>;
 
 export const StepResultScoringProposal = z
