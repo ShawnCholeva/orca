@@ -70,6 +70,7 @@
 .workflow-detail-panel__title {
   font-size: 20px;
   line-height: 1.1;
+  color: var(--text-1);
 }
 
 .workflows-page__empty,
@@ -341,6 +342,8 @@
 }
 
 .workflow-section {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;

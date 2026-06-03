@@ -14,7 +14,7 @@ export interface WorkflowFlowProps {
 
 const NODE_W = 240;
 const NODE_H = 64;
-const VIEWPORT_H = 460;
+const VIEWPORT_H_MIN = 320;
 const MIN_SCALE = 0.4;
 const MAX_SCALE = 2;
 
@@ -225,7 +225,7 @@ export function WorkflowFlow({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
       {/* Toolbar */}
       {!readOnly && (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -294,15 +294,15 @@ export function WorkflowFlow({
       </div>}
 
       {/* Canvas viewport (relative wrapper hosts the zoom controls) */}
-      <div style={{ position: "relative" }}>
+      <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex" }}>
         <div
           ref={containerRef}
           onMouseDown={handleCanvasMouseDown}
           onWheel={handleWheel}
           style={{
             position: "relative",
-            width: "100%",
-            height: VIEWPORT_H,
+            flex: 1,
+            minHeight: VIEWPORT_H_MIN,
             minWidth: 0,
             background: "var(--bg)",
             border: "1px solid var(--hairline)",

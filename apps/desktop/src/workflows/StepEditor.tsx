@@ -144,7 +144,7 @@ export function StepEditor({
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <div style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
       {steps.map((step, i) => {
         const isOpen = expanded.has(step.id);
         return (
