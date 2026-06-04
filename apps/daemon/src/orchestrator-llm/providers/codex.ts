@@ -37,8 +37,20 @@ export class CodexShadowProvider implements ShadowProvider {
     };
   }
 
-  workerHookConfig(_args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) {
-    return { files: [], spawnArgs: [] };
+  workerHookConfig(args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) {
+    // CODEX_HOME points Codex at this private dir; config.toml + hooks.json live at
+    // its root (CODEX_HOME *is* the codex home, so no `.codex/` prefix here).
+    return {
+      files: [
+        { relPath: "config.toml", contents: "[features]\nhooks = true\n" },
+        {
+          relPath: "hooks.json",
+          contents: JSON.stringify(buildCodexWorkerHookSettings(args), null, 2),
+        },
+      ],
+      spawnArgs: [],
+      env: { CODEX_HOME: args.configDir },
+    };
   }
 
   permissionRule(_toolName: string, _toolInput: unknown): string | null {
@@ -102,6 +114,60 @@ function buildCodexHookSettings(args: { goalId: string; port: number; authToken:
     hooks: {
       Stop: [{ hooks: [{ type: "command", command: commandFor(false) }] }],
       StopFailure: [{ hooks: [{ type: "command", command: commandFor(true) }] }],
+    },
+  };
+}
+
+function buildCodexWorkerHookSettings(args: {
+  sessionId: string;
+  port: number;
+  authToken: string;
+}): unknown {
+  const sid = encodeURIComponent(args.sessionId);
+  const auth = `Authorization: Bearer ${args.authToken}`;
+  const stopCommand = (failure: boolean) => [
+    "curl",
+    "-fsS",
+    "-X", "POST",
+    "-H", shellArg(auth),
+    "-H", shellArg("Content-Type: application/json"),
+    "--data-binary", "@-",
+    shellArg(`http://127.0.0.1:${args.port}/v1/agent-hooks/stop?sessionId=${sid}${failure ? "&failure=1" : ""}`),
+  ].join(" ");
+
+  // Codex omits tool_use_id on PermissionRequest (verified codex-cli 0.136.0). The
+  // shared store dedups purely on toolUseId, so an empty id would collide across the
+  // concurrent worker sessions. Inject a stable correlation id before forwarding.
+  // session_id + turn_id alone is NOT enough: turn_id is turn-scoped, so two distinct
+  // permission requests in one turn would synthesize the same id and the store would
+  // silently reuse the first request's decision (an "allow" could auto-allow a different
+  // tool, breaking safe-by-default). We append a sha1 digest of tool_name + tool_input
+  // so distinct tool calls get distinct ids, while a genuine retry of the identical call
+  // still dedups (mirroring Claude's per-tool-call tool_use_id). node + crypto are
+  // guaranteed in this monorepo; jq is not.
+  const relay =
+    "const c=[];process.stdin.on('data',d=>c.push(d));" +
+    "process.stdin.on('end',()=>{let b={};try{b=JSON.parse(Buffer.concat(c).toString('utf8')||'{}')}catch{};" +
+    "const sig=require('crypto').createHash('sha1').update(String(b.tool_name||'')+JSON.stringify(b.tool_input||{})).digest('hex').slice(0,12);" +
+    "b.tool_use_id=String(b.session_id||'')+':'+String(b.turn_id||'')+':'+sig;" +
+    "process.stdout.write(JSON.stringify(b))});";
+  const permCommand = [
+    "node", "-e", shellArg(relay),
+    "|",
+    "curl",
+    "-fsS",
+    "-X", "POST",
+    "-H", shellArg(auth),
+    "-H", shellArg("Content-Type: application/json"),
+    "--data-binary", "@-",
+    shellArg(`http://127.0.0.1:${args.port}/v1/agent-hooks/permission?sessionId=${sid}`),
+  ].join(" ");
+
+  return {
+    hooks: {
+      Stop: [{ hooks: [{ type: "command", command: stopCommand(false) }] }],
+      StopFailure: [{ hooks: [{ type: "command", command: stopCommand(true) }] }],
+      PermissionRequest: [{ hooks: [{ type: "command", command: permCommand }] }],
     },
   };
 }
