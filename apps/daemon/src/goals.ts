@@ -61,6 +61,7 @@ interface GoalRow {
   created_at: string;
   updated_at: string;
   archived_at: string | null;
+  worker_permission_mode: string;
 }
 
 function rowToGoal(row: GoalRow): Goal {
@@ -76,6 +77,7 @@ function rowToGoal(row: GoalRow): Goal {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     archivedAt: row.archived_at,
+    workerPermissionMode: row.worker_permission_mode,
   });
 }
 
@@ -99,7 +101,7 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
         "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)"
       ),
       insertGoal: db.prepare(
-        "INSERT INTO goals (id, title, description, status, autonomy_level, orchestrator_provider, orchestrator_model, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, ?, ?, ?, ?)"
+        "INSERT INTO goals (id, title, description, status, autonomy_level, orchestrator_provider, orchestrator_model, worker_permission_mode, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, ?, ?, 'ask', ?, ?)"
       ),
       selectGoals: db.prepare(
         "SELECT * FROM goals WHERE archived_at IS NULL ORDER BY updated_at DESC"
@@ -313,6 +315,7 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
     createdAt: now,
     updatedAt: now,
     archivedAt: null,
+    workerPermissionMode: "ask",
   };
 }
 

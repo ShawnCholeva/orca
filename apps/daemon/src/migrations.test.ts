@@ -73,7 +73,8 @@ describe("runMigrations", () => {
       "0019_orchestrator_messages_pending_question.sql",
       "0020_drop_removed_provider_execution_modes.sql",
       "0021_workflow_template_scope_graph.sql",
-      "0022_workflow_step_result.sql"
+      "0022_workflow_step_result.sql",
+      "0023_worker_permission_mode.sql"
     ]);
   });
 
@@ -177,7 +178,8 @@ describe("runMigrations", () => {
       "0019_orchestrator_messages_pending_question.sql",
       "0020_drop_removed_provider_execution_modes.sql",
       "0021_workflow_template_scope_graph.sql",
-      "0022_workflow_step_result.sql"
+      "0022_workflow_step_result.sql",
+      "0023_worker_permission_mode.sql"
     ]);
 
     const goalCount = (
@@ -231,6 +233,7 @@ describe("runMigrations", () => {
       "why_rationale",
       "internal_kind",
       "pending_question",
+      "pending_approval",
     ]);
   });
 
@@ -349,7 +352,8 @@ describe("session tables migration", () => {
       "0019_orchestrator_messages_pending_question.sql",
       "0020_drop_removed_provider_execution_modes.sql",
       "0021_workflow_template_scope_graph.sql",
-      "0022_workflow_step_result.sql"
+      "0022_workflow_step_result.sql",
+      "0023_worker_permission_mode.sql"
     ]);
 
     const tables = (
@@ -765,6 +769,7 @@ describe("migration 0010 workflows", () => {
     expect(goalsCols).toContain("orchestrator_provider");
     expect(goalsCols).toContain("orchestrator_model");
     expect(goalsCols).toContain("active_workflow_run_id");
+    expect(goalsCols).toContain("worker_permission_mode");
 
     const sessionsCols = (
       db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]
@@ -845,7 +850,8 @@ describe("migration 0010 workflows", () => {
       "0019_orchestrator_messages_pending_question.sql",
       "0020_drop_removed_provider_execution_modes.sql",
       "0021_workflow_template_scope_graph.sql",
-      "0022_workflow_step_result.sql"
+      "0022_workflow_step_result.sql",
+      "0023_worker_permission_mode.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1422,7 +1428,8 @@ describe("migration 0012 orchestration transport", () => {
       "0019_orchestrator_messages_pending_question.sql",
       "0020_drop_removed_provider_execution_modes.sql",
       "0021_workflow_template_scope_graph.sql",
-      "0022_workflow_step_result.sql"
+      "0022_workflow_step_result.sql",
+      "0023_worker_permission_mode.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

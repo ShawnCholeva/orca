@@ -15,6 +15,7 @@ import {
   archiveGoal,
   createGoal,
   type CreateGoalCtx,
+  getGoalById,
   listGoals,
   NotFoundError,
   updateGoal,
@@ -943,6 +944,31 @@ describe("archiveGoal", () => {
     `);
 
     expect(() => archiveGoal(created.id)).not.toThrow();
+  });
+});
+
+describe("workerPermissionMode", () => {
+  it("new goals default workerPermissionMode to 'ask' and round-trip through the DB", async () => {
+    const { db, ctx } = setup();
+
+    const created = await createGoal({ title: "Permission Mode Test" }, ctx);
+    expect(created.workerPermissionMode).toBe("ask");
+
+    const row = db
+      .prepare("SELECT worker_permission_mode FROM goals WHERE id = ?")
+      .get(created.id) as { worker_permission_mode: string } | undefined;
+    expect(row?.worker_permission_mode).toBe("ask");
+
+    // Verify rowToGoal mapping path: read back through getGoalById
+    const fetched = getGoalById(db, created.id);
+    expect(fetched).not.toBeNull();
+    expect(fetched!.workerPermissionMode).toBe("ask");
+
+    // Update to a non-default value and confirm the mapping path reflects it
+    db.prepare("UPDATE goals SET worker_permission_mode = 'auto' WHERE id = ?").run(created.id);
+    const fetchedAfterUpdate = getGoalById(db, created.id);
+    expect(fetchedAfterUpdate).not.toBeNull();
+    expect(fetchedAfterUpdate!.workerPermissionMode).toBe("auto");
   });
 });
 
