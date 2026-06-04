@@ -17,6 +17,7 @@ const goal = {
   description: "Guided goal implementation",
   status: "active" as const,
   autonomyLevel: 1,
+  workerPermissionMode: "ask" as const,
   createdAt: now,
   updatedAt: now,
   archivedAt: null,

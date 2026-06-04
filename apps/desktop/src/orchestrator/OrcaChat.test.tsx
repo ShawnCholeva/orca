@@ -45,6 +45,7 @@ const goal: Goal = {
   description: "Goal description",
   status: "active",
   autonomyLevel: 1,
+  workerPermissionMode: "ask",
   orchestratorProvider: "orca/openai",
   orchestratorModel: "gpt-5",
   activeWorkflowRunId: null,

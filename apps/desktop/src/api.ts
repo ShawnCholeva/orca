@@ -964,6 +964,46 @@ export async function submitWorkerAnswers(
   );
 }
 
+export async function submitPermissionDecision(
+  goalId: string,
+  approvalId: string,
+  decision: "allow" | "deny",
+  remember = false,
+): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  return requestVoid(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/permission-approvals/${encodeURIComponent(approvalId)}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify({ decision, remember }),
+    },
+    "Submit permission decision failed",
+  );
+}
+
+export async function setWorkerPermissionMode(
+  goalId: string,
+  workerPermissionMode: "ask" | "auto",
+): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  return requestVoid(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/worker-permission-mode`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify({ workerPermissionMode }),
+    },
+    "Set worker permission mode failed",
+  );
+}
+
 export async function listWorkflowDecisions(
   goalId: string,
   runId: string,
