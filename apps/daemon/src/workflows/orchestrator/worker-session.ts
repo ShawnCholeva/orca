@@ -1,10 +1,9 @@
 import { mkdirSync, writeFileSync, watch, openSync, readSync, closeSync, type FSWatcher } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import {
   defaultTmuxRunner, newSession, capturePane, sendEnter, paste, pipePaneToFile, killSession, hasSession,
   type TmuxRunner,
 } from "../../tmux/runner.js";
-import { buildAgentHookSettings } from "../../agent-hooks/hook-settings.js";
 
 const TRUST_DEFAULT = /trust this folder|Is this a project you created or one you trust|do you trust/i;
 const READY_DEFAULT = /(auto mode on|\? for shortcuts|\n\s*❯)/i;
@@ -21,6 +20,8 @@ export type DeliverResult = "delivered" | "no_session" | "timeout";
 
 export interface WorkerSpawnInput {
   sessionId: string;
+  goalId: string;
+  adapterId: string;
   workspacePath: string;
   command: string;            // resolved claude binary (from adapter.resolveSpawn)
   env: Record<string, string>; // adapter env (already secret-sanitized; carries HOME for auth)
@@ -31,6 +32,10 @@ export interface WorkerSessionDeps {
   daemonPort: number;
   authToken: string;
   claudeBin: string;
+  resolveProvider: (adapterId: string) => {
+    workerHookConfig: (args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) =>
+      { files: { relPath: string; contents: string }[]; spawnArgs: string[]; env?: Record<string, string> };
+  };
   tmux?: TmuxRunner;
   captureSink: (sessionId: string, chunk: Buffer) => void; // appends pane bytes to the output store
   markRunning?: (sessionId: string) => void; // optional: flip DB session status to running
@@ -61,17 +66,28 @@ export class WorkerSessionManager {
     if (this.sessions.has(input.sessionId)) return;
     const cfgDir = join(this.deps.privateRoot, input.sessionId);
     mkdirSync(cfgDir, { recursive: true });
-    const settingsPath = join(cfgDir, "settings.json");
-    // Hooks via private --settings file (repo-safe; workspace stays the cwd).
-    writeFileSync(
-      settingsPath,
-      JSON.stringify(buildAgentHookSettings({ sessionId: input.sessionId, port: this.deps.daemonPort, authToken: this.deps.authToken }), null, 2),
-      "utf8",
-    );
+    const provider = this.deps.resolveProvider(input.adapterId);
+    const hookCfg = provider.workerHookConfig({
+      goalId: input.goalId,
+      sessionId: input.sessionId,
+      port: this.deps.daemonPort,
+      authToken: this.deps.authToken,
+      configDir: cfgDir,
+    });
+    for (const file of hookCfg.files) {
+      const target = join(cfgDir, file.relPath);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, file.contents, "utf8");
+    }
     const name = this.name(input.sessionId);
-    // Auth: inherit input.env (carries HOME → real ~/.claude). Do NOT set CLAUDE_CONFIG_DIR.
-    const command = `${input.command} --settings ${JSON.stringify(settingsPath)}`;
-    await newSession(this.tmux, name, input.workspacePath, command, input.env);
+    // tmux runs this command string via `sh -c`, so quote any token containing
+    // whitespace (e.g. a settings path under a data dir with spaces). JSON.stringify
+    // matches the quoting the pre-seam code used.
+    const command = [input.command, ...hookCfg.spawnArgs]
+      .map((token) => (/\s/.test(token) ? JSON.stringify(token) : token))
+      .join(" ");
+    const env = { ...input.env, ...(hookCfg.env ?? {}) };
+    await newSession(this.tmux, name, input.workspacePath, command, env);
     // Output capture: pipe pane to a private file; daemon tails it (Task 3.2).
     await pipePaneToFile(this.tmux, name, join(cfgDir, "pane.out"));
     this.startTail(input.sessionId, join(cfgDir, "pane.out"));

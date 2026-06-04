@@ -182,6 +182,7 @@ import { buildContextFromDb } from './orchestrator-llm/build-context.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
 import { registerAgentHookRoutes } from './agent-hooks/routes.js';
 import { WorkerSessionManager } from './workflows/orchestrator/worker-session.js';
+import { resolveShadowProvider } from './orchestrator-llm/providers/registry.js';
 import { WorkerQuestionStore } from './workflows/orchestrator/worker-questions.js';
 import { validateAnswers, assembleAnswerReason } from './workflows/orchestrator/worker-answer-format.js';
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
@@ -512,6 +513,7 @@ export function createServer(
     daemonPort: 0, // set after listen via setDaemonPort, mirroring the shadow
     authToken: config.getAuthToken(),
     claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
+    resolveProvider: (adapterId) => resolveShadowProvider(adapterId as ShadowAdapterId),
     captureSink: (sessionId, chunk) => sessionOutputStore.appendChunk(sessionId, chunk),
     markRunning: (sessionId) => {
       db.prepare(
@@ -558,7 +560,7 @@ export function createServer(
       const adapter = adapterRegistry.get(adapterId);
       if (!adapter) { console.warn(`[orchestrator] workerSpawn: no adapter ${adapterId}`); return; }
       const spawn = await adapter.resolveSpawn({ goalId, sessionId, workspacePath: wsRow.path });
-      await workerSessions.spawn({ sessionId, workspacePath: wsRow.path, command: spawn.command, env: spawn.env });
+      await workerSessions.spawn({ sessionId, goalId, adapterId, workspacePath: wsRow.path, command: spawn.command, env: spawn.env });
     },
     // workerDeliver
     (sessionId, text) => workerSessions.deliver(sessionId, text),

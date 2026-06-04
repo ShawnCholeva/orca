@@ -4,6 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkerSessionManager } from "./worker-session.js";
 import type { TmuxRunner } from "../../tmux/runner.js";
+import { resolveShadowProvider } from "../../orchestrator-llm/providers/registry.js";
+import type { ShadowAdapterId } from "../../orchestrator-llm/providers/types.js";
+
+// Wrap resolveShadowProvider to widen the parameter type from ShadowAdapterId to string,
+// satisfying the WorkerSessionDeps.resolveProvider signature.
+const resolveProvider = (adapterId: string) => resolveShadowProvider(adapterId as ShadowAdapterId);
 
 function fakeTmux(paneByCall: string[] = []): TmuxRunner & { calls: string[][] } {
   const calls: string[][] = [];
@@ -21,7 +27,7 @@ function fakeTmux(paneByCall: string[] = []): TmuxRunner & { calls: string[][] }
 describe("WorkerSessionManager.isTmuxAlive", () => {
   it("reflects tmux has-session, not DB status", async () => {
     const base = mkdtempSync(join(tmpdir(), "orca-worker-"));
-    const deps = { privateRoot: base, daemonPort: 8787, authToken: "tok", claudeBin: "claude", captureSink: () => {} } as const;
+    const deps = { privateRoot: base, daemonPort: 8787, authToken: "tok", claudeBin: "claude", captureSink: () => {}, resolveProvider };
     // tmux runner where has-session returns code 1 (dead) for one id, 0 (alive) otherwise.
     const aliveTmux: TmuxRunner = { run: async (args) => ({ stdout: "", stderr: "", code: args[0] === "has-session" ? 0 : 0 }) };
     const deadTmux: TmuxRunner = { run: async (args) => ({ stdout: "", stderr: "", code: args[0] === "has-session" ? 1 : 0 }) };
@@ -37,8 +43,9 @@ describe("WorkerSessionManager.spawn", () => {
     const mgr = new WorkerSessionManager({
       privateRoot, daemonPort: 8787, authToken: "tok",
       claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
+      resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-1", workspacePath: "/repo", command: "claude", env: { HOME: "/home/u" } });
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: { HOME: "/home/u" } });
     // private settings written, NOT under /repo
     expect(existsSync(join(privateRoot, "sess-1", "settings.json"))).toBe(true);
     const settings = JSON.parse(readFileSync(join(privateRoot, "sess-1", "settings.json"), "utf8"));
@@ -52,6 +59,72 @@ describe("WorkerSessionManager.spawn", () => {
     // output pipe established
     expect(tmux.calls.some((c) => c[0] === "pipe-pane")).toBe(true);
   });
+
+  it("uses provider workerHookConfig to write files and form spawn args", async () => {
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const tmux = fakeTmux(["auto mode on"]);
+    const fakeProvider = {
+      workerHookConfig: (args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) => ({
+        files: [{ relPath: "settings.json", contents: '{"hooks":{}}' }],
+        spawnArgs: ["--settings", join(args.configDir, "settings.json")],
+      }),
+    };
+    const mgr = new WorkerSessionManager({
+      privateRoot, daemonPort: 8787, authToken: "tok",
+      claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
+      resolveProvider: (_adapterId) => fakeProvider,
+    });
+    await mgr.spawn({ sessionId: "s1", goalId: "g1", adapterId: "claude-code", workspacePath: "/ws", command: "claude", env: {} });
+    // file written under privateRoot/s1/
+    expect(existsSync(join(privateRoot, "s1", "settings.json"))).toBe(true);
+    expect(readFileSync(join(privateRoot, "s1", "settings.json"), "utf8")).toBe('{"hooks":{}}');
+    // tmux new-session command contains --settings and the scoped settings path
+    const newSess = tmux.calls.find((c) => c[0] === "new-session")!;
+    expect(newSess.join(" ")).toContain("--settings");
+    expect(newSess.join(" ")).toContain(join(privateRoot, "s1", "settings.json"));
+  });
+
+  it("quotes spawnArgs tokens that contain whitespace in the tmux command", async () => {
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const tmux = fakeTmux(["auto mode on"]);
+    const fakeProvider = {
+      workerHookConfig: () => ({
+        files: [{ relPath: "settings.json", contents: '{"hooks":{}}' }],
+        spawnArgs: ["--settings", "/tmp/with space/settings.json"],
+      }),
+    };
+    const mgr = new WorkerSessionManager({
+      privateRoot, daemonPort: 8787, authToken: "tok",
+      claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
+      resolveProvider: (_adapterId) => fakeProvider,
+    });
+    await mgr.spawn({ sessionId: "s-space", goalId: "g1", adapterId: "claude-code", workspacePath: "/ws", command: "claude", env: {} });
+    const newSess = tmux.calls.find((c) => c[0] === "new-session")!;
+    const cmd = newSess.join(" ");
+    // The path with a space must appear JSON-quoted (double-quoted) so sh -c doesn't word-split it
+    expect(cmd).toContain('"/tmp/with space/settings.json"');
+    // The bare unquoted form must NOT appear as a standalone word-split token
+    expect(cmd).not.toMatch(/(?<!")\/tmp\/with space\/settings\.json(?!")/);
+  });
+
+  it("creates parent dirs for nested relPath files", async () => {
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const tmux = fakeTmux(["auto mode on"]);
+    const fakeProvider = {
+      workerHookConfig: () => ({
+        files: [{ relPath: ".codex/hooks.json", contents: "{}" }],
+        spawnArgs: [],
+      }),
+    };
+    const mgr = new WorkerSessionManager({
+      privateRoot, daemonPort: 8787, authToken: "tok",
+      claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
+      resolveProvider: (_adapterId) => fakeProvider,
+    });
+    await mgr.spawn({ sessionId: "s-nested", goalId: "g1", adapterId: "claude-code", workspacePath: "/ws", command: "claude", env: {} });
+    expect(existsSync(join(privateRoot, "s-nested", ".codex", "hooks.json"))).toBe(true);
+    expect(readFileSync(join(privateRoot, "s-nested", ".codex", "hooks.json"), "utf8")).toBe("{}");
+  });
 });
 
 describe("WorkerSessionManager.startTail", () => {
@@ -63,8 +136,9 @@ describe("WorkerSessionManager.startTail", () => {
       tmux: fakeTmux(["auto mode on"]),
       captureSink: (_sid, buf) => void chunks.push(buf.toString("utf8")),
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-1", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
     const paneFile = join(privateRoot, "sess-1", "pane.out");
     appendFileSync(paneFile, "hello-pane");
     await new Promise((r) => setTimeout(r, 50));
@@ -82,8 +156,9 @@ describe("WorkerSessionManager.deliver", () => {
       privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux,
       captureSink: () => {}, startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
       idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
+      resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-1", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
     const result = await mgr.deliver("sess-1", "do the thing\nplease");
     expect(result).toBe("delivered");
     const order = tmux.calls.map((c) => c[0]);
@@ -97,6 +172,7 @@ describe("WorkerSessionManager.deliver", () => {
     const mgr = new WorkerSessionManager({
       privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
       daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux: fakeTmux(), captureSink: () => {},
+      resolveProvider,
     });
     expect(await mgr.deliver("nope", "x")).toBe("no_session");
   });
@@ -112,6 +188,7 @@ describe("WorkerSessionManager.reattach", () => {
       daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
       markRunning: (id) => void marked.push(id),
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      resolveProvider,
     });
     const adopted = await mgr.reattach("sess-1", "/repo");
     expect(adopted).toBe(true);
@@ -137,6 +214,7 @@ describe("WorkerSessionManager.reattach", () => {
     const mgr = new WorkerSessionManager({
       privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
       daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
+      resolveProvider,
     });
     const adopted = await mgr.reattach("sess-missing", "/repo");
     expect(adopted).toBe(false);
@@ -150,8 +228,9 @@ describe("WorkerSessionManager.reattach", () => {
       privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
       daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      resolveProvider,
     });
-    await expect(mgr.spawn({ sessionId: "sess-1", workspacePath: "/repo", command: "claude", env: {} })).resolves.not.toThrow();
+    await expect(mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} })).resolves.not.toThrow();
     await mgr.terminate("sess-1");
   });
 
@@ -163,8 +242,9 @@ describe("WorkerSessionManager.reattach", () => {
       daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
       markRunning: (id) => void marked.push(id),
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-2", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-2", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
     expect(marked).toContain("sess-2");
     await mgr.terminate("sess-2");
   });
