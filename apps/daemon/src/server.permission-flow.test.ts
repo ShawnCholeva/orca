@@ -1,0 +1,290 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import { bootstrapRegistries } from './registry/bootstrap.js';
+import { createServer } from './server.js';
+import { closeDatabase, openDatabase } from './db.js';
+import { defaultMigrationsDir, runMigrations } from './migrations.js';
+import { eventBus } from './events.js';
+import { createDaemonContext } from './daemon-context.js';
+import { seedAgents } from './agents.js';
+import type { Config } from './config.js';
+
+beforeAll(() => {
+  bootstrapRegistries();
+});
+
+const AUTH_HEADERS = { authorization: 'Bearer test-token' } as const;
+
+function createConfig(dataDir: string): Config {
+  return {
+    dataDir,
+    port: 8787,
+    logLevel: 'silent',
+    sessionOutputTailBytes: 1024 * 1024,
+    sessionStopGraceMs: 5000,
+    sessionWsBufferLimitBytes: 1024 * 1024,
+    memoryExtractionMaxInputBytes: 131072,
+    memoryExtractionTimeoutMs: 15000,
+    getAuthToken: () => 'test-token',
+  };
+}
+
+async function startServer(): Promise<{
+  server: FastifyInstance;
+  db: ReturnType<typeof openDatabase>;
+  dataDir: string;
+}> {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-permission-test-'));
+  const config = createConfig(dir);
+  const db = openDatabase(config);
+  runMigrations(db, defaultMigrationsDir());
+  seedAgents(db);
+  const daemonContext = createDaemonContext(db, eventBus);
+  const server = createServer(config, { daemonContext });
+  return { server, db, dataDir: dir };
+}
+
+/**
+ * Insert a bare goal row directly (bypasses the skill pipeline).
+ * Returns the goalId.
+ */
+function insertGoal(db: ReturnType<typeof openDatabase>, goalId: string, permissionMode: 'ask' | 'auto'): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, worker_permission_mode)
+     VALUES (?, ?, '', 'active', 1, ?, ?, ?)`
+  ).run(goalId, 'test-goal', now, now, permissionMode);
+}
+
+/**
+ * Insert a bare workspace + session row directly.
+ * The session points to the goal and uses adapter_id='claude-code'.
+ */
+function insertSession(db: ReturnType<typeof openDatabase>, sessionId: string, goalId: string): void {
+  const now = new Date().toISOString();
+  const workspaceId = `ws-${sessionId}`;
+  db.prepare(
+    `INSERT INTO workspaces (id, goal_id, path, name, workspace_type, git_probe, attached_at)
+     VALUES (?, ?, ?, 'test', 'folder', 'not_a_repo', ?)`
+  ).run(workspaceId, goalId, `/tmp/ws-${sessionId}`, now);
+  db.prepare(
+    `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at)
+     VALUES (?, ?, ?, 'claude-code', 'test session', 'created', ?)`
+  ).run(sessionId, goalId, workspaceId, now);
+}
+
+describe('permission decision flow', () => {
+  let server: FastifyInstance;
+  let db: ReturnType<typeof openDatabase>;
+  let dataDir: string;
+
+  beforeEach(async () => {
+    const result = await startServer();
+    server = result.server;
+    db = result.db;
+    dataDir = result.dataDir;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  // (a) auto-mode goal: permission hook → "allow" immediately, no chat message
+  it('auto-mode goal: POST /v1/agent-hooks/permission resolves allow immediately without a chat message', async () => {
+    const goalId = 'goal-auto-1';
+    const sessionId = 'session-auto-1';
+    insertGoal(db, goalId, 'auto');
+    insertSession(db, sessionId, goalId);
+
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'tu-auto-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { hookSpecificOutput: { hookEventName: string; decision: { behavior: string } } };
+    expect(body.hookSpecificOutput.decision.behavior).toBe('allow');
+
+    // No chat message should have been posted for auto-mode
+    const messages = db
+      .prepare("SELECT COUNT(*) AS cnt FROM orchestrator_messages WHERE goal_id = ?")
+      .get(goalId) as { cnt: number };
+    expect(messages.cnt).toBe(0);
+  });
+
+  // (b) ask-mode goal: hook holds → chat message with pendingApproval → answer → resolves allow
+  it('ask-mode goal: hook holds, chat message appears, answer route resolves it', async () => {
+    const goalId = 'goal-ask-1';
+    const sessionId = 'session-ask-1';
+    insertGoal(db, goalId, 'ask');
+    insertSession(db, sessionId, goalId);
+
+    // Fire the permission hook but don't await it — it should hold open
+    const permissionPromise = server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Bash', tool_input: { command: 'rm -rf /' }, tool_use_id: 'tu-ask-1' },
+    });
+
+    // Wait for the chat message to appear (the hook posts it before blocking)
+    const approvalId = await vi.waitFor(
+      () => {
+        const row = db
+          .prepare("SELECT pending_approval FROM orchestrator_messages WHERE goal_id = ? AND pending_approval IS NOT NULL")
+          .get(goalId) as { pending_approval: string } | undefined;
+        if (!row) throw new Error('pending approval message not yet posted');
+        const parsed = JSON.parse(row.pending_approval) as { approvalId: string };
+        return parsed.approvalId;
+      },
+      { timeout: 2000, interval: 50 }
+    );
+
+    expect(typeof approvalId).toBe('string');
+    expect(approvalId.length).toBeGreaterThan(0);
+
+    // Submit the allow decision via the answer route
+    const answerRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/permission-approvals/${approvalId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { decision: 'allow' },
+    });
+    expect(answerRes.statusCode).toBe(200);
+    expect(answerRes.json()).toMatchObject({ ok: true });
+
+    // Now await the held permission hook — it should resolve to "allow"
+    const permissionRes = await permissionPromise;
+    expect(permissionRes.statusCode).toBe(200);
+    const body = permissionRes.json() as { hookSpecificOutput: { decision: { behavior: string } } };
+    expect(body.hookSpecificOutput.decision.behavior).toBe('allow');
+  });
+
+  // (c) answer route with wrong goalId → 404, then resolve with correct goalId to unblock
+  it('answer route with a different goalId returns 404', async () => {
+    const goalId = 'goal-ask-2';
+    const sessionId = 'session-ask-2';
+    insertGoal(db, goalId, 'ask');
+    insertSession(db, sessionId, goalId);
+
+    const permissionPromise = server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Bash', tool_input: { command: 'echo hi' }, tool_use_id: 'tu-ask-2' },
+    });
+
+    const approvalId = await vi.waitFor(
+      () => {
+        const row = db
+          .prepare("SELECT pending_approval FROM orchestrator_messages WHERE goal_id = ? AND pending_approval IS NOT NULL")
+          .get(goalId) as { pending_approval: string } | undefined;
+        if (!row) throw new Error('pending approval message not yet posted');
+        return (JSON.parse(row.pending_approval) as { approvalId: string }).approvalId;
+      },
+      { timeout: 2000, interval: 50 }
+    );
+
+    // Using the WRONG goalId → should 404
+    const wrongRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/wrong-goal-id/permission-approvals/${approvalId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { decision: 'deny' },
+    });
+    expect(wrongRes.statusCode).toBe(404);
+    expect(wrongRes.json()).toMatchObject({ error: { code: 'approval_not_found' } });
+
+    // Resolve correctly so the held hook doesn't dangle
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/permission-approvals/${approvalId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { decision: 'deny' },
+    });
+    const permissionRes = await permissionPromise;
+    expect(permissionRes.statusCode).toBe(200);
+    const body = permissionRes.json() as { hookSpecificOutput: { decision: { behavior: string } } };
+    expect(body.hookSpecificOutput.decision.behavior).toBe('deny');
+  });
+
+  // (d) PUT /v1/goals/:goalId/worker-permission-mode → 200, mode updated in DB, event replayable
+  it('PUT /v1/goals/:goalId/worker-permission-mode updates the mode to auto', async () => {
+    const goalId = 'goal-mode-toggle';
+    insertGoal(db, goalId, 'ask');
+
+    const res = await server.inject({
+      method: 'PUT',
+      url: `/v1/goals/${goalId}/worker-permission-mode`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workerPermissionMode: 'auto' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { ok: boolean; workerPermissionMode: string };
+    expect(body.ok).toBe(true);
+    expect(body.workerPermissionMode).toBe('auto');
+
+    // Verify the DB was actually updated
+    const row = db
+      .prepare("SELECT worker_permission_mode FROM goals WHERE id = ?")
+      .get(goalId) as { worker_permission_mode: string };
+    expect(row.worker_permission_mode).toBe('auto');
+
+    // Verify the event is DB-backed and replayable via GET /v1/events
+    const eventsRes = await server.inject({
+      method: 'GET',
+      url: '/v1/events?sinceSeq=0',
+      headers: AUTH_HEADERS,
+    });
+    expect(eventsRes.statusCode).toBe(200);
+    const eventsBody = eventsRes.json() as { events: Array<{ type: string; goalId: string; seq: number }> };
+    const modeEvent = eventsBody.events.find(
+      (e) => e.type === 'goal.worker_permission_mode_changed' && e.goalId === goalId
+    );
+    expect(modeEvent).toBeDefined();
+    expect(modeEvent!.seq).toBeGreaterThan(0);
+  });
+
+  it('PUT /v1/goals/:goalId/worker-permission-mode returns 404 for unknown goal', async () => {
+    const res = await server.inject({
+      method: 'PUT',
+      url: '/v1/goals/does-not-exist/worker-permission-mode',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workerPermissionMode: 'auto' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({ error: { code: 'goal_not_found' } });
+  });
+
+  it('unknown session id on permission hook → safe deny', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/agent-hooks/permission?sessionId=no-such-session',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'tu-unknown' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { hookSpecificOutput: { decision: { behavior: string } } };
+    expect(body.hookSpecificOutput.decision.behavior).toBe('deny');
+  });
+
+  it('missing sessionId on permission hook → safe deny', async () => {
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/agent-hooks/permission',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 'tu-nosession' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { hookSpecificOutput: { decision: { behavior: string } } };
+    expect(body.hookSpecificOutput.decision.behavior).toBe('deny');
+  });
+});
