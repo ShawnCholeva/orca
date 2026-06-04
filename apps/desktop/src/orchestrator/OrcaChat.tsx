@@ -29,6 +29,8 @@ import {
 import { AgentParaphrasedMessage } from "./AgentParaphrasedMessage";
 import { InternalThoughtRow } from "./InternalThoughtRow";
 import { MarkDoneConfirmCard } from "./MarkDoneConfirmCard";
+import { PermissionApprovalCard } from "./PermissionApprovalCard";
+import { WorkerPermissionToggle } from "./WorkerPermissionToggle";
 import "./orca-chat.css";
 
 type Props = {
@@ -386,6 +388,12 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
               }
             />
 
+            <WorkerPermissionToggle
+              goalId={selectedGoal.id}
+              mode={selectedGoal.workerPermissionMode}
+              disabled={!connected}
+            />
+
             {loading && <ThinkingRow label="routing" />}
 
             {!loading && error && (
@@ -624,6 +632,9 @@ function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage;
         <div className="orca-chat-message">{message.body}</div>
         {message.pendingQuestion && (
           <WorkerQuestionForm goalId={goalId} pending={message.pendingQuestion} />
+        )}
+        {message.pendingApproval && (
+          <PermissionApprovalCard goalId={goalId} pending={message.pendingApproval} />
         )}
       </div>
     </div>

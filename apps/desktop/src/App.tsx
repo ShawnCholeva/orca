@@ -39,7 +39,7 @@ function toErrorMessage(err: unknown, fallback: string): string {
 type Diagnostics = { plugins: PluginSummary[]; skills: SkillSummary[] };
 
 const DETAIL_REFETCH_EVENTS = new Set<DomainEventType>(["goal.refined", "workspace.attached", "workspace.removed"]);
-const GOAL_LIST_EVENTS = new Set<DomainEventType>(["goal.created", "goal.updated", "goal.archived"]);
+const GOAL_LIST_EVENTS = new Set<DomainEventType>(["goal.created", "goal.updated", "goal.archived", "goal.worker_permission_mode_changed"]);
 
 export default function App() {
   const [onboardingState, setOnboardingState] = useState<OnboardingState>("checking");

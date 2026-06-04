@@ -19,6 +19,8 @@ const requestNextOrchestratorDecisionMock = vi.fn();
 const listWorkflowTemplatesMock = vi.fn();
 const startWorkflowRunMock = vi.fn();
 const submitWorkerAnswersMock = vi.fn();
+const submitPermissionDecisionMock = vi.fn();
+const setWorkerPermissionModeMock = vi.fn();
 
 vi.mock("../api", () => ({
   createOrchestratorMessage: (...args: unknown[]) => createOrchestratorMessageMock(...args),
@@ -33,6 +35,8 @@ vi.mock("../api", () => ({
   listWorkflowTemplates: (...args: unknown[]) => listWorkflowTemplatesMock(...args),
   startWorkflowRun: (...args: unknown[]) => startWorkflowRunMock(...args),
   submitWorkerAnswers: (...args: unknown[]) => submitWorkerAnswersMock(...args),
+  submitPermissionDecision: (...args: unknown[]) => submitPermissionDecisionMock(...args),
+  setWorkerPermissionMode: (...args: unknown[]) => setWorkerPermissionModeMock(...args),
   toErrorMessage: (err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback,
 }));
@@ -126,6 +130,10 @@ describe("OrcaChat", () => {
     startWorkflowRunMock.mockReset();
     submitWorkerAnswersMock.mockReset();
     submitWorkerAnswersMock.mockResolvedValue(undefined);
+    submitPermissionDecisionMock.mockReset();
+    submitPermissionDecisionMock.mockResolvedValue(undefined);
+    setWorkerPermissionModeMock.mockReset();
+    setWorkerPermissionModeMock.mockResolvedValue(undefined);
     openEventStreamMock.mockReset();
     openEventStreamMock.mockReturnValue({ close: vi.fn() });
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
@@ -551,6 +559,30 @@ describe("OrcaChat", () => {
     await screen.findByText("This question expired.");
     // Controls came back: Submit is enabled again (selections still satisfy the gate).
     expect(screen.getByRole("button", { name: /submit/i })).toBeEnabled();
+  });
+
+  it("renders the permission toggle reflecting the goal's mode when a goal is selected", async () => {
+    setupRunLoad();
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[{ ...goal, workerPermissionMode: "ask" }]} selectedGoalId="goal-1" connectionStatus="open" />);
+    expect(await screen.findByRole("button", { name: /Ask-in-chat/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ask-in-chat/ }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("renders an Allow/Deny approval card for a message with pendingApproval", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [{
+        id: "m-approve", goalId: "goal-1", role: "orchestrator", kind: "message",
+        body: "The agent wants to run Bash.", correlationId: "c1", createdAt: now,
+        pendingApproval: { approvalId: "a1", sessionId: "s1", toolName: "Bash", summary: "rm -rf build" },
+      }],
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+    expect(await screen.findByText("Allow")).toBeInTheDocument();
+    expect(screen.getByText("Deny")).toBeInTheDocument();
+    expect(screen.getByText(/rm -rf build/)).toBeInTheDocument();
   });
 
   it("does not flash a loading indicator or blank content on SSE-driven refresh once loaded", async () => {
