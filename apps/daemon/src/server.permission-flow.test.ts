@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { bootstrapRegistries } from './registry/bootstrap.js';
@@ -74,6 +75,28 @@ function insertSession(db: ReturnType<typeof openDatabase>, sessionId: string, g
     `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at)
      VALUES (?, ?, ?, 'claude-code', 'test session', 'created', ?)`
   ).run(sessionId, goalId, workspaceId, now);
+}
+
+/**
+ * Insert a workspace row with a specific path (for always-allow write tests).
+ */
+function insertWorkspace(db: ReturnType<typeof openDatabase>, workspaceId: string, goalId: string, wsPath: string): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO workspaces (id, goal_id, path, name, workspace_type, git_probe, attached_at)
+     VALUES (?, ?, ?, 'test', 'folder', 'not_a_repo', ?)`
+  ).run(workspaceId, goalId, wsPath, now);
+}
+
+/**
+ * Insert a session row pointing to an existing workspace.
+ */
+function insertSessionWithWorkspace(db: ReturnType<typeof openDatabase>, sessionId: string, goalId: string, workspaceId: string, adapterId = 'claude-code'): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at)
+     VALUES (?, ?, ?, ?, 'test session', 'created', ?)`
+  ).run(sessionId, goalId, workspaceId, adapterId, now);
 }
 
 describe('permission decision flow', () => {
@@ -286,5 +309,123 @@ describe('permission decision flow', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as { hookSpecificOutput: { decision: { behavior: string } } };
     expect(body.hookSpecificOutput.decision.behavior).toBe('deny');
+  });
+
+  // ---- Always-allow native rule write tests ----
+
+  it('remember+allow writes the native rule into the workspace settings', async () => {
+    const goalId = 'goal-remember-1';
+    const sessionId = 'session-remember-1';
+    const ws = mkdtempSync(join(os.tmpdir(), 'orca-ws-'));
+    insertGoal(db, goalId, 'ask');
+    insertWorkspace(db, 'ws-remember-1', goalId, ws);
+    insertSessionWithWorkspace(db, sessionId, goalId, 'ws-remember-1', 'claude-code');
+
+    const hookPromise = server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Bash', tool_input: { command: 'rm -rf build' }, tool_use_id: 'tu-remember-1' },
+    });
+
+    const approvalId = await vi.waitFor(
+      () => {
+        const row = db
+          .prepare("SELECT pending_approval FROM orchestrator_messages WHERE goal_id = ? AND pending_approval IS NOT NULL")
+          .get(goalId) as { pending_approval: string } | undefined;
+        if (!row) throw new Error('pending approval message not yet posted');
+        return (JSON.parse(row.pending_approval) as { approvalId: string }).approvalId;
+      },
+      { timeout: 2000, interval: 50 }
+    );
+
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/permission-approvals/${approvalId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { decision: 'allow', remember: true },
+    });
+    await hookPromise;
+
+    const settings = JSON.parse(readFileSync(join(ws, '.claude', 'settings.local.json'), 'utf8')) as { permissions: { allow: string[] } };
+    expect(settings.permissions.allow).toContain('Bash(rm:*)');
+    rmSync(ws, { recursive: true, force: true });
+  });
+
+  it('remember+deny writes nothing', async () => {
+    const goalId = 'goal-remember-2';
+    const sessionId = 'session-remember-2';
+    const ws = mkdtempSync(join(os.tmpdir(), 'orca-ws-'));
+    insertGoal(db, goalId, 'ask');
+    insertWorkspace(db, 'ws-remember-2', goalId, ws);
+    insertSessionWithWorkspace(db, sessionId, goalId, 'ws-remember-2', 'claude-code');
+
+    const hookPromise = server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Bash', tool_input: { command: 'rm -rf build' }, tool_use_id: 'tu-remember-2' },
+    });
+
+    const approvalId = await vi.waitFor(
+      () => {
+        const row = db
+          .prepare("SELECT pending_approval FROM orchestrator_messages WHERE goal_id = ? AND pending_approval IS NOT NULL")
+          .get(goalId) as { pending_approval: string } | undefined;
+        if (!row) throw new Error('pending approval message not yet posted');
+        return (JSON.parse(row.pending_approval) as { approvalId: string }).approvalId;
+      },
+      { timeout: 2000, interval: 50 }
+    );
+
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/permission-approvals/${approvalId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { decision: 'deny', remember: true },
+    });
+    await hookPromise;
+
+    expect(existsSync(join(ws, '.claude', 'settings.local.json'))).toBe(false);
+    rmSync(ws, { recursive: true, force: true });
+  });
+
+  it('remember with an unmapped tool succeeds and writes nothing', async () => {
+    const goalId = 'goal-remember-3';
+    const sessionId = 'session-remember-3';
+    const ws = mkdtempSync(join(os.tmpdir(), 'orca-ws-'));
+    insertGoal(db, goalId, 'ask');
+    insertWorkspace(db, 'ws-remember-3', goalId, ws);
+    insertSessionWithWorkspace(db, sessionId, goalId, 'ws-remember-3', 'claude-code');
+
+    const hookPromise = server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Glob', tool_input: { pattern: '**' }, tool_use_id: 'tu-remember-3' },
+    });
+
+    const approvalId = await vi.waitFor(
+      () => {
+        const row = db
+          .prepare("SELECT pending_approval FROM orchestrator_messages WHERE goal_id = ? AND pending_approval IS NOT NULL")
+          .get(goalId) as { pending_approval: string } | undefined;
+        if (!row) throw new Error('pending approval message not yet posted');
+        return (JSON.parse(row.pending_approval) as { approvalId: string }).approvalId;
+      },
+      { timeout: 2000, interval: 50 }
+    );
+
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/permission-approvals/${approvalId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { decision: 'allow', remember: true },
+    });
+    await hookPromise;
+
+    expect(res.statusCode).toBe(200);
+    expect(existsSync(join(ws, '.claude', 'settings.local.json'))).toBe(false);
+    rmSync(ws, { recursive: true, force: true });
   });
 });

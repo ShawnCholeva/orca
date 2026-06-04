@@ -1210,7 +1210,19 @@ export function createServer(
     if (!pending || pending.goalId !== goalId) { reply.status(404); return { error: { code: "approval_not_found" } }; }
     const ok = permissionApprovals.resolveDecision(approvalId, parsed.data.decision);
     if (!ok) { reply.status(409); return { error: { code: "already_answered" } }; }
-    // NOTE: parsed.data.remember (Always-allow native-config write) is Phase 2 — accepted but not yet acted on.
+    if (parsed.data.decision === "allow" && parsed.data.remember) {
+      try {
+        const adapterId = (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(pending.sessionId) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code";
+        const provider = resolveShadowProvider(adapterId as ShadowAdapterId);
+        const rule = provider.permissionRule(pending.toolName, pending.toolInput);
+        if (rule) {
+          const wsRow = db.prepare("SELECT w.path AS path FROM workspaces w WHERE w.goal_id = ? ORDER BY w.attached_at ASC LIMIT 1").get(goalId) as { path: string } | undefined;
+          if (wsRow) provider.writePermissionRule(wsRow.path, rule);
+        }
+      } catch (err) {
+        console.warn("[permission] always-allow rule write failed", err);
+      }
+    }
     return { ok: true };
   });
 
