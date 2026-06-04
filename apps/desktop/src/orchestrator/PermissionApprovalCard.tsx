@@ -8,11 +8,11 @@ export function PermissionApprovalCard({ goalId, pending }: { goalId: string; pe
   const [error, setError] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
 
-  async function decide(decision: "allow" | "deny") {
+  async function decide(decision: "allow" | "deny", remember = false) {
     setSubmitting(true);
     setError(null);
     try {
-      await submitPermissionDecision(goalId, pending.approvalId, decision);
+      await submitPermissionDecision(goalId, pending.approvalId, decision, remember);
       setDecided(decision);
     } catch {
       setError("That decision could not be submitted — the request may have expired.");
@@ -38,6 +38,9 @@ export function PermissionApprovalCard({ goalId, pending }: { goalId: string; pe
       <div className="orca-chat-approval-actions">
         <button type="button" className="submit-button" disabled={locked} onClick={() => void decide("allow")}>
           Allow
+        </button>
+        <button type="button" className="orca-chat-approval-always" disabled={locked} onClick={() => void decide("allow", true)}>
+          Always allow
         </button>
         <button type="button" className="orca-chat-approval-deny" disabled={locked} onClick={() => void decide("deny")}>
           Deny

@@ -687,4 +687,6 @@
 .orca-chat-approval-actions { display: flex; gap: 8px; }
 .orca-chat-approval-deny { font-size: 12px; padding: 3px 12px; border-radius: 6px; border: 1px solid rgba(255, 120, 120, 0.4); background: transparent; color: inherit; cursor: pointer; }
 .orca-chat-approval-deny:disabled { opacity: 0.5; cursor: default; }
+.orca-chat-approval-always { font-size: 12px; padding: 3px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.2); background: transparent; color: inherit; cursor: pointer; }
+.orca-chat-approval-always:disabled { opacity: 0.5; cursor: default; }
 .orca-chat-approval-status { font-size: 12px; opacity: 0.8; margin: 6px 0 0; }

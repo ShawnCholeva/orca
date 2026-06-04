@@ -26,7 +26,16 @@ describe("PermissionApprovalCard", () => {
     render(<PermissionApprovalCard goalId="g1" pending={pending} />);
     fireEvent.click(screen.getByText("Allow"));
     await waitFor(() => {
-      expect(submitPermissionDecisionMock).toHaveBeenCalledWith("g1", "a1", "allow");
+      expect(submitPermissionDecisionMock).toHaveBeenCalledWith("g1", "a1", "allow", false);
+    });
+  });
+
+  it("calls submitPermissionDecision with allow + remember=true when Always allow is clicked", async () => {
+    const { PermissionApprovalCard } = await import("./PermissionApprovalCard");
+    render(<PermissionApprovalCard goalId="g1" pending={pending} />);
+    fireEvent.click(screen.getByText("Always allow"));
+    await waitFor(() => {
+      expect(submitPermissionDecisionMock).toHaveBeenCalledWith("g1", "a1", "allow", true);
     });
   });
 
@@ -35,7 +44,7 @@ describe("PermissionApprovalCard", () => {
     render(<PermissionApprovalCard goalId="g1" pending={pending} />);
     fireEvent.click(screen.getByText("Deny"));
     await waitFor(() => {
-      expect(submitPermissionDecisionMock).toHaveBeenCalledWith("g1", "a1", "deny");
+      expect(submitPermissionDecisionMock).toHaveBeenCalledWith("g1", "a1", "deny", false);
     });
   });
 
