@@ -23,12 +23,16 @@ function hasMaxSerializedBytes(value: unknown, maxBytes: number): boolean {
 export const GoalStatus = z.enum(["active", "archived"]);
 export type GoalStatus = z.infer<typeof GoalStatus>;
 
+export const WorkerPermissionMode = z.enum(["ask", "auto"]);
+export type WorkerPermissionMode = z.infer<typeof WorkerPermissionMode>;
+
 export const Goal = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string(),
   status: GoalStatus,
   autonomyLevel: z.number().int().default(1),
+  workerPermissionMode: WorkerPermissionMode.default("ask"),
   orchestratorProvider: ModelProviderId.nullable().optional(),
   orchestratorModel: z.string().nullable().optional(),
   activeWorkflowRunId: z.string().nullable().optional(),
@@ -1009,6 +1013,30 @@ export const PendingQuestion = z
   .strict();
 export type PendingQuestion = z.infer<typeof PendingQuestion>;
 
+export const PendingApproval = z
+  .object({
+    approvalId: z.string().min(1),
+    sessionId: z.string().min(1),
+    toolName: z.string().min(1).max(100),
+    summary: z.string().min(1).max(4000),
+    detail: z.string().max(20_000).optional(),
+  })
+  .strict();
+export type PendingApproval = z.infer<typeof PendingApproval>;
+
+export const SubmitPermissionDecisionRequest = z
+  .object({
+    decision: z.enum(["allow", "deny"]),
+    remember: z.boolean().default(false),
+  })
+  .strict();
+export type SubmitPermissionDecisionRequest = z.infer<typeof SubmitPermissionDecisionRequest>;
+
+export const UpdateWorkerPermissionModeRequest = z
+  .object({ workerPermissionMode: WorkerPermissionMode })
+  .strict();
+export type UpdateWorkerPermissionModeRequest = z.infer<typeof UpdateWorkerPermissionModeRequest>;
+
 export const OrchestratorChatMessage = z
   .object({
     id: z.string(),
@@ -1021,7 +1049,8 @@ export const OrchestratorChatMessage = z
     whyRationale: z.string().max(4000).nullable().optional(),
     internalKind: OrchestratorInternalThoughtKind.nullable().optional(),
     createdAt: z.string().datetime(),
-    pendingQuestion: PendingQuestion.optional()
+    pendingQuestion: PendingQuestion.optional(),
+    pendingApproval: PendingApproval.optional()
   })
   .strict();
 export type OrchestratorChatMessage = z.infer<typeof OrchestratorChatMessage>;
