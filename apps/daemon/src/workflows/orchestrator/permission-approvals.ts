@@ -6,6 +6,7 @@ export interface PendingPermissionApproval {
   goalId: string;
   toolName: string;
   summary: string;
+  toolInput: unknown;
   detail?: string;
   resolve: (decision: PermissionDecision) => void;
   answered: Promise<PermissionDecision>;
@@ -17,6 +18,7 @@ export interface RecordApprovalInput {
   goalId: string;
   toolName: string;
   summary: string;
+  toolInput: unknown;
   detail?: string;
 }
 

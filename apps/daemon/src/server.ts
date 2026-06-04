@@ -1121,7 +1121,7 @@ export function createServer(
       const summary = summarizePermission(payload.toolName, payload.toolInput);
       const { approvalId, answered, isNew } = permissionApprovals.record({
         toolUseId: payload.toolUseId, sessionId, goalId,
-        toolName: payload.toolName, summary,
+        toolName: payload.toolName, summary, toolInput: payload.toolInput,
       });
       if (isNew) {
         insertMessageWithEvent(
