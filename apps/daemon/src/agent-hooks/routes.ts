@@ -16,6 +16,15 @@ export interface AgentHookRouteDeps {
   // Resolve the adapter id for a session (DB lookup in prod); tags the response.
   resolveAdapterForSession(sessionId: string): string;
   onWorkerQuestion(sessionId: string, payload: { questions: Array<{ question: string; header: string; options: Array<{ label: string; description: string }>; multiSelect: boolean }>; toolUseId: string }): Promise<string>;
+  /**
+   * Decide a worker tool-permission request: "allow" or "deny". The implementation
+   * resolves immediately for auto-mode goals, otherwise holds until the user answers
+   * in chat or a long timeout elapses (then "deny").
+   */
+  onPermissionRequest(
+    sessionId: string,
+    payload: { toolName: string; toolInput: unknown; toolUseId: string },
+  ): Promise<"allow" | "deny">;
 }
 
 export function registerAgentHookRoutes(server: FastifyInstance, deps: AgentHookRouteDeps): void {
@@ -42,6 +51,21 @@ export function registerAgentHookRoutes(server: FastifyInstance, deps: AgentHook
     // tool so no tmux menu paints.
     const reason = await deps.onWorkerQuestion(sessionId, { questions, toolUseId: body.tool_use_id ?? "" });
     return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } };
+  });
+
+  server.post("/v1/agent-hooks/permission", async (request) => {
+    const { sessionId } = request.query as { sessionId?: string };
+    const body = (request.body ?? {}) as { tool_name?: string; tool_input?: unknown; tool_use_id?: string };
+    // Safe default: anything we cannot attribute to a session is denied, never allowed.
+    let behavior: "allow" | "deny" = "deny";
+    if (sessionId) {
+      behavior = await deps.onPermissionRequest(sessionId, {
+        toolName: body.tool_name ?? "",
+        toolInput: body.tool_input ?? {},
+        toolUseId: body.tool_use_id ?? "",
+      });
+    }
+    return { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior } } };
   });
 
   server.post("/v1/agent-hooks/stop", async (request, reply) => {
