@@ -671,3 +671,20 @@
 .orca-chat-option-row input { margin: 0; }
 .orca-chat-question-submit { align-self: flex-start; margin-top: 4px; }
 .orca-chat-question-submit:disabled { opacity: 0.5; cursor: default; }
+
+/* Worker tool-permission mode toggle */
+.orca-perm-toggle { display: flex; align-items: center; gap: 6px; margin: 6px 0 10px; }
+.orca-perm-toggle-label { opacity: 0.6; font-size: 11px; }
+.orca-perm-toggle-opt { font-size: 12px; padding: 2px 8px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.15); background: transparent; color: inherit; cursor: pointer; }
+.orca-perm-toggle-opt--active { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.3); }
+.orca-perm-toggle-opt:disabled { opacity: 0.4; cursor: default; }
+
+/* Tool-permission approval card */
+.orca-chat-approval { margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; }
+.orca-chat-approval-tool { display: flex; gap: 8px; align-items: baseline; margin: 0 0 6px; }
+.orca-chat-approval-summary { font-size: 13px; }
+.orca-chat-approval-detail { white-space: pre-wrap; font-size: 12px; opacity: 0.85; margin: 4px 0 0; }
+.orca-chat-approval-actions { display: flex; gap: 8px; }
+.orca-chat-approval-deny { font-size: 12px; padding: 3px 12px; border-radius: 6px; border: 1px solid rgba(255, 120, 120, 0.4); background: transparent; color: inherit; cursor: pointer; }
+.orca-chat-approval-deny:disabled { opacity: 0.5; cursor: default; }
+.orca-chat-approval-status { font-size: 12px; opacity: 0.8; margin: 6px 0 0; }
