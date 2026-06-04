@@ -1,5 +1,7 @@
+import { join } from "node:path";
 import { extractActionBlock } from "../sentinel.js";
 import { buildShadowHookSettings } from "../shadow-hook-settings.js";
+import { buildAgentHookSettings } from "../../agent-hooks/hook-settings.js";
 import type {
   ShadowCaptureMode,
   ShadowHookConfig,
@@ -25,6 +27,16 @@ export class ClaudeShadowProvider implements ShadowProvider {
           contents: JSON.stringify(buildShadowHookSettings(args), null, 2),
         },
       ],
+    };
+  }
+
+  workerHookConfig(args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) {
+    // goalId is part of the shared seam signature; Claude's worker hooks key off
+    // sessionId only (the daemon resolves goal from session), so it's unused here.
+    const settings = buildAgentHookSettings({ sessionId: args.sessionId, port: args.port, authToken: args.authToken });
+    return {
+      files: [{ relPath: "settings.json", contents: JSON.stringify(settings, null, 2) }],
+      spawnArgs: ["--settings", join(args.configDir, "settings.json")],
     };
   }
 

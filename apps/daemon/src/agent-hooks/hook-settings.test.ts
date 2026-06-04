@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentHookUrl, buildAgentHookSettings } from "./hook-settings.js";
+import { agentHookUrl, buildAgentHookSettings, permissionHookUrl } from "./hook-settings.js";
 
 describe("agent hook settings", () => {
   it("builds a session-scoped Stop hook URL", () => {
@@ -36,5 +36,23 @@ describe("agent hook settings", () => {
     const s = buildAgentHookSettings({ sessionId: "sess-1", port: 8787, authToken: "tok" });
     const pre = s.hooks.PreToolUse!;
     expect(pre[0]!.hooks[0]!.timeout).toBe(600);
+  });
+});
+
+describe("permission hook settings", () => {
+  it("permissionHookUrl points at the permission endpoint with the session id", () => {
+    expect(permissionHookUrl(1234, "s1")).toBe("http://127.0.0.1:1234/v1/agent-hooks/permission?sessionId=s1");
+  });
+
+  it("worker hook settings include a catch-all PermissionRequest hook", () => {
+    const s = buildAgentHookSettings({ sessionId: "s1", port: 1234, authToken: "tok" });
+    const pr = s.hooks.PermissionRequest;
+    expect(pr).toBeDefined();
+    expect(pr![0].matcher).toBe("*");
+    expect(pr![0].hooks[0]).toMatchObject({
+      type: "http",
+      url: "http://127.0.0.1:1234/v1/agent-hooks/permission?sessionId=s1",
+    });
+    expect(pr![0].hooks[0].timeout).toBeGreaterThanOrEqual(600);
   });
 });

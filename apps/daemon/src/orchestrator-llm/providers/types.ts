@@ -41,6 +41,18 @@ export interface ShadowProvider {
   readonly modelProviderId: string;
   launch(deps: { binOverride?: string }): ShadowLaunch;
   hookConfig(args: { goalId: string; port: number; authToken: string }): ShadowHookConfig;
+  /**
+   * Hook config for a workflow-step worker session of this provider. Returns files
+   * to write under the worker's private config dir plus spawn args/env to append.
+   * (Generalizes the provider seam to workers; future: rename to AgentProvider.)
+   */
+  workerHookConfig(args: {
+    goalId: string;
+    sessionId: string;
+    port: number;
+    authToken: string;
+    configDir: string;
+  }): { files: { relPath: string; contents: string }[]; spawnArgs: string[]; env?: Record<string, string> };
   captureMode(): ShadowCaptureMode;
   turnParser(): ShadowTurnParse;
   /** Optional hook run before each prompt submission (e.g. dismiss a modal). */

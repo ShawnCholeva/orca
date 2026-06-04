@@ -37,6 +37,10 @@ export class CodexShadowProvider implements ShadowProvider {
     };
   }
 
+  workerHookConfig(_args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) {
+    return { files: [], spawnArgs: [] };
+  }
+
   captureMode(): ShadowCaptureMode {
     return { kind: "pane-poll", intervalMs: 1000 };
   }
