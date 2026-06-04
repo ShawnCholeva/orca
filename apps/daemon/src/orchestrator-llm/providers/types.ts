@@ -55,6 +55,10 @@ export interface ShadowProvider {
   }): { files: { relPath: string; contents: string }[]; spawnArgs: string[]; env?: Record<string, string> };
   captureMode(): ShadowCaptureMode;
   turnParser(): ShadowTurnParse;
+  /** Native permission rule string for an "always allow" of this tool call, or null if not persistable. */
+  permissionRule(toolName: string, toolInput: unknown): string | null;
+  /** Persist a permission rule into the workspace's native config (best-effort). No-op if unsupported. */
+  writePermissionRule(workspacePath: string, rule: string): void;
   /** Optional hook run before each prompt submission (e.g. dismiss a modal). */
   beforeSubmit?(ctx: {
     tmux: TmuxRunner;

@@ -38,6 +38,14 @@ export class AntigravityShadowProvider implements ShadowProvider {
     return { files: [], spawnArgs: [] };
   }
 
+  permissionRule(_toolName: string, _toolInput: unknown): string | null {
+    return null;
+  }
+
+  writePermissionRule(_workspacePath: string, _rule: string): void {
+    // No native permission-rule writer for this provider yet (future phase).
+  }
+
   captureMode(): ShadowCaptureMode {
     return { kind: "hook" };
   }
