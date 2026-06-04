@@ -11,6 +11,7 @@ import {
   type DomainEvent,
   type ModelProviderId,
   type OrchestratorChatMessage as OrchestratorChatMessageT,
+  type PendingApproval as PendingApprovalT,
   type PendingQuestion as PendingQuestionT,
 } from "@orca/contracts";
 
@@ -222,6 +223,7 @@ export function insertMessageWithEvent(
     correlationId: string;
     createdAt: string;
     pendingQuestion?: PendingQuestionT;
+    pendingApproval?: PendingApprovalT;
   }
 ): OrchestratorChatMessageT {
   const idFactory = ctx.idFactory ?? randomUUID;
@@ -229,8 +231,8 @@ export function insertMessageWithEvent(
     ctx.db
       .prepare(
         `INSERT INTO orchestrator_messages
-          (id, goal_id, role, kind, body, correlation_id, created_at, pending_question)
-         VALUES (?, ?, ?, 'message', ?, ?, ?, ?)`
+          (id, goal_id, role, kind, body, correlation_id, created_at, pending_question, pending_approval)
+         VALUES (?, ?, ?, 'message', ?, ?, ?, ?, ?)`
       )
       .run(
         message.id,
@@ -239,7 +241,8 @@ export function insertMessageWithEvent(
         message.body,
         message.correlationId,
         message.createdAt,
-        message.pendingQuestion != null ? JSON.stringify(message.pendingQuestion) : null
+        message.pendingQuestion != null ? JSON.stringify(message.pendingQuestion) : null,
+        message.pendingApproval != null ? JSON.stringify(message.pendingApproval) : null
       );
 
     const payload = {
@@ -276,5 +279,6 @@ export function insertMessageWithEvent(
     correlationId: message.correlationId,
     createdAt: message.createdAt,
     ...(message.pendingQuestion != null ? { pendingQuestion: message.pendingQuestion } : {}),
+    ...(message.pendingApproval != null ? { pendingApproval: message.pendingApproval } : {}),
   });
 }
