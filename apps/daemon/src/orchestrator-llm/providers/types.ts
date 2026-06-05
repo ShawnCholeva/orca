@@ -54,7 +54,13 @@ export interface ShadowProvider {
     port: number;
     authToken: string;
     configDir: string;
-  }): { files: { relPath: string; contents: string }[]; spawnArgs: string[]; env?: Record<string, string> };
+  }): {
+    files: { relPath: string; contents: string }[];
+    /** Existing files to copy into the worker's config dir (e.g. provider credentials). Skipped if the source is missing. */
+    copyFiles?: { relPath: string; sourcePath: string }[];
+    spawnArgs: string[];
+    env?: Record<string, string>;
+  };
   captureMode(): ShadowCaptureMode;
   turnParser(): ShadowTurnParse;
   /** Native permission rule string for an "always allow" of this tool call, or null if not persistable. */

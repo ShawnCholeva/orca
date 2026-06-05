@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, appendFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkerSessionManager } from "./worker-session.js";
@@ -125,6 +125,36 @@ describe("WorkerSessionManager.spawn", () => {
     expect(existsSync(join(privateRoot, "s-nested", ".codex", "hooks.json"))).toBe(true);
     expect(readFileSync(join(privateRoot, "s-nested", ".codex", "hooks.json"), "utf8")).toBe("{}");
   });
+
+  it("copies provider copyFiles into the config dir and skips missing sources", async () => {
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const srcDir = mkdtempSync(join(tmpdir(), "orca-auth-"));
+    const authSrc = join(srcDir, "auth.json");
+    writeFileSync(authSrc, '{"token":"abc"}');
+    const tmux = fakeTmux(["auto mode on"]);
+    const fakeProvider = {
+      workerHookConfig: () => ({
+        files: [{ relPath: "config.toml", contents: "[features]\nhooks = true\n" }],
+        copyFiles: [
+          { relPath: "auth.json", sourcePath: authSrc },
+          { relPath: "missing.json", sourcePath: join(srcDir, "does-not-exist.json") },
+        ],
+        spawnArgs: [],
+        env: { CODEX_HOME: "x" },
+      }),
+    };
+    const mgr = new WorkerSessionManager({
+      privateRoot, daemonPort: 8787, authToken: "tok",
+      claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
+      resolveProvider: (_adapterId) => fakeProvider,
+    });
+    await mgr.spawn({ sessionId: "s-copy", goalId: "g1", adapterId: "codex", workspacePath: "/ws", command: "codex", env: {} });
+    // existing source copied into the private config dir
+    expect(existsSync(join(privateRoot, "s-copy", "auth.json"))).toBe(true);
+    expect(readFileSync(join(privateRoot, "s-copy", "auth.json"), "utf8")).toBe('{"token":"abc"}');
+    // missing source skipped without throwing or creating a file
+    expect(existsSync(join(privateRoot, "s-copy", "missing.json"))).toBe(false);
+  });
 });
 
 describe("WorkerSessionManager.startTail", () => {
@@ -166,6 +196,26 @@ describe("WorkerSessionManager.deliver", () => {
     expect(order).toContain("paste-buffer");
     const pasteIdx = order.indexOf("paste-buffer");
     expect(order.slice(pasteIdx).includes("send-keys")).toBe(true);
+  });
+
+  it("deliver detects the codex composer prompt (›) as idle, not just claude's ❯", async () => {
+    // Codex pane: ready composer, then a busy "Working … esc to interrupt" frame,
+    // then the idle composer again. deliver must recognise › (not ❯) as idle.
+    const tmux = fakeTmux([
+      "› hi",
+      "• Working (1s • esc to interrupt)",
+      "› Summarize recent commits\n  gpt-5.5 default · /repo",
+    ]);
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const codexProvider = { workerHookConfig: () => ({ files: [], spawnArgs: [] }) };
+    const mgr = new WorkerSessionManager({
+      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux,
+      captureSink: () => {}, startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
+      resolveProvider: (_adapterId) => codexProvider,
+    });
+    await mgr.spawn({ sessionId: "cx", goalId: "g1", adapterId: "codex", workspacePath: "/repo", command: "codex", env: {} });
+    expect(await mgr.deliver("cx", "do the thing")).toBe("delivered");
   });
 
   it("deliver returns no_session for an unknown session", async () => {

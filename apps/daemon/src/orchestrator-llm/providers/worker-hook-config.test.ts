@@ -54,6 +54,16 @@ describe("workerHookConfig", () => {
 
     // CODEX_HOME points discovery at the private config dir.
     expect(cfg.env).toEqual({ CODEX_HOME: "/tmp/cfg" });
+
+    // Redirecting CODEX_HOME relocates Codex's credentials lookup, so the real
+    // auth.json must be copied in or the worker stalls on the sign-in screen.
+    const auth = cfg.copyFiles?.find((f) => f.relPath === "auth.json");
+    expect(auth).toBeDefined();
+    expect(auth!.sourcePath).toMatch(/[/\\]\.codex[/\\]auth\.json$/);
+
+    // The unattended worker must bypass interactive hook-trust review or the
+    // daemon-authored hooks never fire.
+    expect(cfg.spawnArgs).toContain("--dangerously-bypass-hook-trust");
   });
 
   it("Antigravity returns an empty worker config (no permission flow yet)", () => {

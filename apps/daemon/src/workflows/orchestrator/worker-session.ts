@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, watch, openSync, readSync, closeSync, type FSWatcher } from "node:fs";
+import { mkdirSync, writeFileSync, copyFileSync, existsSync, watch, openSync, readSync, closeSync, type FSWatcher } from "node:fs";
 import { join, dirname } from "node:path";
 import {
   defaultTmuxRunner, newSession, capturePane, sendEnter, paste, pipePaneToFile, killSession, hasSession,
@@ -14,6 +14,11 @@ const BUSY_DEFAULT = /esc to interrupt|\bthinking\b|running .* hook|cooked for|c
 // NOTE: claude pads the empty input line with a non-breaking space (U+00A0), not
 // a normal space — the char class MUST include   or idle is never detected.
 const PROMPT_IDLE = /❯[ \t ]*(?:\n|$)/;
+// Codex renders its composer prompt with a single right-angle quote (› U+203A,
+// distinct from claude's ❯) followed by placeholder/typed text, e.g. "› Summarize
+// recent commits". It's present whenever the composer accepts input, so combined
+// with !busy it signals idle. (› never appears in claude's TUI, so this is additive.)
+const CODEX_PROMPT_IDLE = /(?:\n|^)[ \t]*›[ \t]/;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export type DeliverResult = "delivered" | "no_session" | "timeout";
@@ -34,7 +39,12 @@ export interface WorkerSessionDeps {
   claudeBin: string;
   resolveProvider: (adapterId: string) => {
     workerHookConfig: (args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) =>
-      { files: { relPath: string; contents: string }[]; spawnArgs: string[]; env?: Record<string, string> };
+      {
+        files: { relPath: string; contents: string }[];
+        copyFiles?: { relPath: string; sourcePath: string }[];
+        spawnArgs: string[];
+        env?: Record<string, string>;
+      };
   };
   tmux?: TmuxRunner;
   captureSink: (sessionId: string, chunk: Buffer) => void; // appends pane bytes to the output store
@@ -79,6 +89,14 @@ export class WorkerSessionManager {
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, file.contents, "utf8");
     }
+    // Copy in any existing provider files (e.g. Codex credentials). Missing sources
+    // are skipped — a worker without credentials degrades to its own auth prompt.
+    for (const cp of hookCfg.copyFiles ?? []) {
+      if (!existsSync(cp.sourcePath)) continue;
+      const target = join(cfgDir, cp.relPath);
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(cp.sourcePath, target);
+    }
     const name = this.name(input.sessionId);
     // tmux runs this command string via `sh -c`, so quote any token containing
     // whitespace (e.g. a settings path under a data dir with spaces). JSON.stringify
@@ -109,7 +127,7 @@ export class WorkerSessionManager {
         await sleep(this.deps.readyQuietMs ?? 1500);
         return;
       }
-      if (!trustRe.test(pane) && readyRe.test(pane)) { await sleep(this.deps.readyQuietMs ?? 1500); return; }
+      if (!trustRe.test(pane) && (readyRe.test(pane) || CODEX_PROMPT_IDLE.test(pane))) { await sleep(this.deps.readyQuietMs ?? 1500); return; }
       await sleep(poll);
     }
   }
@@ -146,7 +164,7 @@ export class WorkerSessionManager {
     while (Date.now() < deadline) {
       const pane = await capturePane(this.tmux, s.name);
       const busy = BUSY_DEFAULT.test(pane);
-      const idle = !busy && PROMPT_IDLE.test(pane);
+      const idle = !busy && (PROMPT_IDLE.test(pane) || CODEX_PROMPT_IDLE.test(pane));
       if (idle) {
         if (idleSince === null) idleSince = Date.now();
         if (Date.now() - idleSince >= idleQuiet) { ready = true; break; }

@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { extractActionBlock } from "../sentinel.js";
 import type {
   ShadowCaptureMode,
@@ -41,6 +43,7 @@ export class CodexShadowProvider implements ShadowProvider {
   workerHookConfig(args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) {
     // CODEX_HOME points Codex at this private dir; config.toml + hooks.json live at
     // its root (CODEX_HOME *is* the codex home, so no `.codex/` prefix here).
+    const codexHome = process.env["CODEX_HOME"] ?? join(homedir(), ".codex");
     return {
       files: [
         { relPath: "config.toml", contents: "[features]\nhooks = true\n" },
@@ -49,7 +52,15 @@ export class CodexShadowProvider implements ShadowProvider {
           contents: JSON.stringify(buildCodexWorkerHookSettings(args), null, 2),
         },
       ],
-      spawnArgs: [],
+      // Redirecting CODEX_HOME also relocates where Codex reads credentials, so copy
+      // the user's real auth.json into the private home — otherwise the worker shows
+      // Codex's sign-in screen and never becomes idle. (Verified codex-cli 0.136.0.)
+      copyFiles: [{ relPath: "auth.json", sourcePath: join(codexHome, "auth.json") }],
+      // The worker runs unattended, so bypass the interactive hook-trust review for
+      // the daemon-authored hooks.json (the daemon vets its own hook sources). Without
+      // this the Stop/PermissionRequest hooks never fire. (Folder trust is auto-answered
+      // by the worker startup pane handler.)
+      spawnArgs: ["--dangerously-bypass-hook-trust"],
       env: { CODEX_HOME: args.configDir },
     };
   }
