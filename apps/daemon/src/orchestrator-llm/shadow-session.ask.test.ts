@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,15 +19,7 @@ function fakeTmux(paneScript: string[] = ["❯ \n auto mode on"]) {
       if (args[0] === "capture-pane") {
         const out = paneScript[Math.min(paneIdx, paneScript.length - 1)];
         paneIdx++;
-        const marker = calls
-          .map((c) => c.input?.match(/ORCA_TURN_ID=[0-9a-f-]+/)?.[0])
-          .filter(Boolean)
-          .at(-1);
-        return {
-          stdout: (out ?? "").replaceAll("__TURN_MARKER__", marker ?? "ORCA_TURN_ID=missing"),
-          stderr: "",
-          code: 0,
-        };
+        return { stdout: out ?? "", stderr: "", code: 0 };
       }
       return { stdout: "", stderr: "", code: 0 };
     },
@@ -97,47 +89,32 @@ describe("ShadowSessionManager.ask (hook-resolved)", () => {
     await expect(m.ask("G1", { systemPrompt: "S", userPrompt: "q", timeoutMs: 10 })).rejects.toThrow(/timeout/i);
   });
 
-  it("codex pane polling rejects usage-limit failures without waiting for hook timeout", async () => {
+  it("codex resolves via the Stop hook's last_assistant_message action block", async () => {
+    // Codex now uses hook capture: the Stop hook POSTs last_assistant_message
+    // (carrying the ```orca:action fence) to /v1/shadow-hooks/stop -> resolvePending.
     const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
-    const tmux = fakeTmux([
-      "codex ready\n>",
-      "__TURN_MARKER__\n■ You've hit your usage limit. Upgrade to Pro or try again at 3:42 AM.",
-    ]);
+    const tmux = fakeTmux(["codex ready\n>"]);
     const m = new ShadowSessionManager(deps(root, tmux));
     await m.spawn("G1", "codex");
-    await expect(
-      m.ask("G1", { adapterId: "codex", systemPrompt: "S", userPrompt: "q", timeoutMs: 5000 })
-    ).rejects.toThrow(/usage limit/i);
+    const p = m.ask("G1", { adapterId: "codex", systemPrompt: "S", userPrompt: "q", timeoutMs: 1000 });
+    await waitReady();
+    m.resolvePending("G1", {
+      text: '```orca:action\n{"kind":"forward_to_agent","translated":"hello"}\n```',
+    });
+    expect((await p).text).toBe('{"kind":"forward_to_agent","translated":"hello"}');
   });
 
-  it("codex pane polling ignores stale startup quota warnings before the current turn marker", async () => {
+  it("codex StopFailure (failure=true) rejects the pending ask", async () => {
+    // Usage-limit / auth-loss surfaces as a StopFailure hook (failure=1) on the
+    // hook capture path, rejecting the ask without waiting for the timeout.
     const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
-    const tmux = fakeTmux([
-      "codex ready\n⚠ Heads up, you have less than 10% of your 5h limit left.\n>",
-      [
-        "⚠ Heads up, you have less than 10% of your 5h limit left.",
-        "__TURN_MARKER__",
-        "",
-        "working...",
-      ].join("\n"),
-      [
-        "⚠ Heads up, you have less than 10% of your 5h limit left.",
-        "__TURN_MARKER__",
-        "",
-        '• {"kind":"forward_to_agent","translated":"hello"}',
-        "",
-        "›",
-      ].join("\n"),
-    ]);
+    const tmux = fakeTmux(["codex ready\n>"]);
     const m = new ShadowSessionManager(deps(root, tmux));
     await m.spawn("G1", "codex");
-    const result = await m.ask("G1", {
-      adapterId: "codex",
-      systemPrompt: "S",
-      userPrompt: "q",
-      timeoutMs: 5000,
-    });
-    expect(result.text).toBe('{"kind":"forward_to_agent","translated":"hello"}');
+    const p = m.ask("G1", { adapterId: "codex", systemPrompt: "S", userPrompt: "q", timeoutMs: 5000 });
+    await waitReady();
+    m.resolvePending("G1", { failure: true, text: "codex usage limit reached" });
+    await expect(p).rejects.toThrow(/usage limit/i);
   });
 
   it("codex ask dismisses the non-fatal model-switch modal before pasting the next prompt", async () => {
@@ -151,109 +128,26 @@ describe("ShadowSessionManager.ask (hook-resolved)", () => {
         "› 1. Switch to gpt-5.4-mini",
         "  2. Keep current model",
       ].join("\n"),
-      [
-        "__TURN_MARKER__",
-        "",
-        '• {"kind":"answer_user_directly","body":"ok"}',
-        "",
-        "›",
-      ].join("\n"),
     ]);
     const m = new ShadowSessionManager(deps(root, tmux));
     await m.spawn("G1", "codex");
-    await m.ask("G1", {
+    const p = m.ask("G1", {
       adapterId: "codex",
       systemPrompt: "S",
       userPrompt: "q",
       timeoutMs: 5000,
     });
+    // beforeSubmit (modal dismissal) runs before the prompt is pasted and pending
+    // is registered; wait until paste-buffer fires so resolvePending isn't dropped.
+    await vi.waitFor(() => expect(tmux.calls.some((c) => c.args[0] === "paste-buffer")).toBe(true));
+    m.resolvePending("G1", {
+      text: '```orca:action\n{"kind":"answer_user_directly","body":"ok"}\n```',
+    });
+    await p;
     const dismissIndex = tmux.calls.findIndex((c) => c.args[0] === "send-keys" && c.args.includes("2"));
     const pasteIndex = tmux.calls.findIndex((c) => c.args[0] === "paste-buffer");
     expect(dismissIndex).toBeGreaterThanOrEqual(0);
     expect(pasteIndex).toBeGreaterThan(dismissIndex);
-  });
-
-  it("codex pane polling resolves raw bullet JSON actions when hooks do not fire", async () => {
-    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
-    const tmux = fakeTmux([
-      "codex ready\n>",
-      '› prompt __TURN_MARKER__\n\n• {"kind":"forward_to_agent","translated":"hello"}\n\n›',
-    ]);
-    const m = new ShadowSessionManager(deps(root, tmux));
-    await m.spawn("G1", "codex");
-    const result = await m.ask("G1", {
-      adapterId: "codex",
-      systemPrompt: "S",
-      userPrompt: "q",
-      timeoutMs: 5000,
-    });
-    expect(result.text).toBe('{"kind":"forward_to_agent","translated":"hello"}');
-  });
-
-  it("codex pane polling resolves wrapped multiline bullet JSON actions", async () => {
-    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
-    const tmux = fakeTmux([
-      "codex ready\n>",
-      [
-        "› prompt",
-        "__TURN_MARKER__",
-        "",
-        '• {"kind":"forward_to_agent","translated":"hello","rationale":"The message should be',
-        '  handled by the step agent."}',
-        "",
-        "›",
-      ].join("\n"),
-    ]);
-    const m = new ShadowSessionManager(deps(root, tmux));
-    await m.spawn("G1", "codex");
-    const result = await m.ask("G1", {
-      adapterId: "codex",
-      systemPrompt: "S",
-      userPrompt: "q",
-      timeoutMs: 5000,
-    });
-    expect(JSON.parse(result.text)).toMatchObject({
-      kind: "forward_to_agent",
-      translated: "hello",
-      rationale: "The message should be handled by the step agent.",
-    });
-  });
-
-  it("codex pane polling ignores prompt example fences before the current turn marker", async () => {
-    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
-    const tmux = fakeTmux([
-      "›",
-      [
-        "```orca:action",
-        "{ ...one OrchestratorAction object... }",
-        "```",
-        "__TURN_MARKER__",
-      ].join("\n"),
-      [
-        "```orca:action",
-        "{ ...one OrchestratorAction object... }",
-        "```",
-        "__TURN_MARKER__",
-        "",
-        '• {"kind":"answer_user_directly","body":"current turn"}',
-        "",
-        "›",
-      ].join("\n"),
-    ]);
-    const m = new ShadowSessionManager(deps(root, tmux));
-    await m.spawn("G1", "codex");
-    const result = await m.ask("G1", {
-      adapterId: "codex",
-      systemPrompt: [
-        "S",
-        "```orca:action",
-        "{ ...one OrchestratorAction object... }",
-        "```",
-      ].join("\n"),
-      userPrompt: "q",
-      timeoutMs: 5000,
-    });
-    expect(result.text).toBe('{"kind":"answer_user_directly","body":"current turn"}');
   });
 
   it("StopFailure (failure=true) rejects the pending ask", async () => {

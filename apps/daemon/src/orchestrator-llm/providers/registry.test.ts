@@ -31,6 +31,24 @@ describe("resolveShadowProvider", () => {
     expect(provider.captureMode()).toEqual({ kind: "hook" });
   });
 
+  it("captures codex turns via hook (not pane-poll)", () => {
+    expect(resolveShadowProvider("codex").captureMode()).toEqual({ kind: "hook" });
+  });
+
+  it("parses the codex action block out of a Stop-hook last_assistant_message", () => {
+    // The Codex Stop hook POSTs `last_assistant_message` to /v1/shadow-hooks/stop,
+    // which carries the full ```orca:action fenced block verbatim (verified
+    // codex-cli 0.136.0). The hook capture path runs this through turnParser.
+    const lastAssistantMessage = [
+      "Done with the analysis.",
+      "```orca:action",
+      '{ "kind": "advance", "note": "ready" }',
+      "```",
+    ].join("\n");
+    const action = resolveShadowProvider("codex").turnParser().parseAction(lastAssistantMessage);
+    expect(action).toBe('{ "kind": "advance", "note": "ready" }');
+  });
+
   it("surfaces permission-persistence support per provider", () => {
     expect(resolveShadowProvider("claude-code").supportsPermissionPersistence).toBe(true);
     expect(resolveShadowProvider("codex").supportsPermissionPersistence).toBe(false);

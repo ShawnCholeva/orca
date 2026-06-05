@@ -63,7 +63,7 @@ export class CodexShadowProvider implements ShadowProvider {
   }
 
   captureMode(): ShadowCaptureMode {
-    return { kind: "pane-poll", intervalMs: 1000 };
+    return { kind: "hook" };
   }
 
   turnParser(): ShadowTurnParse {
