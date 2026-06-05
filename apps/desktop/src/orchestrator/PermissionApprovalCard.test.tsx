@@ -66,4 +66,20 @@ describe("PermissionApprovalCard", () => {
     expect(await screen.findByText(/could not be submitted/i)).toBeInTheDocument();
     expect((screen.getByText("Allow") as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it("hides Always allow when the provider cannot persist (canRemember false)", async () => {
+    const { PermissionApprovalCard } = await import("./PermissionApprovalCard");
+    render(<PermissionApprovalCard goalId="g1" pending={{ ...pending, canRemember: false }} />);
+    expect(screen.getByText("Allow")).toBeInTheDocument();
+    expect(screen.getByText("Deny")).toBeInTheDocument();
+    expect(screen.queryByText("Always allow")).toBeNull();
+  });
+
+  it("shows Always allow when canRemember is true or absent (Claude unchanged)", async () => {
+    const { PermissionApprovalCard } = await import("./PermissionApprovalCard");
+    const { rerender } = render(<PermissionApprovalCard goalId="g1" pending={{ ...pending, canRemember: true }} />);
+    expect(screen.getByText("Always allow")).toBeInTheDocument();
+    rerender(<PermissionApprovalCard goalId="g1" pending={pending} />); // absent
+    expect(screen.getByText("Always allow")).toBeInTheDocument();
+  });
 });

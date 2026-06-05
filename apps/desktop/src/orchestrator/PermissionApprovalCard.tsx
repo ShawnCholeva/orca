@@ -39,9 +39,12 @@ export function PermissionApprovalCard({ goalId, pending }: { goalId: string; pe
         <button type="button" className="submit-button" disabled={locked} onClick={() => void decide("allow")}>
           Allow
         </button>
-        <button type="button" className="orca-chat-approval-always" disabled={locked} onClick={() => void decide("allow", true)}>
-          Always allow
-        </button>
+        {/* Hidden when the provider can't persist a rule (e.g. Codex sets canRemember: false); true/undefined → shown */}
+        {pending.canRemember !== false && (
+          <button type="button" className="orca-chat-approval-always" disabled={locked} onClick={() => void decide("allow", true)}>
+            Always allow
+          </button>
+        )}
         <button type="button" className="orca-chat-approval-deny" disabled={locked} onClick={() => void decide("deny")}>
           Deny
         </button>
