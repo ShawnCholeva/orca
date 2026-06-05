@@ -30,6 +30,13 @@ describe("worker permission modes contracts", () => {
     expect(PendingApproval.safeParse({ approvalId: "a1", sessionId: "s1", toolName: "Bash", summary: "ls" }).success).toBe(true);
   });
 
+  it("PendingApproval accepts an optional canRemember boolean and round-trips it", () => {
+    const ok = { approvalId: "a1", sessionId: "s1", toolName: "Bash", summary: "ls", canRemember: false };
+    expect(PendingApproval.parse(ok)).toMatchObject(ok);
+    expect(PendingApproval.parse({ ...ok, canRemember: true }).canRemember).toBe(true);
+    expect(PendingApproval.safeParse({ ...ok, canRemember: "yes" }).success).toBe(false);
+  });
+
   it("OrchestratorChatMessage carries an optional pendingApproval", () => {
     const msg = {
       id: "m1", goalId: "g1", role: "orchestrator" as const, kind: "message" as const,

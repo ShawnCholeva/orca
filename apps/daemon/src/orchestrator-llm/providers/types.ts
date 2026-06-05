@@ -39,6 +39,8 @@ export interface ShadowProvider {
   readonly displayName: string;
   /** Model-provider registry id used by the non-shadow LLM client. */
   readonly modelProviderId: string;
+  /** Whether this provider can persist a per-command "always allow" permission rule. */
+  readonly supportsPermissionPersistence: boolean;
   launch(deps: { binOverride?: string }): ShadowLaunch;
   hookConfig(args: { goalId: string; port: number; authToken: string }): ShadowHookConfig;
   /**

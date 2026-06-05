@@ -20,6 +20,7 @@ export class CodexShadowProvider implements ShadowProvider {
   readonly id = "codex" as const;
   readonly displayName = "Codex";
   readonly modelProviderId = "orca/openai";
+  readonly supportsPermissionPersistence = false;
 
   launch(deps: { binOverride?: string }): ShadowLaunch {
     return { bin: deps.binOverride ?? process.env["ORCA_CODEX_BIN"] ?? "codex" };

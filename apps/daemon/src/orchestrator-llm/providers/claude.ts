@@ -15,6 +15,7 @@ export class ClaudeShadowProvider implements ShadowProvider {
   readonly id = "claude-code" as const;
   readonly displayName = "Claude Code";
   readonly modelProviderId = "orca/anthropic";
+  readonly supportsPermissionPersistence = true;
 
   launch(deps: { binOverride?: string }): ShadowLaunch {
     return { bin: deps.binOverride ?? process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude" };

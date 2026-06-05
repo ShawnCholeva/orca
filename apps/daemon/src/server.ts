@@ -1124,6 +1124,8 @@ export function createServer(
         toolName: payload.toolName, summary, toolInput: payload.toolInput,
       });
       if (isNew) {
+        const adapterId = (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(sessionId) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code";
+        const canRemember = resolveShadowProvider(adapterId as ShadowAdapterId).supportsPermissionPersistence;
         insertMessageWithEvent(
           { db, bus: eventBus, modelProviderRegistry: daemonContext.modelProviderRegistry, now: daemonContext.now, idFactory: daemonContext.idFactory },
           {
@@ -1133,7 +1135,7 @@ export function createServer(
             body: `The agent wants to run ${payload.toolName}.`,
             correlationId: daemonContext.idFactory(),
             createdAt: daemonContext.now(),
-            pendingApproval: { approvalId, sessionId, toolName: payload.toolName, summary },
+            pendingApproval: { approvalId, sessionId, toolName: payload.toolName, summary, canRemember },
           }
         );
       }

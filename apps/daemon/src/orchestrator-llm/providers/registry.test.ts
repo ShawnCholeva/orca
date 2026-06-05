@@ -31,6 +31,12 @@ describe("resolveShadowProvider", () => {
     expect(provider.captureMode()).toEqual({ kind: "hook" });
   });
 
+  it("surfaces permission-persistence support per provider", () => {
+    expect(resolveShadowProvider("claude-code").supportsPermissionPersistence).toBe(true);
+    expect(resolveShadowProvider("codex").supportsPermissionPersistence).toBe(false);
+    expect(resolveShadowProvider("antigravity").supportsPermissionPersistence).toBe(false);
+  });
+
   it("throws on an unknown adapter id", () => {
     // @ts-expect-error exercising the runtime guard with an invalid id
     expect(() => resolveShadowProvider("nope")).toThrow();

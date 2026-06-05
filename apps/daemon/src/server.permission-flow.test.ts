@@ -190,6 +190,46 @@ describe('permission decision flow', () => {
     expect(body.hookSpecificOutput.decision.behavior).toBe('allow');
   });
 
+  // (b2) pendingApproval.canRemember reflects the session adapter's persistence capability
+  it('ask-mode goal: pendingApproval.canRemember is true for claude-code, false for codex', async () => {
+    const goalId = 'goal-canremember';
+    insertGoal(db, goalId, 'ask');
+    insertWorkspace(db, 'ws-canremember', goalId, '/tmp/ws-canremember');
+    insertSessionWithWorkspace(db, 'session-claude-cr', goalId, 'ws-canremember', 'claude-code');
+    insertSessionWithWorkspace(db, 'session-codex-cr', goalId, 'ws-canremember', 'codex');
+
+    const readCanRemember = async (sessionId: string, toolUseId: string): Promise<boolean | undefined> => {
+      const hookPromise = server.inject({
+        method: 'POST',
+        url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: toolUseId },
+      });
+      const approval = await vi.waitFor(
+        () => {
+          const row = db
+            .prepare("SELECT pending_approval FROM orchestrator_messages WHERE pending_approval LIKE ?")
+            .get(`%${sessionId}%`) as { pending_approval: string } | undefined;
+          if (!row) throw new Error('pending approval message not yet posted');
+          return JSON.parse(row.pending_approval) as { approvalId: string; canRemember?: boolean };
+        },
+        { timeout: 2000, interval: 50 }
+      );
+      // Resolve so the held hook doesn't dangle.
+      await server.inject({
+        method: 'POST',
+        url: `/v1/goals/${goalId}/permission-approvals/${approval.approvalId}`,
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { decision: 'deny' },
+      });
+      await hookPromise;
+      return approval.canRemember;
+    };
+
+    expect(await readCanRemember('session-claude-cr', 'tu-cr-claude')).toBe(true);
+    expect(await readCanRemember('session-codex-cr', 'tu-cr-codex')).toBe(false);
+  });
+
   // (c) answer route with wrong goalId → 404, then resolve with correct goalId to unblock
   it('answer route with a different goalId returns 404', async () => {
     const goalId = 'goal-ask-2';

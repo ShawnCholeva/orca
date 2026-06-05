@@ -1021,6 +1021,7 @@ export const PendingApproval = z
     toolName: z.string().min(1).max(100),
     summary: z.string().min(1).max(4000),
     detail: z.string().max(20_000).optional(),
+    canRemember: z.boolean().optional(),
   })
   .strict();
 export type PendingApproval = z.infer<typeof PendingApproval>;

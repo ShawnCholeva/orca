@@ -14,6 +14,7 @@ export class AntigravityShadowProvider implements ShadowProvider {
   readonly id = "antigravity" as const;
   readonly displayName = "Antigravity";
   readonly modelProviderId = "orca/google";
+  readonly supportsPermissionPersistence = false;
 
   launch(deps: { binOverride?: string }): ShadowLaunch {
     return { bin: deps.binOverride ?? process.env["ORCA_ANTIGRAVITY_BIN"] ?? "agy" };
