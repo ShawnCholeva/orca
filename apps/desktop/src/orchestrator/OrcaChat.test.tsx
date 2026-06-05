@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Goal, OrchestratorChatMessage } from "@orca/contracts";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -11,6 +11,7 @@ const createOrchestratorMessageMock = vi.fn();
 const getGoalDetailMock = vi.fn();
 const getWorkflowRunMock = vi.fn();
 const getWorkflowStepRunMock = vi.fn();
+const getWorkflowTemplateMock = vi.fn();
 const listOrchestratorMessagesMock = vi.fn();
 const listWorkflowDecisionsMock = vi.fn();
 const listWorkflowRunArtifactsMock = vi.fn();
@@ -27,6 +28,7 @@ vi.mock("../api", () => ({
   getGoalDetail: (...args: unknown[]) => getGoalDetailMock(...args),
   getWorkflowRun: (...args: unknown[]) => getWorkflowRunMock(...args),
   getWorkflowStepRun: (...args: unknown[]) => getWorkflowStepRunMock(...args),
+  getWorkflowTemplate: (...args: unknown[]) => getWorkflowTemplateMock(...args),
   listOrchestratorMessages: (...args: unknown[]) => listOrchestratorMessagesMock(...args),
   listWorkflowDecisions: (...args: unknown[]) => listWorkflowDecisionsMock(...args),
   listWorkflowRunArtifacts: (...args: unknown[]) => listWorkflowRunArtifactsMock(...args),
@@ -121,6 +123,10 @@ describe("OrcaChat", () => {
     getGoalDetailMock.mockReset();
     getWorkflowRunMock.mockReset();
     getWorkflowStepRunMock.mockReset();
+    getWorkflowTemplateMock.mockReset();
+    getWorkflowTemplateMock.mockResolvedValue({
+      template: { steps: [{ id: "execution", ordinal: 4, name: "Build It" }] },
+    });
     listOrchestratorMessagesMock.mockReset();
     listWorkflowDecisionsMock.mockReset();
     listWorkflowRunArtifactsMock.mockReset();
@@ -139,6 +145,10 @@ describe("OrcaChat", () => {
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks(); // undo any Date.now() spy so elapsed-time tests don't leak
+  });
+
   it("shows a goal prompt and no composer when no goal is selected", async () => {
     const { OrcaChat } = await import("./OrcaChat");
 
@@ -154,7 +164,7 @@ describe("OrcaChat", () => {
     expect(screen.queryByPlaceholderText("Message Orca…")).toBeNull();
   });
 
-  it("shows the selected goal SystemCard and composer when a goal is selected", async () => {
+  it("shows the starting indicator while run and step are active and Orca has not spoken", async () => {
     setupRunLoad();
     const { OrcaChat } = await import("./OrcaChat");
 
@@ -166,8 +176,48 @@ describe("OrcaChat", () => {
       />,
     );
 
-    expect(await screen.findByText("Ship Engineering workflow chat")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Message Orca…")).toBeInTheDocument();
+    const indicator = await screen.findByTestId("step-starting");
+    // ordinal is 4 → "Step 5"; the resolved-name variant is covered separately.
+    expect(indicator).toHaveTextContent("Step 5");
+    expect(indicator).toHaveTextContent("starting");
+  });
+
+  it("hides the starting indicator once an orchestrator message exists", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [orcaMessage] });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    // Wait for the orchestrator message to land, then assert the indicator is absent.
+    expect(await screen.findByText("Start with a bounded verification pass.")).toBeInTheDocument();
+    expect(screen.queryByTestId("step-starting")).toBeNull();
+  });
+
+  it("does not render the goal title/description header card", async () => {
+    setupRunLoad();
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    // Composer is the reliable "goal is selected" signal now that the header
+    // card is gone (the goal title lives in the goal rail, not in OrcaChat).
+    expect(await screen.findByPlaceholderText("Message Orca…")).toBeInTheDocument();
+    // The goal title/description header card no longer renders inside the chat.
+    expect(screen.queryByText("Ship Engineering workflow chat")).toBeNull();
+    expect(screen.queryByText("Goal description")).toBeNull();
   });
 
   it("shows the no-model SystemCard when the goal lacks an orchestrator model", async () => {
@@ -585,6 +635,60 @@ describe("OrcaChat", () => {
     expect(screen.getByText(/rm -rf build/)).toBeInTheDocument();
   });
 
+  it("labels the starting indicator with the resolved step name", async () => {
+    setupRunLoad();
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    const indicator = await screen.findByTestId("step-starting");
+    expect(indicator).toHaveTextContent("Step 5 · Build It");
+    expect(indicator).toHaveTextContent("— starting");
+  });
+
+  it("falls back to an ordinal-only label when the template fetch fails", async () => {
+    setupRunLoad();
+    getWorkflowTemplateMock.mockRejectedValue(new Error("nope"));
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    const indicator = await screen.findByTestId("step-starting");
+    expect(indicator).toHaveTextContent("Step 5 — starting");
+    expect(indicator).not.toHaveTextContent("Build It");
+    expect(indicator).not.toHaveTextContent("·");
+  });
+
+  it("shows the elapsed time since the step started, not the static hint", async () => {
+    setupRunLoad(); // stepRun.startedAt === now ("2026-01-01T00:00:00.000Z")
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse(now) + 45_000);
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    const indicator = await screen.findByTestId("step-starting");
+    expect(indicator).toHaveTextContent("starting 0:45");
+    expect(indicator).not.toHaveTextContent("~30");
+  });
+
   it("does not flash a loading indicator or blank content on SSE-driven refresh once loaded", async () => {
     setupRunLoad();
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [userMessage, orcaMessage] });
@@ -623,8 +727,19 @@ describe("OrcaChat", () => {
     await new Promise((resolve) => setTimeout(resolve, 120));
 
     // Background refresh must NOT blank content nor show a "routing" loader.
-    expect(screen.getByText("Ship Engineering workflow chat")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Message Orca…")).toBeInTheDocument();
     expect(screen.getByText("Start with a bounded verification pass.")).toBeInTheDocument();
     expect(screen.queryAllByText("routing")).toHaveLength(0);
+  });
+});
+
+describe("formatElapsed", () => {
+  it("formats durations as M:SS and floors negatives to 0:00", async () => {
+    const { formatElapsed } = await import("./OrcaChat");
+    expect(formatElapsed(0)).toBe("0:00");
+    expect(formatElapsed(5_000)).toBe("0:05");
+    expect(formatElapsed(65_000)).toBe("1:05");
+    expect(formatElapsed(600_000)).toBe("10:00");
+    expect(formatElapsed(-1_000)).toBe("0:00");
   });
 });

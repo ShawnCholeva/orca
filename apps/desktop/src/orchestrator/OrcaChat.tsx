@@ -16,6 +16,7 @@ import {
   getGoalDetail,
   getWorkflowRun,
   getWorkflowStepRun,
+  getWorkflowTemplate,
   listOrchestratorMessages,
   listWorkflowDecisions,
   listWorkflowRunArtifacts,
@@ -43,6 +44,7 @@ type WorkflowState = {
   detail: GoalDetailResponse | null;
   run: WorkflowRun | null;
   stepRun: WorkflowStepRun | null;
+  stepName: string | null;
   decisions: WorkflowDecisionTrace[];
   artifacts: WorkflowArtifact[];
 };
@@ -51,6 +53,7 @@ const EMPTY_WORKFLOW_STATE: WorkflowState = {
   detail: null,
   run: null,
   stepRun: null,
+  stepName: null,
   decisions: [],
   artifacts: [],
 };
@@ -58,6 +61,7 @@ const EMPTY_WORKFLOW_STATE: WorkflowState = {
 export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   const [workflowState, setWorkflowState] = useState<WorkflowState>(EMPTY_WORKFLOW_STATE);
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -202,6 +206,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
             detail,
             run: null,
             stepRun: null,
+            stepName: null,
             decisions: [],
             artifacts: [],
           });
@@ -221,10 +226,28 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
           : null;
         if (cancelled) return;
 
+        // Resolve the step's human name (e.g. "Build It") from the template.
+        // Non-critical enrichment: on any failure we leave stepName null and the
+        // starting indicator falls back to an ordinal-only label.
+        let stepName: string | null = null;
+        if (stepRun) {
+          try {
+            const templateResponse = await getWorkflowTemplate(runResponse.run.templateId);
+            if (cancelled) return;
+            stepName =
+              templateResponse.template.steps.find(
+                (step) => step.id === stepRun.stepTemplateId,
+              )?.name ?? null;
+          } catch {
+            stepName = null;
+          }
+        }
+
         setWorkflowState({
           detail,
           run: runResponse.run,
           stepRun,
+          stepName,
           decisions: sortByCreatedAtDesc(decisionsResponse.decisions),
           artifacts: sortByCreatedAtDesc(artifactsResponse.artifacts),
         });
@@ -308,6 +331,33 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   const lastMessage = messages[messages.length - 1] ?? null;
   const showMarkDoneCard = lastMessage?.internalKind === "mark_done_ready";
 
+  // Show a "step is starting…" indicator during the agent's first-turn latency:
+  // the run and step are active but neither Orca nor the agent has paraphrased
+  // anything into the chat yet. Clears automatically once the first turn lands.
+  const orcaHasSpoken = messages.some(
+    (m) => m.role === "orchestrator" || m.role === "agent_paraphrased",
+  );
+  const showStarting =
+    workflowState.run?.status === "active" &&
+    workflowState.stepRun?.status === "active" &&
+    !orcaHasSpoken;
+  // While the indicator is up, tick once a second so the elapsed time advances.
+  useEffect(() => {
+    if (!showStarting) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [showStarting]);
+
+  const startingElapsed =
+    workflowState.stepRun?.startedAt != null
+      ? formatElapsed(nowMs - Date.parse(workflowState.stepRun.startedAt))
+      : null;
+  const startingLabel = workflowState.stepRun
+    ? `Step ${workflowState.stepRun.ordinal + 1}${
+        workflowState.stepName ? ` · ${workflowState.stepName}` : ""
+      } — starting${startingElapsed ? ` ${startingElapsed}` : "…"}`
+    : "";
+
   async function handleRecoveryStart() {
     if (!selectedGoalId || !recoveryTemplateId) return;
     setStarting(true);
@@ -380,14 +430,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
 
         {selectedGoal && (
           <>
-            <SystemCard
-              title={selectedGoal.title}
-              body={
-                selectedGoal.description ||
-                "This goal is ready for supervised workflow orchestration."
-              }
-            />
-
             <WorkerPermissionToggle
               goalId={selectedGoal.id}
               mode={selectedGoal.workerPermissionMode}
@@ -499,6 +541,12 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
             )}
 
             {messagesLoading && <ThinkingRow label="routing" />}
+
+            {showStarting && (
+              <div data-testid="step-starting">
+                <ThinkingRow label={startingLabel} />
+              </div>
+            )}
 
             {messages.map((message) => {
               if (message.role === "internal_thought") {
@@ -761,6 +809,13 @@ function OrcaMark() {
       </svg>
     </div>
   );
+}
+
+export function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function sortByCreatedAtDesc<T extends { createdAt: string }>(items: T[]): T[] {
