@@ -25,7 +25,13 @@ export class CodexShadowProvider implements ShadowProvider {
   readonly supportsPermissionPersistence = false;
 
   launch(deps: { binOverride?: string }): ShadowLaunch {
-    return { bin: deps.binOverride ?? process.env["ORCA_CODEX_BIN"] ?? "codex" };
+    // Bypass the interactive hook-trust review for the daemon-authored hooks.json so
+    // the Stop hook fires unattended (otherwise turn capture never reaches the daemon).
+    // The shadow session can't reliably pane-answer Codex's multi-step trust menu.
+    return {
+      bin: deps.binOverride ?? process.env["ORCA_CODEX_BIN"] ?? "codex",
+      args: ["--dangerously-bypass-hook-trust"],
+    };
   }
 
   hookConfig(args: { goalId: string; port: number; authToken: string }): ShadowHookConfig {

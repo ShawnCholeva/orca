@@ -90,9 +90,11 @@ export class ShadowSessionManager {
     const dir = join(this.deps.shadowRoot, goalId);
     this.writeHookConfig(provider, goalId, dir);
     const name = this.tmuxName(goalId);
-    const bin = provider.launch({ binOverride: this.binOverride(adapterId) }).bin;
-    const started = await newSession(this.tmux, name, dir, bin);
-    dbg(goalId, `tmux new-session code=${started.code} adapter=${adapterId} name=${name} bin=${bin} dir=${dir} port=${this.deps.daemonPort}`);
+    const { bin, args = [] } = provider.launch({ binOverride: this.binOverride(adapterId) });
+    // tmux runs this via `sh -c`, so quote any token containing whitespace (e.g. a bin path with spaces).
+    const command = [bin, ...args].map((token) => (/\s/.test(token) ? JSON.stringify(token) : token)).join(" ");
+    const started = await newSession(this.tmux, name, dir, command);
+    dbg(goalId, `tmux new-session code=${started.code} adapter=${adapterId} name=${name} command=${command} dir=${dir} port=${this.deps.daemonPort}`);
     const ready = this.startup(goalId, name, provider);
     // Prevent an unhandled-rejection warning when nobody is awaiting `ready` yet
     // (askOnce still observes the rejection via `await pre.ready`).

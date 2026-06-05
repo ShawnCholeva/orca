@@ -5,6 +5,8 @@ export type ShadowAdapterId = "claude-code" | "codex" | "antigravity";
 export interface ShadowLaunch {
   /** Executable invoked by `tmux new-session` for this provider. */
   bin: string;
+  /** Extra CLI args appended after the executable (e.g. Codex's hook-trust bypass). */
+  args?: string[];
 }
 
 interface ShadowHookFile {

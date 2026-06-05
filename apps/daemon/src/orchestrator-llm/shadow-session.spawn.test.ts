@@ -67,7 +67,11 @@ describe("ShadowSessionManager spawn integration", () => {
     const m = new ShadowSessionManager({ ...deps(root, tmux), codexBin: "/bin/codex-test" });
     await m.spawn("G3", "codex");
     const newSession = tmux.calls.find((c) => c.args[0] === "new-session");
-    expect(newSession?.args).toContain("/bin/codex-test");
+    // The command is the last new-session arg: the bin plus the hook-trust bypass flag
+    // (so the daemon-authored hooks fire without the interactive trust menu).
+    const command = newSession!.args[newSession!.args.length - 1];
+    expect(command).toContain("/bin/codex-test");
+    expect(command).toContain("--dangerously-bypass-hook-trust");
   });
 
   it("readiness gate: spawn rejects when not ready", async () => {

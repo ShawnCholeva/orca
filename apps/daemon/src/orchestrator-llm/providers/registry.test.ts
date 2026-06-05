@@ -64,6 +64,11 @@ describe("resolveShadowProvider", () => {
     expect(action).toBe('{ "kind": "advance", "note": "ok" }');
   });
 
+  it("codex launch bypasses hook-trust so its hooks fire unattended; claude does not", () => {
+    expect(resolveShadowProvider("codex").launch({}).args).toContain("--dangerously-bypass-hook-trust");
+    expect(resolveShadowProvider("claude-code").launch({}).args ?? []).not.toContain("--dangerously-bypass-hook-trust");
+  });
+
   it("surfaces permission-persistence support per provider", () => {
     expect(resolveShadowProvider("claude-code").supportsPermissionPersistence).toBe(true);
     expect(resolveShadowProvider("codex").supportsPermissionPersistence).toBe(false);
