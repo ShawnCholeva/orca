@@ -59,6 +59,10 @@ describe("ShadowSessionManager spawn integration", () => {
     const hooks = JSON.parse(readFileSync(hooksPath, "utf8"));
     expect(hooks.hooks.Stop[0].hooks[0].command).toContain("goalId=G1");
     expect(hooks.hooks.StopFailure[0].hooks[0].command).toContain("failure=1");
+    // Stop/StopFailure discard the daemon ack so Codex doesn't error parsing it as
+    // stop-hook JSON; turn capture comes from the POSTed last_assistant_message.
+    expect(hooks.hooks.Stop[0].hooks[0].command).toContain("/dev/null");
+    expect(hooks.hooks.StopFailure[0].hooks[0].command).toContain("/dev/null");
   });
 
   it("uses the codex binary when spawning a codex shadow session", async () => {

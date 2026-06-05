@@ -26,15 +26,22 @@ describe("workerHookConfig", () => {
     const hooks = cfg.files.find((f) => f.relPath === "hooks.json");
     const parsed = JSON.parse(hooks!.contents) as {
       hooks: {
-        Stop: unknown;
-        StopFailure: unknown;
+        Stop: Array<{ hooks: Array<{ command: string }> }>;
+        StopFailure: Array<{ hooks: Array<{ command: string }> }>;
         PermissionRequest: Array<{ hooks: Array<{ command: string; timeout?: number }> }>;
       };
     };
     expect(parsed.hooks.Stop).toBeDefined();
     expect(parsed.hooks.StopFailure).toBeDefined();
 
+    // Stop/StopFailure discard the daemon response (Codex errors on non-empty
+    // stop-hook stdout); capture still happens from the POSTed body.
+    expect(parsed.hooks.Stop[0]!.hooks[0]!.command).toContain("/dev/null");
+    expect(parsed.hooks.StopFailure[0]!.hooks[0]!.command).toContain("/dev/null");
+
     const permCommand = parsed.hooks.PermissionRequest[0]!.hooks[0]!.command;
+    // PermissionRequest must NOT discard stdout — it emits the allow/deny decision.
+    expect(permCommand).not.toContain("/dev/null");
     // Targets the shared permission route, scoped to this session, with the bearer token.
     expect(permCommand).toContain("permission?sessionId=s1");
     expect(permCommand).toContain("tok");

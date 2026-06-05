@@ -124,6 +124,9 @@ function buildCodexHookSettings(args: { goalId: string; port: number; authToken:
     "-H", shellArg(`Authorization: Bearer ${args.authToken}`),
     "-H", shellArg("Content-Type: application/json"),
     "--data-binary", "@-",
+    // Discard the daemon's response body: Codex parses the Stop hook's stdout as
+    // stop-hook JSON and errors on the ack. Capture happens from the POSTed body.
+    "-o", "/dev/null",
     shellArg(
       `http://127.0.0.1:${args.port}/v1/shadow-hooks/stop?goalId=${encodeURIComponent(args.goalId)}${failure ? "&failure=1" : ""}`,
     ),
@@ -150,6 +153,8 @@ function buildCodexWorkerHookSettings(args: {
     "-H", shellArg(auth),
     "-H", shellArg("Content-Type: application/json"),
     "--data-binary", "@-",
+    // Discard the daemon ack: Codex parses Stop-hook stdout as JSON and errors on it.
+    "-o", "/dev/null",
     shellArg(`http://127.0.0.1:${args.port}/v1/agent-hooks/stop?sessionId=${sid}${failure ? "&failure=1" : ""}`),
   ].join(" ");
 
