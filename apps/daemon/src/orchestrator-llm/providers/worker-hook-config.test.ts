@@ -28,7 +28,7 @@ describe("workerHookConfig", () => {
       hooks: {
         Stop: unknown;
         StopFailure: unknown;
-        PermissionRequest: Array<{ hooks: Array<{ command: string }> }>;
+        PermissionRequest: Array<{ hooks: Array<{ command: string; timeout?: number }> }>;
       };
     };
     expect(parsed.hooks.Stop).toBeDefined();
@@ -48,6 +48,9 @@ describe("workerHookConfig", () => {
     expect(permCommand).toContain("createHash");
     expect(permCommand).toContain("tool_name");
     expect(permCommand).toContain("tool_input");
+    // Parity with Claude's PermissionRequest hook: an explicit timeout so the turn
+    // doesn't fall back to Codex's default while it blocks awaiting the daemon decision.
+    expect(parsed.hooks.PermissionRequest[0]!.hooks[0]!.timeout).toBe(1800);
 
     // CODEX_HOME points discovery at the private config dir.
     expect(cfg.env).toEqual({ CODEX_HOME: "/tmp/cfg" });

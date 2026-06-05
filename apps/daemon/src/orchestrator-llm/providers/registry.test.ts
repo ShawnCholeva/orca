@@ -49,6 +49,21 @@ describe("resolveShadowProvider", () => {
     expect(action).toBe('{ "kind": "advance", "note": "ready" }');
   });
 
+  it("falls back to the codex pane bullet form when no orca:action fence is present", () => {
+    // Without a ```orca:action fence, extractActionBlock returns null and parseAction
+    // falls through to the retained TUI-pane parser (extractCodexPaneAction). This keeps
+    // the dormant fallback covered now that capture is hook-based.
+    const paneText = ["  some preamble", '  • { "kind": "advance", "note": "ok" }', "  › "].join("\n");
+    const action = resolveShadowProvider("codex").turnParser().parseAction(paneText);
+    expect(action).toBe('{ "kind": "advance", "note": "ok" }');
+  });
+
+  it("compacts a multiline-wrapped codex pane bullet into valid JSON", () => {
+    const paneText = ["  • { \"kind\": \"advance\",", '      "note": "ok" }', "  › "].join("\n");
+    const action = resolveShadowProvider("codex").turnParser().parseAction(paneText);
+    expect(action).toBe('{ "kind": "advance", "note": "ok" }');
+  });
+
   it("surfaces permission-persistence support per provider", () => {
     expect(resolveShadowProvider("claude-code").supportsPermissionPersistence).toBe(true);
     expect(resolveShadowProvider("codex").supportsPermissionPersistence).toBe(false);

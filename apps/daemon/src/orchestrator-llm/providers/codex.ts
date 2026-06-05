@@ -168,7 +168,9 @@ function buildCodexWorkerHookSettings(args: {
     hooks: {
       Stop: [{ hooks: [{ type: "command", command: stopCommand(false) }] }],
       StopFailure: [{ hooks: [{ type: "command", command: stopCommand(true) }] }],
-      PermissionRequest: [{ hooks: [{ type: "command", command: permCommand }] }],
+      // timeout mirrors the Claude PermissionRequest hook (1800s): the hook blocks the
+      // turn while the daemon awaits the operator's decision, so it must outlast a human.
+      PermissionRequest: [{ hooks: [{ type: "command", command: permCommand, timeout: 1800 }] }],
     },
   };
 }
