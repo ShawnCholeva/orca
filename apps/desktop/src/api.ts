@@ -46,6 +46,7 @@ import {
   ListConflictsQuery,
   ListConflictsResponse,
   ListAdaptersResponse,
+  ListActivitiesResponse,
   ListContextPackagesQuery,
   ListContextPackagesResponse,
   ListGoalDecisionsResponse,
@@ -106,6 +107,7 @@ import {
   WorkflowRunResponse,
   WorkflowStepRunResponse,
   WorkflowTemplateResponse,
+  type Activity,
   type AgentReadinessReport,
   type SystemReadinessReport,
   type PluginSummary,
@@ -1154,6 +1156,17 @@ export async function listSessions(goalId: string): Promise<ListSessionsResponse
     ListSessionsResponse,
     "List sessions failed",
   );
+}
+
+export async function listActivities(goalId: string): Promise<Activity[]> {
+  const { baseUrl, token } = await loadConfig();
+  const body = await requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/activities`,
+    { headers: authHeaders(token) },
+    ListActivitiesResponse,
+    "List activities failed",
+  );
+  return body.items;
 }
 
 export async function createContextPackage(

@@ -637,6 +637,39 @@ describe("desktop api client", () => {
     expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1/sessions");
   });
 
+  it("listActivities fetches and parses goal activity", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        items: [
+          {
+            id: "a1",
+            goalId: "g1",
+            workflowRunId: "r1",
+            stepRunId: "s1",
+            agentSessionId: null,
+            turnOrdinal: 0,
+            status: "active",
+            currentText: "Watching the step agent...",
+            finalSummary: null,
+            sourceKind: "step_started",
+            workCategory: null,
+            confidence: null,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: null,
+          },
+        ],
+      }),
+    );
+
+    const response = await api.listActivities("g1");
+
+    expect(response[0]!.currentText).toBe("Watching the step agent...");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://127.0.0.1:8787/v1/goals/g1/activities");
+    expect(init?.headers).toEqual({});
+  });
+
   it("workflow wrappers hit the goal-scoped routes with validated payloads", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(201, { run: workflowRun }))
