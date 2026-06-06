@@ -1,0 +1,185 @@
+import Database from "better-sqlite3";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { EventBus } from "../events.js";
+import { defaultMigrationsDir, runMigrations } from "../migrations.js";
+import { listActivitiesByGoal } from "./projection.js";
+import type { ActivityStoreCtx } from "./store.js";
+import { ActivityUpdater } from "./updater.js";
+
+describe("ActivityUpdater", () => {
+  let db: Database.Database;
+  let nowMs: number;
+  let events: Array<{ type: string }>;
+  let ctx: ActivityStoreCtx;
+  let updater: ActivityUpdater;
+
+  const base = {
+    goalId: "g1",
+    workflowRunId: "r1",
+    stepRunId: "s1",
+    agentSessionId: "sess1"
+  };
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    runMigrations(db, defaultMigrationsDir());
+    db.prepare(
+      `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+       VALUES ('g1', 'Goal', '', 'active', 1, '2026-06-05', '2026-06-05', null)`
+    ).run();
+
+    nowMs = Date.parse("2026-06-05T00:00:00.000Z");
+    events = [];
+    const bus = new EventBus();
+    bus.subscribe((event) => events.push(event));
+    let nextId = 0;
+    ctx = {
+      db,
+      bus,
+      now: () => new Date(nowMs).toISOString(),
+      idFactory: () => `activity-${++nextId}`
+    };
+    updater = new ActivityUpdater(() => nowMs);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("opens a live bubble naming the started step", () => {
+    updater.apply(ctx, {
+      kind: "step_started",
+      ...base,
+      stepName: "Implement updater"
+    });
+
+    expect(listActivitiesByGoal(db, "g1")).toMatchObject([
+      {
+        status: "active",
+        currentText: "Watching the step agent start Implement updater…",
+        sourceKind: "step_started",
+        workCategory: null
+      }
+    ]);
+  });
+
+  it("coalesces same-category tool signals inside the throttle window", () => {
+    updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
+
+    nowMs += 100;
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading" });
+    nowMs += 1_000;
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading" });
+    nowMs += 1_000;
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading" });
+
+    const activities = listActivitiesByGoal(db, "g1");
+    expect(activities.filter((activity) => activity.workCategory === "reading")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "activity.changed")).toHaveLength(2);
+  });
+
+  it("updates immediately when the tool category changes", () => {
+    updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
+    nowMs += 100;
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading" });
+    nowMs += 100;
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "editing" });
+
+    expect(listActivitiesByGoal(db, "g1")).toMatchObject([
+      {
+        currentText: "Making changes...",
+        sourceKind: "tool_use",
+        workCategory: "editing"
+      }
+    ]);
+    expect(events.filter((event) => event.type === "activity.changed")).toHaveLength(3);
+  });
+
+  it("reassures after weak-signal silence then expires an empty completion", () => {
+    updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
+
+    nowMs += 9_999;
+    updater.apply(ctx, { kind: "weak_signal_tick", ...base });
+    expect(events.filter((event) => event.type === "activity.changed")).toHaveLength(1);
+
+    nowMs += 2;
+    updater.apply(ctx, { kind: "weak_signal_tick", ...base });
+    expect(listActivitiesByGoal(db, "g1")).toMatchObject([
+      {
+        status: "active",
+        currentText: "Still working on the step; no new output yet.",
+        sourceKind: "weak_signal",
+        workCategory: null
+      }
+    ]);
+
+    updater.apply(ctx, {
+      kind: "turn_completed",
+      stepRunId: "s1",
+      summary: "   ",
+      confidence: null
+    });
+
+    const activities = listActivitiesByGoal(db, "g1");
+    expect(activities).toMatchObject([
+      {
+        status: "expired",
+        finalSummary: null
+      }
+    ]);
+    expect(
+      activities.filter(
+        (activity) => activity.status === "completed" && activity.finalSummary !== null
+      )
+    ).toHaveLength(0);
+  });
+
+  it("persists exactly one completed final summary", () => {
+    updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
+    updater.apply(ctx, {
+      kind: "turn_completed",
+      stepRunId: "s1",
+      summary: "  Implemented paced narration.  ",
+      confidence: "high"
+    });
+
+    const completed = listActivitiesByGoal(db, "g1").filter(
+      (activity) => activity.status === "completed"
+    );
+    expect(completed).toHaveLength(1);
+    expect(completed[0]?.finalSummary).toBe("Implemented paced narration.");
+  });
+
+  it("pauses with the embedded pending question", () => {
+    const pendingQuestion = {
+      questionId: "q1",
+      toolUseId: "tool-1",
+      questions: [
+        {
+          header: "Approach",
+          question: "Which approach?",
+          multiSelect: false,
+          options: [{ label: "A", description: "Use A" }]
+        }
+      ]
+    };
+    updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
+
+    updater.apply(ctx, {
+      kind: "question_pending",
+      stepRunId: "s1",
+      text: "I need your decision.",
+      pendingQuestion
+    });
+
+    expect(listActivitiesByGoal(db, "g1")).toMatchObject([
+      {
+        status: "paused_for_input",
+        currentText: "I need your decision.",
+        sourceKind: "question_pending",
+        pendingQuestion
+      }
+    ]);
+  });
+});
