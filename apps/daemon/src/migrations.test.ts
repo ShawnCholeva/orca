@@ -74,7 +74,8 @@ describe("runMigrations", () => {
       "0020_drop_removed_provider_execution_modes.sql",
       "0021_workflow_template_scope_graph.sql",
       "0022_workflow_step_result.sql",
-      "0023_worker_permission_mode.sql"
+      "0023_worker_permission_mode.sql",
+      "0024_activities.sql"
     ]);
   });
 
@@ -179,7 +180,8 @@ describe("runMigrations", () => {
       "0020_drop_removed_provider_execution_modes.sql",
       "0021_workflow_template_scope_graph.sql",
       "0022_workflow_step_result.sql",
-      "0023_worker_permission_mode.sql"
+      "0023_worker_permission_mode.sql",
+      "0024_activities.sql"
     ]);
 
     const goalCount = (
@@ -235,6 +237,59 @@ describe("runMigrations", () => {
       "pending_question",
       "pending_approval",
     ]);
+  });
+
+  it("0024 creates activities with a one-live-per-step partial unique index", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+
+    const cols = db.prepare("PRAGMA table_info(activities)").all() as Array<{
+      name: string;
+    }>;
+    const names = cols.map((c) => c.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "id",
+        "goal_id",
+        "workflow_run_id",
+        "step_run_id",
+        "agent_session_id",
+        "turn_ordinal",
+        "status",
+        "current_text",
+        "final_summary",
+        "source_kind",
+        "work_category",
+        "confidence",
+        "pending_question",
+        "created_at",
+        "updated_at",
+        "completed_at",
+      ])
+    );
+
+    db.prepare(
+      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "g1",
+      "t",
+      "",
+      "active",
+      1,
+      "2026-06-05",
+      "2026-06-05",
+      null
+    );
+
+    const ins = db.prepare(
+      `INSERT INTO activities (id, goal_id, workflow_run_id, step_run_id, turn_ordinal,
+         status, current_text, source_kind, created_at, updated_at)
+       VALUES (?, 'g1', 'r1', 's1', 0, ?, 't', 'step_started', '2026-06-05', '2026-06-05')`
+    );
+
+    ins.run("a1", "active");
+    expect(() => ins.run("a2", "active")).toThrow();
+    expect(() => ins.run("a3", "completed")).not.toThrow();
   });
 
   it("workflow_step_runs has operator-selection columns", () => {
@@ -353,7 +408,8 @@ describe("session tables migration", () => {
       "0020_drop_removed_provider_execution_modes.sql",
       "0021_workflow_template_scope_graph.sql",
       "0022_workflow_step_result.sql",
-      "0023_worker_permission_mode.sql"
+      "0023_worker_permission_mode.sql",
+      "0024_activities.sql"
     ]);
 
     const tables = (
@@ -851,7 +907,8 @@ describe("migration 0010 workflows", () => {
       "0020_drop_removed_provider_execution_modes.sql",
       "0021_workflow_template_scope_graph.sql",
       "0022_workflow_step_result.sql",
-      "0023_worker_permission_mode.sql"
+      "0023_worker_permission_mode.sql",
+      "0024_activities.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1429,7 +1486,8 @@ describe("migration 0012 orchestration transport", () => {
       "0020_drop_removed_provider_execution_modes.sql",
       "0021_workflow_template_scope_graph.sql",
       "0022_workflow_step_result.sql",
-      "0023_worker_permission_mode.sql"
+      "0023_worker_permission_mode.sql",
+      "0024_activities.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

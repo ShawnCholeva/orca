@@ -34,6 +34,7 @@ export const migrationFiles = [
   "0021_workflow_template_scope_graph.sql",
   "0022_workflow_step_result.sql",
   "0023_worker_permission_mode.sql",
+  "0024_activities.sql",
 ] as const;
 
 export function runMigrations(
