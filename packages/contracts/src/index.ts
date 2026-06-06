@@ -232,7 +232,8 @@ export const DomainEventType = z.enum([
   "workflow.worker.state_changed",
   "workflow.human_review.requested",
   "adapter.execution_modes.changed",
-  "goal.worker_permission_mode_changed"
+  "goal.worker_permission_mode_changed",
+  "activity.changed"
 ]);
 export type DomainEventType = z.infer<typeof DomainEventType>;
 
@@ -1033,6 +1034,64 @@ export const SubmitPermissionDecisionRequest = z
   })
   .strict();
 export type SubmitPermissionDecisionRequest = z.infer<typeof SubmitPermissionDecisionRequest>;
+
+export const ActivityStatus = z.enum([
+  "active",
+  "paused_for_input",
+  "completed",
+  "expired"
+]);
+export type ActivityStatus = z.infer<typeof ActivityStatus>;
+
+export const ActivitySourceKind = z.enum([
+  "step_started",
+  "tool_use",
+  "question_pending",
+  "permission_pending",
+  "turn_completed",
+  "weak_signal"
+]);
+export type ActivitySourceKind = z.infer<typeof ActivitySourceKind>;
+
+export const ActivityWorkCategory = z.enum([
+  "reading",
+  "searching",
+  "editing",
+  "running",
+  "testing",
+  "other"
+]);
+export type ActivityWorkCategory = z.infer<typeof ActivityWorkCategory>;
+
+export const ActivityConfidence = z.enum(["low", "medium", "high"]);
+export type ActivityConfidence = z.infer<typeof ActivityConfidence>;
+
+export const Activity = z
+  .object({
+    id: z.string(),
+    goalId: z.string(),
+    workflowRunId: z.string(),
+    stepRunId: z.string(),
+    agentSessionId: z.string().nullable(),
+    turnOrdinal: z.number().int().nonnegative(),
+    status: ActivityStatus,
+    currentText: z.string().max(4000),
+    finalSummary: z.string().max(4000).nullable(),
+    sourceKind: ActivitySourceKind,
+    workCategory: ActivityWorkCategory.nullable(),
+    confidence: ActivityConfidence.nullable(),
+    pendingQuestion: PendingQuestion.optional(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    completedAt: z.string().nullable()
+  })
+  .strict();
+export type Activity = z.infer<typeof Activity>;
+
+export const ListActivitiesResponse = z
+  .object({ items: z.array(Activity) })
+  .strict();
+export type ListActivitiesResponse = z.infer<typeof ListActivitiesResponse>;
 
 export const UpdateWorkerPermissionModeRequest = z
   .object({ workerPermissionMode: WorkerPermissionMode })

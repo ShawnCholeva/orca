@@ -6,6 +6,8 @@ import {
   AgentReadinessReport,
   AgentReadinessStatus,
   AdapterSummary,
+  Activity,
+  ActivityStatus,
   AuthStatus,
   AttachWorkspaceRequest,
   AttachWorkspaceResponse,
@@ -138,6 +140,70 @@ const guidedOutputFixture = GuidedRefinementOutput.parse({
   successCriteria: ["Goal detail shows refinement"],
   constraints: ["No AI calls"],
   assumptions: ["Local filesystem available"]
+});
+
+describe("Activity contract", () => {
+  it("parses a minimal active activity", () => {
+    const parsed = Activity.parse({
+      id: "a1",
+      goalId: "g1",
+      workflowRunId: "r1",
+      stepRunId: "s1",
+      agentSessionId: null,
+      turnOrdinal: 0,
+      status: "active",
+      currentText: "Watching the step agent...",
+      finalSummary: null,
+      sourceKind: "step_started",
+      workCategory: null,
+      confidence: null,
+      createdAt: "2026-06-05T00:00:00.000Z",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+      completedAt: null
+    });
+    expect(parsed.status).toBe("active");
+  });
+
+  it("accepts an embedded pending question", () => {
+    const parsed = Activity.parse({
+      id: "a1",
+      goalId: "g1",
+      workflowRunId: "r1",
+      stepRunId: "s1",
+      agentSessionId: "sess1",
+      turnOrdinal: 1,
+      status: "paused_for_input",
+      currentText: "I need your call.",
+      finalSummary: null,
+      sourceKind: "question_pending",
+      workCategory: null,
+      confidence: null,
+      pendingQuestion: {
+        questionId: "q1",
+        toolUseId: "t1",
+        questions: [
+          {
+            header: "Signals",
+            question: "Which passed?",
+            multiSelect: true,
+            options: [{ label: "A", description: "x" }]
+          }
+        ]
+      },
+      createdAt: "2026-06-05T00:00:00.000Z",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+      completedAt: null
+    });
+    expect(parsed.pendingQuestion?.questionId).toBe("q1");
+  });
+
+  it("rejects an unknown status", () => {
+    expect(ActivityStatus.safeParse("running").success).toBe(false);
+  });
+
+  it("includes the activity.changed event type", () => {
+    expect(DomainEventType.safeParse("activity.changed").success).toBe(true);
+  });
 });
 
 function expectRoundTrip<T>(
