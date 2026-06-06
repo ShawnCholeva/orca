@@ -168,6 +168,10 @@ import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js';
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerActivityRoutes } from './activities/routes.js';
+import { categorizeClaudeTool } from './activities/claude-adapter.js';
+import type { ActivitySignal } from './activities/signals.js';
+import type { ActivityStoreCtx } from './activities/store.js';
+import { ActivityUpdater } from './activities/updater.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
 import { insertMessageWithEvent } from './orchestrator-chat/usecases.js';
@@ -196,6 +200,7 @@ import {
   providerIdsForConnectedAgents,
   toModelProvidersResponse,
 } from './workflows/orchestration-transport/provider-catalog.js';
+import { getTemplateById } from './workflows/templates/projection.js';
 import { NotConnectedError, UnknownAgentError } from './readiness/service.js';
 import { checkTmuxReadiness } from './readiness/system.js';
 
@@ -529,6 +534,78 @@ export function createServer(
   const ELICIT_ANSWER_TIMEOUT_MS = 590_000; // slightly under the 600s hook timeout
   const permissionApprovals = new PermissionApprovalStore(daemonContext.idFactory);
   const PERMISSION_DECISION_TIMEOUT_MS = 1_790_000; // ~under the 1800s PermissionRequest hook timeout; then deny
+  const activityUpdater = new ActivityUpdater();
+  const activityCtx: ActivityStoreCtx = {
+    db,
+    bus: eventBus,
+    now: daemonContext.now,
+    idFactory: daemonContext.idFactory,
+  };
+  const applyActivitySafely = (
+    source: string,
+    signal: ActivitySignal
+  ): void => {
+    try {
+      activityUpdater.apply(activityCtx, signal);
+    } catch (error) {
+      console.error("[activity] narration update failed", {
+        source,
+        kind: signal.kind,
+        stepRunId: signal.stepRunId,
+        error,
+      });
+    }
+  };
+  const resolveStepContext = (
+    sessionId: string
+  ): {
+    goalId: string;
+    workflowRunId: string;
+    stepRunId: string;
+    agentSessionId: string;
+  } | null => {
+    const row = db
+      .prepare(
+        `SELECT s.id AS agent_session_id, s.goal_id, s.workflow_step_run_id AS step_run_id,
+                wsr.workflow_run_id
+         FROM sessions s
+         JOIN workflow_step_runs wsr
+           ON wsr.id = s.workflow_step_run_id
+          AND wsr.goal_id = s.goal_id
+         JOIN workflow_runs wr
+           ON wr.id = wsr.workflow_run_id
+          AND wr.goal_id = s.goal_id
+         WHERE s.id = ?
+           AND s.status IN ('starting', 'running')
+           AND wsr.status = 'active'
+           AND wr.status = 'active'
+           AND wr.current_step_run_id = wsr.id
+           AND s.id = (
+             SELECT latest.id
+             FROM sessions latest
+             WHERE latest.workflow_step_run_id = wsr.id
+               AND latest.goal_id = wsr.goal_id
+               AND latest.status IN ('starting', 'running')
+             ORDER BY latest.created_at DESC, latest.id DESC
+             LIMIT 1
+           )`
+      )
+      .get(sessionId) as
+      | {
+          agent_session_id: string;
+          goal_id: string;
+          step_run_id: string;
+          workflow_run_id: string;
+        }
+      | undefined;
+    if (!row) return null;
+    return {
+      goalId: row.goal_id,
+      workflowRunId: row.workflow_run_id,
+      stepRunId: row.step_run_id,
+      agentSessionId: row.agent_session_id,
+    };
+  };
 
   // Update the hook endpoint URLs with the actual bound port after listen.
   server.addHook("onListen", async () => {
@@ -671,6 +748,104 @@ export function createServer(
         { bus: eventBus, idFactory: daemonContext.idFactory }
       )
       .catch((err) => console.error("[workflow] onWorkflowSessionCompleted error", err));
+  });
+
+  const unsubscribeActivityEvents = eventBus.subscribe((event) => {
+    if (event.type !== "workflow.step.started") return;
+    const eventGoalId =
+      typeof event.goalId === "string" && event.goalId.length > 0
+        ? event.goalId
+        : null;
+    const stepRunId =
+      typeof event.payload.stepRunId === "string" ? event.payload.stepRunId : null;
+    const goalId =
+      typeof event.payload.goalId === "string" ? event.payload.goalId : null;
+    const workflowRunId =
+      typeof event.payload.workflowRunId === "string"
+        ? event.payload.workflowRunId
+        : null;
+    const stepTemplateId =
+      typeof event.payload.stepTemplateId === "string"
+        ? event.payload.stepTemplateId
+        : null;
+    const ordinal =
+      typeof event.payload.ordinal === "number" &&
+      Number.isInteger(event.payload.ordinal) &&
+      event.payload.ordinal >= 0
+        ? event.payload.ordinal
+        : null;
+    if (
+      !eventGoalId ||
+      !stepRunId ||
+      !goalId ||
+      !workflowRunId ||
+      !stepTemplateId ||
+      ordinal === null ||
+      eventGoalId !== goalId
+    ) {
+      return;
+    }
+
+    const row = db
+      .prepare(
+        `SELECT wsr.goal_id, wsr.workflow_run_id, wsr.step_template_id, wsr.ordinal,
+                wr.template_id,
+                (
+                  SELECT s.id
+                  FROM sessions s
+                  WHERE s.workflow_step_run_id = wsr.id
+                    AND s.goal_id = wsr.goal_id
+                    AND s.status IN ('starting', 'running')
+                  ORDER BY s.created_at DESC, s.id DESC
+                  LIMIT 1
+                ) AS agent_session_id
+         FROM workflow_step_runs wsr
+         JOIN workflow_runs wr
+           ON wr.id = wsr.workflow_run_id
+          AND wr.goal_id = wsr.goal_id
+         WHERE wsr.id = ?
+           AND wsr.status = 'active'
+           AND wr.status = 'active'
+           AND wr.current_step_run_id = wsr.id`
+      )
+      .get(stepRunId) as
+      | {
+          goal_id: string;
+          workflow_run_id: string;
+          step_template_id: string;
+          ordinal: number;
+          template_id: string;
+          agent_session_id: string | null;
+        }
+      | undefined;
+    if (
+      !row ||
+      row.goal_id !== goalId ||
+      row.goal_id !== eventGoalId ||
+      row.workflow_run_id !== workflowRunId ||
+      row.step_template_id !== stepTemplateId ||
+      row.ordinal !== ordinal
+    ) {
+      return;
+    }
+
+    const template = getTemplateById(db, row.template_id);
+    const step = template?.steps.find(
+      (candidate) => candidate.id === row.step_template_id
+    );
+    if (!step) return;
+
+    applyActivitySafely("workflow.step.started", {
+      kind: "step_started",
+      goalId: row.goal_id,
+      workflowRunId: row.workflow_run_id,
+      stepRunId,
+      agentSessionId: row.agent_session_id,
+      stepName: step.name,
+    });
+  });
+  server.addHook("onClose", async () => {
+    unsubscribeActivityEvents();
   });
 
   // ---- Composite goal + workflow bootstrap ----
@@ -1110,13 +1285,34 @@ export function createServer(
 
   registerAgentHookRoutes(server, {
     onResponseDone: async (payload) => {
-      await orchestratorService.onAgentResponseDone(db, daemonContext.now, payload, {
-        bus: eventBus,
-        idFactory: daemonContext.idFactory,
-      });
+      const stepContext = resolveStepContext(payload.sessionId);
+      try {
+        await orchestratorService.onAgentResponseDone(db, daemonContext.now, payload, {
+          bus: eventBus,
+          idFactory: daemonContext.idFactory,
+        });
+      } finally {
+        if (stepContext) {
+          applyActivitySafely("agent.response_done", {
+            kind: "turn_completed",
+            stepRunId: stepContext.stepRunId,
+            summary: deriveTurnSummary(payload.responseText),
+            confidence: null,
+          });
+        }
+      }
     },
     resolveAdapterForSession: (sid) =>
       (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(sid) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code",
+    onToolUse: async (sessionId, payload) => {
+      const stepContext = resolveStepContext(sessionId);
+      if (!stepContext) return;
+      applyActivitySafely("agent.tool_use", {
+        kind: "tool_use",
+        ...stepContext,
+        category: categorizeClaudeTool(payload.toolName, payload.toolInput),
+      });
+    },
     onPermissionRequest: async (sessionId, payload) => {
       const sessionRow = db.prepare("SELECT goal_id FROM sessions WHERE id = ?").get(sessionId) as { goal_id: string } | undefined;
       if (!sessionRow) return "deny"; // safe default: unknown session
@@ -1145,6 +1341,14 @@ export function createServer(
             pendingApproval: { approvalId, sessionId, toolName: payload.toolName, summary, canRemember },
           }
         );
+      }
+      const stepContext = resolveStepContext(sessionId);
+      if (stepContext) {
+        applyActivitySafely("agent.permission_pending", {
+          kind: "permission_pending",
+          ...stepContext,
+          toolName: payload.toolName,
+        });
       }
       let timerId: ReturnType<typeof setTimeout>;
       const timed = new Promise<"deny">((res) => { timerId = setTimeout(() => res("deny"), PERMISSION_DECISION_TIMEOUT_MS); });
@@ -1728,6 +1932,14 @@ function summarizePermission(toolName: string, toolInput: unknown): string {
     if (cmd) return cmd.length > 200 ? `${cmd.slice(0, 200)}…` : cmd;
   }
   return toolName;
+}
+
+function deriveTurnSummary(responseText: string): string {
+  const firstMeaningfulLine = responseText
+    .split(/\r\n?|\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  return (firstMeaningfulLine ?? "").slice(0, 280);
 }
 
 function postOrchestratorChatReply(
