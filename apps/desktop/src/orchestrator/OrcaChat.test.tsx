@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Goal, OrchestratorChatMessage } from "@orca/contracts";
+import type { Activity, Goal, OrchestratorChatMessage } from "@orca/contracts";
 
 vi.mock("@tauri-apps/api/core", () => ({
   isTauri: () => false,
@@ -12,6 +12,7 @@ const getGoalDetailMock = vi.fn();
 const getWorkflowRunMock = vi.fn();
 const getWorkflowStepRunMock = vi.fn();
 const getWorkflowTemplateMock = vi.fn();
+const listActivitiesMock = vi.fn();
 const listOrchestratorMessagesMock = vi.fn();
 const listWorkflowDecisionsMock = vi.fn();
 const listWorkflowRunArtifactsMock = vi.fn();
@@ -29,6 +30,7 @@ vi.mock("../api", () => ({
   getWorkflowRun: (...args: unknown[]) => getWorkflowRunMock(...args),
   getWorkflowStepRun: (...args: unknown[]) => getWorkflowStepRunMock(...args),
   getWorkflowTemplate: (...args: unknown[]) => getWorkflowTemplateMock(...args),
+  listActivities: (...args: unknown[]) => listActivitiesMock(...args),
   listOrchestratorMessages: (...args: unknown[]) => listOrchestratorMessagesMock(...args),
   listWorkflowDecisions: (...args: unknown[]) => listWorkflowDecisionsMock(...args),
   listWorkflowRunArtifacts: (...args: unknown[]) => listWorkflowRunArtifactsMock(...args),
@@ -60,6 +62,12 @@ const goal: Goal = {
   archivedAt: null,
 };
 
+const goal2: Goal = {
+  ...goal,
+  id: "goal-2",
+  title: "Ship another workflow",
+};
+
 const userMessage: OrchestratorChatMessage = {
   id: "msg-user",
   goalId: "goal-1",
@@ -79,6 +87,50 @@ const orcaMessage: OrchestratorChatMessage = {
   correlationId: "corr-1",
   createdAt: now,
 };
+
+const activeActivity: Activity = {
+  id: "activity-1",
+  goalId: "goal-1",
+  workflowRunId: "run-1",
+  stepRunId: "step-1",
+  agentSessionId: null,
+  turnOrdinal: 0,
+  status: "active",
+  currentText: "Reading through the codebase...",
+  finalSummary: null,
+  sourceKind: "tool_use",
+  workCategory: "reading",
+  confidence: "high",
+  createdAt: now,
+  updatedAt: now,
+  completedAt: null,
+};
+
+function pausedActivity(
+  questionId: string,
+  optionLabel: string,
+  currentText = "I need your input.",
+): Activity {
+  return {
+    ...activeActivity,
+    id: `activity-${questionId}`,
+    status: "paused_for_input",
+    currentText,
+    sourceKind: "question_pending",
+    pendingQuestion: {
+      questionId,
+      toolUseId: `tool-${questionId}`,
+      questions: [
+        {
+          header: "Approach",
+          question: `Question ${questionId}?`,
+          multiSelect: false,
+          options: [{ label: optionLabel, description: "Option description" }],
+        },
+      ],
+    },
+  };
+}
 
 function setupRunLoad() {
   getGoalDetailMock.mockResolvedValue({
@@ -127,6 +179,8 @@ describe("OrcaChat", () => {
     getWorkflowTemplateMock.mockResolvedValue({
       template: { steps: [{ id: "execution", ordinal: 4, name: "Build It" }] },
     });
+    listActivitiesMock.mockReset();
+    listActivitiesMock.mockResolvedValue([]);
     listOrchestratorMessagesMock.mockReset();
     listWorkflowDecisionsMock.mockReset();
     listWorkflowRunArtifactsMock.mockReset();
@@ -365,82 +419,229 @@ describe("OrcaChat", () => {
     );
   });
 
-  it("renders an internal-thought row from the message list", async () => {
+  it("renders the activity thread without a routing indicator", async () => {
     setupRunLoad();
-    listOrchestratorMessagesMock.mockResolvedValue({
-      messages: [
-        {
-          id: "msg-thought",
-          goalId: "goal-1",
-          role: "internal_thought",
-          kind: "message",
-          body: "Starting Intake",
-          correlationId: null,
-          internalKind: "step_started",
-          createdAt: now,
-        },
-      ],
-    });
+    listActivitiesMock.mockResolvedValue([activeActivity]);
     const { OrcaChat } = await import("./OrcaChat");
 
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
-    expect(await screen.findByText(/Starting Intake/)).toBeInTheDocument();
+    expect(await screen.findByTestId("activity-bubble")).toHaveTextContent(
+      "Reading through the codebase...",
+    );
+    expect(screen.queryByText("routing")).not.toBeInTheDocument();
   });
 
-  it("renders an agent-paraphrased message with the raw transcript hidden by default", async () => {
+  it("refreshes the visible activity when activity.changed arrives without resubscribing", async () => {
     setupRunLoad();
-    listOrchestratorMessagesMock.mockResolvedValue({
-      messages: [
-        {
-          id: "msg-paraphrased",
-          goalId: "goal-1",
-          role: "agent_paraphrased",
-          kind: "message",
-          body: "I asked the user to confirm the rollout scope.",
-          rawAgentText: "RAW transcript that should stay hidden",
-          correlationId: null,
-          createdAt: now,
-        },
-      ],
-    });
+    listActivitiesMock
+      .mockResolvedValueOnce([
+        { ...activeActivity, currentText: "Reading the old implementation..." },
+      ])
+      .mockResolvedValueOnce([
+        { ...activeActivity, currentText: "Reading the updated implementation..." },
+      ]);
+    let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+    openEventStreamMock.mockImplementation(
+      ({ onEvent }: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+        capturedOnEvent = onEvent;
+        return { close: vi.fn() };
+      },
+    );
     const { OrcaChat } = await import("./OrcaChat");
 
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
-    expect(
-      await screen.findByText("I asked the user to confirm the rollout scope."),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("RAW transcript that should stay hidden")).toBeNull();
+    expect(await screen.findByTestId("activity-bubble")).toHaveTextContent(
+      "Reading the old implementation...",
+    );
+    expect(capturedOnEvent).not.toBeNull();
+    act(() => {
+      capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
+    });
 
-    // Toggling the disclosure reveals the raw transcript.
-    fireEvent.click(screen.getByText(/Show raw agent transcript/));
-    expect(
-      await screen.findByText("RAW transcript that should stay hidden"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Reading the updated implementation...")).toBeInTheDocument();
+    expect(screen.getAllByTestId("activity-bubble")).toHaveLength(1);
+    expect(listActivitiesMock).toHaveBeenCalledTimes(2);
+    expect(openEventStreamMock).toHaveBeenCalledTimes(1);
   });
 
-  it("renders the MarkDoneConfirmCard when the last message signals mark_done_ready", async () => {
-    setupRunLoad();
-    listOrchestratorMessagesMock.mockResolvedValue({
-      messages: [
-        {
-          id: "msg-done",
-          goalId: "goal-1",
-          role: "internal_thought",
-          kind: "message",
-          body: "All steps complete.",
-          correlationId: null,
-          internalKind: "mark_done_ready",
-          createdAt: now,
-        },
-      ],
+  it("hides the previous goal activity while the next goal load is pending", async () => {
+    getGoalDetailMock.mockImplementation((goalId: string) => {
+      if (goalId === "goal-1") {
+        return Promise.resolve({ goal, refinement: null, workspaces: [] });
+      }
+      return new Promise(() => {});
     });
+    listOrchestratorMessagesMock.mockImplementation((goalId: string) => {
+      if (goalId === "goal-1") return Promise.resolve({ messages: [] });
+      return new Promise(() => {});
+    });
+    listActivitiesMock.mockImplementation((goalId: string) => {
+      if (goalId === "goal-1") {
+        return Promise.resolve([pausedActivity("q1", "Keep goal one")]);
+      }
+      return new Promise<Activity[]>(() => {});
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    const { rerender } = render(
+      <OrcaChat
+        goals={[goal, goal2]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    await screen.findByText("Question q1?");
+    fireEvent.click(screen.getByRole("radio", { name: /Keep goal one/ }));
+
+    rerender(
+      <OrcaChat
+        goals={[goal, goal2]}
+        selectedGoalId="goal-2"
+        connectionStatus="open"
+      />,
+    );
+
+    const staleSubmit = screen.queryByRole("button", { name: /submit/i });
+    if (staleSubmit) fireEvent.click(staleSubmit);
+    expect(screen.queryByText("Question q1?")).not.toBeInTheDocument();
+    expect(submitWorkerAnswersMock).not.toHaveBeenCalledWith(
+      "goal-2",
+      "q1",
+      expect.anything(),
+    );
+  });
+
+  it("keeps the current same-goal activity when an activity refresh fails", async () => {
+    setupRunLoad();
+    listActivitiesMock
+      .mockResolvedValueOnce([
+        { ...activeActivity, currentText: "Testing the current implementation..." },
+      ])
+      .mockRejectedValueOnce(new Error("refresh failed"));
+    let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+    openEventStreamMock.mockImplementation(
+      ({ onEvent }: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+        capturedOnEvent = onEvent;
+        return { close: vi.fn() };
+      },
+    );
     const { OrcaChat } = await import("./OrcaChat");
 
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
-    expect(await screen.findByText(/Confirm done/)).toBeInTheDocument();
+    expect(await screen.findByTestId("activity-bubble")).toHaveTextContent(
+      "Testing the current implementation...",
+    );
+    act(() => {
+      capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
+    });
+
+    await waitFor(() => expect(listActivitiesMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("activity-bubble")).toHaveTextContent(
+      "Testing the current implementation...",
+    );
+  });
+
+  it("does not show the step-starting indicator when a live activity exists", async () => {
+    setupRunLoad();
+    listActivitiesMock.mockResolvedValue([activeActivity]);
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByTestId("activity-bubble")).toBeInTheDocument();
+    await waitFor(() => expect(getWorkflowTemplateMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("step-starting")).not.toBeInTheDocument();
+  });
+
+  it("shows a Recommended badge but submits the original option label", async () => {
+    setupRunLoad();
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity,
+        status: "paused_for_input",
+        currentText: "I need your call on the implementation approach.",
+        sourceKind: "question_pending",
+        pendingQuestion: {
+          questionId: "question-1",
+          toolUseId: "tool-1",
+          questions: [
+            {
+              header: "Approach",
+              question: "Which approach should I use?",
+              multiSelect: false,
+              options: [
+                {
+                  label: "Use hooks (Recommended)",
+                  description: "Matches the existing integration.",
+                },
+                {
+                  label: "Poll the API",
+                  description: "Adds a separate refresh loop.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("Which approach should I use?");
+    expect(screen.getByText("Use hooks", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("Recommended", { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText("Use hooks (Recommended)", { exact: true })).not.toBeInTheDocument();
+
+    const recommendedOption = screen.getByRole("radio", {
+      name: "Use hooks (Recommended)",
+    });
+    expect(recommendedOption).toHaveAccessibleName("Use hooks (Recommended)");
+    fireEvent.click(recommendedOption);
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    await waitFor(() =>
+      expect(submitWorkerAnswersMock).toHaveBeenCalledWith(
+        "goal-1",
+        "question-1",
+        [{ questionIndex: 0, selectedLabels: ["Use hooks (Recommended)"] }],
+      ),
+    );
+  });
+
+  it("resets question state when a refreshed activity has a new question id", async () => {
+    setupRunLoad();
+    listActivitiesMock
+      .mockResolvedValueOnce([pausedActivity("q1", "First option")])
+      .mockResolvedValueOnce([pausedActivity("q2", "Second option")]);
+    let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+    openEventStreamMock.mockImplementation(
+      ({ onEvent }: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+        capturedOnEvent = onEvent;
+        return { close: vi.fn() };
+      },
+    );
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    fireEvent.click(await screen.findByRole("radio", { name: /First option/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(await screen.findByRole("button", { name: "Submitted" })).toBeDisabled();
+
+    act(() => {
+      capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
+    });
+
+    const secondOption = await screen.findByRole("radio", { name: /Second option/ });
+    expect(secondOption).not.toBeChecked();
+    expect(secondOption).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled();
+    expect(screen.queryByText("This question expired.")).not.toBeInTheDocument();
   });
 
   it("shows a thinking indicator while a blocking (one_shot) send is in flight, before the reply lands", async () => {

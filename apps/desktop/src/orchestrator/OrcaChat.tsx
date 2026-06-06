@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type {
+  Activity,
   Goal,
   GoalDetailResponse,
   OrchestratorChatMessage,
@@ -17,6 +18,7 @@ import {
   getWorkflowRun,
   getWorkflowStepRun,
   getWorkflowTemplate,
+  listActivities,
   listOrchestratorMessages,
   listWorkflowDecisions,
   listWorkflowRunArtifacts,
@@ -27,9 +29,7 @@ import {
   startWorkflowRun,
   toErrorMessage,
 } from "../api";
-import { AgentParaphrasedMessage } from "./AgentParaphrasedMessage";
-import { InternalThoughtRow } from "./InternalThoughtRow";
-import { MarkDoneConfirmCard } from "./MarkDoneConfirmCard";
+import { ActivityThread } from "./ActivityThread";
 import { PermissionApprovalCard } from "./PermissionApprovalCard";
 import { WorkerPermissionToggle } from "./WorkerPermissionToggle";
 import "./orca-chat.css";
@@ -49,6 +49,11 @@ type WorkflowState = {
   artifacts: WorkflowArtifact[];
 };
 
+type ActivityState = {
+  goalId: string | null;
+  items: Activity[];
+};
+
 const EMPTY_WORKFLOW_STATE: WorkflowState = {
   detail: null,
   run: null,
@@ -56,6 +61,11 @@ const EMPTY_WORKFLOW_STATE: WorkflowState = {
   stepName: null,
   decisions: [],
   artifacts: [],
+};
+
+const EMPTY_ACTIVITY_STATE: ActivityState = {
+  goalId: null,
+  items: [],
 };
 
 export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
@@ -70,6 +80,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   const [recoveryTemplateId, setRecoveryTemplateId] = useState<string | null>(null);
   const [recoveryTemplates, setRecoveryTemplates] = useState<WorkflowTemplate[]>([]);
   const [recoveryTemplatesLoaded, setRecoveryTemplatesLoaded] = useState(false);
+  const [activityState, setActivityState] = useState<ActivityState>(EMPTY_ACTIVITY_STATE);
   const [messages, setMessages] = useState<OrchestratorChatMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
@@ -80,7 +91,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Track which goal each data set has already loaded for, so SSE-driven
   // refetches refresh silently (keeping stale content) instead of flipping the
-  // loading flags and flashing "routing" indicators on every event.
+  // loading flags on every event.
   const messagesLoadedGoalRef = useRef<string | null>(null);
   const workflowLoadedGoalRef = useRef<string | null>(null);
   // Track which goal we've already scrolled to the bottom for, so the chat opens
@@ -92,6 +103,8 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
 
   const selectedGoal = goals.find((goal) => goal.id === selectedGoalId) ?? null;
   const connected = connectionStatus === "open";
+  const activities =
+    activityState.goalId === selectedGoalId ? activityState.items : [];
 
   useEffect(() => {
     setActionError(null);
@@ -174,6 +187,36 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     }
 
     void loadMessages();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshNonce, selectedGoalId]);
+
+  useEffect(() => {
+    if (!selectedGoalId) {
+      setActivityState(EMPTY_ACTIVITY_STATE);
+      return;
+    }
+
+    const goalId = selectedGoalId;
+    let cancelled = false;
+
+    async function loadActivities() {
+      try {
+        const nextActivities = await listActivities(goalId);
+        if (!cancelled) {
+          setActivityState({ goalId, items: nextActivities });
+        }
+      } catch {
+        if (!cancelled) {
+          setActivityState((current) =>
+            current.goalId === goalId ? current : { goalId, items: [] },
+          );
+        }
+      }
+    }
+
+    void loadActivities();
     return () => {
       cancelled = true;
     };
@@ -278,6 +321,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
         if (
           event.type === "goal.orchestrator_model_changed" ||
           event.type === "orchestrator.message.created" ||
+          event.type === "activity.changed" ||
           event.type.startsWith("workflow.") ||
           event.type.startsWith("recommendation.")
         ) {
@@ -328,19 +372,19 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
       workflowState.detail?.goal.orchestratorModel,
   );
 
-  const lastMessage = messages[messages.length - 1] ?? null;
-  const showMarkDoneCard = lastMessage?.internalKind === "mark_done_ready";
-
   // Show a "step is starting…" indicator during the agent's first-turn latency:
-  // the run and step are active but neither Orca nor the agent has paraphrased
-  // anything into the chat yet. Clears automatically once the first turn lands.
-  const orcaHasSpoken = messages.some(
-    (m) => m.role === "orchestrator" || m.role === "agent_paraphrased",
+  // the run and step are active but Orca has not posted anything into the chat
+  // yet. Clears automatically once the first turn lands.
+  const orcaHasSpoken = messages.some((message) => message.role === "orchestrator");
+  const hasLiveActivity = activities.some(
+    (activity) =>
+      activity.status === "active" || activity.status === "paused_for_input",
   );
   const showStarting =
     workflowState.run?.status === "active" &&
     workflowState.stepRun?.status === "active" &&
-    !orcaHasSpoken;
+    !orcaHasSpoken &&
+    !hasLiveActivity;
   // While the indicator is up, tick once a second so the elapsed time advances.
   useEffect(() => {
     if (!showStarting) return;
@@ -407,17 +451,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     }
   }
 
-  // Mark-done approval path is not yet wired into the daemon (deferred). There
-  // is no existing API client function for approving a mark-done in this file's
-  // imports, so we surface a pending-wiring note rather than invent one.
-  function handleConfirmDone() {
-    setActionError("Mark-done wiring pending — completion approval will land in a later task.");
-  }
-
-  function handleDeclineDone() {
-    // No-op: declining simply leaves the run as-is.
-  }
-
   return (
     <div className="orca-chat">
       <div className="orca-chat-scroll scroll" ref={scrollRef}>
@@ -435,8 +468,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
               mode={selectedGoal.workerPermissionMode}
               disabled={!connected}
             />
-
-            {loading && <ThinkingRow label="routing" />}
 
             {!loading && error && (
               <div className="form-error" role="alert">
@@ -540,45 +571,25 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
               </div>
             )}
 
-            {messagesLoading && <ThinkingRow label="routing" />}
-
             {showStarting && (
               <div data-testid="step-starting">
                 <ThinkingRow label={startingLabel} />
               </div>
             )}
 
-            {messages.map((message) => {
-              if (message.role === "internal_thought") {
-                return (
-                  <InternalThoughtRow
-                    key={message.id}
-                    body={message.body}
-                    kind={message.internalKind ?? undefined}
-                    whyRationale={message.whyRationale ?? undefined}
-                  />
-                );
-              }
-              if (message.role === "agent_paraphrased") {
-                return (
-                  <AgentParaphrasedMessage
-                    key={message.id}
-                    body={message.body}
-                    rawAgentText={message.rawAgentText ?? undefined}
-                    whyRationale={message.whyRationale ?? undefined}
-                  />
-                );
-              }
-              return <ChatMessageRow key={message.id} message={message} goalId={selectedGoalId ?? ""} />;
-            })}
-
-            {showMarkDoneCard && lastMessage && (
-              <MarkDoneConfirmCard
-                summary={lastMessage.body}
-                onConfirm={handleConfirmDone}
-                onDecline={handleDeclineDone}
+            {messages.map((message) => (
+              <ChatMessageRow
+                key={message.id}
+                message={message}
+                goalId={selectedGoalId ?? ""}
               />
-            )}
+            ))}
+
+            <ActivityThread
+              goalId={selectedGoalId ?? ""}
+              activities={activities}
+              renderQuestionForm={WorkerQuestionForm}
+            />
 
             {/* Show Orca is working from the moment the send is in flight
                 (covers the blocking one_shot path) through the async wait for a
@@ -700,6 +711,12 @@ function WorkerQuestionForm({
   const [submitted, setSubmitted] = useState(false);
   const [expired, setExpired] = useState(false);
 
+  useEffect(() => {
+    setSelections({});
+    setSubmitted(false);
+    setExpired(false);
+  }, [pending.questionId]);
+
   function toggle(qIndex: number, label: string, multi: boolean) {
     setSelections((prev) => {
       const current = prev[qIndex] ?? [];
@@ -733,15 +750,30 @@ function WorkerQuestionForm({
           </legend>
           {q.options.map((opt, oi) => {
             const chosen = (selections[qi] ?? []).includes(opt.label);
+            const recommendedSuffix = " (Recommended)";
+            const recommended = opt.label.endsWith(recommendedSuffix);
+            const displayLabel = recommended
+              ? opt.label.slice(0, -recommendedSuffix.length)
+              : opt.label;
             return (
               <label key={oi} className="orca-chat-option-row">
                 <input
                   type={q.multiSelect ? "checkbox" : "radio"}
                   name={`${pending.questionId}-${qi}`}
+                  aria-label={opt.label}
                   checked={chosen}
                   onChange={() => toggle(qi, opt.label, q.multiSelect)}
                 />
-                <span className="orca-chat-option-label">{submitted && chosen ? "✓ " : ""}{opt.label}</span>
+                <span className="orca-chat-option-label">
+                  {submitted && chosen ? "✓ " : ""}
+                  <span>{displayLabel}</span>
+                  {recommended ? (
+                    <>
+                      {" "}
+                      <span className="workflow-decision-badge">Recommended</span>
+                    </>
+                  ) : null}
+                </span>
                 {opt.description ? <span className="orca-chat-option-desc">{opt.description}</span> : null}
               </label>
             );
