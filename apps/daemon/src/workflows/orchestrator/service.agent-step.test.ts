@@ -591,9 +591,7 @@ describe("OrchestratorService.onUserMessage (user_message trigger)", () => {
 
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver).toHaveBeenCalledWith("sess-judge", "please add tests");
-    // Must also acknowledge in chat so the UI "thinking" bubble clears.
-    expect(orchestratorMessageCount(db)).toBe(1);
-    expect(lastOrchestratorMessageBody(db)).toContain("Relayed your message");
+    expect(orchestratorMessageCount(db)).toBe(0);
   });
 
   it("forward_to_agent with no live session: posts a 'no session' acknowledgment instead of silently dropping", async () => {

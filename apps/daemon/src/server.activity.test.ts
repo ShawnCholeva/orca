@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { ListActivitiesResponse } from "@orca/contracts";
+import { ListActivitiesResponse, type PendingQuestionItem } from "@orca/contracts";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -93,6 +93,61 @@ async function postToolUse(
       tool_use_id: toolUseId,
     },
   });
+}
+
+function postElicit(
+  server: FastifyInstance,
+  sessionId: string,
+  toolUseId: string,
+  questions: PendingQuestionItem[]
+) {
+  return server.inject({
+    method: "POST",
+    url: `/v1/agent-hooks/elicit?sessionId=${sessionId}`,
+    headers: { "content-type": "application/json", ...AUTH_HEADERS },
+    payload: {
+      tool_input: { questions },
+      tool_use_id: toolUseId,
+    },
+  });
+}
+
+function waitForRecordedQuestion(
+  db: ReturnType<typeof openDatabase>,
+  ids: { goalId: string; stepRunId: string }
+) {
+  return vi.waitFor(
+    () => {
+      const activity = db
+        .prepare(
+          "SELECT status, current_text, pending_question FROM activities WHERE step_run_id = ?"
+        )
+        .get(ids.stepRunId) as
+        | {
+            status: string;
+            current_text: string;
+            pending_question: string | null;
+          }
+        | undefined;
+      const chat = db
+        .prepare(
+          "SELECT pending_question FROM orchestrator_messages WHERE goal_id = ? AND pending_question IS NOT NULL ORDER BY rowid DESC LIMIT 1"
+        )
+        .get(ids.goalId) as { pending_question: string } | undefined;
+      const rawPendingQuestion =
+        activity?.pending_question ?? chat?.pending_question;
+      if (!rawPendingQuestion) throw new Error("worker question not recorded");
+      return {
+        activity,
+        pendingQuestion: JSON.parse(rawPendingQuestion) as {
+          questionId: string;
+          toolUseId: string;
+          questions: PendingQuestionItem[];
+        },
+      };
+    },
+    { timeout: 2000, interval: 50 }
+  );
 }
 
 beforeAll(() => {
@@ -317,6 +372,215 @@ describe("daemon activity integration", () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  it("pauses a live activity with the exact worker question without posting chat", async () => {
+    const ids = {
+      goalId: "goal-question-pending",
+      runId: "run-question-pending",
+      stepRunId: "step-question-pending",
+      sessionId: "session-question-pending",
+    };
+    const questions: PendingQuestionItem[] = [
+      {
+        header: "Release Plan",
+        question: "When should this ship?",
+        multiSelect: false,
+        options: [
+          { label: "Ship now", description: "Release immediately." },
+          { label: "Wait", description: "Hold for another review." },
+        ],
+      },
+    ];
+    seedLiveWorkflowSession(db, ids);
+    expect(
+      (await postToolUse(server, ids.sessionId, "tool-use-question-pending"))
+        .statusCode
+    ).toBe(200);
+
+    const elicitPromise = postElicit(
+      server,
+      ids.sessionId,
+      "question-tool-pending",
+      questions
+    );
+    const recorded = await waitForRecordedQuestion(db, ids);
+    const answer = await server.inject({
+      method: "POST",
+      url: `/v1/goals/${ids.goalId}/worker-questions/${recorded.pendingQuestion.questionId}/answer`,
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+      payload: {
+        answers: [{ questionIndex: 0, selectedLabels: ["Wait"] }],
+      },
+    });
+    const elicit = await elicitPromise;
+
+    expect(recorded.activity).toMatchObject({
+      status: "paused_for_input",
+      current_text: "I need your call on release plan.",
+    });
+    expect(recorded.pendingQuestion).toEqual({
+      questionId: expect.any(String),
+      toolUseId: "question-tool-pending",
+      questions,
+    });
+    const chatRows = db
+      .prepare(
+        "SELECT body FROM orchestrator_messages WHERE goal_id = ? ORDER BY rowid"
+      )
+      .all(ids.goalId) as Array<{ body: string }>;
+    expect(chatRows).not.toContainEqual({
+      body: "The agent needs your input.",
+    });
+    expect(answer.statusCode).toBe(200);
+    expect(elicit.statusCode).toBe(200);
+  });
+
+  it("completes the paused activity while preserving the exact assembled answer reason", async () => {
+    const ids = {
+      goalId: "goal-question-answered",
+      runId: "run-question-answered",
+      stepRunId: "step-question-answered",
+      sessionId: "session-question-answered",
+    };
+    const questions: PendingQuestionItem[] = [
+      {
+        header: "Release Plan",
+        question: "When should this ship?",
+        multiSelect: false,
+        options: [
+          { label: "Ship now", description: "Release immediately." },
+          { label: "Wait", description: "Hold for another review." },
+        ],
+      },
+    ];
+    seedLiveWorkflowSession(db, ids);
+    expect(
+      (await postToolUse(server, ids.sessionId, "tool-use-question-answered"))
+        .statusCode
+    ).toBe(200);
+
+    const elicitPromise = postElicit(
+      server,
+      ids.sessionId,
+      "question-tool-answered",
+      questions
+    );
+    const recorded = await waitForRecordedQuestion(db, ids);
+
+    const answer = await server.inject({
+      method: "POST",
+      url: `/v1/goals/${ids.goalId}/worker-questions/${recorded.pendingQuestion.questionId}/answer`,
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+      payload: {
+        answers: [{ questionIndex: 0, selectedLabels: ["Ship now"] }],
+      },
+    });
+    const elicit = await elicitPromise;
+
+    expect(answer.statusCode).toBe(200);
+    expect(elicit.statusCode).toBe(200);
+    expect(elicit.json()).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason:
+          "User answered via Orca chat. Q1 'Release Plan': Ship now. These are the user's final answers — treat the AskUserQuestion as fully answered with exactly these selections and continue. Do not call AskUserQuestion again.",
+      },
+    });
+    const activitiesResponse = await server.inject({
+      method: "GET",
+      url: `/v1/goals/${ids.goalId}/activities`,
+      headers: AUTH_HEADERS,
+    });
+    const activities = ListActivitiesResponse.parse(activitiesResponse.json());
+    expect(activities.items[0]).toMatchObject({
+      status: "completed",
+      sourceKind: "turn_completed",
+      finalSummary: "Asked about Release Plan; recorded your answer.",
+      confidence: null,
+    });
+    expect(activities.items[0]?.pendingQuestion).toBeUndefined();
+  });
+
+  it("does not duplicate activity or chat side effects for a repeated question toolUseId", async () => {
+    const ids = {
+      goalId: "goal-question-duplicate",
+      runId: "run-question-duplicate",
+      stepRunId: "step-question-duplicate",
+      sessionId: "session-question-duplicate",
+    };
+    const questions: PendingQuestionItem[] = [
+      {
+        header: "Approach",
+        question: "Which approach?",
+        multiSelect: false,
+        options: [{ label: "A", description: "Use approach A." }],
+      },
+    ];
+    seedLiveWorkflowSession(db, ids);
+    expect(
+      (await postToolUse(server, ids.sessionId, "tool-use-question-duplicate"))
+        .statusCode
+    ).toBe(200);
+
+    const firstElicit = postElicit(
+      server,
+      ids.sessionId,
+      "question-tool-duplicate",
+      questions
+    );
+    const recorded = await waitForRecordedQuestion(db, ids);
+    const activityEventsBeforeDuplicate = (
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM events WHERE goal_id = ? AND type = 'activity.changed'"
+        )
+        .get(ids.goalId) as { count: number }
+    ).count;
+
+    const duplicateElicit = postElicit(
+      server,
+      ids.sessionId,
+      "question-tool-duplicate",
+      questions
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const activityEventsAfterDuplicate = (
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM events WHERE goal_id = ? AND type = 'activity.changed'"
+        )
+        .get(ids.goalId) as { count: number }
+    ).count;
+    const chatCount = (
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM orchestrator_messages WHERE goal_id = ?"
+        )
+        .get(ids.goalId) as { count: number }
+    ).count;
+    expect(activityEventsAfterDuplicate).toBe(
+      activityEventsBeforeDuplicate
+    );
+    expect(chatCount).toBe(0);
+
+    const answer = await server.inject({
+      method: "POST",
+      url: `/v1/goals/${ids.goalId}/worker-questions/${recorded.pendingQuestion.questionId}/answer`,
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+      payload: {
+        answers: [{ questionIndex: 0, selectedLabels: ["A"] }],
+      },
+    });
+    const [firstResponse, duplicateResponse] = await Promise.all([
+      firstElicit,
+      duplicateElicit,
+    ]);
+    expect(answer.statusCode).toBe(200);
+    expect(firstResponse.statusCode).toBe(200);
+    expect(duplicateResponse.statusCode).toBe(200);
   });
 
   it("opens one live activity when a workflow step starts", async () => {

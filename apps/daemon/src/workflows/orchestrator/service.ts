@@ -728,13 +728,10 @@ export class OrchestratorService {
   }
 
   /**
-   * Builds a short user-facing acknowledgment for a user_message-triggered
-   * action that did NOT itself post a chat reply (forward_to_agent,
-   * approve_step_complete, revise_step under cap). Without this the chat UI's
-   * "thinking" indicator never clears, because it only stops once a non-user
-   * message lands. `sessionId` is null when no live agent session exists for the
-   * current step (e.g. after a daemon restart) — surface that to the user
-   * instead of letting the relay silently no-op.
+   * Builds a user-facing acknowledgment, when needed, for a
+   * user_message-triggered action that did not itself post a chat reply.
+   * `sessionId` is null when no live agent session exists for the current step
+   * (e.g. after a daemon restart).
    */
   private acknowledgeUserMessageAction(
     action: OrchestratorAction,
@@ -743,7 +740,7 @@ export class OrchestratorService {
     switch (action.kind) {
       case "forward_to_agent":
         return sessionId
-          ? "Relayed your message to the agent working the current step."
+          ? ""
           : "Couldn't relay your message — no live agent session for the current step. It may need to be respawned.";
       case "approve_step_complete":
         return "Approved the current step from your message — advancing the workflow.";
@@ -838,16 +835,14 @@ export class OrchestratorService {
     const { postedChatReply } = await this.applyOrchestratorAction(
       db, now, ctx, sessionId, "", action, options
     );
-    // The chat UI clears its "thinking" indicator only when a non-user message
-    // arrives. Actions that route to the agent (forward_to_agent) or advance the
-    // workflow (approve_step_complete) post nothing to chat, so acknowledge them
-    // here — otherwise the user's bubble spins forever.
+    // Some actions need a durable acknowledgment after applying their side effect.
     if (!postedChatReply) {
-      this.postOrchestratorMessage(
-        db, now, run.goalId,
-        this.acknowledgeUserMessageAction(action, sessionId),
-        options
-      );
+      const acknowledgment = this.acknowledgeUserMessageAction(action, sessionId);
+      if (acknowledgment) {
+        this.postOrchestratorMessage(
+          db, now, run.goalId, acknowledgment, options
+        );
+      }
     }
   }
 

@@ -57,6 +57,7 @@ import {
   type ModelProviderId,
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
+  type PendingQuestionItem,
   SubmitWorkerAnswersRequest,
   CheckSystemReadinessResponse,
   SubmitPermissionDecisionRequest,
@@ -1367,22 +1368,20 @@ export function createServer(
         goalId,
         questions: payload.questions,
       });
-      // Only post the chat message for a freshly recorded question. A duplicate hook
-      // fire (network/timeout retry with the same toolUseId) reuses the existing
-      // deferred — posting again would show the user a second identical question block.
       if (isNew) {
-        insertMessageWithEvent(
-          { db, bus: eventBus, modelProviderRegistry: daemonContext.modelProviderRegistry, now: daemonContext.now, idFactory: daemonContext.idFactory },
-          {
-            id: daemonContext.idFactory(),
-            goalId,
-            role: "orchestrator",
-            body: "The agent needs your input.",
-            correlationId: daemonContext.idFactory(),
-            createdAt: daemonContext.now(),
-            pendingQuestion: { questionId, toolUseId: payload.toolUseId, questions: payload.questions },
-          }
-        );
+        const stepContext = resolveStepContext(sessionId);
+        if (stepContext) {
+          applyActivitySafely("agent.question_pending", {
+            kind: "question_pending",
+            stepRunId: stepContext.stepRunId,
+            text: orcaVoiceQuestionText(payload.questions),
+            pendingQuestion: {
+              questionId,
+              toolUseId: payload.toolUseId,
+              questions: payload.questions,
+            },
+          });
+        }
       }
       let timerId: ReturnType<typeof setTimeout>;
       const timed = new Promise<string>((res) => {
@@ -1410,6 +1409,16 @@ export function createServer(
     const reason = assembleAnswerReason(pending.questions, parsed.data.answers);
     const ok = workerQuestions.resolveAnswers(questionId, reason);
     if (!ok) { reply.status(409); return { error: { code: "already_answered" } }; }
+    const stepContext = resolveStepContext(pending.sessionId);
+    if (stepContext) {
+      const headers = pending.questions.map((question) => question.header).join(", ");
+      applyActivitySafely("agent.question_answered", {
+        kind: "turn_completed",
+        stepRunId: stepContext.stepRunId,
+        summary: `Asked about ${headers}; recorded your answer.`,
+        confidence: null,
+      });
+    }
     return { ok: true };
   });
 
@@ -1932,6 +1941,15 @@ function summarizePermission(toolName: string, toolInput: unknown): string {
     if (cmd) return cmd.length > 200 ? `${cmd.slice(0, 200)}…` : cmd;
   }
   return toolName;
+}
+
+function orcaVoiceQuestionText(questions: PendingQuestionItem[]): string {
+  const first = questions[0];
+  if (!first) return "I need your input to continue.";
+  if (questions.length === 1) {
+    return `I need your call on ${first.header.toLowerCase()}.`;
+  }
+  return `I need your input on a few things, starting with ${first.header.toLowerCase()}.`;
 }
 
 function deriveTurnSummary(responseText: string): string {
