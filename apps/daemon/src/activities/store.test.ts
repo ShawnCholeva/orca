@@ -101,6 +101,29 @@ describe("ActivityStore", () => {
     expect(getLiveForStepRun(db, "s1")?.id).toBe(b.id);
   });
 
+  it("completes a live row with null confidence", () => {
+    const { ctx } = ctxFor(db);
+    openOrUpdateLive(ctx, {
+      ...base,
+      sourceKind: "step_started",
+      currentText: "Watching...",
+      workCategory: null
+    });
+
+    const completed = completeLive(ctx, {
+      stepRunId: "s1",
+      finalSummary: "Done.",
+      confidence: null
+    });
+
+    const stored = db
+      .prepare("SELECT status, confidence FROM activities WHERE step_run_id = ?")
+      .get("s1") as { status: string; confidence: string | null };
+    expect(completed?.status).toBe("completed");
+    expect(completed?.confidence).toBeNull();
+    expect(stored).toEqual({ status: "completed", confidence: null });
+  });
+
   it("pauses with an embedded question and resolves it via getPausedForGoal", () => {
     const { ctx } = ctxFor(db);
     const pendingQuestion = {

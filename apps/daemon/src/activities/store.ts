@@ -264,7 +264,7 @@ export function completeLive(
   input: {
     stepRunId: string;
     finalSummary: string;
-    confidence: ActivityConfidence;
+    confidence: ActivityConfidence | null;
   }
 ): ActivityT | undefined {
   let event: DomainEvent | undefined;
