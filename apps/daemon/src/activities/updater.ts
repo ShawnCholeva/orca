@@ -9,6 +9,7 @@ import type { ActivitySignal } from "./signals.js";
 import {
   completeLive,
   expireLive,
+  getLiveForStepRun,
   openOrUpdateLive,
   pauseForInput,
   type ActivityStoreCtx
@@ -61,6 +62,7 @@ export class ActivityUpdater {
       }
 
       case "weak_signal_tick": {
+        if (getLiveForStepRun(ctx.db, signal.stepRunId) === undefined) return;
         const now = this.nowMs();
         const state = this.perStep.get(signal.stepRunId);
         if (
@@ -108,7 +110,7 @@ export class ActivityUpdater {
           completeLive(ctx, {
             stepRunId: signal.stepRunId,
             finalSummary: summary,
-            confidence: signal.confidence ?? "low"
+            confidence: signal.confidence
           });
         } else {
           expireLive(ctx, { stepRunId: signal.stepRunId });

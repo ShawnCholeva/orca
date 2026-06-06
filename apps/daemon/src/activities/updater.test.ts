@@ -135,6 +135,30 @@ describe("ActivityUpdater", () => {
     ).toHaveLength(0);
   });
 
+  it("ignores a stale weak-signal tick after the turn completes", () => {
+    updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
+    updater.apply(ctx, {
+      kind: "turn_completed",
+      stepRunId: "s1",
+      summary: "Finished.",
+      confidence: "high"
+    });
+    const activitiesBefore = listActivitiesByGoal(db, "g1");
+    const eventCountBefore = events.filter(
+      (event) => event.type === "activity.changed"
+    ).length;
+
+    nowMs += 10_001;
+    updater.apply(ctx, { kind: "weak_signal_tick", ...base });
+
+    const activitiesAfter = listActivitiesByGoal(db, "g1");
+    expect(activitiesAfter).toEqual(activitiesBefore);
+    expect(activitiesAfter.some((activity) => activity.status === "active")).toBe(false);
+    expect(events.filter((event) => event.type === "activity.changed")).toHaveLength(
+      eventCountBefore
+    );
+  });
+
   it("persists exactly one completed final summary", () => {
     updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
     updater.apply(ctx, {
@@ -149,6 +173,24 @@ describe("ActivityUpdater", () => {
     );
     expect(completed).toHaveLength(1);
     expect(completed[0]?.finalSummary).toBe("Implemented paced narration.");
+  });
+
+  it("preserves null confidence on a completed summary", () => {
+    updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
+    updater.apply(ctx, {
+      kind: "turn_completed",
+      stepRunId: "s1",
+      summary: "Completed without a confidence signal.",
+      confidence: null
+    });
+
+    expect(listActivitiesByGoal(db, "g1")).toMatchObject([
+      {
+        status: "completed",
+        finalSummary: "Completed without a confidence signal.",
+        confidence: null
+      }
+    ]);
   });
 
   it("pauses with the embedded pending question", () => {
