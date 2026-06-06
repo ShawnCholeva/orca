@@ -11,6 +11,10 @@ export function permissionHookUrl(port: number, sessionId: string): string {
   return `http://127.0.0.1:${port}/v1/agent-hooks/permission?sessionId=${encodeURIComponent(sessionId)}`;
 }
 
+export function toolUseHookUrl(port: number, sessionId: string): string {
+  return `http://127.0.0.1:${port}/v1/agent-hooks/tool-use?sessionId=${encodeURIComponent(sessionId)}`;
+}
+
 interface HttpHook {
   type: "http";
   url: string;
@@ -37,7 +41,10 @@ export function buildAgentHookSettings(args: {
     hooks: {
       Stop: [{ hooks: [{ type: "http", url: agentHookUrl(args.port, args.sessionId, false), headers }] }],
       StopFailure: [{ hooks: [{ type: "http", url: agentHookUrl(args.port, args.sessionId, true), headers }] }],
-      PreToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "http", url: elicitHookUrl(args.port, args.sessionId), headers, timeout: 600 }] }],
+      PreToolUse: [
+        { matcher: "AskUserQuestion", hooks: [{ type: "http", url: elicitHookUrl(args.port, args.sessionId), headers, timeout: 600 }] },
+        { matcher: "*", hooks: [{ type: "http", url: toolUseHookUrl(args.port, args.sessionId), headers, timeout: 5 }] },
+      ],
       PermissionRequest: [
         {
           matcher: "*",

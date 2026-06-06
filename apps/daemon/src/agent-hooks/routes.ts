@@ -11,6 +11,25 @@ export const AgentResponseDonePayload = z
   .strict();
 export type AgentResponseDonePayload = z.infer<typeof AgentResponseDonePayload>;
 
+const AgentToolUseQuery = z
+  .object({
+    sessionId: z.string().min(1).max(200),
+  })
+  .strict();
+
+const AgentToolUsePayload = z
+  .object({
+    session_id: z.string().min(1).max(200).optional(),
+    transcript_path: z.string().max(1000).optional(),
+    cwd: z.string().max(1000).optional(),
+    permission_mode: z.string().max(100).optional(),
+    hook_event_name: z.literal("PreToolUse").optional(),
+    tool_name: z.string().min(1).max(200),
+    tool_input: z.unknown().optional(),
+    tool_use_id: z.string().max(200).default(""),
+  })
+  .passthrough();
+
 export interface AgentHookRouteDeps {
   onResponseDone(payload: AgentResponseDonePayload): Promise<void>;
   // Resolve the adapter id for a session (DB lookup in prod); tags the response.
@@ -25,6 +44,10 @@ export interface AgentHookRouteDeps {
     sessionId: string,
     payload: { toolName: string; toolInput: unknown; toolUseId: string },
   ): Promise<"allow" | "deny">;
+  onToolUse(
+    sessionId: string,
+    payload: { toolName: string; toolInput: unknown; toolUseId: string },
+  ): Promise<void>;
 }
 
 export function registerAgentHookRoutes(server: FastifyInstance, deps: AgentHookRouteDeps): void {
@@ -36,6 +59,31 @@ export function registerAgentHookRoutes(server: FastifyInstance, deps: AgentHook
     }
     await deps.onResponseDone(parsed.data);
     return { ok: true };
+  });
+
+  server.post("/v1/agent-hooks/tool-use", async (request, reply) => {
+    const query = AgentToolUseQuery.safeParse(request.query);
+    const body = AgentToolUsePayload.safeParse(request.body);
+    if (!query.success || !body.success) {
+      reply.status(400);
+      return {
+        error: {
+          code: "validation_failed",
+          issues: [
+            ...(query.success ? [] : query.error.issues),
+            ...(body.success ? [] : body.error.issues),
+          ],
+        },
+      };
+    }
+    if (body.data.tool_name !== "AskUserQuestion") {
+      await deps.onToolUse(query.data.sessionId, {
+        toolName: body.data.tool_name,
+        toolInput: body.data.tool_input,
+        toolUseId: body.data.tool_use_id,
+      });
+    }
+    return { continue: true };
   });
 
   server.post("/v1/agent-hooks/elicit", async (request) => {

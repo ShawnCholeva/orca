@@ -7,13 +7,14 @@ const stubDeps = {
   resolveAdapterForSession: () => "claude-code",
   onWorkerQuestion: vi.fn(async () => "ANSWER REASON"),
   onPermissionRequest: vi.fn(async () => "deny" as const),
+  onToolUse: vi.fn(async () => undefined),
 };
 
 describe("POST /v1/agent-hooks/response-done", () => {
   it("accepts payload and invokes mediator", async () => {
     const onResponseDone = vi.fn(async () => undefined);
     const app = Fastify();
-    registerAgentHookRoutes(app, { onResponseDone, resolveAdapterForSession: () => "claude-code", onWorkerQuestion: async () => "x", onPermissionRequest: async () => "deny" });
+    registerAgentHookRoutes(app, { onResponseDone, resolveAdapterForSession: () => "claude-code", onWorkerQuestion: async () => "x", onPermissionRequest: async () => "deny", onToolUse: async () => undefined });
     const res = await app.inject({
       method: "POST",
       url: "/v1/agent-hooks/response-done",
@@ -33,7 +34,7 @@ describe("POST /v1/agent-hooks/response-done", () => {
 
   it("rejects missing fields", async () => {
     const app = Fastify();
-    registerAgentHookRoutes(app, { onResponseDone: vi.fn(), resolveAdapterForSession: () => "claude-code", onWorkerQuestion: async () => "x", onPermissionRequest: async () => "deny" });
+    registerAgentHookRoutes(app, { onResponseDone: vi.fn(), resolveAdapterForSession: () => "claude-code", onWorkerQuestion: async () => "x", onPermissionRequest: async () => "deny", onToolUse: async () => undefined });
     const res = await app.inject({ method: "POST", url: "/v1/agent-hooks/response-done", payload: {} });
     expect(res.statusCode).toBe(400);
   });
@@ -47,6 +48,7 @@ it("POST /v1/agent-hooks/stop maps last_assistant_message to a response-done cal
     resolveAdapterForSession: () => "claude-code",
     onWorkerQuestion: async () => "x",
     onPermissionRequest: async () => "deny",
+    onToolUse: async () => undefined,
   });
   const res = await server.inject({
     method: "POST",
@@ -65,6 +67,7 @@ it("POST /v1/agent-hooks/elicit returns deny with the assembled answer reason", 
     resolveAdapterForSession: () => "claude-code",
     onWorkerQuestion,
     onPermissionRequest: async () => "deny",
+    onToolUse: async () => undefined,
   });
   const res = await server.inject({
     method: "POST",
@@ -88,7 +91,7 @@ it("POST /v1/agent-hooks/elicit returns deny with the assembled answer reason", 
 
 it("POST /v1/agent-hooks/elicit allows (no deny) when there is no question payload", async () => {
   const server = Fastify();
-  registerAgentHookRoutes(server, { onResponseDone: async () => undefined, resolveAdapterForSession: () => "claude-code", onWorkerQuestion: async () => "x", onPermissionRequest: async () => "deny" });
+  registerAgentHookRoutes(server, { onResponseDone: async () => undefined, resolveAdapterForSession: () => "claude-code", onWorkerQuestion: async () => "x", onPermissionRequest: async () => "deny", onToolUse: async () => undefined });
   const res = await server.inject({ method: "POST", url: "/v1/agent-hooks/elicit?sessionId=s1", payload: { tool_input: { questions: [] } } });
   const body = JSON.parse(res.body) as { hookSpecificOutput: { permissionDecision: string } };
   expect(body.hookSpecificOutput.permissionDecision).toBe("allow");
@@ -100,6 +103,7 @@ it("permission route returns allow when onPermissionRequest resolves allow", asy
     onResponseDone: async () => {}, resolveAdapterForSession: () => "claude-code",
     onWorkerQuestion: async () => "x",
     onPermissionRequest: async () => "allow",
+    onToolUse: async () => undefined,
   });
   const res = await app.inject({ method: "POST", url: "/v1/agent-hooks/permission?sessionId=s1",
     payload: { tool_name: "Bash", tool_input: { command: "ls" }, tool_use_id: "t1" } });
@@ -115,6 +119,7 @@ it("permission route returns deny when onPermissionRequest resolves deny", async
     onResponseDone: async () => {}, resolveAdapterForSession: () => "claude-code",
     onWorkerQuestion: async () => "x",
     onPermissionRequest: async () => "deny",
+    onToolUse: async () => undefined,
   });
   const res = await app.inject({ method: "POST", url: "/v1/agent-hooks/permission?sessionId=s1",
     payload: { tool_name: "Bash", tool_input: { command: "rm -rf /" }, tool_use_id: "t2" } });
@@ -127,9 +132,115 @@ it("permission route denies (safe default) when sessionId is missing, without ca
   registerAgentHookRoutes(app, {
     onResponseDone: async () => {}, resolveAdapterForSession: () => "claude-code",
     onWorkerQuestion: async () => "x", onPermissionRequest,
+    onToolUse: async () => undefined,
   });
   const res = await app.inject({ method: "POST", url: "/v1/agent-hooks/permission",
     payload: { tool_name: "Bash", tool_input: {}, tool_use_id: "t3" } });
   expect(res.json().hookSpecificOutput.decision.behavior).toBe("deny");
   expect(onPermissionRequest).not.toHaveBeenCalled();
+});
+
+describe("POST /v1/agent-hooks/tool-use", () => {
+  it("observes tool use and returns an exact non-blocking response", async () => {
+    const onToolUse = vi.fn(async () => undefined);
+    const app = Fastify();
+    registerAgentHookRoutes(app, { ...stubDeps, onToolUse });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/agent-hooks/tool-use?sessionId=s1",
+      payload: {
+        session_id: "claude-session",
+        transcript_path: "/tmp/transcript.jsonl",
+        cwd: "/tmp/project",
+        permission_mode: "default",
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_input: { command: "ls" },
+        tool_use_id: "t1",
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(onToolUse).toHaveBeenCalledWith("s1", {
+      toolName: "Bash",
+      toolInput: { command: "ls" },
+      toolUseId: "t1",
+    });
+    expect(res.json()).toEqual({ continue: true });
+    expect(res.body).not.toContain("permissionDecision");
+    expect(res.body).not.toContain("decision");
+    expect(res.body).not.toContain("behavior");
+  });
+
+  it("accepts additional Claude metadata without forwarding it", async () => {
+    const onToolUse = vi.fn(async () => undefined);
+    const app = Fastify();
+    registerAgentHookRoutes(app, { ...stubDeps, onToolUse });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/agent-hooks/tool-use?sessionId=s1",
+      payload: {
+        hook_event_name: "PreToolUse",
+        session_id: "claude-session",
+        effort: { level: "high" },
+        agent_id: "agent-1",
+        agent_type: "general-purpose",
+        tool_name: "Bash",
+        tool_input: { command: "pwd" },
+        tool_use_id: "t-extra",
+      },
+    });
+
+    expect({
+      statusCode: res.statusCode,
+      callbackCalls: onToolUse.mock.calls.length,
+    }).toEqual({
+      statusCode: 200,
+      callbackCalls: 1,
+    });
+    expect(onToolUse).toHaveBeenCalledWith("s1", {
+      toolName: "Bash",
+      toolInput: { command: "pwd" },
+      toolUseId: "t-extra",
+    });
+    expect(res.json()).toEqual({ continue: true });
+  });
+
+  it("ignores AskUserQuestion while continuing tool execution", async () => {
+    const onToolUse = vi.fn(async () => undefined);
+    const app = Fastify();
+    registerAgentHookRoutes(app, { ...stubDeps, onToolUse });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/agent-hooks/tool-use?sessionId=s1",
+      payload: { tool_name: "AskUserQuestion", tool_input: { questions: [] }, tool_use_id: "t2" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(onToolUse).not.toHaveBeenCalled();
+    expect(res.json()).toEqual({ continue: true });
+  });
+
+  it("rejects a missing tool name with the standard validation error shape", async () => {
+    const app = Fastify();
+    registerAgentHookRoutes(app, stubDeps);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/agent-hooks/tool-use?sessionId=s1",
+      payload: { tool_input: {}, tool_use_id: "t3" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: {
+        code: "validation_failed",
+        issues: expect.any(Array),
+      },
+    });
+    expect(stubDeps.onToolUse).not.toHaveBeenCalled();
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentHookUrl, buildAgentHookSettings, permissionHookUrl } from "./hook-settings.js";
+import { agentHookUrl, buildAgentHookSettings, permissionHookUrl, toolUseHookUrl } from "./hook-settings.js";
 
 describe("agent hook settings", () => {
   it("builds a session-scoped Stop hook URL", () => {
@@ -36,6 +36,26 @@ describe("agent hook settings", () => {
     const s = buildAgentHookSettings({ sessionId: "sess-1", port: 8787, authToken: "tok" });
     const pre = s.hooks.PreToolUse!;
     expect(pre[0]!.hooks[0]!.timeout).toBe(600);
+  });
+
+  it("toolUseHookUrl points at the tool-use endpoint with the session id", () => {
+    expect(toolUseHookUrl(8787, "sess-1")).toBe(
+      "http://127.0.0.1:8787/v1/agent-hooks/tool-use?sessionId=sess-1"
+    );
+  });
+
+  it("includes a non-blocking catch-all PreToolUse hook without replacing AskUserQuestion", () => {
+    const s = buildAgentHookSettings({ sessionId: "sess-1", port: 8787, authToken: "tok" });
+    const pre = s.hooks.PreToolUse!;
+    const toolUse = pre.find((entry) => entry.matcher === "*");
+
+    expect(pre.some((entry) => entry.matcher === "AskUserQuestion")).toBe(true);
+    expect(toolUse?.hooks[0]).toEqual({
+      type: "http",
+      url: "http://127.0.0.1:8787/v1/agent-hooks/tool-use?sessionId=sess-1",
+      headers: { Authorization: "Bearer tok" },
+      timeout: 5,
+    });
   });
 });
 
