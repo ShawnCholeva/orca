@@ -167,6 +167,7 @@ import { registerWorkflowTemplateRoutes } from './workflows/templates/routes.js'
 import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js';
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
+import { registerActivityRoutes } from './activities/routes.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
 import { insertMessageWithEvent } from './orchestrator-chat/usecases.js';
@@ -1081,6 +1082,12 @@ export function createServer(
   // ---- Workflow decision routes ----
 
   registerWorkflowDecisionRoutes(server, {
+    db,
+  });
+
+  // ---- Activity routes ----
+
+  registerActivityRoutes(server, {
     db,
   });
 
