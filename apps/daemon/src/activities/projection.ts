@@ -67,19 +67,3 @@ export function listActivitiesByGoal(
     .all(goalId) as ActivityRow[];
   return rows.map(rowToActivity);
 }
-
-export function getActivityById(
-  db: Database.Database,
-  activityId: string
-): ActivityT | undefined {
-  const row = db
-    .prepare(
-      `SELECT id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
-              status, current_text, final_summary, source_kind, work_category, confidence,
-              pending_question, created_at, updated_at, completed_at
-       FROM activities
-       WHERE id = ?`
-    )
-    .get(activityId) as ActivityRow | undefined;
-  return row === undefined ? undefined : rowToActivity(row);
-}

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, copyFileSync, existsSync, watchFile, unwatchFile, openSync, readSync, closeSync } from "node:fs";
+import { mkdirSync, writeFileSync, copyFileSync, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { join, dirname } from "node:path";
 import {
   defaultTmuxRunner, newSession, capturePane, sendEnter, paste, pipePaneToFile, killSession, hasSession,
@@ -161,15 +161,19 @@ export class WorkerSessionManager {
         this.stopTail(sessionId, tail);
       }
     };
-    const onChange = () => pump();
+    // Poll the pane file ourselves rather than via fs.watchFile: watchFile takes its
+    // baseline stat asynchronously, so bytes appended between setup and that first
+    // stat get folded into the baseline and are never reported (flaky under load).
+    // A self-driven interval reading pos→EOF is deterministic; pump() is idempotent.
+    const timer = setInterval(pump, this.deps.pollMs ?? 300);
+    timer.unref?.();
     tail = {
       fd,
       closed: false,
-      stopWatching: () => unwatchFile(file, onChange),
+      stopWatching: () => clearInterval(timer),
     };
     this.tails.set(sessionId, tail);
-    watchFile(file, { persistent: false, interval: this.deps.pollMs ?? 300 }, onChange);
-    pump(); // initial pump: catch bytes written before the watcher was established
+    pump(); // initial pump: catch bytes already present before the first interval tick
   }
 
   private stopTail(sessionId: string, expected?: WorkerTail): void {

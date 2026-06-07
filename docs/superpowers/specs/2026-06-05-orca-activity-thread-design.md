@@ -13,7 +13,8 @@ Orca chat currently mixes several different concepts into one message stream:
 - generic loading states, such as routing;
 - worker-agent input requests;
 - transient progress indicators;
-- durable internal-thought rows.
+- a scaffolded `internal_thought` row taxonomy that was never wired to a
+  producer (see "Relationship to Existing Code").
 
 This makes the experience feel like the user is sometimes talking through Orca
 to a worker agent, and sometimes watching implementation plumbing. It also
@@ -66,6 +67,44 @@ Example progression within one activity bubble:
 Those are revisions of the same activity, not three durable chat rows. When the
 turn resolves, Orca may persist one concise final summary.
 
+## Relationship to Existing Code (What This Replaces)
+
+The activity thread is not displacing a working system. It finishes — with a
+better design — an abandoned one.
+
+A richer chat-row taxonomy already exists in the schema and desktop, but **no
+daemon path ever writes it**. Specifically unbuilt scaffold:
+
+- roles `internal_thought` and `agent_paraphrased` (defined in the contracts
+  enum and the migration `0017` CHECK, but never inserted);
+- the `internal_kind` values (`step_started`, `agent_invocation`,
+  `schema_validation`, `revise`, `agent_crash`, `mark_done_ready`, `thinking`);
+- the `raw_agent_text` and `why_rationale` columns (no writers at all);
+- the desktop `InternalThoughtRow` component (renders only under test).
+
+Both `INSERT INTO orchestrator_messages` sites only ever write `user`,
+`orchestrator`, or `system`. Everything that reaches chat today — escalations,
+paraphrased agent output, worker-question prompts — lands as plain
+`role: "orchestrator"`. Two consequences confirm this is dead code: the
+mark-done card is gated on `internalKind === "mark_done_ready"`, which is never
+written (so it can never appear, and its handler is a stub), and
+`InternalThoughtRow` has no production render path.
+
+Direction:
+
+- The activity thread **subsumes the intent** of this scaffold and retires it.
+  The implementation plan should drop or repurpose the `internal_thought` /
+  `agent_paraphrased` roles, the `internal_kind` / `raw_agent_text` /
+  `why_rationale` columns, and `InternalThoughtRow`, rather than leave two
+  parallel "internal thought" representations.
+- Because nothing populates the scaffold, this carries no data migration and no
+  user-visible regression.
+- One intent must not be lost in the teardown: `mark_done_ready` represents a
+  real (currently unwired) completion-approval card. In the new model that maps
+  naturally to an activity in `completed` or `paused_for_input` state, and the
+  activity lifecycle should give the mark-done card an explicit home rather than
+  dropping it.
+
 ## Activity Lifecycle
 
 Each activity belongs to a goal, workflow run, step run, and agent turn where
@@ -91,10 +130,15 @@ The user only talks to Orca.
 
 Orca chat should not surface these as ordinary messages:
 
-- `routing`;
-- `Relayed your message to the agent working the current step.`;
-- `The agent needs your input.`;
+- `Relayed your message to the agent working the current step.` (a real durable
+  message today, from `acknowledgeUserMessageAction`);
+- `The agent needs your input.` (the current worker-question prompt body);
 - successful submit or delivery acknowledgements.
+
+Note a distinction: `routing` is **not** a persisted message today — it is a
+transient `ThinkingRow` loading flag. It should also stop flashing as
+user-facing noise, but the fix is in the desktop loading state, not in message
+suppression.
 
 Instead:
 
@@ -145,6 +189,38 @@ The option labels and descriptions remain equivalent. If the worker supplied a
 recommended choice, Orca marks it as recommended or presents it as a short
 recommendation note.
 
+**Presentation generation is hybrid.** The Orca-voice card is templated
+deterministically from the worker schema on the held-hook path, so there is no
+added latency while the worker call is blocked waiting on the answer. An
+optional LLM polish of the presentation text can be layered later (async or
+out-of-band), never on the blocking path. The answer schema is never rewritten —
+only the presentation text.
+
+**Reuse the existing round-trip.** Lossless conversion back to the worker's
+expected answer already exists: `validateAnswers` and `assembleAnswerReason`
+(`worker-answer-format.ts`) validate selections against exact option labels and
+assemble the deny-reason carrying the user's choices. The activity thread should
+build on these, not reinvent them.
+
+**Recommendations are a label convention, not a structured signal.** The worker
+tool (`AskUserQuestion`) does not emit a structured recommendation field: each
+option carries only `label`, `description`, and an optional `preview`. The tool's
+documented convention for a recommendation is to place the recommended option
+first and append `(Recommended)` to its `label`. So the recommendation already
+arrives inside the label text and by option order.
+
+Two consequences:
+
+- Do **not** add a `recommended` boolean to `PendingQuestionItem` sourced from
+  the tool — nothing would populate it, which would repeat the unbuilt-scaffold
+  mistake above. The recommendation already survives losslessly today because the
+  existing round-trip preserves option labels and order exactly.
+- The only optional work is presentation: Orca may detect the `(Recommended)`
+  suffix / first-option convention and render a badge instead of showing the
+  literal `(Recommended)` text inline. This is a best-effort heuristic on
+  Claude's convention, not a contract change, and it should degrade gracefully
+  when the convention is absent.
+
 ## Activity Signal Sources
 
 Use a hybrid signal model.
@@ -160,11 +236,14 @@ Preferred v1 sources:
 
 Provider scope:
 
-- v1 implementation targets Claude Code first.
-- Codex is next and should use the same activity contract once its hook/status
-  signals are mapped.
+- v1 implementation targets Claude Code only.
+- Codex is **not** future work in the abstract — hook-based capture and
+  permission parity are already merged. The provider-neutral activity contract
+  will be validated against the existing Codex hook adapter in a follow-up,
+  rather than designed for a provider that does not yet exist.
 - The contract should not encode Claude-specific concepts directly. Provider
-  details belong in signal adapters.
+  details belong in signal adapters, consistent with the existing
+  `workerHookConfig` seam ("no Claude hardcoding").
 
 ## Weak Signal Handling
 
@@ -264,7 +343,12 @@ Focused tests should cover:
 - Should completed activity summaries be shown inline by default, collapsed, or
   only retained for inspection?
 - What threshold should trigger the weak-signal waiting update?
-- Should question-card presentation be generated deterministically from the
-  worker schema, via orchestrator LLM rewrite, or a hybrid?
 - How should activity summaries be capped so long-running steps do not create too
   much durable history?
+
+(Resolved during review: question-card presentation is hybrid — deterministic on
+the held-hook path, optional LLM polish later; v1 is Claude-only with the Codex
+adapter validated in a follow-up; the unbuilt `internal_thought` scaffold is
+retired and subsumed; worker recommendations are a `(Recommended)` label
+convention preserved by the existing round-trip — no new structured field, only
+optional badge rendering.)
