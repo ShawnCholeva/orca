@@ -156,6 +156,9 @@ describe('context migration 0006_context.sql', () => {
       '0019_orchestrator_messages_pending_question.sql',
       '0020_drop_removed_provider_execution_modes.sql',
       '0021_workflow_template_scope_graph.sql',
+      '0022_workflow_step_result.sql',
+      '0023_worker_permission_mode.sql',
+      '0024_activities.sql',
     ]);
 
     const tables = (
@@ -238,6 +241,9 @@ describe('context migration 0006_context.sql', () => {
       '0019_orchestrator_messages_pending_question.sql',
       '0020_drop_removed_provider_execution_modes.sql',
       '0021_workflow_template_scope_graph.sql',
+      '0022_workflow_step_result.sql',
+      '0023_worker_permission_mode.sql',
+      '0024_activities.sql',
     ]);
 
     const counts = {

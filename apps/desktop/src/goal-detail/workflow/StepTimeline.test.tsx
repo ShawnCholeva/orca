@@ -21,6 +21,7 @@ describe("StepTimeline", () => {
             startedAt: now,
             finishedAt: now,
             blockedReason: null,
+            stepResult: null,
           },
           {
             id: "step-2",
@@ -33,6 +34,7 @@ describe("StepTimeline", () => {
             startedAt: now,
             finishedAt: null,
             blockedReason: null,
+            stepResult: null,
           },
         ]}
       />,

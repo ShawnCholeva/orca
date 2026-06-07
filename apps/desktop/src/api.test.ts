@@ -323,6 +323,7 @@ const workflowStepRun = {
   startedAt: now,
   finishedAt: null,
   blockedReason: null,
+  stepResult: null,
 };
 
 const workflowDecision = {

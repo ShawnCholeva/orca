@@ -91,7 +91,7 @@ describe("inspectWorkspace", () => {
     expect(result.branch).toBeNull();
     expect(result.isDirty).toBeNull();
     expect(result.name).toBe(path.basename(dir));
-    expect(result.path).toBe(dir);
+    expect(result.path).toBe(await fs.realpath(dir));
   });
 
   it("returns repo metadata for a clean git repo with an initial commit", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, existsSync, appendFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, appendFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkerSessionManager } from "./worker-session.js";
@@ -171,9 +171,109 @@ describe("WorkerSessionManager.startTail", () => {
     await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
     const paneFile = join(privateRoot, "sess-1", "pane.out");
     appendFileSync(paneFile, "hello-pane");
-    await new Promise((r) => setTimeout(r, 50));
-    expect(chunks.join("")).toContain("hello-pane");
+    await vi.waitFor(
+      () => expect(chunks.join("")).toContain("hello-pane"),
+      { timeout: 2_000, interval: 10 },
+    );
     await mgr.terminate("sess-1");
+  });
+
+  it("replaces a concurrent reattach tail and stops capture after terminate", async () => {
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const chunks: string[] = [];
+    const mgr = new WorkerSessionManager({
+      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude",
+      tmux: fakeTmux(),
+      captureSink: (_sid, buf) => void chunks.push(buf.toString("utf8")),
+      pollMs: 1,
+      resolveProvider,
+    });
+
+    await Promise.all([
+      mgr.reattach("sess-1", "/repo"),
+      mgr.reattach("sess-1", "/repo"),
+    ]);
+
+    const paneFile = join(privateRoot, "sess-1", "pane.out");
+    appendFileSync(paneFile, "hello-pane");
+    await vi.waitFor(
+      () => expect(chunks).toEqual(["hello-pane"]),
+      { timeout: 2_000, interval: 10 },
+    );
+
+    await mgr.terminate("sess-1");
+    appendFileSync(paneFile, "-after-terminate");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(chunks).toEqual(["hello-pane"]);
+  });
+
+  it("cleans up when capture fails during the initial pump", async () => {
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const sessionDir = join(privateRoot, "sess-1");
+    const paneFile = join(sessionDir, "pane.out");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(paneFile, "existing-pane");
+    const captureSink = vi.fn(() => {
+      throw new Error("capture failed");
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mgr = new WorkerSessionManager({
+      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude",
+      tmux: fakeTmux(),
+      captureSink,
+      pollMs: 1,
+      resolveProvider,
+    });
+
+    try {
+      await expect(mgr.reattach("sess-1", "/repo")).resolves.toBe(true);
+      appendFileSync(paneFile, "-later");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(captureSink).toHaveBeenCalledTimes(1);
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining("tail capture failed"),
+        expect.any(Error),
+      );
+      await expect(mgr.terminate("sess-1")).resolves.not.toThrow();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("cleans up when capture fails during a watch callback", async () => {
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const captureSink = vi.fn(() => {
+      throw new Error("capture failed");
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mgr = new WorkerSessionManager({
+      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude",
+      tmux: fakeTmux(),
+      captureSink,
+      pollMs: 1,
+      resolveProvider,
+    });
+
+    try {
+      await expect(mgr.reattach("sess-1", "/repo")).resolves.toBe(true);
+      const paneFile = join(privateRoot, "sess-1", "pane.out");
+      appendFileSync(paneFile, "first");
+      await vi.waitFor(
+        () => expect(captureSink).toHaveBeenCalledTimes(1),
+        { timeout: 2_000, interval: 10 },
+      );
+
+      appendFileSync(paneFile, "-later");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(captureSink).toHaveBeenCalledTimes(1);
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining("tail capture failed"),
+        expect.any(Error),
+      );
+      await expect(mgr.terminate("sess-1")).resolves.not.toThrow();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
 

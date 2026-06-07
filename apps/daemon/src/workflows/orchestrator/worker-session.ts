@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, copyFileSync, existsSync, watch, openSync, readSync, closeSync, type FSWatcher } from "node:fs";
+import { mkdirSync, writeFileSync, copyFileSync, existsSync, watchFile, unwatchFile, openSync, readSync, closeSync } from "node:fs";
 import { join, dirname } from "node:path";
 import {
   defaultTmuxRunner, newSession, capturePane, sendEnter, paste, pipePaneToFile, killSession, hasSession,
@@ -60,10 +60,15 @@ export interface WorkerSessionDeps {
 }
 
 interface WorkerSession { name: string; ready: Promise<void>; }
+interface WorkerTail {
+  fd: number;
+  closed: boolean;
+  stopWatching: () => void;
+}
 
 export class WorkerSessionManager {
   private readonly sessions = new Map<string, WorkerSession>();
-  private readonly tails = new Map<string, { watcher: FSWatcher; fd: number; pos: number }>();
+  private readonly tails = new Map<string, WorkerTail>();
   private readonly tmux: TmuxRunner;
   constructor(private readonly deps: WorkerSessionDeps) {
     this.tmux = deps.tmux ?? defaultTmuxRunner();
@@ -134,20 +139,47 @@ export class WorkerSessionManager {
 
   // startTail: Task 3.2 — tails the pane.out file into captureSink.
   private startTail(sessionId: string, file: string): void {
+    this.stopTail(sessionId);
     // Ensure the file exists before watching (pipe-pane may not have created it yet).
     const fd = openSync(file, "a+");
     let pos = 0;
+    let tail: WorkerTail;
     const pump = () => {
-      const buf = Buffer.alloc(64 * 1024);
-      let n: number;
-      do {
-        n = readSync(fd, buf, 0, buf.length, pos);
-        if (n > 0) { pos += n; this.deps.captureSink(sessionId, Buffer.from(buf.subarray(0, n))); }
-      } while (n > 0);
+      if (tail.closed) return;
+      try {
+        const buf = Buffer.alloc(64 * 1024);
+        let n: number;
+        do {
+          n = readSync(fd, buf, 0, buf.length, pos);
+          if (n > 0) {
+            pos += n;
+            this.deps.captureSink(sessionId, Buffer.from(buf.subarray(0, n)));
+          }
+        } while (n > 0);
+      } catch (err) {
+        console.error(`[worker-session] tail capture failed session=${sessionId}`, err);
+        this.stopTail(sessionId, tail);
+      }
     };
-    const watcher = watch(file, { persistent: false }, () => pump());
+    const onChange = () => pump();
+    tail = {
+      fd,
+      closed: false,
+      stopWatching: () => unwatchFile(file, onChange),
+    };
+    this.tails.set(sessionId, tail);
+    watchFile(file, { persistent: false, interval: this.deps.pollMs ?? 300 }, onChange);
     pump(); // initial pump: catch bytes written before the watcher was established
-    this.tails.set(sessionId, { watcher, fd, pos });
+  }
+
+  private stopTail(sessionId: string, expected?: WorkerTail): void {
+    const tail = this.tails.get(sessionId);
+    if (!tail || (expected && tail !== expected)) return;
+    this.tails.delete(sessionId);
+    if (tail.closed) return;
+    tail.closed = true;
+    tail.stopWatching();
+    closeSync(tail.fd);
   }
 
   async deliver(sessionId: string, text: string): Promise<DeliverResult> {
@@ -216,8 +248,7 @@ export class WorkerSessionManager {
     const s = this.sessions.get(sessionId);
     if (!s) return;
     this.sessions.delete(sessionId);
-    const t = this.tails.get(sessionId);
-    if (t) { t.watcher.close(); closeSync(t.fd); this.tails.delete(sessionId); }
+    this.stopTail(sessionId);
     await killSession(this.tmux, s.name);
   }
 }

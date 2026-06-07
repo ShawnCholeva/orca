@@ -20,6 +20,7 @@ describe("ArtifactsList", () => {
             startedAt: now,
             finishedAt: now,
             blockedReason: null,
+            stepResult: null,
           },
         ]}
         artifacts={[

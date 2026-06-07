@@ -31,6 +31,7 @@ describe("WorkflowBanner", () => {
           startedAt: now,
           finishedAt: null,
           blockedReason: null,
+          stepResult: null,
         }}
         latestDecision={{
           decisionId: "dec-1",
