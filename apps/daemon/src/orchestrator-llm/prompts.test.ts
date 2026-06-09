@@ -43,6 +43,18 @@ describe("composeAgentInitialPrompt", () => {
 });
 
 describe("composeOrchestratorPrompt", () => {
+  it("instructs the model to include a scoring object on approval", () => {
+    const sys = composeOrchestratorPrompt({
+      triggerKind: "agent_response",
+      context: {} as never,
+      triggerPayload: {} as never,
+    }).systemPrompt;
+    expect(sys).toContain("approve_step_complete");
+    expect(sys).toContain("scoring");
+    expect(sys).toContain("successScore");
+    expect(sys).toContain("riskLevel");
+  });
+
   it("describes role and produces a structured response shape request", () => {
     const out = composeOrchestratorPrompt({
       triggerKind: "agent_response",
