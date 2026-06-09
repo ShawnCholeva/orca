@@ -65,6 +65,12 @@ import {
 import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
 import { adapterIdForProvider } from "../../orchestrator-llm/model-provider-llm-client.js";
 import { randomUUID } from "node:crypto";
+import { SHADOW_LLM_TIMEOUT_MS } from "../../orchestrator-llm/shadow-llm-client.js";
+import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
+import {
+  recoverStepScoring,
+  type ShadowAsk,
+} from "./recover-step-scoring.js";
 
 export interface StepDispatchCapabilities {
   isAdapterReady(adapterId: string): Promise<boolean>;
@@ -78,6 +84,58 @@ interface GoalRow {
   description: string;
   orchestrator_provider: ModelProviderId | null;
   orchestrator_model: string | null;
+}
+
+interface RecoveryScoringPromptInput {
+  stepTpl: WorkflowStepTemplate;
+  goal: GoalRow;
+  output: Record<string, unknown>;
+}
+
+type RecoveryScoringPromptComposer = (
+  input: RecoveryScoringPromptInput
+) => { systemPrompt: string; userPrompt: string };
+
+function composeRecoveryScoringPrompt(
+  input: RecoveryScoringPromptInput
+): { systemPrompt: string; userPrompt: string } {
+  return {
+    systemPrompt: [
+      "Score a recovered Orca workflow step result.",
+      "Return only one JSON object with successScore, quality, reason, and handoffReady.",
+      "All numeric values must be between 0 and 1.",
+      "quality must contain outputCompleteness, outputCorrectness, instructionAdherence, downstreamReadiness, and riskLevel.",
+      "For riskLevel, 0 means no risk and 1 means severe risk.",
+    ].join("\n"),
+    userPrompt: JSON.stringify({
+      goal: {
+        id: input.goal.id,
+        title: input.goal.title,
+        description: input.goal.description,
+      },
+      step: {
+        id: input.stepTpl.id,
+        name: input.stepTpl.name,
+        instructions: input.stepTpl.instructions,
+        outputSchema: input.stepTpl.outputSchema,
+      },
+      recoveredOutput: input.output,
+    }),
+  };
+}
+
+function resolveShadowAdapterId(goal: GoalRow): ShadowAdapterId {
+  const adapterId = goal.orchestrator_provider
+    ? adapterIdForProvider(goal.orchestrator_provider)
+    : null;
+  if (
+    adapterId !== "claude-code"
+    && adapterId !== "codex"
+    && adapterId !== "antigravity"
+  ) {
+    throw new Error("goal has no shadow adapter");
+  }
+  return adapterId;
 }
 
 function preferencesForGoal(
@@ -236,7 +294,10 @@ export class OrchestratorService {
     // Reliable idle-gated submit to the worker's stdin (initial objective, forwards, revise feedback).
     private readonly workerDeliver?: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">,
     // Best-effort worker termination when a step's session ends.
-    private readonly workerTerminate?: (sessionId: string) => Promise<void>
+    private readonly workerTerminate?: (sessionId: string) => Promise<void>,
+    private readonly shadowAsk?: ShadowAsk,
+    private readonly recoveryPromptComposer: RecoveryScoringPromptComposer =
+      composeRecoveryScoringPrompt
   ) {
     this.sessionOutputStore = sessionOutputStore ?? NULL_OUTPUT_STORE;
   }
@@ -431,12 +492,40 @@ export class OrchestratorService {
 
     // (10) Drive advancement to the next step / completion.
     const finishedAt = now();
-    const stepResult = await this.scoreCompletedStepResult(
-      db,
-      { run, stepRun, stepTpl, goal },
-      result.output,
-      finishedAt
-    );
+    const facts = this.scoringFacts(db, stepRun, "passed", finishedAt);
+    const adapterId = resolveShadowAdapterId(goal);
+    let shadowOnly = false;
+    try {
+      shadowOnly =
+        this.stepDispatch?.resolveMode(adapterId).mode === "shadow_session";
+    } catch {
+      // Missing execution-mode configuration must not block advancement.
+    }
+    const stepResult = this.shadowAsk && shadowOnly
+      ? await recoverStepScoring(this.shadowAsk, {
+          goalId: goal.id,
+          adapterId,
+          timeoutMs: SHADOW_LLM_TIMEOUT_MS,
+          facts,
+          prompt: this.recoveryPromptComposer({
+            stepTpl,
+            goal,
+            output: result.output,
+          }),
+          startedAt: stepRun.started_at,
+          finishedAt,
+        })
+      : buildEvaluationFailedStepResult({
+          stepId: stepRun.id,
+          stepStatus: facts.stepStatus,
+          startedAt: stepRun.started_at,
+          finishedAt,
+          retries: facts.performance.retries,
+          producedArtifactsCount: facts.outcome.producedArtifactsCount,
+          blockingIssuesCount: facts.outcome.blockingIssuesCount,
+          warningsCount: facts.outcome.warningsCount,
+          reason: "no shadow session available for recovery scoring",
+        });
     await this.requestNextDecision(db, nowWithFirstTimestamp(now, finishedAt), run.id, {
       ...options,
       stepResultByStepRunId: {

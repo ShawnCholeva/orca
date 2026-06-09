@@ -178,7 +178,10 @@ import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
 import { insertMessageWithEvent } from './orchestrator-chat/usecases.js';
 import { registerShadowHookRoutes } from './shadow-hooks/routes.js';
 import { ShadowSessionManager, shadowSessionId, type ShadowAdapterId } from './orchestrator-llm/shadow-session.js';
-import { ShadowSessionLlmClient } from './orchestrator-llm/shadow-llm-client.js';
+import {
+  SHADOW_LLM_TIMEOUT_MS,
+  ShadowSessionLlmClient,
+} from './orchestrator-llm/shadow-llm-client.js';
 import {
   ModelProviderOrchestratorLlmClient,
   RoutedOrchestratorLlmClient,
@@ -617,7 +620,9 @@ export function createServer(
     }
   });
 
-  const shadowClient = new ShadowSessionLlmClient(shadowSessions, { timeoutMs: 60_000 });
+  const shadowClient = new ShadowSessionLlmClient(shadowSessions, {
+    timeoutMs: SHADOW_LLM_TIMEOUT_MS,
+  });
   const providerClient = new ModelProviderOrchestratorLlmClient(daemonContext.modelProviderRegistry);
   const routedOrchestratorClient = new RoutedOrchestratorLlmClient(shadowClient, providerClient);
   const orchestratorMediator = new OrchestratorMediator({
@@ -649,7 +654,8 @@ export function createServer(
     // workerDeliver
     (sessionId, text) => workerSessions.deliver(sessionId, text),
     // workerTerminate
-    (sessionId) => workerSessions.terminate(sessionId)
+    (sessionId) => workerSessions.terminate(sessionId),
+    shadowSessions
   );
   // Wire the late-binding ref so the onChunkAppended callback is live.
   _orchestratorServiceRef.current = orchestratorService;

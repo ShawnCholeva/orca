@@ -1,6 +1,8 @@
 import type { OrchestratorLlmClient } from "./mediator.js";
 import type { ShadowAdapterId, ShadowSessionManager } from "./shadow-session.js";
 
+export const SHADOW_LLM_TIMEOUT_MS = 60_000;
+
 export class ShadowSessionLlmClient implements OrchestratorLlmClient {
   constructor(
     private readonly manager: Pick<ShadowSessionManager, "ask">,

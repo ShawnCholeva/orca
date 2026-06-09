@@ -367,7 +367,7 @@ describe("OrchestratorService.onWorkflowSessionCompleted", () => {
     expect(artifact.linked_session_id).toBe(sessionId);
   });
 
-  it("scores and persists step_result after session completion", async () => {
+  it("persists evaluation-failed step_result when no shadow session is available", async () => {
     const { db } = setupHarness();
     const { sessionId, stepRunId } = seedWorkflowWithSession(db);
     const broker = fakeSynthesisBroker({ problem: "solved" });
@@ -381,7 +381,7 @@ describe("OrchestratorService.onWorkflowSessionCompleted", () => {
     expect(readPersistedStepResult(db, stepRunId)).toMatchObject({
       stepId: stepRunId,
       stepStatus: "completed",
-      evaluationStatus: "scored",
+      evaluationStatus: "failed",
     });
   });
 

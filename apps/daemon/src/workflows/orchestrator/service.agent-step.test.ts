@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase } from "../../db.js";
 import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { resetWorkflowStepProjectionPreparedStatements } from "../steps/projection.js";
-import type { OperatorDescriptor, OperatorSelection } from "@orca/contracts";
+import type {
+  OperatorDescriptor,
+  OperatorSelection,
+  SessionOutputSnapshot,
+} from "@orca/contracts";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import { OrchestratorService, type StepDispatchCapabilities } from "./service.js";
 import {
@@ -21,6 +25,8 @@ import {
 import type { SelectorInput } from "../operators/selector.js";
 import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
 import type { OrchestratorAction } from "@orca/contracts";
+import type { SessionOutputStore } from "../../sessions/output-store.js";
+import type { ShadowAsk } from "./recover-step-scoring.js";
 
 const AGENT_OPERATOR_ID = "agent:claude-code";
 
@@ -192,6 +198,62 @@ function readPersistedStepResult(db: Database.Database, stepRunId: string) {
   return JSON.parse(row.step_result_json!);
 }
 
+function workerExitOutputStore(sessionId: string): SessionOutputStore {
+  const text = '```orca-output\n{"problem":"Recovered output."}\n```';
+  const snapshot: SessionOutputSnapshot = {
+    sessionId,
+    firstByteOffset: 0,
+    nextSeq: 1,
+    totalBytesKept: Buffer.byteLength(text),
+    chunks: [
+      {
+        seq: 0,
+        byteOffset: 0,
+        dataBase64: Buffer.from(text).toString("base64"),
+      },
+    ],
+  };
+  return {
+    appendChunk: vi.fn(() => ({ seq: 0, byteOffset: 0 })),
+    readTail: vi.fn(() => snapshot),
+  };
+}
+
+function seedWorkerExitRecovery(db: Database.Database): { sessionId: string } {
+  seedSkillWorkflow(db);
+  seedWorkspace(db);
+  db.prepare(
+    "UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-sonnet-4-6' WHERE id = 'goal-1'"
+  ).run();
+  db.prepare(
+    "UPDATE workflow_step_runs SET selected_operator_id = 'agent:claude-code', selected_model_id = 'claude-haiku-4-5', operator_selected_at = ? WHERE id = 'step-1'"
+  ).run(NOW);
+  const sessionId = "sess-worker-exit";
+  db.prepare(
+    "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES (?, 'goal-1', 'ws-1', 'claude-code', 'Worker', 'exited', ?, 'step-1')"
+  ).run(sessionId, NOW);
+  return { sessionId };
+}
+
+function makeWorkerExitRecoveryService(
+  sessionId: string,
+  shadowAsk: ShadowAsk
+): OrchestratorService {
+  return new OrchestratorService(
+    fakeAgentSelector(),
+    fakeBrokerNoop(),
+    { async list() { return [agentOperatorDescriptor()]; } },
+    makeLauncher(),
+    workerExitOutputStore(sessionId),
+    fakeStepDispatch(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    shadowAsk
+  );
+}
+
 function orchestratorMessageCount(db: Database.Database): number {
   return (
     db.prepare("SELECT COUNT(*) AS c FROM orchestrator_messages WHERE goal_id = 'goal-1'").get() as { c: number }
@@ -261,6 +323,70 @@ afterEach(() => {
 });
 
 describe("OrchestratorService agent step", () => {
+  it("scores worker-exit recovery through the shadow session and advances", async () => {
+    const { db } = setupHarness();
+    const { sessionId } = seedWorkerExitRecovery(db);
+    const ask = vi.fn<ShadowAsk["ask"]>().mockResolvedValue({
+      text: JSON.stringify({
+        successScore: 0.73,
+        quality: {
+          outputCompleteness: 0.75,
+          outputCorrectness: 0.7,
+          instructionAdherence: 0.8,
+          downstreamReadiness: 0.7,
+          riskLevel: 0.25,
+        },
+        reason: "Recovered output is usable.",
+        handoffReady: true,
+      }),
+    });
+    const service = makeWorkerExitRecoveryService(sessionId, { ask });
+
+    await service.onWorkflowSessionCompleted(db, () => NOW, {
+      sessionId,
+      goalId: "goal-1",
+    });
+
+    expect(ask).toHaveBeenCalledOnce();
+    expect(readPersistedStepResult(db, "step-1")).toMatchObject({
+      evaluationStatus: "scored",
+      successScore: 0.73,
+    });
+    const run = db
+      .prepare("SELECT current_step_run_id FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { current_step_run_id: string };
+    expect(run.current_step_run_id).not.toBe("step-1");
+    expect(
+      db.prepare("SELECT status FROM workflow_step_runs WHERE id = ?").get(run.current_step_run_id)
+    ).toMatchObject({ status: "active" });
+  });
+
+  it("advances worker-exit recovery when the shadow scoring turn rejects", async () => {
+    const { db } = setupHarness();
+    const { sessionId } = seedWorkerExitRecovery(db);
+    const ask = vi.fn<ShadowAsk["ask"]>().mockRejectedValue(new Error("shadow unavailable"));
+    const service = makeWorkerExitRecoveryService(sessionId, { ask });
+
+    await service.onWorkflowSessionCompleted(db, () => NOW, {
+      sessionId,
+      goalId: "goal-1",
+    });
+
+    expect(readPersistedStepResult(db, "step-1")).toMatchObject({
+      evaluationStatus: "failed",
+      outcome: {
+        handoffReady: false,
+      },
+    });
+    const run = db
+      .prepare("SELECT current_step_run_id FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { current_step_run_id: string };
+    expect(run.current_step_run_id).not.toBe("step-1");
+    expect(
+      db.prepare("SELECT status FROM workflow_step_runs WHERE id = ?").get(run.current_step_run_id)
+    ).toMatchObject({ status: "active" });
+  });
+
   it("scores and persists step_result after model step completion", async () => {
     const { db, bus, idFactory } = setupHarness();
     seedSkillWorkflow(db, {
