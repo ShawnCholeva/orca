@@ -725,7 +725,7 @@ describe("OrchestratorService.onWorkflowSessionCompleted", () => {
     expect(decisions?.decision_type).toBe("mark_run_complete");
   });
 
-  it("already has step_output without step_result: scores before advancing", async () => {
+  it("already has step_output without step_result: writes evaluation-failed on replay and advances without broker call", async () => {
     const { db, bus, idFactory } = setupHarness();
     const { sessionId, goalId, runId, stepRunId } = seedWorkflowWithSession(db);
 
@@ -734,9 +734,9 @@ describe("OrchestratorService.onWorkflowSessionCompleted", () => {
        VALUES ('art-pre', ?, ?, ?, 'step_output', 'Plan', '{"problem":"pre-existing"}', 'agent', NULL, NULL, NULL, ?)`
     ).run(goalId, runId, stepRunId, NOW);
 
-    const broker = fakeSynthesisBroker({ problem: "unused" });
+    const brokerSpy = vi.fn();
     const outputStore = fakeOutputStore();
-    const service = makeService(broker.broker, outputStore);
+    const service = makeService({ propose: brokerSpy }, outputStore);
 
     await service.onWorkflowSessionCompleted(
       db,
@@ -746,11 +746,18 @@ describe("OrchestratorService.onWorkflowSessionCompleted", () => {
     );
 
     expect(artifactCount(db, "step_output")).toBe(1);
+    expect(brokerSpy).not.toHaveBeenCalled();
     expect(readPersistedStepResult(db, stepRunId)).toMatchObject({
       stepId: stepRunId,
       stepStatus: "completed",
-      evaluationStatus: "scored",
+      evaluationStatus: "failed",
+      outcome: {
+        reason: expect.stringContaining("recovered on replay"),
+      },
     });
-    expect(broker.callCount()).toBe(1);
+    const decisions = db
+      .prepare("SELECT decision_type FROM workflow_decisions ORDER BY rowid DESC LIMIT 1")
+      .get() as { decision_type: string } | undefined;
+    expect(decisions?.decision_type).toBe("mark_run_complete");
   });
 });

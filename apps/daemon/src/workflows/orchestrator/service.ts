@@ -205,16 +205,6 @@ function nowWithFirstTimestamp(now: () => string, fixed: string): () => string {
   };
 }
 
-function parsedObjectOrNull(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 /** Minimal no-op output store used when sessionOutputStore is not injected */
 const NULL_OUTPUT_STORE: SessionOutputStore = {
@@ -292,18 +282,8 @@ export class OrchestratorService {
       }
       const run = getWorkflowRunById(db, stepRun.workflow_run_id);
       if (!run || run.status !== "active") return;
-      const template = getTemplateById(db, run.templateId);
-      if (!template) return;
-      const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
-      if (!stepTpl) return;
-      const goal = readGoal(db, run.goalId);
       const finishedAt = now();
-      const stepResult = await this.scoreCompletedStepResult(
-        db,
-        { run, stepRun, stepTpl, goal },
-        parsedObjectOrNull(existing.body),
-        finishedAt
-      );
+      const stepResult = this.replayEvaluationFailedResult(db, stepRun, finishedAt);
       await this.requestNextDecision(
         db,
         nowWithFirstTimestamp(now, finishedAt),
@@ -1372,6 +1352,31 @@ export class OrchestratorService {
       blockingIssuesCount: facts.outcome.blockingIssuesCount,
       warningsCount: facts.outcome.warningsCount,
       reason: scoring === undefined ? "approval omitted scoring proposal" : "invalid step result scoring proposal",
+    });
+  }
+
+  /**
+   * Replay/reconciliation: step_output already exists but step_result_json is
+   * null (crash between artifact write and result persistence). There is no
+   * live approval turn or worker session to score against, so we write a
+   * deterministic evaluation-failure result from measured facts — no model call.
+   */
+  private replayEvaluationFailedResult(
+    db: Database.Database,
+    stepRun: StepRunRow,
+    finishedAt: string
+  ): WorkflowStepResult {
+    const facts = this.scoringFacts(db, stepRun, "passed", finishedAt);
+    return buildEvaluationFailedStepResult({
+      stepId: stepRun.id,
+      stepStatus: facts.stepStatus,
+      startedAt: stepRun.started_at,
+      finishedAt,
+      retries: facts.performance.retries,
+      producedArtifactsCount: facts.outcome.producedArtifactsCount,
+      blockingIssuesCount: facts.outcome.blockingIssuesCount,
+      warningsCount: facts.outcome.warningsCount,
+      reason: "result recovered on replay without live scoring",
     });
   }
 
