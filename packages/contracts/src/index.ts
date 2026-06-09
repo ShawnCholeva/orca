@@ -3,7 +3,8 @@ import {
   ModelProviderId,
   OperatorKind,
   OrchestratorModelChoice,
-  WorkflowArtifactType
+  WorkflowArtifactType,
+  WorkflowStepResult
 } from "./workflows/index.js";
 import { AdapterId } from "./adapters/ids.js";
 
@@ -1049,7 +1050,8 @@ export const ActivitySourceKind = z.enum([
   "question_pending",
   "permission_pending",
   "turn_completed",
-  "weak_signal"
+  "weak_signal",
+  "step_result"
 ]);
 export type ActivitySourceKind = z.infer<typeof ActivitySourceKind>;
 
@@ -1081,6 +1083,8 @@ export const Activity = z
     workCategory: ActivityWorkCategory.nullable(),
     confidence: ActivityConfidence.nullable(),
     pendingQuestion: PendingQuestion.optional(),
+    stepName: z.string().max(256).optional(),
+    stepResult: WorkflowStepResult.optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
     completedAt: z.string().nullable()
