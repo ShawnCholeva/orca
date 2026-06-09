@@ -1216,3 +1216,35 @@ describe("WorkflowScope + WorkflowGraph schemas", () => {
     ).toThrow();
   });
 });
+
+describe("OrchestratorAction approve_step_complete scoring", () => {
+  const validScoring = {
+    successScore: 0.8,
+    quality: {
+      outputCompleteness: 0.8,
+      outputCorrectness: 0.8,
+      instructionAdherence: 0.9,
+      downstreamReadiness: 0.8,
+      riskLevel: 0.2,
+    },
+    reason: "ready for next step",
+    handoffReady: true,
+  };
+
+  it("parses approval with valid scoring and preserves it", () => {
+    const parsed = OrchestratorAction.parse({ kind: "approve_step_complete", scoring: validScoring });
+    expect(parsed.kind).toBe("approve_step_complete");
+    expect((parsed as { scoring?: unknown }).scoring).toEqual(validScoring);
+  });
+
+  it("preserves the approval action when scoring is malformed", () => {
+    const parsed = OrchestratorAction.safeParse({ kind: "approve_step_complete", scoring: { successScore: "oops" } });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.kind).toBe("approve_step_complete");
+  });
+
+  it("parses approval with no scoring", () => {
+    const parsed = OrchestratorAction.parse({ kind: "approve_step_complete" });
+    expect(parsed.kind).toBe("approve_step_complete");
+  });
+});
