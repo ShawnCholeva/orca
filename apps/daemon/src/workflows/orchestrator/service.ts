@@ -3,6 +3,7 @@ import {
   InterviewTurn,
   OrchestrationRequest,
   ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES,
+  StepResultScoringProposal,
   StepSkillProposal,
   validateStepOutput,
   type DomainEvent,
@@ -57,6 +58,7 @@ import { incrementCrashRetry, CRASH_RETRY_CAP } from "./crash-retry.js";
 import { scoreStepResult } from "./step-result-scoring.js";
 import {
   buildEvaluationFailedStepResult,
+  buildScoredStepResult,
   durationSeconds,
   mapStepRunStatusToResultStatus,
 } from "../steps/step-result.js";
@@ -664,11 +666,8 @@ export class OrchestratorService {
         if (sessionId) {
           void this.workerTerminate?.(sessionId);
         }
-        const output = block && typeof block === "object" && !Array.isArray(block)
-          ? (block as Record<string, unknown>)
-          : null;
         const finishedAt = now();
-        const stepResult = await this.scoreCompletedStepResult(db, ctx, output, finishedAt);
+        const stepResult = this.buildApprovalStepResult(db, ctx, action.scoring, finishedAt);
         await this.advanceToNextStep(db, nowWithFirstTimestamp(now, finishedAt), ctx.run.id, {
           ...options,
           stepResultByStepRunId: {
@@ -1344,6 +1343,36 @@ export class OrchestratorService {
         warningsCount: 0,
       },
     };
+  }
+
+  /**
+   * Builds the terminal step result for a normal approval. Scoring is owned by
+   * the shadow orchestrator and arrives on the approve_step_complete action;
+   * the daemon owns the measured facts. Missing or invalid scoring yields a
+   * non-blocking evaluation-failure result.
+   */
+  private buildApprovalStepResult(
+    db: Database.Database,
+    ctx: { stepRun: StepRunRow },
+    scoring: unknown,
+    finishedAt: string
+  ): WorkflowStepResult {
+    const facts = this.scoringFacts(db, ctx.stepRun, "passed", finishedAt);
+    const proposal = StepResultScoringProposal.safeParse(scoring);
+    if (proposal.success) {
+      return buildScoredStepResult(facts, proposal.data);
+    }
+    return buildEvaluationFailedStepResult({
+      stepId: ctx.stepRun.id,
+      stepStatus: facts.stepStatus,
+      startedAt: ctx.stepRun.started_at,
+      finishedAt,
+      retries: facts.performance.retries,
+      producedArtifactsCount: facts.outcome.producedArtifactsCount,
+      blockingIssuesCount: facts.outcome.blockingIssuesCount,
+      warningsCount: facts.outcome.warningsCount,
+      reason: scoring === undefined ? "approval omitted scoring proposal" : "invalid step result scoring proposal",
+    });
   }
 
   private async scoreCompletedStepResult(

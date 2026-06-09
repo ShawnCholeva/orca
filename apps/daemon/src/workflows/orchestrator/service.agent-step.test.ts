@@ -474,6 +474,48 @@ describe("OrchestratorService agent step", () => {
 });
 
 describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
+  it("persists a model-scored result when the orchestrator approves with scoring", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.82,
+          quality: {
+            outputCompleteness: 0.8,
+            outputCorrectness: 0.85,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.8,
+            riskLevel: 0.2,
+          },
+          reason: "Output complete.",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    const result = readPersistedStepResult(db, "step-1");
+    expect(result.evaluationStatus).toBe("scored");
+    expect(result.successScore).toBe(0.82);
+    expect(result.quality.outputCorrectness).toBe(0.85);
+    expect(result.outcome.reason).toBe("Output complete.");
+  });
+
   it("approve_step_complete: writes step_output artifact and recommends run completion", async () => {
     const { db, bus, idFactory } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" });
@@ -501,7 +543,10 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     expect(readPersistedStepResult(db, "step-1")).toMatchObject({
       stepId: "step-1",
       stepStatus: "completed",
-      evaluationStatus: "scored",
+      evaluationStatus: "failed",
+      outcome: {
+        reason: "step result evaluation failed: approval omitted scoring proposal",
+      },
     });
     expect(deliver).not.toHaveBeenCalled();
   });
