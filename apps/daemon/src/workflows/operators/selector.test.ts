@@ -171,7 +171,8 @@ function makeProvider(responses: unknown[]): { provider: ModelProvider; seenProm
 function makeSelector(
   db: Database.Database,
   operators: OperatorDescriptor[],
-  responses: unknown[] = []
+  responses: unknown[] = [],
+  resolveMode?: ConstructorParameters<typeof OperatorSelector>[3]
 ): { selector: OperatorSelector; seenPrompts: string[] } {
   const providers = new ModelProviderRegistry();
   const { provider, seenPrompts } = makeProvider(responses);
@@ -191,7 +192,7 @@ function makeSelector(
     })(),
   });
   return {
-    selector: new OperatorSelector(providers, registry, broker),
+    selector: new OperatorSelector(providers, registry, broker, resolveMode),
     seenPrompts,
   };
 }
@@ -308,6 +309,27 @@ describe("OperatorSelector", () => {
       source: "fallback",
       selection: { operatorId: "agent:codex", operatorKind: "agent" },
     });
+    expect(llmRows(db)).toEqual([]);
+  });
+
+  it("does not use SDK selection or choose a model operator for a shadow-only adapter", async () => {
+    const db = setupDb();
+    const { selector: operatorSelector, seenPrompts } = makeSelector(
+      db,
+      READY_OPERATORS,
+      [selection("orca/openai:gpt-5.1-mini", "model")],
+      (adapterId) => ({ adapterId, mode: "shadow_session", fallbacks: [] })
+    );
+
+    const result = await operatorSelector.select(
+      db,
+      () => NOW,
+      baseInput({ recommendedOperatorIds: ["orca/openai:gpt-5.1-mini"] })
+    );
+
+    expect(result.source).toBe("fallback");
+    expect(result.selection.operatorKind).not.toBe("model");
+    expect(seenPrompts).toEqual([]);
     expect(llmRows(db)).toEqual([]);
   });
 

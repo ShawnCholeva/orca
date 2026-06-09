@@ -7,11 +7,15 @@ import {
   type WorkflowStepOutputSchema,
 } from "@orca/contracts";
 import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
+import { SHADOW_LLM_TIMEOUT_MS } from "../../orchestrator-llm/shadow-llm-client.js";
+import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
+import type { ShadowAsk } from "./recover-step-scoring.js";
 import { parseOrcaOutputBlock } from "./orca-output.js";
 import type { StepExecutionInput } from "./step-input.js";
 
 export interface SynthesisDeps {
   broker: Pick<OrchestrationTransportBroker, "propose">;
+  shadowAsk?: ShadowAsk;
 }
 
 export interface SynthesisInput {
@@ -20,6 +24,7 @@ export interface SynthesisInput {
   stepRunId: string;
   providerId: ModelProviderId;
   modelId: string;
+  adapterId?: ShadowAdapterId;
   outputSchema: WorkflowStepOutputSchema;
   stepInput: StepExecutionInput;
   sessionResult: string;
@@ -49,6 +54,46 @@ export async function synthesizeStepOutput(
       outputSchema: input.outputSchema,
       stepInput: input.stepInput,
     });
+    const validateProposal = (raw: unknown) => {
+      const proposal = SynthesisProposal.safeParse(raw);
+      if (!proposal.success) {
+        return { accepted: false as const, failureMessage: "invalid synthesis proposal structure" };
+      }
+      const validated = validateStepOutput(input.outputSchema, proposal.data.output);
+      if (!validated.ok) {
+        return {
+          accepted: false as const,
+          failureMessage: `schema: ${validated.errors.join("; ")}`,
+        };
+      }
+      return { accepted: true as const, parsed: proposal.data };
+    };
+
+    if (input.adapterId && deps.shadowAsk) {
+      try {
+        const { text } = await deps.shadowAsk.ask(input.goalId, {
+          adapterId: input.adapterId,
+          systemPrompt: [
+            "Synthesize a workflow step output from the supplied session result.",
+            "Return exactly one JSON object matching SynthesisProposal inside an orca:action fence.",
+            "The object must contain an output field matching the supplied outputSchema.",
+          ].join("\n"),
+          userPrompt: JSON.stringify(requestPayload),
+          timeoutMs: SHADOW_LLM_TIMEOUT_MS,
+        });
+        const validation = validateProposal(JSON.parse(text));
+        if (validation.accepted) {
+          return {
+            ok: true,
+            output: validation.parsed.output,
+            source: "orchestrator",
+          };
+        }
+      } catch {
+        // Retry once, matching the existing broker synthesis behavior.
+      }
+      continue;
+    }
 
     const request = OrchestrationRequest.parse({
       kind: "synthesize_step_output",
@@ -57,24 +102,12 @@ export async function synthesizeStepOutput(
       stepRunId: input.stepRunId,
       providerId: input.providerId,
       modelId: input.modelId,
+      adapterId: input.adapterId,
       payload: requestPayload,
     });
 
     const result = await deps.broker.propose(request, {
-      validateProposal: (raw) => {
-        const proposal = SynthesisProposal.safeParse(raw);
-        if (!proposal.success) {
-          return { accepted: false, failureMessage: "invalid synthesis proposal structure" };
-        }
-        const validated = validateStepOutput(input.outputSchema, proposal.data.output);
-        if (!validated.ok) {
-          return {
-            accepted: false,
-            failureMessage: `schema: ${validated.errors.join("; ")}`,
-          };
-        }
-        return { accepted: true, parsed: proposal.data };
-      },
+      validateProposal,
     });
 
     if (result.status === "proposed") {

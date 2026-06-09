@@ -15,6 +15,8 @@ import {
 import { ProviderError, type ModelCompletionResponse, type ModelProvider } from "../../llm/types.js";
 import { ModelProviderRegistry } from "../../llm/registry.js";
 import { redactSecrets } from "../../memory/normalize.js";
+import type { ResolvedMode } from "../../adapters/dispatcher.js";
+import { adapterIdForProvider } from "../../orchestrator-llm/model-provider-llm-client.js";
 import { evaluateGuardrail, type GuardrailContext } from "../guardrails/evaluator.js";
 import { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { validateOperatorSelectionProposal } from "../orchestration-transport/proposals.js";
@@ -64,7 +66,8 @@ export class OperatorSelector {
   constructor(
     private readonly providers: ModelProviderRegistry,
     private readonly operators: OperatorRegistry,
-    private readonly orchestrationTransportBroker: OrchestrationTransportBroker
+    private readonly orchestrationTransportBroker: OrchestrationTransportBroker,
+    private readonly resolveMode?: (adapterId: string) => ResolvedMode
   ) {}
 
   async select(
@@ -81,6 +84,13 @@ export class OperatorSelector {
     if (readyOperators.length === 0) {
       throw new Error("no_ready_operators");
     }
+    const oneShotEnabled = this.isOneShotEnabled(input.orchestratorProvider);
+    if (!oneShotEnabled) {
+      readyOperators = readyOperators.filter((operator) => operator.kind !== "model");
+      if (readyOperators.length === 0) {
+        throw new Error("no_ready_operators");
+      }
+    }
     const deterministicSelection = this.selectDeterministic(input, readyOperators);
     if (deterministicSelection) {
       return {
@@ -92,7 +102,7 @@ export class OperatorSelector {
     const provider = input.orchestratorProvider
       ? this.providers.get(input.orchestratorProvider)
       : undefined;
-    if (provider && input.orchestratorModel) {
+    if (provider && input.orchestratorModel && oneShotEnabled) {
       const first = await this.tryLlm(db, now, provider, input, readyOperators, []);
       if (first.valid) return first.result;
 
@@ -108,6 +118,17 @@ export class OperatorSelector {
       selection: this.fallbackRank(input, readyOperators),
       source: "fallback",
     };
+  }
+
+  private isOneShotEnabled(providerId: ModelProviderId | null): boolean {
+    if (!providerId || !this.resolveMode) return true;
+    const adapterId = adapterIdForProvider(providerId);
+    try {
+      const resolved = this.resolveMode(adapterId);
+      return resolved.mode === "one_shot" || resolved.fallbacks.includes("one_shot");
+    } catch {
+      return false;
+    }
   }
 
   private async tryLlm(

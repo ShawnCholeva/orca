@@ -124,7 +124,8 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
     operatorSelector: new OperatorSelector(
       modelProviderRegistry,
       operatorRegistry,
-      orchestrationTransportBroker
+      orchestrationTransportBroker,
+      (adapterId) => adapterDispatcher.resolveMode(adapterId)
     ),
     stepDispatchCapabilities,
     workflowSessionLauncher,

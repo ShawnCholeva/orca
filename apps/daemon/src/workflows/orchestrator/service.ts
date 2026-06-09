@@ -138,6 +138,21 @@ function resolveShadowAdapterId(goal: GoalRow): ShadowAdapterId {
   return adapterId;
 }
 
+function resolvedModeEnablesOneShot(mode: ResolvedMode): boolean {
+  return mode.mode === "one_shot" || mode.fallbacks.includes("one_shot");
+}
+
+function stepDispatchEnablesOneShot(
+  stepDispatch: StepDispatchCapabilities,
+  adapterId: string
+): boolean {
+  try {
+    return resolvedModeEnablesOneShot(stepDispatch.resolveMode(adapterId));
+  } catch {
+    return false;
+  }
+}
+
 function preferencesForGoal(
   preferences: StepAgentChoice[],
   orchestratorProvider: GoalRow["orchestrator_provider"]
@@ -438,16 +453,25 @@ export class OrchestratorService {
       );
       return;
     }
+    const synthesisAdapterId = resolveShadowAdapterId(goal);
+    const synthesisUsesShadow =
+      this.shadowAsk
+      && this.stepDispatch
+      && !stepDispatchEnablesOneShot(this.stepDispatch, synthesisAdapterId);
 
     // (8) Parse-then-synthesize.
     const result = await synthesizeStepOutput(
-      { broker: this.broker },
+      {
+        broker: this.broker,
+        shadowAsk: synthesisUsesShadow ? this.shadowAsk : undefined,
+      },
       {
         goalId: goal.id,
         workflowRunId: run.id,
         stepRunId: stepRun.id,
         providerId: provider,
         modelId: model,
+        adapterId: synthesisUsesShadow ? synthesisAdapterId : undefined,
         outputSchema: stepTpl.outputSchema,
         stepInput,
         sessionResult: tail,
@@ -1263,6 +1287,18 @@ export class OrchestratorService {
     // Model path: require providerId + modelId.
     if (!sel.selectedProviderId || !sel.selectedModelId) {
       return this.blockRun(db, now, ctx, "no ready model operator", options);
+    }
+    if (this.stepDispatch) {
+      const adapterId = adapterIdForProvider(sel.selectedProviderId);
+      if (!stepDispatchEnablesOneShot(this.stepDispatch, adapterId)) {
+        return this.blockRun(
+          db,
+          now,
+          ctx,
+          "direct model operator disabled for shadow-only adapter",
+          options
+        );
+      }
     }
 
     // (4) run the skill turn.

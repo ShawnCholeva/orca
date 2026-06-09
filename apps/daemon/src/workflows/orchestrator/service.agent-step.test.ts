@@ -387,6 +387,36 @@ describe("OrchestratorService agent step", () => {
     ).toMatchObject({ status: "active" });
   });
 
+  it("blocks a preselected direct model operator when its adapter is shadow-only", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedSkillWorkflow(db, {
+      steps: [makeStep()],
+      selectedOperatorId: MODEL_OPERATOR_ID,
+      selectedProviderId: "orca/anthropic",
+      selectedModelId: "claude-sonnet-4-6",
+      operatorSelectedAt: NOW,
+    });
+    const propose = vi.fn(fakeBrokerNoop().propose);
+    const service = new OrchestratorService(
+      fakeSelector(),
+      { propose },
+      fakeRegistry(),
+      makeLauncher(),
+      undefined,
+      fakeStepDispatch()
+    );
+
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    expect(propose).not.toHaveBeenCalled();
+    expect(
+      db.prepare("SELECT status, blocked_reason FROM workflow_runs WHERE id = 'run-1'").get()
+    ).toMatchObject({
+      status: "blocked",
+      blocked_reason: expect.stringMatching(/shadow-only|direct model/i),
+    });
+  });
+
   it("scores and persists step_result after model step completion", async () => {
     const { db, bus, idFactory } = setupHarness();
     seedSkillWorkflow(db, {

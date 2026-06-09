@@ -56,6 +56,30 @@ describe("synthesizeStepOutput", () => {
     expect(d.broker.propose).toHaveBeenCalledTimes(1);
   });
 
+  it("routes shadow-only synthesis through hidden interactive without SDK compatibility", async () => {
+    const propose = vi.fn(async (_request, options) => ({
+      status: "proposed" as const,
+      attemptId: "att",
+      transport: "hidden_interactive" as const,
+      parsed: { output: { summary: "from shadow" } },
+      rawTextLength: 0,
+      latencyMs: 0,
+    }));
+    const shadowAsk = {
+      ask: vi.fn(async () => ({
+        text: JSON.stringify({ output: { summary: "from shadow" } }),
+      })),
+    };
+
+    await synthesizeStepOutput(
+      { broker: { propose }, shadowAsk } as SynthesisDeps,
+      { ...input, adapterId: "claude-code", sessionResult: "no block" } as SynthesisInput
+    );
+
+    expect(propose).not.toHaveBeenCalled();
+    expect(shadowAsk.ask).toHaveBeenCalledOnce();
+  });
+
   it("synthesize path: invalid block falls back to model", async () => {
     const d = deps();
     const r = await synthesizeStepOutput(d, {
