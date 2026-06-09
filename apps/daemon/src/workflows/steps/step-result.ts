@@ -1,6 +1,8 @@
 import {
   WORKFLOW_FAILURE_MAX_MESSAGE_CHARS,
   WorkflowStepResult,
+  type StepResultScoringFacts,
+  type StepResultScoringProposal,
   type WorkflowStepResult as WorkflowStepResultT,
   type WorkflowStepResultStatus,
 } from "@orca/contracts";
@@ -103,4 +105,25 @@ export function sanitizeStepResult(result: WorkflowStepResultT): WorkflowStepRes
 
 export function serializeStepResult(result: WorkflowStepResultT): string {
   return JSON.stringify(WorkflowStepResult.parse(result));
+}
+
+export function buildScoredStepResult(
+  facts: StepResultScoringFacts,
+  proposal: StepResultScoringProposal
+): WorkflowStepResultT {
+  return WorkflowStepResult.parse({
+    stepId: facts.stepId,
+    stepStatus: facts.stepStatus,
+    evaluationStatus: "scored",
+    successScore: proposal.successScore,
+    quality: proposal.quality,
+    performance: facts.performance,
+    outcome: {
+      reason: sanitizeStepResultReason(proposal.reason),
+      producedArtifactsCount: facts.outcome.producedArtifactsCount,
+      blockingIssuesCount: facts.outcome.blockingIssuesCount,
+      warningsCount: facts.outcome.warningsCount,
+      handoffReady: proposal.handoffReady,
+    },
+  });
 }
