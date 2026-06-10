@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import {
   Activity,
   PendingQuestion,
+  WorkflowStepResult,
   type Activity as ActivityT,
   type PendingQuestion as PendingQuestionT
 } from "@orca/contracts";
@@ -51,6 +52,36 @@ function rowToActivity(row: ActivityRow): ActivityT {
   });
 }
 
+function enrichStepResult(db: Database.Database, activity: ActivityT): ActivityT {
+  if (activity.sourceKind !== "step_result" || activity.stepRunId === null) return activity;
+  const row = db
+    .prepare(
+      `SELECT sr.step_result_json AS result_json,
+              sr.step_template_id,
+              wt.steps_json
+       FROM workflow_step_runs sr
+       LEFT JOIN workflow_runs wr ON wr.id = sr.workflow_run_id
+       LEFT JOIN workflow_templates wt ON wt.id = wr.template_id
+       WHERE sr.id = ?`
+    )
+    .get(activity.stepRunId) as {
+      result_json: string | null;
+      step_template_id: string;
+      steps_json: string | null;
+    } | undefined;
+  if (!row?.result_json) return activity;
+  let stepName: string | undefined;
+  if (row.steps_json) {
+    const steps = JSON.parse(row.steps_json) as Array<{ id: string; name?: string }>;
+    stepName = steps.find((s) => s.id === row.step_template_id)?.name;
+  }
+  return Activity.parse({
+    ...activity,
+    ...(stepName !== undefined ? { stepName } : {}),
+    stepResult: WorkflowStepResult.parse(JSON.parse(row.result_json)),
+  });
+}
+
 export function listActivitiesByGoal(
   db: Database.Database,
   goalId: string
@@ -65,5 +96,5 @@ export function listActivitiesByGoal(
        ORDER BY created_at ASC, id ASC`
     )
     .all(goalId) as ActivityRow[];
-  return rows.map(rowToActivity);
+  return rows.map(rowToActivity).map((a) => enrichStepResult(db, a));
 }
