@@ -75,8 +75,12 @@ export async function synthesizeStepOutput(
           adapterId: input.adapterId,
           systemPrompt: [
             "Synthesize a workflow step output from the supplied session result.",
-            "Return exactly one JSON object matching SynthesisProposal inside an orca:action fence.",
+            "Produce one JSON object matching SynthesisProposal.",
             "The object must contain an output field matching the supplied outputSchema.",
+            "Output protocol (MANDATORY): emit exactly one fenced block and nothing after the closing fence:",
+            "```orca:action",
+            '{ ...the SynthesisProposal JSON object... }',
+            "```",
           ].join("\n"),
           userPrompt: JSON.stringify(requestPayload),
           timeoutMs: SHADOW_LLM_TIMEOUT_MS,

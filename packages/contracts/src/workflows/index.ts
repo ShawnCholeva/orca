@@ -728,7 +728,11 @@ export const StepResultScoringProposal = z
   .object({
     successScore: Score01,
     quality: WorkflowStepResultQuality,
-    reason: z.string().max(WORKFLOW_FAILURE_MAX_MESSAGE_CHARS),
+    // The model's free-text justification. Kept generous (matching rationale
+    // fields) so a verbose-but-valid reason never invalidates a real score; the
+    // persisted WorkflowStepResult truncates it to WORKFLOW_FAILURE_MAX_MESSAGE_CHARS
+    // via sanitizeStepResultReason.
+    reason: z.string().max(2000),
     handoffReady: z.boolean()
   })
   .strict();

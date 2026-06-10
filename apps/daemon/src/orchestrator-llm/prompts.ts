@@ -81,6 +81,7 @@ export function composeOrchestratorPrompt(input: OrchestratorPromptInput): Orche
     "When you approve_step_complete you MUST score the completed step. All scoring numbers are 0..1.",
     "successScore and each quality dimension: 1 = best. riskLevel is inverted: 0 = no risk, 1 = severe risk.",
     "Score from the agent evidence (output block, artifacts, assumptions, warnings). The agent never authors its own score.",
+    "Keep scoring.reason concise (about one sentence, under 240 characters); longer reasons are truncated on the result card.",
     'Every shape also accepts an optional "rationale":"<short why>".',
     "For user_message triggers, answer simple greetings, status checks, and meta questions directly.",
     "Only use forward_to_agent when the user is asking the active step agent to do work or providing information the step agent needs.",

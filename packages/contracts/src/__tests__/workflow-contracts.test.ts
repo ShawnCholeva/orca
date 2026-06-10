@@ -1074,6 +1074,25 @@ describe("step result scoring contracts", () => {
 
     expect(StepResultScoringProposal.parse(proposal)).toEqual(proposal);
   });
+
+  it("accepts a verbose reason longer than the persisted-result cap", () => {
+    // Models routinely write 300-450 char justifications. A valid score must not
+    // be discarded just because the prose reason exceeds the 256-char failure
+    // cap; the persisted WorkflowStepResult truncates it later.
+    const proposal = {
+      successScore: 0.88,
+      quality: {
+        outputCompleteness: 0.9,
+        outputCorrectness: 0.85,
+        instructionAdherence: 0.92,
+        downstreamReadiness: 0.9,
+        riskLevel: 0.15
+      },
+      reason: "x".repeat(457),
+      handoffReady: true
+    };
+    expect(StepResultScoringProposal.parse(proposal)).toEqual(proposal);
+  });
 });
 
 describe("OrchestratorAction", () => {

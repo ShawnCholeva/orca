@@ -103,10 +103,14 @@ function composeRecoveryScoringPrompt(
   return {
     systemPrompt: [
       "Score a recovered Orca workflow step result.",
-      "Return only one JSON object with successScore, quality, reason, and handoffReady.",
+      "The JSON object has successScore, quality, reason, and handoffReady.",
       "All numeric values must be between 0 and 1.",
       "quality must contain outputCompleteness, outputCorrectness, instructionAdherence, downstreamReadiness, and riskLevel.",
       "For riskLevel, 0 means no risk and 1 means severe risk.",
+      "Output protocol (MANDATORY): emit exactly one fenced block and nothing after the closing fence:",
+      "```orca:action",
+      '{ ...the scoring JSON object... }',
+      "```",
     ].join("\n"),
     userPrompt: JSON.stringify({
       goal: {
@@ -1467,6 +1471,14 @@ export class OrchestratorService {
     const proposal = StepResultScoringProposal.safeParse(scoring);
     if (proposal.success) {
       return buildScoredStepResult(facts, proposal.data);
+    }
+    if (scoring !== undefined) {
+      // Field paths + codes only (never values) so a rejected score is debuggable
+      // without leaking model-authored content into the logs.
+      console.warn("[scoring] approval scoring rejected", {
+        stepRunId: ctx.stepRun.id,
+        issues: proposal.error.issues.map((i) => `${i.path.join(".")}:${i.code}`),
+      });
     }
     return buildEvaluationFailedStepResult({
       stepId: ctx.stepRun.id,
