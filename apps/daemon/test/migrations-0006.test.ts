@@ -159,6 +159,7 @@ describe('context migration 0006_context.sql', () => {
       '0022_workflow_step_result.sql',
       '0023_worker_permission_mode.sql',
       '0024_activities.sql',
+      '0025_activity_step_result.sql',
     ]);
 
     const tables = (
@@ -244,6 +245,7 @@ describe('context migration 0006_context.sql', () => {
       '0022_workflow_step_result.sql',
       '0023_worker_permission_mode.sql',
       '0024_activities.sql',
+      '0025_activity_step_result.sql',
     ]);
 
     const counts = {

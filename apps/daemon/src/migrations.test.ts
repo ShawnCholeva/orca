@@ -75,7 +75,8 @@ describe("runMigrations", () => {
       "0021_workflow_template_scope_graph.sql",
       "0022_workflow_step_result.sql",
       "0023_worker_permission_mode.sql",
-      "0024_activities.sql"
+      "0024_activities.sql",
+      "0025_activity_step_result.sql"
     ]);
   });
 
@@ -181,7 +182,8 @@ describe("runMigrations", () => {
       "0021_workflow_template_scope_graph.sql",
       "0022_workflow_step_result.sql",
       "0023_worker_permission_mode.sql",
-      "0024_activities.sql"
+      "0024_activities.sql",
+      "0025_activity_step_result.sql"
     ]);
 
     const goalCount = (
@@ -409,7 +411,8 @@ describe("session tables migration", () => {
       "0021_workflow_template_scope_graph.sql",
       "0022_workflow_step_result.sql",
       "0023_worker_permission_mode.sql",
-      "0024_activities.sql"
+      "0024_activities.sql",
+      "0025_activity_step_result.sql"
     ]);
 
     const tables = (
@@ -908,7 +911,8 @@ describe("migration 0010 workflows", () => {
       "0021_workflow_template_scope_graph.sql",
       "0022_workflow_step_result.sql",
       "0023_worker_permission_mode.sql",
-      "0024_activities.sql"
+      "0024_activities.sql",
+      "0025_activity_step_result.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1487,7 +1491,8 @@ describe("migration 0012 orchestration transport", () => {
       "0021_workflow_template_scope_graph.sql",
       "0022_workflow_step_result.sql",
       "0023_worker_permission_mode.sql",
-      "0024_activities.sql"
+      "0024_activities.sql",
+      "0025_activity_step_result.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
