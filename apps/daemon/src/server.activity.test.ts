@@ -219,6 +219,59 @@ describe("daemon activity integration", () => {
     });
   });
 
+  it("backfills a missing step_result activity when the server starts", async () => {
+    const ids = {
+      goalId: "goal-result-reconcile",
+      runId: "run-result-reconcile",
+      stepRunId: "step-result-reconcile",
+      sessionId: "session-result-reconcile",
+    };
+    seedLiveWorkflowSession(db, ids);
+    db.prepare(
+      `UPDATE workflow_step_runs
+       SET status = 'passed', finished_at = ?, step_result_json = ?
+       WHERE id = ?`
+    ).run(
+      NOW,
+      JSON.stringify({
+        stepId: ids.stepRunId,
+        stepStatus: "completed",
+        evaluationStatus: "failed",
+        successScore: 0,
+        quality: {
+          outputCompleteness: 0,
+          outputCorrectness: 0,
+          instructionAdherence: 0,
+          downstreamReadiness: 0,
+          riskLevel: 1,
+        },
+        performance: { durationSeconds: 0, retries: 0 },
+        outcome: {
+          reason: "step result evaluation failed: recovered on startup",
+          producedArtifactsCount: 0,
+          blockingIssuesCount: 0,
+          warningsCount: 0,
+          handoffReady: false,
+        },
+      }),
+      ids.stepRunId
+    );
+
+    await server.close();
+    const config = createConfig(dataDir);
+    server = createServer(config, {
+      daemonContext: createDaemonContext(db, eventBus),
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM activities WHERE step_run_id = ? AND source_kind = 'step_result'"
+        )
+        .get(ids.stepRunId)
+    ).toEqual({ count: 1 });
+  });
+
   it("ignores a hook from a workflow step that is no longer current", async () => {
     const ids = {
       goalId: "goal-stale-step",

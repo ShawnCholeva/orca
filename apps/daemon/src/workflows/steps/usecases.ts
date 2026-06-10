@@ -20,6 +20,8 @@ import {
   sanitizeStepResult,
   serializeStepResult,
 } from "./step-result.js";
+import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
+import type { ActivityStoreCtx } from "../../activities/store.js";
 
 interface WorkflowStepRunRow {
   id: string;
@@ -61,6 +63,7 @@ class WorkflowStepInvalidTransitionError extends Error {
 interface StepEventOptions {
   idFactory?: () => string;
   stagedEvents?: DomainEvent[];
+  activityCtx?: ActivityStoreCtx;
 }
 
 function sanitizeReason(reason: string): string {
@@ -157,6 +160,21 @@ function emitEvent(
 ): void {
   const event = appendWorkflowEvent(db, type, payload, now, options?.idFactory);
   options?.stagedEvents?.push(event);
+}
+
+function materializeStepResultSafely(
+  options: StepEventOptions | undefined,
+  input: { goalId: string; workflowRunId: string; stepRunId: string }
+): void {
+  if (!options?.activityCtx) return;
+  try {
+    materializeStepResultActivity(options.activityCtx, input);
+  } catch (error) {
+    console.error("[activity] step result materialization failed", {
+      stepRunId: input.stepRunId,
+      error,
+    });
+  }
 }
 
 function insertStep(
@@ -293,6 +311,11 @@ export function advanceToNextStep(
       timestamp,
       eventOptions
     );
+    materializeStepResultSafely(eventOptions, {
+      goalId: current.goalId,
+      workflowRunId: current.workflowRunId,
+      stepRunId: currentStepRunId,
+    });
 
     const next = template.steps.find((step) => step.ordinal === current.ordinal + 1);
     if (!next) {
@@ -355,6 +378,11 @@ export function markStepBlocked(
       timestamp,
       eventOptions
     );
+    materializeStepResultSafely(eventOptions, {
+      goalId: row.goalId,
+      workflowRunId: row.workflowRunId,
+      stepRunId,
+    });
     return readStep(db, stepRunId);
   })();
 }
@@ -388,6 +416,11 @@ export function failStep(
       timestamp,
       eventOptions
     );
+    materializeStepResultSafely(eventOptions, {
+      goalId: row.goalId,
+      workflowRunId: row.workflowRunId,
+      stepRunId,
+    });
     return readStep(db, stepRunId);
   })();
 }

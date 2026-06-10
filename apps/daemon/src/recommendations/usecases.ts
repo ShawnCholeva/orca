@@ -398,6 +398,7 @@ function applyWorkflowAcceptSideEffectsInTx(
   db: Database.Database,
   now: string,
   idFn: () => string,
+  bus: EventBus,
   rec: Recommendation,
   stagedEvents: DomainEvent[]
 ): void {
@@ -409,6 +410,7 @@ function applyWorkflowAcceptSideEffectsInTx(
       advanceToNextStep(db, () => now, action.workflowStepRunId, {
         idFactory: idFn,
         stagedEvents,
+        activityCtx: { db, bus, now: () => now, idFactory: idFn },
       });
       return;
     }
@@ -417,6 +419,7 @@ function applyWorkflowAcceptSideEffectsInTx(
       advanceToNextStep(db, () => now, action.workflowStepRunId, {
         idFactory: idFn,
         stagedEvents,
+        activityCtx: { db, bus, now: () => now, idFactory: idFn },
       });
       return;
     }
@@ -480,7 +483,7 @@ function recordTerminalFeedback(
       });
       updateRecommendationStatusRow(db, rec.id, targetStatus, now, now);
       if (action === 'accept') {
-        applyWorkflowAcceptSideEffectsInTx(db, now, idFn, rec, toPublish);
+        applyWorkflowAcceptSideEffectsInTx(db, now, idFn, bus, rec, toPublish);
       }
       toPublish.push(
         emitEvent(stmts, eventType, rec.goalId, {

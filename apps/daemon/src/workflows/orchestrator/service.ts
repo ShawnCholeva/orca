@@ -71,6 +71,7 @@ import {
   recoverStepScoring,
   type ShadowAsk,
 } from "./recover-step-scoring.js";
+import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
 
 export interface StepDispatchCapabilities {
   isAdapterReady(adapterId: string): Promise<boolean>;
@@ -1943,6 +1944,16 @@ export class OrchestratorService {
         {
           idFactory: options.idFactory,
           stagedEvents,
+          ...(options.bus
+            ? {
+                activityCtx: {
+                  db,
+                  bus: options.bus,
+                  now,
+                  idFactory: options.idFactory,
+                },
+              }
+            : {}),
         },
         options.stepResultByStepRunId?.[stepRun.id]
       );
@@ -2019,6 +2030,28 @@ export class OrchestratorService {
       return { decision, recommendationIds: [recommendationId] };
     })();
     this.publish(options.bus, stagedEvents);
+    if (options.bus && options.stepResultByStepRunId?.[stepRun.id]) {
+      try {
+        materializeStepResultActivity(
+          {
+            db,
+            bus: options.bus,
+            now,
+            idFactory: options.idFactory,
+          },
+          {
+            goalId: goal.id,
+            workflowRunId: run.id,
+            stepRunId: stepRun.id,
+          }
+        );
+      } catch (error) {
+        console.error("[activity] step result materialization failed", {
+          stepRunId: stepRun.id,
+          error,
+        });
+      }
+    }
     return output;
   }
 

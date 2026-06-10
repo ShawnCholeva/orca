@@ -632,6 +632,8 @@ describe("OrchestratorService agent step", () => {
 describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
   it("persists a model-scored result when the orchestrator approves with scoring", async () => {
     const { db, bus, idFactory } = setupHarness();
+    const events: Array<{ type: string; payload: unknown }> = [];
+    bus.subscribe((event) => events.push(event));
     setupAgentStepRun(db, { guardrailsJson: "[]" });
     seedWorkspace(db);
     seedAgentSession(db);
@@ -670,6 +672,20 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     expect(result.successScore).toBe(0.82);
     expect(result.quality.outputCorrectness).toBe(0.85);
     expect(result.outcome.reason).toBe("Output complete.");
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM activities WHERE step_run_id = 'step-1' AND source_kind = 'step_result'"
+        )
+        .get()
+    ).toEqual({ count: 1 });
+    expect(
+      events.filter(
+        (event) =>
+          event.type === "activity.changed" &&
+          (event.payload as { stepRunId?: string }).stepRunId === "step-1"
+      )
+    ).toHaveLength(1);
   });
 
   it("approve_step_complete: writes step_output artifact and recommends run completion", async () => {

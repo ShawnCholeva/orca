@@ -173,6 +173,7 @@ import { categorizeClaudeTool } from './activities/claude-adapter.js';
 import type { ActivitySignal } from './activities/signals.js';
 import type { ActivityStoreCtx } from './activities/store.js';
 import { ActivityUpdater } from './activities/updater.js';
+import { reconcileStepResultActivities } from './activities/step-result-activity.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
 import { insertMessageWithEvent } from './orchestrator-chat/usecases.js';
@@ -545,6 +546,11 @@ export function createServer(
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
   };
+  try {
+    reconcileStepResultActivities(activityCtx);
+  } catch (error) {
+    console.error("[activity] step result reconciliation failed", { error });
+  }
   const applyActivitySafely = (
     source: string,
     signal: ActivitySignal
