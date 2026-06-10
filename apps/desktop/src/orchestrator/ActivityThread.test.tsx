@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { Activity } from "@orca/contracts";
 import { describe, expect, it } from "vitest";
 
@@ -122,6 +122,49 @@ describe("ActivityThread", () => {
 
     expect(screen.getByText("I need your call on signals.")).toBeInTheDocument();
     expect(screen.getByText("g1: Which passed?")).toBeInTheDocument();
+  });
+
+  function stepResultActivity(over: Partial<Activity> = {}): Activity {
+    return {
+      id: "res1", goalId: "g1", workflowRunId: "r1", stepRunId: "s1", agentSessionId: null,
+      turnOrdinal: 9, status: "completed", currentText: "", finalSummary: null,
+      sourceKind: "step_result", workCategory: null, confidence: null,
+      createdAt: "2026-06-09T00:00:00.000Z", updatedAt: "2026-06-09T00:00:00.000Z", completedAt: "2026-06-09T00:00:00.000Z",
+      stepName: "Investigate",
+      stepResult: {
+        stepId: "s1", stepStatus: "completed", evaluationStatus: "scored", successScore: 0.82,
+        quality: { outputCompleteness: 0.8, outputCorrectness: 0.85, instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2 },
+        performance: { durationSeconds: 96, retries: 0 },
+        outcome: { reason: "Output complete.", producedArtifactsCount: 1, blockingIssuesCount: 0, warningsCount: 0, handoffReady: true },
+      },
+      ...over,
+    } as Activity;
+  }
+
+  it("renders a scored result card with a percentage and expands to metrics", () => {
+    render(<ActivityThread goalId="g1" activities={[stepResultActivity()]} renderQuestionForm={() => null} />);
+    const card = screen.getByTestId("step-result-card");
+    expect(card).toHaveTextContent("Investigate");
+    expect(card).toHaveTextContent("82%");
+    fireEvent.click(screen.getByTestId("step-result-expand"));
+    expect(card).toHaveTextContent("Instruction adherence");
+  });
+
+  it("shows 'Evaluation failed' and never a percentage for failed evaluation", () => {
+    const baseResult = stepResultActivity().stepResult!;
+    const failed = stepResultActivity({
+      stepResult: {
+        ...baseResult,
+        evaluationStatus: "failed",
+        successScore: 0,
+        quality: { outputCompleteness: 0, outputCorrectness: 0, instructionAdherence: 0, downstreamReadiness: 0, riskLevel: 1 },
+        outcome: { ...baseResult.outcome, reason: "step result evaluation failed: shadow timeout", handoffReady: false },
+      },
+    });
+    render(<ActivityThread goalId="g1" activities={[failed]} renderQuestionForm={() => null} />);
+    const card = screen.getByTestId("step-result-card");
+    expect(card).toHaveTextContent("Evaluation failed");
+    expect(card).not.toHaveTextContent("%");
   });
 
   it("preserves summary order and renders only the latest live activity", () => {
