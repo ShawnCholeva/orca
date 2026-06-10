@@ -239,13 +239,17 @@ function makeWorkerExitRecoveryService(
   sessionId: string,
   shadowAsk: ShadowAsk
 ): OrchestratorService {
+  const shadowOnlyDispatch: StepDispatchCapabilities = {
+    ...fakeStepDispatch(),
+    resolveMode: (adapterId) => ({ adapterId, mode: "shadow_session", fallbacks: [] }),
+  };
   return new OrchestratorService(
     fakeAgentSelector(),
     fakeBrokerNoop(),
     { async list() { return [agentOperatorDescriptor()]; } },
     makeLauncher(),
     workerExitOutputStore(sessionId),
-    fakeStepDispatch(),
+    shadowOnlyDispatch,
     undefined,
     undefined,
     undefined,
@@ -397,13 +401,17 @@ describe("OrchestratorService agent step", () => {
       operatorSelectedAt: NOW,
     });
     const propose = vi.fn(fakeBrokerNoop().propose);
+    const shadowOnlyDispatch: StepDispatchCapabilities = {
+      ...fakeStepDispatch(),
+      resolveMode: (adapterId) => ({ adapterId, mode: "shadow_session", fallbacks: [] }),
+    };
     const service = new OrchestratorService(
       fakeSelector(),
       { propose },
       fakeRegistry(),
       makeLauncher(),
       undefined,
-      fakeStepDispatch()
+      shadowOnlyDispatch
     );
 
     await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });

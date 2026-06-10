@@ -203,7 +203,7 @@ export function fakeStepDispatch(): StepDispatchCapabilities {
       return adapterId === "claude-code" && modelId === "claude-haiku-4-5";
     },
     resolveMode(adapterId) {
-      return { adapterId, mode: "shadow_session", fallbacks: [] };
+      return { adapterId, mode: "one_shot", fallbacks: ["shadow_session"] };
     },
   };
 }
