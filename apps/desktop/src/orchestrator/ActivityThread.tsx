@@ -94,11 +94,16 @@ export function LiveActivity({
   goalId,
   activity,
   renderQuestionForm: QuestionForm,
+  onContinue,
 }: {
   goalId: string;
   activity: Activity;
   renderQuestionForm: ComponentType<QuestionFormProps>;
+  onContinue?: (runId: string) => void;
 }) {
+  const isConfirmation =
+    activity.status === "paused_for_input" &&
+    activity.sourceKind === "step_confirmation_pending";
   return (
     <div
       className="activity-bubble"
@@ -108,6 +113,19 @@ export function LiveActivity({
       <div className="activity-bubble-text">{activity.currentText}</div>
       {activity.status === "paused_for_input" && activity.pendingQuestion ? (
         <QuestionForm goalId={goalId} pending={activity.pendingQuestion} />
+      ) : null}
+      {isConfirmation ? (
+        <div className="step-confirm-actions">
+          <button
+            type="button"
+            data-testid="step-confirm-continue"
+            className="step-confirm-continue-btn"
+            onClick={() => onContinue?.(activity.workflowRunId)}
+          >
+            Continue
+          </button>
+          <span className="step-confirm-hint">Type in chat to send revisions to the agent.</span>
+        </div>
       ) : null}
     </div>
   );

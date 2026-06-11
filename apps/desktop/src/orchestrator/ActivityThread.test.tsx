@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { Activity } from "@orca/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ActivityCard,
@@ -74,6 +74,26 @@ describe("LiveActivity", () => {
 
     expect(screen.getByText("I need your call on signals.")).toBeInTheDocument();
     expect(screen.getByText("g1: Which passed?")).toBeInTheDocument();
+  });
+
+  it("renders a Continue button on a supervised confirmation checkpoint", () => {
+    const onContinue = vi.fn();
+    render(
+      <LiveActivity
+        goalId="g1"
+        activity={mk({
+          workflowRunId: "r1",
+          status: "paused_for_input",
+          currentText: "Completeness 90% · Correctness 85% · Ready for handoff — Continue or send revisions.",
+          sourceKind: "step_confirmation_pending",
+        })}
+        renderQuestionForm={unusedQuestionForm}
+        onContinue={onContinue}
+      />,
+    );
+    expect(screen.getByText(/Completeness 90%/)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("step-confirm-continue"));
+    expect(onContinue).toHaveBeenCalledWith("r1");
   });
 });
 

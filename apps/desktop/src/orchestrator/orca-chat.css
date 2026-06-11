@@ -832,3 +832,22 @@
 .orca-chat-approval-always { font-size: 12px; padding: 3px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.2); background: transparent; color: inherit; cursor: pointer; }
 .orca-chat-approval-always:disabled { opacity: 0.5; cursor: default; }
 .orca-chat-approval-status { font-size: 12px; opacity: 0.8; margin: 6px 0 0; }
+
+.step-confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.step-confirm-continue-btn {
+  background: var(--accent);
+  color: var(--accent-contrast, #0b0b0b);
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.step-confirm-hint {
+  color: var(--text-3);
+  font-size: 12px;
+}
