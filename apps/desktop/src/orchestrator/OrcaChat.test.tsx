@@ -254,6 +254,32 @@ describe("OrcaChat", () => {
     expect(screen.queryByTestId("step-starting")).toBeNull();
   });
 
+  it("hides the starting indicator once the step has finished, even while the run awaits completion approval", async () => {
+    setupRunLoad();
+    // Final step: agent produced its output (finished_at set) but the step run is
+    // held active pending the complete_workflow_run approval. Not "starting".
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1",
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepTemplateId: "execution",
+        ordinal: 4,
+        attempt: 1,
+        status: "active",
+        startedAt: now,
+        finishedAt: "2026-01-01T00:01:00.000Z",
+        blockedReason: null,
+      },
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByPlaceholderText("Message Orca…")).toBeInTheDocument();
+    expect(screen.queryByTestId("step-starting")).toBeNull();
+  });
+
   it("does not render the goal title/description header card", async () => {
     setupRunLoad();
     const { OrcaChat } = await import("./OrcaChat");
@@ -348,6 +374,62 @@ describe("OrcaChat", () => {
       });
     });
     expect(await screen.findByText("I will keep it bounded.")).toBeInTheDocument();
+  });
+
+  it("interleaves step-result cards with messages in createdAt order", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        { ...userMessage, id: "m1", body: "First user message", createdAt: "2026-06-09T00:00:01.000Z" },
+        { ...orcaMessage, id: "m2", body: "Later orchestrator reply", createdAt: "2026-06-09T00:00:03.000Z" },
+      ],
+    });
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity,
+        id: "card1",
+        status: "completed",
+        currentText: "",
+        finalSummary: null,
+        sourceKind: "step_result",
+        stepName: "Investigate",
+        createdAt: "2026-06-09T00:00:02.000Z",
+        updatedAt: "2026-06-09T00:00:02.000Z",
+        completedAt: "2026-06-09T00:00:02.000Z",
+        stepResult: {
+          stepId: "s1", stepStatus: "completed", evaluationStatus: "scored", successScore: 0.82,
+          quality: { outputCompleteness: 0.8, outputCorrectness: 0.85, instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2 },
+          performance: { durationSeconds: 96, retries: 0 },
+          outcome: { reason: "Output complete.", producedArtifactsCount: 1, blockingIssuesCount: 0, warningsCount: 0, handoffReady: true },
+        },
+      },
+    ]);
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const userMsg = await screen.findByText("First user message");
+    const card = await screen.findByTestId("step-result-card");
+    const orcaMsg = screen.getByText("Later orchestrator reply");
+
+    // Timeline order must be t1 (user) → t2 (card) → t3 (orchestrator).
+    expect(userMsg.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.compareDocumentPosition(orcaMsg) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("pins the starting indicator to the tail, after the latest message", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [{ ...userMessage, id: "m1", body: "User said something", createdAt: now }],
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const userMsg = await screen.findByText("User said something");
+    const indicator = await screen.findByTestId("step-starting");
+    // The "starting" hint trails the conversation instead of floating above it.
+    expect(userMsg.compareDocumentPosition(indicator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("starts a workflow via recovery card for a goal with no run", async () => {

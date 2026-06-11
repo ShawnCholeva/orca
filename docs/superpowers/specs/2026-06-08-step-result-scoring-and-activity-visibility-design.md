@@ -1,8 +1,17 @@
 # Step Result Scoring and Activity Visibility
 
-**Date:** 2026-06-08
-**Status:** Design approved, pending written-spec review
+**Date:** 2026-06-08 (open questions resolved 2026-06-09)
+**Status:** Design approved — no open questions; ready for implementation planning
 **Source PRD:** `docs/prds/step-result-scoring-and-chat-visibility.md`
+
+> **Supersedes the PRD's mechanism.** The PRD proposed wiring `runSdkOneShot`
+> into the scoring path (modeled on `selector.ts`). That routes Claude through
+> `ModelProvider.complete`, which requires `ANTHROPIC_API_KEY` and violates
+> Orca's interactive-subscription policy. This spec is authoritative wherever it
+> conflicts with the PRD. In particular, the PRD acceptance criterion
+> *"`workflow_llm_calls` shows a scoring LLM call per completed step"* is **void**:
+> scoring now rides the existing shadow approval turn and produces no separate
+> `workflow_llm_calls` row.
 
 ## Problem
 
@@ -58,6 +67,32 @@ result representation.
 6. Cards show a concise summary by default and full metrics when expanded.
 7. Evaluation failure is labeled `Evaluation failed`; the UI never presents its
    persisted zero values as a valid `0%` quality score.
+8. **Scope is the full shadow-only policy, not scoring alone.** All four
+   terminal scoring entry points and every `broker.propose` caller that relies
+   on the SDK fast-path are addressed in this work: scoring
+   (`step-result-scoring.ts`), operator selection (`selector.ts`), synthesis
+   (`synthesize.ts`), and the Claude model-operator path (`service.ts:1244`).
+   For shadow-only adapters each is fixed by routing through the shadow session
+   or by being made provably unreachable — none may silently fall through to
+   `hidden_interactive`/`human_review`.
+9. **Worker-exit recovery blocks on a bounded shadow turn.** The dedicated
+   structured shadow turn runs with the existing shadow-ask timeout; on timeout,
+   hook failure, or malformed response it writes an evaluation-failure result and
+   advances. It never blocks advancement indefinitely.
+10. **Replay and reconciliation do not re-score.** When a terminal path is
+    reached with `step_output` already persisted but `step_result_json` null
+    (crash/restart replay at `service.ts:299`, and startup reconciliation), the
+    daemon writes a deterministic evaluation-failure result with measured facts.
+    No new model call is made on these rare recovery paths.
+11. **Result-card ordering is deterministic.** Activities order by terminal
+    `finishedAt`, tiebroken by a deterministic secondary key (activity
+    id/sequence), so the result card reliably follows the step's worker-turn
+    summaries even when timestamps collide.
+12. **Reliability bar is unit tests, not a prompt-eval gate.** Scoring is
+    validated; missing/malformed scoring yields a non-blocking evaluation-failure
+    result. The approval-action and scoring-validation branches are covered by
+    unit tests. No separate scoring-fill-rate eval harness is built for this
+    work; fill-rate is observed in practice post-ship.
 
 ## Execution and Scoring
 
@@ -148,8 +183,10 @@ typed shadow-evaluation interface. It launches or reuses plain interactive
 hooks. It does not call `ModelProvider.complete`, require an API key, or invoke
 `claude -p`.
 
-If recovery or evaluation fails, the daemon preserves the existing bounded
-fallback behavior and writes `evaluationStatus: "failed"`.
+This recovery turn **blocks** the terminal transition but is bounded by the
+existing shadow-ask timeout. On timeout, hook failure, malformed response, or
+schema rejection, the daemon writes the bounded `evaluationStatus: "failed"`
+result and advances — it never waits on the shadow turn indefinitely.
 
 ### Blocked, Failed, and Cancelled Steps
 
@@ -159,6 +196,41 @@ daemon-authored terminal results remain authoritative:
 - terminal state and measured facts are shown;
 - `evaluationStatus: "failed"` communicates that no subjective score exists;
 - the result reason explains the terminal or evaluation condition.
+
+### Replay and Reconciliation
+
+A terminal scoring path can be re-entered after a crash or restart with the
+step's `step_output` already persisted but `step_result_json` still null (the
+idempotency branch at `service.ts:299`, and startup reconciliation). On these
+paths there is no live approval turn and no live worker session to score
+against.
+
+These paths do **not** issue a new model call. The daemon writes a deterministic
+evaluation-failure result built from measured facts (real terminal status,
+duration, retries, artifact/blocker/warning counts, `evaluationStatus: "failed"`,
+bounded reason) and advances. This keeps crash recovery deterministic and cheap;
+only the live normal-completion and worker-exit paths produce model-scored
+results.
+
+### Direct-SDK Caller Scope
+
+This work resolves the shared root cause across every `broker.propose` caller
+that depended on the SDK fast-path, not the scoring path alone. With no API key,
+each otherwise falls through to `hidden_interactive`/`human_review`:
+
+- **Scoring** (`step-result-scoring.ts`) — replaced by the shadow approval-turn
+  scoring described above; the separate broker scoring call is removed.
+- **Operator selection** (`selector.ts`) — must use the shadow session for
+  shadow-only adapters, never `runSdkOneShot`.
+- **Synthesis** (`synthesize.ts`) — must use the shadow session for shadow-only
+  adapters, or be provably unreachable for them.
+- **Claude model operator** (`service.ts:1244`) — disabled under shadow-only
+  policy (see below).
+
+A caller is "fixed" when, for a shadow-only adapter, it either routes through a
+shadow-session path or is provably unreachable. For adapters that legitimately
+enable `one_shot` (with an API key), the existing SDK path remains valid and
+unchanged.
 
 ### Claude Model Operators
 
@@ -212,7 +284,9 @@ name. Other activity kinds remain unchanged.
 
 Existing worker-turn summaries remain separate completed activities. The final
 result card follows those summaries as the terminal outcome for the step
-attempt.
+attempt. Ordering is by terminal `finishedAt`, tiebroken by a deterministic
+secondary key (activity id/sequence), so the result card reliably sorts after
+the step's worker-turn summaries even when timestamps collide.
 
 Workflow event payloads remain identifier-only and within the existing 4 KiB
 cap. The desktop already refreshes Activity Thread data on `activity.changed`
@@ -314,8 +388,15 @@ evaluation success.
 - Invalid approval scoring writes an evaluation-failure result and advances.
 - Worker termination happens after proposal capture.
 - Worker-exit recovery handles valid output, malformed output, shadow failure,
-  and fallback persistence.
+  shadow timeout, and fallback persistence; the recovery turn is bounded and
+  always advances.
+- Replay/reconciliation (output present, result null) writes a deterministic
+  evaluation-failure result with no model call and advances.
 - Shadow-only adapters cannot select or execute direct model operators.
+- For shadow-only adapters, operator selection and synthesis route through the
+  shadow session and never invoke `runSdkOneShot`; no scoring/selection/synthesis
+  path emits a `transport.fallback` or `human_review` attempt.
+- One_shot-enabled adapters retain their existing SDK path unchanged.
 
 ### Activity Subsystem
 
@@ -355,3 +436,8 @@ their cards and fallback semantics.
 - Every terminal step attempt has exactly one Activity Thread result card.
 - The card is concise when collapsed and exposes full valid metrics on expansion.
 - Direct Claude model-operator execution is disabled under shadow-only policy.
+- Operator selection and synthesis no longer fall through to
+  `hidden_interactive`/`human_review` for shadow-only Claude.
+- Worker-exit recovery scoring is bounded and never blocks advancement
+  indefinitely.
+- Replay and startup reconciliation never issue a scoring model call.

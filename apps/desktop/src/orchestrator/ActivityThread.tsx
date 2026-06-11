@@ -7,13 +7,7 @@ type QuestionFormProps = {
   pending: NonNullable<Activity["pendingQuestion"]>;
 };
 
-type ActivityThreadProps = {
-  goalId: string;
-  activities: Activity[];
-  renderQuestionForm: ComponentType<QuestionFormProps>;
-};
-
-function isMeaningfulCompleted(activity: Activity): boolean {
+export function isMeaningfulCompleted(activity: Activity): boolean {
   return (
     activity.status === "completed" &&
     activity.finalSummary !== null &&
@@ -22,9 +16,28 @@ function isMeaningfulCompleted(activity: Activity): boolean {
   );
 }
 
+// An activity that earns a permanent, time-ordered slot in the chat timeline:
+// a terminal step-result card or a meaningful completed summary. Everything else
+// (live turns, weak signals, expired blips) is surfaced only via the tail bubble.
+export function isTimelineCard(activity: Activity): boolean {
+  return isMeaningfulCompleted(activity) || activity.sourceKind === "step_result";
+}
+
+// The latest still-running activity (active or awaiting input). The chat shows it
+// as a single live "working" bubble pinned to the tail of the timeline.
+export function pickLiveActivity(activities: Activity[]): Activity | null {
+  for (let index = activities.length - 1; index >= 0; index -= 1) {
+    const activity = activities[index];
+    if (activity?.status === "active" || activity?.status === "paused_for_input") {
+      return activity;
+    }
+  }
+  return null;
+}
+
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
-function StepResultCard({ activity }: { activity: Activity }) {
+export function StepResultCard({ activity }: { activity: Activity }) {
   const [open, setOpen] = useState(false);
   const r = activity.stepResult;
   if (!r) return null;
@@ -63,45 +76,38 @@ function StepResultCard({ activity }: { activity: Activity }) {
   );
 }
 
-export function ActivityThread({
-  goalId,
-  activities,
-  renderQuestionForm: QuestionForm,
-}: ActivityThreadProps) {
-  const terminalCards = activities.filter(
-    (a) => isMeaningfulCompleted(a) || a.sourceKind === "step_result"
-  );
-  let live: Activity | null = null;
-  for (let index = activities.length - 1; index >= 0; index -= 1) {
-    const activity = activities[index];
-    if (activity?.status === "active" || activity?.status === "paused_for_input") {
-      live = activity;
-      break;
-    }
+// One terminal entry in the timeline: a scored result card or a plain summary.
+export function ActivityCard({ activity }: { activity: Activity }) {
+  if (activity.sourceKind === "step_result") {
+    return <StepResultCard activity={activity} />;
   }
-
   return (
-    <div className="activity-thread">
-      {terminalCards.map((activity) =>
-        activity.sourceKind === "step_result" ? (
-          <StepResultCard key={activity.id} activity={activity} />
-        ) : (
-          <div key={activity.id} className="activity-summary" data-testid="activity-summary">
-            {activity.finalSummary}
-          </div>
-        )
-      )}
-      {live ? (
-        <div
-          className="activity-bubble"
-          data-testid="activity-bubble"
-          data-status={live.status}
-        >
-          <div className="activity-bubble-text">{live.currentText}</div>
-          {live.status === "paused_for_input" && live.pendingQuestion ? (
-            <QuestionForm goalId={goalId} pending={live.pendingQuestion} />
-          ) : null}
-        </div>
+    <div className="activity-summary" data-testid="activity-summary">
+      {activity.finalSummary}
+    </div>
+  );
+}
+
+// The live "working" bubble for the active step's agent, pinned to the tail of
+// the timeline. Carries the embedded question form when the agent is paused.
+export function LiveActivity({
+  goalId,
+  activity,
+  renderQuestionForm: QuestionForm,
+}: {
+  goalId: string;
+  activity: Activity;
+  renderQuestionForm: ComponentType<QuestionFormProps>;
+}) {
+  return (
+    <div
+      className="activity-bubble"
+      data-testid="activity-bubble"
+      data-status={activity.status}
+    >
+      <div className="activity-bubble-text">{activity.currentText}</div>
+      {activity.status === "paused_for_input" && activity.pendingQuestion ? (
+        <QuestionForm goalId={goalId} pending={activity.pendingQuestion} />
       ) : null}
     </div>
   );

@@ -2,7 +2,12 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import type { Activity } from "@orca/contracts";
 import { describe, expect, it } from "vitest";
 
-import { ActivityThread } from "./ActivityThread";
+import {
+  ActivityCard,
+  LiveActivity,
+  isTimelineCard,
+  pickLiveActivity,
+} from "./ActivityThread";
 
 const mk = (over: Partial<Activity> = {}): Activity => ({
   id: "a",
@@ -25,12 +30,12 @@ const mk = (over: Partial<Activity> = {}): Activity => ({
 
 const unusedQuestionForm = () => null;
 
-describe("ActivityThread", () => {
+describe("LiveActivity", () => {
   it("renders the live bubble's current text", () => {
     render(
-      <ActivityThread
+      <LiveActivity
         goalId="g1"
-        activities={[mk({ currentText: "Reading through the codebase..." })]}
+        activity={mk({ currentText: "Reading through the codebase..." })}
         renderQuestionForm={unusedQuestionForm}
       />,
     );
@@ -38,80 +43,27 @@ describe("ActivityThread", () => {
     expect(screen.getByText("Reading through the codebase...")).toBeInTheDocument();
   });
 
-  it("renders meaningful completed summaries but not expired or weak-signal summaries (G5)", () => {
-    render(
-      <ActivityThread
-        goalId="g1"
-        activities={[
-          mk({
-            id: "c1",
-            status: "completed",
-            finalSummary: "12/12 pass",
-            sourceKind: "turn_completed",
-          }),
-          mk({
-            id: "w1",
-            status: "completed",
-            finalSummary: "Still working",
-            sourceKind: "weak_signal",
-          }),
-          mk({
-            id: "x1",
-            status: "expired",
-            finalSummary: "Expired signal",
-            sourceKind: "weak_signal",
-          }),
-        ]}
-        renderQuestionForm={unusedQuestionForm}
-      />,
-    );
-
-    expect(screen.getByText("12/12 pass")).toBeInTheDocument();
-    expect(screen.queryByText("Still working")).not.toBeInTheDocument();
-    expect(screen.queryByText("Expired signal")).not.toBeInTheDocument();
-  });
-
-  it("does not render a whitespace-only completed summary", () => {
-    render(
-      <ActivityThread
-        goalId="g1"
-        activities={[
-          mk({
-            status: "completed",
-            finalSummary: "   ",
-            sourceKind: "turn_completed",
-          }),
-        ]}
-        renderQuestionForm={unusedQuestionForm}
-      />,
-    );
-
-    expect(screen.queryByTestId("activity-summary")).not.toBeInTheDocument();
-  });
-
   it("renders the embedded question form when paused", () => {
     render(
-      <ActivityThread
+      <LiveActivity
         goalId="g1"
-        activities={[
-          mk({
-            status: "paused_for_input",
-            currentText: "I need your call on signals.",
-            sourceKind: "question_pending",
-            pendingQuestion: {
-              questionId: "q1",
-              toolUseId: "t1",
-              questions: [
-                {
-                  header: "Signals",
-                  question: "Which passed?",
-                  multiSelect: true,
-                  options: [{ label: "A", description: "x" }],
-                },
-              ],
-            },
-          }),
-        ]}
+        activity={mk({
+          status: "paused_for_input",
+          currentText: "I need your call on signals.",
+          sourceKind: "question_pending",
+          pendingQuestion: {
+            questionId: "q1",
+            toolUseId: "t1",
+            questions: [
+              {
+                header: "Signals",
+                question: "Which passed?",
+                multiSelect: true,
+                options: [{ label: "A", description: "x" }],
+              },
+            ],
+          },
+        })}
         renderQuestionForm={({ goalId, pending }) => (
           <div>
             {goalId}: {pending.questions[0]?.question}
@@ -122,6 +74,52 @@ describe("ActivityThread", () => {
 
     expect(screen.getByText("I need your call on signals.")).toBeInTheDocument();
     expect(screen.getByText("g1: Which passed?")).toBeInTheDocument();
+  });
+});
+
+describe("pickLiveActivity", () => {
+  it("returns the latest active/paused activity and null when none are live", () => {
+    expect(
+      pickLiveActivity([
+        mk({ id: "c1", status: "completed", finalSummary: "done", sourceKind: "turn_completed" }),
+        mk({ id: "live-1", currentText: "Older live activity" }),
+        mk({ id: "live-2", status: "paused_for_input", currentText: "Latest live activity" }),
+      ])?.id,
+    ).toBe("live-2");
+
+    expect(
+      pickLiveActivity([
+        mk({ id: "c1", status: "completed", finalSummary: "done", sourceKind: "turn_completed" }),
+      ]),
+    ).toBeNull();
+  });
+});
+
+describe("isTimelineCard", () => {
+  it("includes meaningful completed summaries and step results", () => {
+    expect(
+      isTimelineCard(mk({ status: "completed", finalSummary: "12/12 pass", sourceKind: "turn_completed" })),
+    ).toBe(true);
+    expect(isTimelineCard(mk({ status: "completed", sourceKind: "step_result", finalSummary: null }))).toBe(true);
+  });
+
+  it("excludes weak signals, expired blips, and whitespace-only summaries", () => {
+    expect(
+      isTimelineCard(mk({ status: "completed", finalSummary: "Still working", sourceKind: "weak_signal" })),
+    ).toBe(false);
+    expect(
+      isTimelineCard(mk({ status: "expired", finalSummary: "Expired signal", sourceKind: "weak_signal" })),
+    ).toBe(false);
+    expect(
+      isTimelineCard(mk({ status: "completed", finalSummary: "   ", sourceKind: "turn_completed" })),
+    ).toBe(false);
+  });
+});
+
+describe("ActivityCard", () => {
+  it("renders a completed summary", () => {
+    render(<ActivityCard activity={mk({ status: "completed", finalSummary: "12/12 pass", sourceKind: "turn_completed" })} />);
+    expect(screen.getByTestId("activity-summary")).toHaveTextContent("12/12 pass");
   });
 
   function stepResultActivity(over: Partial<Activity> = {}): Activity {
@@ -142,7 +140,7 @@ describe("ActivityThread", () => {
   }
 
   it("renders a scored result card with a percentage and expands to metrics", () => {
-    render(<ActivityThread goalId="g1" activities={[stepResultActivity()]} renderQuestionForm={() => null} />);
+    render(<ActivityCard activity={stepResultActivity()} />);
     const card = screen.getByTestId("step-result-card");
     expect(card).toHaveTextContent("Investigate");
     expect(card).toHaveTextContent("82%");
@@ -161,32 +159,9 @@ describe("ActivityThread", () => {
         outcome: { ...baseResult.outcome, reason: "step result evaluation failed: shadow timeout", handoffReady: false },
       },
     });
-    render(<ActivityThread goalId="g1" activities={[failed]} renderQuestionForm={() => null} />);
+    render(<ActivityCard activity={failed} />);
     const card = screen.getByTestId("step-result-card");
     expect(card).toHaveTextContent("Evaluation failed");
     expect(card).not.toHaveTextContent("%");
-  });
-
-  it("preserves summary order and renders only the latest live activity", () => {
-    render(
-      <ActivityThread
-        goalId="g1"
-        activities={[
-          mk({ id: "c1", status: "completed", finalSummary: "First", sourceKind: "turn_completed" }),
-          mk({ id: "c2", status: "completed", finalSummary: "Second", sourceKind: "turn_completed" }),
-          mk({ id: "live-1", currentText: "Older live activity" }),
-          mk({ id: "live-2", status: "paused_for_input", currentText: "Latest live activity" }),
-        ]}
-        renderQuestionForm={unusedQuestionForm}
-      />,
-    );
-
-    expect(screen.getAllByTestId("activity-summary").map((element) => element.textContent)).toEqual([
-      "First",
-      "Second",
-    ]);
-    expect(screen.getAllByTestId("activity-bubble")).toHaveLength(1);
-    expect(screen.getByText("Latest live activity")).toBeInTheDocument();
-    expect(screen.queryByText("Older live activity")).not.toBeInTheDocument();
   });
 });

@@ -29,7 +29,12 @@ import {
   startWorkflowRun,
   toErrorMessage,
 } from "../api";
-import { ActivityThread } from "./ActivityThread";
+import {
+  ActivityCard,
+  LiveActivity,
+  isTimelineCard,
+  pickLiveActivity,
+} from "./ActivityThread";
 import { PermissionApprovalCard } from "./PermissionApprovalCard";
 import { WorkerPermissionToggle } from "./WorkerPermissionToggle";
 import "./orca-chat.css";
@@ -53,6 +58,13 @@ type ActivityState = {
   goalId: string | null;
   items: Activity[];
 };
+
+// A single chronological entry in the chat: either an orchestrator/user message
+// or a terminal activity card. Merging both streams by createdAt keeps step
+// result cards interleaved with messages in the order things actually happened.
+type TimelineEntry =
+  | { kind: "message"; at: string; key: string; message: OrchestratorChatMessage }
+  | { kind: "card"; at: string; key: string; activity: Activity };
 
 const EMPTY_WORKFLOW_STATE: WorkflowState = {
   detail: null,
@@ -376,13 +388,14 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   // the run and step are active but Orca has not posted anything into the chat
   // yet. Clears automatically once the first turn lands.
   const orcaHasSpoken = messages.some((message) => message.role === "orchestrator");
-  const hasLiveActivity = activities.some(
-    (activity) =>
-      activity.status === "active" || activity.status === "paused_for_input",
-  );
+  const liveActivity = pickLiveActivity(activities);
+  const hasLiveActivity = liveActivity !== null;
   const showStarting =
     workflowState.run?.status === "active" &&
     workflowState.stepRun?.status === "active" &&
+    // The final step run stays "active" with finished_at set while the run waits
+    // for completion approval; a finished step is done, not starting.
+    workflowState.stepRun?.finishedAt == null &&
     !orcaHasSpoken &&
     !hasLiveActivity;
   // While the indicator is up, tick once a second so the elapsed time advances.
@@ -401,6 +414,28 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
         workflowState.stepName ? ` · ${workflowState.stepName}` : ""
       } — starting${startingElapsed ? ` ${startingElapsed}` : "…"}`
     : "";
+
+  // Merge messages and terminal activity cards into one timeline ordered by
+  // createdAt (id breaks ties), so a step-result card lands between the messages
+  // it actually occurred between instead of after every message.
+  const timeline: TimelineEntry[] = [
+    ...messages.map((message) => ({
+      kind: "message" as const,
+      at: message.createdAt,
+      key: `m:${message.id}`,
+      message,
+    })),
+    ...activities.filter(isTimelineCard).map((activity) => ({
+      kind: "card" as const,
+      at: activity.createdAt,
+      key: `a:${activity.id}`,
+      activity,
+    })),
+  ].sort((left, right) =>
+    left.at === right.at
+      ? left.key.localeCompare(right.key)
+      : left.at.localeCompare(right.at),
+  );
 
   async function handleRecoveryStart() {
     if (!selectedGoalId || !recoveryTemplateId) return;
@@ -571,25 +606,34 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
               </div>
             )}
 
+            {timeline.map((entry) =>
+              entry.kind === "message" ? (
+                <ChatMessageRow
+                  key={entry.key}
+                  message={entry.message}
+                  goalId={selectedGoalId ?? ""}
+                />
+              ) : (
+                <ActivityCard key={entry.key} activity={entry.activity} />
+              )
+            )}
+
+            {/* Tail indicators: the live agent bubble, the first-turn "starting"
+                hint, and the orchestrator "thinking" dots all pin to the bottom
+                of the timeline so they trail the most recent activity. */}
+            {liveActivity && (
+              <LiveActivity
+                goalId={selectedGoalId ?? ""}
+                activity={liveActivity}
+                renderQuestionForm={WorkerQuestionForm}
+              />
+            )}
+
             {showStarting && (
               <div data-testid="step-starting">
                 <ThinkingRow label={startingLabel} />
               </div>
             )}
-
-            {messages.map((message) => (
-              <ChatMessageRow
-                key={message.id}
-                message={message}
-                goalId={selectedGoalId ?? ""}
-              />
-            ))}
-
-            <ActivityThread
-              goalId={selectedGoalId ?? ""}
-              activities={activities}
-              renderQuestionForm={WorkerQuestionForm}
-            />
 
             {/* Show Orca is working from the moment the send is in flight
                 (covers the blocking one_shot path) through the async wait for a

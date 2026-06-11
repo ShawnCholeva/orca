@@ -507,6 +507,148 @@
   font-size: 0.78rem;
 }
 
+/* Activity thread — orchestrator thoughts, activities, and step results.
+   Rendered as muted "thought bubbles": flush-left, no avatar, dimmer and
+   softer-bordered than the solid .orca-chat-message reply bubbles so real
+   replies read as messages while working/thinking reads as ambient activity. */
+.activity-summary,
+.activity-bubble {
+  align-self: flex-start;
+  max-width: 720px;
+  padding: 9px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--panel-2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.activity-summary {
+  font-style: italic;
+}
+
+.activity-bubble-text {
+  white-space: pre-wrap;
+}
+
+.activity-bubble[data-status="paused_for_input"] {
+  border-style: solid;
+  border-color: var(--accent-line, rgba(91, 140, 255, 0.28));
+  background: var(--accent-soft, rgba(91, 140, 255, 0.08));
+}
+
+.step-result-card {
+  align-self: flex-start;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--panel-2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.step-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.step-result-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.step-result-state,
+.step-result-score,
+.step-result-handoff,
+.step-result-eval-failed {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+.step-result-state {
+  background: rgba(91, 140, 255, 0.14);
+  color: var(--accent);
+}
+
+.step-result-score {
+  background: rgba(16, 185, 129, 0.14);
+  color: #0f766e;
+}
+
+.step-result-handoff {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-3);
+}
+
+.step-result-eval-failed {
+  background: rgba(239, 68, 68, 0.14);
+  color: #b91c1c;
+}
+
+.step-result-head button {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-3);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.step-result-head button:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
+.step-result-reason {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+
+.step-result-counts {
+  font-size: 11px;
+  color: var(--text-4);
+}
+
+.step-result-metrics {
+  margin: 4px 0 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 14px;
+}
+
+.step-result-metrics > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.step-result-metrics dt {
+  color: var(--text-3);
+}
+
+.step-result-metrics dd {
+  margin: 0;
+  color: var(--text);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
 .orca-agent-paraphrased {
   display: flex;
   flex-direction: column;
