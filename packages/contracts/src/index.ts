@@ -1097,6 +1097,15 @@ export const ListActivitiesResponse = z
   .strict();
 export type ListActivitiesResponse = z.infer<typeof ListActivitiesResponse>;
 
+export const SupervisionMode = z.enum(["supervised", "unsupervised"]);
+export type SupervisionMode = z.infer<typeof SupervisionMode>;
+
+export const AppSettings = z.object({ supervisionMode: SupervisionMode }).strict();
+export type AppSettings = z.infer<typeof AppSettings>;
+
+export const PutSettingsRequest = z.object({ supervisionMode: SupervisionMode }).strict();
+export type PutSettingsRequest = z.infer<typeof PutSettingsRequest>;
+
 export const UpdateWorkerPermissionModeRequest = z
   .object({ workerPermissionMode: WorkerPermissionMode })
   .strict();
