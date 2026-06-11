@@ -76,7 +76,8 @@ describe("runMigrations", () => {
       "0022_workflow_step_result.sql",
       "0023_worker_permission_mode.sql",
       "0024_activities.sql",
-      "0025_activity_step_result.sql"
+      "0025_activity_step_result.sql",
+      "0026_app_settings.sql"
     ]);
   });
 
@@ -85,6 +86,15 @@ describe("runMigrations", () => {
     runMigrations(db, defaultMigrationsDir());
     const result = runMigrations(db, defaultMigrationsDir());
     expect(result.applied).toEqual([]);
+  });
+
+  it("creates the app_settings table", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+    const row = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='app_settings'")
+      .get();
+    expect(row).toBeTruthy();
   });
 
   it("records suggested orchestration as applied when the schema already exists", () => {
@@ -183,7 +193,8 @@ describe("runMigrations", () => {
       "0022_workflow_step_result.sql",
       "0023_worker_permission_mode.sql",
       "0024_activities.sql",
-      "0025_activity_step_result.sql"
+      "0025_activity_step_result.sql",
+      "0026_app_settings.sql"
     ]);
 
     const goalCount = (
@@ -412,7 +423,8 @@ describe("session tables migration", () => {
       "0022_workflow_step_result.sql",
       "0023_worker_permission_mode.sql",
       "0024_activities.sql",
-      "0025_activity_step_result.sql"
+      "0025_activity_step_result.sql",
+      "0026_app_settings.sql"
     ]);
 
     const tables = (
@@ -912,7 +924,8 @@ describe("migration 0010 workflows", () => {
       "0022_workflow_step_result.sql",
       "0023_worker_permission_mode.sql",
       "0024_activities.sql",
-      "0025_activity_step_result.sql"
+      "0025_activity_step_result.sql",
+      "0026_app_settings.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1492,7 +1505,8 @@ describe("migration 0012 orchestration transport", () => {
       "0022_workflow_step_result.sql",
       "0023_worker_permission_mode.sql",
       "0024_activities.sql",
-      "0025_activity_step_result.sql"
+      "0025_activity_step_result.sql",
+      "0026_app_settings.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

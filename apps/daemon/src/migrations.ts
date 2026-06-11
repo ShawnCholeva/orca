@@ -36,6 +36,7 @@ export const migrationFiles = [
   "0023_worker_permission_mode.sql",
   "0024_activities.sql",
   "0025_activity_step_result.sql",
+  "0026_app_settings.sql",
 ] as const;
 
 export function runMigrations(
