@@ -1500,6 +1500,13 @@ export function createServer(
     }
     const now = daemonContext.now();
     setSupervisionMode(db, parsed.data.supervisionMode, now);
+    if (parsed.data.supervisionMode === "unsupervised") {
+      await orchestratorService.continueAllPausedSteps(
+        getDatabase(),
+        daemonContext.now,
+        { bus: eventBus, idFactory: daemonContext.idFactory }
+      );
+    }
     return { supervisionMode: parsed.data.supervisionMode };
   });
 

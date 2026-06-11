@@ -1164,6 +1164,30 @@ export class OrchestratorService {
   }
 
   /**
+   * Continues all workflow runs currently paused at a supervised confirmation
+   * checkpoint. Called when supervision mode switches to "unsupervised" so that
+   * any held steps are immediately advanced without waiting for user confirmation.
+   * Delegates to confirmStep for each paused run.
+   */
+  async continueAllPausedSteps(
+    db: Database.Database,
+    now: () => string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const paused = db
+      .prepare(
+        `SELECT wr.id AS run_id
+         FROM workflow_runs wr
+         JOIN workflow_step_runs sr ON sr.id = wr.current_step_run_id
+         WHERE sr.pending_completion_json IS NOT NULL`
+      )
+      .all() as { run_id: string }[];
+    for (const p of paused) {
+      await this.confirmStep(db, now, p.run_id, options);
+    }
+  }
+
+  /**
    * Advances the run past the current step's produced output, then — when an
    * intermediate step becomes active — spawns the next step's agent. On the
    * terminal step, commitAdvanceOrComplete produces the complete_workflow_run

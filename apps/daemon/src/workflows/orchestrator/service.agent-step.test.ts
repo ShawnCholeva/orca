@@ -1336,6 +1336,46 @@ describe("OrchestratorService.confirmStep", () => {
   });
 });
 
+describe("OrchestratorService.continueAllPausedSteps", () => {
+  it("continueAllPausedSteps continues a step held at a checkpoint", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "supervised", NOW);
+
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete", scoring: { successScore: 0.82, quality: { outputCompleteness: 0.8, outputCorrectness: 0.85, instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2 }, reason: "ok", handoffReady: true } }),
+      vi.fn(async () => "delivered" as const)
+    );
+    const responseText = "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(db, () => NOW, { sessionId: "sess-judge", adapterId: "claude-code", responseText }, { bus, idFactory });
+
+    // held with a stash
+    const before = db.prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'").get() as { pending_completion_json: string | null };
+    expect(before.pending_completion_json).not.toBeNull();
+
+    // switch effect: continue all paused
+    await service.continueAllPausedSteps(db, () => NOW, { bus, idFactory });
+
+    const result = readPersistedStepResult(db, "step-1");
+    expect(result.evaluationStatus).toBe("scored");
+    const after = db.prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'").get() as { pending_completion_json: string | null };
+    expect(after.pending_completion_json).toBeNull();
+  });
+
+  it("continueAllPausedSteps is a no-op when nothing is paused", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), vi.fn(async () => "delivered" as const));
+    await service.continueAllPausedSteps(db, () => NOW, { bus, idFactory });
+    const row = db.prepare("SELECT step_result_json FROM workflow_step_runs WHERE id = 'step-1'").get() as { step_result_json: string | null };
+    expect(row.step_result_json).toBeNull();
+  });
+});
+
 describe("OrchestratorService.onUserMessage (refine path)", () => {
   it("refining a paused supervised step records a signal, clears the stash, resumes the activity", async () => {
     const { db, bus, idFactory } = setupHarness();
