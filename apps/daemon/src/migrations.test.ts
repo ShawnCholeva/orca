@@ -78,7 +78,8 @@ describe("runMigrations", () => {
       "0024_activities.sql",
       "0025_activity_step_result.sql",
       "0026_app_settings.sql",
-      "0027_step_run_pending_completion.sql"
+      "0027_step_run_pending_completion.sql",
+      "0028_step_revision_signals.sql"
     ]);
   });
 
@@ -196,7 +197,8 @@ describe("runMigrations", () => {
       "0024_activities.sql",
       "0025_activity_step_result.sql",
       "0026_app_settings.sql",
-      "0027_step_run_pending_completion.sql"
+      "0027_step_run_pending_completion.sql",
+      "0028_step_revision_signals.sql"
     ]);
 
     const goalCount = (
@@ -326,6 +328,19 @@ describe("runMigrations", () => {
     expect(cols.map((c) => c.name)).toContain("pending_completion_json");
   });
 
+  it("creates step_revision_signals with a step_run index", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+    const table = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='step_revision_signals'")
+      .get();
+    expect(table).toBeTruthy();
+    const idx = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_step_revision_signals_step_run'")
+      .get();
+    expect(idx).toBeTruthy();
+  });
+
   it("enforces foreign keys for workspaces.goal_id", () => {
     const db = freshDb();
     runMigrations(db, defaultMigrationsDir());
@@ -434,7 +449,8 @@ describe("session tables migration", () => {
       "0024_activities.sql",
       "0025_activity_step_result.sql",
       "0026_app_settings.sql",
-      "0027_step_run_pending_completion.sql"
+      "0027_step_run_pending_completion.sql",
+      "0028_step_revision_signals.sql"
     ]);
 
     const tables = (
@@ -936,7 +952,8 @@ describe("migration 0010 workflows", () => {
       "0024_activities.sql",
       "0025_activity_step_result.sql",
       "0026_app_settings.sql",
-      "0027_step_run_pending_completion.sql"
+      "0027_step_run_pending_completion.sql",
+      "0028_step_revision_signals.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1518,7 +1535,8 @@ describe("migration 0012 orchestration transport", () => {
       "0024_activities.sql",
       "0025_activity_step_result.sql",
       "0026_app_settings.sql",
-      "0027_step_run_pending_completion.sql"
+      "0027_step_run_pending_completion.sql",
+      "0028_step_revision_signals.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
