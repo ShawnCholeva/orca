@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import type { Agent } from "@orca/contracts";
+import type { Agent, SupervisionMode } from "@orca/contracts";
 import { useTheme } from "../theme/ThemeProvider";
+import { getSettings, putSettings } from "../api";
 import type { ThemeDefinition } from "../theme/themes";
 import { glyphFor, CheckIcon, XIcon } from "../onboarding/glyphs";
 import "./settings.css";
@@ -140,38 +141,55 @@ function ThemeCard({
 
 // ───────────────────────── Orchestration ─────────────────────────
 
-const AUTONOMY_LEVELS = [
-  { lvl: 1, name: "Manual coordination", desc: "Sessions are independent." },
-  { lvl: 2, name: "Shared context", desc: "Goal memory + sibling awareness." },
-  { lvl: 3, name: "Suggested orchestration", desc: "Recommendations, conflicts escalate to you.", active: true },
-  { lvl: 4, name: "Supervised execution", desc: "Orchestrator executes with approval gates." },
-  { lvl: 5, name: "Autonomous execution", desc: "Exception-based oversight.", disabled: true },
-] as const;
+const SUPERVISION_OPTIONS: { mode: SupervisionMode; name: string; desc: string }[] = [
+  { mode: "supervised", name: "Supervised", desc: "Pause after each step so you can review the result and refine it before continuing." },
+  { mode: "unsupervised", name: "Unsupervised", desc: "Run steps to completion automatically without pausing." },
+];
 
 function OrchestrationTab() {
+  const [mode, setMode] = useState<SupervisionMode | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getSettings().then((s) => {
+      if (active) setMode(s.supervisionMode);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function choose(next: SupervisionMode) {
+    if (next === mode) return;
+    setMode(next);
+    try {
+      await putSettings({ supervisionMode: next });
+    } catch {
+      const s = await getSettings();
+      setMode(s.supervisionMode);
+    }
+  }
+
   return (
     <section>
-      <div className="settings-section-label">Autonomy level</div>
+      <div className="settings-section-label">Supervision</div>
       <div className="settings-level-list">
-        {AUTONOMY_LEVELS.map((l) => {
-          const active = "active" in l && l.active;
-          const disabled = "disabled" in l && l.disabled;
+        {SUPERVISION_OPTIONS.map((o) => {
+          const active = mode === o.mode;
           return (
-            <div
-              key={l.lvl}
-              className={
-                "settings-level" +
-                (active ? " settings-level--active" : "") +
-                (disabled ? " settings-level--disabled" : "")
-              }
+            <button
+              key={o.mode}
+              type="button"
+              data-testid={`supervision-${o.mode}`}
+              className={"settings-level" + (active ? " settings-level--active" : "")}
+              onClick={() => choose(o.mode)}
             >
-              <span className="mono settings-level-tag">L{l.lvl}</span>
               <div className="settings-level-body">
-                <div className="settings-level-name">{l.name}</div>
-                <div className="settings-level-desc">{l.desc}</div>
+                <div className="settings-level-name">{o.name}</div>
+                <div className="settings-level-desc">{o.desc}</div>
               </div>
               {active && <CheckIcon size={14} color="var(--accent)" />}
-            </div>
+            </button>
           );
         })}
       </div>
