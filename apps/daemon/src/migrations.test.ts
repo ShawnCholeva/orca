@@ -77,7 +77,8 @@ describe("runMigrations", () => {
       "0023_worker_permission_mode.sql",
       "0024_activities.sql",
       "0025_activity_step_result.sql",
-      "0026_app_settings.sql"
+      "0026_app_settings.sql",
+      "0027_step_run_pending_completion.sql"
     ]);
   });
 
@@ -194,7 +195,8 @@ describe("runMigrations", () => {
       "0023_worker_permission_mode.sql",
       "0024_activities.sql",
       "0025_activity_step_result.sql",
-      "0026_app_settings.sql"
+      "0026_app_settings.sql",
+      "0027_step_run_pending_completion.sql"
     ]);
 
     const goalCount = (
@@ -317,6 +319,13 @@ describe("runMigrations", () => {
     expect(names).toContain("step_result_json");
   });
 
+  it("adds pending_completion_json to workflow_step_runs", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+    const cols = db.prepare("PRAGMA table_info(workflow_step_runs)").all() as { name: string }[];
+    expect(cols.map((c) => c.name)).toContain("pending_completion_json");
+  });
+
   it("enforces foreign keys for workspaces.goal_id", () => {
     const db = freshDb();
     runMigrations(db, defaultMigrationsDir());
@@ -424,7 +433,8 @@ describe("session tables migration", () => {
       "0023_worker_permission_mode.sql",
       "0024_activities.sql",
       "0025_activity_step_result.sql",
-      "0026_app_settings.sql"
+      "0026_app_settings.sql",
+      "0027_step_run_pending_completion.sql"
     ]);
 
     const tables = (
@@ -925,7 +935,8 @@ describe("migration 0010 workflows", () => {
       "0023_worker_permission_mode.sql",
       "0024_activities.sql",
       "0025_activity_step_result.sql",
-      "0026_app_settings.sql"
+      "0026_app_settings.sql",
+      "0027_step_run_pending_completion.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1506,7 +1517,8 @@ describe("migration 0012 orchestration transport", () => {
       "0023_worker_permission_mode.sql",
       "0024_activities.sql",
       "0025_activity_step_result.sql",
-      "0026_app_settings.sql"
+      "0026_app_settings.sql",
+      "0027_step_run_pending_completion.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

@@ -37,6 +37,7 @@ export const migrationFiles = [
   "0024_activities.sql",
   "0025_activity_step_result.sql",
   "0026_app_settings.sql",
+  "0027_step_run_pending_completion.sql",
 ] as const;
 
 export function runMigrations(
