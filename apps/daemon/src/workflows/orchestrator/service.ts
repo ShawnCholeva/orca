@@ -1080,6 +1080,61 @@ export class OrchestratorService {
   }
 
   /**
+   * User "Continue" action for a supervised step held at a confirmation
+   * checkpoint. Loads the pending_completion_json stash, runs the same terminal
+   * tail as the unsupervised path (write artifact, terminate worker, build scored
+   * result, advance), and clears the stash. Idempotent no-op when no stash exists.
+   */
+  async confirmStep(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run || !run.currentStepRunId) return;
+    const stepRun = readStepRun(db, run.currentStepRunId);
+    const stashRow = db
+      .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = ?")
+      .get(stepRun.id) as { pending_completion_json: string | null } | undefined;
+    if (!stashRow?.pending_completion_json) return; // idempotent no-op
+
+    let stash: { block: unknown; scoring: StepResultScoringProposal | null; finishedAt: string };
+    try {
+      stash = JSON.parse(stashRow.pending_completion_json);
+    } catch {
+      db.prepare("UPDATE workflow_step_runs SET pending_completion_json = NULL WHERE id = ?").run(stepRun.id);
+      return;
+    }
+
+    const template = getTemplateById(db, run.templateId);
+    if (!template) return;
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) return;
+    const goal = readGoal(db, run.goalId);
+    const ctx = { run, stepRun, stepTpl, template, goal };
+
+    // Clear the stash first so a racing refine/confirm cannot double-apply.
+    db.prepare("UPDATE workflow_step_runs SET pending_completion_json = NULL WHERE id = ?").run(stepRun.id);
+
+    const stagedEvents: DomainEvent[] = [];
+    this.createStepOutputArtifact(db, now, ctx, JSON.stringify(stash.block ?? {}), options, stagedEvents);
+    this.publish(options.bus, stagedEvents);
+
+    const sessionRow = db
+      .prepare("SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('running','starting') ORDER BY started_at DESC LIMIT 1")
+      .get(stepRun.id) as { id: string } | undefined;
+    if (sessionRow?.id) void this.workerTerminate?.(sessionRow.id);
+
+    const stepResult = this.buildApprovalStepResult(db, ctx, stash.scoring ?? undefined, stash.finishedAt);
+    await this.advanceToNextStep(db, nowWithFirstTimestamp(now, stash.finishedAt), run.id, {
+      ...options,
+      stepResultByStepRunId: { ...options.stepResultByStepRunId, [stepRun.id]: stepResult },
+      terminalFinishedAtByStepRunId: { ...options.terminalFinishedAtByStepRunId, [stepRun.id]: stash.finishedAt },
+    });
+  }
+
+  /**
    * Advances the run past the current step's produced output, then — when an
    * intermediate step becomes active — spawns the next step's agent. On the
    * terminal step, commitAdvanceOrComplete produces the complete_workflow_run

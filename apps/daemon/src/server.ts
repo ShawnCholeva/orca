@@ -1503,6 +1503,18 @@ export function createServer(
     return { supervisionMode: parsed.data.supervisionMode };
   });
 
+  // ---- Confirm-step route (supervised Continue action) ----
+
+  server.post<{ Params: { id: string } }>("/v1/workflows/runs/:id/confirm-step", async (request, reply) => {
+    await orchestratorService.confirmStep(
+      getDatabase(),
+      daemonContext.now,
+      request.params.id,
+      { bus: eventBus, idFactory: daemonContext.idFactory }
+    );
+    return reply.code(202).send({ ok: true });
+  });
+
   // ---- Workflow orchestrator routes ----
 
   registerOrchestratorRoutes(server, {

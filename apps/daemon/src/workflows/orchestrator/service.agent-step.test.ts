@@ -1272,3 +1272,66 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     expect(launchFn).not.toHaveBeenCalled();
   });
 });
+
+describe("OrchestratorService.confirmStep", () => {
+  it("continues a paused supervised step (writes result, clears stash)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "supervised", NOW);
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.82,
+          quality: {
+            outputCompleteness: 0.8,
+            outputCorrectness: 0.85,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.8,
+            riskLevel: 0.2,
+          },
+          reason: "ok",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+    // step is now paused with a stash. Continue:
+    await service.confirmStep(db, () => NOW, "run-1", { bus, idFactory });
+
+    const result = readPersistedStepResult(db, "step-1");
+    expect(result.evaluationStatus).toBe("scored");
+    expect(result.successScore).toBe(0.82);
+    const row = db
+      .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { pending_completion_json: string | null };
+    expect(row.pending_completion_json).toBeNull();
+  });
+
+  it("is a no-op when there is no stash", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete" }),
+      vi.fn(async () => "delivered" as const)
+    );
+    await service.confirmStep(db, () => NOW, "run-1", { bus, idFactory });
+    const row = db
+      .prepare("SELECT step_result_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { step_result_json: string | null };
+    expect(row.step_result_json).toBeNull();
+  });
+});

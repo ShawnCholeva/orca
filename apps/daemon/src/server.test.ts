@@ -2539,3 +2539,19 @@ describe('GET/PUT /v1/settings', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 });
+
+describe('POST /v1/workflows/runs/:id/confirm-step', () => {
+  it('returns 202 for a nonexistent run (no-op)', async () => {
+    const { server, token, dataDir } = await startServer();
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/workflows/runs/nonexistent/confirm-step',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ ok: true });
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+});
