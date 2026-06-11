@@ -9,7 +9,9 @@ import {
   getLiveForStepRun,
   getPausedForGoal,
   openOrUpdateLive,
+  pauseForConfirmation,
   pauseForInput,
+  resumeFromConfirmation,
   type ActivityStoreCtx
 } from "./store.js";
 
@@ -237,5 +239,26 @@ describe("ActivityStore", () => {
     expect(paused?.status).toBe("paused_for_input");
     expect(paused?.pendingQuestion).toEqual(pendingQuestion);
     expect(events.filter((event) => event.type === "activity.changed").length).toBe(eventCount);
+  });
+
+  it("pauses a live activity for confirmation", () => {
+    const { ctx } = ctxFor(db);
+    openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "working", workCategory: null });
+    const paused = pauseForConfirmation(ctx, {
+      stepRunId: "s1",
+      summary: "Completeness 90% · Correctness 85% · Ready for handoff"
+    });
+    expect(paused?.status).toBe("paused_for_input");
+    expect(paused?.sourceKind).toBe("step_confirmation_pending");
+    expect(paused?.currentText).toContain("90%");
+  });
+
+  it("resumes a confirmation activity back to active", () => {
+    const { ctx } = ctxFor(db);
+    openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "working", workCategory: null });
+    pauseForConfirmation(ctx, { stepRunId: "s1", summary: "x" });
+    const resumed = resumeFromConfirmation(ctx, { stepRunId: "s1" });
+    expect(resumed?.status).toBe("active");
+    expect(resumed?.sourceKind).toBe("step_started");
   });
 });
