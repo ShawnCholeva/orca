@@ -1051,7 +1051,8 @@ export const ActivitySourceKind = z.enum([
   "permission_pending",
   "turn_completed",
   "weak_signal",
-  "step_result"
+  "step_result",
+  "step_confirmation_pending"
 ]);
 export type ActivitySourceKind = z.infer<typeof ActivitySourceKind>;
 
