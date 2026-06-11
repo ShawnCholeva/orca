@@ -61,7 +61,8 @@ import {
   SubmitWorkerAnswersRequest,
   CheckSystemReadinessResponse,
   SubmitPermissionDecisionRequest,
-  UpdateWorkerPermissionModeRequest
+  UpdateWorkerPermissionModeRequest,
+  PutSettingsRequest
 } from '@orca/contracts';
 import type { Config } from './config.js';
 import { getDatabase } from './db.js';
@@ -208,6 +209,7 @@ import {
 import { getTemplateById } from './workflows/templates/projection.js';
 import { NotConnectedError, UnknownAgentError } from './readiness/service.js';
 import { checkTmuxReadiness } from './readiness/system.js';
+import { getSupervisionMode, setSupervisionMode } from './settings/store.js';
 
 // Sidecar (CJS-bundled SEA) sets ORCA_DAEMON_VERSION at build time; fall back
 // to reading package.json at the source-tree path otherwise.
@@ -1483,6 +1485,22 @@ export function createServer(
     if (!goalExists) { reply.status(404); return { error: { code: "goal_not_found" } }; }
     eventBus.publish({ seq, id: eventId, type: "goal.worker_permission_mode_changed", goalId, payload: { workerPermissionMode: parsed.data.workerPermissionMode }, createdAt: now });
     return { ok: true, workerPermissionMode: parsed.data.workerPermissionMode };
+  });
+
+  // ---- Settings routes ----
+
+  server.get("/v1/settings", async () => {
+    return { supervisionMode: getSupervisionMode(db) };
+  });
+
+  server.put("/v1/settings", async (request, reply) => {
+    const parsed = PutSettingsRequest.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "validation_failed", issues: parsed.error.issues });
+    }
+    const now = daemonContext.now();
+    setSupervisionMode(db, parsed.data.supervisionMode, now);
+    return { supervisionMode: parsed.data.supervisionMode };
   });
 
   // ---- Workflow orchestrator routes ----

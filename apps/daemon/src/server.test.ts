@@ -2489,3 +2489,53 @@ describe('session summary and extract-memory routes', () => {
     expect(detailBody.session.latestSummaryHeadline).toBe('Validation passed');
   });
 });
+
+describe('GET/PUT /v1/settings', () => {
+  it('GET /v1/settings defaults to supervised', async () => {
+    const { server, token, dataDir } = await startServer();
+    const res = await server.inject({
+      method: 'GET',
+      url: '/v1/settings',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ supervisionMode: 'supervised' });
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('PUT /v1/settings persists the mode', async () => {
+    const { server, token, dataDir } = await startServer();
+    const put = await server.inject({
+      method: 'PUT',
+      url: '/v1/settings',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { supervisionMode: 'unsupervised' },
+    });
+    expect(put.statusCode).toBe(200);
+    const get = await server.inject({
+      method: 'GET',
+      url: '/v1/settings',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(get.json()).toEqual({ supervisionMode: 'unsupervised' });
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('PUT /v1/settings rejects an invalid mode', async () => {
+    const { server, token, dataDir } = await startServer();
+    const res = await server.inject({
+      method: 'PUT',
+      url: '/v1/settings',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { supervisionMode: 'auto' },
+    });
+    expect(res.statusCode).toBe(400);
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+});
