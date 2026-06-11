@@ -27,6 +27,7 @@ import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
 import type { OrchestratorAction } from "@orca/contracts";
 import type { SessionOutputStore } from "../../sessions/output-store.js";
 import type { ShadowAsk } from "./recover-step-scoring.js";
+import { setSupervisionMode } from "../../settings/store.js";
 
 const AGENT_OPERATOR_ID = "agent:claude-code";
 
@@ -645,6 +646,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     setupAgentStepRun(db, { guardrailsJson: "[]" });
     seedWorkspace(db);
     seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
 
     const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(
@@ -696,11 +698,106 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     ).toHaveLength(1);
   });
 
+  it("supervised: holds at checkpoint — no result, stash set, activity paused", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "supervised", NOW);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.82,
+          quality: {
+            outputCompleteness: 0.8,
+            outputCorrectness: 0.85,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.8,
+            riskLevel: 0.2,
+          },
+          reason: "ok",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    const row = db
+      .prepare(
+        "SELECT step_result_json, pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'"
+      )
+      .get() as { step_result_json: string | null; pending_completion_json: string | null };
+    expect(row.step_result_json).toBeNull();
+    expect(row.pending_completion_json).not.toBeNull();
+    const act = db
+      .prepare(
+        "SELECT status, source_kind FROM activities WHERE step_run_id = 'step-1' ORDER BY turn_ordinal DESC LIMIT 1"
+      )
+      .get() as { status: string; source_kind: string };
+    expect(act.status).toBe("paused_for_input");
+    expect(act.source_kind).toBe("step_confirmation_pending");
+  });
+
+  it("unsupervised: terminates and advances immediately (writes scored result, no stash)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.82,
+          quality: {
+            outputCompleteness: 0.8,
+            outputCorrectness: 0.85,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.8,
+            riskLevel: 0.2,
+          },
+          reason: "ok",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    const result = readPersistedStepResult(db, "step-1");
+    expect(result.evaluationStatus).toBe("scored");
+    const row = db
+      .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { pending_completion_json: string | null };
+    expect(row.pending_completion_json).toBeNull();
+  });
+
   it("approve_step_complete: writes step_output artifact and recommends run completion", async () => {
     const { db, bus, idFactory } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" });
     seedWorkspace(db);
     seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
 
     const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), deliver);

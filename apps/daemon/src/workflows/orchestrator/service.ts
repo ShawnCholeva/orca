@@ -72,6 +72,9 @@ import {
   type ShadowAsk,
 } from "./recover-step-scoring.js";
 import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
+import { getSupervisionMode } from "../../settings/store.js";
+import { openOrUpdateLive, pauseForConfirmation } from "../../activities/store.js";
+import { summarizeScoring } from "./scoring-summary.js";
 
 export interface StepDispatchCapabilities {
   isAdapterReady(adapterId: string): Promise<boolean>;
@@ -750,6 +753,32 @@ export class OrchestratorService {
       }
       case "approve_step_complete": {
         const block = extractOrcaStepCompleteBlock(responseText);
+        const finishedAt = now();
+
+        if (getSupervisionMode(db) === "supervised") {
+          const scoringParse = StepResultScoringProposal.safeParse(action.scoring);
+          const scoring = scoringParse.success ? scoringParse.data : undefined;
+          db.prepare(
+            "UPDATE workflow_step_runs SET pending_completion_json = ? WHERE id = ?"
+          ).run(
+            JSON.stringify({ block: block ?? {}, scoring: scoring ?? null, finishedAt }),
+            ctx.stepRun.id
+          );
+          const summary = summarizeScoring(scoring);
+          const activityCtx = { db, bus: options.bus ?? new EventBus() };
+          openOrUpdateLive(activityCtx, {
+            goalId: ctx.run.goalId,
+            workflowRunId: ctx.run.id,
+            stepRunId: ctx.stepRun.id,
+            agentSessionId: sessionId,
+            sourceKind: "step_started",
+            currentText: summary,
+            workCategory: null,
+          });
+          pauseForConfirmation(activityCtx, { stepRunId: ctx.stepRun.id, summary });
+          return { postedChatReply: false };
+        }
+
         const stagedEvents: DomainEvent[] = [];
         this.createStepOutputArtifact(
           db,
@@ -764,7 +793,6 @@ export class OrchestratorService {
         if (sessionId) {
           void this.workerTerminate?.(sessionId);
         }
-        const finishedAt = now();
         const stepResult = this.buildApprovalStepResult(db, ctx, action.scoring, finishedAt);
         await this.advanceToNextStep(db, nowWithFirstTimestamp(now, finishedAt), ctx.run.id, {
           ...options,
