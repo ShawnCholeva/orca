@@ -1,6 +1,11 @@
 import type { Database } from "better-sqlite3";
 
+import type { StepResultScoringProposal } from "@orca/contracts";
+
+import { EventBus } from "../events.js";
+import { openOrUpdateLive, pauseForConfirmation } from "../activities/store.js";
 import { appendWorkflowEvent } from "./events.js";
+import { summarizeScoring } from "./orchestrator/scoring-summary.js";
 
 interface StaleLlmCallRow {
   id: string;
@@ -68,4 +73,44 @@ export function reconcileWorkflowsOnBoot(db: Database, now: () => string): void 
       );
     }
   })();
+
+  // Re-assert supervised confirmation checkpoints for steps that were held
+  // (stash present) but are still non-terminal — covers a crash after stashing
+  // but before/while pausing the activity. Done outside the transaction above
+  // because the activity-store helpers manage their own transactions.
+  const held = db
+    .prepare(
+      `SELECT id AS step_run_id, workflow_run_id, goal_id, pending_completion_json AS stash
+       FROM workflow_step_runs
+       WHERE pending_completion_json IS NOT NULL AND finished_at IS NULL`
+    )
+    .all() as { step_run_id: string; workflow_run_id: string; goal_id: string; stash: string }[];
+
+  if (held.length > 0) {
+    const bus = new EventBus();
+    for (const h of held) {
+      let summary = "Step complete — review and Continue or send revisions.";
+      try {
+        const parsed = JSON.parse(h.stash) as { scoring: StepResultScoringProposal | null };
+        summary = summarizeScoring(parsed.scoring ?? undefined);
+      } catch {
+        // keep the default summary
+      }
+      // openOrUpdateLive ensures a live row (or returns an existing paused one);
+      // pauseForConfirmation then sets it to the confirmation-pending state. Idempotent.
+      openOrUpdateLive(
+        { db, bus },
+        {
+          goalId: h.goal_id,
+          workflowRunId: h.workflow_run_id,
+          stepRunId: h.step_run_id,
+          agentSessionId: null,
+          sourceKind: "step_started",
+          currentText: summary,
+          workCategory: null,
+        }
+      );
+      pauseForConfirmation({ db, bus }, { stepRunId: h.step_run_id, summary });
+    }
+  }
 }

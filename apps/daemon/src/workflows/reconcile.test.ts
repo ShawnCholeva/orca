@@ -126,6 +126,32 @@ describe("reconcileWorkflowsOnBoot", () => {
     }
   });
 
+  it("re-asserts a confirmation checkpoint for a held non-terminal step", () => {
+    const db = setup();
+    seedGoal(db);
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, '[]', '[]', ?, ?)"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)"
+    ).run(NOW);
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-1', 'goal-1', 'run-1', 'intake', 0, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1')"
+    ).run(NOW);
+    // held: stash present, step non-terminal, and NO activity row yet
+    db.prepare("UPDATE workflow_step_runs SET pending_completion_json = ? WHERE id = 'step-1'").run(
+      JSON.stringify({ block: {}, scoring: { successScore: 0.8, quality: { outputCompleteness: 0.8, outputCorrectness: 0.8, instructionAdherence: 0.8, downstreamReadiness: 0.8, riskLevel: 0.2 }, reason: "ok", handoffReady: true }, finishedAt: NOW })
+    );
+
+    reconcileWorkflowsOnBoot(db, () => NOW);
+
+    const act = db
+      .prepare("SELECT status, source_kind FROM activities WHERE step_run_id = 'step-1' ORDER BY turn_ordinal DESC LIMIT 1")
+      .get() as { status: string; source_kind: string } | undefined;
+    expect(act?.status).toBe("paused_for_input");
+    expect(act?.source_kind).toBe("step_confirmation_pending");
+  });
+
   it("repairs active-run step drift by blocking the run and writing blocked event", () => {
     const db = setup();
     seedGoal(db, "goal-1");
