@@ -73,7 +73,8 @@ import {
 } from "./recover-step-scoring.js";
 import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
 import { getSupervisionMode } from "../../settings/store.js";
-import { openOrUpdateLive, pauseForConfirmation } from "../../activities/store.js";
+import { openOrUpdateLive, pauseForConfirmation, resumeFromConfirmation } from "../../activities/store.js";
+import { recordRevisionSignal } from "../revision-signals/store.js";
 import { summarizeScoring } from "./scoring-summary.js";
 
 export interface StepDispatchCapabilities {
@@ -725,6 +726,34 @@ export class OrchestratorService {
         return { postedChatReply: true };
       }
       case "forward_to_agent": {
+        // If this step is paused at a confirmation checkpoint, the user is refining:
+        // record the divergence signal, clear the stash, and resume the activity.
+        const refineStashRow = db
+          .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = ?")
+          .get(ctx.stepRun.id) as { pending_completion_json: string | null } | undefined;
+        if (refineStashRow?.pending_completion_json) {
+          try {
+            const stash = JSON.parse(refineStashRow.pending_completion_json) as {
+              scoring: import("@orca/contracts").StepResultScoringProposal | null;
+            };
+            if (stash.scoring) {
+              recordRevisionSignal(db, {
+                id: randomUUID(),
+                stepRunId: ctx.stepRun.id,
+                goalId: ctx.run.goalId,
+                supersededScoring: stash.scoring,
+                feedbackText: action.translated,
+                now: now(),
+              });
+            }
+          } catch {
+            // signal capture must never block refinement
+          }
+          db.prepare("UPDATE workflow_step_runs SET pending_completion_json = NULL WHERE id = ?").run(
+            ctx.stepRun.id
+          );
+          resumeFromConfirmation({ db, bus: options.bus ?? new EventBus() }, { stepRunId: ctx.stepRun.id });
+        }
         if (sessionId && this.workerDeliver) {
           const r = await this.workerDeliver(sessionId, action.translated);
           if (r !== "delivered") {

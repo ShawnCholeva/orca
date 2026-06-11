@@ -1335,3 +1335,41 @@ describe("OrchestratorService.confirmStep", () => {
     expect(row.step_result_json).toBeNull();
   });
 });
+
+describe("OrchestratorService.onUserMessage (refine path)", () => {
+  it("refining a paused supervised step records a signal, clears the stash, resumes the activity", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "supervised", NOW);
+
+    // 1) Approve → step holds at the confirmation checkpoint.
+    const approveService = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete", scoring: { successScore: 0.82, quality: { outputCompleteness: 0.8, outputCorrectness: 0.85, instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2 }, reason: "ok", handoffReady: true } }),
+      vi.fn(async () => "delivered" as const)
+    );
+    const responseText = "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await approveService.onAgentResponseDone(db, () => NOW, { sessionId: "sess-judge", adapterId: "claude-code", responseText }, { bus, idFactory });
+
+    // sanity: paused with a stash
+    const before = db.prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'").get() as { pending_completion_json: string | null };
+    expect(before.pending_completion_json).not.toBeNull();
+
+    // 2) User refines → orchestrator forwards to the live worker.
+    const deliver = vi.fn(async () => "delivered" as const);
+    const refineService = makeJudgeService(
+      fakeMediator({ kind: "forward_to_agent", translated: "add error handling" }),
+      deliver
+    );
+    await refineService.onUserMessage(db, () => NOW, { goalId: "goal-1", body: "add error handling" }, { bus, idFactory });
+
+    expect(deliver).toHaveBeenCalledWith("sess-judge", "add error handling");
+    const after = db.prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'").get() as { pending_completion_json: string | null };
+    expect(after.pending_completion_json).toBeNull();
+    const sig = db.prepare("SELECT COUNT(*) AS c FROM step_revision_signals WHERE step_run_id = 'step-1'").get() as { c: number };
+    expect(sig.c).toBe(1);
+    const act = db.prepare("SELECT status FROM activities WHERE step_run_id = 'step-1' AND status = 'active'").get() as { status: string } | undefined;
+    expect(act?.status).toBe("active");
+  });
+});
