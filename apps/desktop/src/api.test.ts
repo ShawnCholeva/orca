@@ -1429,6 +1429,31 @@ describe("desktop api client", () => {
     });
   });
 
+  it("getSettings returns the supervision mode", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { supervisionMode: "supervised" }));
+    const s = await api.getSettings();
+    expect(s.supervisionMode).toBe("supervised");
+  });
+
+  it("putSettings sends PUT and returns the mode", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { supervisionMode: "unsupervised" }));
+    const r = await api.putSettings({ supervisionMode: "unsupervised" });
+    expect(r.supervisionMode).toBe("unsupervised");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("/v1/settings"),
+      expect.objectContaining({ method: "PUT" })
+    );
+  });
+
+  it("confirmStep posts to confirm-step", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 202 }));
+    await api.confirmStep("run-1");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("/v1/workflows/runs/run-1/confirm-step"),
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
   describe("readiness api", () => {
     it("runReadinessCheck POSTs and returns reports", async () => {
       fetchMock.mockResolvedValueOnce(

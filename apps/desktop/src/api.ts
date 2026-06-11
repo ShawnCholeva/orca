@@ -1,5 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
+  AppSettings,
+  type PutSettingsRequest,
   AcceptRecommendationResponse,
   Agent,
   ListAgentsResponse,
@@ -1617,6 +1619,39 @@ export async function stopSession(sessionId: string): Promise<StopSessionRespons
     },
     StopSessionResponse,
     "Stop session failed",
+  );
+}
+
+export async function getSettings(): Promise<AppSettings> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/settings`,
+    { headers: authHeaders(token) },
+    AppSettings,
+    "Failed to load settings",
+  );
+}
+
+export async function putSettings(body: PutSettingsRequest): Promise<AppSettings> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/settings`,
+    {
+      method: "PUT",
+      headers: { ...authHeaders(token), "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    AppSettings,
+    "Failed to update settings",
+  );
+}
+
+export async function confirmStep(runId: string): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  await requestVoid(
+    `${baseUrl}/v1/workflows/runs/${runId}/confirm-step`,
+    { method: "POST", headers: authHeaders(token) },
+    "Failed to confirm step",
   );
 }
 
