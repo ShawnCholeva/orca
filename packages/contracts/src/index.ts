@@ -4,7 +4,8 @@ import {
   OperatorKind,
   OrchestratorModelChoice,
   WorkflowArtifactType,
-  WorkflowStepResult
+  WorkflowStepResult,
+  StepResultScoringProposal
 } from "./workflows/index.js";
 import { AdapterId } from "./adapters/ids.js";
 
@@ -3205,3 +3206,16 @@ export {
   validateAdapterExecutionModeConfig,
 } from "./adapters/execution-modes.js";
 export type { ValidationResult as AdapterExecutionModeValidation } from "./adapters/execution-modes.js";
+
+export const StepRevisionSignal = z
+  .object({
+    id: z.string(),
+    stepRunId: z.string(),
+    goalId: z.string(),
+    revisionIndex: z.number().int().nonnegative(),
+    supersededScoring: StepResultScoringProposal,
+    feedbackText: z.string().max(4000).nullable(),
+    createdAt: z.string()
+  })
+  .strict();
+export type StepRevisionSignal = z.infer<typeof StepRevisionSignal>;
