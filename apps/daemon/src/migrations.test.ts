@@ -79,7 +79,8 @@ describe("runMigrations", () => {
       "0025_activity_step_result.sql",
       "0026_app_settings.sql",
       "0027_step_run_pending_completion.sql",
-      "0028_step_revision_signals.sql"
+      "0028_step_revision_signals.sql",
+      "0029_workflow_graph_cursor.sql"
     ]);
   });
 
@@ -198,7 +199,8 @@ describe("runMigrations", () => {
       "0025_activity_step_result.sql",
       "0026_app_settings.sql",
       "0027_step_run_pending_completion.sql",
-      "0028_step_revision_signals.sql"
+      "0028_step_revision_signals.sql",
+      "0029_workflow_graph_cursor.sql"
     ]);
 
     const goalCount = (
@@ -450,7 +452,8 @@ describe("session tables migration", () => {
       "0025_activity_step_result.sql",
       "0026_app_settings.sql",
       "0027_step_run_pending_completion.sql",
-      "0028_step_revision_signals.sql"
+      "0028_step_revision_signals.sql",
+      "0029_workflow_graph_cursor.sql"
     ]);
 
     const tables = (
@@ -953,7 +956,8 @@ describe("migration 0010 workflows", () => {
       "0025_activity_step_result.sql",
       "0026_app_settings.sql",
       "0027_step_run_pending_completion.sql",
-      "0028_step_revision_signals.sql"
+      "0028_step_revision_signals.sql",
+      "0029_workflow_graph_cursor.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1536,7 +1540,8 @@ describe("migration 0012 orchestration transport", () => {
       "0025_activity_step_result.sql",
       "0026_app_settings.sql",
       "0027_step_run_pending_completion.sql",
-      "0028_step_revision_signals.sql"
+      "0028_step_revision_signals.sql",
+      "0029_workflow_graph_cursor.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
