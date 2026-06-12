@@ -42,6 +42,7 @@ export const WORKFLOW_TEMPLATE_MAX_SCOPE_NAME_CHARS = 200;
 export const WORKFLOW_GRAPH_MAX_NODES = 64;
 export const WORKFLOW_GRAPH_MAX_EDGES = 128;
 export const WORKFLOW_GATE_MAX_CONDITION_CHARS = 2048;
+export const WORKFLOW_GATE_MAX_INSTRUCTIONS_CHARS = 8192;
 export const ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES = 65536;
 export const ORCHESTRATION_DIAGNOSTICS_MAX_BYTES = 4096;
 export const ORCHESTRATION_HUMAN_REVIEW_MAX_SUMMARY_BYTES = 4096;
@@ -289,7 +290,12 @@ export const WorkflowGraphNode = z
     type: z.enum(["step", "gate"]),
     name: z.string().max(100).default(""),
     stepId: Id100.optional(),
+    // Legacy gate field, retained read-only so pre-migration graphs still parse.
     condition: z.string().max(WORKFLOW_GATE_MAX_CONDITION_CHARS).optional(),
+    // Gate nodes: the orchestrator routing instructions (replaces `condition`).
+    instructions: z.string().max(WORKFLOW_GATE_MAX_INSTRUCTIONS_CHARS).optional(),
+    // Step nodes: explicit terminal designation. Exactly one per valid template.
+    terminal: z.boolean().optional(),
   })
   .strict();
 export type WorkflowGraphNode = z.infer<typeof WorkflowGraphNode>;

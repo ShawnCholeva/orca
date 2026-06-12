@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WorkflowGraph, WorkflowGraphEdge } from "./index.js";
+import { WorkflowGraph, WorkflowGraphEdge, WorkflowGraphNode } from "./index.js";
 
 describe("WorkflowGraphEdge", () => {
   it("parses a labeled object edge", () => {
@@ -31,5 +31,38 @@ describe("WorkflowGraphEdge", () => {
       positions: { a: { x: 0, y: 0 }, b: { x: 0, y: 1 } },
     });
     expect(graph.edges[0]).toEqual({ from: "a", to: "b" });
+  });
+});
+
+describe("WorkflowGraphNode", () => {
+  it("accepts a terminal step node", () => {
+    const node = WorkflowGraphNode.parse({
+      id: "done",
+      type: "step",
+      name: "Done",
+      stepId: "done",
+      terminal: true,
+    });
+    expect(node.terminal).toBe(true);
+  });
+
+  it("accepts a gate node with instructions", () => {
+    const node = WorkflowGraphNode.parse({
+      id: "gate",
+      type: "gate",
+      name: "Release Readiness",
+      instructions: "Approve only when validation passed.",
+    });
+    expect(node.instructions).toBe("Approve only when validation passed.");
+  });
+
+  it("still accepts a legacy gate node with a condition field", () => {
+    const node = WorkflowGraphNode.parse({
+      id: "gate",
+      type: "gate",
+      name: "Gate",
+      condition: "x === true",
+    });
+    expect(node.condition).toBe("x === true");
   });
 });
