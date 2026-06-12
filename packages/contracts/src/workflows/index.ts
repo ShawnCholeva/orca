@@ -294,7 +294,19 @@ export const WorkflowGraphNode = z
   .strict();
 export type WorkflowGraphNode = z.infer<typeof WorkflowGraphNode>;
 
-export const WorkflowGraphEdge = z.tuple([Id100, Id100]);
+export const WorkflowGraphEdge = z.preprocess(
+  (value) =>
+    Array.isArray(value) && value.length === 2
+      ? { from: value[0], to: value[1] }
+      : value,
+  z
+    .object({
+      from: Id100,
+      to: Id100,
+      port: z.enum(["approved", "rejected"]).optional(),
+    })
+    .strict()
+);
 export type WorkflowGraphEdge = z.infer<typeof WorkflowGraphEdge>;
 
 export const WorkflowGraph = z

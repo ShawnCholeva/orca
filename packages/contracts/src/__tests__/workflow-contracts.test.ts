@@ -1136,7 +1136,7 @@ describe("WorkflowScope + WorkflowGraph schemas", () => {
   });
 
   it("WorkflowTemplate round-trips with scope/scopeName/graph populated", () => {
-    const graph = {
+    const graphInput = {
       nodes: [
         { id: "n1", type: "step" as const, name: "Intake step", stepId: "intake" },
         { id: "n2", type: "gate" as const, name: "Quality gate", condition: "output.goal_brief.length > 0" },
@@ -1147,16 +1147,22 @@ describe("WorkflowScope + WorkflowGraph schemas", () => {
         n2: { x: 200, y: 0 },
       },
     };
+    // after parsing, legacy edge array form is normalized to object form
+    const expectedGraph = {
+      nodes: graphInput.nodes,
+      edges: [{ from: "n1", to: "n2" }],
+      positions: graphInput.positions,
+    };
     const input = {
       ...template,
       scope: "goal" as const,
       scopeName: "my-workspace/my-goal",
-      graph,
+      graph: graphInput,
     };
     const result = WorkflowTemplate.parse(input);
     expect(result.scope).toBe("goal");
     expect(result.scopeName).toBe("my-workspace/my-goal");
-    expect(result.graph).toEqual(graph);
+    expect(result.graph).toEqual(expectedGraph);
   });
 
   it("WorkflowGraph rejects more than 64 nodes", () => {
@@ -1181,11 +1187,22 @@ describe("WorkflowScope + WorkflowGraph schemas", () => {
     expect(result.edges).toHaveLength(128);
   });
 
-  it("WorkflowGraphEdge is a 2-tuple of ids", () => {
-    expect(WorkflowGraphEdge.parse(["a", "b"])).toEqual(["a", "b"]);
+  it("WorkflowGraphEdge supports labeled object with legacy back-compat", () => {
+    // legacy 2-tuple form normalizes to { from, to }
+    expect(WorkflowGraphEdge.parse(["a", "b"])).toEqual({ from: "a", to: "b" });
+    // labeled object form
+    expect(WorkflowGraphEdge.parse({ from: "a", to: "b" })).toEqual({ from: "a", to: "b" });
+    // optional port field
+    expect(WorkflowGraphEdge.parse({ from: "a", to: "b", port: "approved" })).toEqual({
+      from: "a",
+      to: "b",
+      port: "approved"
+    });
+    // validation still applies
     expect(() => WorkflowGraphEdge.parse(["a"])).toThrow();
     expect(() => WorkflowGraphEdge.parse(["a", "b", "c"])).toThrow();
     expect(() => WorkflowGraphEdge.parse(["", "b"])).toThrow();
+    expect(() => WorkflowGraphEdge.parse({ from: "g", to: "x", port: "invalid" })).toThrow();
   });
 
   it("CreateWorkflowTemplateRequest applies defaults when scope/scopeName/graph are omitted", () => {
