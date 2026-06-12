@@ -13,6 +13,7 @@ import type {
 
 import type { ConnectionStatus } from "../api";
 import {
+  confirmStep,
   createOrchestratorMessage,
   getGoalDetail,
   getWorkflowRun,
@@ -459,6 +460,14 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     }
   }
 
+  async function handleContinue(runId: string) {
+    try {
+      await confirmStep(runId);
+    } finally {
+      setRefreshNonce((current) => current + 1);
+    }
+  }
+
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedGoalId) return;
@@ -626,6 +635,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
                 goalId={selectedGoalId ?? ""}
                 activity={liveActivity}
                 renderQuestionForm={WorkerQuestionForm}
+                onContinue={handleContinue}
               />
             )}
 

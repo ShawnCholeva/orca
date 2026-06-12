@@ -7,6 +7,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
+const confirmStepMock = vi.fn();
 const createOrchestratorMessageMock = vi.fn();
 const getGoalDetailMock = vi.fn();
 const getWorkflowRunMock = vi.fn();
@@ -25,6 +26,7 @@ const submitPermissionDecisionMock = vi.fn();
 const setWorkerPermissionModeMock = vi.fn();
 
 vi.mock("../api", () => ({
+  confirmStep: (...args: unknown[]) => confirmStepMock(...args),
   createOrchestratorMessage: (...args: unknown[]) => createOrchestratorMessageMock(...args),
   getGoalDetail: (...args: unknown[]) => getGoalDetailMock(...args),
   getWorkflowRun: (...args: unknown[]) => getWorkflowRunMock(...args),
@@ -171,6 +173,8 @@ function setupRunLoad() {
 
 describe("OrcaChat", () => {
   beforeEach(() => {
+    confirmStepMock.mockReset();
+    confirmStepMock.mockResolvedValue(undefined);
     createOrchestratorMessageMock.mockReset();
     getGoalDetailMock.mockReset();
     getWorkflowRunMock.mockReset();
@@ -970,6 +974,42 @@ describe("OrcaChat", () => {
     const indicator = await screen.findByTestId("step-starting");
     expect(indicator).toHaveTextContent("starting 0:45");
     expect(indicator).not.toHaveTextContent("~30");
+  });
+
+  it("clicking Continue on a checkpoint calls confirmStep with the run id", async () => {
+    const ts = new Date().toISOString();
+    listActivitiesMock.mockResolvedValue([
+      {
+        id: "a-confirm",
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepRunId: "step-1",
+        agentSessionId: "sess-1",
+        turnOrdinal: 1,
+        status: "paused_for_input",
+        currentText: "Completeness 90% · Ready for handoff — Continue or send revisions.",
+        finalSummary: null,
+        sourceKind: "step_confirmation_pending",
+        workCategory: null,
+        confidence: null,
+        createdAt: ts,
+        updatedAt: ts,
+        completedAt: null,
+      },
+    ]);
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    const btn = await screen.findByTestId("step-confirm-continue");
+    fireEvent.click(btn);
+    await waitFor(() => expect(confirmStepMock).toHaveBeenCalledWith("run-1"));
   });
 
   it("does not flash a loading indicator or blank content on SSE-driven refresh once loaded", async () => {
