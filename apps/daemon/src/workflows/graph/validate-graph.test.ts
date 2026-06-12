@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowGraph, WorkflowStepTemplate } from "@orca/contracts";
-import { validateGraph } from "./validate-graph.js";
+import { validateGraph, validateSchemaReferences } from "./validate-graph.js";
 
 function step(id: string, ordinal: number): WorkflowStepTemplate {
   return {
@@ -89,5 +89,56 @@ describe("validateGraph", () => {
   it("rejects a direct step edge carrying a port", () => {
     const g = { ...valid, edges: valid.edges.map((e) => (e.from === "analysis" ? { ...e, port: "approved" as const } : e)) };
     expect(validateGraph(g, steps)).toContain("step edge must not carry a port: analysis -> execution");
+  });
+});
+
+describe("validateSchemaReferences", () => {
+  function refStep(id: string, ordinal: number, instructions: string, produces: string[]): WorkflowStepTemplate {
+    return {
+      id,
+      ordinal,
+      name: id,
+      instructions,
+      outputSchema: produces.map((k) => ({ key: k, type: "string" as const, required: true })),
+      agentPreference: [{ adapterId: "claude-code", modelId: "m" }],
+    };
+  }
+
+  it("accepts a reference produced on every incoming path", () => {
+    const s = [refStep("a", 0, "", ["plan"]), refStep("b", 1, "use {{plan}}", [])];
+    const g: WorkflowGraph = {
+      nodes: [
+        { id: "a", type: "step", name: "A", stepId: "a" },
+        { id: "b", type: "step", name: "B", stepId: "b", terminal: true },
+      ],
+      edges: [{ from: "a", to: "b" }],
+      positions: {},
+    };
+    expect(validateSchemaReferences(g, s)).toEqual([]);
+  });
+
+  it("rejects a reference to a key produced by no upstream node", () => {
+    const s = [refStep("a", 0, "", ["plan"]), refStep("b", 1, "use {{missing}}", [])];
+    const g: WorkflowGraph = {
+      nodes: [
+        { id: "a", type: "step", name: "A", stepId: "a" },
+        { id: "b", type: "step", name: "B", stepId: "b", terminal: true },
+      ],
+      edges: [{ from: "a", to: "b" }],
+      positions: {},
+    };
+    expect(validateSchemaReferences(g, s)).toContain(
+      "step 'b' references '{{missing}}' which is not produced on every incoming path"
+    );
+  });
+
+  it("allows platform context keys (goal, workspace)", () => {
+    const s = [refStep("a", 0, "use {{goal}} and {{workspace}}", ["plan"])];
+    const g: WorkflowGraph = {
+      nodes: [{ id: "a", type: "step", name: "A", stepId: "a", terminal: true }],
+      edges: [],
+      positions: {},
+    };
+    expect(validateSchemaReferences(g, s)).toEqual([]);
   });
 });

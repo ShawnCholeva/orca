@@ -93,3 +93,88 @@ export function validateGraph(
 
   return errors;
 }
+
+const REF_RE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
+const PLATFORM_KEYS = new Set(["goal", "workspace", "constraints", "role"]);
+
+function refsIn(text: string): string[] {
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  REF_RE.lastIndex = 0;
+  while ((m = REF_RE.exec(text)) !== null) out.push(m[1]);
+  return out;
+}
+
+/**
+ * A `{{key}}` token in a step's instructions is valid only if every path from
+ * the initial node to that step passes through a node producing `key`, or `key`
+ * is platform context. Computed as a forward "must-reach" fixpoint: the keys
+ * available at a node are the intersection, over all predecessors, of each
+ * predecessor's available keys plus the keys it produces. Cycles do not remove a
+ * key once it is produced on all incoming paths.
+ */
+export function validateSchemaReferences(
+  graph: WorkflowGraph,
+  steps: WorkflowStepTemplate[]
+): string[] {
+  const stepById = new Map(steps.map((s) => [s.id, s]));
+  const produces = new Map<string, Set<string>>(); // nodeId -> keys it produces
+  for (const node of graph.nodes) {
+    if (node.type === "step") {
+      const tpl = stepById.get(node.stepId ?? node.id);
+      produces.set(node.id, new Set(tpl ? tpl.outputSchema.map((f) => f.key) : []));
+    } else {
+      produces.set(node.id, new Set());
+    }
+  }
+
+  const initial = findInitialStepNode(graph, steps);
+  if (!initial) return []; // structural validation already reported this
+
+  const allKeys = new Set<string>();
+  for (const set of produces.values()) for (const k of set) allKeys.add(k);
+
+  // available[node]: keys guaranteed present on entry. Initialize to the
+  // universe (so intersection narrows it), except the initial node which has
+  // only platform keys on entry.
+  const available = new Map<string, Set<string>>();
+  for (const node of graph.nodes) {
+    available.set(node.id, node.id === initial.id ? new Set() : new Set(allKeys));
+  }
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of graph.nodes) {
+      if (node.id === initial.id) continue;
+      const preds = graph.edges.filter((e) => e.to === node.id).map((e) => e.from);
+      if (preds.length === 0) continue;
+      let next: Set<string> | null = null;
+      for (const p of preds) {
+        const incoming = new Set([...(available.get(p) ?? []), ...(produces.get(p) ?? [])]);
+        next = next === null ? incoming : new Set([...next].filter((k) => incoming.has(k)));
+      }
+      const cur = available.get(node.id)!;
+      if (next && (next.size !== cur.size || [...next].some((k) => !cur.has(k)))) {
+        available.set(node.id, next);
+        changed = true;
+      }
+    }
+  }
+
+  const errors: string[] = [];
+  for (const node of graph.nodes) {
+    if (node.type !== "step") continue;
+    const tpl = stepById.get(node.stepId ?? node.id);
+    if (!tpl) continue;
+    const here = available.get(node.id)!;
+    for (const ref of refsIn(tpl.instructions)) {
+      if (!here.has(ref) && !PLATFORM_KEYS.has(ref)) {
+        errors.push(
+          `step '${node.id}' references '{{${ref}}}' which is not produced on every incoming path`
+        );
+      }
+    }
+  }
+  return errors;
+}
