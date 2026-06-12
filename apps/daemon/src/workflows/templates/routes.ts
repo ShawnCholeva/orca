@@ -8,6 +8,7 @@ import {
   UpdateWorkflowTemplateRequest,
   WorkflowTemplateResponse,
 } from "@orca/contracts";
+import type { WorkflowStepTemplate } from "@orca/contracts";
 import type { EventBus } from "../../events.js";
 import { getTemplateById, listTemplates } from "./projection.js";
 import { validateTemplatePipeline } from "./validate-pipeline.js";
@@ -19,6 +20,7 @@ import {
   type WorkflowTemplateUsecaseCtx,
   updateCustomTemplate,
 } from "./usecases.js";
+import { validateGraph, validateSchemaReferences } from "../graph/validate-graph.js";
 
 export interface WorkflowTemplateRouteDeps {
   db: Database.Database;
@@ -67,6 +69,18 @@ export function registerWorkflowTemplateRoutes(
       return { error: "validation_failed", issues: parsed.error.issues };
     }
 
+    if (parsed.data.graph) {
+      const steps = normalizeStepsForValidation(parsed.data.steps);
+      const issues = [
+        ...validateGraph(parsed.data.graph, steps),
+        ...validateSchemaReferences(parsed.data.graph, steps),
+      ];
+      if (issues.length > 0) {
+        reply.status(400);
+        return { error: "invalid_graph", issues };
+      }
+    }
+
     const template = createCustomTemplate(createUsecaseCtx(deps), parsed.data);
     const warnings = validateTemplatePipeline(template.steps);
     reply.status(201);
@@ -79,6 +93,18 @@ export function registerWorkflowTemplateRoutes(
     if (!parsed.success) {
       reply.status(400);
       return { error: "validation_failed", issues: parsed.error.issues };
+    }
+
+    if (parsed.data.graph) {
+      const steps = normalizeStepsForValidation(parsed.data.steps);
+      const issues = [
+        ...validateGraph(parsed.data.graph, steps),
+        ...validateSchemaReferences(parsed.data.graph, steps),
+      ];
+      if (issues.length > 0) {
+        reply.status(400);
+        return { error: "invalid_graph", issues };
+      }
     }
 
     try {
@@ -125,4 +151,10 @@ export function registerWorkflowTemplateRoutes(
       throw error;
     }
   });
+}
+
+function normalizeStepsForValidation(
+  steps: CreateWorkflowTemplateRequest["steps"]
+): WorkflowStepTemplate[] {
+  return steps.map((s, i) => ({ ...s, ordinal: s.ordinal ?? i })) as WorkflowStepTemplate[];
 }

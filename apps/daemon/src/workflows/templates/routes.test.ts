@@ -166,7 +166,7 @@ describe("workflow template routes", () => {
 
   it("POST create with scope, scopeName, graph in body persists and is returned", async () => {
     const graph = {
-      nodes: [{ id: "n1", type: "step", name: "Intake", stepId: "intake" }],
+      nodes: [{ id: "n1", type: "step", name: "Intake", stepId: "intake", terminal: true }],
       edges: [],
       positions: { n1: { x: 0, y: 0 } },
     };
@@ -209,6 +209,46 @@ describe("workflow template routes", () => {
     expect(fetched.template.scope).toBe("workspace");
     expect(fetched.template.scopeName).toBe("ws-abc");
     expect(fetched.template.graph).toEqual(graph);
+  });
+
+  it("rejects a template whose graph has no terminal step", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/v1/workflow-templates",
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+      payload: {
+        name: "Bad Graph",
+        description: "",
+        steps: [
+          {
+            id: "a",
+            name: "A",
+            instructions: "x",
+            outputSchema: [{ key: "s", type: "string", required: true }],
+            agentPreference: [{ adapterId: "claude-code", modelId: "m" }],
+          },
+          {
+            id: "b",
+            name: "B",
+            instructions: "x",
+            outputSchema: [{ key: "s", type: "string", required: true }],
+            agentPreference: [{ adapterId: "claude-code", modelId: "m" }],
+          },
+        ],
+        guardrails: [],
+        graph: {
+          nodes: [
+            { id: "a", type: "step", name: "A", stepId: "a" },
+            { id: "b", type: "step", name: "B", stepId: "b" },
+          ],
+          edges: [{ from: "a", to: "b" }],
+          positions: { a: { x: 0, y: 0 }, b: { x: 0, y: 1 } },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("invalid_graph");
+    expect(res.json().issues.join(" ")).toContain("exactly one terminal step is required");
   });
 
   it("updating built-in template returns 409", async () => {
