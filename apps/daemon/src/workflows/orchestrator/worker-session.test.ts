@@ -326,6 +326,23 @@ describe("WorkerSessionManager.deliver", () => {
     });
     expect(await mgr.deliver("nope", "x")).toBe("no_session");
   });
+
+  it("deliver treats a completed-turn summary ('Churned for Ns') above an idle prompt as idle", async () => {
+    // Claude Code prints a past-tense summary line AFTER a turn finishes while it
+    // sits idle at the ❯ prompt. That summary is NOT a busy state, so deliver must
+    // paste rather than time out waiting for idle.
+    const idlePane = "✻ Churned for 36s\n\n❯ \n  ← for agents";
+    const tmux = fakeTmux(["auto mode on", idlePane]);
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
+      resolveProvider,
+    });
+    await mgr.spawn({ sessionId: "sess-churn", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    expect(await mgr.deliver("sess-churn", "b")).toBe("delivered");
+  });
 });
 
 describe("WorkerSessionManager.reattach", () => {

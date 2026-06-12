@@ -7,7 +7,11 @@ import {
 
 const TRUST_DEFAULT = /trust this folder|Is this a project you created or one you trust|do you trust/i;
 const READY_DEFAULT = /(auto mode on|\? for shortcuts|\n\s*❯)/i;
-const BUSY_DEFAULT = /esc to interrupt|\bthinking\b|running .* hook|cooked for|churned for/i;
+// Busy = the live, interruptible spinner. Match only signals that are exclusive
+// to an in-progress turn. Note: the past-tense summaries Claude Code prints AFTER
+// a turn ("Cooked for 12s", "Churned for 36s") are shown while IDLE at the prompt,
+// so they must NOT count as busy (every genuinely-busy frame carries "esc to interrupt").
+const BUSY_DEFAULT = /esc to interrupt|\bthinking\b|running .* hook/i;
 // claude renders the input box (❯) ABOVE its status/footer lines, so the prompt
 // is not at end-of-pane. Match an EMPTY prompt line (❯ followed by only spaces)
 // anywhere; combined with !busy this means the agent is idle and ready for input.
