@@ -1317,6 +1317,10 @@ describe("OrchestratorService.confirmStep", () => {
       .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'")
       .get() as { pending_completion_json: string | null };
     expect(row.pending_completion_json).toBeNull();
+    const liveAfter = db
+      .prepare("SELECT status, source_kind FROM activities WHERE step_run_id = 'step-1' AND status IN ('active','paused_for_input')")
+      .get() as { status: string; source_kind: string } | undefined;
+    expect(liveAfter).toBeUndefined();
   });
 
   it("is a no-op when there is no stash", async () => {

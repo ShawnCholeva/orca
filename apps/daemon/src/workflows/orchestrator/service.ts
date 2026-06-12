@@ -73,7 +73,7 @@ import {
 } from "./recover-step-scoring.js";
 import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
 import { getSupervisionMode } from "../../settings/store.js";
-import { openOrUpdateLive, pauseForConfirmation, resumeFromConfirmation } from "../../activities/store.js";
+import { expireConfirmation, openOrUpdateLive, pauseForConfirmation, resumeFromConfirmation } from "../../activities/store.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
 import { summarizeScoring } from "./scoring-summary.js";
 
@@ -742,7 +742,7 @@ export class OrchestratorService {
                 stepRunId: ctx.stepRun.id,
                 goalId: ctx.run.goalId,
                 supersededScoring: stash.scoring,
-                feedbackText: action.translated,
+                feedbackText: action.translated.slice(0, 4000),
                 now: now(),
               });
             }
@@ -1145,6 +1145,7 @@ export class OrchestratorService {
 
     // Clear the stash first so a racing refine/confirm cannot double-apply.
     db.prepare("UPDATE workflow_step_runs SET pending_completion_json = NULL WHERE id = ?").run(stepRun.id);
+    expireConfirmation({ db, bus: options.bus ?? new EventBus() }, { stepRunId: stepRun.id });
 
     const stagedEvents: DomainEvent[] = [];
     this.createStepOutputArtifact(db, now, ctx, JSON.stringify(stash.block ?? {}), options, stagedEvents);

@@ -261,4 +261,15 @@ describe("ActivityStore", () => {
     expect(resumed?.status).toBe("active");
     expect(resumed?.sourceKind).toBe("step_started");
   });
+
+  it("completeLive does not close a confirmation checkpoint", () => {
+    const { ctx } = ctxFor(db);
+    openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "working", workCategory: null });
+    pauseForConfirmation(ctx, { stepRunId: "s1", summary: "score summary" });
+    const result = completeLive(ctx, { stepRunId: "s1", finalSummary: "turn done", confidence: null });
+    expect(result).toBeUndefined();
+    const row = db.prepare("SELECT status, source_kind FROM activities WHERE step_run_id = 's1'").get() as { status: string; source_kind: string };
+    expect(row.status).toBe("paused_for_input");
+    expect(row.source_kind).toBe("step_confirmation_pending");
+  });
 });
