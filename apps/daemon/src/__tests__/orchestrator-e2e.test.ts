@@ -29,6 +29,7 @@ import { closeDatabase } from "../db.js";
 import { resetWorkflowEventPreparedStatements } from "../workflows/events.js";
 import { resetWorkflowStepProjectionPreparedStatements } from "../workflows/steps/projection.js";
 import { OrchestratorService } from "../workflows/orchestrator/service.js";
+import { setSupervisionMode } from "../settings/store.js";
 import {
   cleanupHarness,
   NOW,
@@ -124,6 +125,7 @@ describe("orchestrator-mediated workflow e2e (service-level happy path)", () => 
       "UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-haiku-4-5' WHERE id = 'goal-1'"
     ).run();
     seedWorkspace(db);
+    setSupervisionMode(db, "unsupervised", NOW);
 
     // ---- Boundary fakes: spy launcher (PTY) + fake mediator (LLM). ----
     const launches: any[] = [];

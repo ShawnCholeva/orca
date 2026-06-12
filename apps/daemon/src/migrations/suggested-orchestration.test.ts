@@ -152,7 +152,10 @@ describe("suggested orchestration migration schema", () => {
       "0022_workflow_step_result.sql",
       "0023_worker_permission_mode.sql",
       "0024_activities.sql",
-      "0025_activity_step_result.sql"
+      "0025_activity_step_result.sql",
+      "0026_app_settings.sql",
+      "0027_step_run_pending_completion.sql",
+      "0028_step_revision_signals.sql"
     ]);
 
     const postCounts = {
