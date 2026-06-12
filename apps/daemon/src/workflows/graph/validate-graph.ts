@@ -151,8 +151,8 @@ export function validateSchemaReferences(
       if (preds.length === 0) continue;
       let next: Set<string> | null = null;
       for (const p of preds) {
-        const incoming = new Set([...(available.get(p) ?? []), ...(produces.get(p) ?? [])]);
-        next = next === null ? incoming : new Set([...next].filter((k) => incoming.has(k)));
+        const incoming = new Set<string>([...(available.get(p) ?? []), ...(produces.get(p) ?? [])]);
+        next = next === null ? incoming : new Set<string>([...(next as Set<string>)].filter((k) => incoming.has(k)));
       }
       const cur = available.get(node.id)!;
       if (next && (next.size !== cur.size || [...next].some((k) => !cur.has(k)))) {
