@@ -53,7 +53,7 @@ export function reconcileWorkflowsOnBoot(db: Database, now: () => string): void 
 
     const driftRuns = db
       .prepare(
-        "SELECT wr.id AS run_id, wr.goal_id AS goal_id FROM workflow_runs wr LEFT JOIN workflow_step_runs ws ON ws.id = wr.current_step_run_id WHERE wr.status = 'active' AND (ws.id IS NULL OR ws.status IN ('passed','failed','skipped'))"
+        "SELECT wr.id AS run_id, wr.goal_id AS goal_id FROM workflow_runs wr LEFT JOIN workflow_step_runs ws ON ws.id = wr.current_step_run_id WHERE wr.status = 'active' AND (wr.current_node_kind IS NULL OR wr.current_node_kind <> 'gate') AND (ws.id IS NULL OR ws.status IN ('passed','failed','skipped'))"
       )
       .all() as DriftRunRow[];
 

@@ -152,6 +152,33 @@ describe("reconcileWorkflowsOnBoot", () => {
     expect(act?.source_kind).toBe("step_confirmation_pending");
   });
 
+  it("does not flag a run parked on a gate as drift", () => {
+    const db = setup();
+    seedGoal(db);
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, '[]', '[]', ?, ?)"
+    ).run(NOW, NOW);
+    const runId = "run-gate";
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES (?, 'goal-1', 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)"
+    ).run(runId, NOW);
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-1', 'goal-1', ?, 'intake', 0, 1, 'passed', '[]', '[]', NULL, ?, ?, 'fp-gate')"
+    ).run(runId, NOW, NOW);
+    // Park the run on a gate: cursor points to a gate node, not a step run
+    db.prepare(
+      "UPDATE workflow_runs SET current_step_run_id=NULL, current_node_id='gate', current_node_kind='gate' WHERE id=?"
+    ).run(runId);
+
+    reconcileWorkflowsOnBoot(db, () => NOW);
+
+    const after = db
+      .prepare("SELECT status, blocked_reason FROM workflow_runs WHERE id=?")
+      .get(runId) as { status: string; blocked_reason: string | null };
+    expect(after.status).toBe("active");
+    expect(after.blocked_reason).toBeNull();
+  });
+
   it("repairs active-run step drift by blocking the run and writing blocked event", () => {
     const db = setup();
     seedGoal(db, "goal-1");
