@@ -137,7 +137,10 @@ const run = {
   currentStepRunId: "step-run-1",
   startedAt: now,
   finishedAt: null,
-  blockedReason: null
+  blockedReason: null,
+  currentNodeId: null,
+  currentNodeKind: null,
+  traversalSeq: 0
 };
 
 const stepRun = {
