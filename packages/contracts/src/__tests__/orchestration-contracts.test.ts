@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  Activity,
+  ActivityStatus,
+  ActivitySourceKind,
+  ActivityWorkCategory,
+  ActivityConfidence,
+  ProviderRecoveryCheckpoint,
+  ProviderRecoverySwitchRequest,
   AcceptRecommendationResponse,
   AssociateTaskSessionRequest,
   AssociateTaskSessionResponse,
@@ -948,5 +955,78 @@ describe("SubmitWorkerAnswersRequest", () => {
   });
   it("rejects empty answers", () => {
     expect(() => SubmitWorkerAnswersRequest.parse({ answers: [] })).toThrow();
+  });
+});
+
+describe("ProviderRecovery contracts", () => {
+  const activityFixture = {
+    id: "act-1",
+    goalId: "goal-1",
+    workflowRunId: "run-1",
+    stepRunId: "step-1",
+    agentSessionId: "session-1",
+    turnOrdinal: 0,
+    status: "paused_for_input" as ActivityStatus,
+    currentText: "Waiting for provider recovery",
+    finalSummary: null,
+    sourceKind: "step_started" as ActivitySourceKind,
+    workCategory: null as ActivityWorkCategory | null,
+    confidence: null as ActivityConfidence | null,
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
+  };
+
+  it("parses a ProviderRecoveryCheckpoint with selectable and disabled choices", () => {
+    const recovery = ProviderRecoveryCheckpoint.parse({
+      id: "recovery-1",
+      mode: "choose",
+      failureCode: "session_limit",
+      message: "Claude Code session limit reached",
+      currentSessionId: "session-1",
+      currentAdapterId: "claude-code",
+      currentProviderName: "Claude Code",
+      resetTimeText: "4:20am (America/New_York)",
+      resetAt: "2026-06-12T08:20:00.000Z",
+      timezone: "America/New_York",
+      detectedAt: "2026-06-12T05:00:00.000Z",
+      retryOutputSeq: null,
+      retryKind: "preserved_session",
+      replacementSessionId: null,
+      replacementOutputSeq: null,
+      pendingGuidance: [],
+      lastError: null,
+      choices: [
+        {
+          adapterId: "codex",
+          displayName: "Codex",
+          modelId: "gpt-5.4-mini",
+          enabled: true,
+          reason: null,
+        },
+        {
+          adapterId: "antigravity",
+          displayName: "Antigravity",
+          modelId: null,
+          enabled: false,
+          reason: "not configured for this step",
+        },
+      ],
+    });
+    expect(recovery.mode).toBe("choose");
+
+    expect(Activity.parse({
+      ...activityFixture,
+      sourceKind: "provider_recovery_pending",
+      providerRecovery: recovery,
+    })).toBeDefined();
+
+    expect(ProviderRecoverySwitchRequest.parse({
+      checkpointId: "recovery-1",
+      adapterId: "codex",
+    })).toEqual({
+      checkpointId: "recovery-1",
+      adapterId: "codex",
+    });
   });
 });

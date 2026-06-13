@@ -80,7 +80,8 @@ describe("runMigrations", () => {
       "0026_app_settings.sql",
       "0027_step_run_pending_completion.sql",
       "0028_step_revision_signals.sql",
-      "0029_workflow_graph_cursor.sql"
+      "0029_workflow_graph_cursor.sql",
+      "0030_provider_recovery.sql"
     ]);
   });
 
@@ -200,7 +201,8 @@ describe("runMigrations", () => {
       "0026_app_settings.sql",
       "0027_step_run_pending_completion.sql",
       "0028_step_revision_signals.sql",
-      "0029_workflow_graph_cursor.sql"
+      "0029_workflow_graph_cursor.sql",
+      "0030_provider_recovery.sql"
     ]);
 
     const goalCount = (
@@ -330,6 +332,13 @@ describe("runMigrations", () => {
     expect(cols.map((c) => c.name)).toContain("pending_completion_json");
   });
 
+  it("adds pending_provider_recovery_json to workflow_step_runs", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+    const columns = db.prepare("PRAGMA table_info(workflow_step_runs)").all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toContain("pending_provider_recovery_json");
+  });
+
   it("creates step_revision_signals with a step_run index", () => {
     const db = freshDb();
     runMigrations(db, defaultMigrationsDir());
@@ -453,7 +462,8 @@ describe("session tables migration", () => {
       "0026_app_settings.sql",
       "0027_step_run_pending_completion.sql",
       "0028_step_revision_signals.sql",
-      "0029_workflow_graph_cursor.sql"
+      "0029_workflow_graph_cursor.sql",
+      "0030_provider_recovery.sql"
     ]);
 
     const tables = (
@@ -957,7 +967,8 @@ describe("migration 0010 workflows", () => {
       "0026_app_settings.sql",
       "0027_step_run_pending_completion.sql",
       "0028_step_revision_signals.sql",
-      "0029_workflow_graph_cursor.sql"
+      "0029_workflow_graph_cursor.sql",
+      "0030_provider_recovery.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1541,7 +1552,8 @@ describe("migration 0012 orchestration transport", () => {
       "0026_app_settings.sql",
       "0027_step_run_pending_completion.sql",
       "0028_step_revision_signals.sql",
-      "0029_workflow_graph_cursor.sql"
+      "0029_workflow_graph_cursor.sql",
+      "0030_provider_recovery.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

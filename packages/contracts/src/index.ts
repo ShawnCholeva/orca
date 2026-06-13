@@ -1045,6 +1045,69 @@ export const ActivityStatus = z.enum([
 ]);
 export type ActivityStatus = z.infer<typeof ActivityStatus>;
 
+export const ProviderTerminalFailureCode = z.enum([
+  "session_limit",
+  "usage_limit",
+  "authentication_required",
+  "provider_unavailable",
+]);
+export type ProviderTerminalFailureCode = z.infer<typeof ProviderTerminalFailureCode>;
+
+export const ProviderRecoveryMode = z.enum([
+  "choose",
+  "waiting",
+  "retrying",
+  "switching",
+]);
+export type ProviderRecoveryMode = z.infer<typeof ProviderRecoveryMode>;
+
+export const ProviderRecoveryRetryKind = z.enum([
+  "preserved_session",
+  "fresh_session",
+]);
+export type ProviderRecoveryRetryKind = z.infer<typeof ProviderRecoveryRetryKind>;
+
+export const ProviderRecoveryChoice = z.object({
+  adapterId: AdapterId,
+  displayName: z.string().min(1).max(120),
+  modelId: z.string().min(1).max(80).nullable(),
+  enabled: z.boolean(),
+  reason: z.string().max(512).nullable(),
+}).strict();
+export type ProviderRecoveryChoice = z.infer<typeof ProviderRecoveryChoice>;
+
+export const ProviderRecoveryCheckpoint = z.object({
+  id: z.string().min(1).max(100),
+  mode: ProviderRecoveryMode,
+  failureCode: ProviderTerminalFailureCode,
+  message: z.string().min(1).max(512),
+  currentSessionId: z.string().min(1),
+  currentAdapterId: AdapterId,
+  currentProviderName: z.string().min(1).max(120),
+  resetTimeText: z.string().max(160).nullable(),
+  resetAt: z.string().datetime().nullable(),
+  timezone: z.string().max(100).nullable(),
+  detectedAt: z.string().datetime(),
+  retryOutputSeq: z.number().int().nonnegative().nullable(),
+  retryKind: ProviderRecoveryRetryKind,
+  replacementSessionId: z.string().min(1).nullable(),
+  replacementOutputSeq: z.number().int().nonnegative().nullable(),
+  pendingGuidance: z.array(z.string().min(1).max(4000)).max(20),
+  lastError: z.string().max(512).nullable(),
+  choices: z.array(ProviderRecoveryChoice).max(8),
+}).strict();
+export type ProviderRecoveryCheckpoint = z.infer<typeof ProviderRecoveryCheckpoint>;
+
+export const ProviderRecoveryActionRequest = z.object({
+  checkpointId: z.string().min(1).max(100),
+}).strict();
+export type ProviderRecoveryActionRequest = z.infer<typeof ProviderRecoveryActionRequest>;
+
+export const ProviderRecoverySwitchRequest = ProviderRecoveryActionRequest.extend({
+  adapterId: AdapterId,
+}).strict();
+export type ProviderRecoverySwitchRequest = z.infer<typeof ProviderRecoverySwitchRequest>;
+
 export const ActivitySourceKind = z.enum([
   "step_started",
   "tool_use",
@@ -1053,7 +1116,8 @@ export const ActivitySourceKind = z.enum([
   "turn_completed",
   "weak_signal",
   "step_result",
-  "step_confirmation_pending"
+  "step_confirmation_pending",
+  "provider_recovery_pending",
 ]);
 export type ActivitySourceKind = z.infer<typeof ActivitySourceKind>;
 
@@ -1087,6 +1151,7 @@ export const Activity = z
     pendingQuestion: PendingQuestion.optional(),
     stepName: z.string().max(256).optional(),
     stepResult: WorkflowStepResult.optional(),
+    providerRecovery: ProviderRecoveryCheckpoint.optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
     completedAt: z.string().nullable()

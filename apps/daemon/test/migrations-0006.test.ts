@@ -164,6 +164,7 @@ describe('context migration 0006_context.sql', () => {
       '0027_step_run_pending_completion.sql',
       '0028_step_revision_signals.sql',
       '0029_workflow_graph_cursor.sql',
+      '0030_provider_recovery.sql',
     ]);
 
     const tables = (
@@ -254,6 +255,7 @@ describe('context migration 0006_context.sql', () => {
       '0027_step_run_pending_completion.sql',
       '0028_step_revision_signals.sql',
       '0029_workflow_graph_cursor.sql',
+      '0030_provider_recovery.sql',
     ]);
 
     const counts = {
