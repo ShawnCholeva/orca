@@ -1522,6 +1522,16 @@ export function createServer(
     return reply.code(202).send({ ok: true });
   });
 
+  server.post<{ Params: { id: string } }>("/v1/workflows/runs/:id/confirm-gate", async (request, reply) => {
+    await orchestratorService.confirmGate(
+      getDatabase(),
+      daemonContext.now,
+      request.params.id,
+      { bus: eventBus, idFactory: daemonContext.idFactory }
+    );
+    return reply.code(202).send({ ok: true });
+  });
+
   // ---- Workflow orchestrator routes ----
 
   registerOrchestratorRoutes(server, {

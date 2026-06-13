@@ -8,6 +8,7 @@ import type { OperatorDescriptor, OperatorSelection, WorkflowGraph } from "@orca
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import { OrchestratorService } from "./service.js";
 import { listGateDecisionsForRun } from "../gates/projection.js";
+import { setSupervisionMode } from "../../settings/store.js";
 import {
   cleanupHarness,
   NOW,
@@ -218,6 +219,7 @@ afterEach(() => {
 describe("OrchestratorService gate routing", () => {
   it("routes through a gate and approves to the terminal step", async () => {
     const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtValidation(db);
     const service = makeService(
       fakeGateBroker({ outcome: "approved", reason: "validation passed", inputsConsidered: ["validation"] })
@@ -242,6 +244,7 @@ describe("OrchestratorService gate routing", () => {
 
   it("emits a mark_run_complete recommendation when the terminal step finishes, without completing the run", async () => {
     const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtTerminalDoneStep(db);
     const service = makeService(
       fakeGateBroker({ outcome: "approved", reason: "n/a", inputsConsidered: [] })
@@ -267,6 +270,7 @@ describe("OrchestratorService gate routing", () => {
 
   it("routes a rejected gate backward to a fresh Execution attempt", async () => {
     const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtValidation(db);
     const service = makeService(
       fakeGateBroker({
@@ -292,5 +296,102 @@ describe("OrchestratorService gate routing", () => {
       selectedEdgeTo: "execution",
       issueRefs: ["i1"],
     });
+  });
+
+  it("supervised: records the gate decision but pauses before routing to the destination", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "supervised", NOW);
+    seedRunAtValidation(db);
+    const service = makeService(
+      fakeGateBroker({ outcome: "approved", reason: "validation passed", inputsConsidered: ["validation"] })
+    );
+
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    // Decision is recorded with the resolved destination edge.
+    const decisions = listGateDecisionsForRun(db, "run-1");
+    expect(decisions.at(-1)).toMatchObject({
+      nodeId: "gate",
+      outcome: "approved",
+      selectedEdgeTo: "done",
+      traversalSeq: 1,
+    });
+
+    // Cursor stays parked on the gate; destination step is NOT routed/spawned.
+    const run = db
+      .prepare(
+        "SELECT current_node_id, current_node_kind, current_step_run_id, pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'"
+      )
+      .get() as {
+      current_node_id: string;
+      current_node_kind: string;
+      current_step_run_id: string | null;
+      pending_gate_route_json: string | null;
+    };
+    expect(run.current_node_id).toBe("gate");
+    expect(run.current_node_kind).toBe("gate");
+    expect(run.current_step_run_id).toBeNull();
+
+    // Route stash is set for the Continue path.
+    expect(run.pending_gate_route_json).not.toBeNull();
+    const stash = JSON.parse(run.pending_gate_route_json!) as {
+      gateNodeId: string;
+      outcome: string;
+      destNodeId: string;
+      traversalSeq: number;
+    };
+    expect(stash).toMatchObject({
+      gateNodeId: "gate",
+      outcome: "approved",
+      destNodeId: "done",
+      traversalSeq: 1,
+    });
+
+    // No destination step_run row exists yet.
+    const doneRuns = db
+      .prepare("SELECT id FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = 'done'")
+      .all();
+    expect(doneRuns).toHaveLength(0);
+
+    // A paused confirmation activity is parked on the source step.
+    const activity = db
+      .prepare(
+        "SELECT status, source_kind FROM activities WHERE step_run_id = 'step-validation' AND status = 'paused_for_input' LIMIT 1"
+      )
+      .get() as { status: string; source_kind: string } | undefined;
+    expect(activity?.source_kind).toBe("step_confirmation_pending");
+  });
+
+  it("supervised: confirmGate consumes the stash and routes to the destination, idempotently", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "supervised", NOW);
+    seedRunAtValidation(db);
+    const service = makeService(
+      fakeGateBroker({ outcome: "approved", reason: "validation passed", inputsConsidered: ["validation"] })
+    );
+
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    // Continue.
+    await service.confirmGate(db, () => NOW, "run-1", { bus, idFactory });
+
+    // Cursor advanced to the terminal `done` step; stash cleared.
+    const run = db
+      .prepare("SELECT current_node_id, current_node_kind, pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { current_node_id: string; current_node_kind: string; pending_gate_route_json: string | null };
+    expect(run.current_node_id).toBe("done");
+    expect(run.current_node_kind).toBe("step");
+    expect(run.pending_gate_route_json).toBeNull();
+
+    const doneRuns = db
+      .prepare("SELECT attempt FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = 'done'")
+      .all() as Array<{ attempt: number }>;
+    expect(doneRuns).toHaveLength(1);
+
+    // Double-Continue is a no-op: no second destination attempt.
+    await service.confirmGate(db, () => NOW, "run-1", { bus, idFactory });
+    const doneRunsAfter = db
+      .prepare("SELECT attempt FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = 'done'")
+      .all() as Array<{ attempt: number }>;
+    expect(doneRunsAfter).toHaveLength(1);
   });
 });

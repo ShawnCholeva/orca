@@ -21,3 +21,8 @@ CREATE INDEX idx_workflow_gate_decisions_run
   ON workflow_gate_decisions(workflow_run_id, created_at DESC);
 CREATE UNIQUE INDEX idx_workflow_gate_decisions_seq
   ON workflow_gate_decisions(workflow_run_id, node_id, traversal_seq);
+
+-- Task 15: supervised-mode gate pause. Run-level stash of the deferred gate
+-- route ({ gateNodeId, outcome, destNodeId, traversalSeq, sourceStepRunId }),
+-- consumed exactly once by the Continue/confirm-gate path.
+ALTER TABLE workflow_runs ADD COLUMN pending_gate_route_json TEXT;

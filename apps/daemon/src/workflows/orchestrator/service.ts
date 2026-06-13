@@ -1201,6 +1201,14 @@ export class OrchestratorService {
     for (const p of paused) {
       await this.confirmStep(db, now, p.run_id, options);
     }
+
+    // Runs parked at a gate confirmation checkpoint also resume.
+    const pausedGates = db
+      .prepare("SELECT id AS run_id FROM workflow_runs WHERE pending_gate_route_json IS NOT NULL")
+      .all() as { run_id: string }[];
+    for (const p of pausedGates) {
+      await this.confirmGate(db, now, p.run_id, options);
+    }
   }
 
   /**
@@ -2136,8 +2144,11 @@ export class OrchestratorService {
           options
         );
         // A missing gate or failed evaluation blocks the run; do not recurse.
+        // A supervised gate pause leaves the run active but parked on the gate
+        // (current_step_run_id = NULL) awaiting Continue; do not recurse there
+        // either (the Continue/confirmGate path resumes routing).
         const after = getWorkflowRunById(db, run.id);
-        if (!after || after.status !== "active") {
+        if (!after || after.status !== "active" || !after.currentStepRunId) {
           return this.commitNoopLatestDecision(db, run.id, stepRun.id);
         }
       }
@@ -2361,20 +2372,7 @@ export class OrchestratorService {
       issueRefs: evaluation.decision.issueRefs,
     });
 
-    if (dest.kind === "gate") {
-      db.prepare(
-        "UPDATE workflow_runs SET current_step_run_id = NULL, current_node_id = ?, current_node_kind = 'gate' WHERE id = ?"
-      ).run(dest.nodeId, run.id);
-      await this.evaluateAndRouteGate(
-        db,
-        now,
-        { ...ctx, gateNodeId: dest.nodeId },
-        options
-      );
-      return;
-    }
-
-    if (dest.kind !== "step") {
+    if (dest.kind !== "step" && dest.kind !== "gate") {
       // resolveGateNext only ever classifies edges to step/gate nodes; a terminal
       // destination is unreachable. Guard defensively so the run never stalls.
       this.blockRun(
@@ -2382,6 +2380,131 @@ export class OrchestratorService {
         now,
         { run, stepRun, stepTpl, goal },
         `gate ${gateNode.id} resolved to an unroutable destination`,
+        options
+      );
+      return;
+    }
+
+    // Supervised mode: pause for user confirmation BEFORE routing to the
+    // destination. The decision is already recorded (and deduped by
+    // traversal_seq); we stash the deferred route and park a confirmation
+    // activity on the source step. The Continue action (confirmGate) consumes
+    // the stash and performs the deferred route exactly once.
+    if (getSupervisionMode(db) === "supervised") {
+      const summary = `Gate "${gateNode.name}" ${evaluation.decision.outcome}: ${evaluation.decision.reason}`;
+      const stagedEvents: DomainEvent[] = [];
+      db.transaction(() => {
+        db.prepare("UPDATE workflow_runs SET pending_gate_route_json = ? WHERE id = ?").run(
+          JSON.stringify({
+            gateNodeId: gateNode.id,
+            outcome: evaluation.decision.outcome,
+            destNodeId: dest.nodeId,
+            destKind: dest.kind,
+            traversalSeq: seq,
+            sourceStepRunId: stepRun.id,
+          }),
+          run.id
+        );
+        // Record an evaluate_gate decision so the caller has a trace to return
+        // while the run is parked awaiting Continue.
+        recordDecisionInTx(
+          db,
+          now,
+          {
+            goalId: goal.id,
+            workflowRunId: run.id,
+            stepRunId: stepRun.id,
+            decisionType: "evaluate_gate",
+            selectedAction: `gate:${evaluation.decision.outcome}:await_confirmation`,
+            reason: evaluation.decision.reason,
+            influencedBy: [
+              {
+                kind: "workflow_step",
+                id: stepTpl.id,
+                label: stepTpl.name,
+                effect: "satisfied",
+              },
+            ],
+            inputFingerprint: decisionFingerprint({
+              runId: run.id,
+              stepRunId: stepRun.id,
+              decisionType: "evaluate_gate",
+              payload: `${gateNode.id}:${seq}`,
+            }),
+          },
+          { idFactory: options.idFactory, stagedEvents }
+        );
+      })();
+      this.publish(options.bus, stagedEvents);
+      const activityCtx = { db, bus: options.bus ?? new EventBus() };
+      openOrUpdateLive(activityCtx, {
+        goalId: goal.id,
+        workflowRunId: run.id,
+        stepRunId: stepRun.id,
+        agentSessionId: null,
+        sourceKind: "step_started",
+        currentText: summary,
+        workCategory: null,
+      });
+      pauseForConfirmation(activityCtx, { stepRunId: stepRun.id, summary });
+      return;
+    }
+
+    await this.routeGateDestination(
+      db,
+      now,
+      { run, template, goal, sourceStepRunId: stepRun.id },
+      { kind: dest.kind, nodeId: dest.nodeId },
+      options
+    );
+  }
+
+  /**
+   * Performs the deferred destination route for an already-evaluated gate (the
+   * decision is recorded + deduped by traversal_seq). A gate destination moves
+   * the cursor and recurses into evaluateAndRouteGate; a step destination
+   * inserts a fresh attempt (its agent is selected/spawned by the caller's
+   * requestNextDecision recursion). Shared by the unsupervised inline path and
+   * the supervised Continue (confirmGate) path so routing lives in one place.
+   */
+  private async routeGateDestination(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+      sourceStepRunId: string;
+    },
+    dest: { kind: "step" | "gate"; nodeId: string },
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    const { run, template, goal, sourceStepRunId } = ctx;
+    const graph = effectiveGraph(template.graph, template.steps);
+
+    if (dest.kind === "gate") {
+      db.prepare(
+        "UPDATE workflow_runs SET current_step_run_id = NULL, current_node_id = ?, current_node_kind = 'gate' WHERE id = ?"
+      ).run(dest.nodeId, run.id);
+      // Re-read the source step so the recursion has a fresh ctx; the cursor
+      // remains parked on the new gate until that evaluation resolves.
+      const stepRun = readStepRun(db, sourceStepRunId);
+      const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+      if (!stepTpl) {
+        this.blockRun(
+          db,
+          now,
+          { run, stepRun, stepTpl: template.steps[0]!, goal },
+          `source step template not found: ${stepRun.step_template_id}`,
+          options
+        );
+        return;
+      }
+      const sourceStepOutput = this.readStepOutputAsRecord(db, run.id, stepRun.id);
+      await this.evaluateAndRouteGate(
+        db,
+        now,
+        { run, stepRun, stepTpl, template, goal, gateNodeId: dest.nodeId, sourceStepOutput },
         options
       );
       return;
@@ -2412,6 +2535,69 @@ export class OrchestratorService {
       }
     );
     this.publish(options.bus, stagedEvents);
+  }
+
+  /**
+   * User "Continue" action for a supervised gate decision held at a confirmation
+   * checkpoint. Reads + clears pending_gate_route_json, expires the confirmation
+   * activity, then performs the deferred route. Idempotent: a null/consumed stash
+   * is a no-op so a double-Continue cannot double-route. The gate is NOT
+   * re-evaluated — the decision is already recorded and deduped by traversal_seq.
+   */
+  async confirmGate(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run) return;
+    const stashRow = db
+      .prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id = ?")
+      .get(runId) as { pending_gate_route_json: string | null } | undefined;
+    if (!stashRow?.pending_gate_route_json) return; // idempotent no-op
+
+    let stash: {
+      gateNodeId: string;
+      outcome: string;
+      destNodeId: string;
+      destKind: "step" | "gate";
+      traversalSeq: number;
+      sourceStepRunId: string;
+    };
+    try {
+      stash = JSON.parse(stashRow.pending_gate_route_json);
+    } catch {
+      db.prepare("UPDATE workflow_runs SET pending_gate_route_json = NULL WHERE id = ?").run(runId);
+      return;
+    }
+
+    const template = getTemplateById(db, run.templateId);
+    if (!template) return;
+    const goal = readGoal(db, run.goalId);
+
+    // Clear the stash first so a racing Continue cannot double-route.
+    db.prepare("UPDATE workflow_runs SET pending_gate_route_json = NULL WHERE id = ?").run(runId);
+    expireConfirmation(
+      { db, bus: options.bus ?? new EventBus() },
+      { stepRunId: stash.sourceStepRunId }
+    );
+
+    await this.routeGateDestination(
+      db,
+      now,
+      { run, template, goal, sourceStepRunId: stash.sourceStepRunId },
+      { kind: stash.destKind, nodeId: stash.destNodeId },
+      options
+    );
+
+    // If the destination is a step, deterministically select/spawn its agent
+    // (mirrors the requestNextDecision recursion the unsupervised inline path
+    // relies on). A gate destination re-pauses inside routeGateDestination.
+    const after = getWorkflowRunById(db, runId);
+    if (after && after.status === "active" && after.currentStepRunId) {
+      await this.requestNextDecision(db, now, runId, options);
+    }
   }
 
   private blockRun(
