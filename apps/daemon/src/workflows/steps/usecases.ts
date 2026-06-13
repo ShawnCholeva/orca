@@ -457,3 +457,16 @@ export function retryStep(
     );
   })();
 }
+
+export function nextAttemptForStep(
+  db: Database.Database,
+  runId: string,
+  stepTemplateId: string
+): number {
+  const row = db
+    .prepare(
+      "SELECT MAX(attempt) AS max FROM workflow_step_runs WHERE workflow_run_id = ? AND step_template_id = ?"
+    )
+    .get(runId, stepTemplateId) as { max: number | null };
+  return (row.max ?? 0) + 1;
+}

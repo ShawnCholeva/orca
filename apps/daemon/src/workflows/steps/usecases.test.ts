@@ -26,6 +26,7 @@ import {
   createInitialStep,
   failStep,
   markStepBlocked,
+  nextAttemptForStep,
   recordExitCriteriaSatisfaction,
   retryStep,
   stepFingerprint,
@@ -406,5 +407,31 @@ describe("workflow step usecases", () => {
       .get(run.id) as { current_node_id: string | null; current_node_kind: string | null };
     expect(row.current_node_kind).toBe("step");
     expect(row.current_node_id).toBeTruthy();
+  });
+
+  it("computes the next attempt as max(existing) + 1 for a revisited step", () => {
+    const { db, runCtx } = setup();
+    seedGoal(db, "goal-1");
+    seedEngineeringTemplate(db, () => NOW);
+    const run = startWorkflowRun(runCtx, { goalId: "goal-1", templateId: ENGINEERING_ID });
+    const firstStep = getStep(db, run.currentStepRunId!)!;
+    const stepTemplateId = firstStep.step_template_id;
+
+    // Insert another attempt for the same step
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES (?, ?, ?, ?, ?, ?, 'active', '[]', '[]', NULL, ?, NULL, ?)"
+    ).run(
+      "step-attempt-2",
+      "goal-1",
+      run.id,
+      stepTemplateId,
+      firstStep.ordinal,
+      2,
+      NOW,
+      stepFingerprint(run.id, stepTemplateId, 2)
+    );
+
+    const nextAttempt = nextAttemptForStep(db, run.id, stepTemplateId);
+    expect(nextAttempt).toBe(3);
   });
 });
