@@ -298,7 +298,7 @@ export function recordExitCriteriaSatisfaction(
 export type AdvanceResult =
   | { kind: "step"; stepRun: WorkflowStepRunT }
   | { kind: "gate"; nodeId: string }
-  | { kind: "completed" };
+  | { kind: "completed-terminal"; stepRun: WorkflowStepRunT };
 
 function graphStepTemplateId(graph: WorkflowGraph, nodeId: string): string {
   const node = graph.nodes.find((n) => n.id === nodeId);
@@ -363,20 +363,11 @@ export function advanceToNextStepOrGate(
     const dest = resolveStepNext(graph, current.stepTemplateId);
 
     if (dest.kind === "terminal") {
-      db.prepare(
-        "UPDATE workflow_runs SET status = 'completed', finished_at = ?, current_step_run_id = NULL, current_node_id = NULL, current_node_kind = NULL, blocked_reason = NULL WHERE id = ?"
-      ).run(timestamp, current.workflowRunId);
-      db.prepare(
-        "UPDATE goals SET active_workflow_run_id = NULL WHERE id = ? AND active_workflow_run_id = ?"
-      ).run(current.goalId, current.workflowRunId);
-      emitEvent(
-        db,
-        "workflow.run.completed",
-        { goalId: current.goalId, workflowRunId: current.workflowRunId, status: "completed" },
-        timestamp,
-        eventOptions
-      );
-      return { kind: "completed" };
+      // A finished terminal step does NOT auto-complete the run. The run stays
+      // active with the cursor parked on the terminal step so the orchestrator can
+      // yield to the user (mark_run_complete decision + complete_workflow_run
+      // recommendation); completion happens only on user approval.
+      return { kind: "completed-terminal", stepRun: readStep(db, currentStepRunId) };
     }
 
     if (dest.kind === "gate") {

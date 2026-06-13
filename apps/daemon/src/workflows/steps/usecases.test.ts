@@ -12,6 +12,7 @@ import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
 import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import {
+  completeWorkflowRun,
   markWorkflowRunBlocked,
   resumeWorkflowRun,
   startWorkflowRun,
@@ -170,6 +171,7 @@ describe("workflow step usecases", () => {
     expect(run.currentStepRunId).toBeTruthy();
 
     let currentRun = run;
+    let terminalStepRunId: string | null = null;
     while (currentRun.currentStepRunId) {
       const step = getStep(db, currentRun.currentStepRunId);
       expect(step).toBeTruthy();
@@ -177,12 +179,23 @@ describe("workflow step usecases", () => {
       recordExitCriteriaSatisfaction(db, () => NOW, step!.id, outstanding);
       const next = advanceToNextStep(db, () => NOW, step!.id);
       currentRun = getWorkflowRunById(db, run.id)!;
-      if (next === null) break;
+      // The terminal step yields (next === null) without completing the run.
+      if (next === null) {
+        terminalStepRunId = step!.id;
+        break;
+      }
     }
+
+    // Terminal step finished: the run stays active until the user approves completion.
+    const yieldedRun = getWorkflowRunById(db, run.id);
+    expect(yieldedRun?.status).toBe("active");
+    expect(yieldedRun?.currentStepRunId).toBe(terminalStepRunId);
+
+    // Simulate the user approving the complete_workflow_run recommendation.
+    completeWorkflowRun(runCtx, run.id);
 
     const completedRun = getWorkflowRunById(db, run.id);
     expect(completedRun?.status).toBe("completed");
-    expect(completedRun?.currentStepRunId).toBeNull();
     expect(completedRun?.finishedAt).toBe(NOW);
     const goalRow = db
       .prepare("SELECT active_workflow_run_id FROM goals WHERE id = ?")
@@ -531,7 +544,7 @@ describe("graph-routed step advancement", () => {
     expect(result).toEqual({ kind: "gate", nodeId: "quality-gate" });
   });
 
-  it("completes the run when advancing from the terminal step", () => {
+  it("does not complete the run on a terminal step; returns completed-terminal", () => {
     const { db, runCtx } = setup();
     const run = seedRunWithGraph(db, runCtx);
     // Advance analysis -> execution
@@ -540,11 +553,22 @@ describe("graph-routed step advancement", () => {
     // Advance execution -> validation
     const step3 = advanceToNextStep(db, () => NOW, step2.id)!;
     expect(step3.stepTemplateId).toBe("validation");
-    // Advance validation -> terminal
-    const next = advanceToNextStep(db, () => NOW, step3.id);
-    expect(next).toBeNull();
+    // Advance validation -> terminal: the run yields for user approval, it does NOT auto-complete.
+    const result = advanceToNextStepOrGate(db, () => NOW, step3.id);
+    expect(result.kind).toBe("completed-terminal");
     const after = db.prepare("SELECT status FROM workflow_runs WHERE id = ?").get(run.id) as { status: string };
-    expect(after.status).toBe("completed");
+    expect(after.status).toBe("active");
+  });
+
+  it("legacy advanceToNextStep maps a terminal step to null without completing the run", () => {
+    const { db, runCtx } = setup();
+    const run = seedRunWithGraph(db, runCtx);
+    const step2 = advanceToNextStep(db, () => NOW, run.currentStepRunId!)!;
+    const step3 = advanceToNextStep(db, () => NOW, step2.id)!;
+    // Advance validation -> terminal via the legacy wrapper.
+    expect(advanceToNextStep(db, () => NOW, step3.id)).toBeNull();
+    const after = db.prepare("SELECT status FROM workflow_runs WHERE id = ?").get(run.id) as { status: string };
+    expect(after.status).toBe("active");
   });
 
   it("gate sentinel parks cursor on gate node", () => {

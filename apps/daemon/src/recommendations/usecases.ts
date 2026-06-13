@@ -416,11 +416,32 @@ function applyWorkflowAcceptSideEffectsInTx(
     }
     case 'complete_workflow_run': {
       assertFinalStepReadyForCompletion(db, action.workflowRunId, action.workflowStepRunId);
+      // Marks the terminal step passed; the terminal step yields rather than
+      // auto-completing the run, so the user-approved completion happens here.
       advanceToNextStep(db, () => now, action.workflowStepRunId, {
         idFactory: idFn,
         stagedEvents,
         activityCtx: { db, bus, now: () => now, idFactory: idFn },
       });
+      db.prepare(
+        "UPDATE workflow_runs SET status = 'completed', finished_at = ?, current_step_run_id = NULL, current_node_id = NULL, current_node_kind = NULL WHERE id = ?"
+      ).run(now, action.workflowRunId);
+      db.prepare(
+        'UPDATE goals SET active_workflow_run_id = NULL WHERE id = ? AND active_workflow_run_id = ?'
+      ).run(rec.goalId, action.workflowRunId);
+      stagedEvents.push(
+        appendWorkflowEvent(
+          db,
+          'workflow.run.completed',
+          {
+            goalId: rec.goalId,
+            workflowRunId: action.workflowRunId,
+            status: 'completed',
+          },
+          now,
+          idFn
+        )
+      );
       return;
     }
     case 'mark_artifact_satisfied': {

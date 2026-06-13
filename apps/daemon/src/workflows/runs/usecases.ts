@@ -245,7 +245,7 @@ export function completeWorkflowRun(
     assertTransition(run, ["active"], "complete");
     ctx.db
       .prepare(
-        "UPDATE workflow_runs SET status = 'completed', finished_at = ? WHERE id = ?"
+        "UPDATE workflow_runs SET status = 'completed', finished_at = ?, current_node_id = NULL, current_node_kind = NULL WHERE id = ?"
       )
       .run(now, runId);
     ctx.db

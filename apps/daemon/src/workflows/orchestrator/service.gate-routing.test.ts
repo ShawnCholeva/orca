@@ -187,6 +187,27 @@ function seedRunAtValidation(db: Database.Database) {
   ).run(JSON.stringify({ result: "all good", _completion: {} }), NOW);
 }
 
+/** Seed a run positioned at the terminal `done` step holding a step_output artifact. */
+function seedRunAtTerminalDoneStep(db: Database.Database) {
+  const steps = [step("analysis", 0), step("execution", 1), step("validation", 2), step("done", 3)];
+  db.prepare(
+    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('goal-1', 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, 'orca/anthropic', 'claude-sonnet-4-6')"
+  ).run(NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, graph_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', 'desc', 1, 1, 1, ?, '[]', ?, ?, ?)"
+  ).run(JSON.stringify(steps), JSON.stringify(gateGraph()), NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, traversal_seq, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-done', 'done', 'step', 0, NULL, ?, NULL)"
+  ).run(NOW);
+  db.prepare(
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-done', 'goal-1', 'run-1', 'done', 3, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-done', 'agent:claude-code', NULL, 'claude-haiku-4-5', ?)"
+  ).run(NOW, NOW);
+  // step_output artifact on the active terminal step → branch (1) routes to commitAdvanceOrComplete.
+  db.prepare(
+    "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-done', 'goal-1', 'run-1', 'step-done', 'step_output', 'Done', ?, 'orchestrator', NULL, NULL, NULL, ?)"
+  ).run(JSON.stringify({ result: "complete", _completion: {} }), NOW);
+}
+
 afterEach(() => {
   closeDatabase();
   resetWorkflowEventPreparedStatements();
@@ -217,6 +238,31 @@ describe("OrchestratorService gate routing", () => {
       .get() as { current_node_id: string; current_node_kind: string };
     expect(run.current_node_id).toBe("done");
     expect(run.current_node_kind).toBe("step");
+  });
+
+  it("emits a mark_run_complete recommendation when the terminal step finishes, without completing the run", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedRunAtTerminalDoneStep(db);
+    const service = makeService(
+      fakeGateBroker({ outcome: "approved", reason: "n/a", inputsConsidered: [] })
+    );
+
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    const rec = db
+      .prepare(
+        "SELECT type FROM recommendations WHERE goal_id = ? ORDER BY rowid DESC LIMIT 1"
+      )
+      .get("goal-1") as { type: string } | undefined;
+    expect(rec?.type).toBe("complete_workflow_run");
+
+    const runAfter = db
+      .prepare("SELECT status, current_node_id, current_node_kind FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { status: string; current_node_id: string | null; current_node_kind: string | null };
+    // Not completed until the user approves the recommendation; cursor still parked on the terminal step.
+    expect(runAfter.status).toBe("active");
+    expect(runAfter.current_node_id).toBe("done");
+    expect(runAfter.current_node_kind).toBe("step");
   });
 
   it("routes a rejected gate backward to a fresh Execution attempt", async () => {
