@@ -24,6 +24,7 @@ interface TailChunkRow {
 export interface SessionOutputStore {
   appendChunk(sessionId: string, data: Buffer): { seq: number; byteOffset: number };
   readTail(sessionId: string): SessionOutputSnapshot;
+  onChunkAppended?(listener: (sessionId: string) => void): () => void;
 }
 
 export interface SessionOutputStoreOptions {
@@ -98,7 +99,10 @@ export function createSessionOutputStore(
 ): SessionOutputStore {
   const stmts = ensureStmts(db);
   const capBytes = options?.tailBytes ?? DEFAULT_TAIL_BYTES;
-  const onChunkAppended = options?.onChunkAppended;
+  const chunkListeners = new Set<(sessionId: string) => void>();
+  if (options?.onChunkAppended) {
+    chunkListeners.add(options.onChunkAppended);
+  }
 
   return {
     appendChunk(sessionId: string, data: Buffer): { seq: number; byteOffset: number } {
@@ -151,7 +155,9 @@ export function createSessionOutputStore(
         stmts.updateCounters.run(outputSeq, outputBytesKept, outputOffsetFirst, sessionId);
         return { seq, byteOffset };
       })();
-      onChunkAppended?.(sessionId);
+      for (const listener of chunkListeners) {
+        listener(sessionId);
+      }
       return result;
     },
 
@@ -180,6 +186,11 @@ export function createSessionOutputStore(
           dataBase64: row.data.toString('base64'),
         })),
       });
+    },
+
+    onChunkAppended(listener: (sessionId: string) => void): () => void {
+      chunkListeners.add(listener);
+      return () => chunkListeners.delete(listener);
     },
   };
 }

@@ -2,8 +2,14 @@ import type { Database } from "better-sqlite3";
 
 import type { StepResultScoringProposal } from "@orca/contracts";
 
+import { ProviderRecoveryCheckpoint } from "@orca/contracts";
+
 import { EventBus } from "../events.js";
-import { openOrUpdateLive, pauseForConfirmation } from "../activities/store.js";
+import {
+  openOrUpdateLive,
+  pauseForConfirmation,
+  pauseForProviderRecovery,
+} from "../activities/store.js";
 import { appendWorkflowEvent } from "./events.js";
 import { summarizeScoring } from "./orchestrator/scoring-summary.js";
 
@@ -111,6 +117,65 @@ export function reconcileWorkflowsOnBoot(db: Database, now: () => string): void 
         }
       );
       pauseForConfirmation({ db, bus }, { stepRunId: h.step_run_id, summary });
+    }
+  }
+
+  // Re-assert provider-limit recovery checkpoints: a step paused for recovery
+  // must surface its waiting card again on boot so the operator can act. The
+  // worker reattach/missing decision is handled separately by resumeActiveRuns;
+  // here we only ensure the activity exists in the paused recovery state.
+  const recovering = db
+    .prepare(
+      `SELECT id AS step_run_id, workflow_run_id, goal_id,
+              pending_provider_recovery_json AS recovery
+       FROM workflow_step_runs
+       WHERE pending_provider_recovery_json IS NOT NULL AND finished_at IS NULL`
+    )
+    .all() as {
+    step_run_id: string;
+    workflow_run_id: string;
+    goal_id: string;
+    recovery: string;
+  }[];
+
+  if (recovering.length > 0) {
+    const bus = new EventBus();
+    for (const r of recovering) {
+      let checkpoint: ProviderRecoveryCheckpoint;
+      try {
+        checkpoint = ProviderRecoveryCheckpoint.parse(JSON.parse(r.recovery));
+      } catch (err) {
+        // Malformed/unparseable checkpoint must not crash boot. Clear only the
+        // bad JSON and emit a bounded diagnostic.
+        db.prepare(
+          "UPDATE workflow_step_runs SET pending_provider_recovery_json = NULL WHERE id = ?"
+        ).run(r.step_run_id);
+        console.error(
+          "[reconcile] dropped malformed provider recovery checkpoint",
+          r.step_run_id,
+          (err instanceof Error ? err.message : String(err)).slice(0, 256)
+        );
+        continue;
+      }
+
+      const summary = checkpoint.resetTimeText
+        ? `${checkpoint.currentProviderName} reached its session limit. Available again at ${checkpoint.resetTimeText}.`
+        : `${checkpoint.currentProviderName} reached its session limit. Reset time unavailable.`;
+      // Recreate (or reuse) the live row tied to the preserved session, then
+      // pause it for recovery. Idempotent on a re-run.
+      openOrUpdateLive(
+        { db, bus },
+        {
+          goalId: r.goal_id,
+          workflowRunId: r.workflow_run_id,
+          stepRunId: r.step_run_id,
+          agentSessionId: checkpoint.currentSessionId,
+          sourceKind: "step_started",
+          currentText: summary,
+          workCategory: null,
+        }
+      );
+      pauseForProviderRecovery({ db, bus }, { stepRunId: r.step_run_id, summary });
     }
   }
 }

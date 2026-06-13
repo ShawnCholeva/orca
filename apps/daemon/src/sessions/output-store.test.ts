@@ -157,6 +157,21 @@ describe('SessionOutputStore', () => {
     expect(after).toBe(before);
   });
 
+  it('notifies listeners registered after the store is created', () => {
+    const db = freshDb();
+    const sessionId = 's-listener';
+    seedSession(db, sessionId);
+    const appended: string[] = [];
+    const store = createSessionOutputStore(db, { tailBytes: 1024 });
+
+    const unsubscribe = store.onChunkAppended!((id) => appended.push(id));
+    store.appendChunk(sessionId, Buffer.from('data'));
+    unsubscribe();
+    store.appendChunk(sessionId, Buffer.from('more'));
+
+    expect(appended).toEqual([sessionId]);
+  });
+
   it('returns an empty snapshot for unknown sessions', () => {
     const db = freshDb();
     const store = createSessionOutputStore(db, { tailBytes: 1024 });

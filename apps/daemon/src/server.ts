@@ -62,7 +62,10 @@ import {
   CheckSystemReadinessResponse,
   SubmitPermissionDecisionRequest,
   UpdateWorkerPermissionModeRequest,
-  PutSettingsRequest
+  PutSettingsRequest,
+  ProviderRecoveryActionRequest,
+  ProviderRecoverySwitchRequest,
+  ProviderRecoveryCheckpoint
 } from '@orca/contracts';
 import type { Config } from './config.js';
 import { getDatabase } from './db.js';
@@ -163,7 +166,15 @@ import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
 import { registerGoalBootstrapRoute } from './goals/bootstrap-route.js';
 import { startWorkflowRun } from './workflows/runs/usecases.js';
-import { OrchestratorService } from './workflows/orchestrator/service.js';
+import {
+  OrchestratorService,
+  OrchestratorProviderRecoveryNotFoundError,
+  OrchestratorProviderRecoveryInvalidTransitionError,
+} from './workflows/orchestrator/service.js';
+import {
+  openOrUpdateLive as openOrUpdateLiveActivity,
+  pauseForProviderRecovery as pauseForProviderRecoveryActivity,
+} from './activities/store.js';
 import { resumeActiveRuns } from './workflows/orchestrator/resume.js';
 import { registerWorkflowTemplateRoutes } from './workflows/templates/routes.js';
 import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
@@ -258,23 +269,23 @@ export function createServer(
     deps?.sessionOutputStore ??
     createSessionOutputStore(db, {
       tailBytes: config.sessionOutputTailBytes,
-      onChunkAppended: (sessionId) => {
-        if (!_orchestratorServiceRef.current) return;
-        // Best-effort: look up goalId from the session row.
-        const row = db
-          .prepare("SELECT goal_id FROM sessions WHERE id = ?")
-          .get(sessionId) as { goal_id: string } | undefined;
-        if (!row) return;
-        _orchestratorServiceRef.current
-          .onSessionOutputChunk(
-            db,
-            daemonContext.now,
-            { sessionId, goalId: row.goal_id },
-            { bus: eventBus, idFactory: daemonContext.idFactory }
-          )
-          .catch((err) => console.error("[workflow] onSessionOutputChunk error", err));
-      },
     });
+  const unsubscribeFromSessionOutput = sessionOutputStore.onChunkAppended?.((sessionId) => {
+    if (!_orchestratorServiceRef.current) return;
+    // Best-effort: look up goalId from the session row.
+    const row = db
+      .prepare("SELECT goal_id FROM sessions WHERE id = ?")
+      .get(sessionId) as { goal_id: string } | undefined;
+    if (!row) return;
+    _orchestratorServiceRef.current
+      .onSessionOutputChunk(
+        db,
+        daemonContext.now,
+        { sessionId, goalId: row.goal_id },
+        { bus: eventBus, idFactory: daemonContext.idFactory }
+      )
+      .catch((err) => console.error("[workflow] onSessionOutputChunk error", err));
+  });
   const sessionRuntime =
     deps?.sessionRuntime ??
     new SessionRuntime(new NodePtyManager(), config.sessionStopGraceMs, config.sessionWsBufferLimitBytes);
@@ -294,6 +305,9 @@ export function createServer(
 
   server.register(cors, { origin: CORS_ORIGINS });
   server.register(websocket);
+  server.addHook('onClose', async () => {
+    unsubscribeFromSessionOutput?.();
+  });
 
   server.addHook('onRequest', async (request, reply) => {
     const pathname = request.url.split('?')[0];
@@ -663,7 +677,12 @@ export function createServer(
     (sessionId, text) => workerSessions.deliver(sessionId, text),
     // workerTerminate
     (sessionId) => workerSessions.terminate(sessionId),
-    shadowSessions
+    shadowSessions,
+    // recoveryPromptComposer: keep the constructor default.
+    undefined,
+    // workerWait: drives a provider's terminal "wait for limit reset" interaction
+    // against the worker's live tmux session (preserved-session Wait/Retry).
+    (sessionId, adapterId) => workerSessions.waitForProviderReset(sessionId, adapterId)
   );
   // Wire the late-binding ref so the onChunkAppended callback is live.
   _orchestratorServiceRef.current = orchestratorService;
@@ -677,15 +696,17 @@ export function createServer(
       listActiveRuns: async () => {
         const rows = db.prepare(`
           SELECT wr.id AS run_id, wr.goal_id, wr.current_step_run_id,
-                 (SELECT s.id FROM sessions s WHERE s.workflow_step_run_id = wr.current_step_run_id AND s.status IN ('running','starting') ORDER BY s.created_at DESC LIMIT 1) AS session_id
+                 (SELECT s.id FROM sessions s WHERE s.workflow_step_run_id = wr.current_step_run_id AND s.status IN ('running','starting') ORDER BY s.created_at DESC LIMIT 1) AS session_id,
+                 (SELECT ws.pending_provider_recovery_json IS NOT NULL FROM workflow_step_runs ws WHERE ws.id = wr.current_step_run_id) AS provider_recovery_pending
           FROM workflow_runs wr
           WHERE wr.status = 'active'
-        `).all() as Array<{ run_id: string; goal_id: string; current_step_run_id: string; session_id: string | null }>;
+        `).all() as Array<{ run_id: string; goal_id: string; current_step_run_id: string; session_id: string | null; provider_recovery_pending: number | null }>;
         return rows.map((r) => ({
           runId: r.run_id,
           goalId: r.goal_id,
           currentStepRunId: r.current_step_run_id,
           sessionId: r.session_id,
+          providerRecoveryPending: r.provider_recovery_pending === 1,
         }));
       },
       isSessionAlive: async (id) => {
@@ -725,6 +746,48 @@ export function createServer(
           stepRunId,
           { bus: eventBus, idFactory: daemonContext.idFactory }
         );
+      },
+      markRecoverySessionMissing: async ({ stepRunId, sessionId }) => {
+        // A run paused for provider recovery lost its native worker across the
+        // restart. Never respawn (that discards the checkpoint). Flip the
+        // checkpoint to a fresh-session restart and republish the recovery card
+        // so the current-provider action restarts the step in a new session;
+        // alternative switch choices are preserved unchanged.
+        const stepRow = db
+          .prepare("SELECT goal_id, workflow_run_id, pending_provider_recovery_json AS recovery FROM workflow_step_runs WHERE id = ?")
+          .get(stepRunId) as { goal_id: string; workflow_run_id: string; recovery: string | null } | undefined;
+        if (!stepRow?.recovery) return;
+        let checkpoint: ProviderRecoveryCheckpoint;
+        try {
+          checkpoint = ProviderRecoveryCheckpoint.parse(JSON.parse(stepRow.recovery));
+        } catch (err) {
+          console.error("[resume] malformed recovery checkpoint for missing worker", stepRunId, err);
+          return;
+        }
+        const next = ProviderRecoveryCheckpoint.parse({
+          ...checkpoint,
+          mode: "choose",
+          retryKind: "fresh_session",
+          lastError: null,
+        });
+        db.prepare(
+          "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = ?"
+        ).run(JSON.stringify(next), stepRunId);
+
+        const summary = `${checkpoint.currentProviderName} reached its session limit and its native session did not survive the restart. Retrying restarts this step in a fresh ${checkpoint.currentProviderName} session, or switch to another provider.`;
+        openOrUpdateLiveActivity(
+          { db, bus: eventBus },
+          {
+            goalId: stepRow.goal_id,
+            workflowRunId: stepRow.workflow_run_id,
+            stepRunId,
+            agentSessionId: sessionId,
+            sourceKind: "step_started",
+            currentText: summary,
+            workCategory: null,
+          }
+        );
+        pauseForProviderRecoveryActivity({ db, bus: eventBus }, { stepRunId, summary });
       },
     }).catch((err) => console.error("[resume] boot resume failed", err));
   }
@@ -1531,6 +1594,118 @@ export function createServer(
     );
     return reply.code(202).send({ ok: true });
   });
+
+  // ---- Provider-limit recovery action routes ----
+  // Routes validate the body + map domain errors; persistence, transitions, and
+  // idempotency live inside the OrchestratorService methods (Task 5).
+
+  function mapProviderRecoveryError(
+    reply: import('fastify').FastifyReply,
+    error: unknown
+  ): { error: unknown } {
+    if (error instanceof OrchestratorProviderRecoveryNotFoundError) {
+      reply.status(404);
+      return apiError(error.code, error.message);
+    }
+    if (error instanceof OrchestratorProviderRecoveryInvalidTransitionError) {
+      reply.status(409);
+      return apiError(error.code, error.message);
+    }
+    throw error;
+  }
+
+  server.post<{ Params: { id: string } }>(
+    "/v1/workflows/runs/:id/provider-recovery/wait",
+    async (request, reply) => {
+      const parsed = ProviderRecoveryActionRequest.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return apiError("validation_failed", "invalid provider recovery request");
+      }
+      try {
+        await orchestratorService.waitForProvider(
+          getDatabase(),
+          daemonContext.now,
+          request.params.id,
+          parsed.data.checkpointId,
+          { bus: eventBus, idFactory: daemonContext.idFactory }
+        );
+        return reply.code(202).send({ ok: true });
+      } catch (error) {
+        return mapProviderRecoveryError(reply, error);
+      }
+    }
+  );
+
+  server.post<{ Params: { id: string } }>(
+    "/v1/workflows/runs/:id/provider-recovery/retry",
+    async (request, reply) => {
+      const parsed = ProviderRecoveryActionRequest.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return apiError("validation_failed", "invalid provider recovery request");
+      }
+      try {
+        await orchestratorService.retryProvider(
+          getDatabase(),
+          daemonContext.now,
+          request.params.id,
+          parsed.data.checkpointId,
+          { bus: eventBus, idFactory: daemonContext.idFactory }
+        );
+        return reply.code(202).send({ ok: true });
+      } catch (error) {
+        return mapProviderRecoveryError(reply, error);
+      }
+    }
+  );
+
+  server.post<{ Params: { id: string } }>(
+    "/v1/workflows/runs/:id/provider-recovery/refresh",
+    async (request, reply) => {
+      const parsed = ProviderRecoveryActionRequest.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return apiError("validation_failed", "invalid provider recovery request");
+      }
+      try {
+        await orchestratorService.refreshProviderRecovery(
+          getDatabase(),
+          daemonContext.now,
+          request.params.id,
+          parsed.data.checkpointId,
+          { bus: eventBus, idFactory: daemonContext.idFactory }
+        );
+        return reply.code(202).send({ ok: true });
+      } catch (error) {
+        return mapProviderRecoveryError(reply, error);
+      }
+    }
+  );
+
+  server.post<{ Params: { id: string } }>(
+    "/v1/workflows/runs/:id/provider-recovery/switch",
+    async (request, reply) => {
+      const parsed = ProviderRecoverySwitchRequest.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return apiError("validation_failed", "invalid provider recovery switch request");
+      }
+      try {
+        await orchestratorService.switchProvider(
+          getDatabase(),
+          daemonContext.now,
+          request.params.id,
+          parsed.data.checkpointId,
+          parsed.data.adapterId,
+          { bus: eventBus, idFactory: daemonContext.idFactory }
+        );
+        return reply.code(202).send({ ok: true });
+      } catch (error) {
+        return mapProviderRecoveryError(reply, error);
+      }
+    }
+  );
 
   // ---- Workflow orchestrator routes ----
 

@@ -112,6 +112,26 @@ async function startServer(opts?: {
   };
 }
 
+describe('createServer output listener', () => {
+  it('subscribes when the session output store is injected', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'orca-server-output-listener-'));
+    const config = createConfig(dir);
+    const db = openDatabase(config);
+    runMigrations(db, defaultMigrationsDir());
+    const outputStore = createSessionOutputStore(db, {
+      tailBytes: config.sessionOutputTailBytes,
+    });
+    const subscribe = vi.spyOn(outputStore, 'onChunkAppended');
+    const server = createServer(config, { sessionOutputStore: outputStore });
+
+    expect(subscribe).toHaveBeenCalledOnce();
+
+    await server.close();
+    closeDatabase();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe('server routes', () => {
   let server: FastifyInstance;
 
@@ -2550,6 +2570,143 @@ describe('POST /v1/workflows/runs/:id/confirm-step', () => {
     });
     expect(res.statusCode).toBe(202);
     expect(res.json()).toEqual({ ok: true });
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+});
+
+describe('POST /v1/workflows/runs/:id/provider-recovery/*', () => {
+  const NOW = '2026-06-12T00:00:00.000Z';
+  const CHECKPOINT_ID = 'ckpt-route-1';
+
+  function seedRecoveryRun(db: ReturnType<typeof openDatabase>, mode: 'choose' | 'waiting'): void {
+    db.prepare(
+      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES ('goal-1', 'Goal', 'desc', 'active', 1, ?, ?, NULL)"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at) VALUES ('ws-1', 'goal-1', '/tmp/ws', 'ws', 'local', NULL, 0, 'clean', ?)"
+    ).run(NOW);
+    seedEngineeringTemplate(db, () => NOW);
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 5, 'active', 'step-1', NULL, ?, NULL)"
+    ).run(NOW);
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-1', 'goal-1', 'run-1', 'intake', 0, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1')"
+    ).run(NOW);
+    db.prepare(
+      "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES ('sess-1', 'goal-1', 'ws-1', 'claude-code', 'worker', 'running', ?, 'step-1')"
+    ).run(NOW);
+    const checkpoint = {
+      id: CHECKPOINT_ID,
+      mode,
+      failureCode: 'usage_limit',
+      message: 'Claude reached its session limit.',
+      currentSessionId: 'sess-1',
+      currentAdapterId: 'claude-code',
+      currentProviderName: 'Claude',
+      resetTimeText: null,
+      resetAt: null,
+      timezone: null,
+      detectedAt: NOW,
+      retryOutputSeq: null,
+      retryKind: 'preserved_session',
+      replacementSessionId: null,
+      replacementOutputSeq: null,
+      pendingGuidance: [],
+      lastError: null,
+      choices: [],
+    };
+    db.prepare(
+      "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = 'step-1'"
+    ).run(JSON.stringify(checkpoint));
+  }
+
+  it('returns 202 for a valid refresh action', async () => {
+    const { server, token, db, dataDir } = await startServer();
+    seedRecoveryRun(db, 'choose');
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/workflows/runs/run-1/provider-recovery/refresh',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      payload: { checkpointId: CHECKPOINT_ID },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ ok: true });
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('returns 400 for a malformed body', async () => {
+    const { server, token, db, dataDir } = await startServer();
+    seedRecoveryRun(db, 'choose');
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/workflows/runs/run-1/provider-recovery/refresh',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      payload: { wrong: 'field' },
+    });
+    expect(res.statusCode).toBe(400);
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('returns 404 for an unknown run', async () => {
+    const { server, token, dataDir } = await startServer();
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/workflows/runs/missing-run/provider-recovery/refresh',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      payload: { checkpointId: CHECKPOINT_ID },
+    });
+    expect(res.statusCode).toBe(404);
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('returns 404 for a checkpoint id mismatch', async () => {
+    const { server, token, db, dataDir } = await startServer();
+    seedRecoveryRun(db, 'choose');
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/workflows/runs/run-1/provider-recovery/refresh',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      payload: { checkpointId: 'stale-checkpoint' },
+    });
+    expect(res.statusCode).toBe(404);
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('returns 409 for an invalid transition (retry while choosing)', async () => {
+    const { server, token, db, dataDir } = await startServer();
+    seedRecoveryRun(db, 'choose');
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/workflows/runs/run-1/provider-recovery/retry',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      payload: { checkpointId: CHECKPOINT_ID },
+    });
+    expect(res.statusCode).toBe(409);
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('returns 409 for an unavailable switch target', async () => {
+    const { server, token, db, dataDir } = await startServer();
+    seedRecoveryRun(db, 'choose');
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/workflows/runs/run-1/provider-recovery/switch',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      payload: { checkpointId: CHECKPOINT_ID, adapterId: 'codex' },
+    });
+    expect(res.statusCode).toBe(409);
     await server.close();
     closeDatabase();
     rmSync(dataDir, { recursive: true, force: true });

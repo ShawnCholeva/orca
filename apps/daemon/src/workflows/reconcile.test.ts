@@ -152,6 +152,83 @@ describe("reconcileWorkflowsOnBoot", () => {
     expect(act?.source_kind).toBe("step_confirmation_pending");
   });
 
+  it("re-asserts a provider-recovery checkpoint for a waiting step with no activity", () => {
+    const db = setup();
+    seedGoal(db);
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, '[]', '[]', ?, ?)"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)"
+    ).run(NOW);
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-1', 'goal-1', 'run-1', 'intake', 0, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1')"
+    ).run(NOW);
+    const checkpoint = {
+      id: "ckpt-1",
+      mode: "waiting",
+      failureCode: "usage_limit",
+      message: "Claude reached its session limit.",
+      currentSessionId: "sess-1",
+      currentAdapterId: "claude-code",
+      currentProviderName: "Claude",
+      resetTimeText: "3pm",
+      resetAt: null,
+      timezone: null,
+      detectedAt: NOW,
+      retryOutputSeq: null,
+      retryKind: "preserved_session",
+      replacementSessionId: null,
+      replacementOutputSeq: null,
+      pendingGuidance: [],
+      lastError: null,
+      choices: [],
+    };
+    db.prepare(
+      "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = 'step-1'"
+    ).run(JSON.stringify(checkpoint));
+
+    reconcileWorkflowsOnBoot(db, () => NOW);
+
+    const act = db
+      .prepare(
+        "SELECT status, source_kind, agent_session_id FROM activities WHERE step_run_id = 'step-1' ORDER BY turn_ordinal DESC LIMIT 1"
+      )
+      .get() as { status: string; source_kind: string; agent_session_id: string | null } | undefined;
+    expect(act?.status).toBe("paused_for_input");
+    expect(act?.source_kind).toBe("provider_recovery_pending");
+    expect(act?.agent_session_id).toBe("sess-1");
+  });
+
+  it("clears a malformed recovery checkpoint without crashing boot", () => {
+    const db = setup();
+    seedGoal(db);
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, '[]', '[]', ?, ?)"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)"
+    ).run(NOW);
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-1', 'goal-1', 'run-1', 'intake', 0, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1')"
+    ).run(NOW);
+    db.prepare(
+      "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = 'step-1'"
+    ).run("{not valid json");
+
+    expect(() => reconcileWorkflowsOnBoot(db, () => NOW)).not.toThrow();
+
+    const cleared = db
+      .prepare("SELECT pending_provider_recovery_json AS recovery FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { recovery: string | null };
+    expect(cleared.recovery).toBeNull();
+
+    const act = db
+      .prepare("SELECT id FROM activities WHERE step_run_id = 'step-1'")
+      .get() as { id: string } | undefined;
+    expect(act).toBeUndefined();
+  });
+
   it("does not flag a run parked on a gate as drift", () => {
     const db = setup();
     seedGoal(db);
