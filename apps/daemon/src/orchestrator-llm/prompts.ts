@@ -8,6 +8,7 @@ export interface AgentInitialPromptInput {
   stepInstructions: string;
   outputSchema: WorkflowStepOutputSchema;
   priorStepArtifacts: Array<{ stepId: string; outputJson: unknown }>;
+  repairContext?: { reason: string; issueRefs: string[] } | null;
 }
 
 export function composeAgentInitialPrompt(input: AgentInitialPromptInput): string {
@@ -16,10 +17,21 @@ export function composeAgentInitialPrompt(input: AgentInitialPromptInput): strin
     : input.priorStepArtifacts.map((a) => `## prior step: ${a.stepId}\n${JSON.stringify(a.outputJson, null, 2)}`).join("\n\n");
 
   const goalDescription = input.goalDescription.trim();
+  const repair = input.repairContext;
+  const repairSection = repair
+    ? [
+        "",
+        "# Repair context",
+        "A reviewing gate routed back to this step. Address the following before completing:",
+        repair.reason,
+        ...(repair.issueRefs.length > 0 ? [`Issue refs: ${repair.issueRefs.join(", ")}`] : []),
+      ]
+    : [];
   return [
     "# Goal",
     input.goalTitle,
     ...(goalDescription ? ["", goalDescription] : []),
+    ...repairSection,
     "",
     "# Step instructions",
     input.stepInstructions,

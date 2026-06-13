@@ -5,7 +5,7 @@ import { closeDatabase } from "../../db.js";
 import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { resetWorkflowStepProjectionPreparedStatements } from "../steps/projection.js";
 import type { OperatorDescriptor, OperatorSelection, WorkflowGraph } from "@orca/contracts";
-import type { WorkflowSessionLauncher } from "./session-launcher.js";
+import type { WorkflowLaunchContext, WorkflowSessionLauncher } from "./session-launcher.js";
 import { OrchestratorService } from "./service.js";
 import { listGateDecisionsForRun } from "../gates/projection.js";
 import { setSupervisionMode } from "../../settings/store.js";
@@ -113,16 +113,19 @@ function fakeGateBroker(gate: {
   };
 }
 
-function makeLauncher(): WorkflowSessionLauncher {
-  return { launch: vi.fn(async () => ({ sessionId: "sess-1" })) };
+function makeLauncher(launch = vi.fn(async () => ({ sessionId: "sess-1" }))): WorkflowSessionLauncher {
+  return { launch };
 }
 
-function makeService(broker: Pick<OrchestrationTransportBroker, "propose">): OrchestratorService {
+function makeService(
+  broker: Pick<OrchestrationTransportBroker, "propose">,
+  launcher: WorkflowSessionLauncher = makeLauncher()
+): OrchestratorService {
   return new OrchestratorService(
     fakeAgentSelector(),
     broker,
     { async list() { return [agentOperatorDescriptor()]; } },
-    makeLauncher(),
+    launcher,
     undefined,
     fakeStepDispatch()
   );
@@ -296,6 +299,38 @@ describe("OrchestratorService gate routing", () => {
       selectedEdgeTo: "execution",
       issueRefs: ["i1"],
     });
+  });
+
+  it("includes the latest downstream step output and the rejecting gate reason on a revisit", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "unsupervised", NOW);
+    seedRunAtValidation(db);
+    const launch = vi.fn(async (_ctx: WorkflowLaunchContext) => ({ sessionId: "sess-1" }));
+    const service = makeService(
+      fakeGateBroker({
+        outcome: "rejected",
+        reason: "bug in parser",
+        inputsConsidered: ["validation"],
+        issueRefs: ["i1"],
+      }),
+      makeLauncher(launch)
+    );
+
+    await service.advanceToNextStep(db, () => NOW, "run-1", { bus, idFactory });
+
+    // The fresh Execution attempt's agent was launched with a composed objective.
+    expect(launch).toHaveBeenCalledTimes(1);
+    const objective = launch.mock.calls[0]![0].objective;
+
+    // Prior-artifact selection includes the DOWNSTREAM validation output (higher
+    // ordinal) — the recency-based collector no longer filters it out.
+    expect(objective).toMatch(/prior step: validation/);
+    expect(objective).toMatch(/all good/);
+
+    // The rejecting gate reason + issue refs are surfaced as repair context.
+    expect(objective).toMatch(/Repair context/);
+    expect(objective).toMatch(/bug in parser/);
+    expect(objective).toMatch(/i1/);
   });
 
   it("supervised: records the gate decision but pauses before routing to the destination", async () => {
