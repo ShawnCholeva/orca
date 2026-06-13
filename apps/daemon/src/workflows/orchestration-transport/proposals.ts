@@ -165,6 +165,7 @@ function validatePayload(
     }
     case "score_transition":
     case "score_step_result":
+    case "evaluate_gate":
     case "repair_artifact":
     case "run_audit":
     case "run_step_skill":
