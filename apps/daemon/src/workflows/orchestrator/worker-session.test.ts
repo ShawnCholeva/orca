@@ -365,6 +365,29 @@ describe("WorkerSessionManager.reattach", () => {
     await mgr.terminate("sess-1");
   });
 
+  it("registers and marks the session running before replaying existing output", async () => {
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const sessionId = "sess-replay";
+    mkdirSync(join(privateRoot, sessionId), { recursive: true });
+    writeFileSync(join(privateRoot, sessionId, "pane.out"), "existing output");
+    const events: string[] = [];
+    const mgr = new WorkerSessionManager({
+      privateRoot,
+      daemonPort: 8787,
+      authToken: "tok",
+      claudeBin: "claude",
+      tmux: fakeTmux(["auto mode on"]),
+      captureSink: () => void events.push("capture"),
+      markRunning: () => void events.push("running"),
+      resolveProvider,
+    });
+
+    await mgr.reattach(sessionId, "/repo");
+
+    expect(events.slice(0, 2)).toEqual(["running", "capture"]);
+    await mgr.terminate(sessionId);
+  });
+
   it("returns false when the tmux session does not exist", async () => {
     // Override the fake to return code 1 for has-session
     const calls: string[][] = [];
@@ -414,5 +437,85 @@ describe("WorkerSessionManager.reattach", () => {
     await mgr.spawn({ sessionId: "sess-2", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
     expect(marked).toContain("sess-2");
     await mgr.terminate("sess-2");
+  });
+});
+
+describe("WorkerSessionManager.waitForProviderReset", () => {
+  it("invokes the provider's waitForLimitReset against the live tmux session", async () => {
+    const tmux = fakeTmux(["auto mode on"]);
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const mgr = new WorkerSessionManager({
+      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux,
+      captureSink: () => {}, startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      resolveProvider,
+    });
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.waitForProviderReset("sess-1", "claude-code");
+    expect(tmux.calls).toContainEqual([
+      "send-keys",
+      "-t",
+      "orca-worker-sess-1",
+      "Enter",
+    ]);
+    await mgr.terminate("sess-1");
+  });
+
+  it("controls a live but unregistered deterministic session after a daemon restart", async () => {
+    const tmux = fakeTmux();
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const mgr = new WorkerSessionManager({
+      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux,
+      captureSink: () => {}, pollMs: 1,
+      resolveProvider,
+    });
+    // No spawn/reattach: the in-memory session map is empty (as after restart), but
+    // the deterministic tmux name is derived from the session id.
+    await mgr.waitForProviderReset("sess-restored", "claude-code");
+    expect(tmux.calls).toContainEqual([
+      "send-keys",
+      "-t",
+      "orca-worker-sess-restored",
+      "Enter",
+    ]);
+  });
+
+  it("throws when the provider cannot preserve a limited session", async () => {
+    const tmux = fakeTmux();
+    const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const noWaitProvider = {
+      workerHookConfig: () => ({ files: [], spawnArgs: [] }),
+      displayName: "Antigravity",
+    };
+    const mgr = new WorkerSessionManager({
+      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux,
+      captureSink: () => {}, pollMs: 1,
+      resolveProvider: (_adapterId) => noWaitProvider,
+    });
+    await expect(mgr.waitForProviderReset("sess-x", "antigravity")).rejects.toThrow(
+      /Antigravity does not support/
+    );
+  });
+});
+
+describe("WorkerSessionManager.terminate", () => {
+  it("kills a surviving tmux worker that is not registered in memory", async () => {
+    const tmux = fakeTmux();
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      daemonPort: 8787,
+      authToken: "tok",
+      claudeBin: "claude",
+      tmux,
+      captureSink: () => {},
+      resolveProvider,
+    });
+
+    await mgr.terminate("sess-stale");
+
+    expect(tmux.calls).toContainEqual([
+      "kill-session",
+      "-t",
+      "orca-worker-sess-stale",
+    ]);
   });
 });

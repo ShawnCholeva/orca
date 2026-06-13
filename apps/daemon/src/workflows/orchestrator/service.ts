@@ -55,7 +55,7 @@ import { buildAgentObjective } from "./agent-objective.js";
 import { buildStepExecutionInput } from "./step-input.js";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.js";
-import { decodeSessionTail } from "./session-tail.js";
+import { decodeSessionTail, decodeSessionTailFromSeq } from "./session-tail.js";
 import { synthesizeStepOutput } from "./synthesize.js";
 import { detectPendingAgentQuestion } from "./agent-interview.js";
 import { assembleWorkspaceContext } from "./workspace-context.js";
@@ -87,7 +87,8 @@ import {
 } from "./recover-step-scoring.js";
 import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
 import { getSupervisionMode } from "../../settings/store.js";
-import { expireConfirmation, openOrUpdateLive, pauseForConfirmation, pauseForProviderRecovery, resumeFromConfirmation } from "../../activities/store.js";
+import { expireConfirmation, openOrUpdateLive, pauseForConfirmation, pauseForProviderRecovery, resumeFromConfirmation, resumeFromProviderRecovery } from "../../activities/store.js";
+import { setSessionStatus } from "../../sessions/projection.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
 import { summarizeScoring } from "./scoring-summary.js";
 
@@ -258,6 +259,37 @@ export class OrchestratorGoalNotFoundError extends Error {
   }
 }
 
+/**
+ * Raised when a provider-recovery checkpoint cannot be loaded for an action:
+ * the run/step is no longer active, the current step no longer matches the
+ * checkpoint, the checkpoint is missing/unparseable, the checkpoint ID does not
+ * match, or the limited session no longer belongs to the step. Task 6's HTTP
+ * routes map this to a 404/409 response.
+ */
+export class OrchestratorProviderRecoveryNotFoundError extends Error {
+  readonly code = "provider_recovery_not_found" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "OrchestratorProviderRecoveryNotFoundError";
+  }
+}
+
+/**
+ * Raised when a recovery action is not allowed in the checkpoint's current mode
+ * (e.g. Retry while still `choose`, any action while `retrying`/`switching`, or
+ * a preserved-session Retry before a known future reset time). Task 6's HTTP
+ * routes map this to a 409 response.
+ */
+export class OrchestratorProviderRecoveryInvalidTransitionError extends Error {
+  readonly code = "provider_recovery_invalid_transition" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "OrchestratorProviderRecoveryInvalidTransitionError";
+  }
+}
+
 function readStepRun(db: Database.Database, stepRunId: string | null): StepRunRow {
   if (!stepRunId) throw new OrchestratorStepNotFoundError(stepRunId);
   const row = db
@@ -342,7 +374,10 @@ export class OrchestratorService {
     private readonly workerTerminate?: (sessionId: string) => Promise<void>,
     private readonly shadowAsk?: ShadowAsk,
     private readonly recoveryPromptComposer: RecoveryScoringPromptComposer =
-      composeRecoveryScoringPrompt
+      composeRecoveryScoringPrompt,
+    // Drives a provider's terminal "wait for limit reset" interaction against the
+    // worker's live tmux session (preserved-session Wait/Retry).
+    private readonly workerWait?: (sessionId: string, adapterId: string) => Promise<void>
   ) {
     this.sessionOutputStore = sessionOutputStore ?? NULL_OUTPUT_STORE;
   }
@@ -620,14 +655,177 @@ export class OrchestratorService {
       .get(sess.workflow_step_run_id) as StepRunRow | undefined;
     if (!stepRun || stepRun.status !== "active") return;
 
-    // (3) Scan the tail for provider terminal screens before looking for input.
+    // (3) Decode the full tail; provider terminal/turn parsing happens below.
     const tail = decodeSessionTail(this.sessionOutputStore.readTail(args.sessionId));
     const provider = resolveShadowProvider(sess.adapter_id as ShadowAdapterId);
+    const bus = options.bus ?? new EventBus();
+    const activityCtx = { db, bus, now, idFactory: options.idFactory };
+
+    // Helpers to persist/clear the step's recovery checkpoint.
+    const updateCheckpoint = (next: ProviderRecoveryCheckpoint): void => {
+      db.prepare(
+        "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = ?"
+      ).run(JSON.stringify(ProviderRecoveryCheckpoint.parse(next)), stepRun.id);
+    };
+    const clearCheckpoint = (): void => {
+      db.prepare(
+        "UPDATE workflow_step_runs SET pending_provider_recovery_json = NULL WHERE id = ?"
+      ).run(stepRun.id);
+    };
+
+    // (4) Parse any existing recovery checkpoint up front so we can branch on its mode.
+    const checkpoint = stepRun.pending_provider_recovery_json
+      ? ProviderRecoveryCheckpoint.parse(JSON.parse(stepRun.pending_provider_recovery_json))
+      : null;
+
+    // (5) Drive in-flight retry progress (preserved or fresh session).
+    if (checkpoint?.mode === "retrying") {
+      const recoverySessionId =
+        checkpoint.retryKind === "preserved_session"
+          ? checkpoint.currentSessionId
+          : checkpoint.replacementSessionId;
+      const firstSeq =
+        checkpoint.retryKind === "preserved_session"
+          ? checkpoint.retryOutputSeq
+          : checkpoint.replacementOutputSeq;
+      if (!recoverySessionId || args.sessionId !== recoverySessionId || firstSeq === null) return;
+      const snapshot = this.sessionOutputStore.readTail(args.sessionId);
+      if (snapshot.nextSeq <= firstSeq) return;
+      const retryTail = decodeSessionTailFromSeq(snapshot, firstSeq);
+      const retryFailure = provider.turnParser().detectError?.(retryTail, new Date(now()));
+      if (retryFailure) {
+        updateCheckpoint({
+          ...checkpoint,
+          mode: "waiting",
+          message: retryFailure.message,
+          resetTimeText: retryFailure.resetTimeText,
+          resetAt: retryFailure.resetAt,
+          timezone: retryFailure.timezone,
+          detectedAt: now(),
+          retryOutputSeq: null,
+          replacementSessionId: null,
+          replacementOutputSeq: null,
+        });
+        return;
+      }
+      if (provider.turnParser().detectTurnStarted?.(retryTail)) {
+        if (checkpoint.retryKind === "preserved_session" && checkpoint.pendingGuidance.length > 0) {
+          const guidance = checkpoint.pendingGuidance.join("\n\n");
+          const delivered = await this.workerDeliver?.(recoverySessionId, guidance);
+          if (delivered !== "delivered") {
+            updateCheckpoint({
+              ...checkpoint,
+              lastError: "The provider resumed, but pending guidance could not be delivered.",
+            });
+            return;
+          }
+        }
+        clearCheckpoint();
+        resumeFromProviderRecovery(activityCtx, {
+          stepRunId: stepRun.id,
+          agentSessionId: recoverySessionId,
+          summary:
+            checkpoint.retryKind === "preserved_session"
+              ? `Retrying ${checkpoint.currentProviderName} in the preserved session…`
+              : `Continuing ${checkpoint.currentProviderName} in a fresh session…`,
+        });
+        if (
+          checkpoint.retryKind === "fresh_session" &&
+          checkpoint.currentSessionId !== recoverySessionId
+        ) {
+          setSessionStatus(db, checkpoint.currentSessionId, "stopped", {
+            failureReason: "provider_session_replaced",
+            exitedAt: now(),
+          });
+          await this.workerTerminate?.(checkpoint.currentSessionId).catch(() => {});
+        }
+      }
+      return;
+    }
+
+    // (6) Drive in-flight switch startup against the replacement session.
+    if (
+      checkpoint?.mode === "switching" &&
+      checkpoint.replacementSessionId === args.sessionId &&
+      checkpoint.replacementOutputSeq !== null
+    ) {
+      const snapshot = this.sessionOutputStore.readTail(args.sessionId);
+      if (snapshot.nextSeq <= checkpoint.replacementOutputSeq) return;
+      const switchTail = decodeSessionTailFromSeq(snapshot, checkpoint.replacementOutputSeq);
+      const replacementFailure = provider.turnParser().detectError?.(switchTail, new Date(now()));
+      if (replacementFailure) {
+        setSessionStatus(db, args.sessionId, "failed", {
+          failureReason: "provider_recovery_start_failed",
+          exitedAt: now(),
+        });
+        await this.workerTerminate?.(args.sessionId).catch(() => {});
+        updateCheckpoint({
+          ...checkpoint,
+          mode: "choose",
+          replacementSessionId: null,
+          replacementOutputSeq: null,
+          lastError: replacementFailure.message,
+        });
+        return;
+      }
+      if (provider.turnParser().detectTurnStarted?.(switchTail)) {
+        const choice = checkpoint.choices.find(
+          (candidate) => candidate.adapterId === sess.adapter_id && candidate.enabled
+        );
+        if (!choice?.modelId) return;
+        const run = getWorkflowRunById(db, stepRun.workflow_run_id);
+        if (!run || run.status !== "active") return;
+        const template = getTemplateById(db, run.templateId);
+        if (!template) return;
+        const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+        if (!stepTpl) return;
+        const goal = readGoal(db, run.goalId);
+        const mode = this.stepDispatch!.resolveMode(choice.adapterId);
+        this.commitDeterministicStepSelection(
+          db,
+          now,
+          { run, stepRun, stepTpl, template, goal },
+          {
+            adapterId: choice.adapterId,
+            modelId: choice.modelId,
+            executionMode: mode.mode,
+            fallbackModes: mode.fallbacks,
+          },
+          options
+        );
+        clearCheckpoint();
+        resumeFromProviderRecovery(activityCtx, {
+          stepRunId: stepRun.id,
+          agentSessionId: args.sessionId,
+          summary: `Continuing with ${choice.displayName}…`,
+        });
+        setSessionStatus(db, checkpoint.currentSessionId, "stopped", {
+          failureReason: "provider_switched",
+          exitedAt: now(),
+        });
+        await this.workerTerminate?.(checkpoint.currentSessionId).catch(() => {});
+      }
+      return;
+    }
+
+    // (7) Scan the tail for a fresh provider terminal screen.
     const providerFailure = provider.turnParser().detectError?.(tail, new Date(now()));
     if (providerFailure) {
-      // Idempotency: a recovery checkpoint already exists for this step → do not
-      // create a duplicate or re-pause.
-      if (stepRun.pending_provider_recovery_json) return;
+      // A checkpoint already exists in choose/waiting: refresh reset details from
+      // the newest matching limit frame without creating a duplicate or re-pausing.
+      if (checkpoint) {
+        if (checkpoint.mode === "choose" || checkpoint.mode === "waiting") {
+          updateCheckpoint({
+            ...checkpoint,
+            message: providerFailure.message,
+            resetTimeText: providerFailure.resetTimeText,
+            resetAt: providerFailure.resetAt,
+            timezone: providerFailure.timezone,
+            detectedAt: now(),
+          });
+        }
+        return;
+      }
 
       const run = getWorkflowRunById(db, stepRun.workflow_run_id);
       if (!run || run.status !== "active") return;
@@ -636,7 +834,6 @@ export class OrchestratorService {
       const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
       if (!stepTpl) return;
       const goal = readGoal(db, run.goalId);
-      const bus = options.bus ?? new EventBus();
 
       // Build recovery choices over connected, non-current agents only; never
       // probe registered-but-disconnected adapters.
@@ -658,7 +855,7 @@ export class OrchestratorService {
         supportsModel: (id, mid) => this.stepDispatch?.supportsModel(id, mid) ?? false,
       });
 
-      const checkpoint = ProviderRecoveryCheckpoint.parse({
+      const newCheckpoint = ProviderRecoveryCheckpoint.parse({
         id: options.idFactory?.() ?? randomUUID(),
         mode: "choose",
         failureCode: providerFailure.code,
@@ -681,7 +878,7 @@ export class OrchestratorService {
 
       db.prepare(
         "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = ?"
-      ).run(JSON.stringify(checkpoint), stepRun.id);
+      ).run(JSON.stringify(newCheckpoint), stepRun.id);
 
       const summary = providerFailure.resetTimeText
         ? `${provider.displayName} reached its session limit. Available again at ${providerFailure.resetTimeText}.`
@@ -693,7 +890,11 @@ export class OrchestratorService {
       return;
     }
 
-    // (4) Scan the tail for an explicit user-input sentinel.
+    // A recovery checkpoint exists but the tail shows neither a new limit nor turn
+    // progress yet: do not run normal [orca:ask] handling while recovering.
+    if (checkpoint) return;
+
+    // (8) Scan the tail for an explicit user-input sentinel.
     const question = detectPendingAgentQuestion(tail);
     if (!question) return;
 

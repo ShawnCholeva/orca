@@ -42,6 +42,7 @@ export interface WorkerSessionDeps {
   authToken: string;
   claudeBin: string;
   resolveProvider: (adapterId: string) => {
+    displayName?: string;
     workerHookConfig: (args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) =>
       {
         files: { relPath: string; contents: string }[];
@@ -49,6 +50,11 @@ export interface WorkerSessionDeps {
         spawnArgs: string[];
         env?: Record<string, string>;
       };
+    waitForLimitReset?: (ctx: {
+      tmux: TmuxRunner;
+      sessionName: string;
+      dbg: (msg: string) => void;
+    }) => Promise<void>;
   };
   tmux?: TmuxRunner;
   captureSink: (sessionId: string, chunk: Buffer) => void; // appends pane bytes to the output store
@@ -63,7 +69,7 @@ export interface WorkerSessionDeps {
   idleTimeoutMs?: number;
 }
 
-interface WorkerSession { name: string; ready: Promise<void>; }
+interface WorkerSession { name: string; adapterId: string; ready: Promise<void>; }
 interface WorkerTail {
   fd: number;
   closed: boolean;
@@ -118,7 +124,7 @@ export class WorkerSessionManager {
     // Output capture: pipe pane to a private file; daemon tails it (Task 3.2).
     await pipePaneToFile(this.tmux, name, join(cfgDir, "pane.out"));
     this.startTail(input.sessionId, join(cfgDir, "pane.out"));
-    this.sessions.set(input.sessionId, { name, ready: this.startup(name) });
+    this.sessions.set(input.sessionId, { name, adapterId: input.adapterId, ready: this.startup(name) });
     this.deps.markRunning?.(input.sessionId);
   }
 
@@ -246,17 +252,42 @@ export class WorkerSessionManager {
     mkdirSync(cfgDir, { recursive: true });
     // Re-establish the output pipe + tail; the tmux session + claude survived the restart.
     await pipePaneToFile(this.tmux, name, join(cfgDir, "pane.out"));
-    this.startTail(sessionId, join(cfgDir, "pane.out"));
-    this.sessions.set(sessionId, { name, ready: Promise.resolve() });
-    this.deps.markRunning?.(sessionId);
+    this.sessions.set(sessionId, { name, adapterId: "", ready: Promise.resolve() });
+    try {
+      this.deps.markRunning?.(sessionId);
+      this.startTail(sessionId, join(cfgDir, "pane.out"));
+    } catch (error) {
+      this.sessions.delete(sessionId);
+      this.stopTail(sessionId);
+      throw error;
+    }
     return true;
   }
 
   async terminate(sessionId: string): Promise<void> {
     const s = this.sessions.get(sessionId);
-    if (!s) return;
     this.sessions.delete(sessionId);
     this.stopTail(sessionId);
-    await killSession(this.tmux, s.name);
+    await killSession(this.tmux, s?.name ?? this.name(sessionId));
+  }
+
+  /**
+   * Drives the provider's terminal "wait for the limit to reset" interaction
+   * against the worker's live tmux session (e.g. Claude Code's Enter selection).
+   * Tolerates a session missing from the in-memory map by deriving the
+   * deterministic tmux name, so a live session can be controlled after a daemon
+   * restart. Throws when the provider cannot preserve a limited session.
+   */
+  async waitForProviderReset(sessionId: string, adapterId: string): Promise<void> {
+    const name = this.sessions.get(sessionId)?.name ?? this.name(sessionId);
+    const provider = this.deps.resolveProvider(adapterId);
+    if (!provider.waitForLimitReset) {
+      throw new Error(`${provider.displayName ?? adapterId} does not support preserving a limited session`);
+    }
+    await provider.waitForLimitReset({
+      tmux: this.tmux,
+      sessionName: name,
+      dbg: (message) => console.debug(`[worker-session] ${message}`),
+    });
   }
 }
