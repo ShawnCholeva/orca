@@ -185,7 +185,8 @@ function insertStep(
   templateStepId: string,
   ordinal: number,
   attempt: number,
-  eventOptions?: StepEventOptions
+  eventOptions?: StepEventOptions,
+  nodeId?: string
 ): WorkflowStepRunT {
   const id = randomUUID();
   const timestamp = now();
@@ -202,7 +203,9 @@ function insertStep(
     timestamp,
     fingerprint
   );
-  db.prepare("UPDATE workflow_runs SET current_step_run_id = ? WHERE id = ?").run(id, runId);
+  db.prepare(
+    "UPDATE workflow_runs SET current_step_run_id = ?, current_node_id = ?, current_node_kind = 'step' WHERE id = ?"
+  ).run(id, nodeId ?? templateStepId, runId);
   emitEvent(
     db,
     "workflow.step.started",

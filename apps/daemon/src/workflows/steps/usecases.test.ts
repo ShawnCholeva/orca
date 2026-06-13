@@ -23,6 +23,7 @@ import {
 } from "../templates/seed-engineering.js";
 import {
   advanceToNextStep,
+  createInitialStep,
   failStep,
   markStepBlocked,
   recordExitCriteriaSatisfaction,
@@ -392,5 +393,18 @@ describe("workflow step usecases", () => {
     const actual = stepFingerprint("run-1", "intake", 2);
     const expected = createHash("sha256").update("run-1:intake:2").digest("hex");
     expect(actual).toBe(expected);
+  });
+
+  it("sets the node cursor when the initial step is created", () => {
+    const { db, runCtx } = setup();
+    seedGoal(db, "goal-1");
+    seedEngineeringTemplate(db, () => NOW);
+    const run = startWorkflowRun(runCtx, { goalId: "goal-1", templateId: ENGINEERING_ID });
+    // startWorkflowRun calls createInitialStep internally; verify cursor was set
+    const row = db
+      .prepare("SELECT current_node_id, current_node_kind FROM workflow_runs WHERE id = ?")
+      .get(run.id) as { current_node_id: string | null; current_node_kind: string | null };
+    expect(row.current_node_kind).toBe("step");
+    expect(row.current_node_id).toBeTruthy();
   });
 });
