@@ -329,6 +329,7 @@ export function TemplateDetail({
         name: step.name,
         instructions: step.instructions,
         outputSchema: step.outputSchema,
+        terminal: node.terminal ?? false,
         onChange: (patch) => {
           setDraft((current) => {
             const nextSteps = current.steps.map((s) =>
@@ -339,7 +340,17 @@ export function TemplateDetail({
               patch.name !== undefined
                 ? reconcileGraph(nextSteps, current.graph)
                 : current.graph;
-            return { ...current, steps: nextSteps, graph: nextGraph };
+            // If terminal changed, update graph node
+            const finalGraph =
+              patch.terminal !== undefined
+                ? {
+                    ...nextGraph,
+                    nodes: nextGraph.nodes.map((n) =>
+                      n.id === step.id ? { ...n, terminal: patch.terminal } : n,
+                    ),
+                  }
+                : nextGraph;
+            return { ...current, steps: nextSteps, graph: finalGraph };
           });
         },
       };
@@ -348,7 +359,7 @@ export function TemplateDetail({
       return {
         kind: "gate",
         name: node.name,
-        condition: node.condition ?? "",
+        instructions: node.instructions ?? node.condition ?? "",
         onChange: (patch) => {
           setDraft((current) => ({
             ...current,

@@ -9,17 +9,19 @@ export type NodeDetail =
       name: string;
       instructions: string;
       outputSchema: WorkflowStepOutputSchema;
+      terminal?: boolean;
       onChange: (patch: {
         name?: string;
         instructions?: string;
         outputSchema?: WorkflowStepOutputSchema;
+        terminal?: boolean;
       }) => void;
     }
   | {
       kind: "gate";
       name: string;
-      condition: string;
-      onChange: (patch: { name?: string; condition?: string }) => void;
+      instructions: string;
+      onChange: (patch: { name?: string; instructions?: string }) => void;
     };
 
 export interface NodeDetailModalProps {
@@ -228,13 +230,13 @@ function GateBody({ detail, readOnly }: { detail: Extract<NodeDetail, { kind: "g
           marginBottom: 6,
         }}
       >
-        Condition
+        Instructions
       </div>
       <textarea
-        value={detail.condition ?? ""}
-        onChange={(e) => !readOnly && detail.onChange({ condition: e.target.value })}
+        value={detail.instructions ?? ""}
+        onChange={(e) => !readOnly && detail.onChange({ instructions: e.target.value })}
         readOnly={readOnly}
-        placeholder="e.g. verification.pass === true && critique.risks.length < 3"
+        placeholder="Approve only when … ; otherwise reject."
         rows={5}
         style={{
           width: "100%",
@@ -253,8 +255,8 @@ function GateBody({ detail, readOnly }: { detail: Extract<NodeDetail, { kind: "g
         }}
       />
       <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 8, lineHeight: 1.5 }}>
-        The gate blocks downstream nodes until the condition evaluates true. Outgoing edges run when
-        the gate passes; sessions that fail it park their work and surface a conflict.
+        The gate routes work through fixed <strong>approved</strong> or <strong>rejected</strong> ports.
+        Provide routing criteria; the orchestrator records a decision with justification before advancing.
       </div>
     </div>
   );
@@ -314,6 +316,16 @@ function StepBody({
         disabled={readOnly}
         onValidityChange={(valid) => onOutputSchemaValidityChange?.(!valid)}
       />
+
+      <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <input
+          type="checkbox"
+          aria-label="Terminal step"
+          checked={detail.terminal ?? false}
+          onChange={(e) => !readOnly && detail.onChange({ terminal: e.target.checked })}
+        />
+        Terminal step (completes the workflow)
+      </label>
     </>
   );
 }

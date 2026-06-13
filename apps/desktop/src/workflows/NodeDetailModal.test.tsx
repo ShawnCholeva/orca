@@ -13,7 +13,7 @@ function makeGateDetail(
   return {
     kind: "gate",
     name: "Quality Gate",
-    condition: "output.score > 0.8",
+    instructions: "output.score > 0.8",
     onChange,
   };
 }
@@ -31,7 +31,7 @@ function makeStepDetail(
 }
 
 describe("NodeDetailModal — gate", () => {
-  it("renders the condition textarea with the current value", () => {
+  it("renders the instructions textarea with the current value", () => {
     render(
       <NodeDetailModal
         detail={makeGateDetail()}
@@ -44,11 +44,11 @@ describe("NodeDetailModal — gate", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText(/verification\.pass/i) as HTMLTextAreaElement;
+    const textarea = screen.getByPlaceholderText(/approve only when/i) as HTMLTextAreaElement;
     expect(textarea.value).toBe("output.score > 0.8");
   });
 
-  it("calls onChange with condition patch when textarea changes", () => {
+  it("calls onChange with instructions patch when textarea changes", () => {
     const onChange = vi.fn();
     render(
       <NodeDetailModal
@@ -62,9 +62,9 @@ describe("NodeDetailModal — gate", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText(/verification\.pass/i);
+    const textarea = screen.getByPlaceholderText(/approve only when/i);
     fireEvent.change(textarea, { target: { value: "output.pass === true" } });
-    expect(onChange).toHaveBeenCalledWith({ condition: "output.pass === true" });
+    expect(onChange).toHaveBeenCalledWith({ instructions: "output.pass === true" });
   });
 
   it("shows the gate hint text", () => {
@@ -80,7 +80,7 @@ describe("NodeDetailModal — gate", () => {
       />,
     );
 
-    expect(screen.getByText(/blocks downstream nodes/i)).toBeDefined();
+    expect(screen.getByText(/approved/i)).toBeDefined();
   });
 });
 
@@ -280,4 +280,28 @@ describe("NodeDetailModal — navigation and actions", () => {
     fireEvent.keyDown(window, { key: "ArrowRight" });
     expect(onNext).toHaveBeenCalledTimes(1);
   });
+});
+
+it("edits gate instructions", () => {
+  const onChange = vi.fn();
+  render(
+    <NodeDetailModal
+      detail={{ kind: "gate", name: "Gate", instructions: "", onChange }}
+      index={0} total={1} onPrev={null} onNext={null} onClose={() => {}} onDelete={() => {}}
+    />
+  );
+  fireEvent.change(screen.getByPlaceholderText(/approve/i), { target: { value: "approve when validation passed" } });
+  expect(onChange).toHaveBeenCalledWith({ instructions: "approve when validation passed" });
+});
+
+it("toggles a step terminal flag", () => {
+  const onChange = vi.fn();
+  render(
+    <NodeDetailModal
+      detail={{ kind: "step", name: "Done", instructions: "", outputSchema: [], terminal: false, onChange }}
+      index={0} total={1} onPrev={null} onNext={null} onClose={() => {}} onDelete={() => {}}
+    />
+  );
+  fireEvent.click(screen.getByLabelText(/terminal step/i));
+  expect(onChange).toHaveBeenCalledWith({ terminal: true });
 });
