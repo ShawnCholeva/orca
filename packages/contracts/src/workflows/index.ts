@@ -356,7 +356,10 @@ export const WorkflowRun = z
     currentStepRunId: z.string().nullable(),
     startedAt: z.string().datetime(),
     finishedAt: z.string().datetime().nullable(),
-    blockedReason: z.string().max(WORKFLOW_FAILURE_MAX_MESSAGE_CHARS).nullable()
+    blockedReason: z.string().max(WORKFLOW_FAILURE_MAX_MESSAGE_CHARS).nullable(),
+    currentNodeId: z.string().nullable().default(null),
+    currentNodeKind: z.string().nullable().default(null),
+    traversalSeq: z.number().int().nonnegative().default(0),
   })
   .strict();
 export type WorkflowRun = z.infer<typeof WorkflowRun>;

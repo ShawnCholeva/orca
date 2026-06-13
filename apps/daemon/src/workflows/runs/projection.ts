@@ -11,6 +11,9 @@ interface WorkflowRunRow {
   started_at: string;
   finished_at: string | null;
   blocked_reason: string | null;
+  current_node_id: string | null;
+  current_node_kind: string | null;
+  traversal_seq: number;
 }
 
 let _db: Database.Database | null = null;
@@ -24,10 +27,10 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
     _db = db;
     _stmts = {
       getById: db.prepare(
-        "SELECT id, goal_id, template_id, template_version, status, current_step_run_id, started_at, finished_at, blocked_reason FROM workflow_runs WHERE id = ?"
+        "SELECT id, goal_id, template_id, template_version, status, current_step_run_id, started_at, finished_at, blocked_reason, current_node_id, current_node_kind, traversal_seq FROM workflow_runs WHERE id = ?"
       ),
       listByGoal: db.prepare(
-        "SELECT id, goal_id, template_id, template_version, status, current_step_run_id, started_at, finished_at, blocked_reason FROM workflow_runs WHERE goal_id = ? ORDER BY started_at DESC"
+        "SELECT id, goal_id, template_id, template_version, status, current_step_run_id, started_at, finished_at, blocked_reason, current_node_id, current_node_kind, traversal_seq FROM workflow_runs WHERE goal_id = ? ORDER BY started_at DESC"
       ),
     };
   }
@@ -50,6 +53,9 @@ function rowToRun(row: WorkflowRunRow): WorkflowRunT {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     blockedReason: row.blocked_reason,
+    currentNodeId: row.current_node_id,
+    currentNodeKind: row.current_node_kind,
+    traversalSeq: row.traversal_seq,
   });
 }
 
