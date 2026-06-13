@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WorkflowGraph, WorkflowGraphEdge, WorkflowGraphNode } from "./index.js";
+import { GateEvaluationProposal, OrchestrationDecisionKind, WorkflowGraph, WorkflowGraphEdge, WorkflowGraphNode } from "./index.js";
 
 describe("WorkflowGraphEdge", () => {
   it("parses a labeled object edge", () => {
@@ -64,5 +64,25 @@ describe("WorkflowGraphNode", () => {
       condition: "x === true",
     });
     expect(node.condition).toBe("x === true");
+  });
+});
+
+describe("gate evaluation contract", () => {
+  it("includes evaluate_gate in the decision kinds", () => {
+    expect(OrchestrationDecisionKind.options).toContain("evaluate_gate");
+  });
+
+  it("parses a valid gate proposal", () => {
+    const p = GateEvaluationProposal.parse({
+      outcome: "rejected",
+      reason: "tests failed",
+      issueRefs: ["i1"],
+      inputsConsidered: ["validation"],
+    });
+    expect(p.outcome).toBe("rejected");
+  });
+
+  it("rejects an outcome outside approved/rejected", () => {
+    expect(() => GateEvaluationProposal.parse({ outcome: "maybe", reason: "x", inputsConsidered: [] })).toThrow();
   });
 });

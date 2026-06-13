@@ -149,6 +149,7 @@ export const OrchestrationDecisionKind = z.enum([
   "run_audit",
   "run_step_skill",
   "synthesize_step_output",
+  "evaluate_gate",
 ]);
 export type OrchestrationDecisionKind = z.infer<typeof OrchestrationDecisionKind>;
 
@@ -199,6 +200,7 @@ export const WorkflowDecisionType = z.enum([
   "request_user_input",
   "evaluate_exit_criteria",
   "evaluate_guardrail",
+  "evaluate_gate",
   "mark_run_complete",
   "block_run"
 ]);
@@ -758,6 +760,32 @@ export const StepResultScoringProposal = z
   })
   .strict();
 export type StepResultScoringProposal = z.infer<typeof StepResultScoringProposal>;
+
+export const GateEvaluationProposal = z
+  .object({
+    outcome: z.enum(["approved", "rejected"]),
+    reason: z.string().min(1).max(1024),
+    issueRefs: z.array(z.string().min(1).max(128)).max(50).optional(),
+    inputsConsidered: z.array(z.string().min(1).max(128)).max(50),
+  })
+  .strict();
+export type GateEvaluationProposal = z.infer<typeof GateEvaluationProposal>;
+
+export const GateEvaluationRequest = z
+  .object({
+    gate: z.object({ nodeId: Id100, name: z.string().max(100), instructions: z.string().max(WORKFLOW_GATE_MAX_INSTRUCTIONS_CHARS) }).strict(),
+    goal: z.object({ id: Id, description: z.string().max(4000) }).strict(),
+    sourceStepOutput: z.record(z.string(), z.unknown()).nullable(),
+    priorGateDecisions: z.array(z.object({ nodeId: Id100, outcome: z.enum(["approved", "rejected"]), reason: z.string().max(1024) }).strict()).max(50),
+    availableOutcomes: z.array(z.enum(["approved", "rejected"])).min(1).max(2),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!hasMaxSerializedBytes(value, ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "GateEvaluationRequest too large" });
+    }
+  });
+export type GateEvaluationRequest = z.infer<typeof GateEvaluationRequest>;
 
 export const StepSkillProposal = z.discriminatedUnion("action", [
   z.object({
