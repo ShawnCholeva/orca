@@ -182,4 +182,38 @@ describe("OperatorRegistry", () => {
       supportsTerminal: true,
     });
   });
+
+  it("filters to requested agentIds without probing others", async () => {
+    const probed: string[] = [];
+
+    class SpyReadiness {
+      async checkAgent(agentId: string): Promise<AgentReadinessReport> {
+        probed.push(agentId);
+        return {
+          agentId,
+          status: "ready" satisfies AgentReadinessStatus,
+          steps: [{ name: "installed", ok: true, command: "fake" }],
+          checkedAt: NOW,
+        };
+      }
+    }
+
+    const adapters = new AdapterRegistry();
+    adapters.register(new FakeAdapter("claude-code", "Claude Code"));
+    adapters.register(new FakeAdapter("codex", "Codex", false, false));
+    adapters.register(new FakeAdapter("antigravity", "Antigravity"));
+
+    const models = new ModelProviderRegistry();
+    const registry = new OperatorRegistry(adapters, models, new SpyReadiness());
+
+    const operators = await registry.list("goal-1", {
+      agentIds: ["codex"],
+      includeNonAgents: false,
+    });
+
+    expect(probed).toEqual(["codex"]);
+    expect(operators.map((op) => op.id)).toEqual(["agent:codex"]);
+    // No model or human descriptors
+    expect(operators.every((op) => op.kind === "agent")).toBe(true);
+  });
 });

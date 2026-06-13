@@ -25,12 +25,23 @@ export class OperatorRegistry {
     private readonly readiness: ReadinessChecker
   ) {}
 
-  async list(goalId: string): Promise<OperatorDescriptor[]> {
+  async list(
+    goalId: string,
+    options: {
+      agentIds?: string[];
+      includeNonAgents?: boolean;
+    } = {}
+  ): Promise<OperatorDescriptor[]> {
     void goalId;
 
     const out: OperatorDescriptor[] = [];
 
-    for (const adapter of this.adapters.listAgentAdapters()) {
+    const allowedAgents = options.agentIds ? new Set(options.agentIds) : null;
+    const agentAdapters = this.adapters
+      .listAgentAdapters()
+      .filter((adapter) => allowedAgents?.has(adapter.id) ?? true);
+
+    for (const adapter of agentAdapters) {
       const readiness = await this.readiness.checkAgent(adapter.id);
       const ready = readiness.status === "ready";
       out.push({
@@ -45,36 +56,38 @@ export class OperatorRegistry {
       });
     }
 
-    for (const provider of this.models.list()) {
-      const availability = await provider.isAvailable();
-      const models = await provider.listModels();
-      for (const model of models) {
-        out.push({
-          id: `${provider.id}:${model.id}`,
-          kind: "model",
-          displayName: `${provider.displayName} ${model.displayName}`,
-          capabilities: model.capabilities,
-          ready: availability.available,
-          notReadyReason: availability.available
-            ? undefined
-            : boundedReason(availability.reason, "unavailable"),
-          supportsRepoEditing: false,
-          supportsTerminal: false,
-          providerId: provider.id,
-          modelId: model.id,
-        });
+    if (options.includeNonAgents !== false) {
+      for (const provider of this.models.list()) {
+        const availability = await provider.isAvailable();
+        const models = await provider.listModels();
+        for (const model of models) {
+          out.push({
+            id: `${provider.id}:${model.id}`,
+            kind: "model",
+            displayName: `${provider.displayName} ${model.displayName}`,
+            capabilities: model.capabilities,
+            ready: availability.available,
+            notReadyReason: availability.available
+              ? undefined
+              : boundedReason(availability.reason, "unavailable"),
+            supportsRepoEditing: false,
+            supportsTerminal: false,
+            providerId: provider.id,
+            modelId: model.id,
+          });
+        }
       }
-    }
 
-    out.push({
-      id: "human",
-      kind: "human",
-      displayName: "Human (you)",
-      capabilities: ["judgment", "qa", "approval"],
-      ready: true,
-      supportsRepoEditing: true,
-      supportsTerminal: true,
-    });
+      out.push({
+        id: "human",
+        kind: "human",
+        displayName: "Human (you)",
+        capabilities: ["judgment", "qa", "approval"],
+        ready: true,
+        supportsRepoEditing: true,
+        supportsTerminal: true,
+      });
+    }
 
     return out;
   }
