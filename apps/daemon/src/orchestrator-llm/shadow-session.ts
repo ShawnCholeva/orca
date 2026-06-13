@@ -212,7 +212,7 @@ export class ShadowSessionManager {
               }
               const error = parser.detectError?.(turnText) ?? null;
               if (error !== null) {
-                this.settlePending(goalId, pending, { error });
+                this.settlePending(goalId, pending, { error: new Error(error.message) });
               }
             })
             .finally(() => { polling = false; });

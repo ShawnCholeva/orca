@@ -11,7 +11,9 @@ import {
   openOrUpdateLive,
   pauseForConfirmation,
   pauseForInput,
+  pauseForProviderRecovery,
   resumeFromConfirmation,
+  resumeFromProviderRecovery,
   type ActivityStoreCtx
 } from "./store.js";
 
@@ -260,6 +262,32 @@ describe("ActivityStore", () => {
     const resumed = resumeFromConfirmation(ctx, { stepRunId: "s1" });
     expect(resumed?.status).toBe("active");
     expect(resumed?.sourceKind).toBe("step_started");
+  });
+
+  it("pauses a live activity for provider recovery", () => {
+    const { ctx } = ctxFor(db);
+    openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "working", workCategory: null });
+    const paused = pauseForProviderRecovery(ctx, {
+      stepRunId: "s1",
+      summary: "Claude Code is available again at 4:20am America/New_York.",
+    });
+    expect(paused?.sourceKind).toBe("provider_recovery_pending");
+    expect(paused?.status).toBe("paused_for_input");
+    expect(paused?.currentText).toContain("4:20am");
+  });
+
+  it("resumes a provider-recovery activity and rebinds the session", () => {
+    const { ctx } = ctxFor(db);
+    openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "working", workCategory: null });
+    pauseForProviderRecovery(ctx, { stepRunId: "s1", summary: "waiting" });
+    const resumed = resumeFromProviderRecovery(ctx, {
+      stepRunId: "s1",
+      agentSessionId: "sess2",
+      summary: "Continuing with Codex…",
+    });
+    expect(resumed?.status).toBe("active");
+    expect(resumed?.sourceKind).toBe("step_started");
+    expect(resumed?.agentSessionId).toBe("sess2");
   });
 
   it("completeLive does not close a confirmation checkpoint", () => {

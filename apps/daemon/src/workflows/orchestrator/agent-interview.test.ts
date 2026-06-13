@@ -71,13 +71,21 @@ function fakeOutputStore(tail: string): SessionOutputStore {
   };
 }
 
-function makeServiceWithStore(outputStore: SessionOutputStore): OrchestratorService {
+function makeServiceWithStore(
+  outputStore: SessionOutputStore,
+  workerTerminate?: (sessionId: string) => Promise<void>,
+): OrchestratorService {
   return new OrchestratorService(
     fakeSelector(),
     { async propose() { return { status: "proposed" as const, attemptId: "a", transport: "one_shot" as const, parsed: {}, rawTextLength: null, latencyMs: 1 }; } },
     fakeRegistry(),
     undefined,
-    outputStore
+    outputStore,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    workerTerminate,
   );
 }
 
@@ -166,6 +174,128 @@ describe("OrchestratorService.onSessionOutputChunk", () => {
     await service.onSessionOutputChunk(db, () => NOW, { sessionId, goalId }, { bus, idFactory });
 
     expect(countDecisions(db, "request_user_input")).toBe(0);
+  });
+
+  const LIMIT_TAIL =
+    "You've hit your session limit · resets 1:20am (America/Los_Angeles)\n" +
+    "/upgrade to increase your usage limit.";
+
+  function seedLimitActivity(
+    db: Database.Database,
+    ids: { goalId: string; runId: string; stepRunId: string; sessionId: string },
+  ): void {
+    db.prepare(
+      `INSERT INTO activities
+         (id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+          status, current_text, final_summary, source_kind, work_category, confidence,
+          pending_question, created_at, updated_at, completed_at)
+       VALUES ('activity-limit', ?, ?, ?, ?, 0, 'active', 'Watching...', NULL,
+               'step_started', NULL, NULL, NULL, ?, ?, NULL)`
+    ).run(ids.goalId, ids.runId, ids.stepRunId, ids.sessionId, NOW, NOW);
+  }
+
+  it("Claude session limit pauses the activity for recovery without blocking/terminating", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, runId, stepRunId } = seedAgentSessionWithSentinel(db);
+    seedLimitActivity(db, { goalId, runId, stepRunId, sessionId });
+    const terminate = vi.fn(async () => {});
+    const service = makeServiceWithStore(fakeOutputStore(LIMIT_TAIL), terminate);
+
+    await service.onSessionOutputChunk(db, () => NOW, { sessionId, goalId }, { bus, idFactory });
+
+    expect(
+      db.prepare("SELECT status, blocked_reason FROM workflow_runs WHERE id = ?").get(runId)
+    ).toEqual({ status: "active", blocked_reason: null });
+    expect(
+      db.prepare("SELECT status, failure_reason FROM sessions WHERE id = ?").get(sessionId)
+    ).toEqual({ status: "running", failure_reason: null });
+
+    const recovery = JSON.parse(
+      (db
+        .prepare(
+          "SELECT pending_provider_recovery_json AS recovery FROM workflow_step_runs WHERE id = ?"
+        )
+        .get(stepRunId) as { recovery: string }).recovery
+    );
+    expect(recovery).toMatchObject({
+      mode: "choose",
+      currentSessionId: sessionId,
+      currentAdapterId: "claude-code",
+      resetTimeText: "1:20am (America/Los_Angeles)",
+    });
+
+    expect(
+      db.prepare("SELECT status, source_kind FROM activities WHERE id = 'activity-limit'").get()
+    ).toEqual({ status: "paused_for_input", source_kind: "provider_recovery_pending" });
+    expect(terminate).not.toHaveBeenCalled();
+  });
+
+  it("Claude session limit detection is idempotent (same checkpoint, one activity row)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, stepRunId } = seedAgentSessionWithSentinel(db);
+    seedLimitActivity(db, { goalId, runId: "run-interview-1", stepRunId, sessionId });
+    const service = makeServiceWithStore(fakeOutputStore(LIMIT_TAIL));
+
+    await service.onSessionOutputChunk(db, () => NOW, { sessionId, goalId }, { bus, idFactory });
+    const firstId = (
+      JSON.parse(
+        (db
+          .prepare(
+            "SELECT pending_provider_recovery_json AS recovery FROM workflow_step_runs WHERE id = ?"
+          )
+          .get(stepRunId) as { recovery: string }).recovery
+      ) as { id: string }
+    ).id;
+
+    await service.onSessionOutputChunk(db, () => NOW, { sessionId, goalId }, { bus, idFactory });
+    const secondId = (
+      JSON.parse(
+        (db
+          .prepare(
+            "SELECT pending_provider_recovery_json AS recovery FROM workflow_step_runs WHERE id = ?"
+          )
+          .get(stepRunId) as { recovery: string }).recovery
+      ) as { id: string }
+    ).id;
+
+    expect(secondId).toBe(firstId);
+    expect(
+      (db
+        .prepare(
+          "SELECT COUNT(*) AS c FROM activities WHERE step_run_id = ? AND source_kind = 'provider_recovery_pending'"
+        )
+        .get(stepRunId) as { c: number }).c
+    ).toBe(1);
+  });
+
+  it("unsupervised mode still creates the checkpoint without spawning another provider", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, runId, stepRunId } = seedAgentSessionWithSentinel(db);
+    seedLimitActivity(db, { goalId, runId, stepRunId, sessionId });
+    db.prepare(
+      "INSERT INTO app_settings (key, value, updated_at) VALUES ('supervision_mode', 'unsupervised', ?)"
+    ).run(NOW);
+    const spawn = vi.fn(async () => {});
+    const service = new OrchestratorService(
+      fakeSelector(),
+      { async propose() { return { status: "proposed" as const, attemptId: "a", transport: "one_shot" as const, parsed: {}, rawTextLength: null, latencyMs: 1 }; } },
+      fakeRegistry(),
+      undefined,
+      fakeOutputStore(LIMIT_TAIL),
+      undefined,
+      undefined,
+      spawn,
+    );
+
+    await service.onSessionOutputChunk(db, () => NOW, { sessionId, goalId }, { bus, idFactory });
+
+    expect(
+      db.prepare("SELECT status FROM workflow_runs WHERE id = ?").get(runId)
+    ).toMatchObject({ status: "active" });
+    expect(
+      db.prepare("SELECT status, source_kind FROM activities WHERE id = 'activity-limit'").get()
+    ).toEqual({ status: "paused_for_input", source_kind: "provider_recovery_pending" });
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it("session not linked to a step run → no-op", async () => {

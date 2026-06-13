@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import {
   Activity,
   PendingQuestion,
+  ProviderRecoveryCheckpoint,
   WorkflowStepResult,
   type Activity as ActivityT,
   type PendingQuestion as PendingQuestionT
@@ -82,6 +83,20 @@ function enrichStepResult(db: Database.Database, activity: ActivityT): ActivityT
   });
 }
 
+function enrichProviderRecovery(db: Database.Database, activity: ActivityT): ActivityT {
+  if (activity.sourceKind !== "provider_recovery_pending") return activity;
+  const row = db
+    .prepare(
+      "SELECT pending_provider_recovery_json AS recovery FROM workflow_step_runs WHERE id = ?"
+    )
+    .get(activity.stepRunId) as { recovery: string | null } | undefined;
+  if (!row?.recovery) return activity;
+  return Activity.parse({
+    ...activity,
+    providerRecovery: ProviderRecoveryCheckpoint.parse(JSON.parse(row.recovery)),
+  });
+}
+
 export function listActivitiesByGoal(
   db: Database.Database,
   goalId: string
@@ -96,5 +111,8 @@ export function listActivitiesByGoal(
        ORDER BY created_at ASC, id ASC`
     )
     .all(goalId) as ActivityRow[];
-  return rows.map(rowToActivity).map((a) => enrichStepResult(db, a));
+  return rows
+    .map(rowToActivity)
+    .map((a) => enrichStepResult(db, a))
+    .map((a) => enrichProviderRecovery(db, a));
 }

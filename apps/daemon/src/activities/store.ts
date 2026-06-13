@@ -318,6 +318,66 @@ export function resumeFromConfirmation(
   return activity;
 }
 
+export function pauseForProviderRecovery(
+  ctx: ActivityStoreCtx,
+  input: { stepRunId: string; summary: string }
+): ActivityT | undefined {
+  let event: DomainEvent | undefined;
+  const activity = ctx.db.transaction(() => {
+    const live = getLiveForStepRun(ctx.db, input.stepRunId);
+    if (live === undefined) return undefined;
+
+    const now = currentTime(ctx);
+    ctx.db
+      .prepare(
+        `UPDATE activities
+         SET status = 'paused_for_input', current_text = ?,
+             source_kind = 'provider_recovery_pending', work_category = NULL,
+             pending_question = NULL, updated_at = ?
+         WHERE id = ?`
+      )
+      .run(input.summary, now, live.id);
+
+    const paused = getActivityById(ctx.db, live.id);
+    if (paused === undefined) throw new Error(`Activity disappeared: ${live.id}`);
+    event = insertActivityChangedEvent(ctx.db, paused, now);
+    return paused;
+  })();
+
+  publishActivityChanged(ctx, event);
+  return activity;
+}
+
+export function resumeFromProviderRecovery(
+  ctx: ActivityStoreCtx,
+  input: { stepRunId: string; agentSessionId: string; summary: string }
+): ActivityT | undefined {
+  let event: DomainEvent | undefined;
+  const activity = ctx.db.transaction(() => {
+    const live = getLiveForStepRun(ctx.db, input.stepRunId);
+    if (live === undefined || live.status !== "paused_for_input") return undefined;
+    if (live.sourceKind !== "provider_recovery_pending") return live;
+
+    const now = currentTime(ctx);
+    ctx.db
+      .prepare(
+        `UPDATE activities
+         SET status = 'active', source_kind = 'step_started', agent_session_id = ?,
+             current_text = ?, updated_at = ?
+         WHERE id = ?`
+      )
+      .run(input.agentSessionId, input.summary, now, live.id);
+
+    const resumed = getActivityById(ctx.db, live.id);
+    if (resumed === undefined) throw new Error(`Activity disappeared: ${live.id}`);
+    event = insertActivityChangedEvent(ctx.db, resumed, now);
+    return resumed;
+  })();
+
+  publishActivityChanged(ctx, event);
+  return activity;
+}
+
 export function completeLive(
   ctx: ActivityStoreCtx,
   input: {

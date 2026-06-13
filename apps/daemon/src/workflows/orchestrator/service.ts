@@ -1,7 +1,9 @@
 import type Database from "better-sqlite3";
 import {
+  AdapterId,
   InterviewTurn,
   OrchestrationRequest,
+  ProviderRecoveryCheckpoint,
   ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES,
   StepResultScoringProposal,
   StepSkillProposal,
@@ -76,13 +78,16 @@ import { adapterIdForProvider } from "../../orchestrator-llm/model-provider-llm-
 import { randomUUID } from "node:crypto";
 import { SHADOW_LLM_TIMEOUT_MS } from "../../orchestrator-llm/shadow-llm-client.js";
 import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
+import { resolveShadowProvider } from "../../orchestrator-llm/providers/registry.js";
+import { listAgents } from "../../agents.js";
+import { buildProviderRecoveryChoices } from "./provider-recovery.js";
 import {
   recoverStepScoring,
   type ShadowAsk,
 } from "./recover-step-scoring.js";
 import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
 import { getSupervisionMode } from "../../settings/store.js";
-import { expireConfirmation, openOrUpdateLive, pauseForConfirmation, resumeFromConfirmation } from "../../activities/store.js";
+import { expireConfirmation, openOrUpdateLive, pauseForConfirmation, pauseForProviderRecovery, resumeFromConfirmation } from "../../activities/store.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
 import { summarizeScoring } from "./scoring-summary.js";
 
@@ -198,6 +203,7 @@ interface StepRunRow {
   revise_attempts: number;
   crash_retries: number;
   step_result_json: string | null;
+  pending_provider_recovery_json: string | null;
 }
 
 export interface RequestNextDecisionOptions {
@@ -601,9 +607,12 @@ export class OrchestratorService {
   ): Promise<void> {
     // (1) Resolve step run from session.
     const sess = db
-      .prepare("SELECT workflow_step_run_id FROM sessions WHERE id = ?")
-      .get(args.sessionId) as { workflow_step_run_id: string | null } | undefined;
+      .prepare("SELECT workflow_step_run_id, adapter_id, status FROM sessions WHERE id = ?")
+      .get(args.sessionId) as
+      | { workflow_step_run_id: string | null; adapter_id: string; status: string }
+      | undefined;
     if (!sess?.workflow_step_run_id) return;
+    if (sess.status !== "running" && sess.status !== "starting") return;
 
     // (2) Load step run; skip if not active.
     const stepRun = db
@@ -611,18 +620,90 @@ export class OrchestratorService {
       .get(sess.workflow_step_run_id) as StepRunRow | undefined;
     if (!stepRun || stepRun.status !== "active") return;
 
-    // (3) Scan the tail for a sentinel.
+    // (3) Scan the tail for provider terminal screens before looking for input.
     const tail = decodeSessionTail(this.sessionOutputStore.readTail(args.sessionId));
+    const provider = resolveShadowProvider(sess.adapter_id as ShadowAdapterId);
+    const providerFailure = provider.turnParser().detectError?.(tail, new Date(now()));
+    if (providerFailure) {
+      // Idempotency: a recovery checkpoint already exists for this step → do not
+      // create a duplicate or re-pause.
+      if (stepRun.pending_provider_recovery_json) return;
+
+      const run = getWorkflowRunById(db, stepRun.workflow_run_id);
+      if (!run || run.status !== "active") return;
+      const template = getTemplateById(db, run.templateId);
+      if (!template) return;
+      const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+      if (!stepTpl) return;
+      const goal = readGoal(db, run.goalId);
+      const bus = options.bus ?? new EventBus();
+
+      // Build recovery choices over connected, non-current agents only; never
+      // probe registered-but-disconnected adapters.
+      const connectedAdapterIds = listAgents(db)
+        .filter((agent) => agent.connected)
+        .map((agent) => agent.id);
+      const operatorDescriptors = await this.operators.list(run.goalId, {
+        agentIds: connectedAdapterIds,
+        includeNonAgents: false,
+      });
+      const choices = buildProviderRecoveryChoices({
+        currentAdapterId: sess.adapter_id,
+        connectedAdapterIds,
+        stepPreferences: preferencesForGoal(
+          stepTpl.agentPreference,
+          goal.orchestrator_provider
+        ),
+        operators: operatorDescriptors,
+        supportsModel: (id, mid) => this.stepDispatch?.supportsModel(id, mid) ?? false,
+      });
+
+      const checkpoint = ProviderRecoveryCheckpoint.parse({
+        id: options.idFactory?.() ?? randomUUID(),
+        mode: "choose",
+        failureCode: providerFailure.code,
+        message: providerFailure.message,
+        currentSessionId: args.sessionId,
+        currentAdapterId: AdapterId.parse(sess.adapter_id),
+        currentProviderName: provider.displayName,
+        resetTimeText: providerFailure.resetTimeText,
+        resetAt: providerFailure.resetAt,
+        timezone: providerFailure.timezone,
+        detectedAt: new Date(now()).toISOString(),
+        retryOutputSeq: null,
+        retryKind: "preserved_session",
+        replacementSessionId: null,
+        replacementOutputSeq: null,
+        pendingGuidance: [],
+        lastError: null,
+        choices,
+      });
+
+      db.prepare(
+        "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = ?"
+      ).run(JSON.stringify(checkpoint), stepRun.id);
+
+      const summary = providerFailure.resetTimeText
+        ? `${provider.displayName} reached its session limit. Available again at ${providerFailure.resetTimeText}.`
+        : `${provider.displayName} reached its session limit. Reset time unavailable.`;
+      pauseForProviderRecovery(
+        { db, bus, now, idFactory: options.idFactory },
+        { stepRunId: stepRun.id, summary }
+      );
+      return;
+    }
+
+    // (4) Scan the tail for an explicit user-input sentinel.
     const question = detectPendingAgentQuestion(tail);
     if (!question) return;
 
-    // (4) Idempotency: already an unanswered question outstanding?
+    // (5) Idempotency: already an unanswered question outstanding?
     const stepArtifacts = listArtifactsForRun(db, stepRun.workflow_run_id).filter(
       (a) => a.stepRunId === stepRun.id
     );
     if (this.hasActiveUnansweredQuestion(db, stepArtifacts, stepRun.id)) return;
 
-    // (5) Load run, template, step template to call commitUserInputDecision.
+    // (6) Load run, template, step template to call commitUserInputDecision.
     const run = getWorkflowRunById(db, stepRun.workflow_run_id);
     if (!run || run.status !== "active") return;
     const template = getTemplateById(db, run.templateId);
@@ -630,7 +711,7 @@ export class OrchestratorService {
     const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
     if (!stepTpl) return;
 
-    // (6) Record the decision.
+    // (7) Record the decision.
     this.commitUserInputDecision(
       db,
       now,

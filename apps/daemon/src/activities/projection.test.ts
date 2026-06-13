@@ -86,6 +86,47 @@ describe("listActivitiesByGoal step_result enrichment", () => {
     expect(a.stepResult?.successScore).toBe(0.82);
   });
 
+  it("enriches a provider_recovery_pending activity with providerRecovery", () => {
+    const checkpoint = {
+      id: "recovery-1",
+      mode: "choose",
+      failureCode: "session_limit",
+      message: "Claude Code session limit reached",
+      currentSessionId: "sess-1",
+      currentAdapterId: "claude-code",
+      currentProviderName: "Claude Code",
+      resetTimeText: "4:20am (America/New_York)",
+      resetAt: "2026-06-12T08:20:00.000Z",
+      timezone: "America/New_York",
+      detectedAt: "2026-06-12T05:00:00.000Z",
+      retryOutputSeq: null,
+      retryKind: "preserved_session",
+      replacementSessionId: null,
+      replacementOutputSeq: null,
+      pendingGuidance: [],
+      lastError: null,
+      choices: [],
+    };
+    db.prepare(
+      "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = 's1'"
+    ).run(JSON.stringify(checkpoint));
+    db.prepare(
+      `INSERT INTO activities (
+         id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+         status, current_text, final_summary, source_kind, work_category, confidence,
+         pending_question, created_at, updated_at, completed_at
+       ) VALUES ('a-rec', 'g1', 'r1', 's1', 'sess-1', 2, 'paused_for_input', 'waiting', NULL,
+                 'provider_recovery_pending', NULL, NULL, NULL,
+                 '2026-06-09T00:02:00.000Z', '2026-06-09T00:02:00.000Z', NULL)`
+    ).run();
+
+    const activities = listActivitiesByGoal(db, "g1");
+    const rec = activities.find((a) => a.id === "a-rec")!;
+    expect(rec.providerRecovery).toBeDefined();
+    expect(rec.providerRecovery?.mode).toBe("choose");
+    expect(rec.providerRecovery?.resetTimeText).toBe("4:20am (America/New_York)");
+  });
+
   it("does not enrich non-step_result activities", () => {
     db.prepare(
       `INSERT INTO activities (
