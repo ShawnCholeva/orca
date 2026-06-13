@@ -24,7 +24,7 @@ export function effectiveGraph(
   return materializeLinearGraph(steps);
 }
 
-export function materializeLinearGraph(steps: WorkflowStepTemplate[]): WorkflowGraph {
+function materializeLinearGraph(steps: WorkflowStepTemplate[]): WorkflowGraph {
   const sorted = [...steps].sort((a, b) => a.ordinal - b.ordinal);
   const nodes: WorkflowGraphNode[] = sorted.map((step, i) => ({
     id: step.id,

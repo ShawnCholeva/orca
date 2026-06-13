@@ -116,7 +116,7 @@ describe("workflow template projection", () => {
     const db = setup();
     const graph = {
       nodes: [{ id: "n1", type: "step" as const, name: "Step 1", stepId: "intake" }],
-      edges: [["n1", "n1"]] as [string, string][],
+      edges: [{ from: "n1", to: "n1" }],
       positions: { n1: { x: 10, y: 20 } },
     };
     seedTemplate(db, {

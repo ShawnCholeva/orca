@@ -185,7 +185,7 @@ describe("workflow template usecases", () => {
     const { ctx } = setup();
     const graph = {
       nodes: [{ id: "n1", type: "step" as const, name: "Step 1", stepId: "intake" }],
-      edges: [["n1", "n1"]] as [string, string][],
+      edges: [{ from: "n1", to: "n1" }],
       positions: { n1: { x: 0, y: 0 } },
     };
 
@@ -235,7 +235,7 @@ describe("workflow template usecases", () => {
 
     const graph = {
       nodes: [{ id: "n1", type: "step" as const, name: "Step 1", stepId: "intake" }],
-      edges: [] as [string, string][],
+      edges: [] as { from: string; to: string }[],
       positions: { n1: { x: 5, y: 5 } },
     };
 
@@ -266,7 +266,7 @@ describe("workflow template usecases", () => {
     const { ctx } = setup();
     const graph = {
       nodes: [{ id: "n1", type: "step" as const, name: "Step 1", stepId: "intake" }],
-      edges: [] as [string, string][],
+      edges: [] as { from: string; to: string }[],
       positions: { n1: { x: 1, y: 2 } },
     };
 
