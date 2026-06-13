@@ -1,6 +1,15 @@
+import type { ProviderTerminalFailureCode } from "@orca/contracts";
 import type { TmuxRunner } from "../../tmux/runner.js";
 
 export type ShadowAdapterId = "claude-code" | "codex" | "antigravity";
+
+export interface ProviderTerminalFailure {
+  code: ProviderTerminalFailureCode;
+  message: string;
+  resetTimeText: string | null;
+  resetAt: string | null;
+  timezone: string | null;
+}
 
 export interface ShadowLaunch {
   /** Executable invoked by `tmux new-session` for this provider. */
@@ -33,7 +42,9 @@ export interface ShadowTurnParse {
   /** Extract the structured action from finished turn text, or null if not present yet. */
   parseAction(turnText: string): string | null;
   /** Detect a terminal provider error (usage limit, auth lost, …) in turn text. */
-  detectError?(turnText: string): Error | null;
+  detectError?(turnText: string, detectedAt?: Date): ProviderTerminalFailure | null;
+  /** Return true when turn text confirms the provider has started processing. */
+  detectTurnStarted?(turnText: string): boolean;
 }
 
 export interface ShadowProvider {
@@ -71,6 +82,12 @@ export interface ShadowProvider {
   writePermissionRule(workspacePath: string, rule: string): void;
   /** Optional hook run before each prompt submission (e.g. dismiss a modal). */
   beforeSubmit?(ctx: {
+    tmux: TmuxRunner;
+    sessionName: string;
+    dbg: (msg: string) => void;
+  }): Promise<void>;
+  /** Optional hook to wait for a provider session/usage limit to reset. */
+  waitForLimitReset?(ctx: {
     tmux: TmuxRunner;
     sessionName: string;
     dbg: (msg: string) => void;

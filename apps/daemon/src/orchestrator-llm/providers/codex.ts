@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { extractActionBlock } from "../sentinel.js";
 import type {
+  ProviderTerminalFailure,
   ShadowCaptureMode,
   ShadowHookConfig,
   ShadowLaunch,
@@ -90,16 +91,37 @@ export class CodexShadowProvider implements ShadowProvider {
         if (action !== null) return action;
         return extractCodexPaneAction(turnText);
       },
-      detectError: (turnText) => {
+      detectError: (turnText): ProviderTerminalFailure | null => {
         if (CODEX_USAGE_LIMIT.test(turnText)) {
-          return new Error("codex usage limit reached; retry when Codex quota resets");
+          return {
+            code: "usage_limit",
+            message: "codex usage limit reached; retry when Codex quota resets",
+            resetTimeText: null,
+            resetAt: null,
+            timezone: null,
+          };
         }
         if (CODEX_AUTH_LOST.test(turnText)) {
-          return new Error("codex authentication required; run codex login");
+          return {
+            code: "authentication_required",
+            message: "codex authentication required; run codex login",
+            resetTimeText: null,
+            resetAt: null,
+            timezone: null,
+          };
         }
         return null;
       },
+      detectTurnStarted: (text) => /esc to interrupt|working/i.test(text),
     };
+  }
+
+  async waitForLimitReset(_ctx: {
+    tmux: TmuxRunner;
+    sessionName: string;
+    dbg: (msg: string) => void;
+  }): Promise<void> {
+    // Codex does not support interactive reset dismissal; no-op.
   }
 
   async beforeSubmit(ctx: {

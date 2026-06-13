@@ -35,6 +35,99 @@ describe("resolveShadowProvider", () => {
     expect(resolveShadowProvider("codex").captureMode()).toEqual({ kind: "hook" });
   });
 
+  it("detects Claude Code session-limit screens as terminal errors", () => {
+    const failure = resolveShadowProvider("claude-code")
+      .turnParser()
+      .detectError?.("You've hit your session limit · resets 1:20am");
+
+    expect(failure).toMatchObject({ code: "session_limit", message: expect.stringMatching(/session limit/i) });
+  });
+
+  it("parses Claude session-limit reset time with timezone", () => {
+    const failure = resolveShadowProvider("claude-code")
+      .turnParser()
+      .detectError?.(
+        "You've hit your session limit · resets 4:20am (America/New_York)\n/upgrade to increase your usage limit.",
+        new Date("2026-06-12T05:00:00.000Z"),
+      );
+    expect(failure).toMatchObject({
+      code: "session_limit",
+      message: "Claude Code session limit reached",
+      resetTimeText: "4:20am (America/New_York)",
+      timezone: "America/New_York",
+      resetAt: "2026-06-12T08:20:00.000Z",
+    });
+  });
+
+  it("preserves resetTimeText but leaves resetAt/timezone null when no timezone in Claude reset", () => {
+    const failure = resolveShadowProvider("claude-code")
+      .turnParser()
+      .detectError?.(
+        "You've hit your session limit · resets 4:20am",
+        new Date("2026-06-12T05:00:00.000Z"),
+      );
+    expect(failure).toMatchObject({
+      code: "session_limit",
+      resetTimeText: "4:20am",
+      resetAt: null,
+      timezone: null,
+    });
+  });
+
+  it("returns null reset fields when Claude session limit has no reset text", () => {
+    const failure = resolveShadowProvider("claude-code")
+      .turnParser()
+      .detectError?.(
+        "You've hit your session limit",
+        new Date("2026-06-12T05:00:00.000Z"),
+      );
+    expect(failure).toMatchObject({
+      code: "session_limit",
+      resetTimeText: null,
+      resetAt: null,
+      timezone: null,
+    });
+  });
+
+  it("detects Codex usage-limit as a structured terminal failure", () => {
+    const failure = resolveShadowProvider("codex")
+      .turnParser()
+      .detectError?.("You've hit your usage limit. Please try again later.");
+    expect(failure).toMatchObject({
+      code: "usage_limit",
+      message: expect.stringMatching(/usage limit/i),
+      resetTimeText: null,
+      resetAt: null,
+      timezone: null,
+    });
+  });
+
+  it("detects Codex auth-lost as a structured terminal failure", () => {
+    const failure = resolveShadowProvider("codex")
+      .turnParser()
+      .detectError?.("You are not signed in. Login required.");
+    expect(failure).toMatchObject({
+      code: "authentication_required",
+      message: expect.stringMatching(/authentication/i),
+      resetTimeText: null,
+      resetAt: null,
+      timezone: null,
+    });
+  });
+
+  it("detects Antigravity auth/quota as a structured terminal failure", () => {
+    const failure = resolveShadowProvider("antigravity")
+      .turnParser()
+      .detectError?.("You are not signed in.");
+    expect(failure).toMatchObject({
+      code: "authentication_required",
+      message: expect.stringMatching(/antigravity/i),
+      resetTimeText: null,
+      resetAt: null,
+      timezone: null,
+    });
+  });
+
   it("parses the codex action block out of a Stop-hook last_assistant_message", () => {
     // The Codex Stop hook POSTs `last_assistant_message` to /v1/shadow-hooks/stop,
     // which carries the full ```orca:action fenced block verbatim (verified

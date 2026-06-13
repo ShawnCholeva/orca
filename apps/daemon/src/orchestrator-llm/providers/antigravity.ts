@@ -1,11 +1,13 @@
 import { extractActionBlock } from "../sentinel.js";
 import type {
+  ProviderTerminalFailure,
   ShadowCaptureMode,
   ShadowHookConfig,
   ShadowLaunch,
   ShadowProvider,
   ShadowTurnParse,
 } from "./types.js";
+import type { TmuxRunner } from "../../tmux/runner.js";
 
 const AUTH_OR_QUOTA =
   /\bnot\s+(?:signed|logged)\s+in\b|\bauth(?:entication)?\s+(?:required|expired|failed)\b|\brate limit\b|\bquota\b|\busage limit\b/i;
@@ -54,11 +56,28 @@ export class AntigravityShadowProvider implements ShadowProvider {
   turnParser(): ShadowTurnParse {
     return {
       parseAction: (turnText) => extractActionBlock(turnText) ?? extractXmlActionBlock(turnText),
-      detectError: (turnText) => {
-        if (AUTH_OR_QUOTA.test(turnText)) return new Error("antigravity auth, quota, or usage failure");
+      detectError: (turnText): ProviderTerminalFailure | null => {
+        if (AUTH_OR_QUOTA.test(turnText)) {
+          return {
+            code: "authentication_required",
+            message: "antigravity auth, quota, or usage failure",
+            resetTimeText: null,
+            resetAt: null,
+            timezone: null,
+          };
+        }
         return null;
       },
+      detectTurnStarted: (text) => /esc to cancel|running/i.test(text),
     };
+  }
+
+  async waitForLimitReset(_ctx: {
+    tmux: TmuxRunner;
+    sessionName: string;
+    dbg: (msg: string) => void;
+  }): Promise<void> {
+    // Antigravity does not support interactive reset dismissal; no-op.
   }
 }
 
