@@ -28,6 +28,11 @@ import type { OrchestratorAction } from "@orca/contracts";
 import type { SessionOutputStore } from "../../sessions/output-store.js";
 import type { ShadowAsk } from "./recover-step-scoring.js";
 import { setSupervisionMode } from "../../settings/store.js";
+import type { ProviderRecoveryCheckpoint } from "@orca/contracts";
+import {
+  OrchestratorProviderRecoveryInvalidTransitionError,
+  OrchestratorProviderRecoveryNotFoundError,
+} from "./service.js";
 
 const AGENT_OPERATOR_ID = "agent:claude-code";
 
@@ -283,6 +288,10 @@ function setupAgentStepRun(db: Database.Database, opts: { guardrailsJson?: strin
     name: "Implement",
     instructions: "Write the implementation.",
     outputSchema: [{ key: "result", type: "string", required: true }],
+    agentPreference: [
+      { adapterId: "claude-code", modelId: "claude-haiku-4-5" },
+      { adapterId: "codex", modelId: "gpt-5-codex" },
+    ],
   });
 
   db.prepare(
@@ -1417,3 +1426,654 @@ describe("OrchestratorService.onUserMessage (refine path)", () => {
     expect(act?.status).toBe("active");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Provider recovery actions (Task 5): wait / retry / refresh / switch
+// ---------------------------------------------------------------------------
+
+const TURN_STARTED_TAIL = "working on it… (esc to interrupt)";
+const RECOVERY_LIMIT_TAIL =
+  "You've hit your session limit · resets 1:20am (America/Los_Angeles)\n" +
+  "/upgrade to increase your usage limit.";
+// Codex emits its own usage-limit screen (not Claude's session-limit format), so
+// the codex replacement-failure case must use a codex-parseable limit string.
+const CODEX_LIMIT_TAIL = "You've hit your usage limit. purchase more credits to continue.";
+
+/** A SessionOutputStore that serves a different snapshot per session id. */
+function multiOutputStore(
+  byId: Record<string, { tail: string; nextSeq: number }>
+): SessionOutputStore {
+  return {
+    appendChunk: vi.fn(() => ({ seq: 0, byteOffset: 0 })),
+    readTail: vi.fn((id: string): SessionOutputSnapshot => {
+      const entry = byId[id] ?? { tail: "", nextSeq: 0 };
+      const chunks = entry.tail
+        ? [
+            {
+              seq: 0,
+              byteOffset: 0,
+              dataBase64: Buffer.from(entry.tail).toString("base64"),
+            },
+          ]
+        : [];
+      return {
+        sessionId: id,
+        firstByteOffset: 0,
+        nextSeq: entry.nextSeq,
+        totalBytesKept: Buffer.byteLength(entry.tail),
+        chunks,
+      };
+    }),
+  };
+}
+
+interface RecoveryServiceParts {
+  deliver: ReturnType<typeof vi.fn>;
+  wait: ReturnType<typeof vi.fn>;
+  terminate: ReturnType<typeof vi.fn>;
+  spawn: ReturnType<typeof vi.fn>;
+  launch: ReturnType<typeof vi.fn>;
+  service: OrchestratorService;
+}
+
+function makeRecoveryService(opts: {
+  outputStore?: SessionOutputStore;
+  launchSessionId?: string;
+  operators?: OperatorDescriptor[];
+} = {}): RecoveryServiceParts {
+  const deliver = vi.fn(async () => "delivered" as const);
+  const wait = vi.fn(async () => {});
+  const terminate = vi.fn(async () => {});
+  const spawn = vi.fn(async () => {});
+  const launch = vi.fn(async () => ({ sessionId: opts.launchSessionId ?? "sess-replacement" }));
+  const operators = opts.operators ?? [
+    agentOperatorDescriptor(),
+    {
+      id: "agent:codex",
+      kind: "agent" as const,
+      displayName: "Codex",
+      capabilities: [],
+      ready: true,
+      supportsRepoEditing: true,
+      supportsTerminal: true,
+    },
+  ];
+  const dispatch: StepDispatchCapabilities = {
+    async isAdapterReady(id) {
+      return id === "claude-code" || id === "codex";
+    },
+    supportsModel(id, mid) {
+      if (id === "claude-code" && mid === "claude-haiku-4-5") return true;
+      if (id === "codex" && mid === "gpt-5-codex") return true;
+      return false;
+    },
+    resolveMode(id) {
+      return { adapterId: id, mode: "one_shot", fallbacks: ["shadow_session"] };
+    },
+  };
+  const service = new OrchestratorService(
+    fakeAgentSelector(),
+    fakeBrokerNoop(),
+    { async list() { return operators; } },
+    { launch },
+    opts.outputStore ?? multiOutputStore({}),
+    dispatch,
+    undefined,
+    spawn,
+    deliver,
+    terminate
+  );
+  return { deliver, wait, terminate, spawn, launch, service };
+}
+
+/** Build a recovery service whose workerWait is wired (last constructor arg). */
+function makeRecoveryServiceWithWait(opts: {
+  outputStore?: SessionOutputStore;
+  launchSessionId?: string;
+} = {}): RecoveryServiceParts {
+  const deliver = vi.fn(async () => "delivered" as const);
+  const wait = vi.fn(async () => {});
+  const terminate = vi.fn(async () => {});
+  const spawn = vi.fn(async () => {});
+  const launch = vi.fn(async () => ({ sessionId: opts.launchSessionId ?? "sess-replacement" }));
+  const dispatch: StepDispatchCapabilities = {
+    async isAdapterReady(id) {
+      return id === "claude-code" || id === "codex";
+    },
+    supportsModel(id, mid) {
+      if (id === "claude-code" && mid === "claude-haiku-4-5") return true;
+      if (id === "codex" && mid === "gpt-5-codex") return true;
+      return false;
+    },
+    resolveMode(id) {
+      return { adapterId: id, mode: "one_shot", fallbacks: ["shadow_session"] };
+    },
+  };
+  const service = new OrchestratorService(
+    fakeAgentSelector(),
+    fakeBrokerNoop(),
+    {
+      async list() {
+        return [
+          agentOperatorDescriptor(),
+          {
+            id: "agent:codex",
+            kind: "agent" as const,
+            displayName: "Codex",
+            capabilities: [],
+            ready: true,
+            supportsRepoEditing: true,
+            supportsTerminal: true,
+          },
+        ];
+      },
+    },
+    { launch },
+    opts.outputStore ?? multiOutputStore({}),
+    dispatch,
+    undefined,
+    spawn,
+    deliver,
+    terminate,
+    undefined,
+    undefined,
+    wait
+  );
+  return { deliver, wait, terminate, spawn, launch, service };
+}
+
+/** Seed an agent step + linked session + a recovery checkpoint row. */
+function seedRecoveryCheckpoint(
+  db: Database.Database,
+  patch: Partial<ProviderRecoveryCheckpoint> = {}
+): ProviderRecoveryCheckpoint {
+  setupAgentStepRun(db);
+  seedWorkspace(db);
+  db.prepare(
+    "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES ('sess-cur', 'goal-1', 'ws-1', 'claude-code', 'Session', 'running', ?, 'step-1')"
+  ).run(NOW);
+  db.prepare(
+    "INSERT INTO agents (id, name, short_label, description, swatch, recommended, connected, sort_order, created_at, updated_at) VALUES ('claude-code', 'Claude Code', 'Claude', 'desc', '#000', 0, 1, 0, ?, ?) ON CONFLICT(id) DO UPDATE SET connected = 1"
+  ).run(NOW, NOW);
+  db.prepare(
+    "INSERT INTO agents (id, name, short_label, description, swatch, recommended, connected, sort_order, created_at, updated_at) VALUES ('codex', 'Codex', 'Codex', 'desc', '#111', 0, 1, 1, ?, ?) ON CONFLICT(id) DO UPDATE SET connected = 1"
+  ).run(NOW, NOW);
+  const checkpoint: ProviderRecoveryCheckpoint = {
+    id: "ckpt-1",
+    mode: "choose",
+    failureCode: "session_limit",
+    message: "You've hit your session limit",
+    currentSessionId: "sess-cur",
+    currentAdapterId: "claude-code",
+    currentProviderName: "Claude Code",
+    resetTimeText: "1:20am (America/Los_Angeles)",
+    resetAt: null,
+    timezone: "America/Los_Angeles",
+    detectedAt: NOW,
+    retryOutputSeq: null,
+    retryKind: "preserved_session",
+    replacementSessionId: null,
+    replacementOutputSeq: null,
+    pendingGuidance: [],
+    lastError: null,
+    choices: [
+      {
+        adapterId: "codex",
+        displayName: "Codex",
+        modelId: "gpt-5-codex",
+        enabled: true,
+        reason: null,
+      },
+    ],
+    ...patch,
+  };
+  db.prepare(
+    "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = 'step-1'"
+  ).run(JSON.stringify(checkpoint));
+  return checkpoint;
+}
+
+function readCheckpoint(db: Database.Database): ProviderRecoveryCheckpoint | null {
+  const row = db
+    .prepare("SELECT pending_provider_recovery_json AS j FROM workflow_step_runs WHERE id = 'step-1'")
+    .get() as { j: string | null };
+  return row.j ? (JSON.parse(row.j) as ProviderRecoveryCheckpoint) : null;
+}
+
+function terminalSessionEventCount(db: Database.Database): number {
+  return (
+    db
+      .prepare(
+        "SELECT COUNT(*) AS c FROM events WHERE type IN ('session.stopped', 'session.failed')"
+      )
+      .get() as { c: number }
+  ).c;
+}
+
+describe("OrchestratorService provider recovery actions", () => {
+  it("waitForProvider: choose→waiting, preserves session, calls worker wait", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db);
+    const { service, wait } = makeRecoveryServiceWithWait();
+
+    await service.waitForProvider(db, () => NOW, "run-1", "ckpt-1");
+
+    expect(readCheckpoint(db)?.mode).toBe("waiting");
+    expect(
+      db.prepare("SELECT status FROM sessions WHERE id = 'sess-cur'").get()
+    ).toEqual({ status: "running" });
+    expect(wait).toHaveBeenCalledWith("sess-cur", "claude-code");
+  });
+
+  it("waitForProvider rejected outside choose (waiting) with invalid-transition", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db, { mode: "waiting" });
+    const { service } = makeRecoveryServiceWithWait();
+
+    await expect(
+      service.waitForProvider(db, () => NOW, "run-1", "ckpt-1")
+    ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
+  });
+
+  it("retryProvider (preserved): stores output_seq, waiting→retrying, delivers Continue to same session", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db, { mode: "waiting" });
+    const { service, deliver } = makeRecoveryService({
+      outputStore: multiOutputStore({ "sess-cur": { tail: "", nextSeq: 7 } }),
+    });
+
+    await service.retryProvider(db, () => NOW, "run-1", "ckpt-1");
+
+    const ck = readCheckpoint(db)!;
+    expect(ck.mode).toBe("retrying");
+    expect(ck.retryOutputSeq).toBe(7);
+    expect(deliver).toHaveBeenCalledWith("sess-cur", "Continue the previous step request.");
+  });
+
+  it("retryProvider rejected outside waiting (choose) with invalid-transition", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db, { mode: "choose" });
+    const { service, deliver } = makeRecoveryService();
+
+    await expect(
+      service.retryProvider(db, () => NOW, "run-1", "ckpt-1")
+    ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("retryProvider (fresh_session): launches replacement with handoff instead of claiming preserved", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db, { mode: "waiting", retryKind: "fresh_session" });
+    const { service, deliver, launch, spawn } = makeRecoveryService({
+      outputStore: multiOutputStore({
+        "sess-cur": { tail: "", nextSeq: 1 },
+        "sess-replacement": { tail: "", nextSeq: 3 },
+      }),
+      launchSessionId: "sess-replacement",
+    });
+
+    await service.retryProvider(db, () => NOW, "run-1", "ckpt-1");
+
+    const ck = readCheckpoint(db)!;
+    expect(ck.mode).toBe("retrying");
+    expect(ck.replacementSessionId).toBe("sess-replacement");
+    expect(ck.replacementOutputSeq).toBe(3);
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    // Handoff prompt (not "Continue the previous step request.") delivered to the new session.
+    expect(deliver).toHaveBeenCalledWith(
+      "sess-replacement",
+      expect.stringContaining("Interrupted session handoff")
+    );
+  });
+
+  it("preserved-session Retry before a known future resetAt is rejected without delivering", async () => {
+    const { db } = setupHarness();
+    const future = "2999-01-01T00:00:00.000Z";
+    seedRecoveryCheckpoint(db, { mode: "waiting", resetAt: future });
+    const { service, deliver } = makeRecoveryService({
+      outputStore: multiOutputStore({ "sess-cur": { tail: "", nextSeq: 1 } }),
+    });
+
+    await expect(
+      service.retryProvider(db, () => NOW, "run-1", "ckpt-1")
+    ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(readCheckpoint(db)?.mode).toBe("waiting");
+  });
+
+  it("unknown reset time stays manually retryable", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db, { mode: "waiting", resetAt: null });
+    const { service, deliver } = makeRecoveryService({
+      outputStore: multiOutputStore({ "sess-cur": { tail: "", nextSeq: 2 } }),
+    });
+
+    await service.retryProvider(db, () => NOW, "run-1", "ckpt-1");
+
+    expect(readCheckpoint(db)?.mode).toBe("retrying");
+    expect(deliver).toHaveBeenCalledWith("sess-cur", "Continue the previous step request.");
+  });
+
+  it("user chat while pending → appended to pendingGuidance + Orca ack + NOT sent to worker", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedRecoveryCheckpoint(db, { mode: "waiting" });
+    const deliver = vi.fn(async () => "delivered" as const);
+    const mediator = spyMediator({ kind: "forward_to_agent", translated: "x" });
+    // Goal needs orchestrator provider/model for onUserMessage to reach the guidance check.
+    db.prepare(
+      "UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-haiku-4-5' WHERE id = 'goal-1'"
+    ).run();
+    const service = new OrchestratorService(
+      fakeAgentSelector(),
+      fakeBrokerNoop(),
+      { async list() { return [agentOperatorDescriptor()]; } },
+      makeLauncher(),
+      multiOutputStore({}),
+      fakeStepDispatch(),
+      mediator,
+      undefined,
+      deliver
+    );
+
+    await service.onUserMessage(db, () => NOW, { goalId: "goal-1", body: "prefer pnpm" }, { bus, idFactory });
+
+    expect(readCheckpoint(db)?.pendingGuidance).toEqual(["prefer pnpm"]);
+    expect(mediator.calls).toBe(0);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(lastOrchestratorMessageBody(db)).toContain("Saved this guidance");
+  });
+
+  it("pendingGuidance retains newest 20 and bounds each item to 4000 chars", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const existing = Array.from({ length: 20 }, (_v, i) => `g${i}`);
+    seedRecoveryCheckpoint(db, { mode: "waiting", pendingGuidance: existing });
+    db.prepare(
+      "UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-haiku-4-5' WHERE id = 'goal-1'"
+    ).run();
+    const mediator = spyMediator({ kind: "forward_to_agent", translated: "x" });
+    const service = new OrchestratorService(
+      fakeAgentSelector(),
+      fakeBrokerNoop(),
+      { async list() { return [agentOperatorDescriptor()]; } },
+      makeLauncher(),
+      multiOutputStore({}),
+      fakeStepDispatch(),
+      mediator,
+      undefined,
+      vi.fn(async () => "delivered" as const)
+    );
+
+    const long = "z".repeat(5000);
+    await service.onUserMessage(db, () => NOW, { goalId: "goal-1", body: long }, { bus, idFactory });
+
+    const guidance = readCheckpoint(db)!.pendingGuidance;
+    expect(guidance.length).toBe(20);
+    expect(guidance[0]).toBe("g1"); // oldest dropped
+    expect(guidance[19]!.length).toBe(4000);
+  });
+
+  it("turn-start after stored seq sends pending guidance then clears checkpoint + resumes", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedRecoveryCheckpoint(db, {
+      mode: "retrying",
+      retryKind: "preserved_session",
+      retryOutputSeq: 5,
+      pendingGuidance: ["use the new API"],
+    });
+    db.prepare(
+      `INSERT INTO activities (id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal, status, current_text, final_summary, source_kind, work_category, confidence, pending_question, created_at, updated_at, completed_at) VALUES ('act-r', 'goal-1', 'run-1', 'step-1', 'sess-cur', 0, 'paused_for_input', 'Paused', NULL, 'provider_recovery_pending', NULL, NULL, NULL, ?, ?, NULL)`
+    ).run(NOW, NOW);
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = new OrchestratorService(
+      fakeAgentSelector(),
+      fakeBrokerNoop(),
+      { async list() { return [agentOperatorDescriptor()]; } },
+      makeLauncher(),
+      multiOutputStore({ "sess-cur": { tail: TURN_STARTED_TAIL, nextSeq: 8 } }),
+      fakeStepDispatch(),
+      undefined,
+      undefined,
+      deliver
+    );
+
+    await service.onSessionOutputChunk(db, () => NOW, { sessionId: "sess-cur", goalId: "goal-1" }, { bus, idFactory });
+
+    expect(deliver).toHaveBeenCalledWith("sess-cur", "use the new API");
+    expect(readCheckpoint(db)).toBeNull();
+    expect(
+      db.prepare("SELECT status FROM activities WHERE id = 'act-r'").get()
+    ).toMatchObject({ status: "active" });
+  });
+
+  it("same limit while retrying → back to waiting w/ refreshed reset", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedRecoveryCheckpoint(db, {
+      mode: "retrying",
+      retryKind: "preserved_session",
+      retryOutputSeq: 2,
+      resetAt: null,
+    });
+    const service = new OrchestratorService(
+      fakeAgentSelector(),
+      fakeBrokerNoop(),
+      { async list() { return [agentOperatorDescriptor()]; } },
+      makeLauncher(),
+      multiOutputStore({ "sess-cur": { tail: RECOVERY_LIMIT_TAIL, nextSeq: 5 } }),
+      fakeStepDispatch(),
+      undefined,
+      undefined,
+      vi.fn(async () => "delivered" as const)
+    );
+
+    await service.onSessionOutputChunk(db, () => NOW, { sessionId: "sess-cur", goalId: "goal-1" }, { bus, idFactory });
+
+    const ck = readCheckpoint(db)!;
+    expect(ck.mode).toBe("waiting");
+    expect(ck.retryOutputSeq).toBeNull();
+    expect(ck.resetTimeText).toContain("1:20am");
+  });
+
+  it("old turn-start text before retryOutputSeq does not clear a new retry checkpoint", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedRecoveryCheckpoint(db, {
+      mode: "retrying",
+      retryKind: "preserved_session",
+      retryOutputSeq: 10,
+    });
+    const service = new OrchestratorService(
+      fakeAgentSelector(),
+      fakeBrokerNoop(),
+      { async list() { return [agentOperatorDescriptor()]; } },
+      makeLauncher(),
+      // nextSeq (8) <= retryOutputSeq (10): stale output, must be ignored.
+      multiOutputStore({ "sess-cur": { tail: TURN_STARTED_TAIL, nextSeq: 8 } }),
+      fakeStepDispatch(),
+      undefined,
+      undefined,
+      vi.fn(async () => "delivered" as const)
+    );
+
+    await service.onSessionOutputChunk(db, () => NOW, { sessionId: "sess-cur", goalId: "goal-1" }, { bus, idFactory });
+
+    expect(readCheckpoint(db)?.mode).toBe("retrying");
+  });
+
+  it("refreshProviderRecovery rebuilds choices preserving id+mode", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db, { mode: "waiting", choices: [] });
+    const { service } = makeRecoveryService();
+
+    await service.refreshProviderRecovery(db, () => NOW, "run-1", "ckpt-1");
+
+    const ck = readCheckpoint(db)!;
+    expect(ck.id).toBe("ckpt-1");
+    expect(ck.mode).toBe("waiting");
+    expect(ck.choices.some((c) => c.adapterId === "codex" && c.enabled)).toBe(true);
+  });
+
+  it("switchProvider rejects a stale (unknown) checkpoint id", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db);
+    const { service, launch } = makeRecoveryService();
+
+    await expect(
+      service.switchProvider(db, () => NOW, "run-1", "ckpt-WRONG", "codex")
+    ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryNotFoundError);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("switchProvider rejects the current adapter", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db);
+    const { service, launch } = makeRecoveryService();
+
+    await expect(
+      service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "claude-code")
+    ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("switchProvider rejects a disabled / unavailable choice", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db, {
+      choices: [
+        { adapterId: "codex", displayName: "Codex", modelId: "gpt-5-codex", enabled: false, reason: "provider unavailable" },
+      ],
+    });
+    const { service, launch } = makeRecoveryService();
+
+    await expect(
+      service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex")
+    ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("switchProvider rejects an id not present in choices", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db);
+    const { service, launch } = makeRecoveryService();
+
+    await expect(
+      service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "opencode")
+    ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("successful switch: launches replacement w/ handoff incl. guidance, sets switching + replacementOutputSeq, keeps old session", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db, { pendingGuidance: ["prefer pnpm"] });
+    const { service, launch, spawn, deliver, terminate } = makeRecoveryService({
+      outputStore: multiOutputStore({
+        "sess-cur": { tail: "prior work", nextSeq: 1 },
+        "sess-replacement": { tail: "", nextSeq: 4 },
+      }),
+      launchSessionId: "sess-replacement",
+    });
+
+    await service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex");
+
+    const ck = readCheckpoint(db)!;
+    expect(ck.mode).toBe("switching");
+    expect(ck.replacementSessionId).toBe("sess-replacement");
+    expect(ck.replacementOutputSeq).toBe(4);
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledWith({ sessionId: "sess-replacement", goalId: "goal-1", adapterId: "codex" });
+    expect(deliver).toHaveBeenCalledWith(
+      "sess-replacement",
+      expect.stringContaining("prefer pnpm")
+    );
+    // Old session not yet retired here (only in the switching output branch).
+    expect(terminate).not.toHaveBeenCalled();
+    expect(
+      db.prepare("SELECT status FROM sessions WHERE id = 'sess-cur'").get()
+    ).toEqual({ status: "running" });
+  });
+
+  it("switch startup progress: commits selection only after started output, clears recovery, resumes, terminates old session, no terminal events", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedRecoveryCheckpoint(db, {
+      mode: "switching",
+      replacementSessionId: "sess-replacement",
+      replacementOutputSeq: 4,
+    });
+    db.prepare(
+      "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES ('sess-replacement', 'goal-1', 'ws-1', 'codex', 'New', 'running', ?, 'step-1')"
+    ).run(NOW);
+    db.prepare(
+      `INSERT INTO activities (id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal, status, current_text, final_summary, source_kind, work_category, confidence, pending_question, created_at, updated_at, completed_at) VALUES ('act-s', 'goal-1', 'run-1', 'step-1', 'sess-cur', 0, 'paused_for_input', 'Paused', NULL, 'provider_recovery_pending', NULL, NULL, NULL, ?, ?, NULL)`
+    ).run(NOW, NOW);
+    const { service, terminate } = makeRecoveryService({
+      outputStore: multiOutputStore({ "sess-replacement": { tail: TURN_STARTED_TAIL, nextSeq: 7 } }),
+    });
+
+    await service.onSessionOutputChunk(db, () => NOW, { sessionId: "sess-replacement", goalId: "goal-1" }, { bus, idFactory });
+
+    expect(readCheckpoint(db)).toBeNull();
+    expect(
+      db.prepare("SELECT selected_operator_id FROM workflow_step_runs WHERE id = 'step-1'").get()
+    ).toMatchObject({ selected_operator_id: "agent:codex" });
+    expect(
+      db.prepare("SELECT status FROM activities WHERE id = 'act-s'").get()
+    ).toMatchObject({ status: "active" });
+    expect(
+      db.prepare("SELECT status, failure_reason FROM sessions WHERE id = 'sess-cur'").get()
+    ).toEqual({ status: "stopped", failure_reason: "provider_switched" });
+    expect(terminate).toHaveBeenCalledWith("sess-cur");
+    expect(terminalSessionEventCount(db)).toBe(0);
+  });
+
+  it("failed switch startup keeps the old session and resets checkpoint to choose, no terminal events", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedRecoveryCheckpoint(db, {
+      mode: "switching",
+      replacementSessionId: "sess-replacement",
+      replacementOutputSeq: 4,
+    });
+    db.prepare(
+      "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES ('sess-replacement', 'goal-1', 'ws-1', 'codex', 'New', 'running', ?, 'step-1')"
+    ).run(NOW);
+    const { service, terminate } = makeRecoveryService({
+      outputStore: multiOutputStore({ "sess-replacement": { tail: CODEX_LIMIT_TAIL, nextSeq: 7 } }),
+    });
+
+    await service.onSessionOutputChunk(db, () => NOW, { sessionId: "sess-replacement", goalId: "goal-1" }, { bus, idFactory });
+
+    const ck = readCheckpoint(db)!;
+    expect(ck.mode).toBe("choose");
+    expect(ck.replacementSessionId).toBeNull();
+    expect(ck.lastError).toBeTruthy();
+    // Old session preserved.
+    expect(
+      db.prepare("SELECT status FROM sessions WHERE id = 'sess-cur'").get()
+    ).toEqual({ status: "running" });
+    // Failed replacement gets terminal DB status but no published session.failed event.
+    expect(
+      db.prepare("SELECT status FROM sessions WHERE id = 'sess-replacement'").get()
+    ).toEqual({ status: "failed" });
+    expect(terminate).toHaveBeenCalledWith("sess-replacement");
+    expect(terminalSessionEventCount(db)).toBe(0);
+  });
+
+  it("failed switch launch keeps old session + checkpoint in choose", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db);
+    const parts = makeRecoveryService();
+    parts.launch.mockRejectedValueOnce(new Error("spawn boom"));
+
+    await service_expectThrow(parts.service, db);
+
+    const ck = readCheckpoint(db)!;
+    expect(ck.mode).toBe("choose");
+    expect(ck.lastError).toContain("boom");
+    expect(
+      db.prepare("SELECT status FROM sessions WHERE id = 'sess-cur'").get()
+    ).toEqual({ status: "running" });
+  });
+});
+
+async function service_expectThrow(service: OrchestratorService, db: Database.Database): Promise<void> {
+  await expect(
+    service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex")
+  ).rejects.toThrow();
+}

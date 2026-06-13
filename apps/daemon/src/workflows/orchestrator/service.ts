@@ -80,7 +80,7 @@ import { SHADOW_LLM_TIMEOUT_MS } from "../../orchestrator-llm/shadow-llm-client.
 import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
 import { resolveShadowProvider } from "../../orchestrator-llm/providers/registry.js";
 import { listAgents } from "../../agents.js";
-import { buildProviderRecoveryChoices } from "./provider-recovery.js";
+import { buildProviderRecoveryChoices, composeProviderSwitchPrompt } from "./provider-recovery.js";
 import {
   recoverStepScoring,
   type ShadowAsk,
@@ -691,7 +691,7 @@ export class OrchestratorService {
       if (!recoverySessionId || args.sessionId !== recoverySessionId || firstSeq === null) return;
       const snapshot = this.sessionOutputStore.readTail(args.sessionId);
       if (snapshot.nextSeq <= firstSeq) return;
-      const retryTail = decodeSessionTailFromSeq(snapshot, firstSeq);
+      const retryTail = decodeSessionTailFromSeq(snapshot, firstSeq) || decodeSessionTail(snapshot);
       const retryFailure = provider.turnParser().detectError?.(retryTail, new Date(now()));
       if (retryFailure) {
         updateCheckpoint({
@@ -751,7 +751,9 @@ export class OrchestratorService {
     ) {
       const snapshot = this.sessionOutputStore.readTail(args.sessionId);
       if (snapshot.nextSeq <= checkpoint.replacementOutputSeq) return;
-      const switchTail = decodeSessionTailFromSeq(snapshot, checkpoint.replacementOutputSeq);
+      const switchTail =
+        decodeSessionTailFromSeq(snapshot, checkpoint.replacementOutputSeq) ||
+        decodeSessionTail(snapshot);
       const replacementFailure = provider.turnParser().detectError?.(switchTail, new Date(now()));
       if (replacementFailure) {
         setSessionStatus(db, args.sessionId, "failed", {
@@ -923,6 +925,335 @@ export class OrchestratorService {
       question,
       options
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Provider recovery actions (wait / retry / refresh / switch).
+  // These set exactly the checkpoint mode + fields the committed
+  // onSessionOutputChunk recovery branches observe to drive startup progress.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Validates that a recovery action targets a live, matching checkpoint:
+   * run/step active, current step matches the checkpoint step, checkpoint
+   * parses, the requested id matches, and the current session still belongs to
+   * the step. Throws NotFound for missing/mismatched targets and the
+   * invalid-transition error type elsewhere.
+   */
+  private loadProviderRecoveryContext(
+    db: Database.Database,
+    runId: string,
+    checkpointId: string
+  ): {
+    run: WorkflowRunT;
+    stepRun: StepRunRow;
+    stepTpl: WorkflowStepTemplate;
+    template: WorkflowTemplateT;
+    goal: GoalRow;
+    checkpoint: ProviderRecoveryCheckpoint;
+  } {
+    const run = getWorkflowRunById(db, runId);
+    if (!run) throw new OrchestratorProviderRecoveryNotFoundError(`workflow run not found: ${runId}`);
+    if (run.status !== "active" || !run.currentStepRunId) {
+      throw new OrchestratorProviderRecoveryNotFoundError(`workflow run not active: ${runId}`);
+    }
+    const stepRun = db
+      .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
+      .get(run.currentStepRunId) as StepRunRow | undefined;
+    if (!stepRun || stepRun.status !== "active") {
+      throw new OrchestratorProviderRecoveryNotFoundError(`active step run not found for run: ${runId}`);
+    }
+    if (!stepRun.pending_provider_recovery_json) {
+      throw new OrchestratorProviderRecoveryNotFoundError(`no pending provider recovery for run: ${runId}`);
+    }
+    const checkpoint = ProviderRecoveryCheckpoint.parse(
+      JSON.parse(stepRun.pending_provider_recovery_json)
+    );
+    if (checkpoint.id !== checkpointId) {
+      throw new OrchestratorProviderRecoveryNotFoundError(
+        `provider recovery checkpoint mismatch: ${checkpointId}`
+      );
+    }
+    const template = getTemplateById(db, run.templateId);
+    if (!template) throw new OrchestratorProviderRecoveryNotFoundError(`template not found: ${run.templateId}`);
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) throw new OrchestratorProviderRecoveryNotFoundError(`step template not found: ${stepRun.step_template_id}`);
+    const goal = readGoal(db, run.goalId);
+
+    const sessRow = db
+      .prepare("SELECT workflow_step_run_id FROM sessions WHERE id = ?")
+      .get(checkpoint.currentSessionId) as { workflow_step_run_id: string | null } | undefined;
+    if (!sessRow || sessRow.workflow_step_run_id !== stepRun.id) {
+      throw new OrchestratorProviderRecoveryNotFoundError(
+        `recovery session no longer belongs to the step: ${checkpoint.currentSessionId}`
+      );
+    }
+
+    return { run, stepRun, stepTpl, template, goal, checkpoint };
+  }
+
+  private persistCheckpoint(
+    db: Database.Database,
+    stepRunId: string,
+    next: ProviderRecoveryCheckpoint
+  ): void {
+    db.prepare(
+      "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = ?"
+    ).run(JSON.stringify(ProviderRecoveryCheckpoint.parse(next)), stepRunId);
+  }
+
+  /** choose → waiting; preserves the session and drives the provider wait interaction. */
+  async waitForProvider(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    checkpointId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    void options;
+    const { stepRun, checkpoint } = this.loadProviderRecoveryContext(db, runId, checkpointId);
+    if (checkpoint.mode !== "choose") {
+      throw new OrchestratorProviderRecoveryInvalidTransitionError(
+        `Wait is only allowed while choosing (mode: ${checkpoint.mode}).`
+      );
+    }
+    this.persistCheckpoint(db, stepRun.id, { ...checkpoint, mode: "waiting", lastError: null });
+    try {
+      await this.workerWait?.(checkpoint.currentSessionId, checkpoint.currentAdapterId);
+    } catch (err) {
+      this.persistCheckpoint(db, stepRun.id, {
+        ...checkpoint,
+        mode: "choose",
+        lastError: (err instanceof Error ? err.message : "wait failed").slice(0, 512),
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * waiting → retrying. Preserved-session: stores the current output_seq and
+   * delivers a continue prompt to the same worker. Fresh-session: launches a
+   * replacement of the same adapter with bounded handoff context.
+   */
+  async retryProvider(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    checkpointId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const ctx = this.loadProviderRecoveryContext(db, runId, checkpointId);
+    const { stepRun, checkpoint } = ctx;
+    if (checkpoint.mode !== "waiting") {
+      throw new OrchestratorProviderRecoveryInvalidTransitionError(
+        `Retry is only allowed while waiting (mode: ${checkpoint.mode}).`
+      );
+    }
+    if (
+      checkpoint.retryKind === "preserved_session" &&
+      checkpoint.resetAt !== null &&
+      Date.parse(checkpoint.resetAt) > Date.parse(now())
+    ) {
+      throw new OrchestratorProviderRecoveryInvalidTransitionError(
+        `Retry is not yet available; the provider resets at ${checkpoint.resetTimeText ?? checkpoint.resetAt}.`
+      );
+    }
+
+    if (checkpoint.retryKind === "fresh_session") {
+      await this.startRecoveryReplacementSession(
+        db,
+        now,
+        ctx,
+        checkpoint.currentAdapterId,
+        "retrying",
+        options
+      );
+      return;
+    }
+
+    const outputSeq = this.sessionOutputStore.readTail(checkpoint.currentSessionId).nextSeq;
+    this.persistCheckpoint(db, stepRun.id, {
+      ...checkpoint,
+      mode: "retrying",
+      retryOutputSeq: outputSeq,
+      lastError: null,
+    });
+    try {
+      await this.workerDeliver?.(checkpoint.currentSessionId, "Continue the previous step request.");
+    } catch (err) {
+      this.persistCheckpoint(db, stepRun.id, {
+        ...checkpoint,
+        mode: "waiting",
+        retryOutputSeq: null,
+        lastError: (err instanceof Error ? err.message : "retry failed").slice(0, 512),
+      });
+      throw err;
+    }
+  }
+
+  /** Rebuilds the switch choices from current readiness, preserving id + mode. */
+  async refreshProviderRecovery(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    checkpointId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    void options;
+    void now;
+    const { run, stepRun, stepTpl, goal, checkpoint } = this.loadProviderRecoveryContext(
+      db,
+      runId,
+      checkpointId
+    );
+    if (checkpoint.mode !== "choose" && checkpoint.mode !== "waiting") {
+      throw new OrchestratorProviderRecoveryInvalidTransitionError(
+        `Refresh is only allowed while choosing or waiting (mode: ${checkpoint.mode}).`
+      );
+    }
+    const connectedAdapterIds = listAgents(db)
+      .filter((agent) => agent.connected)
+      .map((agent) => agent.id);
+    const operatorDescriptors = await this.operators.list(run.goalId, {
+      agentIds: connectedAdapterIds,
+      includeNonAgents: false,
+    });
+    const choices = buildProviderRecoveryChoices({
+      currentAdapterId: checkpoint.currentAdapterId,
+      connectedAdapterIds,
+      stepPreferences: preferencesForGoal(stepTpl.agentPreference, goal.orchestrator_provider),
+      operators: operatorDescriptors,
+      supportsModel: (id, mid) => this.stepDispatch?.supportsModel(id, mid) ?? false,
+    });
+    this.persistCheckpoint(db, stepRun.id, { ...checkpoint, choices });
+  }
+
+  /**
+   * choose|waiting → switching. Validates the target against the live choice
+   * set, then launches a replacement session for that adapter. The committed
+   * switching output branch commits selection + retires the old session once the
+   * replacement produces started output.
+   */
+  async switchProvider(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    checkpointId: string,
+    adapterId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const ctx = this.loadProviderRecoveryContext(db, runId, checkpointId);
+    const { checkpoint } = ctx;
+    if (checkpoint.mode !== "choose" && checkpoint.mode !== "waiting") {
+      throw new OrchestratorProviderRecoveryInvalidTransitionError(
+        `Switch is only allowed while choosing or waiting (mode: ${checkpoint.mode}).`
+      );
+    }
+    if (adapterId === checkpoint.currentAdapterId) {
+      throw new OrchestratorProviderRecoveryInvalidTransitionError(
+        `Cannot switch to the limited provider (${adapterId}).`
+      );
+    }
+    const choice = checkpoint.choices.find((c) => c.adapterId === adapterId);
+    if (!choice) {
+      throw new OrchestratorProviderRecoveryInvalidTransitionError(
+        `${adapterId} is not an available recovery choice.`
+      );
+    }
+    if (!choice.enabled || !choice.modelId) {
+      throw new OrchestratorProviderRecoveryInvalidTransitionError(
+        `${choice.displayName} is not available: ${choice.reason ?? "provider unavailable"}.`
+      );
+    }
+    const ready = await (this.stepDispatch?.isAdapterReady(adapterId) ?? Promise.resolve(false));
+    if (!ready) {
+      throw new OrchestratorProviderRecoveryInvalidTransitionError(
+        `${choice.displayName} became unavailable.`
+      );
+    }
+    await this.startRecoveryReplacementSession(db, now, ctx, adapterId, "switching", options);
+  }
+
+  /**
+   * Launches a replacement worker for the given adapter using a bounded
+   * interrupted-session handoff (with any pending guidance), records the
+   * replacement session id + its pre-delivery output_seq, and moves the
+   * checkpoint to the supplied terminal-progress mode (retrying for a fresh
+   * retry, switching for a provider switch). The old session is retained; it is
+   * retired only by the committed output branch once the replacement starts.
+   * On launch failure the old session is preserved and the checkpoint is
+   * restored to choose with a bounded lastError.
+   */
+  private async startRecoveryReplacementSession(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+      checkpoint: ProviderRecoveryCheckpoint;
+    },
+    adapterId: string,
+    mode: "retrying" | "switching",
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    void now;
+    const { run, stepRun, stepTpl, goal, checkpoint } = ctx;
+    const interruptedTail = decodeSessionTail(
+      this.sessionOutputStore.readTail(checkpoint.currentSessionId)
+    );
+    const guidanceBlock =
+      checkpoint.pendingGuidance.length > 0
+        ? `\n\n# Operator guidance\n${checkpoint.pendingGuidance.join("\n\n")}`
+        : "";
+    const handoffPrompt =
+      composeProviderSwitchPrompt({
+        agentPromptInput: {
+          goalTitle: goal.title,
+          goalDescription: goal.description,
+          stepInstructions: stepTpl.instructions,
+          outputSchema: stepTpl.outputSchema,
+          priorStepArtifacts: this.collectPriorStepArtifacts(db, run.id, stepRun.id),
+          repairContext: this.latestRejectingGate(db, run.id),
+        },
+        interruptedTail,
+      }) + guidanceBlock;
+
+    let sessionId: string;
+    try {
+      const launched = await this.launcher.launch({
+        goalId: goal.id,
+        workflowRunId: run.id,
+        workflowStepRunId: stepRun.id,
+        operatorId: "agent:" + adapterId,
+        operatorKind: "agent",
+        objective: handoffPrompt,
+      });
+      sessionId = launched.sessionId;
+      await this.workerSpawn?.({ sessionId, goalId: goal.id, adapterId });
+    } catch (err) {
+      this.persistCheckpoint(db, stepRun.id, {
+        ...checkpoint,
+        mode: "choose",
+        replacementSessionId: null,
+        replacementOutputSeq: null,
+        lastError: (err instanceof Error ? err.message : "replacement launch failed").slice(0, 512),
+      });
+      throw err;
+    }
+
+    // Pre-delivery output sequence: started-output detection compares against this.
+    const replacementOutputSeq = this.sessionOutputStore.readTail(sessionId).nextSeq;
+    this.persistCheckpoint(db, stepRun.id, {
+      ...checkpoint,
+      mode,
+      replacementSessionId: sessionId,
+      replacementOutputSeq,
+      lastError: null,
+    });
+    await this.workerDeliver?.(sessionId, handoffPrompt);
   }
 
   /**
@@ -1249,6 +1580,31 @@ export class OrchestratorService {
     if (!goal.orchestrator_provider || !goal.orchestrator_model) return;
     const adapterId = adapterIdForProvider(goal.orchestrator_provider);
     const modelId = goal.orchestrator_model;
+
+    // Provider recovery is pending: capture chat as bounded guidance instead of
+    // forwarding to (or interpreting via the mediator on behalf of) the limited
+    // worker. The guidance is replayed on retry / handed off on switch.
+    if (stepRun.pending_provider_recovery_json) {
+      const checkpoint = ProviderRecoveryCheckpoint.parse(
+        JSON.parse(stepRun.pending_provider_recovery_json)
+      );
+      const item = args.body.slice(0, 4000);
+      const pendingGuidance = [...checkpoint.pendingGuidance, item].slice(-20);
+      db.prepare(
+        "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = ?"
+      ).run(
+        JSON.stringify(ProviderRecoveryCheckpoint.parse({ ...checkpoint, pendingGuidance })),
+        stepRun.id
+      );
+      this.postOrchestratorMessage(
+        db,
+        now,
+        run.goalId,
+        "Saved this guidance. It will be sent when the current provider is retried or included in the replacement provider handoff.",
+        options
+      );
+      return;
+    }
 
     const invoke = this.orchestratorMediator.invokeWithBackoff?.bind(this.orchestratorMediator) ?? this.orchestratorMediator.invoke.bind(this.orchestratorMediator);
 
