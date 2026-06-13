@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type {
   DomainEvent,
+  WorkflowGraph,
   WorkflowStepResult,
   WorkflowStepRun as WorkflowStepRunT,
 } from "@orca/contracts";
@@ -22,6 +23,7 @@ import {
 } from "./step-result.js";
 import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
 import type { ActivityStoreCtx } from "../../activities/store.js";
+import { effectiveGraph, resolveStepNext } from "../graph/graph-routing.js";
 
 interface WorkflowStepRunRow {
   id: string;
@@ -274,14 +276,32 @@ export function recordExitCriteriaSatisfaction(
   })();
 }
 
-export function advanceToNextStep(
+export type AdvanceResult =
+  | { kind: "step"; stepRun: WorkflowStepRunT }
+  | { kind: "gate"; nodeId: string }
+  | { kind: "completed" };
+
+function graphStepTemplateId(graph: WorkflowGraph, nodeId: string): string {
+  const node = graph.nodes.find((n) => n.id === nodeId);
+  if (!node || node.type !== "step") throw new Error(`not a step node: ${nodeId}`);
+  return node.stepId ?? node.id;
+}
+
+function ordinalForStep(
+  template: { steps: { id: string; ordinal: number }[] },
+  stepId: string
+): number {
+  return template.steps.find((s) => s.id === stepId)?.ordinal ?? 0;
+}
+
+export function advanceToNextStepOrGate(
   db: Database.Database,
   now: () => string,
   currentStepRunId: string,
   eventOptions?: StepEventOptions,
   suppliedStepResult?: WorkflowStepResult
-): WorkflowStepRunT | null {
-  return db.transaction(() => {
+): AdvanceResult {
+  return db.transaction((): AdvanceResult => {
     const current = readStep(db, currentStepRunId);
     if (current.status !== "active") {
       throw new WorkflowStepInvalidTransitionError(
@@ -320,10 +340,12 @@ export function advanceToNextStep(
       stepRunId: currentStepRunId,
     });
 
-    const next = template.steps.find((step) => step.ordinal === current.ordinal + 1);
-    if (!next) {
+    const graph = effectiveGraph(template.graph, template.steps);
+    const dest = resolveStepNext(graph, current.stepTemplateId);
+
+    if (dest.kind === "terminal") {
       db.prepare(
-        "UPDATE workflow_runs SET status = 'completed', finished_at = ?, current_step_run_id = NULL, blocked_reason = NULL WHERE id = ?"
+        "UPDATE workflow_runs SET status = 'completed', finished_at = ?, current_step_run_id = NULL, current_node_id = NULL, current_node_kind = NULL, blocked_reason = NULL WHERE id = ?"
       ).run(timestamp, current.workflowRunId);
       db.prepare(
         "UPDATE goals SET active_workflow_run_id = NULL WHERE id = ? AND active_workflow_run_id = ?"
@@ -335,20 +357,44 @@ export function advanceToNextStep(
         timestamp,
         eventOptions
       );
-      return null;
+      return { kind: "completed" };
     }
 
-    return insertStep(
+    if (dest.kind === "gate") {
+      db.prepare(
+        "UPDATE workflow_runs SET current_step_run_id = NULL, current_node_id = ?, current_node_kind = 'gate' WHERE id = ?"
+      ).run(dest.nodeId, current.workflowRunId);
+      return { kind: "gate", nodeId: dest.nodeId };
+    }
+
+    // dest.kind === "step"
+    const nextStepTemplateId = graphStepTemplateId(graph, dest.nodeId);
+    const attempt = nextAttemptForStep(db, current.workflowRunId, nextStepTemplateId);
+    const stepRun = insertStep(
       db,
       now,
       current.goalId,
       current.workflowRunId,
-      next.id,
-      next.ordinal,
-      1,
-      eventOptions
+      nextStepTemplateId,
+      ordinalForStep(template, nextStepTemplateId),
+      attempt,
+      eventOptions,
+      dest.nodeId
     );
+    return { kind: "step", stepRun };
   })();
+}
+
+export function advanceToNextStep(
+  db: Database.Database,
+  now: () => string,
+  currentStepRunId: string,
+  eventOptions?: StepEventOptions,
+  suppliedStepResult?: WorkflowStepResult
+): WorkflowStepRunT | null {
+  const result = advanceToNextStepOrGate(db, now, currentStepRunId, eventOptions, suppliedStepResult);
+  if (result.kind === "step") return result.stepRun;
+  return null;
 }
 
 export function markStepBlocked(

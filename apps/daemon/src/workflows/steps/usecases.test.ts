@@ -23,6 +23,7 @@ import {
 } from "../templates/seed-engineering.js";
 import {
   advanceToNextStep,
+  advanceToNextStepOrGate,
   createInitialStep,
   failStep,
   markStepBlocked,
@@ -433,5 +434,139 @@ describe("workflow step usecases", () => {
 
     const nextAttempt = nextAttemptForStep(db, run.id, stepTemplateId);
     expect(nextAttempt).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Graph-routing tests
+// ---------------------------------------------------------------------------
+
+const GRAPH_TEMPLATE_ID = "test/graph-template";
+const AGENT_PREF = [{ adapterId: "claude-code", modelId: "claude-sonnet-4-6" }];
+
+/**
+ * Minimal steps + graph: analysis(0) -> execution(1) -> validation(2, terminal)
+ */
+const STEP_OUTPUT = [{ key: "summary", type: "string", required: true }];
+const GRAPH_STEPS = JSON.stringify([
+  { id: "analysis", ordinal: 0, name: "Analysis", instructions: "analyse", outputSchema: STEP_OUTPUT, agentPreference: AGENT_PREF },
+  { id: "execution", ordinal: 1, name: "Execution", instructions: "execute", outputSchema: STEP_OUTPUT, agentPreference: AGENT_PREF },
+  { id: "validation", ordinal: 2, name: "Validation", instructions: "validate", outputSchema: STEP_OUTPUT, agentPreference: AGENT_PREF },
+]);
+const GRAPH_JSON = JSON.stringify({
+  nodes: [
+    { id: "analysis", type: "step", name: "Analysis", stepId: "analysis" },
+    { id: "execution", type: "step", name: "Execution", stepId: "execution" },
+    { id: "validation", type: "step", name: "Validation", stepId: "validation", terminal: true },
+  ],
+  edges: [
+    { from: "analysis", to: "execution" },
+    { from: "execution", to: "validation" },
+  ],
+  positions: { analysis: { x: 0, y: 0 }, execution: { x: 0, y: 92 }, validation: { x: 0, y: 184 } },
+});
+
+/**
+ * Steps + graph with a gate after execution: execution(0) -> gate -> validation(1, terminal)
+ */
+const GATE_STEPS = JSON.stringify([
+  { id: "execution", ordinal: 0, name: "Execution", instructions: "execute", outputSchema: STEP_OUTPUT, agentPreference: AGENT_PREF },
+  { id: "validation", ordinal: 1, name: "Validation", instructions: "validate", outputSchema: STEP_OUTPUT, agentPreference: AGENT_PREF },
+]);
+const GATE_GRAPH_JSON = JSON.stringify({
+  nodes: [
+    { id: "execution", type: "step", name: "Execution", stepId: "execution" },
+    { id: "quality-gate", type: "gate", name: "Quality Gate", instructions: "approve if ready" },
+    { id: "validation", type: "step", name: "Validation", stepId: "validation", terminal: true },
+  ],
+  edges: [
+    { from: "execution", to: "quality-gate" },
+    { from: "quality-gate", to: "validation", port: "approved" },
+    { from: "quality-gate", to: "execution", port: "rejected" },
+  ],
+  positions: {
+    execution: { x: 0, y: 0 },
+    "quality-gate": { x: 0, y: 92 },
+    validation: { x: 0, y: 184 },
+  },
+});
+
+function seedGraphTemplate(db: Database.Database, id: string, stepsJson: string, graphJson: string): void {
+  db.prepare(
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, graph_json, created_at, updated_at) VALUES (?, ?, ?, 1, 0, 0, ?, '[]', ?, ?, ?)"
+  ).run(id, "Test Graph Template", "desc", stepsJson, graphJson, NOW, NOW);
+}
+
+function seedRunWithGraph(db: Database.Database, runCtx: WorkflowRunUsecaseCtx): ReturnType<typeof startWorkflowRun> {
+  seedGoal(db, "goal-graph");
+  seedGraphTemplate(db, GRAPH_TEMPLATE_ID, GRAPH_STEPS, GRAPH_JSON);
+  return startWorkflowRun(runCtx, { goalId: "goal-graph", templateId: GRAPH_TEMPLATE_ID });
+}
+
+const GATE_TEMPLATE_ID = "test/gate-template";
+
+function seedRunAtExecutionStep(db: Database.Database, runCtx: WorkflowRunUsecaseCtx): ReturnType<typeof startWorkflowRun> {
+  seedGoal(db, "goal-gate");
+  seedGraphTemplate(db, GATE_TEMPLATE_ID, GATE_STEPS, GATE_GRAPH_JSON);
+  return startWorkflowRun(runCtx, { goalId: "goal-gate", templateId: GATE_TEMPLATE_ID });
+}
+
+describe("graph-routed step advancement", () => {
+  it("advances to the graphed next step rather than the next ordinal", () => {
+    const { db, runCtx } = setup();
+    const run = seedRunWithGraph(db, runCtx);
+    expect(run.currentStepRunId).toBeTruthy();
+    // Current step is 'analysis'; graph routes analysis -> execution
+    const next = advanceToNextStep(db, () => NOW, run.currentStepRunId!);
+    expect(next).not.toBeNull();
+    expect(next!.stepTemplateId).toBe("execution");
+  });
+
+  it("returns a gate sentinel when the next node is a gate", () => {
+    const { db, runCtx } = setup();
+    const run = seedRunAtExecutionStep(db, runCtx);
+    expect(run.currentStepRunId).toBeTruthy();
+    // Current step is 'execution'; graph routes execution -> quality-gate
+    const result = advanceToNextStepOrGate(db, () => NOW, run.currentStepRunId!);
+    expect(result).toEqual({ kind: "gate", nodeId: "quality-gate" });
+  });
+
+  it("completes the run when advancing from the terminal step", () => {
+    const { db, runCtx } = setup();
+    const run = seedRunWithGraph(db, runCtx);
+    // Advance analysis -> execution
+    const step2 = advanceToNextStep(db, () => NOW, run.currentStepRunId!)!;
+    expect(step2.stepTemplateId).toBe("execution");
+    // Advance execution -> validation
+    const step3 = advanceToNextStep(db, () => NOW, step2.id)!;
+    expect(step3.stepTemplateId).toBe("validation");
+    // Advance validation -> terminal
+    const next = advanceToNextStep(db, () => NOW, step3.id);
+    expect(next).toBeNull();
+    const after = db.prepare("SELECT status FROM workflow_runs WHERE id = ?").get(run.id) as { status: string };
+    expect(after.status).toBe("completed");
+  });
+
+  it("gate sentinel parks cursor on gate node", () => {
+    const { db, runCtx } = setup();
+    const run = seedRunAtExecutionStep(db, runCtx);
+    advanceToNextStepOrGate(db, () => NOW, run.currentStepRunId!);
+    const row = db
+      .prepare("SELECT current_node_id, current_node_kind, current_step_run_id FROM workflow_runs WHERE id = ?")
+      .get(run.id) as { current_node_id: string | null; current_node_kind: string | null; current_step_run_id: string | null };
+    expect(row.current_node_id).toBe("quality-gate");
+    expect(row.current_node_kind).toBe("gate");
+    expect(row.current_step_run_id).toBeNull();
+  });
+
+  it("null graph still advances linearly (ordinal-based fallback via effectiveGraph)", () => {
+    const { db, runCtx } = setup();
+    seedGoal(db, "goal-linear");
+    seedEngineeringTemplate(db, () => NOW);
+    const run = startWorkflowRun(runCtx, { goalId: "goal-linear", templateId: ENGINEERING_ID });
+    // Engineering template has no graph; effectiveGraph materializes linear; first step is 'intake' (ordinal 0)
+    const next = advanceToNextStep(db, () => NOW, run.currentStepRunId!);
+    // Next ordinal=1 is 'research'
+    expect(next!.stepTemplateId).toBe("research");
   });
 });
