@@ -15,6 +15,7 @@ import {
   type WorkflowDecisionTrace,
   type WorkflowRun as WorkflowRunT,
   type WorkflowStepResult,
+  type WorkflowGraph,
   type WorkflowStepTemplate,
   type WorkflowTemplate as WorkflowTemplateT,
 } from "@orca/contracts";
@@ -31,7 +32,15 @@ import type { OrchestrationTransportBroker } from "../orchestration-transport/br
 import { getWorkflowRunById } from "../runs/projection.js";
 import { markWorkflowRunBlocked } from "../runs/usecases.js";
 import { getWorkflowStepRunById, recordOperatorSelection } from "../steps/projection.js";
-import { advanceToNextStep } from "../steps/usecases.js";
+import {
+  advanceToNextStepOrGate,
+  insertStepForRouting,
+  nextAttemptForStep,
+} from "../steps/usecases.js";
+import { effectiveGraph, resolveGateNext, resolveStepNext } from "../graph/graph-routing.js";
+import { evaluateGate } from "./gate-evaluation.js";
+import { nextTraversalSeq, recordGateDecision } from "../gates/usecases.js";
+import { listGateDecisionsForRun } from "../gates/projection.js";
 import { getTemplateById } from "../templates/projection.js";
 import {
   decisionFingerprint,
@@ -285,6 +294,12 @@ function nowWithFirstTimestamp(now: () => string, fixed: string): () => string {
     }
     return now();
   };
+}
+
+/** The template step id backing a graph step node (defaults to the node id). */
+function gateDestinationStepTemplateId(graph: WorkflowGraph, nodeId: string): string {
+  const node = graph.nodes.find((n) => n.id === nodeId);
+  return node?.stepId ?? nodeId;
 }
 
 
@@ -2081,14 +2096,18 @@ export class OrchestratorService {
     options: RequestNextDecisionOptions
   ): Promise<{ decision: WorkflowDecisionTrace; recommendationIds: string[] }> {
     const { run, stepRun, stepTpl, template, goal } = ctx;
-    const nextStepTpl = template.steps.find((step) => step.ordinal === stepRun.ordinal + 1);
+    const graph = effectiveGraph(template.graph, template.steps);
+    const dest = resolveStepNext(graph, stepRun.step_template_id);
 
-    if (nextStepTpl) {
+    if (dest.kind !== "terminal") {
       const stagedEvents: DomainEvent[] = [];
       const terminalFinishedAt = options.terminalFinishedAtByStepRunId?.[stepRun.id];
-      advanceToNextStep(
+      const advanceNow = terminalFinishedAt
+        ? nowWithFirstTimestamp(now, terminalFinishedAt)
+        : now;
+      const result = advanceToNextStepOrGate(
         db,
-        terminalFinishedAt ? nowWithFirstTimestamp(now, terminalFinishedAt) : now,
+        advanceNow,
         stepRun.id,
         {
           idFactory: options.idFactory,
@@ -2107,6 +2126,22 @@ export class OrchestratorService {
         options.stepResultByStepRunId?.[stepRun.id]
       );
       this.publish(options.bus, stagedEvents);
+
+      if (result.kind === "gate") {
+        const sourceStepOutput = this.readStepOutputAsRecord(db, run.id, stepRun.id);
+        await this.evaluateAndRouteGate(
+          db,
+          now,
+          { run, stepRun, stepTpl, template, goal, gateNodeId: result.nodeId, sourceStepOutput },
+          options
+        );
+        // A missing gate or failed evaluation blocks the run; do not recurse.
+        const after = getWorkflowRunById(db, run.id);
+        if (!after || after.status !== "active") {
+          return this.commitNoopLatestDecision(db, run.id, stepRun.id);
+        }
+      }
+
       // recursion depth is bounded by the number of consecutive auto-completing intermediate steps (template step count).
       return this.requestNextDecision(db, now, run.id, options);
     }
@@ -2202,6 +2237,181 @@ export class OrchestratorService {
       }
     }
     return output;
+  }
+
+  /**
+   * Reads the step_output artifact body for a step run and parses it as an
+   * object, stripping the reserved `_completion` envelope. Returns null when no
+   * step_output exists or it is not a JSON object — that's the contract the gate
+   * evaluation request expects for `sourceStepOutput`.
+   */
+  private readStepOutputAsRecord(
+    db: Database.Database,
+    runId: string,
+    stepRunId: string
+  ): Record<string, unknown> | null {
+    const row = db
+      .prepare(
+        "SELECT body FROM workflow_artifacts WHERE workflow_run_id = ? AND step_run_id = ? AND type = 'step_output' LIMIT 1"
+      )
+      .get(runId, stepRunId) as { body: string } | undefined;
+    if (!row) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(row.body);
+    } catch {
+      return null;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    const { _completion: _omit, ...rest } = parsed as Record<string, unknown>;
+    return rest;
+  }
+
+  /**
+   * The run cursor is parked at a gate (current_node_kind='gate'). Evaluates the
+   * gate via the orchestrator broker, records the decision + traversal_seq, and
+   * moves the cursor to the resolved destination. A gate destination recurses;
+   * a step destination inserts a fresh attempt of that step (its agent is then
+   * selected/spawned by the requestNextDecision recursion of the caller).
+   */
+  private async evaluateAndRouteGate(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+      gateNodeId: string;
+      sourceStepOutput: Record<string, unknown> | null;
+    },
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    const { run, stepRun, stepTpl, template, goal, gateNodeId, sourceStepOutput } = ctx;
+    const graph = effectiveGraph(template.graph, template.steps);
+    const gateNode = graph.nodes.find((n) => n.id === gateNodeId && n.type === "gate");
+    if (!gateNode) {
+      this.blockRun(
+        db,
+        now,
+        { run, stepRun, stepTpl, goal },
+        `gate node not found in graph: ${gateNodeId}`,
+        options
+      );
+      return;
+    }
+
+    if (!goal.orchestrator_provider || !goal.orchestrator_model) {
+      this.blockRun(
+        db,
+        now,
+        { run, stepRun, stepTpl, goal },
+        "gate evaluation failed: orchestrator model not configured",
+        options
+      );
+      return;
+    }
+
+    const evaluation = await evaluateGate(
+      { broker: this.broker },
+      {
+        goalId: goal.id,
+        workflowRunId: run.id,
+        providerId: goal.orchestrator_provider,
+        modelId: goal.orchestrator_model,
+        goal: { id: goal.id, description: goal.description },
+        gate: {
+          nodeId: gateNode.id,
+          name: gateNode.name,
+          instructions: gateNode.instructions ?? gateNode.condition ?? "",
+        },
+        sourceStepOutput,
+        priorGateDecisions: listGateDecisionsForRun(db, run.id).map((d) => ({
+          nodeId: d.nodeId,
+          outcome: d.outcome,
+          reason: d.reason,
+        })),
+        availableOutcomes: ["approved", "rejected"],
+      }
+    );
+
+    if (!evaluation.ok) {
+      this.blockRun(
+        db,
+        now,
+        { run, stepRun, stepTpl, goal },
+        `gate evaluation failed: ${evaluation.reason}`,
+        options
+      );
+      return;
+    }
+
+    const dest = resolveGateNext(graph, gateNode.id, evaluation.decision.outcome);
+    const seq = nextTraversalSeq(db, run.id);
+    recordGateDecision(db, now, {
+      goalId: goal.id,
+      workflowRunId: run.id,
+      nodeId: gateNode.id,
+      traversalSeq: seq,
+      outcome: evaluation.decision.outcome,
+      reason: evaluation.decision.reason,
+      selectedEdgeTo: dest.kind === "terminal" ? "" : dest.nodeId,
+      inputsConsidered: evaluation.decision.inputsConsidered,
+      issueRefs: evaluation.decision.issueRefs,
+    });
+
+    if (dest.kind === "gate") {
+      db.prepare(
+        "UPDATE workflow_runs SET current_step_run_id = NULL, current_node_id = ?, current_node_kind = 'gate' WHERE id = ?"
+      ).run(dest.nodeId, run.id);
+      await this.evaluateAndRouteGate(
+        db,
+        now,
+        { ...ctx, gateNodeId: dest.nodeId },
+        options
+      );
+      return;
+    }
+
+    if (dest.kind !== "step") {
+      // resolveGateNext only ever classifies edges to step/gate nodes; a terminal
+      // destination is unreachable. Guard defensively so the run never stalls.
+      this.blockRun(
+        db,
+        now,
+        { run, stepRun, stepTpl, goal },
+        `gate ${gateNode.id} resolved to an unroutable destination`,
+        options
+      );
+      return;
+    }
+
+    // dest.kind === "step": insert a fresh attempt of the destination step. Its
+    // agent is selected/spawned by the caller's requestNextDecision recursion.
+    const destStepTemplateId = gateDestinationStepTemplateId(graph, dest.nodeId);
+    const destStepTpl = template.steps.find((s) => s.id === destStepTemplateId);
+    const ordinal = destStepTpl?.ordinal ?? 0;
+    const attempt = nextAttemptForStep(db, run.id, destStepTemplateId);
+    const stagedEvents: DomainEvent[] = [];
+    insertStepForRouting(
+      db,
+      now,
+      goal.id,
+      run.id,
+      destStepTemplateId,
+      ordinal,
+      attempt,
+      dest.nodeId,
+      {
+        idFactory: options.idFactory,
+        stagedEvents,
+        ...(options.bus
+          ? { activityCtx: { db, bus: options.bus, now, idFactory: options.idFactory } }
+          : {}),
+      }
+    );
+    this.publish(options.bus, stagedEvents);
   }
 
   private blockRun(

@@ -1,0 +1,250 @@
+import type Database from "better-sqlite3";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { closeDatabase } from "../../db.js";
+import { resetWorkflowEventPreparedStatements } from "../events.js";
+import { resetWorkflowStepProjectionPreparedStatements } from "../steps/projection.js";
+import type { OperatorDescriptor, OperatorSelection, WorkflowGraph } from "@orca/contracts";
+import type { WorkflowSessionLauncher } from "./session-launcher.js";
+import { OrchestratorService } from "./service.js";
+import { listGateDecisionsForRun } from "../gates/projection.js";
+import {
+  cleanupHarness,
+  NOW,
+  setupHarness,
+  makeStep,
+  fakeStepDispatch,
+  type SkillStep,
+} from "./skill-step-test-helpers.js";
+import type { SelectorInput } from "../operators/selector.js";
+import type {
+  BrokerCompatibilityOptions,
+  OrchestrationTransportBroker,
+} from "../orchestration-transport/broker.js";
+
+const AGENT_OPERATOR_ID = "agent:claude-code";
+
+function agentOperatorDescriptor(): OperatorDescriptor {
+  return {
+    id: AGENT_OPERATOR_ID,
+    kind: "agent",
+    displayName: "Claude Code",
+    capabilities: [],
+    ready: true,
+    supportsRepoEditing: true,
+    supportsTerminal: true,
+  };
+}
+
+function fakeAgentSelector(): Pick<
+  {
+    select: (
+      db: Database.Database,
+      now: () => string,
+      input: SelectorInput
+    ) => Promise<{ selection: OperatorSelection; source: "fallback" | "llm" }>;
+  },
+  "select"
+> {
+  const result: OperatorSelection = {
+    operatorId: AGENT_OPERATOR_ID,
+    operatorKind: "agent",
+    reason: "agent selected for this step",
+    requiredCapabilities: [],
+    alternativesConsidered: [],
+    confidence: 1,
+    requiresUserApproval: false,
+  };
+  return {
+    async select() {
+      return { selection: result, source: "fallback" };
+    },
+  };
+}
+
+/**
+ * Broker that returns a gate proposal for evaluate_gate requests and a benign
+ * step-scoring proposal otherwise, so the run can reach the gate.
+ */
+function fakeGateBroker(gate: {
+  outcome: "approved" | "rejected";
+  reason: string;
+  inputsConsidered: string[];
+  issueRefs?: string[];
+}): Pick<OrchestrationTransportBroker, "propose"> {
+  return {
+    async propose(request: unknown, options?: BrokerCompatibilityOptions) {
+      const kind = (request as { kind?: string }).kind;
+      const proposal =
+        kind === "evaluate_gate"
+          ? {
+              outcome: gate.outcome,
+              reason: gate.reason,
+              inputsConsidered: gate.inputsConsidered,
+              ...(gate.issueRefs ? { issueRefs: gate.issueRefs } : {}),
+            }
+          : {
+              successScore: 0.82,
+              quality: {
+                outputCompleteness: 0.8,
+                outputCorrectness: 0.8,
+                instructionAdherence: 0.85,
+                downstreamReadiness: 0.8,
+                riskLevel: 0.2,
+              },
+              reason: "Ready for next step.",
+              handoffReady: true,
+            };
+      const validated = options?.validateProposal
+        ? await options.validateProposal(proposal)
+        : { accepted: true as const, parsed: proposal };
+      return {
+        status: "proposed" as const,
+        attemptId: "attempt-1",
+        transport: "one_shot" as const,
+        parsed: Object.prototype.hasOwnProperty.call(validated, "parsed")
+          ? (validated as { parsed: unknown }).parsed
+          : proposal,
+        rawTextLength: null,
+        latencyMs: 1,
+      };
+    },
+  };
+}
+
+function makeLauncher(): WorkflowSessionLauncher {
+  return { launch: vi.fn(async () => ({ sessionId: "sess-1" })) };
+}
+
+function makeService(broker: Pick<OrchestrationTransportBroker, "propose">): OrchestratorService {
+  return new OrchestratorService(
+    fakeAgentSelector(),
+    broker,
+    { async list() { return [agentOperatorDescriptor()]; } },
+    makeLauncher(),
+    undefined,
+    fakeStepDispatch()
+  );
+}
+
+/**
+ * Graph: analysis -> execution -> validation -> gate
+ *   gate: approved -> done (terminal), rejected -> execution
+ */
+function gateGraph(): WorkflowGraph {
+  return {
+    nodes: [
+      { id: "analysis", type: "step", name: "Analysis", stepId: "analysis" },
+      { id: "execution", type: "step", name: "Execution", stepId: "execution" },
+      { id: "validation", type: "step", name: "Validation", stepId: "validation" },
+      { id: "gate", type: "gate", name: "Review Gate", instructions: "Approve if validation passed." },
+      { id: "done", type: "step", name: "Done", stepId: "done", terminal: true },
+    ],
+    edges: [
+      { from: "analysis", to: "execution" },
+      { from: "execution", to: "validation" },
+      { from: "validation", to: "gate" },
+      { from: "gate", to: "done", port: "approved" },
+      { from: "gate", to: "execution", port: "rejected" },
+    ],
+    positions: {},
+  };
+}
+
+function step(id: string, ordinal: number): SkillStep {
+  return makeStep({
+    id,
+    ordinal,
+    name: id,
+    instructions: `Do ${id}.`,
+    outputSchema: [{ key: "result", type: "string", required: true }],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+  });
+}
+
+/** Seed a run positioned at the `validation` step holding a step_output artifact. */
+function seedRunAtValidation(db: Database.Database) {
+  const steps = [step("analysis", 0), step("execution", 1), step("validation", 2), step("done", 3)];
+  db.prepare(
+    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('goal-1', 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, 'orca/anthropic', 'claude-sonnet-4-6')"
+  ).run(NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, graph_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', 'desc', 1, 1, 1, ?, '[]', ?, ?, ?)"
+  ).run(JSON.stringify(steps), JSON.stringify(gateGraph()), NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, traversal_seq, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-validation', 'validation', 'step', 0, NULL, ?, NULL)"
+  ).run(NOW);
+  db.prepare(
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-validation', 'goal-1', 'run-1', 'validation', 2, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-validation', 'agent:claude-code', NULL, 'claude-haiku-4-5', ?)"
+  ).run(NOW, NOW);
+  // A prior execution attempt (attempt 1) so revisit numbering starts at 2.
+  db.prepare(
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-execution', 'goal-1', 'run-1', 'execution', 1, 1, 'passed', '[]', '[]', NULL, ?, ?, 'fp-execution')"
+  ).run(NOW, NOW);
+  // step_output artifact on the active validation step.
+  db.prepare(
+    "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-val', 'goal-1', 'run-1', 'step-validation', 'step_output', 'Validation', ?, 'orchestrator', NULL, NULL, NULL, ?)"
+  ).run(JSON.stringify({ result: "all good", _completion: {} }), NOW);
+}
+
+afterEach(() => {
+  closeDatabase();
+  resetWorkflowEventPreparedStatements();
+  resetWorkflowStepProjectionPreparedStatements();
+  cleanupHarness();
+});
+
+describe("OrchestratorService gate routing", () => {
+  it("routes through a gate and approves to the terminal step", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedRunAtValidation(db);
+    const service = makeService(
+      fakeGateBroker({ outcome: "approved", reason: "validation passed", inputsConsidered: ["validation"] })
+    );
+
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    const decisions = listGateDecisionsForRun(db, "run-1");
+    expect(decisions.at(-1)).toMatchObject({
+      nodeId: "gate",
+      outcome: "approved",
+      selectedEdgeTo: "done",
+      traversalSeq: 1,
+    });
+    // Cursor moved to the terminal `done` step.
+    const run = db
+      .prepare("SELECT current_node_id, current_node_kind FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { current_node_id: string; current_node_kind: string };
+    expect(run.current_node_id).toBe("done");
+    expect(run.current_node_kind).toBe("step");
+  });
+
+  it("routes a rejected gate backward to a fresh Execution attempt", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedRunAtValidation(db);
+    const service = makeService(
+      fakeGateBroker({
+        outcome: "rejected",
+        reason: "bug",
+        inputsConsidered: ["validation"],
+        issueRefs: ["i1"],
+      })
+    );
+
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    const execRuns = db
+      .prepare(
+        "SELECT attempt FROM workflow_step_runs WHERE workflow_run_id = ? AND step_template_id = 'execution' ORDER BY attempt"
+      )
+      .all("run-1") as Array<{ attempt: number }>;
+    expect(execRuns.map((r) => r.attempt)).toEqual([1, 2]);
+
+    const decisions = listGateDecisionsForRun(db, "run-1");
+    expect(decisions.at(-1)).toMatchObject({
+      outcome: "rejected",
+      selectedEdgeTo: "execution",
+      issueRefs: ["i1"],
+    });
+  });
+});

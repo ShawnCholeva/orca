@@ -225,6 +225,25 @@ function insertStep(
   return readStep(db, id);
 }
 
+/**
+ * Inserts a fresh step run for a graph-routed destination (e.g. a gate routing
+ * backward to an earlier step). Moves the run cursor to the new step node. Used
+ * by the orchestrator when a gate's outcome selects a step destination.
+ */
+export function insertStepForRouting(
+  db: Database.Database,
+  now: () => string,
+  goalId: string,
+  runId: string,
+  stepTemplateId: string,
+  ordinal: number,
+  attempt: number,
+  nodeId: string,
+  eventOptions?: StepEventOptions
+): WorkflowStepRunT {
+  return insertStep(db, now, goalId, runId, stepTemplateId, ordinal, attempt, eventOptions, nodeId);
+}
+
 export function createInitialStep(
   db: Database.Database,
   now: () => string,
