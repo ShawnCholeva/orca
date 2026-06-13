@@ -10,7 +10,7 @@ function makeGraph(overrides: Partial<WorkflowGraph> = {}): WorkflowGraph {
       { id: "n2", type: "gate", name: "Quality Gate" },
       { id: "n3", type: "step", name: "Build" },
     ],
-    edges: [["n1", "n2"]],
+    edges: [{ from: "n1", to: "n2" }],
     positions: {
       n1: { x: 40, y: 40 },
       n2: { x: 40, y: 160 },

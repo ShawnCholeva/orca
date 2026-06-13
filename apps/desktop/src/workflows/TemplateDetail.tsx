@@ -294,7 +294,7 @@ export function TemplateDetail({
       const { [id]: _drop, ...restPositions } = current.graph.positions;
       const nextGraph: WorkflowGraph = {
         nodes: current.graph.nodes.filter((n) => n.id !== id),
-        edges: current.graph.edges.filter(([a, b]) => a !== id && b !== id),
+        edges: current.graph.edges.filter((e) => e.from !== id && e.to !== id),
         positions: restPositions,
       };
       return {

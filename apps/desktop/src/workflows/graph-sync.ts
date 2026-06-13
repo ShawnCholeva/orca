@@ -16,9 +16,9 @@ export function buildInitialGraph(steps: WorkflowStepDraft[]): WorkflowGraph {
     positions[step.id] = { x: 110, y: 20 + i * 92 };
   }
 
-  const edges: [string, string][] = nodes
+  const edges = nodes
     .slice(0, -1)
-    .map((n, i) => [n.id, nodes[i + 1].id] as [string, string]);
+    .map((n, i) => ({ from: n.id, to: nodes[i + 1].id }));
 
   return { nodes, edges, positions };
 }
@@ -80,9 +80,9 @@ export function reconcileGraph(
   // duplicate directed pairs (guards against programmatically-seeded or
   // directly DB-edited graphs producing duplicate React keys downstream).
   const seenEdges = new Set<string>();
-  const nextEdges = graph.edges.filter(([a, b]) => {
-    if (!validNodeIds.has(a) || !validNodeIds.has(b) || a === b) return false;
-    const key = `${a}->${b}`;
+  const nextEdges = graph.edges.filter((e) => {
+    if (!validNodeIds.has(e.from) || !validNodeIds.has(e.to) || e.from === e.to) return false;
+    const key = `${e.from}->${e.to}`;
     if (seenEdges.has(key)) return false;
     seenEdges.add(key);
     return true;

@@ -21,7 +21,7 @@ describe("buildInitialGraph", () => {
     expect(graph.nodes).toHaveLength(2);
     expect(graph.nodes[0]).toMatchObject({ id: "s1", type: "step", name: "Alpha", stepId: "s1" });
     expect(graph.nodes[1]).toMatchObject({ id: "s2", type: "step", name: "Beta", stepId: "s2" });
-    expect(graph.edges).toEqual([["s1", "s2"]]);
+    expect(graph.edges).toEqual([{ from: "s1", to: "s2" }]);
     expect(graph.positions["s1"]).toMatchObject({ x: 110 });
     expect(graph.positions["s2"]).toMatchObject({ x: 110 });
     expect(graph.positions["s2"]!.y).toBeGreaterThan(graph.positions["s1"]!.y);
@@ -83,9 +83,9 @@ describe("reconcileGraph", () => {
     expect(result.nodes.find((n) => n.id === "s2")).toBeUndefined();
     expect(result.positions["s2"]).toBeUndefined();
     // edges involving s2 dropped
-    for (const [a, b] of result.edges) {
-      expect(a).not.toBe("s2");
-      expect(b).not.toBe("s2");
+    for (const e of result.edges) {
+      expect(e.from).not.toBe("s2");
+      expect(e.to).not.toBe("s2");
     }
   });
 
@@ -108,7 +108,7 @@ describe("reconcileGraph", () => {
     const graphWithGate = {
       ...base,
       nodes: [...base.nodes, { id: "g1", type: "gate" as const, name: "Check", condition: "" }],
-      edges: [["s1", "g1"] as [string, string], ["g1", "s2"] as [string, string]],
+      edges: [{ from: "s1", to: "g1" }, { from: "g1", to: "s2" }],
       positions: { ...base.positions, g1: { x: 110, y: 150 } },
     };
 
@@ -121,14 +121,14 @@ describe("reconcileGraph", () => {
     // s2 node dropped
     expect(result.nodes.find((n) => n.id === "s2")).toBeUndefined();
     // s2-incident edge dropped; s1→g1 preserved
-    expect(result.edges.some(([a, b]) => a === "s1" && b === "g1")).toBe(true);
-    expect(result.edges.some(([a, b]) => b === "s2" || a === "s2")).toBe(false);
+    expect(result.edges.some((e) => e.from === "s1" && e.to === "g1")).toBe(true);
+    expect(result.edges.some((e) => e.to === "s2" || e.from === "s2")).toBe(false);
   });
 
   it("null graph bootstrap: buildInitialGraph produces linear graph", () => {
     const steps = [makeStep("a"), makeStep("b"), makeStep("c")];
     const graph = buildInitialGraph(steps);
-    expect(graph.edges).toEqual([["a", "b"], ["b", "c"]]);
+    expect(graph.edges).toEqual([{ from: "a", to: "b" }, { from: "b", to: "c" }]);
   });
 
   it("drops self-loops and duplicate directed edges, keeps back-edges", () => {
@@ -136,17 +136,33 @@ describe("reconcileGraph", () => {
     const graph = {
       nodes: buildInitialGraph(steps).nodes,
       edges: [
-        ["s1", "s2"],
-        ["s1", "s2"], // exact duplicate -> dropped
-        ["s2", "s1"], // directed back-edge -> kept
-        ["s1", "s1"], // self-loop -> dropped
-      ] as [string, string][],
+        { from: "s1", to: "s2" },
+        { from: "s1", to: "s2" }, // exact duplicate -> dropped
+        { from: "s2", to: "s1" }, // directed back-edge -> kept
+        { from: "s1", to: "s1" }, // self-loop -> dropped
+      ],
       positions: buildInitialGraph(steps).positions,
     };
     const result = reconcileGraph(steps, graph);
     expect(result.edges).toEqual([
-      ["s1", "s2"],
-      ["s2", "s1"],
+      { from: "s1", to: "s2" },
+      { from: "s2", to: "s1" },
     ]);
+  });
+
+  it("buildInitialGraph emits labeled object edges", () => {
+    const g = buildInitialGraph([
+      { id: "a", name: "A" } as any,
+      { id: "b", name: "B" } as any,
+    ]);
+    expect(g.edges[0]).toEqual({ from: "a", to: "b" });
+  });
+
+  it("reconcileGraph drops edges whose endpoints were removed, using object edges", () => {
+    const g = reconcileGraph(
+      [{ id: "a", name: "A" } as any],
+      { nodes: [{ id: "a", type: "step", name: "A", stepId: "a" }], edges: [{ from: "a", to: "gone" }], positions: { a: { x: 0, y: 0 } } } as any,
+    );
+    expect(g.edges).toEqual([]);
   });
 });

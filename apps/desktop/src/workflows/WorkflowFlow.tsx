@@ -38,6 +38,9 @@ export function WorkflowFlow({
   } | null>(null);
   const [linkDrag, setLinkDrag] = useState<{
     fromId: string;
+    fromPort?: "approved" | "rejected";
+    startX: number;
+    startY: number;
     x: number;
     y: number;
     overId: string | null;
@@ -151,9 +154,13 @@ export function WorkflowFlow({
             // Block self-loops and exact-duplicate directed edges, but allow a
             // directed back-edge (B→A when A→B already exists) — DAGs need it for
             // feedback/retry flows.
-            const exists = graph.edges.some(([a, b]) => a === from && b === to);
+            const exists = graph.edges.some((e) => e.from === from && e.to === to);
             if (from !== to && !exists) {
-              onGraphChange({ ...graph, edges: [...graph.edges, [from, to]] });
+              const port = linkDrag.fromPort;
+              onGraphChange({
+                ...graph,
+                edges: [...graph.edges, port ? { from, to, port } : { from, to }],
+              });
             }
           }
         }
@@ -355,11 +362,14 @@ export function WorkflowFlow({
                   </marker>
                 </defs>
 
-                {edges.map(([from, to], i) => {
+                {edges.map((edge, i) => {
+                  const { from, to, port } = edge;
                   const edgeKey = `${from}-${to}`;
                   const isHot = hoverEdge === edgeKey;
                   const d = pathFor(from, to);
                   if (!d) return null;
+                  const midX = (positions[from]!.x + NODE_W / 2 + positions[to]!.x + NODE_W / 2) / 2;
+                  const midY = (positions[from]!.y + NODE_H + positions[to]!.y) / 2;
                   return (
                     <g
                       key={edgeKey}
@@ -377,13 +387,25 @@ export function WorkflowFlow({
                         fill="none"
                         markerEnd={isHot ? "url(#wf-arrow-hot)" : "url(#wf-arrow)"}
                       />
+                      {port && (
+                        <text
+                          x={midX}
+                          y={midY - 4}
+                          textAnchor="middle"
+                          fontSize={9}
+                          fill={isHot ? "var(--accent)" : "var(--text-3)"}
+                          style={{ pointerEvents: "none", userSelect: "none" }}
+                        >
+                          {port}
+                        </text>
+                      )}
                     </g>
                   );
                 })}
 
                 {linkDrag && positions[linkDrag.fromId] && (
                   <path
-                    d={`M ${positions[linkDrag.fromId].x + NODE_W / 2} ${positions[linkDrag.fromId].y + NODE_H} L ${linkDrag.x} ${linkDrag.y}`}
+                    d={`M ${linkDrag.startX} ${linkDrag.startY} L ${linkDrag.x} ${linkDrag.y}`}
                     stroke="var(--accent)"
                     strokeWidth={1.6}
                     fill="none"
@@ -493,17 +515,21 @@ export function WorkflowFlow({
 
                     {!isGate && <ArrowRightIcon size={11} color="var(--text-4)" />}
 
-                    {/* link-out port — hidden in readOnly */}
-                    {!readOnly && (
+                    {/* link-out port(s) — hidden in readOnly */}
+                    {!readOnly && !isGate && (
                       <button
                         type="button"
                         onMouseDown={(e) => {
                           e.stopPropagation();
                           if (e.button !== 0) return;
+                          const sx = p.x + NODE_W / 2;
+                          const sy = p.y + NODE_H;
                           setLinkDrag({
                             fromId: n.id,
-                            x: p.x + NODE_W / 2,
-                            y: p.y + NODE_H,
+                            startX: sx,
+                            startY: sy,
+                            x: sx,
+                            y: sy,
                             overId: null,
                           });
                         }}
@@ -532,6 +558,56 @@ export function WorkflowFlow({
                       >
                         +
                       </button>
+                    )}
+                    {/* Gate nodes: two labeled out-ports (approved / rejected) */}
+                    {!readOnly && isGate && (
+                      <>
+                        {(["approved", "rejected"] as const).map((portName, pi) => (
+                          <button
+                            key={portName}
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              if (e.button !== 0) return;
+                              const sx = p.x + (pi === 0 ? NODE_W * 0.33 : NODE_W * 0.67);
+                              const sy = p.y + NODE_H;
+                              setLinkDrag({
+                                fromId: n.id,
+                                fromPort: portName,
+                                startX: sx,
+                                startY: sy,
+                                x: sx,
+                                y: sy,
+                                overId: null,
+                              });
+                            }}
+                            title={`Drag to connect ${portName} branch`}
+                            style={{
+                              position: "absolute",
+                              bottom: -9,
+                              left: pi === 0 ? "33%" : "67%",
+                              transform: "translateX(-50%)",
+                              width: 44,
+                              height: 16,
+                              borderRadius: 8,
+                              background: "var(--panel)",
+                              border: "1px solid var(--hairline-strong)",
+                              color: portName === "approved" ? "var(--accent)" : "var(--text-3)",
+                              cursor: "crosshair",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              padding: 0,
+                              fontFamily: "inherit",
+                              fontSize: 9,
+                              lineHeight: "1",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {portName}
+                          </button>
+                        ))}
+                      </>
                     )}
 
                     {/* delete button — hidden in readOnly */}
