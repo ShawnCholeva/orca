@@ -1721,6 +1721,61 @@ export const WorkflowEvent = z
   });
 export type WorkflowEvent = z.infer<typeof WorkflowEvent>;
 
+export const LedgerOperation = z.enum(["create", "update", "link"]);
+export type LedgerOperation = z.infer<typeof LedgerOperation>;
+
+export const LedgerRecordType = z.enum([
+  "requirement",
+  "deliverable",
+  "finding",
+  "decision",
+  "evidence",
+  "artifact",
+]);
+export type LedgerRecordType = z.infer<typeof LedgerRecordType>;
+
+export const LedgerRecordStatus = z.string().min(1).max(64);
+export type LedgerRecordStatus = z.infer<typeof LedgerRecordStatus>;
+
+export const LedgerUpdate = z
+  .object({
+    operation: LedgerOperation,
+    // For update/link: an existing canonical id. For create: a worker-local ref
+    // (e.g. "local:foo"); the engine allocates the canonical id on commit.
+    record_id: z.string().min(1).max(128),
+    record_type: LedgerRecordType,
+    status: LedgerRecordStatus,
+    evidence_refs: z.array(z.string().min(1).max(256)).max(100).default([]),
+    related_record_ids: z.array(z.string().min(1).max(128)).max(100).optional(),
+    note: z.string().max(4000).default(""),
+  })
+  .strict();
+export type LedgerUpdate = z.infer<typeof LedgerUpdate>;
+
+export const StepCompletionEnvelope = z
+  .object({
+    output: z.unknown(),
+    ledger_updates: z.array(LedgerUpdate).max(200).default([]),
+  })
+  .strict();
+export type StepCompletionEnvelope = z.infer<typeof StepCompletionEnvelope>;
+
+// A committed canonical ledger record (read model).
+export const LedgerRecord = z
+  .object({
+    id: z.string().min(1),
+    recordType: LedgerRecordType,
+    status: LedgerRecordStatus,
+    note: z.string(),
+    evidenceRefs: z.array(z.string()),
+    relatedRecordIds: z.array(z.string()),
+    firstVersion: z.number().int().positive(),
+    lastVersion: z.number().int().positive(),
+    updatedAt: z.string(),
+  })
+  .strict();
+export type LedgerRecord = z.infer<typeof LedgerRecord>;
+
 export const OrchestratorAction = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("paraphrase_agent_message"), body: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
   z.object({ kind: z.literal("forward_to_agent"), translated: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
