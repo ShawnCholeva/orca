@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import {
   AdapterId,
   InterviewTurn,
+  LedgerUpdate,
   OrchestrationRequest,
   ProviderRecoveryCheckpoint,
   ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES,
@@ -63,7 +64,10 @@ import { listWorkspacesByGoal } from "../../workspaces/projection.js";
 import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.js";
 import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
 import { judgeAgentResponse } from "./judgement.js";
-import { extractOrcaStepCompleteBlock } from "./orca-output.js";
+import { extractOrcaStepCompleteBlock, parseStepCompletionEnvelope } from "./orca-output.js";
+import { commitLedgerVersion } from "../ledger/usecases.js";
+import { latestCommittedLedger } from "../ledger/projection.js";
+import { reviewAndNormalizeLedgerUpdates } from "../ledger/review.js";
 import { incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
 import { incrementCrashRetry, CRASH_RETRY_CAP } from "./crash-retry.js";
 import { scoreStepResult } from "./step-result-scoring.js";
@@ -1448,14 +1452,17 @@ export class OrchestratorService {
         }
 
         const stagedEvents: DomainEvent[] = [];
-        this.createStepOutputArtifact(
-          db,
-          now,
-          ctx,
-          JSON.stringify(block ?? {}),
-          options,
-          stagedEvents
-        );
+        const rejected = await this.completeStepWithLedger(db, now, ctx, block, options, stagedEvents);
+        if (rejected) {
+          return this.reviseStep(
+            db,
+            now,
+            ctx,
+            sessionId,
+            `Your ledger_updates were rejected:\n${rejected.rejections.join("\n")}\nRevise and re-emit.`,
+            options
+          );
+        }
         this.publish(options.bus, stagedEvents);
         // Best-effort: terminate the tmux worker for the completed step session.
         if (sessionId) {
@@ -1476,48 +1483,65 @@ export class OrchestratorService {
         return { postedChatReply: false };
       }
       case "revise_step": {
-        const counter = incrementReviseAttempt(ctx.stepRun.revise_attempts ?? 0);
-        db.prepare("UPDATE workflow_step_runs SET revise_attempts = ? WHERE id = ?").run(
-          counter.nextAttempt,
-          ctx.stepRun.id
-        );
-        if (counter.capReached) {
-          this.postOrchestratorMessage(
-            db,
-            now,
-            ctx.run.goalId,
-            `Step needs help after ${REVISE_CAP} revision attempts:\n${action.feedback}`,
-            options
-          );
-          return { postedChatReply: true };
-        }
-        if (sessionId && this.workerDeliver) {
-          const r = await this.workerDeliver(sessionId, action.feedback);
-          if (r !== "delivered") {
-            this.postOrchestratorMessage(
-              db,
-              now,
-              ctx.run.goalId,
-              r === "timeout"
-                ? "Unable to send revision feedback because the step agent did not become idle in time."
-                : "Unable to send revision feedback because the step agent session is not running.",
-              options
-            );
-            return { postedChatReply: true };
-          }
-        } else {
-          this.postOrchestratorMessage(
-            db,
-            now,
-            ctx.run.goalId,
-            "Unable to send revision feedback because no step agent session is available.",
-            options
-          );
-          return { postedChatReply: true };
-        }
-        return { postedChatReply: false };
+        return this.reviseStep(db, now, ctx, sessionId, action.feedback, options);
       }
     }
+  }
+
+  /**
+   * Revises the current step: bumps the revise counter, and below the cap relays
+   * feedback to the live agent session; at the cap posts an escalation message.
+   * Shared by the mediator-driven revise_step action and deterministic revisions
+   * (e.g. rejected ledger proposals on approval).
+   */
+  private async reviseStep(
+    db: Database.Database,
+    now: () => string,
+    ctx: { run: WorkflowRunT; stepRun: StepRunRow },
+    sessionId: string | null,
+    feedback: string,
+    options: RequestNextDecisionOptions
+  ): Promise<{ postedChatReply: boolean }> {
+    const counter = incrementReviseAttempt(ctx.stepRun.revise_attempts ?? 0);
+    db.prepare("UPDATE workflow_step_runs SET revise_attempts = ? WHERE id = ?").run(
+      counter.nextAttempt,
+      ctx.stepRun.id
+    );
+    if (counter.capReached) {
+      this.postOrchestratorMessage(
+        db,
+        now,
+        ctx.run.goalId,
+        `Step needs help after ${REVISE_CAP} revision attempts:\n${feedback}`,
+        options
+      );
+      return { postedChatReply: true };
+    }
+    if (sessionId && this.workerDeliver) {
+      const r = await this.workerDeliver(sessionId, feedback);
+      if (r !== "delivered") {
+        this.postOrchestratorMessage(
+          db,
+          now,
+          ctx.run.goalId,
+          r === "timeout"
+            ? "Unable to send revision feedback because the step agent did not become idle in time."
+            : "Unable to send revision feedback because the step agent session is not running.",
+          options
+        );
+        return { postedChatReply: true };
+      }
+    } else {
+      this.postOrchestratorMessage(
+        db,
+        now,
+        ctx.run.goalId,
+        "Unable to send revision feedback because no step agent session is available.",
+        options
+      );
+      return { postedChatReply: true };
+    }
+    return { postedChatReply: false };
   }
 
   /**
@@ -1812,7 +1836,9 @@ export class OrchestratorService {
     expireConfirmation({ db, bus: options.bus ?? new EventBus() }, { stepRunId: stepRun.id });
 
     const stagedEvents: DomainEvent[] = [];
-    this.createStepOutputArtifact(db, now, ctx, JSON.stringify(stash.block ?? {}), options, stagedEvents);
+    // The user already approved this completion; never block the confirmation on
+    // ledger review — drop rejected proposals and commit the accepted ones.
+    await this.completeStepWithLedger(db, now, ctx, stash.block, options, stagedEvents, "drop");
     this.publish(options.bus, stagedEvents);
 
     const sessionRow = db
@@ -2726,6 +2752,92 @@ export class OrchestratorService {
     })();
     this.publish(options.bus, stagedEvents);
     return { decision, recommendationIds: [] };
+  }
+
+  /**
+   * Completes a step from its agent-emitted completion envelope: splits the
+   * envelope into business `output` + proposed `ledger_updates`, reviews the
+   * proposals against the latest committed ledger, then ATOMICALLY writes the
+   * `step_output` artifact (storing only the validated business output, so
+   * downstream readers are unaffected) and commits one ledger version.
+   *
+   * The async review runs OUTSIDE the synchronous better-sqlite3 transaction
+   * (transactions are synchronous). On rejection, NO ledger version is committed
+   * and no step_output is written — the caller revises the step.
+   *
+   * Decision: a ledger version is committed on EVERY successful executable step
+   * even when there are no updates, so `ledger_version` advances monotonically
+   * and gates can reference a stable version. An empty version is cheap.
+   *
+   * Returns the rejection reasons when review fails (caller revises), or `null`
+   * on success.
+   */
+  private async completeStepWithLedger(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      goal: GoalRow;
+    },
+    block: unknown,
+    options: RequestNextDecisionOptions,
+    stagedEvents: DomainEvent[],
+    onReject: "revise" | "drop" = "revise"
+  ): Promise<{ rejections: string[] } | null> {
+    const { output, ledgerUpdates } = parseStepCompletionEnvelope(block);
+
+    // Guard the proposed updates even though parseStepCompletionEnvelope already
+    // returns typed updates (defensive: bare-output back-compat returns []).
+    const guard = LedgerUpdate.array().safeParse(ledgerUpdates);
+    if (!guard.success) {
+      if (onReject === "revise") return { rejections: ["ledger_updates failed schema validation"] };
+      // drop: complete with an empty ledger version (the user already approved).
+      this.commitStepOutputAndLedger(db, now, ctx, output, [], options, stagedEvents);
+      return null;
+    }
+
+    // Async review/normalize MUST happen before opening the synchronous tx.
+    const committed = latestCommittedLedger(db, ctx.run.id);
+    const review = await reviewAndNormalizeLedgerUpdates(
+      {},
+      { committed, proposals: guard.data }
+    );
+    if (review.rejected.length > 0 && onReject === "revise") {
+      return { rejections: review.rejected.map((r) => r.reason) };
+    }
+    if (review.rejected.length > 0 && onReject === "drop") {
+      console.warn("[ledger] dropping rejected proposals on confirm (user already approved)", { stepRunId: ctx.stepRun.id, count: review.rejected.length, reasons: review.rejected.map((r) => r.reason) });
+    }
+
+    this.commitStepOutputAndLedger(db, now, ctx, output, review.accepted, options, stagedEvents);
+    return null;
+  }
+
+  /** Atomic: step_output write + ledger version commit roll back together. */
+  private commitStepOutputAndLedger(
+    db: Database.Database,
+    now: () => string,
+    ctx: { run: WorkflowRunT; stepRun: StepRunRow; stepTpl: WorkflowStepTemplate; goal: GoalRow },
+    output: unknown,
+    updates: LedgerUpdate[],
+    options: RequestNextDecisionOptions,
+    stagedEvents: DomainEvent[]
+  ): void {
+    // Atomic: step_output write + ledger version commit roll back together.
+    // (createArtifact and commitLedgerVersion each open their own tx; nested
+    // here they become SAVEPOINTs under this single outer transaction.)
+    db.transaction(() => {
+      this.createStepOutputArtifact(db, now, ctx, JSON.stringify(output ?? {}), options, stagedEvents);
+      commitLedgerVersion(db, now, {
+        goalId: ctx.run.goalId,
+        workflowRunId: ctx.run.id,
+        sourceStepRunId: ctx.stepRun.id,
+        traversalSeq: ctx.run.traversalSeq,
+        updates,
+      });
+    })();
   }
 
   private createStepOutputArtifact(

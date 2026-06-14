@@ -28,6 +28,7 @@ import type { OrchestratorAction } from "@orca/contracts";
 import type { SessionOutputStore } from "../../sessions/output-store.js";
 import type { ShadowAsk } from "./recover-step-scoring.js";
 import { setSupervisionMode } from "../../settings/store.js";
+import { latestCommittedLedger } from "../ledger/projection.js";
 import type { ProviderRecoveryCheckpoint } from "@orca/contracts";
 import {
   OrchestratorProviderRecoveryInvalidTransitionError,
@@ -835,6 +836,140 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       },
     });
     expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("commits a ledger version from the step completion envelope", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete" }),
+      vi.fn(async () => "delivered" as const)
+    );
+
+    const envelope = {
+      output: { result: "implemented" },
+      ledger_updates: [
+        {
+          operation: "create",
+          record_id: "local:a",
+          record_type: "requirement",
+          status: "open",
+          evidence_refs: [],
+          note: "must support X",
+        },
+      ],
+    };
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify(envelope) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // step_output stores only the validated business output (not the envelope).
+    expect(stepOutputCount(db)).toBe(1);
+    const body = (
+      db
+        .prepare("SELECT body FROM workflow_artifacts WHERE step_run_id = 'step-1' AND type = 'step_output' LIMIT 1")
+        .get() as { body: string }
+    ).body;
+    expect(JSON.parse(body)).toEqual({ result: "implemented" });
+
+    const ledger = latestCommittedLedger(db, "run-1");
+    expect(ledger.version).toBeGreaterThanOrEqual(1);
+    const req = ledger.records.find((r) => r.recordType === "requirement");
+    expect(req).toBeTruthy();
+    expect(req!.status).toBe("open");
+    expect(req!.note).toBe("must support X");
+  });
+
+  it("revises the step when ledger_updates are invalid (unknown canonical record)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async (_sid: string, _text: string) => "delivered" as const);
+    const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), deliver);
+
+    // Valid output, but an update targeting a canonical id that doesn't exist.
+    const envelope = {
+      output: { result: "implemented" },
+      ledger_updates: [
+        {
+          operation: "update",
+          record_id: "REQ-doesnotexist",
+          record_type: "requirement",
+          status: "satisfied",
+          evidence_refs: [],
+          note: "",
+        },
+      ],
+    };
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify(envelope) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // No step_output, no advance, no ledger version committed; step is revised.
+    expect(stepOutputCount(db)).toBe(0);
+    expect(latestCommittedLedger(db, "run-1").version).toBe(0);
+    const row = db
+      .prepare("SELECT revise_attempts, step_result_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { revise_attempts: number; step_result_json: string | null };
+    expect(row.revise_attempts).toBe(1);
+    expect(row.step_result_json).toBeNull();
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver.mock.calls[0]![1]).toContain("ledger_updates");
+  });
+
+  it("still completes a legacy step that emits a bare output (no ledger_updates)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete" }),
+      vi.fn(async () => "delivered" as const)
+    );
+
+    // Bare output (no envelope wrapper) — the legacy engineering template shape.
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    expect(stepOutputCount(db)).toBe(1);
+    const body = (
+      db
+        .prepare("SELECT body FROM workflow_artifacts WHERE step_run_id = 'step-1' AND type = 'step_output' LIMIT 1")
+        .get() as { body: string }
+    ).body;
+    expect(JSON.parse(body)).toEqual({ result: "implemented" });
+    // A ledger version is committed even with no updates (monotonic versioning).
+    const ledger = latestCommittedLedger(db, "run-1");
+    expect(ledger.version).toBe(1);
+    expect(ledger.records).toHaveLength(0);
   });
 
   it("revise_step under cap: bumps revise_attempts to 1 and sends feedback to the agent", async () => {

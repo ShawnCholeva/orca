@@ -1,4 +1,4 @@
-import { extractOrcaStepCompleteBlock } from "./orca-output.js";
+import { extractOrcaStepCompleteBlock, parseStepCompletionEnvelope } from "./orca-output.js";
 import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
 import type { OrchestratorAction } from "@orca/contracts";
 
@@ -23,7 +23,22 @@ export async function judgeAgentResponse(input: JudgeAgentResponseInput): Promis
       triggerPayload: { agentResponseText: input.responseText },
     });
   }
-  const v = input.schemaValidate(block);
+  // The block is a completion envelope `{ output, ledger_updates }`. Back-compat:
+  // a bare output (no `output` key) is treated as the business output with no
+  // ledger updates. Invalid ledger_updates throw via zod -> revise.
+  let output: unknown;
+  try {
+    ({ output } = parseStepCompletionEnvelope(block));
+  } catch {
+    return {
+      kind: "revise_step",
+      feedback:
+        "Your orca:step-complete block had invalid ledger_updates. Each update must match the ledger update schema. Revise and re-emit.",
+      rationale: "ledger_updates failed schema validation deterministically",
+    };
+  }
+  // Validate only the business output against the authored step schema.
+  const v = input.schemaValidate(output);
   if (!v.ok) {
     return {
       kind: "revise_step",
