@@ -3,6 +3,7 @@ import {
   augmentInstructionsWithOutputConvention,
   extractOrcaStepCompleteBlock,
   parseOrcaOutputBlock,
+  parseStepCompletionEnvelope,
 } from "./orca-output.js";
 
 describe("augmentInstructionsWithOutputConvention", () => {
@@ -54,5 +55,24 @@ describe("extractOrcaStepCompleteBlock", () => {
   });
   it("returns null on invalid JSON", () => {
     expect(extractOrcaStepCompleteBlock("```orca:step-complete\nnot json\n```")).toBeNull();
+  });
+});
+
+describe("parseStepCompletionEnvelope", () => {
+  it("splits an envelope into output + ledgerUpdates", () => {
+    const r = parseStepCompletionEnvelope({ output: { summary: "x" }, ledger_updates: [{ operation: "create", record_id: "local:a", record_type: "finding", status: "open", evidence_refs: [], note: "" }] });
+    expect(r.output).toEqual({ summary: "x" });
+    expect(r.ledgerUpdates).toHaveLength(1);
+  });
+
+  it("treats a bare output (no envelope keys) as output with empty ledger updates", () => {
+    const r = parseStepCompletionEnvelope({ summary: "legacy" });
+    expect(r.output).toEqual({ summary: "legacy" });
+    expect(r.ledgerUpdates).toEqual([]);
+  });
+
+  it("treats { output } with no ledger_updates as empty updates", () => {
+    const r = parseStepCompletionEnvelope({ output: { a: 1 } });
+    expect(r.ledgerUpdates).toEqual([]);
   });
 });

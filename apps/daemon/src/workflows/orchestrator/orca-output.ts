@@ -1,3 +1,6 @@
+import { StepCompletionEnvelope } from "@orca/contracts";
+import type { LedgerUpdate } from "@orca/contracts";
+
 const CONVENTION = [
   "",
   "When finished, emit your structured result as a single fenced block:",
@@ -36,4 +39,18 @@ export function extractOrcaStepCompleteBlock(text: string): unknown | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Interprets a parsed orca:step-complete block as the completion envelope
+ * `{ output, ledger_updates }`. Backward-compatible: a block that has no
+ * `output` key is treated as a bare legacy business output with no ledger
+ * updates. Invalid ledger_updates throw via zod (caller maps to a revise).
+ */
+export function parseStepCompletionEnvelope(block: unknown): { output: unknown; ledgerUpdates: LedgerUpdate[] } {
+  if (block !== null && typeof block === "object" && "output" in (block as Record<string, unknown>)) {
+    const parsed = StepCompletionEnvelope.parse(block);
+    return { output: parsed.output, ledgerUpdates: parsed.ledger_updates };
+  }
+  return { output: block, ledgerUpdates: [] };
 }
