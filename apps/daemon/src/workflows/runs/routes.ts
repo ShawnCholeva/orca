@@ -8,6 +8,10 @@ import {
 import type { EventBus } from "../../events.js";
 import { getWorkflowRunById, listWorkflowRunsForGoal } from "./projection.js";
 import {
+  latestCommittedLedger,
+  listLedgerVersionsForRun,
+} from "../ledger/projection.js";
+import {
   ActiveWorkflowRunExistsError,
   cancelWorkflowRun,
   pauseWorkflowRun,
@@ -196,5 +200,20 @@ export function registerWorkflowRunRoutes(
       }
       throw error;
     }
+  });
+
+  server.get("/v1/goals/:goalId/workflow-runs/:id/ledger", async (request, reply) => {
+    const { goalId, id } = request.params as { goalId: string; id: string };
+    if (!runForGoalOr404(goalId, id)) {
+      reply.status(404);
+      return apiError(
+        "workflow_run_not_found",
+        `Workflow run not found for goal ${goalId}: ${id}`
+      );
+    }
+    return {
+      committed: latestCommittedLedger(deps.db, id),
+      versions: listLedgerVersionsForRun(deps.db, id),
+    };
   });
 }
