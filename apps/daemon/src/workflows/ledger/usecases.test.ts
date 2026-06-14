@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { beforeEach, describe, expect, it } from "vitest";
 import { runMigrations } from "../../migrations.js";
-import { nextLedgerVersion, commitLedgerVersion, allocateCanonicalId } from "./usecases.js";
+import { nextLedgerVersion, commitLedgerVersion, allocateCanonicalId, LedgerCommitError } from "./usecases.js";
 import { latestCommittedLedger } from "./projection.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -95,6 +95,6 @@ describe("commitLedgerVersion", () => {
         traversalSeq: 1,
         updates: [{ operation: "update", record_id: "REQ-nonexistent", record_type: "requirement", status: "open", evidence_refs: [], note: "" }],
       })
-    ).toThrow("unknown canonical record");
+    ).toThrow(LedgerCommitError);
   });
 });
