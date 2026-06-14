@@ -22,6 +22,7 @@ import { createDaemonContext } from './daemon-context.js';
 import { subscribeOrchestrationTriggers } from './generation/triggers.js';
 import { reconcileInFlightGenerations } from './generation/reconcile.js';
 import { seedEngineeringTemplate } from './workflows/templates/seed-engineering.js';
+import { seedFeatureDevelopmentTemplate } from './workflows/templates/seed-feature-development.js';
 import { reconcileWorkflowsOnBoot } from './workflows/reconcile.js';
 
 export interface DaemonStartHandles {
@@ -68,6 +69,7 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
 
   try {
     seedEngineeringTemplate(db, () => new Date().toISOString());
+    seedFeatureDevelopmentTemplate(db, () => new Date().toISOString());
   } catch (err) {
     console.error('[orca-daemon] Workflow template seed failed — aborting startup:', err);
     process.exit(1);
