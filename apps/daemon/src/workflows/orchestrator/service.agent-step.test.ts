@@ -1848,6 +1848,40 @@ describe("OrchestratorService provider recovery actions", () => {
     ).toMatchObject({ status: "active" });
   });
 
+  it("turn-start but guidance delivery fails → back to waiting w/ lastError, checkpoint kept", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedRecoveryCheckpoint(db, {
+      mode: "retrying",
+      retryKind: "preserved_session",
+      retryOutputSeq: 5,
+      pendingGuidance: ["use the new API"],
+    });
+    db.prepare(
+      `INSERT INTO activities (id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal, status, current_text, final_summary, source_kind, work_category, confidence, pending_question, created_at, updated_at, completed_at) VALUES ('act-r', 'goal-1', 'run-1', 'step-1', 'sess-cur', 0, 'paused_for_input', 'Paused', NULL, 'provider_recovery_pending', NULL, NULL, NULL, ?, ?, NULL)`
+    ).run(NOW, NOW);
+    const deliver = vi.fn(async () => "no_session" as const);
+    const service = new OrchestratorService(
+      fakeAgentSelector(),
+      fakeBrokerNoop(),
+      { async list() { return [agentOperatorDescriptor()]; } },
+      makeLauncher(),
+      multiOutputStore({ "sess-cur": { tail: TURN_STARTED_TAIL, nextSeq: 8 } }),
+      fakeStepDispatch(),
+      undefined,
+      undefined,
+      deliver
+    );
+
+    await service.onSessionOutputChunk(db, () => NOW, { sessionId: "sess-cur", goalId: "goal-1" }, { bus, idFactory });
+
+    const ck = readCheckpoint(db);
+    expect(ck).not.toBeNull();
+    expect(ck!.mode).toBe("waiting");
+    expect(ck!.lastError).toBeTruthy();
+    expect(ck!.retryOutputSeq).toBeNull();
+    expect(ck!.pendingGuidance).toEqual(["use the new API"]);
+  });
+
   it("same limit while retrying → back to waiting w/ refreshed reset", async () => {
     const { db, bus, idFactory } = setupHarness();
     seedRecoveryCheckpoint(db, {

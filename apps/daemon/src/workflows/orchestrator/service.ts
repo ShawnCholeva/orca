@@ -713,8 +713,12 @@ export class OrchestratorService {
           const guidance = checkpoint.pendingGuidance.join("\n\n");
           const delivered = await this.workerDeliver?.(recoverySessionId, guidance);
           if (delivered !== "delivered") {
+            // Bounce back to waiting so the operator can Retry/Switch again;
+            // staying in retrying would leave the card busy and the run stuck.
             updateCheckpoint({
               ...checkpoint,
+              mode: "waiting",
+              retryOutputSeq: null,
               lastError: "The provider resumed, but pending guidance could not be delivered.",
             });
             return;
