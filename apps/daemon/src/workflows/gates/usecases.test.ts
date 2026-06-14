@@ -46,10 +46,31 @@ describe("recordGateDecision", () => {
       selectedEdgeTo: "execution",
       inputsConsidered: ["validation"],
       issueRefs: ["issue-1"],
+      ledgerVersion: 0,
     });
     const decisions = listGateDecisionsForRun(db, "r");
     expect(decisions).toHaveLength(1);
     expect(decisions[0]).toMatchObject({ nodeId: "gate", outcome: "rejected", selectedEdgeTo: "execution" });
+  });
+
+  it("persists and round-trips ledgerVersion", () => {
+    const seq = nextTraversalSeq(db, "r");
+    recordGateDecision(db, () => "2026-06-12T00:00:01.000Z", {
+      id: "gd1",
+      goalId: "g",
+      workflowRunId: "r",
+      nodeId: "gate",
+      traversalSeq: seq,
+      outcome: "approved",
+      reason: "all good",
+      selectedEdgeTo: "next-step",
+      inputsConsidered: [],
+      issueRefs: [],
+      ledgerVersion: 3,
+    });
+    const decisions = listGateDecisionsForRun(db, "r");
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0].ledgerVersion).toBe(3);
   });
 
   it("rejects a duplicate (run, node, traversalSeq)", () => {
@@ -64,6 +85,7 @@ describe("recordGateDecision", () => {
       selectedEdgeTo: "done",
       inputsConsidered: [],
       issueRefs: [],
+      ledgerVersion: 0,
     };
     recordGateDecision(db, () => "2026-06-12T00:00:01.000Z", args);
     expect(() => recordGateDecision(db, () => "2026-06-12T00:00:02.000Z", { ...args, id: "gd2" })).toThrow();

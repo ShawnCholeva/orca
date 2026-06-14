@@ -12,6 +12,7 @@ export interface GateDecisionInput {
   selectedEdgeTo: string;
   inputsConsidered: string[];
   issueRefs: string[];
+  ledgerVersion: number;
 }
 
 /** Atomically increments and returns the per-run traversal counter. */
@@ -35,8 +36,8 @@ export function recordGateDecision(
   db.prepare(
     `INSERT INTO workflow_gate_decisions
        (id, goal_id, workflow_run_id, node_id, traversal_seq, outcome, reason,
-        selected_edge_to, inputs_considered_json, issue_refs_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        selected_edge_to, inputs_considered_json, issue_refs_json, ledger_version, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     input.goalId,
@@ -48,6 +49,7 @@ export function recordGateDecision(
     input.selectedEdgeTo,
     JSON.stringify(input.inputsConsidered),
     JSON.stringify(input.issueRefs),
+    input.ledgerVersion,
     now()
   );
   return id;

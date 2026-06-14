@@ -778,6 +778,10 @@ export const GateEvaluationRequest = z
     sourceStepOutput: z.record(z.string(), z.unknown()).nullable(),
     priorGateDecisions: z.array(z.object({ nodeId: Id100, outcome: z.enum(["approved", "rejected"]), reason: z.string().max(1024) }).strict()).max(50),
     availableOutcomes: z.array(z.enum(["approved", "rejected"])).min(1).max(2),
+    // Cap at 35 records so worst-case serialized size (~35 × 806 bytes ≈ 28 KB) leaves
+    // comfortable headroom under the 65 536-byte ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES
+    // guard alongside gate instructions (≤8 KB) and goal description (≤4 KB).
+    committedLedger: z.array(z.object({ id: z.string().min(1).max(128), recordType: z.string().min(1).max(64), status: z.string().min(1).max(64), note: z.string().max(500) }).strict()).max(35).default([]),
   })
   .strict()
   .superRefine((value, ctx) => {

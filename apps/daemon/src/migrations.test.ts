@@ -82,7 +82,8 @@ describe("runMigrations", () => {
       "0028_step_revision_signals.sql",
       "0029_workflow_graph_cursor.sql",
       "0030_provider_recovery.sql",
-      "0031_workflow_ledger.sql"
+      "0031_workflow_ledger.sql",
+      "0032_gate_decision_ledger_version.sql"
     ]);
   });
 
@@ -204,7 +205,8 @@ describe("runMigrations", () => {
       "0028_step_revision_signals.sql",
       "0029_workflow_graph_cursor.sql",
       "0030_provider_recovery.sql",
-      "0031_workflow_ledger.sql"
+      "0031_workflow_ledger.sql",
+      "0032_gate_decision_ledger_version.sql"
     ]);
 
     const goalCount = (
@@ -475,7 +477,8 @@ describe("session tables migration", () => {
       "0028_step_revision_signals.sql",
       "0029_workflow_graph_cursor.sql",
       "0030_provider_recovery.sql",
-      "0031_workflow_ledger.sql"
+      "0031_workflow_ledger.sql",
+      "0032_gate_decision_ledger_version.sql"
     ]);
 
     const tables = (
@@ -981,7 +984,8 @@ describe("migration 0010 workflows", () => {
       "0028_step_revision_signals.sql",
       "0029_workflow_graph_cursor.sql",
       "0030_provider_recovery.sql",
-      "0031_workflow_ledger.sql"
+      "0031_workflow_ledger.sql",
+      "0032_gate_decision_ledger_version.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1567,7 +1571,8 @@ describe("migration 0012 orchestration transport", () => {
       "0028_step_revision_signals.sql",
       "0029_workflow_graph_cursor.sql",
       "0030_provider_recovery.sql",
-      "0031_workflow_ledger.sql"
+      "0031_workflow_ledger.sql",
+      "0032_gate_decision_ledger_version.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

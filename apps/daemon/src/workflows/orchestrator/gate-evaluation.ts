@@ -20,6 +20,7 @@ export interface GateEvaluationInput {
   sourceStepOutput: Record<string, unknown> | null;
   priorGateDecisions: { nodeId: string; outcome: "approved" | "rejected"; reason: string }[];
   availableOutcomes: ReadonlyArray<"approved" | "rejected">;
+  committedLedger: { id: string; recordType: string; status: string; note: string }[];
 }
 
 export type GateEvaluationResult =
@@ -36,6 +37,7 @@ export async function evaluateGate(
     sourceStepOutput: input.sourceStepOutput,
     priorGateDecisions: input.priorGateDecisions,
     availableOutcomes: [...input.availableOutcomes],
+    committedLedger: input.committedLedger,
   });
 
   const request = OrchestrationRequest.parse({

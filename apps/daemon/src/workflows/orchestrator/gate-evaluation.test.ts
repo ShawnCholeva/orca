@@ -24,6 +24,7 @@ const baseInput = {
   sourceStepOutput: { verdict: "passed" },
   priorGateDecisions: [],
   availableOutcomes: ["approved", "rejected"] as const,
+  committedLedger: [],
 };
 
 describe("evaluateGate", () => {

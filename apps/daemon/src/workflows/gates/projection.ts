@@ -11,6 +11,7 @@ export interface GateDecisionRecord {
   selectedEdgeTo: string;
   inputsConsidered: string[];
   issueRefs: string[];
+  ledgerVersion: number;
   createdAt: string;
 }
 
@@ -25,6 +26,7 @@ interface Row {
   selected_edge_to: string;
   inputs_considered_json: string;
   issue_refs_json: string;
+  ledger_version: number;
   created_at: string;
 }
 
@@ -46,6 +48,7 @@ export function listGateDecisionsForRun(
     selectedEdgeTo: r.selected_edge_to,
     inputsConsidered: JSON.parse(r.inputs_considered_json),
     issueRefs: JSON.parse(r.issue_refs_json),
+    ledgerVersion: r.ledger_version,
     createdAt: r.created_at,
   }));
 }

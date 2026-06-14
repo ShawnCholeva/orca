@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GateEvaluationProposal, OrchestrationDecisionKind, WorkflowGraph, WorkflowGraphEdge, WorkflowGraphNode } from "./index.js";
+import { GateEvaluationProposal, GateEvaluationRequest, OrchestrationDecisionKind, WorkflowGraph, WorkflowGraphEdge, WorkflowGraphNode } from "./index.js";
 
 describe("WorkflowGraphEdge", () => {
   it("parses a labeled object edge", () => {
@@ -84,5 +84,88 @@ describe("gate evaluation contract", () => {
 
   it("rejects an outcome outside approved/rejected", () => {
     expect(() => GateEvaluationProposal.parse({ outcome: "maybe", reason: "x", inputsConsidered: [] })).toThrow();
+  });
+
+  it("GateEvaluationRequest defaults committedLedger to empty array when omitted", () => {
+    const req = GateEvaluationRequest.parse({
+      gate: { nodeId: "gate1", name: "Release Gate", instructions: "approve when green" },
+      goal: { id: "goal1", description: "ship it" },
+      sourceStepOutput: null,
+      priorGateDecisions: [],
+      availableOutcomes: ["approved", "rejected"],
+    });
+    expect(req.committedLedger).toEqual([]);
+  });
+
+  it("GateEvaluationRequest accepts committedLedger entries", () => {
+    const req = GateEvaluationRequest.parse({
+      gate: { nodeId: "gate1", name: "Release Gate", instructions: "approve when green" },
+      goal: { id: "goal1", description: "ship it" },
+      sourceStepOutput: null,
+      priorGateDecisions: [],
+      availableOutcomes: ["approved"],
+      committedLedger: [{ id: "lr1", recordType: "step_result", status: "completed", note: "all tests passed" }],
+    });
+    expect(req.committedLedger).toHaveLength(1);
+    expect(req.committedLedger[0].id).toBe("lr1");
+  });
+
+  it("GateEvaluationRequest rejects a committedLedger entry with a note over 500 chars", () => {
+    expect(() =>
+      GateEvaluationRequest.parse({
+        gate: { nodeId: "gate1", name: "Release Gate", instructions: "approve when green" },
+        goal: { id: "goal1", description: "ship it" },
+        sourceStepOutput: null,
+        priorGateDecisions: [],
+        availableOutcomes: ["approved"],
+        committedLedger: [{ id: "lr1", recordType: "step_result", status: "completed", note: "x".repeat(501) }],
+      })
+    ).toThrow();
+  });
+
+  it("GateEvaluationRequest accepts a committedLedger entry with a note of exactly 500 chars", () => {
+    const req = GateEvaluationRequest.parse({
+      gate: { nodeId: "gate1", name: "Release Gate", instructions: "approve when green" },
+      goal: { id: "goal1", description: "ship it" },
+      sourceStepOutput: null,
+      priorGateDecisions: [],
+      availableOutcomes: ["approved"],
+      committedLedger: [{ id: "lr1", recordType: "step_result", status: "completed", note: "x".repeat(500) }],
+    });
+    expect(req.committedLedger[0].note).toHaveLength(500);
+  });
+
+  it("GateEvaluationRequest at worst-case committedLedger (35 records × 500-char note) still parses under the size guard", () => {
+    // Each record: id(128) + recordType(64) + status(64) + note(500) ≈ 806 bytes
+    // 35 × 806 ≈ 28 210 bytes — well under 65 536.
+    const maxRecord = {
+      id: "i".repeat(128),
+      recordType: "r".repeat(64),
+      status: "s".repeat(64),
+      note: "n".repeat(500),
+    };
+    const req = GateEvaluationRequest.parse({
+      gate: { nodeId: "gate1", name: "Release Gate", instructions: "approve when green" },
+      goal: { id: "goal1", description: "ship it" },
+      sourceStepOutput: null,
+      priorGateDecisions: [],
+      availableOutcomes: ["approved"],
+      committedLedger: Array.from({ length: 35 }, () => ({ ...maxRecord })),
+    });
+    expect(req.committedLedger).toHaveLength(35);
+  });
+
+  it("GateEvaluationRequest rejects a committedLedger with more than 35 entries", () => {
+    const record = { id: "lr1", recordType: "step_result", status: "completed", note: "ok" };
+    expect(() =>
+      GateEvaluationRequest.parse({
+        gate: { nodeId: "gate1", name: "Release Gate", instructions: "approve when green" },
+        goal: { id: "goal1", description: "ship it" },
+        sourceStepOutput: null,
+        priorGateDecisions: [],
+        availableOutcomes: ["approved"],
+        committedLedger: Array.from({ length: 36 }, () => ({ ...record })),
+      })
+    ).toThrow();
   });
 });

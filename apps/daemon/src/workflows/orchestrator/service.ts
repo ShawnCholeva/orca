@@ -3106,6 +3106,7 @@ export class OrchestratorService {
       return;
     }
 
+    const ledger = latestCommittedLedger(db, run.id);
     const evaluation = await evaluateGate(
       { broker: this.broker },
       {
@@ -3126,6 +3127,14 @@ export class OrchestratorService {
           reason: d.reason,
         })),
         availableOutcomes: ["approved", "rejected"],
+        // Take the most recent 35 records and truncate note to 500 chars so the
+        // committedLedger field can never exceed the GateEvaluationRequest size guard.
+        committedLedger: ledger.records.slice(-35).map((r) => ({
+          id: r.id,
+          recordType: r.recordType,
+          status: r.status,
+          note: r.note.slice(0, 500),
+        })),
       }
     );
 
@@ -3152,6 +3161,7 @@ export class OrchestratorService {
       selectedEdgeTo: dest.kind === "terminal" ? "" : dest.nodeId,
       inputsConsidered: evaluation.decision.inputsConsidered,
       issueRefs: evaluation.decision.issueRefs,
+      ledgerVersion: ledger.version,
     });
 
     if (dest.kind !== "step" && dest.kind !== "gate") {

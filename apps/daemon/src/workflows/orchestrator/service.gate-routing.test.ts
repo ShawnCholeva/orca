@@ -22,6 +22,8 @@ import type {
   BrokerCompatibilityOptions,
   OrchestrationTransportBroker,
 } from "../orchestration-transport/broker.js";
+import { commitLedgerVersion } from "../ledger/usecases.js";
+import { latestCommittedLedger } from "../ledger/projection.js";
 
 const AGENT_OPERATOR_ID = "agent:claude-code";
 
@@ -428,5 +430,60 @@ describe("OrchestratorService gate routing", () => {
       .prepare("SELECT attempt FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = 'done'")
       .all() as Array<{ attempt: number }>;
     expect(doneRunsAfter).toHaveLength(1);
+  });
+
+  it("records the current committed ledger_version on the gate decision", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "unsupervised", NOW);
+    seedRunAtValidation(db);
+
+    // Commit two ledger versions before the gate is evaluated so the run's
+    // ledger_version is 2 (a non-zero value a hardcoded 0 would not match).
+    commitLedgerVersion(db, () => NOW, {
+      goalId: "goal-1",
+      workflowRunId: "run-1",
+      sourceStepRunId: "step-validation",
+      traversalSeq: 0,
+      updates: [
+        {
+          operation: "create",
+          record_type: "requirement",
+          record_id: "req-local-1",
+          status: "open",
+          note: "Initial requirement",
+          evidence_refs: [],
+          related_record_ids: [],
+        },
+      ],
+    });
+    commitLedgerVersion(db, () => NOW, {
+      goalId: "goal-1",
+      workflowRunId: "run-1",
+      sourceStepRunId: "step-validation",
+      traversalSeq: 0,
+      updates: [
+        {
+          operation: "create",
+          record_type: "finding",
+          record_id: "fnd-local-1",
+          status: "open",
+          note: "A finding",
+          evidence_refs: [],
+          related_record_ids: [],
+        },
+      ],
+    });
+
+    const committedVersion = latestCommittedLedger(db, "run-1").version;
+    expect(committedVersion).toBe(2);
+
+    const service = makeService(
+      fakeGateBroker({ outcome: "approved", reason: "validation passed", inputsConsidered: ["validation"] })
+    );
+
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    const decisions = listGateDecisionsForRun(db, "run-1");
+    expect(decisions.at(-1)?.ledgerVersion).toBe(committedVersion);
   });
 });
