@@ -111,6 +111,17 @@ function persistFailure(
   onTerminalState?.(sessionId, goalId);
 }
 
+export function failSession(
+  db: Database.Database,
+  bus: EventBus,
+  sessionId: string,
+  goalId: string,
+  failureReason: string,
+  now: string,
+): void {
+  persistFailure(db, bus, sessionId, goalId, failureReason, now);
+}
+
 export class SessionRuntime {
   private readonly handleSlots = new Map<string, HandleSlot>();
   private readonly subscriberMap = new Map<string, Set<WsClient>>();

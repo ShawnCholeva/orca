@@ -1,7 +1,10 @@
 # Feature Development Workflow and Graph Routing
 
 **Date:** 2026-06-12
-**Status:** Design approved; ready for implementation planning
+**Status:** Design revised after codebase review; ready for phased implementation planning
+
+See [Implementation Phases](#implementation-phases) for the Phase 1 / 2 / 3
+boundaries. Phase 1 (routing) and Phase 2 (ledger) are separately plannable.
 
 ## Problem
 
@@ -85,18 +88,82 @@ Agents and the orchestrator never return arbitrary destination IDs. A gate
 returns one of its declared outcomes, and the engine resolves the corresponding
 edge.
 
+#### Edge representation (contract change)
+
+The current contract stores edges as unlabeled directed pairs
+(`WorkflowGraphEdge = tuple([nodeId, nodeId])` in
+`packages/contracts/src/workflows/index.ts`). An unlabeled pair cannot tell the
+engine which of a gate's two outgoing edges is `approved` and which is
+`rejected`, so port resolution is impossible under the current shape.
+
+Replace the tuple with a labeled edge object:
+
+```text
+WorkflowGraphEdge {
+  from: nodeId
+  to: nodeId
+  port?: "approved" | "rejected"   // required iff `from` is a gate node
+}
+```
+
+- A step's single outgoing edge omits `port`.
+- A gate has exactly two outgoing edges, one with `port: "approved"` and one
+  with `port: "rejected"`.
+- The engine resolves a gate outcome to the unique outgoing edge whose `port`
+  matches the returned outcome.
+
+This is a breaking change to the persisted `graph_json` shape. Existing graphs
+storing two-element arrays are migrated to `{ from, to }` (no `port`) for step
+edges; gate edges that previously had no port are reconstructed during the gate
+migration (see [Migration and Compatibility](#migration-and-compatibility)).
+The desktop graph editor (`apps/desktop/src/workflows/WorkflowFlow.tsx`,
+`graph-sync.ts`) must emit and consume the labeled shape.
+
 ### Terminal Steps
 
 Any normal executable step may be marked `terminal: true`. A valid template has
 exactly one terminal step.
 
+`terminal` is a routing property, so it lives on the **graph node**, not on the
+shared `WorkflowStepTemplate`:
+
+```text
+WorkflowGraphNode {
+  id
+  type: "step" | "gate"
+  name
+  stepId?         // step nodes: references a WorkflowStepTemplate
+  instructions?   // gate nodes only (replaces `condition`)
+  terminal?: boolean   // step nodes only; exactly one node per template is true
+}
+```
+
+A step node may also be referenced by more than one node only through distinct
+node ids; the `terminal` flag is per node. The desktop step detail edits this
+flag through the node, even though the rest of the step's content
+(instructions, output schema, agent preferences) lives on the referenced
+`WorkflowStepTemplate`.
+
 The terminal step runs normally: it receives context, may ask material
 questions, emits schema-validated output, proposes ledger updates, and is
 scored. The workflow run completes only after that step finishes successfully
-and its ledger update is committed.
+and its ledger update is committed (see
+[Run Completion](#run-completion-and-the-mark-done-yield)).
 
-The terminal designation is explicit. It is not inferred from the step name or
-from a missing outgoing edge.
+The terminal designation is explicit. It is **not** inferred from the step name
+or from a missing outgoing edge.
+
+#### Replacing ordinal advancement
+
+Today the engine advances by `template.steps.find(s => s.ordinal === current.ordinal + 1)`
+in two places — the free function `advanceToNextStep`
+(`apps/daemon/src/workflows/steps/usecases.ts`) and the orchestrator's
+`commitAdvanceOrComplete` (`apps/daemon/src/workflows/orchestrator/service.ts`) —
+and infers run completion from "no higher ordinal." Both sites must be replaced
+with graph traversal that resolves the current node's outgoing edge (or a gate
+outcome) to the next node, and detect completion from the explicit `terminal`
+flag rather than ordinal exhaustion. Ordinal is retained only for stable
+ordering, display, and initial-entry selection.
 
 ## Gate Execution
 
@@ -126,10 +193,63 @@ state changes.
 A gate may ask the user only when existing context cannot support a reliable
 decision and the answer would materially affect routing.
 
+#### Gate runtime state and persistence
+
+Gates do not launch a worker and produce no `workflow_step_run`. The current
+runtime has only one progress cursor — `workflow_runs.current_step_run_id`,
+which references `workflow_step_runs` — so a run that is mid-gate has nowhere to
+record its position, and boot reconciliation
+(`apps/daemon/src/workflows/reconcile.ts`) would misclassify it as
+`daemon_restart_state_drift`. The design adds:
+
+- A run-level node cursor: `workflow_runs.current_node_id` and
+  `current_node_kind ("step" | "gate")`. When the cursor is a step,
+  `current_step_run_id` continues to point at the active step run; when the
+  cursor is a gate, `current_step_run_id` is null.
+- A `workflow_gate_decisions` table holding one immutable row per gate
+  evaluation: `id, goal_id, workflow_run_id, node_id, traversal_seq, outcome,
+  reason, selected_edge_to, inputs_considered_json, issue_refs_json,
+  ledger_version, created_at`.
+- A `traversal_seq` monotonic counter per run, incremented on every node entry.
+  It disambiguates repeated visits so two `rejected` evaluations of the same
+  gate across loop iterations are distinct rows (the existing
+  `workflow_decisions` unique index keys on
+  `(run, step_run_id, decision_type, input_fingerprint)`; gate decisions carry a
+  null `step_run_id`, so `traversal_seq` must enter the fingerprint to avoid
+  collisions). `traversal_seq` is also the ordering signal repair context uses
+  to find "latest downstream findings" (see [Revisited Steps](#revisited-steps)).
+
+Boot reconciliation is updated: a run whose cursor is a gate is resumable (re-run
+the gate evaluation idempotently), not drift. A gate decision and the resulting
+cursor move to the destination node are persisted in a single transaction before
+the destination begins.
+
+#### Gate evaluation under supervision
+
+The default supervision mode is `supervised`, which already pauses every step
+completion at a "Continue" confirmation checkpoint. A gate decision is surfaced
+the same way: in `supervised` mode the engine records the gate decision but
+pauses at a confirmation activity showing the outcome, reason, and selected
+destination before moving the cursor; in `unsupervised` mode the transition is
+automatic. The orchestrator's gate judgment is a new orchestration decision kind
+(see [Contract additions](#contract-additions)).
+
 ## Revisited Steps
 
 Routing back to a step creates a new step-run attempt. Earlier attempts, outputs,
 scores, and gate decisions remain immutable.
+
+### Attempt numbering
+
+`workflow_step_runs` already carries an `attempt` column with a unique index on
+`(workflow_run_id, step_template_id, attempt)`. This is a clean substrate for
+immutable revisits, but the current forward-advance path
+(`insertStep`) always inserts `attempt = 1`, so naively routing back into a step
+would violate the unique index. A revisit must compute
+`attempt = max(existing attempts for (run, step_template)) + 1`. Only the
+forward-advance insertion path needs this change; `retryStep` already increments.
+
+### Repair context (graph-aware, not ordinal-windowed)
 
 The new attempt receives bounded repair context:
 
@@ -142,7 +262,24 @@ The new attempt receives bounded repair context:
 
 The step does not receive an unbounded raw workflow transcript.
 
+**Implementation note.** The current context assembler
+(`collectPriorStepArtifacts` in `service.ts`) filters to artifacts whose owning
+step has `ordinal < current.ordinal`. That filter is fundamentally incompatible
+with backward routing: when the Release Readiness gate routes
+`rejected -> Execution`, the findings that must drive the repair (Validation
+output, the gate's reason) belong to nodes at *higher* ordinals and would be
+excluded. Repair-context assembly must be reworked to be graph- and
+attempt-aware — keyed on the current traversal (`traversal_seq`) and the
+rejecting gate decision — rather than on an ordinal window.
+
 ## Platform-Managed Workflow Ledger
+
+> **Phase 2.** The ledger is a self-contained subsystem (new tables, versioning,
+> canonical-ID allocation, an orchestrator review step, and a change to the
+> `<orca:step-complete>` completion convention). It is orthogonal to graph
+> routing and ships after Phase 1. The routing loop in Phase 1 functions without
+> it; gates read whatever committed records exist. See
+> [Implementation Phases](#implementation-phases).
 
 Every workflow run receives a durable, versioned ledger automatically. Users do
 not classify workflows as simple or complex and do not manually enable the
@@ -189,6 +326,15 @@ records and evidence use only the committed canonical ID.
 
 These updates belong to the completion envelope rather than each user-authored
 business output schema. Orca adds and validates the envelope for every workflow.
+
+Today a step's `<orca:step-complete>` payload is parsed as the business output
+and validated against the step's `outputSchema`
+(`extractOrcaStepCompleteBlock` / `validateStepOutput`). The envelope changes
+that contract: the worker emits `{ output, ledger_updates }`, the engine
+validates `output` against the authored schema and `ledger_updates` against the
+platform schema independently. This parsing change lands with Phase 2 and must
+stay backward-compatible with steps that emit no `ledger_updates` (treated as an
+empty array).
 
 Invalid business output or ledger proposals revise the current step. Gates read
 only committed ledger versions.
@@ -448,8 +594,21 @@ handoff
 ```
 
 Done may create finalization artifacts, but it must not change the feature
-implementation. After its output and ledger proposals validate and its result is
-scored, the engine completes the workflow run.
+implementation.
+
+### Run completion and the mark-done yield
+
+After the terminal step's output and ledger proposals validate and its result is
+scored, the run is *ready to complete* — but completion preserves Orca's
+existing single user yield point. The terminal step does not silently
+auto-complete the run; it produces the `mark_run_complete` decision and the
+`complete_workflow_run` recommendation, and the `approval_mark_done` guardrail
+still gates the final transition, exactly as the current "no higher ordinal"
+final step does today (`commitAdvanceOrComplete`). In `supervised` mode the
+terminal step also passes through the normal per-step Continue checkpoint first.
+Graph routing changes how the terminal node is *identified* (explicit
+`terminal` flag instead of ordinal exhaustion); it does not remove the
+human-authoritative completion gate.
 
 ## Workflow Authoring UI
 
@@ -475,24 +634,41 @@ requiring ledger fields in every authored schema.
 
 ## Template Validation
 
-Template save rejects graphs that violate any of these rules:
+Template save **rejects** (HTTP 4xx) graphs that violate any of these rules.
+This is a behavior change: today template save runs only
+`validateTemplatePipeline`, which checks `{{key}}` interpolation and returns
+non-blocking *warnings*; the stored `graph` is never structurally validated.
+Graph validation is new, blocking, and runs on create and update.
 
 - exactly one terminal step exists;
 - the terminal step has no outgoing edges;
 - every nonterminal step has exactly one outgoing edge;
 - every gate has both `approved` and `rejected` outcomes;
 - each gate outcome has exactly one destination;
-- direct step edges are unconditional;
+- direct step edges carry no port; gate edges carry a valid port;
 - no exact duplicate directed edge exists;
 - no self-edge exists;
 - every edge references existing nodes;
+- every node is reachable from the initial (lowest-ordinal) step;
 - every step node references an existing step template;
-- schema references resolve to output available on every incoming path or to
-  platform context;
+- schema references resolve (see below) or reference platform context;
 - all authored output schemas are valid.
 
 Backward edges and cycles are valid. This phase does not impose a maximum number
 of visits.
+
+### Schema reference resolution
+
+"Schema references" are the existing `{{key}}` interpolation tokens in step
+instructions, not a new typed-reference system. Under linear ordinal execution
+`validateTemplatePipeline` resolves a token if any earlier-ordinal step produces
+`key`. Under graph routing the rule becomes: a token `{{key}}` is resolvable if
+**every** path from the initial node to the referencing node passes through a
+node that produces `key` in its output schema, or `key` is platform context.
+Cycles do not invalidate a token: once a key is produced on all incoming paths
+it stays available on revisits. Tokens that are resolvable on some but not all
+incoming paths are a validation error, because a backward-routed attempt could
+reach the step without the producer having run on that path.
 
 ## Runtime Failure Handling
 
@@ -510,26 +686,94 @@ of visits.
 Coverage must include:
 
 - direct unconditional step-to-step routing;
+- gate outcome resolves to the correct port-labeled edge;
 - gate `approved` routing;
 - gate `rejected` backward routing;
 - repeated Execution and Validation attempts;
-- bounded repair-context assembly;
-- terminal step completion;
-- template rejection for malformed gate ports and terminal configuration;
+- revisiting a step increments `attempt` and does not violate the step-run
+  unique index;
+- repeated gate evaluations across loops produce distinct decisions via
+  `traversal_seq`;
+- bounded repair-context assembly includes downstream findings on a backward
+  route (not just lower-ordinal artifacts);
+- terminal step completion still routes through the `mark_run_complete`
+  approval / `approval_mark_done` guardrail;
+- template rejection for malformed gate ports, terminal configuration,
+  unreachable nodes, and unresolvable `{{key}}` references on some incoming path;
 - ledger proposal review, validation, versioning, and replay safety;
 - gate reads from committed, not proposed, ledger state;
 - step scoring on every successful executable attempt;
 - no gate scoring;
-- restart recovery at step, gate, ledger-commit, and transition boundaries;
+- restart recovery at step, gate (cursor = gate), ledger-commit, and transition
+  boundaries, including no misclassification as drift mid-gate;
 - desktop authoring of gate ports, backward edges, and terminal steps.
 
 ## Migration and Compatibility
 
 Existing templates without a graph continue to materialize their current linear
 step order as unconditional edges. Existing graphs that contain gate nodes with
-free-form `condition` fields require migration to gate instructions and explicit
-`approved` and `rejected` edges before they can execute as graph-authoritative
-templates.
+free-form `condition` fields require migration to gate `instructions` and
+explicit `approved` and `rejected` port edges before they can execute as
+graph-authoritative templates.
+
+The built-in `orca/engineering` template is seeded with `graph_json = NULL` and
+no terminal flag; it continues to run by materialized linear order unless and
+until it is reseeded with an explicit graph. No runtime regression: gates are
+inert today, so no existing run depends on gate execution.
 
 Step ordinals remain for stable ordering, display, and initial-entry selection,
 but no longer select the next runtime step once graph execution is enabled.
+
+### Contract additions
+
+Additive changes required for Phase 1:
+
+- `WorkflowGraphEdge`: tuple → labeled object `{ from, to, port? }` (see
+  [Edge representation](#edge-representation-contract-change)); migrate stored
+  two-element arrays to `{ from, to }`.
+- `WorkflowGraphNode`: add `instructions?` (gate nodes, replacing `condition`,
+  bounded like step instructions) and `terminal?` (step nodes).
+- `OrchestrationDecisionKind`: add a gate-evaluation kind (e.g.
+  `evaluate_gate`).
+- `WorkflowDecisionType`: add a gate routing decision type (e.g.
+  `evaluate_gate`).
+- `workflow_runs`: add `current_node_id`, `current_node_kind`.
+- New table `workflow_gate_decisions` and a per-run `traversal_seq` counter.
+
+DB migrations are append-only numbered SQL files registered in `migrations.ts`;
+the `current_node_*` columns and `workflow_gate_decisions` table are one new
+migration each.
+
+## Security
+
+A step's free-text output feeds the orchestrator's gate decision. A faulty or
+adversarial worker could try to steer routing through its output. The blast
+radius is bounded — the orchestrator may only return `approved` or `rejected`,
+the engine rejects any other value, and the engine (not the worker) owns the
+edge resolution and state change — but gate instructions should frame the step
+output as untrusted evidence rather than as directives, consistent with the
+existing prompt conventions.
+
+## Implementation Phases
+
+This design is intentionally split; it is not one plan.
+
+- **Phase 1 — Graph-authoritative routing (no ledger).** Edge/port contract,
+  `terminal` node flag, graph traversal replacing ordinal advancement, gate
+  execution with the `workflow_gate_decisions` table + run node cursor +
+  `traversal_seq`, blocking template validation, graph-aware repair context,
+  revisit attempt numbering, supervised-mode gate behavior, restart recovery at
+  step/gate/transition boundaries, and the desktop authoring changes (gate
+  ports, backward edges, terminal designation). Delivers the
+  Analysis → Execution → Validation → Gate loop end to end.
+- **Phase 2 — Platform-managed ledger.** Tables, versioning, canonical-ID
+  allocation, orchestrator review/normalize, and the `<orca:step-complete>`
+  completion-envelope change. Orthogonal to Phase 1; the routing loop runs
+  without it.
+- **Phase 3 — Feature Development template content.** The instructions and
+  output schemas in [Feature Development Template](#feature-development-template).
+  This is template data, not engine work; it depends on Phase 1 (and optionally
+  the Phase 2 envelope) and could be authored as a custom template once Phase 1
+  lands.
+
+The cross-goal knowledge graph remains a non-goal in all phases.
