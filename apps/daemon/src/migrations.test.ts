@@ -81,7 +81,8 @@ describe("runMigrations", () => {
       "0027_step_run_pending_completion.sql",
       "0028_step_revision_signals.sql",
       "0029_workflow_graph_cursor.sql",
-      "0030_provider_recovery.sql"
+      "0030_provider_recovery.sql",
+      "0031_workflow_ledger.sql"
     ]);
   });
 
@@ -202,7 +203,8 @@ describe("runMigrations", () => {
       "0027_step_run_pending_completion.sql",
       "0028_step_revision_signals.sql",
       "0029_workflow_graph_cursor.sql",
-      "0030_provider_recovery.sql"
+      "0030_provider_recovery.sql",
+      "0031_workflow_ledger.sql"
     ]);
 
     const goalCount = (
@@ -339,6 +341,15 @@ describe("runMigrations", () => {
     expect(columns.map((column) => column.name)).toContain("pending_provider_recovery_json");
   });
 
+  it("adds ledger_version to workflow_runs and creates ledger tables", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+    const cols = db.prepare("PRAGMA table_info(workflow_runs)").all() as Array<{ name: string }>;
+    expect(cols.map((c) => c.name)).toContain("ledger_version");
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
+    expect(tables.map((t) => t.name)).toEqual(expect.arrayContaining(["workflow_ledger_versions", "workflow_ledger_records"]));
+  });
+
   it("creates step_revision_signals with a step_run index", () => {
     const db = freshDb();
     runMigrations(db, defaultMigrationsDir());
@@ -463,7 +474,8 @@ describe("session tables migration", () => {
       "0027_step_run_pending_completion.sql",
       "0028_step_revision_signals.sql",
       "0029_workflow_graph_cursor.sql",
-      "0030_provider_recovery.sql"
+      "0030_provider_recovery.sql",
+      "0031_workflow_ledger.sql"
     ]);
 
     const tables = (
@@ -968,7 +980,8 @@ describe("migration 0010 workflows", () => {
       "0027_step_run_pending_completion.sql",
       "0028_step_revision_signals.sql",
       "0029_workflow_graph_cursor.sql",
-      "0030_provider_recovery.sql"
+      "0030_provider_recovery.sql",
+      "0031_workflow_ledger.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1553,7 +1566,8 @@ describe("migration 0012 orchestration transport", () => {
       "0027_step_run_pending_completion.sql",
       "0028_step_revision_signals.sql",
       "0029_workflow_graph_cursor.sql",
-      "0030_provider_recovery.sql"
+      "0030_provider_recovery.sql",
+      "0031_workflow_ledger.sql"
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
