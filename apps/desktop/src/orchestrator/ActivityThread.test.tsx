@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import type { Activity } from "@orca/contracts";
+import type { Activity, ProviderRecoveryCheckpoint } from "@orca/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -92,8 +92,82 @@ describe("LiveActivity", () => {
       />,
     );
     expect(screen.getByText(/Completeness 90%/)).toBeInTheDocument();
+    expect(screen.getByText(/accepts this result and advances/i)).toBeInTheDocument();
+    expect(screen.getByText(/type revisions in chat/i)).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("step-confirm-continue"));
     expect(onContinue).toHaveBeenCalledWith("r1");
+  });
+
+  it("renders the provider recovery card when activity is paused for provider recovery", () => {
+    const recovery: ProviderRecoveryCheckpoint = {
+      id: "recovery-1",
+      mode: "choose",
+      failureCode: "session_limit",
+      message: "Claude Code session limit reached",
+      currentSessionId: "session-1",
+      currentAdapterId: "claude-code",
+      currentProviderName: "Claude Code",
+      resetTimeText: "4:20am (America/New_York)",
+      resetAt: null,
+      timezone: "America/New_York",
+      detectedAt: "2026-06-12T05:00:00.000Z",
+      retryOutputSeq: null,
+      retryKind: "preserved_session",
+      replacementSessionId: null,
+      replacementOutputSeq: null,
+      pendingGuidance: [],
+      lastError: null,
+      choices: [],
+    };
+
+    const MockRecoveryCard = ({
+      runId,
+      recovery: r,
+    }: {
+      runId: string;
+      recovery: ProviderRecoveryCheckpoint;
+    }) => (
+      <div data-testid="mock-recovery-card">
+        {runId}: {r.currentProviderName}
+      </div>
+    );
+
+    render(
+      <LiveActivity
+        goalId="g1"
+        activity={mk({
+          workflowRunId: "run-1",
+          status: "paused_for_input",
+          sourceKind: "provider_recovery_pending",
+          providerRecovery: recovery,
+          currentText: "Claude Code reached its session limit.",
+        })}
+        renderQuestionForm={unusedQuestionForm}
+        renderProviderRecovery={MockRecoveryCard}
+      />,
+    );
+
+    expect(screen.getByTestId("mock-recovery-card")).toHaveTextContent("run-1: Claude Code");
+    expect(screen.getByText("Claude Code reached its session limit.")).toBeInTheDocument();
+  });
+
+  it("does not render recovery card when sourceKind is not provider_recovery_pending", () => {
+    const MockRecoveryCard = () => <div data-testid="mock-recovery-card" />;
+
+    render(
+      <LiveActivity
+        goalId="g1"
+        activity={mk({
+          status: "paused_for_input",
+          sourceKind: "step_confirmation_pending",
+        })}
+        renderQuestionForm={unusedQuestionForm}
+        renderProviderRecovery={MockRecoveryCard}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("mock-recovery-card")).toBeNull();
   });
 });
 

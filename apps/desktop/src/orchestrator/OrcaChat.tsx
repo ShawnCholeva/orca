@@ -37,6 +37,7 @@ import {
   pickLiveActivity,
 } from "./ActivityThread";
 import { PermissionApprovalCard } from "./PermissionApprovalCard";
+import { ProviderRecoveryCard } from "./ProviderRecoveryCard";
 import { WorkerPermissionToggle } from "./WorkerPermissionToggle";
 import "./orca-chat.css";
 
@@ -219,6 +220,16 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
         const nextActivities = await listActivities(goalId);
         if (!cancelled) {
           setActivityState({ goalId, items: nextActivities });
+          if (
+            nextActivities.some(
+              (activity) =>
+                activity.status === "paused_for_input" &&
+                (activity.sourceKind === "step_confirmation_pending" ||
+                  activity.sourceKind === "provider_recovery_pending"),
+            )
+          ) {
+            setAwaitingReply(false);
+          }
         }
       } catch {
         if (!cancelled) {
@@ -635,6 +646,13 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
                 goalId={selectedGoalId ?? ""}
                 activity={liveActivity}
                 renderQuestionForm={WorkerQuestionForm}
+                renderProviderRecovery={({ runId, recovery }) => (
+                  <ProviderRecoveryCard
+                    runId={runId}
+                    recovery={recovery}
+                    onChanged={() => setRefreshNonce((current) => current + 1)}
+                  />
+                )}
                 onContinue={handleContinue}
               />
             )}

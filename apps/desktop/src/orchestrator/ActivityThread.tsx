@@ -7,6 +7,11 @@ type QuestionFormProps = {
   pending: NonNullable<Activity["pendingQuestion"]>;
 };
 
+type ProviderRecoveryProps = {
+  runId: string;
+  recovery: NonNullable<Activity["providerRecovery"]>;
+};
+
 export function isMeaningfulCompleted(activity: Activity): boolean {
   return (
     activity.status === "completed" &&
@@ -94,16 +99,22 @@ export function LiveActivity({
   goalId,
   activity,
   renderQuestionForm: QuestionForm,
+  renderProviderRecovery: ProviderRecovery,
   onContinue,
 }: {
   goalId: string;
   activity: Activity;
   renderQuestionForm: ComponentType<QuestionFormProps>;
+  renderProviderRecovery?: ComponentType<ProviderRecoveryProps>;
   onContinue?: (runId: string) => void;
 }) {
   const isConfirmation =
     activity.status === "paused_for_input" &&
     activity.sourceKind === "step_confirmation_pending";
+  const isProviderRecovery =
+    activity.status === "paused_for_input" &&
+    activity.sourceKind === "provider_recovery_pending" &&
+    activity.providerRecovery != null;
   return (
     <div
       className="activity-bubble"
@@ -124,8 +135,16 @@ export function LiveActivity({
           >
             Continue
           </button>
-          <span className="step-confirm-hint">Type in chat to send revisions to the agent.</span>
+          <span className="step-confirm-hint">
+            Continue accepts this result and advances the workflow. Type revisions in chat to send it back to the agent.
+          </span>
         </div>
+      ) : null}
+      {isProviderRecovery && ProviderRecovery && activity.providerRecovery ? (
+        <ProviderRecovery
+          runId={activity.workflowRunId}
+          recovery={activity.providerRecovery}
+        />
       ) : null}
     </div>
   );

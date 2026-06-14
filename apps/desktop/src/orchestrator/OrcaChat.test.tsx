@@ -24,6 +24,10 @@ const startWorkflowRunMock = vi.fn();
 const submitWorkerAnswersMock = vi.fn();
 const submitPermissionDecisionMock = vi.fn();
 const setWorkerPermissionModeMock = vi.fn();
+const waitForProviderRecoveryMock = vi.fn();
+const retryProviderRecoveryMock = vi.fn();
+const refreshProviderRecoveryMock = vi.fn();
+const switchProviderRecoveryMock = vi.fn();
 
 vi.mock("../api", () => ({
   confirmStep: (...args: unknown[]) => confirmStepMock(...args),
@@ -43,6 +47,10 @@ vi.mock("../api", () => ({
   submitWorkerAnswers: (...args: unknown[]) => submitWorkerAnswersMock(...args),
   submitPermissionDecision: (...args: unknown[]) => submitPermissionDecisionMock(...args),
   setWorkerPermissionMode: (...args: unknown[]) => setWorkerPermissionModeMock(...args),
+  waitForProviderRecovery: (...args: unknown[]) => waitForProviderRecoveryMock(...args),
+  retryProviderRecovery: (...args: unknown[]) => retryProviderRecoveryMock(...args),
+  refreshProviderRecovery: (...args: unknown[]) => refreshProviderRecoveryMock(...args),
+  switchProviderRecovery: (...args: unknown[]) => switchProviderRecoveryMock(...args),
   toErrorMessage: (err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback,
 }));
@@ -201,6 +209,14 @@ describe("OrcaChat", () => {
     openEventStreamMock.mockReset();
     openEventStreamMock.mockReturnValue({ close: vi.fn() });
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+    waitForProviderRecoveryMock.mockReset();
+    waitForProviderRecoveryMock.mockResolvedValue(undefined);
+    retryProviderRecoveryMock.mockReset();
+    retryProviderRecoveryMock.mockResolvedValue(undefined);
+    refreshProviderRecoveryMock.mockReset();
+    refreshProviderRecoveryMock.mockResolvedValue(undefined);
+    switchProviderRecoveryMock.mockReset();
+    switchProviderRecoveryMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -833,6 +849,52 @@ describe("OrcaChat", () => {
     expect(screen.getByText("I have started the plan.")).toBeInTheDocument();
   });
 
+  it("clears the thinking indicator when an async send produces a confirmation checkpoint", async () => {
+    getGoalDetailMock.mockResolvedValue({
+      goal,
+      refinement: null,
+      workspaces: [],
+    });
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+
+    let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+    openEventStreamMock.mockImplementation(({ onEvent }: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+      capturedOnEvent = onEvent;
+      return { close: vi.fn() };
+    });
+    createOrchestratorMessageMock.mockResolvedValue({
+      message: { ...userMessage, id: "msg-user-confirm", body: "Try again." },
+      reply: null,
+    });
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+    await screen.findByPlaceholderText("Message Orca…");
+
+    fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
+      target: { value: "Try again." },
+    });
+    fireEvent.click(screen.getByText("Send"));
+    expect(await screen.findByTestId("awaiting-reply")).toBeInTheDocument();
+
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity,
+        id: "activity-confirm",
+        status: "paused_for_input",
+        sourceKind: "step_confirmation_pending",
+        currentText: "The agent traced the scoring paths.\nCompleteness 95% · Correctness 90% · Ready for handoff.",
+      },
+    ]);
+    expect(capturedOnEvent).not.toBeNull();
+    capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
+
+    expect(await screen.findByTestId("step-confirm-continue")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByTestId("awaiting-reply")).toBeNull();
+    });
+  });
+
   const pendingMsg: OrchestratorChatMessage = {
     id: "msg-q", goalId: "goal-1", role: "orchestrator", kind: "message",
     body: "The agent needs your input.", correlationId: "c1", createdAt: now,
@@ -1053,6 +1115,166 @@ describe("OrcaChat", () => {
     expect(screen.getByPlaceholderText("Message Orca…")).toBeInTheDocument();
     expect(screen.getByText("Start with a bounded verification pass.")).toBeInTheDocument();
     expect(screen.queryAllByText("routing")).toHaveLength(0);
+  });
+
+  it("clears the thinking indicator when an async send produces a provider recovery checkpoint", async () => {
+    getGoalDetailMock.mockResolvedValue({
+      goal,
+      refinement: null,
+      workspaces: [],
+    });
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+
+    let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+    openEventStreamMock.mockImplementation(({ onEvent }: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+      capturedOnEvent = onEvent;
+      return { close: vi.fn() };
+    });
+    createOrchestratorMessageMock.mockResolvedValue({
+      message: { ...userMessage, id: "msg-user-recovery", body: "Continue." },
+      reply: null,
+    });
+
+    // First load: no activities (so awaitingReply won't be cleared before the send)
+    listActivitiesMock.mockResolvedValueOnce([]);
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+    await screen.findByPlaceholderText("Message Orca…");
+    // Wait for the initial load to complete before sending.
+    await waitFor(() => expect(listActivitiesMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
+      target: { value: "Continue." },
+    });
+    fireEvent.click(screen.getByText("Send"));
+    expect(await screen.findByTestId("awaiting-reply")).toBeInTheDocument();
+
+    const recoveryActivity: Activity = {
+      ...activeActivity,
+      id: "activity-recovery",
+      status: "paused_for_input",
+      sourceKind: "provider_recovery_pending",
+      currentText: "Claude Code reached its session limit. Available again at 4:20am.",
+      providerRecovery: {
+        id: "recovery-1",
+        mode: "choose",
+        failureCode: "session_limit",
+        message: "Claude Code session limit reached",
+        currentSessionId: "session-1",
+        currentAdapterId: "claude-code",
+        currentProviderName: "Claude Code",
+        resetTimeText: "4:20am (America/New_York)",
+        resetAt: null,
+        timezone: "America/New_York",
+        detectedAt: "2026-06-12T05:00:00.000Z",
+        retryOutputSeq: null,
+        retryKind: "preserved_session",
+        replacementSessionId: null,
+        replacementOutputSeq: null,
+        pendingGuidance: [],
+        lastError: null,
+        choices: [],
+      },
+    };
+    listActivitiesMock.mockResolvedValue([recoveryActivity]);
+    expect(capturedOnEvent).not.toBeNull();
+    capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
+
+    // The recovery card renders (Wait for Claude Code button)
+    expect(await screen.findByRole("button", { name: /Wait for Claude Code/ })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByTestId("awaiting-reply")).toBeNull();
+    });
+    // The normal composer is still visible
+    expect(screen.getByPlaceholderText("Message Orca…")).toBeInTheDocument();
+  });
+
+  it("does not show a thinking bubble when a recovery activity is already present", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity,
+        id: "activity-recovery-2",
+        status: "paused_for_input",
+        sourceKind: "provider_recovery_pending",
+        currentText: "Claude Code reached its session limit.",
+        providerRecovery: {
+          id: "recovery-2",
+          mode: "choose",
+          failureCode: "session_limit",
+          message: "Claude Code session limit reached",
+          currentSessionId: "session-2",
+          currentAdapterId: "claude-code",
+          currentProviderName: "Claude Code",
+          resetTimeText: null,
+          resetAt: null,
+          timezone: null,
+          detectedAt: "2026-06-12T05:00:00.000Z",
+          retryOutputSeq: null,
+          retryKind: "preserved_session",
+          replacementSessionId: null,
+          replacementOutputSeq: null,
+          pendingGuidance: [],
+          lastError: null,
+          choices: [],
+        },
+      },
+    ]);
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+    await screen.findByTestId("activity-bubble");
+    expect(screen.queryByTestId("awaiting-reply")).toBeNull();
+    expect(screen.queryByTestId("step-starting")).toBeNull();
+  });
+
+  it("refreshes after provider recovery card action via onChanged", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+    const providerRecovery = {
+      id: "recovery-3",
+      mode: "choose" as const,
+      failureCode: "session_limit" as const,
+      message: "Claude Code session limit reached",
+      currentSessionId: "session-3",
+      currentAdapterId: "claude-code",
+      currentProviderName: "Claude Code",
+      resetTimeText: "4:20am (America/New_York)",
+      resetAt: null,
+      timezone: "America/New_York",
+      detectedAt: "2026-06-12T05:00:00.000Z",
+      retryOutputSeq: null,
+      retryKind: "preserved_session" as const,
+      replacementSessionId: null,
+      replacementOutputSeq: null,
+      pendingGuidance: [],
+      lastError: null,
+      choices: [],
+    };
+    listActivitiesMock
+      .mockResolvedValueOnce([
+        {
+          ...activeActivity,
+          id: "activity-recovery-3",
+          status: "paused_for_input",
+          sourceKind: "provider_recovery_pending",
+          currentText: "Claude Code reached its session limit.",
+          providerRecovery,
+        },
+      ])
+      .mockResolvedValue([]);
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+    await screen.findByRole("button", { name: /Wait for Claude Code/ });
+
+    fireEvent.click(screen.getByRole("button", { name: /Wait for Claude Code/ }));
+    await waitFor(() => {
+      expect(waitForProviderRecoveryMock).toHaveBeenCalledWith("run-1", { checkpointId: "recovery-3" });
+    });
+    // After onChanged fires, listActivities is called again (at least twice total).
+    await waitFor(() => expect(listActivitiesMock).toHaveBeenCalledTimes(2));
   });
 });
 
