@@ -120,6 +120,8 @@ import {
   type SessionSubscribeFrame as SessionSubscribeFrameData,
   type SessionUnsubscribeFrame as SessionUnsubscribeFrameData,
   type SkillSummary,
+  type ProviderRecoveryActionRequest,
+  type ProviderRecoverySwitchRequest,
 } from "@orca/contracts";
 
 export type {
@@ -1653,6 +1655,52 @@ export async function confirmStep(runId: string): Promise<void> {
     { method: "POST", headers: authHeaders(token) },
     "Failed to confirm step",
   );
+}
+
+async function postProviderRecovery(
+  runId: string,
+  action: "wait" | "retry" | "refresh" | "switch",
+  body: ProviderRecoveryActionRequest | ProviderRecoverySwitchRequest,
+  fallbackMessage: string,
+): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  await requestVoid(
+    `${baseUrl}/v1/workflows/runs/${encodeURIComponent(runId)}/provider-recovery/${action}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify(body),
+    },
+    fallbackMessage,
+  );
+}
+
+export async function waitForProviderRecovery(
+  runId: string,
+  body: ProviderRecoveryActionRequest,
+): Promise<void> {
+  await postProviderRecovery(runId, "wait", body, "Failed to start provider wait");
+}
+
+export async function retryProviderRecovery(
+  runId: string,
+  body: ProviderRecoveryActionRequest,
+): Promise<void> {
+  await postProviderRecovery(runId, "retry", body, "Failed to retry provider");
+}
+
+export async function refreshProviderRecovery(
+  runId: string,
+  body: ProviderRecoveryActionRequest,
+): Promise<void> {
+  await postProviderRecovery(runId, "refresh", body, "Failed to refresh provider recovery");
+}
+
+export async function switchProviderRecovery(
+  runId: string,
+  body: ProviderRecoverySwitchRequest,
+): Promise<void> {
+  await postProviderRecovery(runId, "switch", body, "Failed to switch provider");
 }
 
 export type ConnectionStatus = "connecting" | "open" | "closed";

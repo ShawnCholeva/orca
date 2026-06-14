@@ -1497,4 +1497,56 @@ describe("desktop api client", () => {
       expect(call).toContain("/v1/agents/codex/readiness:check");
     });
   });
+
+  describe("provider recovery actions", () => {
+    const checkpointId = "recovery-1";
+
+    it("waitForProviderRecovery POSTs to the wait endpoint with checkpointId", async () => {
+      fetchMock.mockResolvedValueOnce(new Response(null, { status: 202 }));
+      await api.waitForProviderRecovery("run-1", { checkpointId });
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/v1/workflows/runs/run-1/provider-recovery/wait"),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ checkpointId }),
+        }),
+      );
+    });
+
+    it("retryProviderRecovery POSTs to the retry endpoint with checkpointId", async () => {
+      fetchMock.mockResolvedValueOnce(new Response(null, { status: 202 }));
+      await api.retryProviderRecovery("run-1", { checkpointId });
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/v1/workflows/runs/run-1/provider-recovery/retry"),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ checkpointId }),
+        }),
+      );
+    });
+
+    it("refreshProviderRecovery POSTs to the refresh endpoint with checkpointId", async () => {
+      fetchMock.mockResolvedValueOnce(new Response(null, { status: 202 }));
+      await api.refreshProviderRecovery("run-1", { checkpointId });
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/v1/workflows/runs/run-1/provider-recovery/refresh"),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ checkpointId }),
+        }),
+      );
+    });
+
+    it("switchProviderRecovery POSTs to the switch endpoint with checkpointId and adapterId", async () => {
+      fetchMock.mockResolvedValueOnce(new Response(null, { status: 202 }));
+      await api.switchProviderRecovery("run-1", { checkpointId, adapterId: "codex" });
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/v1/workflows/runs/run-1/provider-recovery/switch"),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ checkpointId, adapterId: "codex" }),
+        }),
+      );
+    });
+  });
 });
