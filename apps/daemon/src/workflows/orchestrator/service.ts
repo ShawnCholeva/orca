@@ -966,9 +966,16 @@ export class OrchestratorService {
     if (!stepRun.pending_provider_recovery_json) {
       throw new OrchestratorProviderRecoveryNotFoundError(`no pending provider recovery for run: ${runId}`);
     }
-    const checkpoint = ProviderRecoveryCheckpoint.parse(
-      JSON.parse(stepRun.pending_provider_recovery_json)
-    );
+    let checkpoint: ProviderRecoveryCheckpoint;
+    try {
+      checkpoint = ProviderRecoveryCheckpoint.parse(
+        JSON.parse(stepRun.pending_provider_recovery_json)
+      );
+    } catch {
+      throw new OrchestratorProviderRecoveryNotFoundError(
+        `malformed provider recovery checkpoint for run: ${runId}`
+      );
+    }
     if (checkpoint.id !== checkpointId) {
       throw new OrchestratorProviderRecoveryNotFoundError(
         `provider recovery checkpoint mismatch: ${checkpointId}`

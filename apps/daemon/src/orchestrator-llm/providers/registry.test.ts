@@ -59,6 +59,24 @@ describe("resolveShadowProvider", () => {
     });
   });
 
+  it("resolves the post-transition UTC on a DST fall-back night (no 1h-early error)", () => {
+    // America/New_York falls back from EDT (-4) to EST (-5) at 2:00am on
+    // 2026-11-01. A 4:20am reset lands after the transition, so EST applies:
+    // 4:20 + 5h = 09:20Z. A naive single-pass offset reads -4 and yields the
+    // wrong 08:20Z (1h early).
+    const failure = resolveShadowProvider("claude-code")
+      .turnParser()
+      .detectError?.(
+        "You've hit your session limit · resets 4:20am (America/New_York)\n/upgrade to increase your usage limit.",
+        new Date("2026-11-01T01:00:00.000Z"),
+      );
+    expect(failure).toMatchObject({
+      code: "session_limit",
+      timezone: "America/New_York",
+      resetAt: "2026-11-01T09:20:00.000Z",
+    });
+  });
+
   it("preserves resetTimeText but leaves resetAt/timezone null when no timezone in Claude reset", () => {
     const failure = resolveShadowProvider("claude-code")
       .turnParser()

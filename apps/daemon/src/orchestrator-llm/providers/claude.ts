@@ -63,17 +63,27 @@ function resolveNextZonedTime(clockText: string, timezone: string, detectedAt: D
       month: "2-digit",
       day: "2-digit",
     });
-    // Two-pass: get local time at candidate, compute offset, then pinpoint.
-    const parts = dtf.formatToParts(new Date(candidate));
-    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "0";
-    const lh = parseInt(get("hour"), 10) % 24;
-    const lm = parseInt(get("minute"), 10);
-    const ld = parseInt(get("day"), 10);
-    const lmo = parseInt(get("month"), 10);
-    const ly = parseInt(get("year"), 10);
-    const localMs = Date.UTC(ly, lmo - 1, ld, lh, lm, 0, 0);
-    const offset = candidate - localMs; // UTC - local = offset
-    return Date.UTC(y, mo - 1, d, h, min, 0, 0) + offset;
+    const target = Date.UTC(y, mo - 1, d, h, min, 0, 0);
+    // Read the local wall-clock at a given UTC instant.
+    const localAt = (utcMs: number): number => {
+      const parts = dtf.formatToParts(new Date(utcMs));
+      const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "0";
+      const lh = parseInt(get("hour"), 10) % 24;
+      const lm = parseInt(get("minute"), 10);
+      const ld = parseInt(get("day"), 10);
+      const lmo = parseInt(get("month"), 10);
+      const ly = parseInt(get("year"), 10);
+      return Date.UTC(ly, lmo - 1, ld, lh, lm, 0, 0);
+    };
+    // First pass: estimate the offset at the candidate instant.
+    const firstOffset = candidate - localAt(candidate); // UTC - local
+    const firstGuess = target + firstOffset;
+    // Second pass: the offset can change across a DST transition between the
+    // candidate instant and the actual reset instant (e.g. a fallback night
+    // reads an offset 1h off). Re-derive using the offset at firstGuess; if the
+    // wall-clock there matches the request, accept it, otherwise correct once.
+    const secondOffset = firstGuess - localAt(firstGuess);
+    return target + secondOffset;
   }
 
   let resetMs = zonedToUtcMs(year, month, day, hours, minutes);

@@ -1480,6 +1480,7 @@ function makeRecoveryService(opts: {
   outputStore?: SessionOutputStore;
   launchSessionId?: string;
   operators?: OperatorDescriptor[];
+  adapterReady?: (id: string) => boolean;
 } = {}): RecoveryServiceParts {
   const deliver = vi.fn(async () => "delivered" as const);
   const wait = vi.fn(async () => {});
@@ -1498,9 +1499,10 @@ function makeRecoveryService(opts: {
       supportsTerminal: true,
     },
   ];
+  const adapterReady = opts.adapterReady ?? ((id) => id === "claude-code" || id === "codex");
   const dispatch: StepDispatchCapabilities = {
     async isAdapterReady(id) {
-      return id === "claude-code" || id === "codex";
+      return adapterReady(id);
     },
     supportsModel(id, mid) {
       if (id === "claude-code" && mid === "claude-haiku-4-5") return true;
@@ -1957,6 +1959,38 @@ describe("OrchestratorService provider recovery actions", () => {
     await expect(
       service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "opencode")
     ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("switchProvider rejects when the chosen adapter is no longer ready at switch time", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db);
+    const { service, launch, spawn } = makeRecoveryService({
+      adapterReady: (id) => id === "claude-code",
+    });
+
+    await expect(
+      service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex")
+    ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
+    expect(launch).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+    // Checkpoint is untouched (still in choose mode).
+    const ck = readCheckpoint(db)!;
+    expect(ck.mode).toBe("choose");
+    expect(ck.replacementSessionId).toBeNull();
+  });
+
+  it("loadProviderRecoveryContext maps a malformed persisted checkpoint to NotFound (not an unmapped error)", async () => {
+    const { db } = setupHarness();
+    seedRecoveryCheckpoint(db);
+    db.prepare(
+      "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = 'step-1'"
+    ).run('{"not":"a valid checkpoint"}');
+    const { service, launch } = makeRecoveryService();
+
+    await expect(
+      service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex")
+    ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryNotFoundError);
     expect(launch).not.toHaveBeenCalled();
   });
 
