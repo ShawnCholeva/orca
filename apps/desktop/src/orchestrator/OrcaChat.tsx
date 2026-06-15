@@ -39,12 +39,14 @@ import {
 import { PermissionApprovalCard } from "./PermissionApprovalCard";
 import { ProviderRecoveryCard } from "./ProviderRecoveryCard";
 import { WorkerPermissionToggle } from "./WorkerPermissionToggle";
+import { WorkflowTracker, type TrackerStep } from "./components/WorkflowTracker";
 import "./orca-chat.css";
 
 type Props = {
   goals: Goal[];
   selectedGoalId: string | null;
   connectionStatus: ConnectionStatus;
+  onViewWorkflows?: () => void;
 };
 
 type WorkflowState = {
@@ -52,6 +54,7 @@ type WorkflowState = {
   run: WorkflowRun | null;
   stepRun: WorkflowStepRun | null;
   stepName: string | null;
+  template: WorkflowTemplate | null;
   decisions: WorkflowDecisionTrace[];
   artifacts: WorkflowArtifact[];
 };
@@ -73,6 +76,7 @@ const EMPTY_WORKFLOW_STATE: WorkflowState = {
   run: null,
   stepRun: null,
   stepName: null,
+  template: null,
   decisions: [],
   artifacts: [],
 };
@@ -82,7 +86,7 @@ const EMPTY_ACTIVITY_STATE: ActivityState = {
   items: [],
 };
 
-export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
+export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkflows }: Props) {
   const [workflowState, setWorkflowState] = useState<WorkflowState>(EMPTY_WORKFLOW_STATE);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -274,6 +278,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
             run: null,
             stepRun: null,
             stepName: null,
+            template: null,
             decisions: [],
             artifacts: [],
           });
@@ -293,21 +298,23 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
           : null;
         if (cancelled) return;
 
-        // Resolve the step's human name (e.g. "Build It") from the template.
-        // Non-critical enrichment: on any failure we leave stepName null and the
-        // starting indicator falls back to an ordinal-only label.
+        // Load the run's template so the workflow tracker can render its full
+        // step list, and resolve the current step's human name (e.g. "Build It").
+        // Non-critical enrichment: on any failure we leave template/stepName null
+        // and the starting indicator falls back to an ordinal-only label.
+        let template: WorkflowTemplate | null = null;
         let stepName: string | null = null;
-        if (stepRun) {
-          try {
-            const templateResponse = await getWorkflowTemplate(runResponse.run.templateId);
-            if (cancelled) return;
+        try {
+          const templateResponse = await getWorkflowTemplate(runResponse.run.templateId);
+          if (cancelled) return;
+          template = templateResponse.template;
+          if (stepRun) {
             stepName =
-              templateResponse.template.steps.find(
-                (step) => step.id === stepRun.stepTemplateId,
-              )?.name ?? null;
-          } catch {
-            stepName = null;
+              template.steps.find((step) => step.id === stepRun.stepTemplateId)?.name ?? null;
           }
+        } catch {
+          template = null;
+          stepName = null;
         }
 
         setWorkflowState({
@@ -315,6 +322,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
           run: runResponse.run,
           stepRun,
           stepName,
+          template,
           decisions: sortByCreatedAtDesc(decisionsResponse.decisions),
           artifacts: sortByCreatedAtDesc(artifactsResponse.artifacts),
         });
@@ -421,6 +429,40 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
     workflowState.stepRun?.startedAt != null
       ? formatElapsed(nowMs - Date.parse(workflowState.stepRun.startedAt))
       : null;
+  // Workflow tracker data: the run's full step list plus which step the
+  // Conductor is currently on, derived from the active step run (not a progress
+  // heuristic — the run knows its exact current step).
+  const sortedSteps = workflowState.template
+    ? [...workflowState.template.steps].sort((left, right) => left.ordinal - right.ordinal)
+    : [];
+  const trackerSteps: TrackerStep[] = sortedSteps.map((step) => ({
+    name: step.name,
+    role: step.agentPreference?.[0]?.adapterId,
+  }));
+  const trackerActiveIndex = (() => {
+    if (sortedSteps.length === 0) return 0;
+    const byId = workflowState.stepRun
+      ? sortedSteps.findIndex((step) => step.id === workflowState.stepRun?.stepTemplateId)
+      : -1;
+    const raw = byId >= 0 ? byId : workflowState.stepRun?.ordinal ?? 0;
+    return Math.min(sortedSteps.length - 1, Math.max(0, raw));
+  })();
+  // The current step pulses "running" only while its step run is genuinely
+  // executing. Once it finishes — most notably the terminal step, which passes
+  // but parks the run "active" awaiting completion approval rather than
+  // auto-completing (see daemon advanceToNextStepOrGate) — it must stop pulsing.
+  const activeStepRunning =
+    workflowState.stepRun?.status === "active" && workflowState.stepRun?.finishedAt == null;
+  // The workflow has done all its work once the final step has passed. A truly
+  // completed run detaches from the goal (active_workflow_run_id is nulled), so
+  // the run we can still see here is parked on the passed terminal step. Treat
+  // that as completion for the tracker header and the chat notice, which would
+  // otherwise go silent after the last step.
+  const workflowFinished =
+    workflowState.stepRun?.status === "passed" &&
+    trackerActiveIndex === sortedSteps.length - 1;
+  const showTracker = workflowState.run !== null && trackerSteps.length > 0;
+
   const startingLabel = workflowState.stepRun
     ? `Step ${workflowState.stepRun.ordinal + 1}${
         workflowState.stepName ? ` · ${workflowState.stepName}` : ""
@@ -507,8 +549,19 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
   }
 
   return (
-    <div className="orca-chat">
-      <div className="orca-chat-scroll scroll" ref={scrollRef}>
+    <div className="orca-chat-tab">
+      {showTracker && workflowState.template && (
+        <WorkflowTracker
+          workflowName={workflowState.template.name}
+          steps={trackerSteps}
+          activeIndex={trackerActiveIndex}
+          activeRunning={activeStepRunning}
+          completed={workflowFinished}
+          onViewWorkflows={onViewWorkflows}
+        />
+      )}
+      <div className="orca-chat">
+        <div className="orca-chat-scroll scroll" ref={scrollRef}>
         {!selectedGoal && (
           <SystemCard
             title="Select a goal"
@@ -638,6 +691,15 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
               )
             )}
 
+            {workflowFinished && (
+              <SystemCard
+                title="Workflow complete"
+                body={`Orca finished every step of the ${
+                  workflowState.template?.name ?? "workflow"
+                }.`}
+              />
+            )}
+
             {/* Tail indicators: the live agent bubble, the first-turn "starting"
                 hint, and the orchestrator "thinking" dots all pin to the bottom
                 of the timeline so they trail the most recent activity. */}
@@ -742,6 +804,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus }: Props) {
           </div>
         </form>
       )}
+      </div>
     </div>
   );
 }

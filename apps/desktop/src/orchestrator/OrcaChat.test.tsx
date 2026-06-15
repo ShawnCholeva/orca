@@ -1276,6 +1276,73 @@ describe("OrcaChat", () => {
     // After onChanged fires, listActivities is called again (at least twice total).
     await waitFor(() => expect(listActivitiesMock).toHaveBeenCalledTimes(2));
   });
+
+  // Regression: when a workflow reaches its final step, that step (e.g. "Verify"
+  // in Bug Triage & Fix) must not keep showing "running" in the tracker, and the
+  // chat should surface that the workflow finished. This mirrors the daemon: a
+  // finished terminal step does NOT auto-complete the run — it parks the run
+  // "active" with the final step "passed" awaiting completion approval (a truly
+  // completed/cancelled run detaches from the goal, so this parked state is the
+  // one the Orchestrator tab can actually render).
+  it("does not keep the last step 'running' once the final step has passed", async () => {
+    getGoalDetailMock.mockResolvedValue({
+      goal: { ...goal, activeWorkflowRunId: "run-1" },
+      refinement: null,
+      workspaces: [],
+    });
+    getWorkflowRunMock.mockResolvedValue({
+      run: {
+        id: "run-1",
+        goalId: "goal-1",
+        templateId: "orca/bug-triage",
+        templateVersion: 1,
+        status: "active",
+        currentStepRunId: "step-verify",
+        startedAt: now,
+        finishedAt: null,
+        blockedReason: null,
+      },
+    });
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-verify",
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepTemplateId: "verify",
+        ordinal: 3,
+        attempt: 1,
+        status: "passed",
+        startedAt: now,
+        finishedAt: now,
+        blockedReason: null,
+      },
+    });
+    getWorkflowTemplateMock.mockResolvedValue({
+      template: {
+        name: "Bug Triage & Fix",
+        steps: [
+          { id: "triage", ordinal: 0, name: "Triage" },
+          { id: "reproduce", ordinal: 1, name: "Reproduce" },
+          { id: "fix", ordinal: 2, name: "Fix" },
+          { id: "verify", ordinal: 3, name: "Verify" },
+        ],
+      },
+    });
+    listWorkflowDecisionsMock.mockResolvedValue({ decisions: [] });
+    listWorkflowRunArtifactsMock.mockResolvedValue({ artifacts: [] });
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    // Tracker renders once the template/run load.
+    await screen.findByText("Bug Triage & Fix");
+    // Defect: the final "Verify" step is still flagged as actively running even
+    // though the run is completed and the step passed.
+    expect(screen.queryByText("running")).toBeNull();
+    // And the chat must surface that the workflow finished, instead of going
+    // silent after the last step.
+    await screen.findByText("Workflow complete");
+  });
 });
 
 describe("formatElapsed", () => {

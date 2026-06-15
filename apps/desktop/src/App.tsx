@@ -397,6 +397,7 @@ export default function App() {
                     goals={goals}
                     selectedGoalId={selectedOrchestratorGoalId}
                     connectionStatus={connectionStatus}
+                    onViewWorkflows={() => setActiveTab("workflows")}
                   />
                 )}
               </section>
