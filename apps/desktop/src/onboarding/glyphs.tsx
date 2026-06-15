@@ -85,3 +85,14 @@ export function InfoIcon({ size = 14, color = "currentColor" }: { size?: number;
     </svg>
   );
 }
+
+export function WorkflowIcon({ size = 15, color = "currentColor" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="6" height="6" rx="1" />
+      <rect x="15" y="3" width="6" height="6" rx="1" />
+      <rect x="9" y="15" width="6" height="6" rx="1" />
+      <path d="M6 9v3h12V9M12 12v3" />
+    </svg>
+  );
+}

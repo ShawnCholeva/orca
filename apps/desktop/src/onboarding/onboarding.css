@@ -673,3 +673,146 @@
   white-space: nowrap;
 }
 
+/* ── Workflow template step ───────────────────────────── */
+.template-load-error {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--err-soft);
+  color: var(--err);
+  font-size: 12.5px;
+}
+
+.template-step {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.template-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.template-group-title {
+  font-size: 0.7rem;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.template-group-count {
+  font-size: 0.65rem;
+  color: var(--text-4);
+}
+
+.template-group-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+}
+
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.template-card {
+  all: unset;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  cursor: pointer;
+  position: relative;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.template-card:hover {
+  border-color: var(--hairline-strong);
+}
+
+.template-card--selected,
+.template-card--selected:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.template-card-name-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.template-card-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--hairline);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+}
+
+.template-card--selected .template-card-icon {
+  color: var(--accent);
+}
+
+.template-card-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.template-card-desc {
+  font-size: 0.78rem;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.template-card-bestfor {
+  font-size: 0.7rem;
+  color: var(--text-3);
+  line-height: 1.45;
+}
+
+.template-card-meta {
+  font-size: 0.625rem;
+  color: var(--text-3);
+}
+
+.template-card-check {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-left: auto;
+  background: transparent;
+  border: 1.5px solid var(--hairline-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.template-card--selected .template-card-check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
