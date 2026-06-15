@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import { waitFor } from "@testing-library/react";
-import type { Agent } from "@orca/contracts";
+import type { Agent, BuiltInTemplateSummary } from "@orca/contracts";
 import { OnboardingView } from "./OnboardingView";
 import { ThemeProvider } from "../theme/ThemeProvider";
 
@@ -30,12 +30,19 @@ const SEED_AGENTS: Agent[] = [
   agent("opencode", "OpenCode", false, 40),
 ];
 
+const SEED_CATALOG: BuiltInTemplateSummary[] = [
+  { id: "orca/brainstorm", name: "Brainstorm", category: "Engineering", recommended: true, description: "Frame and propose.", bestFor: "Exploring an idea.", stepCount: 6 },
+  { id: "orca/code-review", name: "Code Review", category: "Engineering", recommended: false, description: "Review a diff.", bestFor: "A second-pass review.", stepCount: 3 },
+];
+
 vi.mock("../api", () => ({
   listAgents: vi.fn(),
   updateAgentConnection: vi.fn(),
   runReadinessCheck: vi.fn(),
   runReadinessCheckForAgent: vi.fn(),
   runSystemReadinessCheck: vi.fn(),
+  listTemplateCatalog: vi.fn(),
+  installTemplates: vi.fn(),
 }));
 
 import * as api from "../api";
@@ -68,6 +75,8 @@ describe("OnboardingView", () => {
       checkedAt: NOW,
       version: "3.4",
     });
+    vi.mocked(api.listTemplateCatalog).mockResolvedValue(SEED_CATALOG);
+    vi.mocked(api.installTemplates).mockResolvedValue([]);
   });
 
   afterEach(async () => {
@@ -101,6 +110,20 @@ describe("OnboardingView", () => {
     act(() => {
       btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
+  }
+
+  // Render, load agents, advance welcome → agents → templates (step 2).
+  async function renderAndAdvanceToTemplates(onComplete: (ids: string[]) => void = vi.fn()) {
+    await render(onComplete);
+    clickByText("Get started");
+    act(() => {
+      (container.querySelector('button[data-agent-id="claude-code"]') as HTMLButtonElement)
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    clickByText("Continue");
+    await act(async () => { await Promise.resolve(); });
+    await waitFor(() => expect(container.textContent).toContain("Brainstorm"));
+    return { container };
   }
 
   it("starts on welcome step", async () => {
@@ -166,6 +189,9 @@ describe("OnboardingView", () => {
     });
 
     clickByText("Continue");
+    // Templates step (brainstorm pre-selected); continue to setup.
+    await act(async () => { await Promise.resolve(); });
+    clickByText("Continue");
     expect(container.textContent).toContain("Preparing your workspace");
 
     // Flush updateAgentConnection promises.
@@ -200,6 +226,8 @@ describe("OnboardingView", () => {
         .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     clickByText("Continue");
+    await act(async () => { await Promise.resolve(); });
+    clickByText("Continue");
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     await waitFor(() => expect(api.runReadinessCheckForAgent).toHaveBeenCalled(), { timeout: 3000 });
     await waitFor(() => {
@@ -224,6 +252,8 @@ describe("OnboardingView", () => {
       (container.querySelector('button[data-agent-id="claude-code"]') as HTMLButtonElement)
         .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
+    clickByText("Continue");
+    await act(async () => { await Promise.resolve(); });
     clickByText("Continue");
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     await waitFor(() => {
@@ -250,6 +280,8 @@ describe("OnboardingView", () => {
       (container.querySelector('button[data-agent-id="claude-code"]') as HTMLButtonElement)
         .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
+    clickByText("Continue");
+    await act(async () => { await Promise.resolve(); });
     clickByText("Continue");
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
@@ -280,5 +312,39 @@ describe("OnboardingView", () => {
       expect(onComplete).toHaveBeenCalledTimes(1);
     }, { timeout: 3000 });
     expect(onComplete.mock.calls[0][0]).toEqual(["claude-code"]);
+  });
+
+  it("step 2 lists a card per catalog entry with step counts and recommended pills", async () => {
+    const { container } = await renderAndAdvanceToTemplates();
+    expect(container.textContent).toContain("Choose workflow templates");
+    expect(container.textContent).toContain("Brainstorm");
+    expect(container.textContent).toContain("Code Review");
+    expect(container.textContent).toContain("6 steps");
+    // bestFor is rendered after "Best for " with a lowercased first letter.
+    expect(container.textContent).toContain("Best for exploring an idea.");
+    expect(container.textContent).toContain("1 template selected");
+  });
+
+  it("toggling a template updates the selected count", async () => {
+    const { container } = await renderAndAdvanceToTemplates();
+    const codeReview = container.querySelector('[data-template-id="orca/code-review"]') as HTMLButtonElement;
+    await act(async () => { codeReview.click(); });
+    expect(container.textContent).toContain("2 templates selected");
+  });
+
+  it("shows 'Skip for now' when zero templates are selected", async () => {
+    const { container } = await renderAndAdvanceToTemplates();
+    const brainstorm = container.querySelector('[data-template-id="orca/brainstorm"]') as HTMLButtonElement;
+    await act(async () => { brainstorm.click(); });
+    expect(container.textContent).toContain("Skip for now");
+  });
+
+  it("installs the selected template ids when setup begins", async () => {
+    const { container } = await renderAndAdvanceToTemplates();
+    clickByText("Continue");
+    await waitFor(() => {
+      expect(vi.mocked(api.installTemplates)).toHaveBeenCalledWith(["orca/brainstorm"]);
+    });
+    expect(container.textContent).toContain("Installing 1 workflow template");
   });
 });

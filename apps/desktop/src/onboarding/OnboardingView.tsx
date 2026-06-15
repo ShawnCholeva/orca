@@ -1,12 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Agent, AgentReadinessReport, SystemReadinessReport } from "@orca/contracts";
+import type {
+  Agent,
+  AgentReadinessReport,
+  BuiltInTemplateSummary,
+  SystemReadinessReport,
+} from "@orca/contracts";
 import {
   listAgents,
   updateAgentConnection,
   runReadinessCheckForAgent,
   runSystemReadinessCheck,
+  listTemplateCatalog,
+  installTemplates,
 } from "../api";
 import { RepairBlock } from "./RepairBlock";
+import { groupCatalog } from "./groupCatalog";
 import { openExternal } from "../utils/openExternal";
 import {
   ArrowRightIcon,
@@ -14,6 +22,7 @@ import {
   ChevronLeftIcon,
   InfoIcon,
   OrcaMark,
+  WorkflowIcon,
   XIcon,
   glyphFor,
 } from "./glyphs";
@@ -24,7 +33,7 @@ interface OnboardingViewProps {
   onComplete: (selectedAgentIds: string[]) => void;
 }
 
-type Step = 0 | 1 | 2;
+type Step = 0 | 1 | 2 | 3;
 
 const WELCOME_BULLETS = [
   "Run multiple agents against a shared goal",
@@ -43,6 +52,9 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
     agentReadyCount: 0,
   });
   const [connectionsSaved, setConnectionsSaved] = useState(false);
+  const [catalog, setCatalog] = useState<BuiltInTemplateSummary[]>([]);
+  const [templates, setTemplates] = useState<Record<string, boolean>>({});
+  const [templateError, setTemplateError] = useState<string | null>(null);
   const { theme } = useTheme();
   const mode = theme.mode;
 
@@ -68,21 +80,51 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    listTemplateCatalog()
+      .then((rows) => {
+        if (cancelled) return;
+        setCatalog(rows);
+        const next: Record<string, boolean> = {};
+        for (const t of rows) if (t.recommended) next[t.id] = true;
+        setTemplates(next);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setTemplateError(err instanceof Error ? err.message : "Failed to load workflow templates");
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   const selectedCount = useMemo(
     () => Object.values(selected).filter(Boolean).length,
     [selected],
+  );
+
+  const templateCount = useMemo(
+    () => Object.values(templates).filter(Boolean).length,
+    [templates],
+  );
+  const selectedTemplateIds = useMemo(
+    () => Object.entries(templates).filter(([, v]) => v).map(([k]) => k),
+    [templates],
+  );
+  const selectedTemplateNames = useMemo(
+    () => catalog.filter((t) => templates[t.id]).map((t) => t.name),
+    [catalog, templates],
   );
 
   function toggle(id: string) {
     setSelected((s) => ({ ...s, [id]: !s[id] }));
   }
 
-  function finish() {
-    setStep(2);
+  function toggleTemplate(id: string) {
+    setTemplates((s) => ({ ...s, [id]: !s[id] }));
   }
 
   useEffect(() => {
-    if (step !== 2) return;
+    if (step !== 3) return;
     let cancelled = false;
     setConnectionsSaved(false);
     setReadinessState({ settled: false, systemReady: false, agentReadyCount: 0 });
@@ -93,16 +135,27 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
         );
         if (cancelled) return;
         setAgents(updated);
-        setConnectionsSaved(true);
       } catch (err) {
         if (cancelled) return;
         setLoadError(err instanceof Error ? err.message : "Failed to save selections");
         setStep(1);
+        return;
       }
+      try {
+        await installTemplates(selectedTemplateIds);
+      } catch (err) {
+        if (cancelled) return;
+        setTemplateError(err instanceof Error ? err.message : "Failed to install workflow templates");
+        setStep(2);
+        return;
+      }
+      if (cancelled) return;
+      setConnectionsSaved(true);
     })();
     return () => { cancelled = true; };
-    // Run once when entering step 2. `agents` and `selected` are captured from the
-    // user's step-1 choices; including `agents` would loop after `setAgents(updated)`.
+    // Run once when entering step 3. `agents`, `selected`, and `selectedTemplateIds`
+    // are captured from the user's earlier choices; including `agents` would loop
+    // after `setAgents(updated)`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
@@ -140,7 +193,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
 
         {step === 1 && (
           <>
-            <div className="mono onboarding-kicker">Step 1 of 1</div>
+            <div className="mono onboarding-kicker">Step 1 of 2</div>
             <h1 className="onboarding-title onboarding-title--sm">Connect your agents</h1>
             <p className="onboarding-prose onboarding-prose--narrow">
               Pick the AI runtimes you want Orca to coordinate. Roles will be portable across the agents you connect — you can change this anytime in Settings.
@@ -158,6 +211,24 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
 
         {step === 2 && (
           <>
+            <div className="mono onboarding-kicker">Step 2 of 2</div>
+            <h1 className="onboarding-title onboarding-title--sm">Choose workflow templates</h1>
+            <p className="onboarding-prose onboarding-prose--narrow">
+              A workflow turns a goal into a repeatable sequence of steps. Start from a template — you can edit any step or add your own anytime.
+            </p>
+            <div className="onboarding-info-card">
+              <span className="onboarding-info-card-icon">
+                <InfoIcon size={14} />
+              </span>
+              <div className="onboarding-info-card-text">
+                More categories — Product, Design, and others — are on the way. For now, pick the Engineering workflows your team runs most.
+              </div>
+            </div>
+          </>
+        )}
+
+        {step === 3 && (
+          <>
             <div className="mono onboarding-kicker">Setting up</div>
             <h1 className="onboarding-title onboarding-title--sm">Preparing your workspace</h1>
             <p className="onboarding-prose onboarding-prose--narrow">
@@ -169,7 +240,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
         <div className="onboarding-spacer" />
 
         <div className="onboarding-steps" aria-hidden="true">
-          {[0, 1, 2].map((i) => (
+          {[0, 1, 2, 3].map((i) => (
             <span
               key={i}
               className={
@@ -198,9 +269,18 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
             </div>
           )}
           {step === 2 && (
+            <div className="template-step">
+              {templateError && (
+                <div className="template-load-error" role="alert">{templateError}</div>
+              )}
+              <TemplateStep groups={groupCatalog(catalog)} selected={templates} onToggle={toggleTemplate} />
+            </div>
+          )}
+          {step === 3 && (
             <SetupPanel
               agents={agents.filter((a) => selected[a.id])}
               connectionsSaved={connectionsSaved}
+              templateNames={selectedTemplateNames}
               runOne={runReadinessCheckForAgent}
               runSystem={runSystemReadinessCheck}
               onOpenUrl={openExternal}
@@ -221,10 +301,25 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
               Back
             </button>
           )}
+          {step === 2 && (
+            <button
+              type="button"
+              className="ob-btn ob-btn--quiet"
+              onClick={() => setStep(1)}
+            >
+              <ChevronLeftIcon />
+              Back
+            </button>
+          )}
           <div style={{ flex: 1 }} />
           {step === 1 && (
             <span className="mono onboarding-footer-meta">
               {selectedCount} {selectedCount === 1 ? "agent" : "agents"} selected
+            </span>
+          )}
+          {step === 2 && (
+            <span className="mono onboarding-footer-meta">
+              {templateCount} {templateCount === 1 ? "template" : "templates"} selected
             </span>
           )}
           {step === 0 && (
@@ -241,7 +336,7 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
             <button
               type="button"
               className="ob-btn ob-btn--primary"
-              onClick={finish}
+              onClick={() => setStep(2)}
               disabled={selectedCount === 0}
             >
               Continue
@@ -249,11 +344,21 @@ export function OnboardingView({ onComplete }: OnboardingViewProps) {
             </button>
           )}
           {step === 2 && (
+            <button
+              type="button"
+              className="ob-btn ob-btn--primary"
+              onClick={() => setStep(3)}
+            >
+              {templateCount === 0 ? "Skip for now" : "Continue"}
+              <ArrowRightIcon />
+            </button>
+          )}
+          {step === 3 && (
             <>
               <button
                 type="button"
                 className="ob-btn ob-btn--quiet"
-                onClick={() => setStep(1)}
+                onClick={() => setStep(2)}
               >
                 <ChevronLeftIcon />
                 Back
@@ -318,6 +423,7 @@ interface SetupTask {
 function SetupPanel({
   agents,
   connectionsSaved,
+  templateNames,
   runOne,
   runSystem,
   onOpenUrl,
@@ -326,6 +432,7 @@ function SetupPanel({
 }: {
   agents: Agent[];
   connectionsSaved: boolean;
+  templateNames: string[];
   runOne: (id: string) => Promise<AgentReadinessReport>;
   runSystem: () => Promise<SystemReadinessReport>;
   onOpenUrl: (url: string) => Promise<void>;
@@ -352,9 +459,19 @@ function SetupPanel({
     })),
     { id: "memory",    label: "Provisioning shared memory", detail: "Goal memory store + indices" },
     { id: "roles",     label: "Loading default roles",      detail: "Architect · Engineer · Reviewer · QA" },
-    { id: "workflows", label: "Loading default workflows",  detail: "Brainstorm" },
+    {
+      id: "workflows",
+      label: templateNames.length === 0
+        ? "Skipping workflow templates"
+        : `Installing ${templateNames.length} workflow ${templateNames.length === 1 ? "template" : "templates"}`,
+      detail: templateNames.length === 0
+        ? "Add them anytime in the Workflows tab"
+        : templateNames.length <= 2
+          ? templateNames.join(" · ")
+          : `${templateNames.slice(0, 2).join(" · ")} +${templateNames.length - 2} more`,
+    },
     { id: "ready",     label: "Finalizing workspace",       detail: "Almost there" },
-  ], [agents]);
+  ], [agents, templateNames]);
 
   const [animIdx, setAnimIdx] = useState(0);
   const [animDoneIdx, setAnimDoneIdx] = useState(-1);
@@ -696,5 +813,75 @@ function AgentCard({
       </span>
     </button>
   );
+}
+
+function TemplateStep({
+  groups,
+  selected,
+  onToggle,
+}: {
+  groups: { category: string; templates: BuiltInTemplateSummary[] }[];
+  selected: Record<string, boolean>;
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <>
+      {groups.map((g) => (
+        <div key={g.category} className="template-group">
+          <div className="template-group-header">
+            <span className="mono template-group-title">{g.category}</span>
+            <span className="mono template-group-count">{g.templates.length}</span>
+            <div className="template-group-rule" />
+          </div>
+          <div className="template-grid">
+            {g.templates.map((t) => (
+              <TemplateCard
+                key={t.id}
+                template={t}
+                selected={!!selected[t.id]}
+                onToggle={() => onToggle(t.id)}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function TemplateCard({
+  template,
+  selected,
+  onToggle,
+}: {
+  template: BuiltInTemplateSummary;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={selected}
+      className={"template-card" + (selected ? " template-card--selected" : "")}
+      data-template-id={template.id}
+    >
+      <div className="template-card-name-row">
+        <span className="template-card-icon"><WorkflowIcon size={15} /></span>
+        <span className="template-card-name">{template.name}</span>
+        {template.recommended && <span className="pill">recommended</span>}
+        <span className="template-card-check" aria-hidden="true">
+          {selected && <CheckIcon size={12} color="#fff" strokeWidth={2.5} />}
+        </span>
+      </div>
+      <div className="template-card-desc">{template.description}</div>
+      <div className="template-card-bestfor">Best for {lowerFirst(template.bestFor)}</div>
+      <div className="mono template-card-meta">{template.stepCount} {template.stepCount === 1 ? "step" : "steps"}</div>
+    </button>
+  );
+}
+
+function lowerFirst(s: string): string {
+  return s.length > 0 ? s[0]!.toLowerCase() + s.slice(1) : s;
 }
 
