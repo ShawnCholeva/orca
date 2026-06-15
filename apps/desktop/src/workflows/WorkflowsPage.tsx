@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
 import type { WorkflowScope, WorkflowTemplate } from "@orca/contracts";
-import { listGoals, toErrorMessage } from "../api";
+import { listGoals, listTemplateCatalog, toErrorMessage } from "../api";
 import { listTemplates } from "./api";
-import { ScopeBadge, ScopeFilter } from "./ScopeControls";
+import { ChevronRightIcon } from "./icons";
+import { ScopeBadge, ScopeFilter, inputStyle } from "./ScopeControls";
 import { TemplateDetail } from "./TemplateDetail";
 import "./workflows.css";
 
 const DRAFT_ID = "draft/new";
+const UNCATEGORIZED = "Uncategorized";
 
 type ScopeFilterValue = "all" | WorkflowScope;
+type SectionKey = "builtin" | "custom";
 
 function makeDraftTemplate(): WorkflowTemplate {
   const now = new Date().toISOString();
@@ -44,6 +47,12 @@ export function WorkflowsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scopeFilter, setScopeFilter] = useState<ScopeFilterValue>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [collapsed, setCollapsed] = useState<Record<SectionKey, boolean>>({
+    builtin: false,
+    custom: false,
+  });
+  const [categoryById, setCategoryById] = useState<Record<string, string>>({});
   const [goalOptions, setGoalOptions] = useState<string[]>([]);
   const [hasDraft, setHasDraft] = useState(false);
 
@@ -64,6 +73,26 @@ export function WorkflowsPage() {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load the built-in template catalog once — used to derive each template's
+  // category by id (built-ins inherit their catalog category; everything else
+  // is "Uncategorized").
+  useEffect(() => {
+    let cancelled = false;
+    listTemplateCatalog()
+      .then((catalog) => {
+        if (cancelled) return;
+        setCategoryById(
+          Object.fromEntries(catalog.map((t) => [t.id, t.category])),
+        );
+      })
+      .catch(() => {
+        // non-fatal — templates just fall back to "Uncategorized"
       });
     return () => {
       cancelled = true;
@@ -100,13 +129,31 @@ export function WorkflowsPage() {
     goal: templates.filter((t) => t.scope === "goal").length,
   };
 
-  // Filter the list (draft always shown when present)
-  const filteredTemplates =
+  // A template's category — inherited from its matching built-in catalog entry,
+  // else "Uncategorized".
+  const categoryOf = (t: WorkflowTemplate) =>
+    categoryById[t.id] ?? UNCATEGORIZED;
+  const categoryOptions = [...new Set(templates.map(categoryOf))].sort();
+
+  // Filters compose: scope first, then category. The draft is always shown.
+  const scopedTemplates =
     scopeFilter === "all"
       ? allDisplayed
       : allDisplayed.filter(
           (t) => t.id === DRAFT_ID || (t.scope ?? "global") === scopeFilter,
         );
+  const filteredTemplates =
+    categoryFilter === "all"
+      ? scopedTemplates
+      : scopedTemplates.filter(
+          (t) => t.id === DRAFT_ID || categoryOf(t) === categoryFilter,
+        );
+
+  // Split the filtered result into the two sections (draft reads as custom).
+  const sections: { key: SectionKey; label: string; items: WorkflowTemplate[] }[] = [
+    { key: "builtin", label: "Built-in", items: filteredTemplates.filter((t) => t.isBuiltIn) },
+    { key: "custom", label: "Custom", items: filteredTemplates.filter((t) => !t.isBuiltIn) },
+  ];
 
   const selected =
     allDisplayed.find((t) => t.id === selectedId) ?? allDisplayed[0] ?? null;
@@ -159,9 +206,30 @@ export function WorkflowsPage() {
           </button>
         </div>
 
-        {/* Scope filter */}
-        <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--hairline)", flexShrink: 0 }}>
+        {/* Scope filter + type filter */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            padding: "14px 12px",
+            borderBottom: "1px solid var(--hairline)",
+            flexShrink: 0,
+          }}
+        >
           <ScopeFilter value={scopeFilter} setValue={setScopeFilter} counts={counts} />
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", width: "100%", cursor: "pointer" }}
+          >
+            <option value="all">All types</option>
+            {categoryOptions.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat}
+              </option>
+            ))}
+          </select>
         </div>
 
         {error && <div className="workflow-error-banner" style={{ margin: "8px 12px" }}>{error}</div>}
@@ -172,58 +240,109 @@ export function WorkflowsPage() {
           ) : filteredTemplates.length === 0 ? (
             <div className="workflows-page__empty">No workflows in this scope.</div>
           ) : (
-            filteredTemplates.map((t) => {
-              const isSelected = t.id === selectedId;
-              const isDraft = t.id === DRAFT_ID;
+            sections.map((section) => {
+              if (section.items.length === 0) return null;
+              const isOpen = !collapsed[section.key];
               return (
-                <div
-                  key={t.id}
-                  onClick={() => {
-                    setSelectedId(t.id);
-                  }}
-                  style={{
-                    padding: "12px 14px",
-                    borderBottom: "1px solid var(--hairline)",
-                    background: isSelected ? "rgba(255,255,255,0.03)" : "transparent",
-                    cursor: "pointer",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span
+                <div key={section.key}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCollapsed((c) => ({ ...c, [section.key]: !c[section.key] }))
+                    }
+                    style={{
+                      all: "unset",
+                      boxSizing: "border-box",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 7,
+                      width: "100%",
+                      padding: "8px 12px",
+                      cursor: "pointer",
+                      borderBottom: "1px solid var(--hairline)",
+                      background: "var(--panel-2)",
+                    }}
+                  >
+                    <ChevronRightIcon
+                      size={12}
+                      color="var(--text-3)"
                       style={{
-                        fontSize: 13,
+                        transform: isOpen ? "rotate(90deg)" : "none",
+                        transition: "transform 140ms ease",
+                      }}
+                    />
+                    <span
+                      className="mono"
+                      style={{
+                        fontSize: 10.5,
                         fontWeight: 600,
-                        color: "var(--text)",
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
+                        letterSpacing: 1,
+                        textTransform: "uppercase",
+                        color: "var(--text-2)",
                       }}
                     >
-                      {t.name}
+                      {section.label}
                     </span>
-                    {isDraft && (
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 600,
-                          padding: "2px 6px",
-                          borderRadius: 999,
-                          background: "var(--accent-soft)",
-                          color: "var(--accent)",
-                          border: "1px solid var(--accent-line)",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        draft
-                      </span>
-                    )}
-                    <ScopeBadge scope={t.scope} scopeName={t.scopeName} size="xs" />
-                  </div>
-                  <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 4 }}>
-                    {t.steps.length} step{t.steps.length !== 1 ? "s" : ""}
-                  </div>
+                    <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }}>
+                      {section.items.length}
+                    </span>
+                  </button>
+                  {isOpen &&
+                    section.items.map((t) => {
+                      const isSelected = t.id === selectedId;
+                      const isDraft = t.id === DRAFT_ID;
+                      return (
+                        <div
+                          key={t.id}
+                          onClick={() => {
+                            setSelectedId(t.id);
+                          }}
+                          style={{
+                            padding: "12px 14px",
+                            borderBottom: "1px solid var(--hairline)",
+                            background: isSelected ? "rgba(255,255,255,0.03)" : "transparent",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: "var(--text)",
+                                flex: 1,
+                                minWidth: 0,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {t.name}
+                            </span>
+                            {isDraft && (
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: 600,
+                                  padding: "2px 6px",
+                                  borderRadius: 999,
+                                  background: "var(--accent-soft)",
+                                  color: "var(--accent)",
+                                  border: "1px solid var(--accent-line)",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                draft
+                              </span>
+                            )}
+                            <ScopeBadge scope={t.scope} scopeName={t.scopeName} size="xs" />
+                          </div>
+                          <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 4 }}>
+                            {t.steps.length} step{t.steps.length !== 1 ? "s" : ""}
+                          </div>
+                        </div>
+                      );
+                    })}
                 </div>
               );
             })

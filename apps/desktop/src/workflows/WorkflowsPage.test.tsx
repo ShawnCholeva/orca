@@ -21,11 +21,13 @@ vi.mock("./api", () => ({
 }));
 
 const listGoalsMock = vi.fn();
+const listTemplateCatalogMock = vi.fn();
 vi.mock("../api", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../api")>();
   return {
     ...mod,
     listGoals: (...args: unknown[]) => listGoalsMock(...args),
+    listTemplateCatalog: (...args: unknown[]) => listTemplateCatalogMock(...args),
   };
 });
 
@@ -67,6 +69,8 @@ describe("WorkflowsPage", () => {
     saveTemplateMock.mockReset();
     listGoalsMock.mockReset();
     listGoalsMock.mockResolvedValue({ goals: [] });
+    listTemplateCatalogMock.mockReset();
+    listTemplateCatalogMock.mockResolvedValue([]);
   });
 
   it("renders an empty state when there are no templates", async () => {
@@ -244,5 +248,82 @@ describe("WorkflowsPage", () => {
       scope: "global",
       graph: expect.objectContaining({ nodes: expect.any(Array) }),
     });
+  });
+
+  it("splits the list into Built-in and Custom sections", async () => {
+    const builtIn = makeTemplate({ id: "orca/engineering", name: "Engineering", isBuiltIn: true });
+    const custom = makeTemplate({ id: "custom/mine", name: "My Flow", isBuiltIn: false, isLocked: false });
+    listTemplatesMock.mockResolvedValue({ templates: [builtIn, custom] });
+
+    render(<WorkflowsPage />);
+    const heading = await screen.findByRole("heading", { name: "Workflows" });
+    const sidebar = heading.closest(".workflows-page__sidebar") as HTMLElement;
+
+    expect(within(sidebar).getByRole("button", { name: /built-in/i })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: /custom/i })).toBeInTheDocument();
+    expect(within(sidebar).getByText("Engineering")).toBeInTheDocument();
+    expect(within(sidebar).getByText("My Flow")).toBeInTheDocument();
+  });
+
+  it("hides a section that has no items", async () => {
+    const custom = makeTemplate({ id: "custom/mine", name: "My Flow", isBuiltIn: false, isLocked: false });
+    listTemplatesMock.mockResolvedValue({ templates: [custom] });
+
+    render(<WorkflowsPage />);
+    const heading = await screen.findByRole("heading", { name: "Workflows" });
+    const sidebar = heading.closest(".workflows-page__sidebar") as HTMLElement;
+
+    expect(within(sidebar).queryByRole("button", { name: /built-in/i })).toBeNull();
+    expect(within(sidebar).getByRole("button", { name: /custom/i })).toBeInTheDocument();
+  });
+
+  it("collapsing a section header hides its items", async () => {
+    const builtIn = makeTemplate({ id: "orca/engineering", name: "Engineering", isBuiltIn: true });
+    const custom = makeTemplate({ id: "custom/mine", name: "My Flow", isBuiltIn: false, isLocked: false });
+    listTemplatesMock.mockResolvedValue({ templates: [builtIn, custom] });
+
+    render(<WorkflowsPage />);
+    const heading = await screen.findByRole("heading", { name: "Workflows" });
+    const sidebar = heading.closest(".workflows-page__sidebar") as HTMLElement;
+    await within(sidebar).findByText("Engineering");
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: /built-in/i }));
+
+    expect(within(sidebar).queryByText("Engineering")).toBeNull();
+    expect(within(sidebar).getByText("My Flow")).toBeInTheDocument();
+  });
+
+  it("type filter narrows the list by category", async () => {
+    const builtIn = makeTemplate({ id: "orca/engineering", name: "Engineering", isBuiltIn: true });
+    const custom = makeTemplate({ id: "custom/mine", name: "My Flow", isBuiltIn: false, isLocked: false });
+    listTemplatesMock.mockResolvedValue({ templates: [builtIn, custom] });
+    listTemplateCatalogMock.mockResolvedValue([
+      {
+        id: "orca/engineering",
+        name: "Engineering",
+        category: "Engineering",
+        recommended: false,
+        description: "Built-in engineering workflow",
+        bestFor: "Shipping code",
+        stepCount: 1,
+      },
+    ]);
+
+    render(<WorkflowsPage />);
+    const heading = await screen.findByRole("heading", { name: "Workflows" });
+    const sidebar = heading.closest(".workflows-page__sidebar") as HTMLElement;
+    // wait for the catalog-derived category to appear as an option
+    await waitFor(() =>
+      expect(within(sidebar).getByRole("option", { name: "Engineering" })).toBeInTheDocument(),
+    );
+
+    fireEvent.change(within(sidebar).getByRole("combobox"), {
+      target: { value: "Engineering" },
+    });
+
+    // Scope row assertions to the scrollable list so the <option> text doesn't match.
+    const list = sidebar.querySelector(".scroll") as HTMLElement;
+    expect(within(list).getByText("Engineering")).toBeInTheDocument();
+    expect(within(list).queryByText("My Flow")).toBeNull();
   });
 });

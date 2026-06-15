@@ -140,7 +140,7 @@ const SCOPE_PICKER_OPTS: { id: WorkflowScope; label: string; desc: string }[] = 
   { id: "goal", label: "Goal", desc: "Available only inside one specific goal." },
 ];
 
-const inputStyle: React.CSSProperties = {
+export const inputStyle: React.CSSProperties = {
   width: "100%",
   background: "var(--bg)",
   border: "1px solid var(--hairline)",
