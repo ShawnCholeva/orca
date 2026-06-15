@@ -991,6 +991,40 @@ export const WorkflowTemplateResponse = z
   .strict();
 export type WorkflowTemplateResponse = z.infer<typeof WorkflowTemplateResponse>;
 
+export const BuiltInTemplateSummary = z
+  .object({
+    id: Id100,
+    name: z.string().min(1).max(WORKFLOW_TEMPLATE_MAX_NAME_CHARS),
+    category: z.string().min(1).max(64),
+    recommended: z.boolean(),
+    description: BoundedString(WORKFLOW_TEMPLATE_MAX_DESCRIPTION_BYTES, "description"),
+    bestFor: z.string().min(1).max(200),
+    stepCount: z.number().int().positive(),
+  })
+  .strict();
+export type BuiltInTemplateSummary = z.infer<typeof BuiltInTemplateSummary>;
+
+export const ListBuiltInTemplateCatalogResponse = z
+  .object({ catalog: z.array(BuiltInTemplateSummary) })
+  .strict();
+export type ListBuiltInTemplateCatalogResponse = z.infer<
+  typeof ListBuiltInTemplateCatalogResponse
+>;
+
+export const InstallBuiltInTemplatesRequest = z
+  .object({ ids: z.array(Id100).min(0).max(50) })
+  .strict();
+export type InstallBuiltInTemplatesRequest = z.infer<
+  typeof InstallBuiltInTemplatesRequest
+>;
+
+export const InstallBuiltInTemplatesResponse = z
+  .object({ templates: z.array(WorkflowTemplate) })
+  .strict();
+export type InstallBuiltInTemplatesResponse = z.infer<
+  typeof InstallBuiltInTemplatesResponse
+>;
+
 export const DuplicateWorkflowTemplateRequest = z
   .object({
     sourceTemplateId: Id100,
