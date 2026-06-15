@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 1. Set your desired time in HH:MM format
-TARGET_TIME="19:21"
+TARGET_TIME="06:50"
 
 echo "Monitoring time... Target is $TARGET_TIME"
 

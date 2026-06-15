@@ -141,10 +141,14 @@ export default function App() {
     setOnboardingState("checking");
   }
 
+  // Load goals/diagnostics once the daemon is reachable, and refetch on every
+  // reconnect. Firing on mount instead races the daemon's HTTP server coming
+  // up — the fetch fails silently and the list stays empty until a goal event.
   useEffect(() => {
+    if (connectionStatus !== "open") return;
     loadGoals();
     loadDiagnostics();
-  }, []);
+  }, [connectionStatus]);
 
   useEffect(() => {
     if (goals.length === 0) {
@@ -306,13 +310,6 @@ export default function App() {
 
           {/* ── Main area: topbar + pane ── */}
           <div className="orchestrator-main">
-            {goals.length === 0 ? (
-              <EmptyGoalsView
-                onCreate={() => setShowCreateFlow(true)}
-                disabled={!connected}
-              />
-            ) : (
-            <>
             <nav className="orchestrator-tabs" role="tablist" aria-label="Workspace views">
               {/* Breadcrumb */}
               <div className="orchestrator-breadcrumb">
@@ -390,11 +387,18 @@ export default function App() {
 
             {activeTab === "orchestrator" ? (
               <section className="orchestrator-pane" role="tabpanel" aria-label="Orchestrator">
-                <OrcaChat
-                  goals={goals}
-                  selectedGoalId={selectedOrchestratorGoalId}
-                  connectionStatus={connectionStatus}
-                />
+                {goals.length === 0 ? (
+                  <EmptyGoalsView
+                    onCreate={() => setShowCreateFlow(true)}
+                    disabled={!connected}
+                  />
+                ) : (
+                  <OrcaChat
+                    goals={goals}
+                    selectedGoalId={selectedOrchestratorGoalId}
+                    connectionStatus={connectionStatus}
+                  />
+                )}
               </section>
             ) : activeTab === "reasoning" ? (
               <section className="reasoning-pane" role="tabpanel" aria-label="Metrics">
@@ -433,8 +437,6 @@ export default function App() {
               <section className="workflows-pane" role="tabpanel" aria-label="Workflows">
                 <WorkflowsPage />
               </section>
-            )}
-            </>
             )}
           </div>
         </div>
