@@ -58,7 +58,10 @@ function validationRule(stepIds: string[]): WorkflowGuardrailConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Feature Development — verbatim copy from seed-feature-development.ts
+// Feature Development — STEPS/GRAPH/GUARDRAILS copied verbatim from
+// seed-feature-development.ts. The catalog display name is intentionally
+// "Feature Implementation" (renamed per catalog spec); the id stays
+// "orca/feature-development".
 // ANALYSIS_PREF == REASONING, EXECUTION_PREF == EXECUTION,
 // VALIDATION_PREF == REASONING, DONE_PREF == LIGHT (verified identical model lists)
 // ---------------------------------------------------------------------------

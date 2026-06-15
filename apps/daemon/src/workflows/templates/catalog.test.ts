@@ -47,7 +47,7 @@ describe("built-in template catalog", () => {
       for (const step of d.steps as WorkflowStepTemplate[]) {
         expect(() => WorkflowStepOutputSchema.parse(step.outputSchema)).not.toThrow();
       }
-      expect(validateTemplatePipeline(d.steps as WorkflowStepTemplate[])).toBeInstanceOf(Array);
+      expect(validateTemplatePipeline(d.steps as WorkflowStepTemplate[])).toEqual([]);
       if (d.graph) {
         WorkflowGraph.parse(d.graph);
         expect(validateGraph(d.graph, d.steps as WorkflowStepTemplate[])).toEqual([]);
@@ -58,6 +58,7 @@ describe("built-in template catalog", () => {
 
   it("summaries derive stepCount from graph node count or step count", () => {
     const summaries = builtInCatalogSummaries();
+    expect(summaries).toHaveLength(7);
     const byId = Object.fromEntries(summaries.map((s) => [s.id, s]));
     expect(byId["orca/feature-development"].stepCount).toBe(5); // 4 steps + gate
     expect(byId["orca/initiative-implementation"].stepCount).toBe(8); // 7 steps + gate
