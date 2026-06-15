@@ -4,6 +4,9 @@ import {
   CreateWorkflowTemplateRequest,
   DuplicateWorkflowTemplateRequest,
   GetWorkflowTemplateResponse,
+  InstallBuiltInTemplatesRequest,
+  InstallBuiltInTemplatesResponse,
+  ListBuiltInTemplateCatalogResponse,
   ListWorkflowTemplatesResponse,
   UpdateWorkflowTemplateRequest,
   WorkflowTemplateResponse,
@@ -12,9 +15,12 @@ import type { WorkflowStepTemplate } from "@orca/contracts";
 import type { EventBus } from "../../events.js";
 import { getTemplateById, listTemplates } from "./projection.js";
 import { validateTemplatePipeline } from "./validate-pipeline.js";
+import { builtInCatalogSummaries } from "./catalog.js";
 import {
   createCustomTemplate,
   duplicateTemplate,
+  installBuiltInTemplates,
+  UnknownBuiltInTemplateError,
   WorkflowTemplateLockedError,
   WorkflowTemplateNotFoundError,
   type WorkflowTemplateUsecaseCtx,
@@ -50,6 +56,29 @@ export function registerWorkflowTemplateRoutes(
     return ListWorkflowTemplatesResponse.parse({
       templates: listTemplates(deps.db),
     });
+  });
+
+  server.get("/v1/workflow-templates/catalog", async () => {
+    return ListBuiltInTemplateCatalogResponse.parse({ catalog: builtInCatalogSummaries() });
+  });
+
+  server.post("/v1/workflow-templates/install", async (request, reply) => {
+    const parsed = InstallBuiltInTemplatesRequest.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: "validation_failed", issues: parsed.error.issues };
+    }
+    try {
+      const templates = installBuiltInTemplates(createUsecaseCtx(deps), parsed.data.ids);
+      reply.status(201);
+      return InstallBuiltInTemplatesResponse.parse({ templates });
+    } catch (error) {
+      if (error instanceof UnknownBuiltInTemplateError) {
+        reply.status(400);
+        return apiError(error.code, error.message);
+      }
+      throw error;
+    }
   });
 
   server.get("/v1/workflow-templates/:id", async (request, reply) => {

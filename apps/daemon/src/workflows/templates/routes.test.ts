@@ -6,6 +6,8 @@ import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import {
   GetWorkflowTemplateResponse,
+  InstallBuiltInTemplatesResponse,
+  ListBuiltInTemplateCatalogResponse,
   ListWorkflowTemplatesResponse,
   WorkflowTemplateResponse,
 } from "@orca/contracts";
@@ -277,5 +279,35 @@ describe("workflow template routes", () => {
     expect(response.statusCode).toBe(409);
     const body = JSON.parse(response.body) as { error: { code: string } };
     expect(body.error.code).toBe("workflow_template_locked");
+  });
+
+  it("GET /v1/workflow-templates/catalog returns the 7 summaries", async () => {
+    const res = await server.inject({ method: "GET", url: "/v1/workflow-templates/catalog", headers: AUTH_HEADERS });
+    expect(res.statusCode).toBe(200);
+    const body = ListBuiltInTemplateCatalogResponse.parse(res.json());
+    expect(body.catalog).toHaveLength(7);
+    expect(body.catalog.find((c) => c.id === "orca/feature-development")?.name).toBe("Feature Implementation");
+  });
+
+  it("POST /v1/workflow-templates/install installs selected templates", async () => {
+    const res = await server.inject({
+      method: "POST", url: "/v1/workflow-templates/install",
+      headers: AUTH_HEADERS, payload: { ids: ["orca/brainstorm", "orca/code-review"] },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = InstallBuiltInTemplatesResponse.parse(res.json());
+    expect(body.templates.map((t) => t.id).sort()).toEqual(["orca/brainstorm", "orca/code-review"]);
+
+    const list = await server.inject({ method: "GET", url: "/v1/workflow-templates", headers: AUTH_HEADERS });
+    expect(ListWorkflowTemplatesResponse.parse(list.json()).templates.map((t) => t.id)).toContain("orca/brainstorm");
+  });
+
+  it("POST /v1/workflow-templates/install rejects unknown ids with 400", async () => {
+    const res = await server.inject({
+      method: "POST", url: "/v1/workflow-templates/install",
+      headers: AUTH_HEADERS, payload: { ids: ["orca/nope"] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe("unknown_builtin_template");
   });
 });
