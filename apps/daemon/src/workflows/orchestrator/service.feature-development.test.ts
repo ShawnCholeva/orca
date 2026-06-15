@@ -7,7 +7,7 @@
  *   - Terminal Done completion → mark_run_complete recommendation (human yield, no auto-complete)
  *
  * The harness is the same as service.gate-routing.test.ts. The only delta is:
- *   - seedFeatureDevelopmentTemplate used instead of an inline graph
+ *   - installBuiltInTemplates used to install orca/feature-development
  *   - fakeStepDispatch supports the FD model IDs (sonnet/opus/haiku)
  */
 
@@ -33,11 +33,12 @@ import type { OperatorDescriptor, OperatorSelection } from "@orca/contracts";
 import type { SelectorInput } from "../operators/selector.js";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import type { StepDispatchCapabilities } from "./service.js";
-import {
-  seedFeatureDevelopmentTemplate,
-  FEATURE_DEV_ID,
-  FEATURE_DEV_VERSION,
-} from "../templates/seed-feature-development.js";
+import { installBuiltInTemplates } from "../templates/usecases.js";
+import type { EventBus } from "../../events.js";
+
+const FEATURE_DEV_ID = "orca/feature-development";
+// Must track the orca/feature-development version in catalog.ts / usecases.ts.
+const FEATURE_DEV_VERSION = 1;
 
 const AGENT_OPERATOR_ID = "agent:claude-code";
 
@@ -158,8 +159,8 @@ function makeService(
  * step_output artifact (the gate-routing trigger). A prior execution attempt
  * (attempt 1) exists so a rejection routes to attempt 2.
  */
-function seedFDRunAtValidation(db: Database.Database): void {
-  seedFeatureDevelopmentTemplate(db, () => NOW);
+function seedFDRunAtValidation(db: Database.Database, bus: EventBus): void {
+  installBuiltInTemplates({ db, bus }, ["orca/feature-development"]);
 
   db.prepare(
     "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('goal-fd', 'FD Goal', 'Feature goal', 'active', 1, ?, ?, NULL, 'orca/anthropic', 'claude-sonnet-4-6')"
@@ -198,8 +199,8 @@ function seedFDRunAtValidation(db: Database.Database): void {
  * Seed the FD template and a run positioned at the terminal `done` step with a
  * step_output artifact, to test the mark_run_complete path.
  */
-function seedFDRunAtDone(db: Database.Database): void {
-  seedFeatureDevelopmentTemplate(db, () => NOW);
+function seedFDRunAtDone(db: Database.Database, bus: EventBus): void {
+  installBuiltInTemplates({ db, bus }, ["orca/feature-development"]);
 
   db.prepare(
     "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('goal-fd', 'FD Goal', 'Feature goal', 'active', 1, ?, ?, NULL, 'orca/anthropic', 'claude-sonnet-4-6')"
@@ -239,7 +240,7 @@ describe("OrchestratorService — feature development loop", () => {
   it("rejected Release Readiness gate routes backward to a fresh Execution attempt", async () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
-    seedFDRunAtValidation(db);
+    seedFDRunAtValidation(db, bus);
     const service = makeService(fakeGateBroker("rejected"));
 
     await service.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });
@@ -265,7 +266,7 @@ describe("OrchestratorService — feature development loop", () => {
   it("approved Release Readiness gate routes to the terminal Done step", async () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
-    seedFDRunAtValidation(db);
+    seedFDRunAtValidation(db, bus);
     const service = makeService(fakeGateBroker("approved"));
 
     await service.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });
@@ -287,7 +288,7 @@ describe("OrchestratorService — feature development loop", () => {
   it("completing terminal Done yields mark_run_complete (human yield) without auto-completing the run", async () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
-    seedFDRunAtDone(db);
+    seedFDRunAtDone(db, bus);
     const service = makeService(fakeGateBroker("approved")); // broker irrelevant; no gate here
 
     await service.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });

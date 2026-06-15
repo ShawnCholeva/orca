@@ -19,10 +19,6 @@ import {
   type WorkflowRunUsecaseCtx,
 } from "../runs/usecases.js";
 import {
-  ENGINEERING_ID,
-  seedEngineeringTemplate,
-} from "../templates/seed-engineering.js";
-import {
   advanceToNextStep,
   advanceToNextStepOrGate,
   createInitialStep,
@@ -36,6 +32,36 @@ import {
 
 const tempDirs: string[] = [];
 const NOW = "2026-01-01T00:00:00.000Z";
+
+// Local fixture: engineering template used as a test fixture for linear step progression.
+// Copied from the deleted seed-engineering.ts; the id and steps are intentionally preserved
+// so that tests that check step counts, step IDs, and ordinals remain valid.
+const ENGINEERING_ID = "orca/engineering";
+const ENGINEERING_VERSION = 5;
+const _ENG_AGENT = [{ adapterId: "claude-code", modelId: "claude-sonnet-4-6" }];
+const _ENG_OUT = [{ key: "summary", type: "string", required: true }];
+const ENGINEERING_STEPS = JSON.stringify([
+  { id: "intake", ordinal: 0, name: "Intake", instructions: "intake", outputSchema: _ENG_OUT, agentPreference: _ENG_AGENT },
+  { id: "research", ordinal: 1, name: "Research", instructions: "research", outputSchema: _ENG_OUT, agentPreference: _ENG_AGENT },
+  { id: "prd", ordinal: 2, name: "PRD / Destination", instructions: "prd", outputSchema: _ENG_OUT, agentPreference: _ENG_AGENT },
+  { id: "issue_breakdown", ordinal: 3, name: "Issue Breakdown", instructions: "breakdown", outputSchema: _ENG_OUT, agentPreference: _ENG_AGENT },
+  { id: "execution", ordinal: 4, name: "Execution", instructions: "execute", outputSchema: _ENG_OUT, agentPreference: _ENG_AGENT },
+  { id: "qa", ordinal: 5, name: "QA", instructions: "qa", outputSchema: _ENG_OUT, agentPreference: _ENG_AGENT },
+  { id: "review", ordinal: 6, name: "Fresh-Context Review", instructions: "review", outputSchema: _ENG_OUT, agentPreference: _ENG_AGENT },
+  { id: "done", ordinal: 7, name: "Done", instructions: "done", outputSchema: _ENG_OUT, agentPreference: _ENG_AGENT },
+]);
+function seedEngineeringTemplate(db: Database.Database, now: () => string): void {
+  const existing = db.prepare("SELECT version FROM workflow_templates WHERE id = ?").get(ENGINEERING_ID) as { version: number } | undefined;
+  if (existing && existing.version >= ENGINEERING_VERSION) return;
+  const ts = now();
+  if (existing) {
+    db.prepare("UPDATE workflow_templates SET name = ?, description = ?, version = ?, is_built_in = 1, is_locked = 1, steps_json = ?, guardrails_json = ?, updated_at = ? WHERE id = ?")
+      .run("Engineering", "Engineering template fixture", ENGINEERING_VERSION, ENGINEERING_STEPS, "[]", ts, ENGINEERING_ID);
+  } else {
+    db.prepare("INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 1, ?, ?, ?, ?)")
+      .run(ENGINEERING_ID, "Engineering", "Engineering template fixture", ENGINEERING_VERSION, ENGINEERING_STEPS, "[]", ts, ts);
+  }
+}
 
 function createConfig(dataDir: string): Config {
   return {

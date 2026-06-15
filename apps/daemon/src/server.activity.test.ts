@@ -14,7 +14,27 @@ import { eventBus } from "./events.js";
 import { defaultMigrationsDir, runMigrations } from "./migrations.js";
 import { bootstrapRegistries } from "./registry/bootstrap.js";
 import { createServer } from "./server.js";
-import { seedEngineeringTemplate } from "./workflows/templates/seed-engineering.js";
+// Local fixture: minimal engineering template row for workflow_runs FK constraint.
+function seedEngineeringTemplate(db: ReturnType<typeof openDatabase>, now: () => string): void {
+  const id = "orca/engineering";
+  const existing = db.prepare("SELECT id FROM workflow_templates WHERE id = ?").get(id);
+  if (existing) return;
+  const ts = now();
+  const agentPref = [{ adapterId: "claude-code", modelId: "claude-sonnet-4-6" }];
+  const stepOut = [{ key: "summary", type: "string", required: true }];
+  const steps = [
+    { id: "intake", ordinal: 0, name: "Intake", instructions: "intake", outputSchema: stepOut, agentPreference: agentPref },
+    { id: "research", ordinal: 1, name: "Research", instructions: "research", outputSchema: stepOut, agentPreference: agentPref },
+    { id: "prd", ordinal: 2, name: "PRD", instructions: "prd", outputSchema: stepOut, agentPreference: agentPref },
+    { id: "issue_breakdown", ordinal: 3, name: "Issue Breakdown", instructions: "breakdown", outputSchema: stepOut, agentPreference: agentPref },
+    { id: "execution", ordinal: 4, name: "Execution", instructions: "execute", outputSchema: stepOut, agentPreference: agentPref },
+    { id: "qa", ordinal: 5, name: "QA", instructions: "qa", outputSchema: stepOut, agentPreference: agentPref },
+    { id: "review", ordinal: 6, name: "Review", instructions: "review", outputSchema: stepOut, agentPreference: agentPref },
+    { id: "done", ordinal: 7, name: "Done", instructions: "done", outputSchema: stepOut, agentPreference: agentPref },
+  ];
+  db.prepare("INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES (?, ?, ?, 5, 1, 1, ?, ?, ?, ?)")
+    .run(id, "Engineering", "Engineering template fixture", JSON.stringify(steps), "[]", ts, ts);
+}
 
 const AUTH_HEADERS = { authorization: "Bearer test-token" } as const;
 const NOW = "2026-06-06T12:00:00.000Z";

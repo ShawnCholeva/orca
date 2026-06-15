@@ -21,8 +21,7 @@ import { sweepOrphanContextFiles } from './sessions/context-delivery.js';
 import { createDaemonContext } from './daemon-context.js';
 import { subscribeOrchestrationTriggers } from './generation/triggers.js';
 import { reconcileInFlightGenerations } from './generation/reconcile.js';
-import { seedEngineeringTemplate } from './workflows/templates/seed-engineering.js';
-import { seedFeatureDevelopmentTemplate } from './workflows/templates/seed-feature-development.js';
+import { reconcileBuiltInTemplates } from './workflows/templates/usecases.js';
 import { reconcileWorkflowsOnBoot } from './workflows/reconcile.js';
 
 export interface DaemonStartHandles {
@@ -68,10 +67,12 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
   }
 
   try {
-    seedEngineeringTemplate(db, () => new Date().toISOString());
-    seedFeatureDevelopmentTemplate(db, () => new Date().toISOString());
+    // Built-in templates are no longer auto-seeded; onboarding installs the
+    // user's selection via POST /v1/workflow-templates/install. Drop any stale
+    // built-ins that are no longer in the catalog and have no runs.
+    reconcileBuiltInTemplates(db);
   } catch (err) {
-    console.error('[orca-daemon] Workflow template seed failed — aborting startup:', err);
+    console.error('[orca-daemon] Workflow template reconcile failed — aborting startup:', err);
     process.exit(1);
   }
 
