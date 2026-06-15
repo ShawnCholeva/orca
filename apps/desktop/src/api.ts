@@ -109,6 +109,10 @@ import {
   WorkflowRunResponse,
   WorkflowStepRunResponse,
   WorkflowTemplateResponse,
+  ListBuiltInTemplateCatalogResponse,
+  InstallBuiltInTemplatesResponse,
+  type BuiltInTemplateSummary,
+  type WorkflowTemplate,
   type Activity,
   type AgentReadinessReport,
   type SystemReadinessReport,
@@ -850,6 +854,33 @@ export async function duplicateWorkflowTemplate(
     WorkflowTemplateResponse,
     "Duplicate workflow template failed",
   );
+}
+
+export async function listTemplateCatalog(): Promise<BuiltInTemplateSummary[]> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/workflow-templates/catalog`, {
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    throw new ApiError(`List template catalog failed (${res.status})`);
+  }
+  const body = await parseResponse(res, ListBuiltInTemplateCatalogResponse);
+  return body.catalog;
+}
+
+export async function installTemplates(ids: string[]): Promise<WorkflowTemplate[]> {
+  const { baseUrl, token } = await loadConfig();
+  const body = await requestJson(
+    `${baseUrl}/v1/workflow-templates/install`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify({ ids }),
+    },
+    InstallBuiltInTemplatesResponse,
+    "Install workflow templates failed",
+  );
+  return body.templates;
 }
 
 export async function startWorkflowRun(

@@ -1429,6 +1429,37 @@ describe("desktop api client", () => {
     });
   });
 
+  it("listTemplateCatalog GETs the catalog and returns summaries", async () => {
+    const summary = {
+      id: "orca/brainstorm", name: "Brainstorm", category: "Engineering",
+      recommended: true, description: "desc", bestFor: "tagline", stepCount: 6,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { catalog: [summary] }));
+    const out = await api.listTemplateCatalog();
+    expect(out).toEqual([summary]);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain("/v1/workflow-templates/catalog");
+    expect(init?.method ?? "GET").toBe("GET");
+  });
+
+  it("installTemplates POSTs the selected ids and returns templates", async () => {
+    const template = {
+      id: "orca/brainstorm", name: "Brainstorm", description: "d", version: 1,
+      isBuiltIn: true, isLocked: true,
+      steps: [{ id: "frame", ordinal: 0, name: "Frame", instructions: "x",
+        outputSchema: [{ key: "problem", type: "string", required: true }],
+        agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] }],
+      guardrails: [], createdAt: now, updatedAt: now, scope: "global", scopeName: "", graph: null,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { templates: [template] }));
+    const out = await api.installTemplates(["orca/brainstorm"]);
+    expect(out.map((t) => t.id)).toEqual(["orca/brainstorm"]);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain("/v1/workflow-templates/install");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ ids: ["orca/brainstorm"] });
+  });
+
   it("getSettings returns the supervision mode", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { supervisionMode: "supervised" }));
     const s = await api.getSettings();
