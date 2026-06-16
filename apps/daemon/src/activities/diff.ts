@@ -53,12 +53,20 @@ function buildEditHunk(
     // leave line numbers null, no context
   }
 
-  const lines: ActivityDiffLine[] = [
+  // Stat counts are true totals; the rendered body is capped with a visible marker so truncation is never silent.
+  const allLines: ActivityDiffLine[] = [
     ...before,
     ...removed.map((text): ActivityDiffLine => ({ kind: "remove", text })),
     ...added.map((text): ActivityDiffLine => ({ kind: "add", text })),
     ...after,
-  ].slice(0, MAX_HUNK_LINES);
+  ];
+  const lines: ActivityDiffLine[] =
+    allLines.length > MAX_HUNK_LINES
+      ? [
+          ...allLines.slice(0, MAX_HUNK_LINES - 1),
+          { kind: "context", text: `… ${allLines.length - (MAX_HUNK_LINES - 1)} more changed line(s) hidden` },
+        ]
+      : allLines;
 
   return {
     filePath: basename(filePath),
@@ -83,9 +91,15 @@ export function reconstructEditDiff(
     if (toolName === "Write") {
       const content = typeof input.content === "string" ? input.content : "";
       const added = splitLines(content);
-      const lines: ActivityDiffLine[] = added
-        .slice(0, MAX_HUNK_LINES)
-        .map((text) => ({ kind: "add", text }));
+      // Stat counts are true totals; the rendered body is capped with a visible marker so truncation is never silent.
+      const allWriteLines: ActivityDiffLine[] = added.map((text) => ({ kind: "add", text }));
+      const lines: ActivityDiffLine[] =
+        allWriteLines.length > MAX_HUNK_LINES
+          ? [
+              ...allWriteLines.slice(0, MAX_HUNK_LINES - 1),
+              { kind: "context", text: `… ${allWriteLines.length - (MAX_HUNK_LINES - 1)} more changed line(s) hidden` },
+            ]
+          : allWriteLines;
       return {
         filePath: basename(filePath),
         additions: added.length,

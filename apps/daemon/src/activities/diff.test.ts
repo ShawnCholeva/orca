@@ -52,4 +52,24 @@ describe("reconstructEditDiff", () => {
     expect(reconstructEditDiff("Edit", { file_path: "/r/x.ts", old_string: "a", new_string: "b" },
       () => { throw new Error("ENOENT"); })!.hunks[0].newStart).toBeNull();
   });
+
+  it("caps hunk body at MAX_HUNK_LINES with a visible marker, but keeps true add/del counts", () => {
+    // Build a new_string with 250 lines so the hunk exceeds the 200-line cap.
+    const newStr = Array.from({ length: 250 }, (_, i) => `line ${i + 1}`).join("\n");
+    const diff = reconstructEditDiff(
+      "Edit",
+      { file_path: "/r/big.ts", old_string: "", new_string: newStr },
+      () => { throw new Error("ENOENT"); }, // no file read — line numbers null, no context lines
+    )!;
+
+    expect(diff.additions).toBe(250);
+    expect(diff.deletions).toBe(0);
+
+    const hunk = diff.hunks[0];
+    expect(hunk.lines.length).toBeLessThanOrEqual(200);
+
+    const lastLine = hunk.lines[hunk.lines.length - 1];
+    expect(lastLine.kind).toBe("context");
+    expect(lastLine.text).toMatch(/more changed line\(s\) hidden/);
+  });
 });
