@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { Activity, ActivitySourceKind } from "../index.js";
+import { describe, expect, it, test } from "vitest";
+import { Activity, ActivitySourceKind, ActivityStep, ActivityDiff } from "../index.js";
 
 it("accepts step_result as a source kind", () => {
   expect(ActivitySourceKind.parse("step_result")).toBe("step_result");
@@ -22,4 +22,32 @@ it("accepts a result-card payload on a step_result activity", () => {
   };
   const parsed = Activity.parse(base);
   expect(parsed.stepName).toBe("Investigate");
+});
+
+test("Activity defaults steps to an empty array (back-compat)", () => {
+  const parsed = Activity.parse({
+    id: "a1", goalId: "g1", workflowRunId: "r1", stepRunId: "s1",
+    agentSessionId: null, turnOrdinal: 0, status: "active",
+    currentText: "Reading…", finalSummary: null, sourceKind: "tool_use",
+    workCategory: "reading", confidence: null,
+    createdAt: "2026-06-16T00:00:00.000Z", updatedAt: "2026-06-16T00:00:00.000Z",
+    completedAt: null,
+  });
+  expect(parsed.steps).toEqual([]);
+});
+
+test("ActivityStep accepts an optional diff", () => {
+  const diff = ActivityDiff.parse({
+    filePath: "verifier.ts", additions: 2, deletions: 1,
+    hunks: [{ oldStart: 42, newStart: 42, lines: [
+      { kind: "remove", text: "old()" },
+      { kind: "add", text: "new()" },
+    ] }],
+  });
+  const step = ActivityStep.parse({
+    id: "st1", text: "Edited verifier.ts", category: "editing",
+    status: "done", diff, createdAt: "2026-06-16T00:00:00.000Z",
+  });
+  expect(step.diff?.additions).toBe(2);
+  expect(step.status).toBe("done");
 });
