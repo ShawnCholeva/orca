@@ -9,7 +9,7 @@ import { getTemplateById } from "../templates/projection.js";
  */
 export function loadRunTemplate(
   db: Database.Database,
-  run: WorkflowRunT
+  run: Pick<WorkflowRunT, "id" | "templateId">
 ): WorkflowTemplateT | null {
   const row = db
     .prepare("SELECT template_snapshot_json FROM workflow_runs WHERE id = ?")

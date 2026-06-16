@@ -23,7 +23,7 @@ import {
   advanceToNextStep,
   recordExitCriteriaSatisfaction,
 } from '../workflows/steps/usecases.js';
-import { getTemplateById } from '../workflows/templates/projection.js';
+import { loadRunTemplate } from '../workflows/runs/run-template.js';
 import {
   decisionFingerprint,
   recordDecisionInTx,
@@ -287,7 +287,7 @@ function assertFinalStepReadyForCompletion(
     );
   }
 
-  const template = getTemplateById(db, run.templateId);
+  const template = loadRunTemplate(db, run);
   if (!template) {
     throw new WorkflowRecommendationActionError(`Workflow template not found: ${run.templateId}`);
   }
@@ -315,7 +315,7 @@ function reEvaluateAfterArtifactSatisfactionInTx(
   const run = getWorkflowRunById(db, stepRun.workflow_run_id);
   if (!run || run.status !== 'active' || run.currentStepRunId !== stepRunId) return;
 
-  const template = getTemplateById(db, run.templateId);
+  const template = loadRunTemplate(db, run);
   if (!template) return;
 
   const stepTemplate = template.steps.find((step) => step.id === stepRun.step_template_id);

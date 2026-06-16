@@ -74,6 +74,21 @@ describe("loadRunTemplate", () => {
     expect(tpl.steps[0].name).toBe("Original");
   });
 
+  it("accepts a minimal { id, templateId } shape", () => {
+    const db = setup();
+    seedTemplate(db, "orca/engineering", 1, "Snap");
+    const snapshot = JSON.stringify({
+      id: "orca/engineering", name: "Engineering", description: "desc", version: 1,
+      isBuiltIn: true, isLocked: true,
+      steps: [{ id: "intake", ordinal: 0, name: "Snap", instructions: "do", outputSchema: [{ key: "k", type: "string", required: true }], agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] }],
+      guardrails: [], createdAt: NOW, updatedAt: NOW, scope: "global", scopeName: "", graph: null,
+    });
+    insertRun(db, "run-3", "orca/engineering", 1, snapshot);
+
+    const tpl = loadRunTemplate(db, { id: "run-3", templateId: "orca/engineering" })!;
+    expect(tpl.steps[0].name).toBe("Snap");
+  });
+
   it("falls back to the live template when the snapshot is null", () => {
     const db = setup();
     seedTemplate(db, "orca/engineering", 1, "LiveName");
