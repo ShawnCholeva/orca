@@ -27,10 +27,10 @@ export function validateGraph(
     seen.add(key);
   }
 
-  // Terminal: exactly one terminal step node.
+  // Terminal: at least one terminal step node.
   const terminals = graph.nodes.filter((n) => n.type === "step" && n.terminal);
-  if (terminals.length !== 1) {
-    errors.push(`exactly one terminal step is required (found ${terminals.length})`);
+  if (terminals.length < 1) {
+    errors.push(`at least one terminal step is required (found ${terminals.length})`);
   }
 
   for (const node of graph.nodes) {
@@ -87,6 +87,33 @@ export function validateGraph(
     for (const node of graph.nodes) {
       if (!reachable.has(node.id)) {
         errors.push(`node '${node.id}' is unreachable from the initial step`);
+      }
+    }
+
+    // Terminal-reachability: every reachable node must have a path to a terminal.
+    // Branch-source-agnostic — covers gate ports and (future) step fan-out alike.
+    if (terminals.length >= 1) {
+      const reverse = new Map<string, string[]>();
+      for (const e of graph.edges) {
+        const preds = reverse.get(e.to) ?? [];
+        preds.push(e.from);
+        reverse.set(e.to, preds);
+      }
+      const canReachTerminal = new Set<string>(terminals.map((t) => t.id));
+      const tq = [...canReachTerminal];
+      while (tq.length) {
+        const id = tq.shift()!;
+        for (const pred of reverse.get(id) ?? []) {
+          if (!canReachTerminal.has(pred)) {
+            canReachTerminal.add(pred);
+            tq.push(pred);
+          }
+        }
+      }
+      for (const node of graph.nodes) {
+        if (reachable.has(node.id) && !canReachTerminal.has(node.id)) {
+          errors.push(`branch from '${node.id}' never reaches a terminal step`);
+        }
       }
     }
   }

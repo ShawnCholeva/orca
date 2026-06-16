@@ -40,7 +40,50 @@ describe("validateGraph", () => {
 
   it("rejects when there is no terminal step", () => {
     const g = { ...valid, nodes: valid.nodes.map((n) => (n.id === "done" ? { ...n, terminal: false } : n)) };
-    expect(validateGraph(g, steps)).toContain("exactly one terminal step is required (found 0)");
+    expect(validateGraph(g, steps)).toContain("at least one terminal step is required (found 0)");
+  });
+
+  it("accepts multiple terminal steps (one per branch)", () => {
+    const s = [step("a", 0), step("done1", 1), step("done2", 2)];
+    const g: WorkflowGraph = {
+      nodes: [
+        { id: "a", type: "step", name: "A", stepId: "a" },
+        { id: "gate", type: "gate", name: "Gate", instructions: "x" },
+        { id: "done1", type: "step", name: "Done1", stepId: "done1", terminal: true },
+        { id: "done2", type: "step", name: "Done2", stepId: "done2", terminal: true },
+      ],
+      edges: [
+        { from: "a", to: "gate" },
+        { from: "gate", to: "done1", port: "approved" },
+        { from: "gate", to: "done2", port: "rejected" },
+      ],
+      positions: {},
+    };
+    expect(validateGraph(g, s)).toEqual([]);
+  });
+
+  it("rejects a branch that never reaches a terminal", () => {
+    const s = [step("a", 0), step("done", 1), step("x", 2), step("y", 3)];
+    const g: WorkflowGraph = {
+      nodes: [
+        { id: "a", type: "step", name: "A", stepId: "a" },
+        { id: "gate", type: "gate", name: "Gate", instructions: "x" },
+        { id: "done", type: "step", name: "Done", stepId: "done", terminal: true },
+        { id: "x", type: "step", name: "X", stepId: "x" },
+        { id: "y", type: "step", name: "Y", stepId: "y" },
+      ],
+      edges: [
+        { from: "a", to: "gate" },
+        { from: "gate", to: "done", port: "approved" },
+        { from: "gate", to: "x", port: "rejected" },
+        { from: "x", to: "y" },
+        { from: "y", to: "x" },
+      ],
+      positions: {},
+    };
+    const errs = validateGraph(g, s);
+    expect(errs).toContain("branch from 'x' never reaches a terminal step");
+    expect(errs).toContain("branch from 'y' never reaches a terminal step");
   });
 
   it("rejects when a terminal step has an outgoing edge", () => {
