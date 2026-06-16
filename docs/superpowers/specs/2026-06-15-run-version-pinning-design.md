@@ -58,24 +58,32 @@ export function loadRunTemplate(db: Database.Database, run: WorkflowRunT): Workf
 ```
 
 Returns the same `WorkflowTemplateT | null` shape as `getTemplateById`, so call sites
-need no downstream changes. Imports `getTemplateById` from `../templates/projection.js`
-and `WorkflowTemplate` from `@orca/contracts`. A dedicated module avoids import cycles
-between the run, step, and orchestrator layers.
+need no downstream changes. The parameter is typed `Pick<WorkflowRunT, "id" | "templateId">`
+— the structural subset the helper reads — so callers with only a joined DB row (e.g.
+the activity-event path in `server.ts`) can use it without a full `WorkflowRun`. Imports
+`getTemplateById` from `../templates/projection.js` and `WorkflowTemplate` from
+`@orca/contracts`. A dedicated module avoids import cycles between the run, step, and
+orchestrator layers.
 
 ### 4. Repoint run-execution call sites
 
-Replace `getTemplateById(db, run.templateId)` with `loadRunTemplate(db, run)` at the
-run-execution sites only:
+Replace `getTemplateById(…, run.templateId)` with `loadRunTemplate(…, run)` at every
+site that loads a template **keyed off an in-flight run**:
 
-- `apps/daemon/src/workflows/steps/usecases.ts` — 3 sites (lines ~255, ~334, ~500).
-- `apps/daemon/src/workflows/orchestrator/service.ts` — ~13 sites.
-- `apps/daemon/src/workflows/orchestration-transport/human-review.ts` — 1 site (~554).
+- `apps/daemon/src/workflows/steps/usecases.ts` — 3 sites.
+- `apps/daemon/src/workflows/orchestrator/service.ts` — 13 sites.
+- `apps/daemon/src/workflows/orchestration-transport/human-review.ts` — 1 site.
+- `apps/daemon/src/recommendations/usecases.ts` — 2 sites (final-step / next-step
+  detection on the active run; must agree with the orchestrator's pinned view).
+- `apps/daemon/src/server.ts` — 1 site (activity-event step name for an active run;
+  passes the minimal `{ id, templateId }` shape from a joined row).
 
-Each site already has the `run` object in scope (it passes `run.templateId` today).
+Each site already has the run (or a row carrying `workflow_run_id` + `template_id`)
+in scope.
 
-**Leave unchanged** (these operate on templates, not run execution):
-`templates/routes.ts`, `templates/usecases.ts`, `templates/projection.ts`,
-`recommendations/usecases.ts`, `server.ts`.
+**Leave unchanged** (these operate on templates, not run execution — they intentionally
+read the live template): `templates/routes.ts`, `templates/usecases.ts`,
+`templates/projection.ts`.
 
 ### 5. Behavior summary
 
