@@ -12,7 +12,13 @@ export function buildInitialGraph(steps: WorkflowStepDraft[]): WorkflowGraph {
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
-    nodes.push({ id: step.id, type: "step", name: step.name, stepId: step.id });
+    nodes.push({
+      id: step.id,
+      type: "step",
+      name: step.name,
+      stepId: step.id,
+      ...(i === steps.length - 1 ? { terminal: true } : {}),
+    });
     positions[step.id] = { x: 110, y: 20 + i * 92 };
   }
 
@@ -95,6 +101,13 @@ export function reconcileGraph(
       const y = maxY + 92;
       nextPositions[gate.id] = { x: 110, y };
     }
+  }
+
+  // Guarantee a terminal exists: if no surviving step node is terminal, mark the
+  // last one (mirrors the daemon's materializeLinearGraph default).
+  if (nextStepNodes.length > 0 && !nextStepNodes.some((n) => n.terminal)) {
+    const lastIdx = nextStepNodes.length - 1;
+    nextStepNodes[lastIdx] = { ...nextStepNodes[lastIdx], terminal: true };
   }
 
   return {

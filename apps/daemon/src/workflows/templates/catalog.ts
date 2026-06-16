@@ -377,6 +377,28 @@ const BRAINSTORM_STEPS: WorkflowStepTemplate[] = [
   },
 ];
 
+const BRAINSTORM_GRAPH: WorkflowGraph = {
+  nodes: [
+    { id: "frame", type: "step", name: "Frame", stepId: "frame" },
+    { id: "research", type: "step", name: "Research", stepId: "research" },
+    { id: "proposal", type: "step", name: "Proposal", stepId: "proposal" },
+    { id: "critique", type: "step", name: "Critique", stepId: "critique" },
+    { id: "verify", type: "step", name: "Verify", stepId: "verify" },
+    { id: "done", type: "step", name: "Done", stepId: "done", terminal: true },
+  ],
+  edges: [
+    { from: "frame", to: "research" },
+    { from: "research", to: "proposal" },
+    { from: "proposal", to: "critique" },
+    { from: "critique", to: "verify" },
+    { from: "verify", to: "done" },
+  ],
+  positions: {
+    frame: { x: 110, y: 20 }, research: { x: 110, y: 112 }, proposal: { x: 110, y: 204 },
+    critique: { x: 110, y: 296 }, verify: { x: 110, y: 388 }, done: { x: 110, y: 480 },
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Bug Triage & Fix
 // ---------------------------------------------------------------------------
@@ -440,7 +462,39 @@ const BUGFIX_STEPS: WorkflowStepTemplate[] = [
     ],
     agentPreference: LIGHT,
   },
+  {
+    id: "done", ordinal: 4, name: "Done",
+    instructions:
+      "Finalize the fix after verification. Summarize the defect, its root cause, and the change that resolved it, and record the regression evidence. Make no further code changes.",
+    outputSchema: [
+      { key: "summary", type: "string", required: true },
+      { key: "resolution", type: "string", required: true },
+      { key: "regression_evidence", type: "array", itemType: "string", required: true },
+      { key: "handoff", type: "string", required: true },
+    ],
+    agentPreference: LIGHT,
+  },
 ];
+
+const BUGFIX_GRAPH: WorkflowGraph = {
+  nodes: [
+    { id: "reproduce", type: "step", name: "Reproduce", stepId: "reproduce" },
+    { id: "root_cause", type: "step", name: "Root Cause", stepId: "root_cause" },
+    { id: "patch", type: "step", name: "Patch", stepId: "patch" },
+    { id: "verify", type: "step", name: "Verify", stepId: "verify" },
+    { id: "done", type: "step", name: "Done", stepId: "done", terminal: true },
+  ],
+  edges: [
+    { from: "reproduce", to: "root_cause" },
+    { from: "root_cause", to: "patch" },
+    { from: "patch", to: "verify" },
+    { from: "verify", to: "done" },
+  ],
+  positions: {
+    reproduce: { x: 110, y: 20 }, root_cause: { x: 110, y: 112 }, patch: { x: 110, y: 204 },
+    verify: { x: 110, y: 296 }, done: { x: 110, y: 388 },
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Code Review
@@ -485,7 +539,37 @@ const CODE_REVIEW_STEPS: WorkflowStepTemplate[] = [
     ],
     agentPreference: REASONING,
   },
+  {
+    id: "done", ordinal: 3, name: "Done",
+    instructions:
+      "Finalize the review. Record the verdict, the change requests, and any follow-up the author must address before merge. Make no code changes.",
+    outputSchema: [
+      { key: "summary", type: "string", required: true },
+      { key: "verdict", type: "string", required: true, enum: ["approved", "changes_requested"] },
+      { key: "follow_up", type: "array", itemType: "string", required: false },
+      { key: "handoff", type: "string", required: true },
+    ],
+    agentPreference: LIGHT,
+  },
 ];
+
+const CODE_REVIEW_GRAPH: WorkflowGraph = {
+  nodes: [
+    { id: "analyze_diff", type: "step", name: "Analyze Diff", stepId: "analyze_diff" },
+    { id: "risk_pass", type: "step", name: "Risk Pass", stepId: "risk_pass" },
+    { id: "report", type: "step", name: "Report", stepId: "report" },
+    { id: "done", type: "step", name: "Done", stepId: "done", terminal: true },
+  ],
+  edges: [
+    { from: "analyze_diff", to: "risk_pass" },
+    { from: "risk_pass", to: "report" },
+    { from: "report", to: "done" },
+  ],
+  positions: {
+    analyze_diff: { x: 110, y: 20 }, risk_pass: { x: 110, y: 112 },
+    report: { x: 110, y: 204 }, done: { x: 110, y: 296 },
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Refactor
@@ -545,6 +629,24 @@ const REFACTOR_STEPS: WorkflowStepTemplate[] = [
   },
 ];
 
+const REFACTOR_GRAPH: WorkflowGraph = {
+  nodes: [
+    { id: "map_blast_radius", type: "step", name: "Map Blast Radius", stepId: "map_blast_radius" },
+    { id: "restructure", type: "step", name: "Restructure", stepId: "restructure" },
+    { id: "behavior_parity", type: "step", name: "Behavior Parity", stepId: "behavior_parity" },
+    { id: "done", type: "step", name: "Done", stepId: "done", terminal: true },
+  ],
+  edges: [
+    { from: "map_blast_radius", to: "restructure" },
+    { from: "restructure", to: "behavior_parity" },
+    { from: "behavior_parity", to: "done" },
+  ],
+  positions: {
+    map_blast_radius: { x: 110, y: 20 }, restructure: { x: 110, y: 112 },
+    behavior_parity: { x: 110, y: 204 }, done: { x: 110, y: 296 },
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Quality Coverage
 // ---------------------------------------------------------------------------
@@ -595,7 +697,36 @@ const QUALITY_COVERAGE_STEPS: WorkflowStepTemplate[] = [
     ],
     agentPreference: EXECUTION,
   },
+  {
+    id: "done", ordinal: 3, name: "Done",
+    instructions:
+      "Finalize the coverage work. Summarize the gaps closed, the checks added, and the resulting quality delta. Make no further changes.",
+    outputSchema: [
+      { key: "summary", type: "string", required: true },
+      { key: "gaps_closed", type: "array", itemType: "string", required: true },
+      { key: "handoff", type: "string", required: true },
+    ],
+    agentPreference: LIGHT,
+  },
 ];
+
+const QUALITY_COVERAGE_GRAPH: WorkflowGraph = {
+  nodes: [
+    { id: "find_gaps", type: "step", name: "Find Gaps", stepId: "find_gaps" },
+    { id: "generate_checks", type: "step", name: "Generate Checks", stepId: "generate_checks" },
+    { id: "confirm_green", type: "step", name: "Confirm Green", stepId: "confirm_green" },
+    { id: "done", type: "step", name: "Done", stepId: "done", terminal: true },
+  ],
+  edges: [
+    { from: "find_gaps", to: "generate_checks" },
+    { from: "generate_checks", to: "confirm_green" },
+    { from: "confirm_green", to: "done" },
+  ],
+  positions: {
+    find_gaps: { x: 110, y: 20 }, generate_checks: { x: 110, y: 112 },
+    confirm_green: { x: 110, y: 204 }, done: { x: 110, y: 296 },
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Initiative Implementation
@@ -753,8 +884,8 @@ export const BUILTIN_TEMPLATE_CATALOG: BuiltInTemplateDefinition[] = [
     id: "orca/brainstorm", name: "Brainstorm",
     description: "Frame the intent, set constraints, generate a proposal, then verify and critique it before it reaches code.",
     bestFor: "Exploring an idea and pressure-testing an approach before any code is written.",
-    version: 1, category: CATEGORY, recommended: true,
-    steps: BRAINSTORM_STEPS, guardrails: [CONTEXT_RULE], graph: null,
+    version: 2, category: CATEGORY, recommended: true,
+    steps: BRAINSTORM_STEPS, guardrails: [CONTEXT_RULE], graph: BRAINSTORM_GRAPH,
   },
   {
     id: "orca/feature-development", name: "Feature Implementation",
@@ -767,29 +898,29 @@ export const BUILTIN_TEMPLATE_CATALOG: BuiltInTemplateDefinition[] = [
     id: "orca/bug-triage-fix", name: "Bug Triage & Fix",
     description: "Reproduce the report, isolate the root cause, patch it, and prove the regression is gone.",
     bestFor: "A reported defect you can reproduce and need fixed without regressions.",
-    version: 1, category: CATEGORY, recommended: true,
-    steps: BUGFIX_STEPS, guardrails: [validationRule(["patch"]), APPROVAL_MARK_DONE], graph: null,
+    version: 2, category: CATEGORY, recommended: true,
+    steps: BUGFIX_STEPS, guardrails: [validationRule(["patch"]), APPROVAL_MARK_DONE], graph: BUGFIX_GRAPH,
   },
   {
     id: "orca/code-review", name: "Code Review",
     description: "Static-analyze a diff, surface second-order risks, and return concrete, actionable suggestions.",
     bestFor: "A thorough second-pass review of an existing diff or change.",
-    version: 1, category: CATEGORY, recommended: false,
-    steps: CODE_REVIEW_STEPS, guardrails: [CONTEXT_RULE], graph: null,
+    version: 2, category: CATEGORY, recommended: false,
+    steps: CODE_REVIEW_STEPS, guardrails: [CONTEXT_RULE], graph: CODE_REVIEW_GRAPH,
   },
   {
     id: "orca/refactor", name: "Refactor",
     description: "Map the blast radius, restructure in safe increments, and prove observable behavior is unchanged.",
     bestFor: "Restructuring code while proving observable behavior stays unchanged.",
-    version: 1, category: CATEGORY, recommended: false,
-    steps: REFACTOR_STEPS, guardrails: [validationRule(["restructure"]), APPROVAL_MARK_DONE], graph: null,
+    version: 2, category: CATEGORY, recommended: false,
+    steps: REFACTOR_STEPS, guardrails: [validationRule(["restructure"]), APPROVAL_MARK_DONE], graph: REFACTOR_GRAPH,
   },
   {
     id: "orca/quality-coverage", name: "Quality Coverage",
     description: "Find untested or under-checked paths, generate cases, and confirm they fail for the right reasons before they pass.",
     bestFor: "Closing gaps in tests, types, and checks on existing code.",
-    version: 1, category: CATEGORY, recommended: false,
-    steps: QUALITY_COVERAGE_STEPS, guardrails: [validationRule(["generate_checks", "confirm_green"])], graph: null,
+    version: 2, category: CATEGORY, recommended: false,
+    steps: QUALITY_COVERAGE_STEPS, guardrails: [validationRule(["generate_checks", "confirm_green"])], graph: QUALITY_COVERAGE_GRAPH,
   },
   {
     id: "orca/initiative-implementation", name: "Initiative Implementation",

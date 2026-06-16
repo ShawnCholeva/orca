@@ -63,6 +63,15 @@ describe("built-in template catalog", () => {
     expect(byId["orca/feature-development"].stepCount).toBe(5); // 4 steps + gate
     expect(byId["orca/initiative-implementation"].stepCount).toBe(8); // 7 steps + gate
     expect(byId["orca/brainstorm"].stepCount).toBe(6); // linear
-    expect(byId["orca/code-review"].stepCount).toBe(3);
+    expect(byId["orca/code-review"].stepCount).toBe(4);
+  });
+
+  it("every built-in graph has a terminal reachable from every node", () => {
+    for (const d of BUILTIN_TEMPLATE_CATALOG) {
+      expect(d.graph).not.toBeNull();
+      const errors = validateGraph(d.graph!, d.steps as WorkflowStepTemplate[]);
+      expect(errors).toEqual([]);
+      expect(d.graph!.nodes.some((n) => n.type === "step" && n.terminal)).toBe(true);
+    }
   });
 });

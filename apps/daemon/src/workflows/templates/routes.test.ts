@@ -166,6 +166,62 @@ describe("workflow template routes", () => {
     expect(duplicated.template.isLocked).toBe(false);
   });
 
+  it("graph-null create materializes a terminal and succeeds", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/v1/workflow-templates",
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+      payload: {
+        name: "Linear NoGraph",
+        description: "desc",
+        steps: [
+          { id: "a", name: "A", instructions: "do a",
+            outputSchema: [{ key: "s", type: "string", required: true }],
+            agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] },
+          { id: "b", name: "B", instructions: "do b",
+            outputSchema: [{ key: "t", type: "string", required: true }],
+            agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] },
+        ],
+        guardrails: [],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("rejects a graph whose only branch never reaches a terminal", async () => {
+    const res = await server.inject({
+      method: "POST",
+      url: "/v1/workflow-templates",
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+      payload: {
+        name: "Dangling",
+        description: "desc",
+        steps: [
+          { id: "a", name: "A", instructions: "do a",
+            outputSchema: [{ key: "s", type: "string", required: true }],
+            agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] },
+          { id: "b", name: "B", instructions: "do b",
+            outputSchema: [{ key: "t", type: "string", required: true }],
+            agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] },
+        ],
+        guardrails: [],
+        graph: {
+          nodes: [
+            { id: "a", type: "step", name: "A", stepId: "a" },
+            { id: "b", type: "step", name: "B", stepId: "b" },
+          ],
+          edges: [
+            { from: "a", to: "b" },
+            { from: "b", to: "a" },
+          ],
+          positions: { a: { x: 0, y: 0 }, b: { x: 0, y: 92 } },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("invalid_graph");
+  });
+
   it("POST create with scope, scopeName, graph in body persists and is returned", async () => {
     const graph = {
       nodes: [{ id: "n1", type: "step", name: "Intake", stepId: "intake", terminal: true }],
@@ -250,7 +306,7 @@ describe("workflow template routes", () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("invalid_graph");
-    expect(res.json().issues.join(" ")).toContain("exactly one terminal step is required");
+    expect(res.json().issues.join(" ")).toContain("at least one terminal step is required");
   });
 
   it("updating built-in template returns 409", async () => {

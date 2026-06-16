@@ -27,6 +27,7 @@ import {
   updateCustomTemplate,
 } from "./usecases.js";
 import { validateGraph, validateSchemaReferences } from "../graph/validate-graph.js";
+import { effectiveGraph } from "../graph/graph-routing.js";
 
 export interface WorkflowTemplateRouteDeps {
   db: Database.Database;
@@ -98,11 +99,12 @@ export function registerWorkflowTemplateRoutes(
       return { error: "validation_failed", issues: parsed.error.issues };
     }
 
-    if (parsed.data.graph) {
+    {
       const steps = normalizeStepsForValidation(parsed.data.steps);
+      const graph = effectiveGraph(parsed.data.graph ?? null, steps);
       const issues = [
-        ...validateGraph(parsed.data.graph, steps),
-        ...validateSchemaReferences(parsed.data.graph, steps),
+        ...validateGraph(graph, steps),
+        ...validateSchemaReferences(graph, steps),
       ];
       if (issues.length > 0) {
         reply.status(400);
@@ -124,11 +126,12 @@ export function registerWorkflowTemplateRoutes(
       return { error: "validation_failed", issues: parsed.error.issues };
     }
 
-    if (parsed.data.graph) {
+    {
       const steps = normalizeStepsForValidation(parsed.data.steps);
+      const graph = effectiveGraph(parsed.data.graph ?? null, steps);
       const issues = [
-        ...validateGraph(parsed.data.graph, steps),
-        ...validateSchemaReferences(parsed.data.graph, steps),
+        ...validateGraph(graph, steps),
+        ...validateSchemaReferences(graph, steps),
       ];
       if (issues.length > 0) {
         reply.status(400);
