@@ -1,10 +1,12 @@
 import type Database from "better-sqlite3";
 import {
   Activity,
+  ActivityStep,
   PendingQuestion,
   ProviderRecoveryCheckpoint,
   WorkflowStepResult,
   type Activity as ActivityT,
+  type ActivityStep as ActivityStepT,
   type PendingQuestion as PendingQuestionT
 } from "@orca/contracts";
 
@@ -27,7 +29,29 @@ interface ActivityRow {
   completed_at: string | null;
 }
 
-function rowToActivity(row: ActivityRow): ActivityT {
+function loadSteps(db: Database.Database, activityId: string): ActivityStepT[] {
+  const rows = db
+    .prepare(
+      `SELECT id, text, category, status, diff, created_at
+       FROM activity_steps WHERE activity_id = ? ORDER BY ordinal ASC`
+    )
+    .all(activityId) as Array<{
+      id: string; text: string; category: string | null;
+      status: string; diff: string | null; created_at: string;
+    }>;
+  return rows.map((r) =>
+    ActivityStep.parse({
+      id: r.id,
+      text: r.text,
+      category: r.category,
+      status: r.status,
+      ...(r.diff ? { diff: JSON.parse(r.diff) } : {}),
+      createdAt: r.created_at,
+    })
+  );
+}
+
+function rowToActivity(db: Database.Database, row: ActivityRow): ActivityT {
   let pendingQuestion: PendingQuestionT | undefined;
   if (row.pending_question !== null) {
     pendingQuestion = PendingQuestion.parse(JSON.parse(row.pending_question));
@@ -49,7 +73,8 @@ function rowToActivity(row: ActivityRow): ActivityT {
     ...(pendingQuestion !== undefined ? { pendingQuestion } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    completedAt: row.completed_at
+    completedAt: row.completed_at,
+    steps: loadSteps(db, row.id),
   });
 }
 
@@ -112,7 +137,7 @@ export function listActivitiesByGoal(
     )
     .all(goalId) as ActivityRow[];
   return rows
-    .map(rowToActivity)
+    .map((r) => rowToActivity(db, r))
     .map((a) => enrichStepResult(db, a))
     .map((a) => enrichProviderRecovery(db, a));
 }
