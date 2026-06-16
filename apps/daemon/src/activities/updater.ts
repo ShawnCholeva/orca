@@ -125,7 +125,7 @@ export class ActivityUpdater {
     ctx: ActivityStoreCtx,
     signal: Extract<
       ActivitySignal,
-      { kind: "step_started" | "tool_use" | "weak_signal_tick" | "permission_pending" }
+      { kind: "step_started" | "weak_signal_tick" | "permission_pending" }
     >,
     activity: {
       sourceKind: "step_started" | "tool_use" | "weak_signal" | "permission_pending";
