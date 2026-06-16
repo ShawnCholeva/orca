@@ -6,6 +6,7 @@ import { EventBus } from "../../events.js";
 import {
   installBuiltInTemplates,
   reconcileBuiltInTemplates,
+  upgradeInstalledBuiltInTemplates,
   UnknownBuiltInTemplateError,
 } from "./usecases.js";
 
@@ -75,5 +76,54 @@ describe("reconcileBuiltInTemplates", () => {
     reconcileBuiltInTemplates(db);
     const row = db.prepare("SELECT id FROM workflow_templates WHERE id = ?").get("orca/brainstorm");
     expect(row).toBeTruthy();
+  });
+});
+
+describe("upgradeInstalledBuiltInTemplates", () => {
+  function insertOldBuiltIn(id: string, version: number) {
+    const steps = JSON.stringify([
+      {
+        id: "old_step",
+        ordinal: 0,
+        name: "Old Step",
+        instructions: "do",
+        outputSchema: [{ key: "s", type: "string", required: true }],
+        agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+      },
+    ]);
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES (?, ?, '', ?, 1, 1, ?, '[]', ?, ?)"
+    ).run(id, id, version, steps, "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+  }
+
+  it("upgrades an installed built-in to the current catalog version", () => {
+    insertOldBuiltIn("orca/bug-triage-fix", 1);
+    upgradeInstalledBuiltInTemplates(ctx());
+    const row = db
+      .prepare("SELECT version, steps_json, graph_json FROM workflow_templates WHERE id = ?")
+      .get("orca/bug-triage-fix") as { version: number; steps_json: string; graph_json: string | null };
+    expect(row.version).toBe(2);
+    expect(row.steps_json).toContain('"id":"done"');
+    expect(row.graph_json).not.toBeNull();
+  });
+
+  it("does not install built-ins that were never installed", () => {
+    upgradeInstalledBuiltInTemplates(ctx());
+    const count = db
+      .prepare("SELECT COUNT(*) c FROM workflow_templates WHERE is_built_in = 1")
+      .get() as { c: number };
+    expect(count.c).toBe(0);
+  });
+
+  it("leaves an already-current built-in unchanged (version-guarded no-op)", () => {
+    installBuiltInTemplates(ctx(), ["orca/bug-triage-fix"]);
+    const before = db
+      .prepare("SELECT version FROM workflow_templates WHERE id = ?")
+      .get("orca/bug-triage-fix") as { version: number };
+    upgradeInstalledBuiltInTemplates(ctx());
+    const after = db
+      .prepare("SELECT version FROM workflow_templates WHERE id = ?")
+      .get("orca/bug-triage-fix") as { version: number };
+    expect(after.version).toBe(before.version);
   });
 });
