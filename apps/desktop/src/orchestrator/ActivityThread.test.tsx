@@ -22,6 +22,7 @@ const mk = (over: Partial<Activity> = {}): Activity => ({
   sourceKind: "step_started",
   workCategory: null,
   confidence: null,
+  steps: [],
   createdAt: "2026-06-05T00:00:00.000Z",
   updatedAt: "2026-06-05T00:00:00.000Z",
   completedAt: null,

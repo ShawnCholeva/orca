@@ -111,6 +111,7 @@ const activeActivity: Activity = {
   sourceKind: "tool_use",
   workCategory: "reading",
   confidence: "high",
+  steps: [],
   createdAt: now,
   updatedAt: now,
   completedAt: null,
