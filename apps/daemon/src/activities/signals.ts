@@ -1,5 +1,6 @@
 import type {
   ActivityConfidence,
+  ActivityDiff,
   ActivityWorkCategory,
   PendingQuestion
 } from "@orca/contracts";
@@ -22,6 +23,8 @@ export type ActivitySignal =
       stepRunId: string;
       agentSessionId: string | null;
       category: ActivityWorkCategory;
+      detail: string;
+      diff: ActivityDiff | null;
     }
   | {
       kind: "question_pending";

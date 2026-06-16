@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EventBus } from "../events.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import { listActivitiesByGoal } from "./projection.js";
+import { getLiveForStepRun } from "./store.js";
 import type { ActivityStoreCtx } from "./store.js";
 import { ActivityUpdater } from "./updater.js";
 
@@ -68,11 +69,11 @@ describe("ActivityUpdater", () => {
     updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
 
     nowMs += 100;
-    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading" });
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null });
     nowMs += 1_000;
-    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading" });
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null });
     nowMs += 1_000;
-    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading" });
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null });
 
     const activities = listActivitiesByGoal(db, "g1");
     expect(activities.filter((activity) => activity.workCategory === "reading")).toHaveLength(1);
@@ -82,13 +83,13 @@ describe("ActivityUpdater", () => {
   it("updates immediately when the tool category changes", () => {
     updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
     nowMs += 100;
-    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading" });
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null });
     nowMs += 100;
-    updater.apply(ctx, { kind: "tool_use", ...base, category: "editing" });
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "editing", detail: "Edited store.ts", diff: null });
 
     expect(listActivitiesByGoal(db, "g1")).toMatchObject([
       {
-        currentText: "Making changes...",
+        currentText: "Edited store.ts",
         sourceKind: "tool_use",
         workCategory: "editing"
       }
@@ -223,5 +224,49 @@ describe("ActivityUpdater", () => {
         pendingQuestion
       }
     ]);
+  });
+});
+
+function ctx() {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE events (id TEXT PRIMARY KEY, type TEXT, goal_id TEXT, payload TEXT, created_at TEXT);
+    CREATE TABLE activities (
+      id TEXT PRIMARY KEY, goal_id TEXT, workflow_run_id TEXT, step_run_id TEXT,
+      agent_session_id TEXT, turn_ordinal INTEGER, status TEXT, current_text TEXT,
+      final_summary TEXT, source_kind TEXT, work_category TEXT, confidence TEXT,
+      pending_question TEXT, created_at TEXT, updated_at TEXT, completed_at TEXT);
+    CREATE TABLE activity_steps (
+      id TEXT PRIMARY KEY, activity_id TEXT, ordinal INTEGER, text TEXT,
+      category TEXT, status TEXT, diff TEXT, created_at TEXT);
+  `);
+  let n = 0;
+  return { db, bus: { publish() {} } as unknown as EventBus, now: () => "2026-06-16T00:00:00.000Z", idFactory: () => `id-${n++}` };
+}
+const sig = { goalId: "g1", workflowRunId: "r1", stepRunId: "s1", agentSessionId: null };
+
+describe("ActivityUpdater steps", () => {
+  it("step_started opens an activity with no persisted steps", () => {
+    const c = ctx();
+    new ActivityUpdater().apply(c, { kind: "step_started", ...sig, stepName: "Root Cause" });
+    expect(getLiveForStepRun(c.db, "s1")!.steps).toEqual([]);
+  });
+
+  it("tool_use appends a persisted step with detail + diff", () => {
+    const c = ctx();
+    const u = new ActivityUpdater();
+    u.apply(c, { kind: "step_started", ...sig, stepName: "Root Cause" });
+    u.apply(c, { kind: "tool_use", ...sig, category: "reading", detail: "Read verifier.ts", diff: null });
+    const live = getLiveForStepRun(c.db, "s1")!;
+    expect(live.steps.map((s) => s.text)).toEqual(["Read verifier.ts"]);
+    expect(live.steps[0].status).toBe("active");
+  });
+
+  it("weak_signal appends no step", () => {
+    const c = ctx();
+    const u = new ActivityUpdater();
+    u.apply(c, { kind: "step_started", ...sig, stepName: "Root Cause" });
+    u.apply(c, { kind: "weak_signal_tick", ...sig });
+    expect(getLiveForStepRun(c.db, "s1")!.steps).toEqual([]);
   });
 });
