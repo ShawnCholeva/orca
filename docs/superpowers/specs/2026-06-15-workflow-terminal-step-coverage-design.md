@@ -147,3 +147,13 @@ mirroring the daemon's `materializeLinearGraph`:
 - Step-level `terminal` marker on the step contract (graph node `terminal` stays the
   single source of truth).
 - DB migration of existing user templates (validation applies on next edit).
+- **Pinning runs to `template_version` (planned fast-follow).** The runtime loads the
+  *live* template (`getTemplateById(db, run.templateId)`), so bumping the three
+  built-ins that gain a `Done` step (v1 → v2) means a run already in flight on the old
+  version will, after finishing its previously-terminal last step, resolve the new
+  edge to `Done` and dispatch it. This is a pre-existing live-template-loading
+  property; this change is the first to trigger a structural mid-run graph change.
+  Accepted for this branch (the run gains a finalize step). A separate feature will
+  snapshot the template into the run (new `workflow_runs` columns + migration + an
+  orchestrator read-path change) so runs execute against their pinned version — no
+  template version history is stored today, so a lookup-by-version is not possible.
