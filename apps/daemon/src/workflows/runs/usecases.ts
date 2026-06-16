@@ -119,9 +119,9 @@ export function startWorkflowRun(
 
     ctx.db
       .prepare(
-        "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES (?, ?, ?, ?, 'active', NULL, NULL, ?, NULL)"
+        "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, template_snapshot_json, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES (?, ?, ?, ?, ?, 'active', NULL, NULL, ?, NULL)"
       )
-      .run(runId, args.goalId, args.templateId, template.version, now);
+      .run(runId, args.goalId, args.templateId, template.version, JSON.stringify(template), now);
     ctx.db
       .prepare("UPDATE goals SET active_workflow_run_id = ? WHERE id = ?")
       .run(runId, args.goalId);

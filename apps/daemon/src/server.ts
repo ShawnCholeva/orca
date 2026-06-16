@@ -217,7 +217,7 @@ import {
   providerIdsForConnectedAgents,
   toModelProvidersResponse,
 } from './workflows/orchestration-transport/provider-catalog.js';
-import { getTemplateById } from './workflows/templates/projection.js';
+import { loadRunTemplate } from './workflows/runs/run-template.js';
 import { NotConnectedError, UnknownAgentError } from './readiness/service.js';
 import { checkTmuxReadiness } from './readiness/system.js';
 import { getSupervisionMode, setSupervisionMode } from './settings/store.js';
@@ -907,7 +907,7 @@ export function createServer(
       return;
     }
 
-    const template = getTemplateById(db, row.template_id);
+    const template = loadRunTemplate(db, { id: row.workflow_run_id, templateId: row.template_id });
     const step = template?.steps.find(
       (candidate) => candidate.id === row.step_template_id
     );

@@ -43,6 +43,7 @@ export const migrationFiles = [
   "0030_provider_recovery.sql",
   "0031_workflow_ledger.sql",
   "0032_gate_decision_ledger_version.sql",
+  "0033_workflow_run_template_snapshot.sql",
 ] as const;
 
 export function runMigrations(
