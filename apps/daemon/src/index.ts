@@ -21,7 +21,7 @@ import { sweepOrphanContextFiles } from './sessions/context-delivery.js';
 import { createDaemonContext } from './daemon-context.js';
 import { subscribeOrchestrationTriggers } from './generation/triggers.js';
 import { reconcileInFlightGenerations } from './generation/reconcile.js';
-import { reconcileBuiltInTemplates } from './workflows/templates/usecases.js';
+import { reconcileBuiltInTemplates, upgradeInstalledBuiltInTemplates } from './workflows/templates/usecases.js';
 import { reconcileWorkflowsOnBoot } from './workflows/reconcile.js';
 
 export interface DaemonStartHandles {
@@ -69,8 +69,12 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
   try {
     // Built-in templates are no longer auto-seeded; onboarding installs the
     // user's selection via POST /v1/workflow-templates/install. Drop any stale
-    // built-ins that are no longer in the catalog and have no runs.
+    // built-ins that are no longer in the catalog and have no runs, then bring
+    // already-installed built-ins up to their current catalog version (so catalog
+    // version bumps reach existing users on app update — without resurrecting
+    // ones they deleted or installing ones they never selected).
     reconcileBuiltInTemplates(db);
+    upgradeInstalledBuiltInTemplates({ db, bus: eventBus });
   } catch (err) {
     console.error('[orca-daemon] Workflow template reconcile failed — aborting startup:', err);
     process.exit(1);

@@ -219,6 +219,23 @@ export function installBuiltInTemplates(
     .map((d) => upsertBuiltInTemplate(ctx, d));
 }
 
+// Boot upgrade: bring already-installed built-ins up to their current catalog
+// version. Version-guarded (no-op when already current) and selection-respecting:
+// only upgrades built-ins already present in the DB — never installs ones the user
+// didn't select, and never resurrects deleted ones.
+export function upgradeInstalledBuiltInTemplates(ctx: WorkflowTemplateUsecaseCtx): void {
+  const installed = new Set(
+    (
+      ctx.db
+        .prepare("SELECT id FROM workflow_templates WHERE is_built_in = 1")
+        .all() as { id: string }[]
+    ).map((r) => r.id)
+  );
+  for (const def of BUILTIN_TEMPLATE_CATALOG) {
+    if (installed.has(def.id)) upsertBuiltInTemplate(ctx, def);
+  }
+}
+
 // Boot cleanup: drop built-ins no longer in the catalog that have no runs.
 export function reconcileBuiltInTemplates(db: Database.Database): void {
   const placeholders = BUILTIN_TEMPLATE_CATALOG.map(() => "?").join(", ");
