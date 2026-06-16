@@ -140,6 +140,23 @@ describe("workflow run usecases", () => {
     ]);
   });
 
+  it("snapshots the template definition into the run at start", () => {
+    const { db, ctx } = setup();
+    seedGoal(db, "goal-1");
+    seedTemplate(db, "orca/engineering", 7);
+
+    const run = startWorkflowRun(ctx, { goalId: "goal-1", templateId: "orca/engineering" });
+
+    const row = db
+      .prepare("SELECT template_snapshot_json FROM workflow_runs WHERE id = ?")
+      .get(run.id) as { template_snapshot_json: string | null };
+    expect(row.template_snapshot_json).not.toBeNull();
+    const snap = JSON.parse(row.template_snapshot_json!);
+    expect(snap.id).toBe("orca/engineering");
+    expect(snap.version).toBe(7);
+    expect(snap.steps[0].id).toBe("intake");
+  });
+
   it("supports pause -> resume and emits lifecycle events", () => {
     const { events, ctx } = setup();
     seedGoal(ctx.db, "goal-1");
