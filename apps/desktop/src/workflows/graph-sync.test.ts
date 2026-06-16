@@ -38,6 +38,16 @@ describe("buildInitialGraph", () => {
     const graph = buildInitialGraph([makeStep("s1")]);
     expect(graph.edges).toHaveLength(0);
   });
+
+  it("marks the last step terminal", () => {
+    const graph = buildInitialGraph([makeStep("s1"), makeStep("s2"), makeStep("s3")]);
+    expect(graph.nodes.map((n) => n.terminal ?? false)).toEqual([false, false, true]);
+  });
+
+  it("single step is terminal", () => {
+    const graph = buildInitialGraph([makeStep("s1")]);
+    expect(graph.nodes[0]!.terminal).toBe(true);
+  });
 });
 
 describe("reconcileGraph", () => {
@@ -164,5 +174,35 @@ describe("reconcileGraph", () => {
       { nodes: [{ id: "a", type: "step", name: "A", stepId: "a" }], edges: [{ from: "a", to: "gone" }], positions: { a: { x: 0, y: 0 } } } as any,
     );
     expect(g.edges).toEqual([]);
+  });
+
+  it("defaults the last step terminal when no node is terminal", () => {
+    const steps = [makeStep("s1"), makeStep("s2")];
+    const graph = {
+      nodes: [
+        { id: "s1", type: "step" as const, name: "s1", stepId: "s1" },
+        { id: "s2", type: "step" as const, name: "s2", stepId: "s2" },
+      ],
+      edges: [{ from: "s1", to: "s2" }],
+      positions: { s1: { x: 110, y: 20 }, s2: { x: 110, y: 112 } },
+    };
+    const next = reconcileGraph(steps, graph);
+    const s2 = next.nodes.find((n) => n.id === "s2");
+    expect(s2!.terminal).toBe(true);
+  });
+
+  it("preserves an existing terminal flag instead of overriding it", () => {
+    const steps = [makeStep("s1"), makeStep("s2")];
+    const graph = {
+      nodes: [
+        { id: "s1", type: "step" as const, name: "s1", stepId: "s1", terminal: true },
+        { id: "s2", type: "step" as const, name: "s2", stepId: "s2" },
+      ],
+      edges: [],
+      positions: { s1: { x: 110, y: 20 }, s2: { x: 110, y: 112 } },
+    };
+    const next = reconcileGraph(steps, graph);
+    expect(next.nodes.find((n) => n.id === "s1")!.terminal).toBe(true);
+    expect(next.nodes.find((n) => n.id === "s2")!.terminal ?? false).toBe(false);
   });
 });
