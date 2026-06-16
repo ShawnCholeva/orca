@@ -30,7 +30,7 @@ import {
 import { createRecommendationForWorkflowInTx } from "../orchestrator/workflow-recommendations.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import { getWorkflowStepRunById } from "../steps/projection.js";
-import { getTemplateById } from "../templates/projection.js";
+import { loadRunTemplate } from "../runs/run-template.js";
 import { appendTransportAttemptFinishedEvent } from "./events.js";
 import { validateOperatorSelectionProposal } from "./proposals.js";
 
@@ -551,7 +551,7 @@ export async function submitHumanReviewDecision(
     throw new HumanReviewNotFoundError(input.goalId, input.workflowRunId, input.attemptId);
   }
 
-  const template = getTemplateById(deps.db, run.templateId);
+  const template = loadRunTemplate(deps.db, run);
   if (!template) {
     throw new HumanReviewNotFoundError(input.goalId, input.workflowRunId, input.attemptId);
   }

@@ -14,7 +14,7 @@ import { redactSecrets } from "../../memory/normalize.js";
 import { appendWorkflowEvent } from "../events.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import { getWorkflowStepRunById } from "./projection.js";
-import { getTemplateById } from "../templates/projection.js";
+import { loadRunTemplate } from "../runs/run-template.js";
 import {
   buildEvaluationFailedStepResult,
   mapStepRunStatusToResultStatus,
@@ -252,7 +252,7 @@ export function createInitialStep(
 ): WorkflowStepRunT {
   const run = getWorkflowRunById(db, workflowRunId);
   if (!run) throw new Error("run_not_found");
-  const template = getTemplateById(db, run.templateId);
+  const template = loadRunTemplate(db, run);
   if (!template) throw new Error("template_not_found");
   const first = template.steps.find((step) => step.ordinal === 0);
   if (!first) throw new Error("template_missing_initial_step");
@@ -331,7 +331,7 @@ export function advanceToNextStepOrGate(
     }
     const run = getWorkflowRunById(db, current.workflowRunId);
     if (!run) throw new Error("run_not_found");
-    const template = getTemplateById(db, run.templateId);
+    const template = loadRunTemplate(db, run);
     if (!template) throw new Error("template_not_found");
 
     const timestamp = now();
@@ -497,7 +497,7 @@ export function retryStep(
     }
     const run = getWorkflowRunById(db, row.workflowRunId);
     if (!run) throw new Error("run_not_found");
-    const template = getTemplateById(db, run.templateId);
+    const template = loadRunTemplate(db, run);
     if (!template) throw new Error("template_not_found");
     const templateStep = template.steps.find((step) => step.id === row.stepTemplateId);
     if (!templateStep) throw new Error("template_step_not_found");

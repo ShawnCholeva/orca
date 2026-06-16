@@ -44,7 +44,7 @@ import { effectiveGraph, resolveGateNext, resolveStepNext } from "../graph/graph
 import { evaluateGate } from "./gate-evaluation.js";
 import { nextTraversalSeq, recordGateDecision } from "../gates/usecases.js";
 import { listGateDecisionsForRun } from "../gates/projection.js";
-import { getTemplateById } from "../templates/projection.js";
+import { loadRunTemplate } from "../runs/run-template.js";
 import {
   decisionFingerprint,
   listDecisionsForRun,
@@ -451,7 +451,7 @@ export class OrchestratorService {
     // (4) Load run, template, goal — needed for blockRun/synthesis context.
     const run = getWorkflowRunById(db, stepRun.workflow_run_id);
     if (!run || run.status !== "active") return;
-    const template = getTemplateById(db, run.templateId);
+    const template = loadRunTemplate(db, run);
     if (!template) return;
     const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
     if (!stepTpl) return;
@@ -785,7 +785,7 @@ export class OrchestratorService {
         if (!choice?.modelId) return;
         const run = getWorkflowRunById(db, stepRun.workflow_run_id);
         if (!run || run.status !== "active") return;
-        const template = getTemplateById(db, run.templateId);
+        const template = loadRunTemplate(db, run);
         if (!template) return;
         const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
         if (!stepTpl) return;
@@ -839,7 +839,7 @@ export class OrchestratorService {
 
       const run = getWorkflowRunById(db, stepRun.workflow_run_id);
       if (!run || run.status !== "active") return;
-      const template = getTemplateById(db, run.templateId);
+      const template = loadRunTemplate(db, run);
       if (!template) return;
       const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
       if (!stepTpl) return;
@@ -917,7 +917,7 @@ export class OrchestratorService {
     // (6) Load run, template, step template to call commitUserInputDecision.
     const run = getWorkflowRunById(db, stepRun.workflow_run_id);
     if (!run || run.status !== "active") return;
-    const template = getTemplateById(db, run.templateId);
+    const template = loadRunTemplate(db, run);
     if (!template) return;
     const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
     if (!stepTpl) return;
@@ -989,7 +989,7 @@ export class OrchestratorService {
         `provider recovery checkpoint mismatch: ${checkpointId}`
       );
     }
-    const template = getTemplateById(db, run.templateId);
+    const template = loadRunTemplate(db, run);
     if (!template) throw new OrchestratorProviderRecoveryNotFoundError(`template not found: ${run.templateId}`);
     const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
     if (!stepTpl) throw new OrchestratorProviderRecoveryNotFoundError(`step template not found: ${stepRun.step_template_id}`);
@@ -1298,7 +1298,7 @@ export class OrchestratorService {
     if (!stepRun || stepRun.status !== "active") return;
     const run = getWorkflowRunById(db, stepRun.workflow_run_id);
     if (!run || run.status !== "active") return;
-    const template = getTemplateById(db, run.templateId);
+    const template = loadRunTemplate(db, run);
     if (!template) return;
     const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
     if (!stepTpl) return;
@@ -1601,7 +1601,7 @@ export class OrchestratorService {
       .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
       .get(run.currentStepRunId) as StepRunRow | undefined;
     if (!stepRun || stepRun.status !== "active") return;
-    const template = getTemplateById(db, run.templateId);
+    const template = loadRunTemplate(db, run);
     if (!template) return;
     const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
     if (!stepTpl) return;
@@ -1749,7 +1749,7 @@ export class OrchestratorService {
   ): Promise<void> {
     const run = getWorkflowRunById(db, runId);
     if (!run) throw new OrchestratorRunNotFoundError(runId);
-    const template = getTemplateById(db, run.templateId);
+    const template = loadRunTemplate(db, run);
     if (!template) throw new OrchestratorTemplateNotFoundError(run.templateId);
     const firstStep = template.steps.find((s) => s.ordinal === 0);
     if (!firstStep) throw new Error(`template has no first step: ${run.templateId}`);
@@ -1779,7 +1779,7 @@ export class OrchestratorService {
   ): Promise<void> {
     const run = getWorkflowRunById(db, runId);
     if (!run || run.status !== "active") return;
-    const template = getTemplateById(db, run.templateId);
+    const template = loadRunTemplate(db, run);
     if (!template) return;
     const stepRun = db
       .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
@@ -1824,7 +1824,7 @@ export class OrchestratorService {
       return;
     }
 
-    const template = getTemplateById(db, run.templateId);
+    const template = loadRunTemplate(db, run);
     if (!template) return;
     const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
     if (!stepTpl) return;
@@ -1909,7 +1909,7 @@ export class OrchestratorService {
     const run = getWorkflowRunById(db, runId);
     if (!run) throw new OrchestratorRunNotFoundError(runId);
     const stepRun = readStepRun(db, run.currentStepRunId);
-    const template = getTemplateById(db, run.templateId);
+    const template = loadRunTemplate(db, run);
     if (!template) throw new OrchestratorTemplateNotFoundError(run.templateId);
     const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
     if (!stepTpl) throw new OrchestratorStepNotFoundError(stepRun.id);
@@ -2075,7 +2075,7 @@ export class OrchestratorService {
     if (!run) throw new OrchestratorRunNotFoundError(workflowRunId);
     if (run.status !== "active") throw new OrchestratorRunNotActiveError(workflowRunId);
 
-    const template = getTemplateById(db, run.templateId);
+    const template = loadRunTemplate(db, run);
     if (!template) throw new OrchestratorTemplateNotFoundError(run.templateId);
     const stepRun = readStepRun(db, run.currentStepRunId);
     if (stepRun.status !== "active") throw new OrchestratorRunNotActiveError(workflowRunId);
@@ -3364,7 +3364,7 @@ export class OrchestratorService {
       return;
     }
 
-    const template = getTemplateById(db, run.templateId);
+    const template = loadRunTemplate(db, run);
     if (!template) return;
     const goal = readGoal(db, run.goalId);
 
