@@ -167,6 +167,7 @@ describe('context migration 0006_context.sql', () => {
       '0030_provider_recovery.sql',
       '0031_workflow_ledger.sql',
       '0032_gate_decision_ledger_version.sql',
+      '0033_workflow_run_template_snapshot.sql',
     ]);
 
     const tables = (
@@ -260,6 +261,7 @@ describe('context migration 0006_context.sql', () => {
       '0030_provider_recovery.sql',
       '0031_workflow_ledger.sql',
       '0032_gate_decision_ledger_version.sql',
+      '0033_workflow_run_template_snapshot.sql',
     ]);
 
     const counts = {
