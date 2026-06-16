@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { EventBus } from "../events.js";
-import { appendActivityStep, completeLive, getLiveForStepRun } from "./store.js";
+import { appendActivityStep, completeLive, expireLive, getLiveForStepRun } from "./store.js";
 
 function ctx() {
   const db = new Database(":memory:");
@@ -49,6 +49,15 @@ describe("activity steps", () => {
     const row = c.db.prepare("SELECT status, final_summary FROM activities WHERE step_run_id='s1'").get() as any;
     expect(row.status).toBe("completed");
     expect(row.final_summary).toBe("Found the bug.");
+    const stepStatus = c.db.prepare("SELECT status FROM activity_steps").get() as any;
+    expect(stepStatus.status).toBe("done");
+  });
+
+  it("expireLive marks the active step done", () => {
+    appendActivityStep(c, { ...base, text: "Read verifier.ts", category: "reading", diff: null });
+    expireLive(c, { stepRunId: "s1" });
+    const row = c.db.prepare("SELECT status FROM activities WHERE step_run_id='s1'").get() as any;
+    expect(row.status).toBe("expired");
     const stepStatus = c.db.prepare("SELECT status FROM activity_steps").get() as any;
     expect(stepStatus.status).toBe("done");
   });

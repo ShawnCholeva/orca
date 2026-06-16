@@ -531,6 +531,10 @@ export function expireLive(
       )
       .run(now, now, live.id);
 
+    ctx.db
+      .prepare("UPDATE activity_steps SET status = 'done' WHERE activity_id = ? AND status = 'active'")
+      .run(live.id);
+
     const expired = getActivityById(ctx.db, live.id);
     if (expired === undefined) throw new Error(`Activity disappeared: ${live.id}`);
     event = insertActivityChangedEvent(ctx.db, expired, now);
