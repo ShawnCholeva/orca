@@ -271,6 +271,9 @@ export const StepAgentChoice = z
   .strict();
 export type StepAgentChoice = z.infer<typeof StepAgentChoice>;
 
+export const StepCompletionPolicy = z.enum(["interview", "reasoning", "handoff"]);
+export type StepCompletionPolicy = z.infer<typeof StepCompletionPolicy>;
+
 export const WorkflowStepTemplate = z
   .object({
     id: Id100,
@@ -279,6 +282,7 @@ export const WorkflowStepTemplate = z
     instructions: BoundedString(WORKFLOW_STEP_MAX_INSTRUCTIONS_BYTES, "instructions"),
     outputSchema: WorkflowStepOutputSchema,
     agentPreference: z.array(StepAgentChoice).min(1).max(8),
+    completionPolicy: StepCompletionPolicy.optional(),
   })
   .strict();
 export type WorkflowStepTemplate = z.infer<typeof WorkflowStepTemplate>;

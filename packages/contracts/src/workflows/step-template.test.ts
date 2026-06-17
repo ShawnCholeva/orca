@@ -23,6 +23,18 @@ describe("WorkflowStepTemplate (instruction-driven)", () => {
     expect(() => WorkflowStepTemplate.parse({ id: "x", ordinal: 0, name: "X", outputSchema: [], agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] }))
       .toThrow();
   });
+  it("accepts an optional completionPolicy and leaves it absent when unset", () => {
+    const base = { id: "x", ordinal: 0, name: "X", instructions: "do it", outputSchema: [{ key: "k", type: "string", required: true }], agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] };
+    const parsed = WorkflowStepTemplate.parse(base);
+    expect(parsed.completionPolicy).toBeUndefined();
+
+    const withPolicy = WorkflowStepTemplate.parse({ ...base, completionPolicy: "interview" });
+    expect(withPolicy.completionPolicy).toBe("interview");
+  });
+  it("rejects an unknown completionPolicy value", () => {
+    const base = { id: "x", ordinal: 0, name: "X", instructions: "do it", outputSchema: [{ key: "k", type: "string", required: true }], agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] };
+    expect(() => WorkflowStepTemplate.parse({ ...base, completionPolicy: "bogus" })).toThrow();
+  });
 });
 
 describe("artifact types + interview turn", () => {
