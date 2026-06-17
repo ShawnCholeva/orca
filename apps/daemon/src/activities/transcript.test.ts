@@ -105,6 +105,18 @@ describe("extractReasoningSince", () => {
     });
     const out = extractReasoningSince(thinkingOnly, 0);
     expect(out.notes).toEqual([]);
+    expect(out.cursor).toBe(0);
+  });
+
+  it("ignores assistant entries whose content is a plain string, not an array", () => {
+    const stringContent = JSON.stringify({
+      type: "assistant",
+      message: { role: "assistant", content: "A simple string response." },
+      uuid: "sc1",
+    });
+    const out = extractReasoningSince(stringContent, 0);
+    expect(out.notes).toEqual([]);
+    expect(out.cursor).toBe(0);
   });
 
   it("handles empty input without throwing", () => {
