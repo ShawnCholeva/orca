@@ -76,6 +76,25 @@ describe("test-command classification (no substring false positives)", () => {
   });
 });
 
+describe("file-reading shell commands render as Read", () => {
+  it("treats sed/cat/head/tail of a file as a read", () => {
+    expect(narrateToolDetail("Bash", { command: "sed -n '1030,1050p' apps/desktop/src/App.tsx" }))
+      .toBe("Read App.tsx");
+    expect(narrateToolDetail("Bash", { command: "cat apps/foo.ts" })).toBe("Read foo.ts");
+    expect(narrateToolDetail("Bash", { command: "head -n 20 src/x.ts" })).toBe("Read x.ts");
+    expect(narrateToolDetail("Bash", { command: "tail -f server.log" })).toBe("Read server.log");
+  });
+  it("keeps file reads in the checklist (not low-signal)", () => {
+    expect(isLowSignalTool("Bash", { command: "sed -n '1,5p' a.ts" })).toBe(false);
+    expect(isLowSignalTool("Bash", { command: "cat a.ts" })).toBe(false);
+  });
+  it("drops search pipelines and treats sed -i as a run, not a read", () => {
+    expect(isLowSignalTool("Bash", { command: "cat a.ts | grep foo" })).toBe(true);
+    expect(narrateToolDetail("Bash", { command: "sed -i 's/a/b/' a.ts" })).toMatch(/^Ran /);
+    expect(narrateToolDetail("Bash", { command: "sed -i 's/a/b/' a.ts" })).not.toMatch(/^Read /);
+  });
+});
+
 describe("isLowSignalTool curation", () => {
   it("drops searches and read-only inspection commands", () => {
     expect(isLowSignalTool("Grep", { pattern: "x" })).toBe(true);

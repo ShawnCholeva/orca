@@ -25,12 +25,34 @@ export function isTestCommand(command: string): boolean {
 }
 
 const BASH_LOW_SIGNAL = new Set([
-  "grep", "rg", "ag", "find", "ls", "wc", "cat", "head", "tail",
+  "grep", "rg", "ag", "find", "ls", "wc",
   "echo", "pwd", "which", "stat", "file", "tree", "sort", "uniq",
 ]);
 const GIT_READ_ONLY = new Set([
   "status", "diff", "log", "show", "ls-files", "grep", "branch", "rev-parse",
 ]);
+
+// Shell commands that read a file's contents — the human reads these like a
+// Read tool call ("Read App.tsx"), not "Ran sed …".
+const READ_COMMANDS = new Set(["sed", "cat", "head", "tail"]);
+
+/** When a Bash command just reads a file (sed -n 'Np' / cat / head / tail of a
+ *  single file, no pipe), returns that file's basename; otherwise null. An
+ *  in-place sed edit (-i) is not a read. */
+export function bashReadFile(command: string): string | null {
+  if (command.includes("|")) return null;
+  const raw = command.trim().split(/\s+/);
+  let i = 0;
+  while (i < raw.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(raw[i] ?? "")) i += 1;
+  const cmd = (raw[i] ?? "").replace(/.*[\\/]/, "").toLowerCase();
+  if (!READ_COMMANDS.has(cmd)) return null;
+  if (cmd === "sed" && raw.some((t) => t === "-i" || t.startsWith("-i."))) return null;
+  const last = (raw[raw.length - 1] ?? "").replace(/^['"]|['"]$/g, "");
+  if (last === "" || last.startsWith("-")) return null;
+  // A bare sed script like '1030,1050p' is not a file.
+  if (cmd === "sed" && /^[0-9,$]*[a-z]$/i.test(last)) return null;
+  return basename(last);
+}
 
 /** Low-signal look-around the activity checklist should not persist as a step:
  *  searches (Grep/Glob) and read-only inspection shell commands. Substantive
@@ -40,6 +62,8 @@ export function isLowSignalTool(toolName: string, toolInput: unknown): boolean {
   if (toolName !== "Bash") return false;
   const command = (toolInput as { command?: unknown } | null)?.command;
   if (typeof command !== "string") return false;
+  // A pipeline filtered through a search is look-around (e.g. `cat x | grep y`).
+  if (/\|\s*(grep|rg|ag)\b/.test(command)) return true;
   const tokens = commandTokens(command);
   const first = tokens[0] ?? "";
   if (BASH_LOW_SIGNAL.has(first)) return true;
@@ -124,6 +148,8 @@ export function narrateToolDetail(toolName: string, toolInput: unknown): string 
       case "Bash": {
         const cmd = typeof input.command === "string" ? input.command : null;
         if (!cmd) return narrateCategory("running");
+        const readFile = bashReadFile(cmd);
+        if (readFile) return `Read ${readFile}`;
         return isTestCommand(cmd) ? `Ran tests: ${truncate(cmd)}` : `Ran ${truncate(cmd)}`;
       }
       default:
