@@ -425,7 +425,12 @@ export const WorkflowStepResult = z
     successScore: Score01,
     quality: WorkflowStepResultQuality,
     performance: WorkflowStepResultPerformance,
-    outcome: WorkflowStepResultOutcome
+    outcome: WorkflowStepResultOutcome,
+    resultSummary: z.string().max(2000).optional(),
+    primaryArtifact: z
+      .object({ reference: z.string().max(1024), description: z.string().max(512) })
+      .strict()
+      .optional(),
   })
   .strict();
 export type WorkflowStepResult = z.infer<typeof WorkflowStepResult>;
