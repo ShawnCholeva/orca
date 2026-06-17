@@ -188,6 +188,7 @@ import type { ActivitySignal } from './activities/signals.js';
 import type { ActivityStoreCtx } from './activities/store.js';
 import { ActivityUpdater } from './activities/updater.js';
 import { reconcileStepResultActivities } from './activities/step-result-activity.js';
+import { extractReasoningSince } from './activities/transcript.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
 import { insertMessageWithEvent } from './orchestrator-chat/usecases.js';
@@ -558,6 +559,7 @@ export function createServer(
   const permissionApprovals = new PermissionApprovalStore(daemonContext.idFactory);
   const PERMISSION_DECISION_TIMEOUT_MS = 1_790_000; // ~under the 1800s PermissionRequest hook timeout; then deny
   const activityUpdater = new ActivityUpdater();
+  const reasoningCursors = new Map<string, number>();
   const activityCtx: ActivityStoreCtx = {
     db,
     bus: eventBus,
@@ -1387,6 +1389,23 @@ export function createServer(
     onToolUse: async (sessionId, payload) => {
       const stepContext = resolveStepContext(sessionId);
       if (!stepContext) return;
+      if (payload.transcriptPath) {
+        try {
+          const text = readFileSync(payload.transcriptPath, "utf8");
+          const prev = reasoningCursors.get(stepContext.stepRunId) ?? 0;
+          const { notes, cursor } = extractReasoningSince(text, prev);
+          reasoningCursors.set(stepContext.stepRunId, cursor);
+          for (const note of notes) {
+            applyActivitySafely("agent.reasoning_note", {
+              kind: "reasoning_note",
+              ...stepContext,
+              text: note,
+            });
+          }
+        } catch {
+          // transcript read/parse must never break tool_use handling
+        }
+      }
       // Curate the checklist: searches and read-only look-around are low signal —
       // skip them so the persisted steps stay substantive (reads, edits, runs).
       if (isLowSignalTool(payload.toolName, payload.toolInput)) return;
