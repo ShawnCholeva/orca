@@ -1814,6 +1814,21 @@ export const LedgerRecord = z
   .strict();
 export type LedgerRecord = z.infer<typeof LedgerRecord>;
 
+// Mirrors PendingQuestionItem in ../index.ts. Kept local because ../index.ts
+// imports this module, so importing it back would create a circular reference;
+// the shapes are structurally identical and stay interchangeable.
+const AskUserQuestionItem = z
+  .object({
+    header: z.string().max(120),
+    question: z.string().max(4000),
+    multiSelect: z.boolean(),
+    options: z
+      .array(z.object({ label: z.string().min(1).max(200), description: z.string().max(1000) }))
+      .min(1)
+      .max(12),
+  })
+  .strict();
+
 export const OrchestratorAction = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("paraphrase_agent_message"), body: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
   z.object({ kind: z.literal("forward_to_agent"), translated: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
@@ -1821,5 +1836,8 @@ export const OrchestratorAction = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("approve_step_complete"), scoring: z.unknown().optional(), rationale: z.string().max(2000).optional() }),
   z.object({ kind: z.literal("revise_step"), feedback: z.string().min(1).max(4000), rationale: z.string().max(2000).optional() }),
   z.object({ kind: z.literal("escalate_to_user"), body: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
+  // The step agent needs a decision from the user: surface structured options as
+  // an interactive choice, not prose. The answer flows back as user guidance.
+  z.object({ kind: z.literal("ask_user"), body: z.string().min(1).max(8000), questions: z.array(AskUserQuestionItem).min(1).max(4), rationale: z.string().max(2000).optional() }),
 ]);
 export type OrchestratorAction = z.infer<typeof OrchestratorAction>;
