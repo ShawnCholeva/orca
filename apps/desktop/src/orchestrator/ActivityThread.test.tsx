@@ -173,15 +173,45 @@ describe("LiveActivity", () => {
 });
 
 describe("pickLiveActivity", () => {
-  it("returns the latest active/paused activity and null when none are live", () => {
+  it("returns pause-interaction activities and null for active tool_use or plain paused", () => {
+    // step_confirmation_pending → shown
     expect(
       pickLiveActivity([
         mk({ id: "c1", status: "completed", finalSummary: "done", sourceKind: "turn_completed" }),
-        mk({ id: "live-1", currentText: "Older live activity" }),
-        mk({ id: "live-2", status: "paused_for_input", currentText: "Latest live activity" }),
+        mk({ id: "confirm", status: "paused_for_input", sourceKind: "step_confirmation_pending" }),
       ])?.id,
-    ).toBe("live-2");
+    ).toBe("confirm");
 
+    // provider_recovery_pending → shown
+    expect(
+      pickLiveActivity([
+        mk({ id: "recovery", status: "paused_for_input", sourceKind: "provider_recovery_pending" }),
+      ])?.id,
+    ).toBe("recovery");
+
+    // paused_for_input with a pending question → shown
+    expect(
+      pickLiveActivity([
+        mk({ id: "q1", status: "paused_for_input", sourceKind: "question_pending",
+          pendingQuestion: { questionId: "q1", toolUseId: "t1", questions: [] } }),
+      ])?.id,
+    ).toBe("q1");
+
+    // active tool_use (no pause interaction) → not shown
+    expect(
+      pickLiveActivity([
+        mk({ id: "live-1", status: "active", sourceKind: "tool_use" }),
+      ]),
+    ).toBeNull();
+
+    // plain paused_for_input without a recognised source → not shown
+    expect(
+      pickLiveActivity([
+        mk({ id: "live-2", status: "paused_for_input", sourceKind: "step_started" }),
+      ]),
+    ).toBeNull();
+
+    // nothing live → null
     expect(
       pickLiveActivity([
         mk({ id: "c1", status: "completed", finalSummary: "done", sourceKind: "turn_completed" }),
