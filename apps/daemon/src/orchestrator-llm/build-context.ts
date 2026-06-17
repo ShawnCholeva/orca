@@ -4,6 +4,7 @@ import {
   type OrchestratorInvocationContext,
   type OrchestratorContextInput,
 } from "./context.js";
+import { type WorkflowStepTemplate } from "@orca/contracts";
 
 const RECENT_CHAT_LIMIT = 40;
 
@@ -12,6 +13,87 @@ const RECENT_CHAT_LIMIT = 40;
 const FREEFORM_OUTPUT_SCHEMA: OrchestratorContextInput["currentStep"]["outputSchema"] = [
   { key: "response", type: "string", required: true, description: "Orchestrator response" },
 ];
+
+function loadWorkspaces(
+  db: Database.Database,
+  goalId: string
+): OrchestratorContextInput["goal"]["attachedWorkspaces"] {
+  const rows = db
+    .prepare("SELECT id, name, path FROM workspaces WHERE goal_id = ? ORDER BY attached_at ASC")
+    .all(goalId) as Array<{ id: string; name: string; path: string }>;
+  return rows.map((r) => ({ id: r.id, name: r.name, root: r.path }));
+}
+
+function loadPriorArtifacts(
+  db: Database.Database,
+  runId: string,
+  currentStepRunId: string
+): OrchestratorContextInput["priorStepArtifacts"] {
+  const stepRuns = db
+    .prepare("SELECT id, step_template_id FROM workflow_step_runs WHERE workflow_run_id = ?")
+    .all(runId) as Array<{ id: string; step_template_id: string }>;
+  const byId = new Map(stepRuns.map((s) => [s.id, s]));
+
+  // Artifacts ordered ASC by created_at; the last seen per template is the most recent.
+  const artifacts = db
+    .prepare(
+      "SELECT step_run_id, body FROM workflow_artifacts WHERE workflow_run_id = ? AND type = 'step_output' AND step_run_id IS NOT NULL ORDER BY created_at ASC"
+    )
+    .all(runId) as Array<{ step_run_id: string; body: string }>;
+
+  const latestByTemplate = new Map<string, unknown>();
+  for (const artifact of artifacts) {
+    if (artifact.step_run_id === currentStepRunId) continue;
+    const owner = byId.get(artifact.step_run_id);
+    if (!owner) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(artifact.body);
+    } catch {
+      parsed = artifact.body;
+    }
+    latestByTemplate.set(owner.step_template_id, parsed);
+  }
+
+  return [...latestByTemplate].map(([stepId, outputJson]) => ({ stepId, outputJson }));
+}
+
+function loadActiveStep(
+  db: Database.Database,
+  runId: string,
+  stepRunId: string
+): {
+  stepTpl: WorkflowStepTemplate;
+  templateVersion: number;
+  ordinal: number;
+} | null {
+  const run = db
+    .prepare("SELECT id, template_id, status FROM workflow_runs WHERE id = ?")
+    .get(runId) as { id: string; template_id: string; status: string } | undefined;
+  if (!run) return null;
+
+  const tplRow = db
+    .prepare("SELECT steps_json, version FROM workflow_templates WHERE id = ?")
+    .get(run.template_id) as { steps_json: string; version: number } | undefined;
+  if (!tplRow) return null;
+
+  let steps: WorkflowStepTemplate[];
+  try {
+    steps = JSON.parse(tplRow.steps_json) as WorkflowStepTemplate[];
+  } catch {
+    return null;
+  }
+
+  const stepRun = db
+    .prepare("SELECT step_template_id, ordinal FROM workflow_step_runs WHERE id = ?")
+    .get(stepRunId) as { step_template_id: string; ordinal: number } | undefined;
+  if (!stepRun) return null;
+
+  const stepTpl = steps.find((s) => s.id === stepRun.step_template_id);
+  if (!stepTpl) return null;
+
+  return { stepTpl, templateVersion: tplRow.version, ordinal: stepRun.ordinal };
+}
 
 export function buildContextFromDb(
   db: Database.Database,
@@ -42,8 +124,37 @@ export function buildContextFromDb(
       ts: r.created_at,
     }));
 
-  // Freeform-chat path (no active run). Active-run enrichment (currentStep,
-  // agent turns, prior artifacts) is wired in a later task.
+  // Active-run enrichment path: populate real step context from the DB.
+  if (args.runId && args.stepRunId) {
+    const activeStep = loadActiveStep(db, args.runId, args.stepRunId);
+    if (activeStep) {
+      const { stepTpl, templateVersion, ordinal } = activeStep;
+      const attachedWorkspaces = loadWorkspaces(db, args.goalId);
+      const priorStepArtifacts = loadPriorArtifacts(db, args.runId, args.stepRunId);
+
+      const input: OrchestratorContextInput = {
+        goal: { id: goal.id, title: goal.title, description: goal.description, attachedWorkspaces },
+        run: { templateId: stepTpl.id, templateVersion, ordinal, status: "active" },
+        currentStep: {
+          id: stepTpl.id,
+          instructions: stepTpl.instructions,
+          outputSchema: stepTpl.outputSchema,
+          completionPolicy: stepTpl.completionPolicy,
+          agentAdapterId: "claude-code",
+          executionMode: "shadow_session",
+        },
+        chatMessages,
+        // Agent-turn reconstruction is a follow-on (Phase 4) and not needed by the backstop/prompt rule.
+        currentStepAgentTurns: [],
+        priorStepArtifacts,
+        payloadBudgetBytes: args.payloadBudgetBytes,
+      };
+      return buildOrchestratorContext(input);
+    }
+    // Guard: if any lookup failed, fall through to the freeform placeholder.
+  }
+
+  // Freeform-chat path (no active run or run/template/step row missing).
   const input: OrchestratorContextInput = {
     goal: { id: goal.id, title: goal.title, description: goal.description, attachedWorkspaces: [] },
     run: { templateId: "", templateVersion: 0, ordinal: 0, status: "active" },
