@@ -182,6 +182,7 @@ import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js'
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerActivityRoutes } from './activities/routes.js';
 import { categorizeClaudeTool, isLowSignalTool, narrateToolDetail } from './activities/claude-adapter.js';
+import { deriveTurnSummary } from './activities/turn-summary.js';
 import { reconstructEditDiff } from './activities/diff.js';
 import type { ActivitySignal } from './activities/signals.js';
 import type { ActivityStoreCtx } from './activities/store.js';
@@ -2190,14 +2191,6 @@ function orcaVoiceQuestionText(questions: PendingQuestionItem[]): string {
     return `I need your call on ${first.header.toLowerCase()}.`;
   }
   return `I need your input on a few things, starting with ${first.header.toLowerCase()}.`;
-}
-
-function deriveTurnSummary(responseText: string): string {
-  const firstMeaningfulLine = responseText
-    .split(/\r\n?|\n/)
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  return (firstMeaningfulLine ?? "").slice(0, 280);
 }
 
 function postOrchestratorChatReply(
