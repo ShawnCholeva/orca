@@ -1824,7 +1824,7 @@ describe("OrchestratorService.confirmStep", () => {
 
     // Create a real temp dir and seed the spec file inside it.
     const tmpBase = join(tmpdir(), `orca-test-${Date.now()}`);
-    const specRelPath = ".orca/specs/2026-06-17-x.md";
+    const specRelPath = ".orca/specs/2026-06-17-phase3-verify-unique.md";
     const specAbsPath = join(tmpBase, specRelPath);
     mkdirSync(join(tmpBase, ".orca/specs"), { recursive: true });
     writeFileSync(specAbsPath, "# Design spec");
@@ -1856,7 +1856,7 @@ describe("OrchestratorService.confirmStep", () => {
 
       const body = lastOrchestratorMessageBody(db);
       expect(body).toContain("Approach A");
-      expect(body).toContain(specRelPath);
+      expect(body).toContain("2026-06-17-phase3-verify-unique.md");
       expect(body).not.toMatch(/could not verify/i);
     } finally {
       rmSync(tmpBase, { recursive: true, force: true });

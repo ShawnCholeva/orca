@@ -1910,7 +1910,10 @@ export class OrchestratorService {
     const direction = typeof out.chosen_direction === "string" ? out.chosen_direction : null;
     const artifacts = Array.isArray(out.artifacts) ? out.artifacts : [];
     const specRefs = artifacts
-      .map((a) => (a && typeof a === "object" ? (a as { reference?: unknown }).reference : undefined))
+      .filter((a): a is { type: unknown; reference: unknown } => {
+        return a && typeof a === "object" && (a as { type?: unknown }).type === "spec";
+      })
+      .map((a) => a.reference)
       .filter((r): r is string => typeof r === "string");
 
     const roots = (db
