@@ -346,6 +346,40 @@ function setupInterviewStepRun(db: Database.Database) {
   ).run(step.id, step.ordinal, NOW);
 }
 
+/** Seed a workflow with a handoff-policy step (completionPolicy: "handoff") */
+function setupHandoffStepRun(db: Database.Database) {
+  const step = {
+    id: "done",
+    ordinal: 0,
+    name: "Done",
+    completionPolicy: "handoff" as const,
+    instructions: "Produce a spec for the user to review.",
+    outputSchema: [
+      { key: "problem", type: "string", required: true },
+      { key: "success_outcome", type: "string", required: true },
+      { key: "constraints", type: "array", itemType: "string", required: true },
+      { key: "open_questions", type: "array", itemType: "string", required: false },
+    ],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+  };
+
+  db.prepare(
+    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+  ).run("goal-1", NOW, NOW);
+
+  db.prepare(
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/brainstorm', 'Brainstorm', 'desc', 1, 1, 1, ?, '[]', ?, ?)"
+  ).run(JSON.stringify([step]), NOW, NOW);
+
+  db.prepare(
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/brainstorm', 1, 'active', 'step-1', NULL, ?, NULL)"
+  ).run(NOW);
+
+  db.prepare(
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-1', 'goal-1', 'run-1', ?, ?, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1', NULL, NULL, NULL, NULL)"
+  ).run(step.id, step.ordinal, NOW);
+}
+
 /** Insert a minimal workspace so sessions FK is satisfied */
 function seedWorkspace(db: Database.Database) {
   db.prepare(
@@ -1159,6 +1193,114 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     // Feedback was delivered to the agent.
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver.mock.calls[0]![1]).toContain("open questions");
+  });
+
+  it("handoff step in unsupervised mode: pauses for confirmation (pending_completion_json set, no step_output)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupHandoffStepRun(db);
+    seedWorkspace(db);
+    seedAgentSession(db);
+    // Explicitly unsupervised — the handoff policy must override this and still pause.
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.9,
+          quality: {
+            outputCompleteness: 0.9,
+            outputCorrectness: 0.9,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.9,
+            riskLevel: 0.1,
+          },
+          reason: "Spec looks complete.",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({
+        problem: "Build a dashboard",
+        success_outcome: "Users can view metrics",
+        constraints: [],
+        open_questions: [],
+      }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // Must be paused: stash set, no step_output written.
+    const row = db
+      .prepare(
+        "SELECT step_result_json, pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'"
+      )
+      .get() as { step_result_json: string | null; pending_completion_json: string | null };
+    expect(row.step_result_json).toBeNull();
+    expect(row.pending_completion_json).not.toBeNull();
+    expect(stepOutputCount(db)).toBe(0);
+    // Activity is paused for user confirmation.
+    const act = db
+      .prepare(
+        "SELECT status, source_kind FROM activities WHERE step_run_id = 'step-1' ORDER BY turn_ordinal DESC LIMIT 1"
+      )
+      .get() as { status: string; source_kind: string };
+    expect(act.status).toBe("paused_for_input");
+    expect(act.source_kind).toBe("step_confirmation_pending");
+  });
+
+  it("reasoning step in unsupervised mode: auto-completes (control case)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" }); // default completionPolicy (reasoning/undefined)
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.82,
+          quality: {
+            outputCompleteness: 0.8,
+            outputCorrectness: 0.85,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.8,
+            riskLevel: 0.2,
+          },
+          reason: "ok",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // Must auto-complete: result written, no stash.
+    const result = readPersistedStepResult(db, "step-1");
+    expect(result.evaluationStatus).toBe("scored");
+    const row = db
+      .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { pending_completion_json: string | null };
+    expect(row.pending_completion_json).toBeNull();
   });
 
   it("interview step with empty open_questions: completes normally", async () => {

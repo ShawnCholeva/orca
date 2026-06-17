@@ -1457,7 +1457,7 @@ export class OrchestratorService {
 
         const finishedAt = now();
 
-        if (getSupervisionMode(db) === "supervised") {
+        if (getSupervisionMode(db) === "supervised" || ctx.stepTpl.completionPolicy === "handoff") {
           const scoringParse = StepResultScoringProposal.safeParse(action.scoring);
           const scoring = scoringParse.success ? scoringParse.data : undefined;
           db.prepare(
