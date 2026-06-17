@@ -708,6 +708,55 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     ).toHaveLength(1);
   });
 
+  it("ask_user posts a chat message carrying an interactive pending_question", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "ask_user",
+        body: "Step 1 agent needs a decision before it can continue.",
+        questions: [
+          {
+            header: "State",
+            question: "Which did you mean by 'state'?",
+            multiSelect: false,
+            options: [
+              { label: "Active / Archived", description: "Group by goal status." },
+              { label: "Running / Idle", description: "Group by active workflow run." },
+            ],
+          },
+        ],
+      }),
+      deliver
+    );
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText: "I need a decision from the user." },
+      { bus, idFactory }
+    );
+
+    const row = db
+      .prepare(
+        "SELECT body, pending_question FROM orchestrator_messages WHERE goal_id = 'goal-1' ORDER BY created_at DESC, rowid DESC LIMIT 1"
+      )
+      .get() as { body: string; pending_question: string | null };
+    expect(row.body).toContain("needs a decision");
+    expect(row.pending_question).toBeTruthy();
+    const pq = JSON.parse(row.pending_question!);
+    expect(pq.questions[0].options).toHaveLength(2);
+    expect(pq.questionId).toBeTruthy();
+    expect(pq.toolUseId).toBeTruthy();
+    // The step agent was not told to advance — it stays paused on the decision.
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
   it("supervised: holds at checkpoint — no result, stash set, activity paused", async () => {
     const { db, bus, idFactory } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" });

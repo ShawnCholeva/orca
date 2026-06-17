@@ -13,6 +13,7 @@ import {
   type ModelProviderId,
   type OperatorDescriptor,
   type OrchestratorAction,
+  type PendingQuestion as PendingQuestionT,
   type StepResultScoringFacts,
   type StepAgentChoice,
   type WorkflowDecisionTrace,
@@ -1368,6 +1369,19 @@ export class OrchestratorService {
         this.postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options);
         return { postedChatReply: true };
       }
+      case "ask_user": {
+        // The step agent needs a decision. Surface it as an interactive choice
+        // (pending_question on the chat message); the user's answer flows back
+        // as ordinary guidance via onUserMessage → forward_to_agent.
+        const idFactory = options.idFactory ?? randomUUID;
+        const pendingQuestion: PendingQuestionT = {
+          questionId: idFactory(),
+          toolUseId: idFactory(),
+          questions: action.questions,
+        };
+        this.postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options, pendingQuestion);
+        return { postedChatReply: true };
+      }
       case "forward_to_agent": {
         // If this step is paused at a confirmation checkpoint, the user is refining:
         // record the divergence signal, clear the stash, and resume the activity.
@@ -1699,7 +1713,8 @@ export class OrchestratorService {
     now: () => string,
     goalId: string,
     body: string,
-    options: RequestNextDecisionOptions
+    options: RequestNextDecisionOptions,
+    pendingQuestion?: PendingQuestionT
   ): void {
     const idFactory = options.idFactory ?? randomUUID;
     const messageId = idFactory();
@@ -1708,9 +1723,16 @@ export class OrchestratorService {
     const event = db.transaction(() => {
       db.prepare(
         `INSERT INTO orchestrator_messages
-          (id, goal_id, role, kind, body, correlation_id, created_at)
-         VALUES (?, ?, 'orchestrator', 'message', ?, ?, ?)`
-      ).run(messageId, goalId, body, correlationId, createdAt);
+          (id, goal_id, role, kind, body, correlation_id, created_at, pending_question)
+         VALUES (?, ?, 'orchestrator', 'message', ?, ?, ?, ?)`
+      ).run(
+        messageId,
+        goalId,
+        body,
+        correlationId,
+        createdAt,
+        pendingQuestion ? JSON.stringify(pendingQuestion) : null
+      );
       const payload = { messageId, role: "orchestrator" as const };
       const eventId = idFactory();
       const result = db
