@@ -55,6 +55,17 @@ describe("composeOrchestratorPrompt", () => {
     expect(sys).toContain("riskLevel");
   });
 
+  it("advertises ask_user for blocking decisions and forbids 'finished' framing while waiting", () => {
+    const sys = composeOrchestratorPrompt({
+      triggerKind: "agent_response",
+      context: {} as never,
+      triggerPayload: {} as never,
+    }).systemPrompt;
+    expect(sys).toContain("ask_user");
+    expect(sys).toContain("questions");
+    expect(sys).toMatch(/waiting on the user|waiting, not done/i);
+  });
+
   it("describes role and produces a structured response shape request", () => {
     const out = composeOrchestratorPrompt({
       triggerKind: "agent_response",
