@@ -95,7 +95,7 @@ import { getSupervisionMode } from "../../settings/store.js";
 import { expireConfirmation, openOrUpdateLive, pauseForConfirmation, pauseForProviderRecovery, resumeFromConfirmation, resumeFromProviderRecovery } from "../../activities/store.js";
 import { setSessionStatus } from "../../sessions/projection.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
-import { summarizeScoring } from "./scoring-summary.js";
+import { extractProposal, summarizeScoring } from "./scoring-summary.js";
 
 export interface StepDispatchCapabilities {
   isAdapterReady(adapterId: string): Promise<boolean>;
@@ -1450,7 +1450,7 @@ export class OrchestratorService {
             JSON.stringify({ block: block ?? {}, scoring: scoring ?? null, finishedAt }),
             ctx.stepRun.id
           );
-          const summary = summarizeScoring(scoring);
+          const summary = summarizeScoring(scoring, extractProposal(responseText));
           const activityCtx = { db, bus: options.bus ?? new EventBus() };
           openOrUpdateLive(activityCtx, {
             goalId: ctx.run.goalId,
