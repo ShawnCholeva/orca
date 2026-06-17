@@ -119,5 +119,9 @@ describe("buildContextFromDb", () => {
     expect(ctx.conversation.currentStepAgentTurns[0].body).toBe("What is the problem?");
     expect(ctx.conversation.currentStepAgentTurns[1].role).toBe("user_via_orchestrator");
     expect(ctx.conversation.currentStepAgentTurns[1].body).toBe("The server is down.");
+    expect(ctx.conversation.currentStepAgentTurns[2].role).toBe("agent");
+    expect(ctx.conversation.currentStepAgentTurns[2].body).toBe("What have you tried?");
+    expect(ctx.conversation.currentStepAgentTurns[3].role).toBe("user_via_orchestrator");
+    expect(ctx.conversation.currentStepAgentTurns[3].body).toBe("Restarting did not help.");
   });
 });

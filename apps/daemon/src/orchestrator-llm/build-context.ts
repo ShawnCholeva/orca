@@ -68,9 +68,9 @@ function loadCurrentStepAgentTurns(
     .prepare(
       "SELECT type, body FROM workflow_artifacts WHERE workflow_run_id = ? AND step_run_id = ? AND type = 'interview_turn' ORDER BY created_at ASC"
     )
-    .all(runId, stepRunId) as WorkflowArtifact[];
+    .all(runId, stepRunId) as Array<{ type: string; body: string }>;
 
-  const turns = reconstructTranscript(rows);
+  const turns = reconstructTranscript(rows as WorkflowArtifact[]);
   const result: OrchestratorContextInput["currentStepAgentTurns"] = [];
   for (const turn of turns) {
     result.push({ role: "agent", body: turn.question, ts: turn.answeredAt });
