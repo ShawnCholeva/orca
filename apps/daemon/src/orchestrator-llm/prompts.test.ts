@@ -114,4 +114,15 @@ describe("composeOrchestratorPrompt", () => {
     expect(out.systemPrompt).toMatch(/forward_to_agent[^]*"translated"/);
     expect(out.systemPrompt).toMatch(/revise_step[^]*"feedback"/);
   });
+
+  it("instructs the mediator to honor completionPolicy", () => {
+    const { systemPrompt } = composeOrchestratorPrompt({
+      triggerKind: "agent_response",
+      context: {} as never,
+      triggerPayload: {} as never,
+    });
+    expect(systemPrompt).toMatch(/completionPolicy/);
+    expect(systemPrompt).toMatch(/interview/i);
+    expect(systemPrompt).toMatch(/open_questions/);
+  });
 });
