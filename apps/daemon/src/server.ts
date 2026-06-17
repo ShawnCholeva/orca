@@ -181,7 +181,7 @@ import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js';
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerActivityRoutes } from './activities/routes.js';
-import { categorizeClaudeTool, narrateToolDetail } from './activities/claude-adapter.js';
+import { categorizeClaudeTool, isLowSignalTool, narrateToolDetail } from './activities/claude-adapter.js';
 import { reconstructEditDiff } from './activities/diff.js';
 import type { ActivitySignal } from './activities/signals.js';
 import type { ActivityStoreCtx } from './activities/store.js';
@@ -1386,6 +1386,9 @@ export function createServer(
     onToolUse: async (sessionId, payload) => {
       const stepContext = resolveStepContext(sessionId);
       if (!stepContext) return;
+      // Curate the checklist: searches and read-only look-around are low signal —
+      // skip them so the persisted steps stay substantive (reads, edits, runs).
+      if (isLowSignalTool(payload.toolName, payload.toolInput)) return;
       applyActivitySafely("agent.tool_use", {
         kind: "tool_use",
         ...stepContext,

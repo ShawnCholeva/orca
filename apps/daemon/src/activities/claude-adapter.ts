@@ -1,6 +1,51 @@
 import type { ActivityWorkCategory } from "@orca/contracts";
 
-const TEST_COMMAND = /\b(test|vitest|jest|pytest)\b/i;
+const TEST_RUNNERS = /^(vitest|jest|pytest|mocha|ava|rspec|phpunit)$/;
+
+function commandTokens(command: string): string[] {
+  // Strip leading env-var assignments (FOO=bar) and reduce each token to its
+  // basename so "node_modules/.bin/vitest" reads as "vitest".
+  const raw = command.trim().split(/\s+/);
+  let i = 0;
+  while (i < raw.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(raw[i] ?? "")) i += 1;
+  return raw.slice(i).map((t) => t.replace(/.*[\\/]/, "").toLowerCase());
+}
+
+/** True only when the command actually invokes a test runner — not when "test"
+ *  merely appears as an argument (e.g. `grep -v "\.test\."`). */
+export function isTestCommand(command: string): boolean {
+  const tokens = commandTokens(command);
+  if (tokens.some((t) => TEST_RUNNERS.test(t))) return true;
+  const first = tokens[0] ?? "";
+  if (/^(pnpm|npm|yarn|npx|bun)$/.test(first) && /(^|\s)(run\s+)?test(\s|$)/.test(command)) {
+    return true;
+  }
+  if (/^(go|cargo|make)$/.test(first) && /(^|\s)test(\s|$)/.test(command)) return true;
+  return false;
+}
+
+const BASH_LOW_SIGNAL = new Set([
+  "grep", "rg", "ag", "find", "ls", "wc", "cat", "head", "tail",
+  "echo", "pwd", "which", "stat", "file", "tree", "sort", "uniq",
+]);
+const GIT_READ_ONLY = new Set([
+  "status", "diff", "log", "show", "ls-files", "grep", "branch", "rev-parse",
+]);
+
+/** Low-signal look-around the activity checklist should not persist as a step:
+ *  searches (Grep/Glob) and read-only inspection shell commands. Substantive
+ *  work (reads, edits, test/build/run commands, git mutations) returns false. */
+export function isLowSignalTool(toolName: string, toolInput: unknown): boolean {
+  if (toolName === "Grep" || toolName === "Glob") return true;
+  if (toolName !== "Bash") return false;
+  const command = (toolInput as { command?: unknown } | null)?.command;
+  if (typeof command !== "string") return false;
+  const tokens = commandTokens(command);
+  const first = tokens[0] ?? "";
+  if (BASH_LOW_SIGNAL.has(first)) return true;
+  if (first === "git" && GIT_READ_ONLY.has(tokens[1] ?? "")) return true;
+  return false;
+}
 
 export function categorizeClaudeTool(
   toolName: string,
@@ -19,7 +64,7 @@ export function categorizeClaudeTool(
       return "editing";
     case "Bash": {
       const command = (toolInput as { command?: unknown } | null)?.command;
-      return typeof command === "string" && TEST_COMMAND.test(command)
+      return typeof command === "string" && isTestCommand(command)
         ? "testing"
         : "running";
     }
@@ -44,8 +89,6 @@ export function narrateCategory(category: ActivityWorkCategory): string {
       return "Working on the step...";
   }
 }
-
-const TEST_CMD = /\b(test|vitest|jest|pytest)\b/i;
 
 function basename(p: string): string {
   const cleaned = p.replace(/[\\/]+$/, "");
@@ -81,7 +124,7 @@ export function narrateToolDetail(toolName: string, toolInput: unknown): string 
       case "Bash": {
         const cmd = typeof input.command === "string" ? input.command : null;
         if (!cmd) return narrateCategory("running");
-        return TEST_CMD.test(cmd) ? `Ran tests: ${truncate(cmd)}` : `Ran ${truncate(cmd)}`;
+        return isTestCommand(cmd) ? `Ran tests: ${truncate(cmd)}` : `Ran ${truncate(cmd)}`;
       }
       default:
         return narrateCategory(categorizeClaudeTool(toolName, toolInput));
