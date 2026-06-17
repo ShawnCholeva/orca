@@ -9,6 +9,7 @@ export interface AgentInitialPromptInput {
   outputSchema: WorkflowStepOutputSchema;
   priorStepArtifacts: Array<{ stepId: string; outputJson: unknown }>;
   repairContext?: { reason: string; issueRefs: string[] } | null;
+  workspaces?: Array<{ name: string; root: string }>;
 }
 
 export function composeAgentInitialPrompt(input: AgentInitialPromptInput): string {
@@ -27,11 +28,15 @@ export function composeAgentInitialPrompt(input: AgentInitialPromptInput): strin
         ...(repair.issueRefs.length > 0 ? [`Issue refs: ${repair.issueRefs.join(", ")}`] : []),
       ]
     : [];
+  const workspaceBlock = input.workspaces && input.workspaces.length > 0
+    ? ["", "# Workspaces", ...input.workspaces.map((w) => `- ${w.name}: ${w.root}`)]
+    : [];
   return [
     "# Goal",
     input.goalTitle,
     ...(goalDescription ? ["", goalDescription] : []),
     ...repairSection,
+    ...workspaceBlock,
     "",
     "# Step instructions",
     input.stepInstructions,

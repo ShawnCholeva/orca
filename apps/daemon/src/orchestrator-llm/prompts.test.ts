@@ -40,6 +40,31 @@ describe("composeAgentInitialPrompt", () => {
     });
     expect(out).toMatch(/Just a title/);
   });
+
+  it("renders a Workspaces section when workspaces are provided", () => {
+    const prompt = composeAgentInitialPrompt({
+      goalTitle: "G",
+      goalDescription: "",
+      stepInstructions: "do it",
+      outputSchema: [{ key: "summary", type: "string", required: true }],
+      priorStepArtifacts: [],
+      workspaces: [{ name: "api", root: "/repos/api" }, { name: "web", root: "/repos/web" }],
+    });
+    expect(prompt).toMatch(/# Workspaces/);
+    expect(prompt).toMatch(/api/);
+    expect(prompt).toMatch(/\/repos\/web/);
+  });
+
+  it("omits the Workspaces section when none are provided", () => {
+    const prompt = composeAgentInitialPrompt({
+      goalTitle: "G",
+      goalDescription: "",
+      stepInstructions: "do it",
+      outputSchema: [{ key: "summary", type: "string", required: true }],
+      priorStepArtifacts: [],
+    });
+    expect(prompt).not.toMatch(/# Workspaces/);
+  });
 });
 
 describe("composeOrchestratorPrompt", () => {
