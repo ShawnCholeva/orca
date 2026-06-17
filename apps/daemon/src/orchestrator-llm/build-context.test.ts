@@ -80,4 +80,44 @@ describe("buildContextFromDb", () => {
     });
     expect(ctx.currentStep.id).toBe("");
   });
+
+  it("reconstructs currentStepAgentTurns from interview_turn artifacts for the active step run", () => {
+    const db = new Database(":memory:");
+    seed(db);
+    seedActiveRun(db);
+
+    const turn0 = JSON.stringify({
+      turnIndex: 0,
+      questionDecisionId: "qd-0",
+      question: "What is the problem?",
+      answer: "The server is down.",
+      answeredAt: "2026-06-01T10:00:00.000Z",
+    });
+    const turn1 = JSON.stringify({
+      turnIndex: 1,
+      questionDecisionId: "qd-1",
+      question: "What have you tried?",
+      answer: "Restarting did not help.",
+      answeredAt: "2026-06-01T10:05:00.000Z",
+    });
+
+    db.exec(`
+      INSERT INTO workflow_artifacts VALUES ('a1','G1','r1','sr1','interview_turn','Turn 0','${turn0.replace(/'/g, "''")}','agent',NULL,NULL,NULL,'2026-06-01T10:00:00Z');
+      INSERT INTO workflow_artifacts VALUES ('a2','G1','r1','sr1','interview_turn','Turn 1','${turn1.replace(/'/g, "''")}','agent',NULL,NULL,NULL,'2026-06-01T10:05:00Z');
+    `);
+
+    const ctx = buildContextFromDb(db, {
+      goalId: "G1",
+      runId: "r1",
+      stepRunId: "sr1",
+      payloadBudgetBytes: 64 * 1024,
+    });
+
+    // Each InterviewTurn expands into two entries: agent question + user answer.
+    expect(ctx.conversation.currentStepAgentTurns.length).toBe(4);
+    expect(ctx.conversation.currentStepAgentTurns[0].role).toBe("agent");
+    expect(ctx.conversation.currentStepAgentTurns[0].body).toBe("What is the problem?");
+    expect(ctx.conversation.currentStepAgentTurns[1].role).toBe("user_via_orchestrator");
+    expect(ctx.conversation.currentStepAgentTurns[1].body).toBe("The server is down.");
+  });
 });

@@ -4,7 +4,8 @@ import {
   type OrchestratorInvocationContext,
   type OrchestratorContextInput,
 } from "./context.js";
-import { type WorkflowStepTemplate, type WorkflowRunStatus } from "@orca/contracts";
+import { type WorkflowArtifact, type WorkflowStepTemplate, type WorkflowRunStatus } from "@orca/contracts";
+import { reconstructTranscript } from "../workflows/orchestrator/interview.js";
 
 const RECENT_CHAT_LIMIT = 40;
 
@@ -56,6 +57,26 @@ function loadPriorArtifacts(
   }
 
   return [...latestByTemplate].map(([stepId, outputJson]) => ({ stepId, outputJson }));
+}
+
+function loadCurrentStepAgentTurns(
+  db: Database.Database,
+  runId: string,
+  stepRunId: string
+): OrchestratorContextInput["currentStepAgentTurns"] {
+  const rows = db
+    .prepare(
+      "SELECT type, body FROM workflow_artifacts WHERE workflow_run_id = ? AND step_run_id = ? AND type = 'interview_turn' ORDER BY created_at ASC"
+    )
+    .all(runId, stepRunId) as WorkflowArtifact[];
+
+  const turns = reconstructTranscript(rows);
+  const result: OrchestratorContextInput["currentStepAgentTurns"] = [];
+  for (const turn of turns) {
+    result.push({ role: "agent", body: turn.question, ts: turn.answeredAt });
+    result.push({ role: "user_via_orchestrator", body: turn.answer, ts: turn.answeredAt });
+  }
+  return result;
 }
 
 function loadActiveStep(
@@ -134,6 +155,7 @@ export function buildContextFromDb(
       const { stepTpl, templateVersion, ordinal, templateId, status, selectedOperatorId } = activeStep;
       const attachedWorkspaces = loadWorkspaces(db, args.goalId);
       const priorStepArtifacts = loadPriorArtifacts(db, args.runId, args.stepRunId);
+      const currentStepAgentTurns = loadCurrentStepAgentTurns(db, args.runId, args.stepRunId);
 
       const agentAdapterId =
         typeof selectedOperatorId === "string" && selectedOperatorId.startsWith("agent:")
@@ -152,8 +174,7 @@ export function buildContextFromDb(
           executionMode: "shadow_session",
         },
         chatMessages,
-        // Agent-turn reconstruction is a follow-on (Phase 4) and not needed by the backstop/prompt rule.
-        currentStepAgentTurns: [],
+        currentStepAgentTurns,
         priorStepArtifacts,
         payloadBudgetBytes: args.payloadBudgetBytes,
       };
