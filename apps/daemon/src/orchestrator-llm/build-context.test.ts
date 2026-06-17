@@ -64,6 +64,8 @@ describe("buildContextFromDb", () => {
     expect(ctx.currentStep.instructions).toBe("interview the user");
     expect(ctx.currentStep.completionPolicy).toBe("interview");
     expect(ctx.goal.attachedWorkspaces.length).toBeGreaterThan(0);
+    expect(ctx.workflowRun.templateId).toBe("tpl");
+    expect(ctx.workflowRun.status).toBe("active");
   });
 
   it("keeps the freeform placeholder when no run is active", () => {

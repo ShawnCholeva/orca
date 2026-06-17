@@ -4,7 +4,7 @@ import {
   type OrchestratorInvocationContext,
   type OrchestratorContextInput,
 } from "./context.js";
-import { type WorkflowStepTemplate } from "@orca/contracts";
+import { type WorkflowStepTemplate, type WorkflowRunStatus } from "@orca/contracts";
 
 const RECENT_CHAT_LIMIT = 40;
 
@@ -66,6 +66,8 @@ function loadActiveStep(
   stepTpl: WorkflowStepTemplate;
   templateVersion: number;
   ordinal: number;
+  templateId: string;
+  status: WorkflowRunStatus;
 } | null {
   const run = db
     .prepare("SELECT id, template_id, status FROM workflow_runs WHERE id = ?")
@@ -92,7 +94,7 @@ function loadActiveStep(
   const stepTpl = steps.find((s) => s.id === stepRun.step_template_id);
   if (!stepTpl) return null;
 
-  return { stepTpl, templateVersion: tplRow.version, ordinal: stepRun.ordinal };
+  return { stepTpl, templateVersion: tplRow.version, ordinal: stepRun.ordinal, templateId: run.template_id, status: run.status as WorkflowRunStatus };
 }
 
 export function buildContextFromDb(
@@ -128,13 +130,13 @@ export function buildContextFromDb(
   if (args.runId && args.stepRunId) {
     const activeStep = loadActiveStep(db, args.runId, args.stepRunId);
     if (activeStep) {
-      const { stepTpl, templateVersion, ordinal } = activeStep;
+      const { stepTpl, templateVersion, ordinal, templateId, status } = activeStep;
       const attachedWorkspaces = loadWorkspaces(db, args.goalId);
       const priorStepArtifacts = loadPriorArtifacts(db, args.runId, args.stepRunId);
 
       const input: OrchestratorContextInput = {
         goal: { id: goal.id, title: goal.title, description: goal.description, attachedWorkspaces },
-        run: { templateId: stepTpl.id, templateVersion, ordinal, status: "active" },
+        run: { templateId, templateVersion, ordinal, status },
         currentStep: {
           id: stepTpl.id,
           instructions: stepTpl.instructions,
