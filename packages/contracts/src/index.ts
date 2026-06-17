@@ -1134,6 +1134,45 @@ export type ActivityWorkCategory = z.infer<typeof ActivityWorkCategory>;
 export const ActivityConfidence = z.enum(["low", "medium", "high"]);
 export type ActivityConfidence = z.infer<typeof ActivityConfidence>;
 
+export const ActivityDiffLine = z
+  .object({
+    kind: z.enum(["context", "add", "remove"]),
+    text: z.string().max(2000),
+  })
+  .strict();
+export type ActivityDiffLine = z.infer<typeof ActivityDiffLine>;
+
+export const ActivityDiffHunk = z
+  .object({
+    oldStart: z.number().int().positive().nullable(),
+    newStart: z.number().int().positive().nullable(),
+    lines: z.array(ActivityDiffLine).max(400),
+  })
+  .strict();
+export type ActivityDiffHunk = z.infer<typeof ActivityDiffHunk>;
+
+export const ActivityDiff = z
+  .object({
+    filePath: z.string().max(1024),
+    additions: z.number().int().nonnegative(),
+    deletions: z.number().int().nonnegative(),
+    hunks: z.array(ActivityDiffHunk).max(20),
+  })
+  .strict();
+export type ActivityDiff = z.infer<typeof ActivityDiff>;
+
+export const ActivityStep = z
+  .object({
+    id: z.string(),
+    text: z.string().max(2000),
+    category: ActivityWorkCategory.nullable(),
+    status: z.enum(["active", "done"]),
+    diff: ActivityDiff.optional(),
+    createdAt: z.string(),
+  })
+  .strict();
+export type ActivityStep = z.infer<typeof ActivityStep>;
+
 export const Activity = z
   .object({
     id: z.string(),
@@ -1154,7 +1193,8 @@ export const Activity = z
     providerRecovery: ProviderRecoveryCheckpoint.optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
-    completedAt: z.string().nullable()
+    completedAt: z.string().nullable(),
+    steps: z.array(ActivityStep).default([]),
   })
   .strict();
 export type Activity = z.infer<typeof Activity>;

@@ -33,9 +33,11 @@ import {
 import {
   ActivityCard,
   LiveActivity,
+  isAgentActivityCard,
   isTimelineCard,
   pickLiveActivity,
 } from "./ActivityThread";
+import { AgentActivity } from "./AgentActivity";
 import { PermissionApprovalCard } from "./PermissionApprovalCard";
 import { ProviderRecoveryCard } from "./ProviderRecoveryCard";
 import { WorkerPermissionToggle } from "./WorkerPermissionToggle";
@@ -410,6 +412,9 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const orcaHasSpoken = messages.some((message) => message.role === "orchestrator");
   const liveActivity = pickLiveActivity(activities);
   const hasLiveActivity = liveActivity !== null;
+  // Suppress the "starting" indicator once any persisted agent-activity card is
+  // present — the agent has already emitted steps, so there is nothing to wait for.
+  const hasAgentActivityCard = activities.some(isAgentActivityCard);
   const showStarting =
     workflowState.run?.status === "active" &&
     workflowState.stepRun?.status === "active" &&
@@ -417,7 +422,8 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     // for completion approval; a finished step is done, not starting.
     workflowState.stepRun?.finishedAt == null &&
     !orcaHasSpoken &&
-    !hasLiveActivity;
+    !hasLiveActivity &&
+    !hasAgentActivityCard;
   // While the indicator is up, tick once a second so the elapsed time advances.
   useEffect(() => {
     if (!showStarting) return;
@@ -686,8 +692,10 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                   message={entry.message}
                   goalId={selectedGoalId ?? ""}
                 />
-              ) : (
+              ) : entry.activity.sourceKind === "step_result" ? (
                 <ActivityCard key={entry.key} activity={entry.activity} />
+              ) : (
+                <AgentActivity key={entry.key} activity={entry.activity} />
               )
             )}
 
@@ -730,7 +738,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                 deferred reply (shadow_session / active-run, reply:null). */}
             {(sendingMessage || awaitingReply) && (
               <div data-testid="awaiting-reply">
-                <ThinkingRow label="orchestrator" />
+                <RoutingCard />
               </div>
             )}
 
@@ -944,6 +952,33 @@ function SystemCard(props: {
           <p className="msg-text">{props.body}</p>
           {props.meta && <p className="orca-chat-system-meta mono">{props.meta}</p>}
           {props.children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoutingCard() {
+  return (
+    <div className="msg msg--orca">
+      <OrcaMark />
+      <div className="agent-activity" data-testid="routing-card">
+        <div className="agent-activity-steps">
+          <div className="agent-activity-step">
+            <svg className="agent-activity-check" width="13" height="13" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+            <span className="agent-activity-step-text is-done">Reading your message</span>
+          </div>
+          <div className="agent-activity-step">
+            <span className="thinking-dots agent-activity-pulse" aria-hidden>
+              <span style={{ animationDelay: "0s" }} />
+              <span style={{ animationDelay: "0.18s" }} />
+              <span style={{ animationDelay: "0.36s" }} />
+            </span>
+            <span className="agent-activity-step-text">Working out a response</span>
+          </div>
         </div>
       </div>
     </div>

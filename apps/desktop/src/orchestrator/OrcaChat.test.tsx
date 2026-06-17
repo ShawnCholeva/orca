@@ -111,6 +111,7 @@ const activeActivity: Activity = {
   sourceKind: "tool_use",
   workCategory: "reading",
   confidence: "high",
+  steps: [],
   createdAt: now,
   updatedAt: now,
   completedAt: null,
@@ -521,27 +522,34 @@ describe("OrcaChat", () => {
     );
   });
 
-  it("renders the activity thread without a routing indicator", async () => {
+  it("renders an agent-activity card for a tool_use activity with steps", async () => {
     setupRunLoad();
-    listActivitiesMock.mockResolvedValue([activeActivity]);
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity,
+        steps: [
+          { id: "s1", text: "Read verifier.ts", category: "reading", status: "done", createdAt: now },
+          { id: "s2", text: "Ran tests: pnpm test", category: "testing", status: "active", createdAt: now },
+        ],
+      },
+    ]);
     const { OrcaChat } = await import("./OrcaChat");
 
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
-    expect(await screen.findByTestId("activity-bubble")).toHaveTextContent(
-      "Reading through the codebase...",
-    );
+    expect(await screen.findByTestId("agent-activity")).toBeInTheDocument();
     expect(screen.queryByText("routing")).not.toBeInTheDocument();
   });
 
   it("refreshes the visible activity when activity.changed arrives without resubscribing", async () => {
     setupRunLoad();
+    const stepBase = { category: "reading" as const, status: "active" as const, createdAt: now };
     listActivitiesMock
       .mockResolvedValueOnce([
-        { ...activeActivity, currentText: "Reading the old implementation..." },
+        { ...activeActivity, steps: [{ id: "s1", text: "Reading the old implementation...", ...stepBase }] },
       ])
       .mockResolvedValueOnce([
-        { ...activeActivity, currentText: "Reading the updated implementation..." },
+        { ...activeActivity, steps: [{ id: "s1", text: "Reading the updated implementation...", ...stepBase }] },
       ]);
     let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
     openEventStreamMock.mockImplementation(
@@ -554,16 +562,15 @@ describe("OrcaChat", () => {
 
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
-    expect(await screen.findByTestId("activity-bubble")).toHaveTextContent(
-      "Reading the old implementation...",
-    );
+    expect(await screen.findByTestId("agent-activity")).toBeInTheDocument();
+    expect(screen.getByText("Reading the old implementation...")).toBeInTheDocument();
     expect(capturedOnEvent).not.toBeNull();
     act(() => {
       capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
     });
 
     expect(await screen.findByText("Reading the updated implementation...")).toBeInTheDocument();
-    expect(screen.getAllByTestId("activity-bubble")).toHaveLength(1);
+    expect(screen.getAllByTestId("agent-activity")).toHaveLength(1);
     expect(listActivitiesMock).toHaveBeenCalledTimes(2);
     expect(openEventStreamMock).toHaveBeenCalledTimes(1);
   });
@@ -620,7 +627,10 @@ describe("OrcaChat", () => {
     setupRunLoad();
     listActivitiesMock
       .mockResolvedValueOnce([
-        { ...activeActivity, currentText: "Testing the current implementation..." },
+        {
+          ...activeActivity,
+          steps: [{ id: "s1", text: "Testing the current implementation...", category: "testing", status: "active", createdAt: now }],
+        },
       ])
       .mockRejectedValueOnce(new Error("refresh failed"));
     let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
@@ -634,27 +644,30 @@ describe("OrcaChat", () => {
 
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
-    expect(await screen.findByTestId("activity-bubble")).toHaveTextContent(
-      "Testing the current implementation...",
-    );
+    expect(await screen.findByTestId("agent-activity")).toBeInTheDocument();
+    expect(screen.getByText("Testing the current implementation...")).toBeInTheDocument();
     act(() => {
       capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
     });
 
     await waitFor(() => expect(listActivitiesMock).toHaveBeenCalledTimes(2));
-    expect(screen.getByTestId("activity-bubble")).toHaveTextContent(
-      "Testing the current implementation...",
-    );
+    expect(screen.getByTestId("agent-activity")).toBeInTheDocument();
+    expect(screen.getByText("Testing the current implementation...")).toBeInTheDocument();
   });
 
   it("does not show the step-starting indicator when a live activity exists", async () => {
     setupRunLoad();
-    listActivitiesMock.mockResolvedValue([activeActivity]);
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity,
+        steps: [{ id: "s1", text: "Reading through the codebase...", category: "reading", status: "active", createdAt: now }],
+      },
+    ]);
     const { OrcaChat } = await import("./OrcaChat");
 
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
-    expect(await screen.findByTestId("activity-bubble")).toBeInTheDocument();
+    expect(await screen.findByTestId("agent-activity")).toBeInTheDocument();
     await waitFor(() => expect(getWorkflowTemplateMock).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId("step-starting")).not.toBeInTheDocument();
   });

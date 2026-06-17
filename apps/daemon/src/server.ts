@@ -181,7 +181,8 @@ import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js';
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerActivityRoutes } from './activities/routes.js';
-import { categorizeClaudeTool } from './activities/claude-adapter.js';
+import { categorizeClaudeTool, narrateToolDetail } from './activities/claude-adapter.js';
+import { reconstructEditDiff } from './activities/diff.js';
 import type { ActivitySignal } from './activities/signals.js';
 import type { ActivityStoreCtx } from './activities/store.js';
 import { ActivityUpdater } from './activities/updater.js';
@@ -1389,6 +1390,8 @@ export function createServer(
         kind: "tool_use",
         ...stepContext,
         category: categorizeClaudeTool(payload.toolName, payload.toolInput),
+        detail: narrateToolDetail(payload.toolName, payload.toolInput),
+        diff: reconstructEditDiff(payload.toolName, payload.toolInput),
       });
     },
     onPermissionRequest: async (sessionId, payload) => {

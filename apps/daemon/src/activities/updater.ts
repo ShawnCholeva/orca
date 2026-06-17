@@ -1,12 +1,12 @@
 import type { ActivityWorkCategory } from "@orca/contracts";
 
-import { narrateCategory } from "./claude-adapter.js";
 import {
   ACTIVITY_THROTTLE_MS,
   ACTIVITY_WEAK_SIGNAL_MS
 } from "./constants.js";
 import type { ActivitySignal } from "./signals.js";
 import {
+  appendActivityStep,
   completeLive,
   expireLive,
   getLiveForStepRun,
@@ -49,15 +49,16 @@ export class ActivityUpdater {
           return;
         }
 
-        this.open(ctx, signal, {
-          sourceKind: "tool_use",
-          currentText: narrateCategory(signal.category),
-          workCategory: signal.category
+        appendActivityStep(ctx, {
+          goalId: signal.goalId,
+          workflowRunId: signal.workflowRunId,
+          stepRunId: signal.stepRunId,
+          agentSessionId: signal.agentSessionId,
+          text: signal.detail,
+          category: signal.category,
+          diff: signal.diff,
         });
-        this.perStep.set(signal.stepRunId, {
-          lastUpdateMs: now,
-          lastCategory: signal.category
-        });
+        this.perStep.set(signal.stepRunId, { lastUpdateMs: now, lastCategory: signal.category });
         return;
       }
 
@@ -124,7 +125,7 @@ export class ActivityUpdater {
     ctx: ActivityStoreCtx,
     signal: Extract<
       ActivitySignal,
-      { kind: "step_started" | "tool_use" | "weak_signal_tick" | "permission_pending" }
+      { kind: "step_started" | "weak_signal_tick" | "permission_pending" }
     >,
     activity: {
       sourceKind: "step_started" | "tool_use" | "weak_signal" | "permission_pending";

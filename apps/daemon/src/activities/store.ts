@@ -3,10 +3,13 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import {
   Activity,
+  ActivityStep,
   PendingQuestion,
   type Activity as ActivityT,
   type ActivityConfidence,
+  type ActivityDiff,
   type ActivitySourceKind,
+  type ActivityStep as ActivityStepT,
   type ActivityWorkCategory,
   type DomainEvent,
   type PendingQuestion as PendingQuestionT
@@ -58,7 +61,29 @@ function nextActivityId(ctx: ActivityStoreCtx): string {
   return ctx.idFactory?.() ?? randomUUID();
 }
 
-function rowToActivity(row: ActivityRow): ActivityT {
+function loadSteps(db: Database.Database, activityId: string): ActivityStepT[] {
+  const rows = db
+    .prepare(
+      `SELECT id, text, category, status, diff, created_at
+       FROM activity_steps WHERE activity_id = ? ORDER BY ordinal ASC`
+    )
+    .all(activityId) as Array<{
+      id: string; text: string; category: string | null;
+      status: string; diff: string | null; created_at: string;
+    }>;
+  return rows.map((r) =>
+    ActivityStep.parse({
+      id: r.id,
+      text: r.text,
+      category: r.category,
+      status: r.status,
+      ...(r.diff ? { diff: JSON.parse(r.diff) } : {}),
+      createdAt: r.created_at,
+    })
+  );
+}
+
+function rowToActivity(db: Database.Database, row: ActivityRow): ActivityT {
   let pendingQuestion: PendingQuestionT | undefined;
   if (row.pending_question !== null) {
     pendingQuestion = PendingQuestion.parse(JSON.parse(row.pending_question));
@@ -80,7 +105,8 @@ function rowToActivity(row: ActivityRow): ActivityT {
     ...(pendingQuestion !== undefined ? { pendingQuestion } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    completedAt: row.completed_at
+    completedAt: row.completed_at,
+    steps: loadSteps(db, row.id),
   });
 }
 
@@ -88,7 +114,7 @@ function getActivityById(db: Database.Database, id: string): ActivityT | undefin
   const row = db.prepare("SELECT * FROM activities WHERE id = ?").get(id) as
     | ActivityRow
     | undefined;
-  return row === undefined ? undefined : rowToActivity(row);
+  return row === undefined ? undefined : rowToActivity(db, row);
 }
 
 export function getLiveForStepRun(
@@ -103,7 +129,7 @@ export function getLiveForStepRun(
        LIMIT 1`
     )
     .get(stepRunId) as ActivityRow | undefined;
-  return row === undefined ? undefined : rowToActivity(row);
+  return row === undefined ? undefined : rowToActivity(db, row);
 }
 
 export function getPausedForGoal(
@@ -118,7 +144,7 @@ export function getPausedForGoal(
        LIMIT 1`
     )
     .get(goalId) as ActivityRow | undefined;
-  return row === undefined ? undefined : rowToActivity(row);
+  return row === undefined ? undefined : rowToActivity(db, row);
 }
 
 function nextTurnOrdinal(db: Database.Database, stepRunId: string): number {
@@ -219,6 +245,73 @@ export function openOrUpdateLive(
     if (inserted === undefined) throw new Error(`Activity insert failed: ${id}`);
     event = insertActivityChangedEvent(ctx.db, inserted, now);
     return inserted;
+  })();
+
+  publishActivityChanged(ctx, event);
+  return activity;
+}
+
+export interface AppendStepInput {
+  goalId: string;
+  workflowRunId: string;
+  stepRunId: string;
+  agentSessionId: string | null;
+  text: string;
+  category: ActivityWorkCategory | null;
+  diff: ActivityDiff | null;
+}
+
+export function appendActivityStep(ctx: ActivityStoreCtx, input: AppendStepInput): ActivityT {
+  let event: DomainEvent | undefined;
+  const activity = ctx.db.transaction(() => {
+    const now = currentTime(ctx);
+    let live = getLiveForStepRun(ctx.db, input.stepRunId);
+
+    // Create the activity lazily if no live one exists (defensive — normally
+    // step_started already opened it).
+    if (live === undefined) {
+      const id = nextActivityId(ctx);
+      const turnOrdinal = nextTurnOrdinal(ctx.db, input.stepRunId);
+      ctx.db
+        .prepare(
+          `INSERT INTO activities (
+             id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+             status, current_text, final_summary, source_kind, work_category, confidence,
+             pending_question, created_at, updated_at, completed_at
+           ) VALUES (?, ?, ?, ?, ?, ?, 'active', '', NULL, 'tool_use', ?, NULL, NULL, ?, ?, NULL)`
+        )
+        .run(id, input.goalId, input.workflowRunId, input.stepRunId, input.agentSessionId,
+          turnOrdinal, input.category, now, now);
+      live = getActivityById(ctx.db, id);
+      if (live === undefined) throw new Error(`Activity insert failed: ${id}`);
+    }
+
+    // Close the current active step.
+    ctx.db
+      .prepare("UPDATE activity_steps SET status = 'done' WHERE activity_id = ? AND status = 'active'")
+      .run(live.id);
+
+    // Insert the new active step.
+    const ord = (ctx.db
+      .prepare("SELECT MAX(ordinal) AS m FROM activity_steps WHERE activity_id = ?")
+      .get(live.id) as { m: number | null }).m;
+    ctx.db
+      .prepare(
+        `INSERT INTO activity_steps (id, activity_id, ordinal, text, category, status, diff, created_at)
+         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`
+      )
+      .run(nextActivityId(ctx), live.id, (ord ?? -1) + 1, input.text, input.category,
+        input.diff ? JSON.stringify(input.diff) : null, now);
+
+    // Mirror latest text + source onto the activity row (back-compat).
+    ctx.db
+      .prepare("UPDATE activities SET current_text = ?, source_kind = 'tool_use', work_category = ?, updated_at = ? WHERE id = ?")
+      .run(input.text, input.category, now, live.id);
+
+    const updated = getActivityById(ctx.db, live.id);
+    if (updated === undefined) throw new Error(`Activity disappeared: ${live.id}`);
+    event = insertActivityChangedEvent(ctx.db, updated, now);
+    return updated;
   })();
 
   publishActivityChanged(ctx, event);
@@ -402,6 +495,10 @@ export function completeLive(
       )
       .run(input.finalSummary, input.confidence, now, now, live.id);
 
+    ctx.db
+      .prepare("UPDATE activity_steps SET status = 'done' WHERE activity_id = ? AND status = 'active'")
+      .run(live.id);
+
     const completed = getActivityById(ctx.db, live.id);
     if (completed === undefined) throw new Error(`Activity disappeared: ${live.id}`);
     event = insertActivityChangedEvent(ctx.db, completed, now);
@@ -422,7 +519,7 @@ export function expireLive(
       .prepare("SELECT * FROM activities WHERE step_run_id = ? AND status = 'active' LIMIT 1")
       .get(input.stepRunId) as ActivityRow | undefined;
     if (row === undefined) return undefined;
-    const live = rowToActivity(row);
+    const live = rowToActivity(ctx.db, row);
 
     const now = currentTime(ctx);
     ctx.db
@@ -433,6 +530,10 @@ export function expireLive(
          WHERE id = ?`
       )
       .run(now, now, live.id);
+
+    ctx.db
+      .prepare("UPDATE activity_steps SET status = 'done' WHERE activity_id = ? AND status = 'active'")
+      .run(live.id);
 
     const expired = getActivityById(ctx.db, live.id);
     if (expired === undefined) throw new Error(`Activity disappeared: ${live.id}`);

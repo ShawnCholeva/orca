@@ -21,19 +21,36 @@ export function isMeaningfulCompleted(activity: Activity): boolean {
   );
 }
 
-// An activity that earns a permanent, time-ordered slot in the chat timeline:
-// a terminal step-result card or a meaningful completed summary. Everything else
-// (live turns, weak signals, expired blips) is surfaced only via the tail bubble.
-export function isTimelineCard(activity: Activity): boolean {
-  return isMeaningfulCompleted(activity) || activity.sourceKind === "step_result";
+// A turn-level agent activity that owns a persisted card (it has accumulated
+// steps or a meaningful summary). step_result keeps its dedicated card.
+export function isAgentActivityCard(activity: Activity): boolean {
+  return (
+    activity.sourceKind !== "step_result" &&
+    activity.sourceKind !== "step_confirmation_pending" &&
+    activity.sourceKind !== "provider_recovery_pending" &&
+    (activity.steps.length > 0 || isMeaningfulCompleted(activity))
+  );
 }
 
-// The latest still-running activity (active or awaiting input). The chat shows it
-// as a single live "working" bubble pinned to the tail of the timeline.
+// An activity that earns a permanent, time-ordered slot in the chat timeline:
+// a terminal step-result card or an agent activity card with persisted steps.
+export function isTimelineCard(activity: Activity): boolean {
+  return activity.sourceKind === "step_result" || isAgentActivityCard(activity);
+}
+
+// The latest still-running activity awaiting a pause interaction (confirmation,
+// provider recovery, or a pending question). Active tool_use turns are now
+// rendered as persisted AgentActivity cards in the timeline, so they are
+// excluded here to avoid a duplicate ephemeral tail bubble.
 export function pickLiveActivity(activities: Activity[]): Activity | null {
   for (let index = activities.length - 1; index >= 0; index -= 1) {
     const activity = activities[index];
-    if (activity?.status === "active" || activity?.status === "paused_for_input") {
+    if (
+      activity?.status === "paused_for_input" &&
+      (activity.sourceKind === "step_confirmation_pending" ||
+        activity.sourceKind === "provider_recovery_pending" ||
+        activity.pendingQuestion != null)
+    ) {
       return activity;
     }
   }

@@ -235,7 +235,14 @@ describe("daemon activity integration", () => {
       status: "active",
       sourceKind: "tool_use",
       workCategory: "reading",
-      currentText: "Reading through the codebase...",
+      currentText: "Read server.ts",
+    });
+    // tool_use now appends a persisted step instead of overwriting the live bubble
+    expect(activities.items[0].steps).toHaveLength(1);
+    expect(activities.items[0].steps[0]).toMatchObject({
+      text: "Read server.ts",
+      category: "reading",
+      status: "active",
     });
   });
 
