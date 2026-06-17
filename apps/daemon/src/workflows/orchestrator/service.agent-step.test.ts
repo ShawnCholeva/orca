@@ -1578,6 +1578,31 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     expect(recommendationCount(db, "complete_workflow_run")).toBe(1);
     expect(launchFn).not.toHaveBeenCalled();
   });
+
+  it("startWorkflowFirstStep includes attached workspaces in the step agent objective", async () => {
+    const { db } = setupHarness();
+    setupFirstStepRun(db);
+    // Seed two workspaces attached to the goal.
+    db.prepare(
+      "INSERT INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-a', 'goal-1', 'frontend', '/home/user/projects/frontend', 'git', 'ok', ?)"
+    ).run(NOW);
+    db.prepare(
+      "INSERT INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-b', 'goal-1', 'backend', '/home/user/projects/backend', 'git', 'ok', ?)"
+    ).run(NOW);
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-ws" }));
+    const service = makeAgentService(makeLauncher(launchFn));
+
+    await service.startWorkflowFirstStep(db, () => NOW, "run-1");
+
+    expect(launchFn).toHaveBeenCalledOnce();
+    expect(launchFn).toHaveBeenCalledWith(
+      expect.objectContaining({ objective: expect.stringContaining("# Workspaces") })
+    );
+    expect(launchFn).toHaveBeenCalledWith(
+      expect.objectContaining({ objective: expect.stringContaining("/home/user/projects/frontend") })
+    );
+  });
 });
 
 describe("OrchestratorService.confirmStep", () => {

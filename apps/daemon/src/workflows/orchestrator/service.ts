@@ -2007,6 +2007,10 @@ export class OrchestratorService {
       this.commitDeterministicStepSelection(db, now, ctx, dispatch, options);
     }
 
+    const workspaceRows = db
+      .prepare("SELECT name, path FROM workspaces WHERE goal_id = ? ORDER BY attached_at ASC")
+      .all(ctx.goal.id) as Array<{ name: string; path: string }>;
+
     const objective = composeAgentInitialPrompt({
       goalTitle: ctx.goal.title,
       goalDescription: ctx.goal.description,
@@ -2014,6 +2018,7 @@ export class OrchestratorService {
       outputSchema: ctx.stepTpl.outputSchema,
       priorStepArtifacts: this.collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.id),
       repairContext: this.latestRejectingGate(db, ctx.run.id),
+      workspaces: workspaceRows.map((w) => ({ name: w.name, root: w.path })),
     });
 
     try {
