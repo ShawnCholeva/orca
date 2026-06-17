@@ -1439,6 +1439,22 @@ export class OrchestratorService {
       }
       case "approve_step_complete": {
         const block = extractOrcaStepCompleteBlock(responseText);
+
+        if (ctx.stepTpl.completionPolicy === "interview") {
+          // An absent open_questions field is treated as empty (step may complete).
+          const openQuestions = (block as { open_questions?: unknown } | null)?.open_questions;
+          if (Array.isArray(openQuestions) && openQuestions.length > 0) {
+            return this.reviseStep(
+              db,
+              now,
+              ctx,
+              sessionId,
+              "This interview step still has unresolved open questions. Resolve each one with the user (one at a time, with a recommended answer), then present the synthesized result and ask the user to confirm before completing.",
+              options
+            );
+          }
+        }
+
         const finishedAt = now();
 
         if (getSupervisionMode(db) === "supervised") {

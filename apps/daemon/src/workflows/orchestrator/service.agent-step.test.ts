@@ -312,6 +312,40 @@ function setupAgentStepRun(db: Database.Database, opts: { guardrailsJson?: strin
   ).run(step.id, step.ordinal, NOW);
 }
 
+/** Seed an interview step workflow (completionPolicy: "interview") */
+function setupInterviewStepRun(db: Database.Database) {
+  const step = {
+    id: "frame",
+    ordinal: 0,
+    name: "Frame",
+    completionPolicy: "interview" as const,
+    instructions: "Interview the user until the scope is clear.",
+    outputSchema: [
+      { key: "problem", type: "string", required: true },
+      { key: "success_outcome", type: "string", required: true },
+      { key: "constraints", type: "array", itemType: "string", required: true },
+      { key: "open_questions", type: "array", itemType: "string", required: false },
+    ],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+  };
+
+  db.prepare(
+    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+  ).run("goal-1", NOW, NOW);
+
+  db.prepare(
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/brainstorm', 'Brainstorm', 'desc', 1, 1, 1, ?, '[]', ?, ?)"
+  ).run(JSON.stringify([step]), NOW, NOW);
+
+  db.prepare(
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/brainstorm', 1, 'active', 'step-1', NULL, ?, NULL)"
+  ).run(NOW);
+
+  db.prepare(
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-1', 'goal-1', 'run-1', ?, ?, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1', NULL, NULL, NULL, NULL)"
+  ).run(step.id, step.ordinal, NOW);
+}
+
 /** Insert a minimal workspace so sessions FK is satisfied */
 function seedWorkspace(db: Database.Database) {
   db.prepare(
@@ -1081,6 +1115,86 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     expect(row.revise_attempts).toBe(3);
     expect(orchestratorMessageCount(db)).toBe(1);
     expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("interview step with open_questions: refuses completion and revises instead", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupInterviewStepRun(db);
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async (_sid: string, _text: string) => "delivered" as const);
+    // The mediator approves (called once via judgeAgentResponse); the backstop
+    // overrides that approval and revises instead.
+    const mediator = spyMediator({ kind: "approve_step_complete" });
+    const service = makeJudgeService(mediator, deliver);
+
+    // Schema-valid interview block, but open_questions is non-empty.
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({
+        problem: "Build a dashboard",
+        success_outcome: "Users can view metrics",
+        constraints: [],
+        open_questions: ["Should we support dark mode?"],
+      }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    expect(mediator.calls).toBe(1);
+    // Step did NOT complete: no step_output artifact written.
+    expect(stepOutputCount(db)).toBe(0);
+    // Revise path was taken: revise_attempts incremented.
+    const row = db
+      .prepare("SELECT revise_attempts FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { revise_attempts: number };
+    expect(row.revise_attempts).toBe(1);
+    // Feedback was delivered to the agent.
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver.mock.calls[0]![1]).toContain("open questions");
+  });
+
+  it("interview step with empty open_questions: completes normally", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupInterviewStepRun(db);
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), deliver);
+
+    // Empty open_questions → backstop must not fire.
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({
+        problem: "Build a dashboard",
+        success_outcome: "Users can view metrics",
+        constraints: [],
+        open_questions: [],
+      }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // Step completed: step_output artifact written.
+    expect(stepOutputCount(db)).toBe(1);
+    const row = db
+      .prepare("SELECT revise_attempts FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { revise_attempts: number };
+    expect(row.revise_attempts).toBe(0);
   });
 });
 
