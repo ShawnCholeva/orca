@@ -51,7 +51,7 @@ Semantics, enforced in the completion path + mediator:
 
 - **`interview`** (Frame): cannot complete while `open_questions` is non-empty. A **deterministic backstop** in the completion check refuses `approve_step_complete` when an interview step's output has non-empty `open_questions`. The step drains the queue via `ask_user`, then presents its synthesized result and requires explicit user confirmation before completing. `open_questions` is a *working queue*, not a deliverable.
 - **`reasoning`** (Research, Proposal, Critique, Verify): pauses at any material fork via `ask_user`; cannot complete while a decision is pending.
-- **`handoff`** (Done): `open_questions` is a legitimate non-blocking deliverable; recorded on the result card, does not block completion.
+- **`handoff`** (Done): `open_questions` is a legitimate non-blocking deliverable; recorded on the result card, does not block completion. A handoff step does **not** auto-complete: it pauses for user confirmation of its produced artifact (the spec) before completing — see §6.
 
 Default for steps that don't set it: `reasoning`. Only Brainstorm steps are assigned explicit policies in this pass (Frame=interview, Research/Proposal/Critique/Verify=reasoning, Done=handoff).
 
@@ -111,6 +111,16 @@ The six steps mirror obra's brainstorming process: Frame (clarify) → Research 
 
 - Honors `completionPolicy`: never `approve_step_complete` while a blocking item is pending (interview step with non-empty `open_questions`, or a reasoning step with an unresolved fork) — `ask_user` instead.
 - Still scores on approval; scores now render in the card's drawer rather than as the headline.
+
+### 6. Done persistence + confirmation (Phase 3)
+
+How the Done step persists the spec and gets the user's sign-off. Design decisions (locked):
+
+- **Agent authors and writes the file; daemon verifies and records.** Spec documents are large, complex markdown (existing specs run 8–30 KB with code fences and tables), so routing the content through the structured `orca:step-complete` JSON → synthesis → validation pipeline is fragile (escaping, payload budgets). Instead the Done agent writes the file directly with its file tools to `.orca/specs/<YYYY-MM-DD-topic>.md` and reports the path(s) in its `artifacts[]` output. On completion the daemon **verifies** the reported file(s) exist under `.orca/specs/` and records the `spec` artifact. The daemon does not author or validate the markdown body — it catches the failure mode that matters (no file written). This makes Done the first Brainstorm step that writes to disk, by design.
+- **Workspace list in the Done agent's prompt.** `composeAgentInitialPrompt` (and its caller) must include the goal's attached workspaces (name + root) so the Done agent knows single- vs multi-workspace and the exact path(s) to write.
+- **Multi-workspace: the agent asks mid-step.** Given the agent owns the write, it also owns the "which workspaces?" fork via the Phase 2 `ask_user` path (no default/recommended option), then writes to each chosen target. The daemon verify step confirms the file(s) landed where expected.
+- **Confirm-before-complete (applies to `handoff`).** A handoff step does not auto-complete. After the spec is written, Done pauses on the existing **confirmation checkpoint** (`pauseForConfirmation`/`resumeFromConfirmation`), surfacing the spec path + `chosen_direction`/summary for review — **regardless of global supervision mode**. The user either confirms ("Continue" → Done completes → daemon verifies/records → closing summary) or types adjustments in chat (→ `forward_to_agent` → the Done agent rewrites the spec file → re-present). This reuses the proven supervised-completion machinery; the only new behavior is forcing the pause for `handoff` steps even in autonomous mode.
+- **Closing summary, not silent finish.** On confirmed completion, post a chat message naming what was decided and where the spec was saved (also the result-card headline, §4).
 
 ## Data Flow
 
