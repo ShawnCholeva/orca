@@ -68,6 +68,7 @@ function loadActiveStep(
   ordinal: number;
   templateId: string;
   status: WorkflowRunStatus;
+  selectedOperatorId: string | null;
 } | null {
   const run = db
     .prepare("SELECT id, template_id, status FROM workflow_runs WHERE id = ?")
@@ -87,14 +88,14 @@ function loadActiveStep(
   }
 
   const stepRun = db
-    .prepare("SELECT step_template_id, ordinal FROM workflow_step_runs WHERE id = ?")
-    .get(stepRunId) as { step_template_id: string; ordinal: number } | undefined;
+    .prepare("SELECT step_template_id, ordinal, selected_operator_id FROM workflow_step_runs WHERE id = ?")
+    .get(stepRunId) as { step_template_id: string; ordinal: number; selected_operator_id: string | null } | undefined;
   if (!stepRun) return null;
 
   const stepTpl = steps.find((s) => s.id === stepRun.step_template_id);
   if (!stepTpl) return null;
 
-  return { stepTpl, templateVersion: tplRow.version, ordinal: stepRun.ordinal, templateId: run.template_id, status: run.status as WorkflowRunStatus };
+  return { stepTpl, templateVersion: tplRow.version, ordinal: stepRun.ordinal, templateId: run.template_id, status: run.status as WorkflowRunStatus, selectedOperatorId: stepRun.selected_operator_id };
 }
 
 export function buildContextFromDb(
@@ -130,9 +131,14 @@ export function buildContextFromDb(
   if (args.runId && args.stepRunId) {
     const activeStep = loadActiveStep(db, args.runId, args.stepRunId);
     if (activeStep) {
-      const { stepTpl, templateVersion, ordinal, templateId, status } = activeStep;
+      const { stepTpl, templateVersion, ordinal, templateId, status, selectedOperatorId } = activeStep;
       const attachedWorkspaces = loadWorkspaces(db, args.goalId);
       const priorStepArtifacts = loadPriorArtifacts(db, args.runId, args.stepRunId);
+
+      const agentAdapterId =
+        typeof selectedOperatorId === "string" && selectedOperatorId.startsWith("agent:")
+          ? selectedOperatorId.slice("agent:".length)
+          : "claude-code";
 
       const input: OrchestratorContextInput = {
         goal: { id: goal.id, title: goal.title, description: goal.description, attachedWorkspaces },
@@ -142,7 +148,7 @@ export function buildContextFromDb(
           instructions: stepTpl.instructions,
           outputSchema: stepTpl.outputSchema,
           completionPolicy: stepTpl.completionPolicy,
-          agentAdapterId: "claude-code",
+          agentAdapterId,
           executionMode: "shadow_session",
         },
         chatMessages,

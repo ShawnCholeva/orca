@@ -9,7 +9,7 @@ function seed(db: Database.Database) {
     CREATE TABLE workspaces (id TEXT, goal_id TEXT, path TEXT, name TEXT, workspace_type TEXT, branch TEXT, is_dirty INTEGER, git_probe TEXT, attached_at TEXT);
     CREATE TABLE workflow_templates (id TEXT PRIMARY KEY, name TEXT, description TEXT, version INTEGER, steps_json TEXT, created_at TEXT, updated_at TEXT);
     CREATE TABLE workflow_runs (id TEXT PRIMARY KEY, goal_id TEXT, template_id TEXT, template_version INTEGER, status TEXT, current_step_run_id TEXT, started_at TEXT);
-    CREATE TABLE workflow_step_runs (id TEXT PRIMARY KEY, goal_id TEXT, workflow_run_id TEXT, step_template_id TEXT, ordinal INTEGER, attempt INTEGER, status TEXT, started_at TEXT, fingerprint TEXT);
+    CREATE TABLE workflow_step_runs (id TEXT PRIMARY KEY, goal_id TEXT, workflow_run_id TEXT, step_template_id TEXT, ordinal INTEGER, attempt INTEGER, status TEXT, started_at TEXT, fingerprint TEXT, selected_operator_id TEXT);
     CREATE TABLE workflow_artifacts (id TEXT PRIMARY KEY, goal_id TEXT, workflow_run_id TEXT, step_run_id TEXT, type TEXT, title TEXT, body TEXT, source TEXT, linked_session_id TEXT, linked_task_id TEXT, linked_context_package_id TEXT, created_at TEXT);
     INSERT INTO goals VALUES ('G1','T','D');
     INSERT INTO orchestrator_messages VALUES ('m1','G1','user','message','hello','2026-05-29T00:00:00Z');
@@ -32,7 +32,7 @@ function seedActiveRun(db: Database.Database) {
     INSERT INTO workspaces VALUES ('ws1','G1','/tmp/ws','My Workspace','local',NULL,0,'{}','2026-01-01T00:00:00Z');
     INSERT INTO workflow_templates VALUES ('tpl','Test Template','',1,'${stepsJson.replace(/'/g, "''")}','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');
     INSERT INTO workflow_runs VALUES ('r1','G1','tpl',1,'active','sr1','2026-01-01T00:00:00Z');
-    INSERT INTO workflow_step_runs VALUES ('sr1','G1','r1','frame',0,1,'active','2026-01-01T00:00:00Z','fp1');
+    INSERT INTO workflow_step_runs VALUES ('sr1','G1','r1','frame',0,1,'active','2026-01-01T00:00:00Z','fp1','agent:codex');
   `);
 }
 
@@ -63,6 +63,7 @@ describe("buildContextFromDb", () => {
     expect(ctx.currentStep.id).toBe("frame");
     expect(ctx.currentStep.instructions).toBe("interview the user");
     expect(ctx.currentStep.completionPolicy).toBe("interview");
+    expect(ctx.currentStep.agentAdapterId).toBe("codex");
     expect(ctx.goal.attachedWorkspaces.length).toBeGreaterThan(0);
     expect(ctx.workflowRun.templateId).toBe("tpl");
     expect(ctx.workflowRun.status).toBe("active");
