@@ -1495,11 +1495,10 @@ export function createServer(
     if (!ok) { reply.status(409); return { error: { code: "already_answered" } }; }
     const stepContext = resolveStepContext(pending.sessionId);
     if (stepContext) {
-      const headers = pending.questions.map((question) => question.header).join(", ");
       applyActivitySafely("agent.question_answered", {
         kind: "turn_completed",
         stepRunId: stepContext.stepRunId,
-        summary: `Asked about ${headers}; recorded your answer.`,
+        summary: "Forwarding your response to the agent.",
         confidence: null,
       });
     }

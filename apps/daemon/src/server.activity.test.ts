@@ -577,7 +577,7 @@ describe("daemon activity integration", () => {
     expect(activities.items[0]).toMatchObject({
       status: "completed",
       sourceKind: "turn_completed",
-      finalSummary: "Asked about Release Plan; recorded your answer.",
+      finalSummary: "Forwarding your response to the agent.",
       confidence: null,
     });
     expect(activities.items[0]?.pendingQuestion).toBeUndefined();
