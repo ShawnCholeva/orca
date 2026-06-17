@@ -75,3 +75,49 @@ describe("built-in template catalog", () => {
     }
   });
 });
+
+describe("Brainstorm participatory revision", () => {
+  const brainstorm = BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === "orca/brainstorm")!;
+  const step = (id: string) => brainstorm.steps.find((s) => s.id === id)!;
+
+  it("bumps the template version to 3", () => {
+    expect(brainstorm.version).toBe(3);
+  });
+
+  it("assigns the expected completion policies", () => {
+    expect(step("frame").completionPolicy).toBe("interview");
+    expect(step("research").completionPolicy).toBe("reasoning");
+    expect(step("proposal").completionPolicy).toBe("reasoning");
+    expect(step("critique").completionPolicy).toBe("reasoning");
+    expect(step("verify").completionPolicy).toBe("reasoning");
+    expect(step("done").completionPolicy).toBe("handoff");
+  });
+
+  it("frames relentlessly and requires confirmation before completing", () => {
+    expect(step("frame").instructions).toMatch(/relentlessly/i);
+    expect(step("frame").instructions).toMatch(/confirm/i);
+    expect(step("frame").instructions).toMatch(/do not analyze the code technically/i);
+  });
+
+  it("tells reasoning steps to pause at a material fork", () => {
+    for (const id of ["research", "proposal", "critique", "verify"]) {
+      expect(step(id).instructions).toMatch(/pause and ask/i);
+    }
+  });
+
+  it("critiques the chosen approach, not the recommendation", () => {
+    expect(step("critique").instructions).toMatch(/approach the user chose/i);
+  });
+
+  it("requires Proposal to capture chosen_approach", () => {
+    const field = step("proposal").outputSchema.find((f) => f.key === "chosen_approach");
+    expect(field).toMatchObject({ key: "chosen_approach", type: "string", required: true });
+  });
+
+  it("gives Done an artifacts field and a save-to-disk instruction", () => {
+    const field = step("done").outputSchema.find((f) => f.key === "artifacts");
+    expect(field?.type).toBe("array");
+    expect(step("done").instructions).toMatch(/\.orca\/specs/);
+    expect(step("done").instructions).toMatch(/do not finish silently/i);
+  });
+});
