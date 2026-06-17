@@ -833,7 +833,22 @@ function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage;
         <div className="mono msg-meta">orca</div>
         <div className="orca-chat-message">{message.body}</div>
         {message.pendingQuestion && (
-          <WorkerQuestionForm goalId={goalId} pending={message.pendingQuestion} />
+          <WorkerQuestionForm
+            goalId={goalId}
+            pending={message.pendingQuestion}
+            onSubmitAnswers={async (answers) => {
+              // An orchestrator ask_user: the answer is user guidance. Post it
+              // as a user message so it flows through the mediator to the agent.
+              const questions = message.pendingQuestion!.questions;
+              const body = questions
+                .map((q, i) => {
+                  const labels = answers.find((a) => a.questionIndex === i)?.selectedLabels ?? [];
+                  return `${q.header || q.question}: ${labels.join(", ")}`;
+                })
+                .join("\n");
+              await createOrchestratorMessage(goalId, { body });
+            }}
+          />
         )}
         {message.pendingApproval && (
           <PermissionApprovalCard goalId={goalId} pending={message.pendingApproval} />
@@ -843,12 +858,19 @@ function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage;
   );
 }
 
+type WorkerAnswer = { questionIndex: number; selectedLabels: string[] };
+
 function WorkerQuestionForm({
   goalId,
   pending,
+  onSubmitAnswers,
 }: {
   goalId: string;
   pending: NonNullable<OrchestratorChatMessage["pendingQuestion"]>;
+  // Override the submit path. Default submits to the worker-question endpoint
+  // (an agent's live AskUserQuestion). Orchestrator ask_user questions pass a
+  // handler that posts the answer back as user guidance instead.
+  onSubmitAnswers?: (answers: WorkerAnswer[]) => Promise<void>;
 }) {
   const [selections, setSelections] = useState<Record<number, string[]>>({});
   const [submitted, setSubmitted] = useState(false);
@@ -877,7 +899,8 @@ function WorkerQuestionForm({
     const answers = pending.questions.map((_, i) => ({ questionIndex: i, selectedLabels: selections[i] ?? [] }));
     setSubmitted(true);
     try {
-      await submitWorkerAnswers(goalId, pending.questionId, answers);
+      if (onSubmitAnswers) await onSubmitAnswers(answers);
+      else await submitWorkerAnswers(goalId, pending.questionId, answers);
     } catch {
       setSubmitted(false);
       setExpired(true);

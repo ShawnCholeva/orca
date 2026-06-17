@@ -728,6 +728,50 @@ describe("OrcaChat", () => {
     );
   });
 
+  it("submits an orchestrator ask_user answer as a user message, not the worker endpoint", async () => {
+    setupRunLoad();
+    const askMessage: OrchestratorChatMessage = {
+      id: "msg-ask",
+      goalId: "goal-1",
+      role: "orchestrator",
+      kind: "message",
+      body: "Step 1 agent needs a decision before it can continue.",
+      correlationId: "corr-ask",
+      createdAt: now,
+      pendingQuestion: {
+        questionId: "oq-1",
+        toolUseId: "ot-1",
+        questions: [
+          {
+            header: "State",
+            question: "Which did you mean by 'state'?",
+            multiSelect: false,
+            options: [
+              { label: "Active / Archived", description: "Group by goal status." },
+              { label: "Running / Idle", description: "Group by active workflow run." },
+            ],
+          },
+        ],
+      },
+    };
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [askMessage] });
+    createOrchestratorMessageMock.mockResolvedValue({ message: askMessage, reply: null });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("Which did you mean by 'state'?");
+    fireEvent.click(screen.getByRole("radio", { name: "Active / Archived" }));
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    await waitFor(() =>
+      expect(createOrchestratorMessageMock).toHaveBeenCalledWith("goal-1", {
+        body: "State: Active / Archived",
+      }),
+    );
+    expect(submitWorkerAnswersMock).not.toHaveBeenCalled();
+  });
+
   it("resets question state when a refreshed activity has a new question id", async () => {
     setupRunLoad();
     listActivitiesMock
@@ -936,10 +980,14 @@ describe("OrcaChat", () => {
     const submit = screen.getByRole("button", { name: /submit/i });
     expect(submit).toBeEnabled();
     fireEvent.click(submit);
-    await waitFor(() => expect(submitWorkerAnswersMock).toHaveBeenCalledWith("goal-1", "q1", [
-      { questionIndex: 0, selectedLabels: ["Red"] },
-      { questionIndex: 1, selectedLabels: ["A", "B"] },
-    ]));
+    // A message-level question is an orchestrator ask_user: the answer posts
+    // back as user guidance, not to the worker-question endpoint.
+    await waitFor(() =>
+      expect(createOrchestratorMessageMock).toHaveBeenCalledWith("goal-1", {
+        body: "Color: Red\nFeat: A, B",
+      }),
+    );
+    expect(submitWorkerAnswersMock).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByRole("button", { name: /submit/i })).toBeDisabled());
   });
 
@@ -958,7 +1006,7 @@ describe("OrcaChat", () => {
   it("shows an expired notice and re-enables Submit when the answer is rejected", async () => {
     setupRunLoad();
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [pendingMsg] });
-    submitWorkerAnswersMock.mockRejectedValueOnce(new Error("question_not_found"));
+    createOrchestratorMessageMock.mockRejectedValueOnce(new Error("question_not_found"));
     const { OrcaChat } = await import("./OrcaChat");
 
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
