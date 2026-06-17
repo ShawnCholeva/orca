@@ -81,6 +81,8 @@ import {
 import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
 import { adapterIdForProvider } from "../../orchestrator-llm/model-provider-llm-client.js";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { SHADOW_LLM_TIMEOUT_MS } from "../../orchestrator-llm/shadow-llm-client.js";
 import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
 import { resolveShadowProvider } from "../../orchestrator-llm/providers/registry.js";
@@ -1890,6 +1892,45 @@ export class OrchestratorService {
       stepResultByStepRunId: { ...options.stepResultByStepRunId, [stepRun.id]: stepResult },
       terminalFinishedAtByStepRunId: { ...options.terminalFinishedAtByStepRunId, [stepRun.id]: stash.finishedAt },
     });
+
+    if (stepTpl.completionPolicy === "handoff") {
+      this.postHandoffClosingSummary(db, now, ctx, stash.block, options);
+    }
+  }
+
+  /** Posts the Done step's closing summary and best-effort verifies the spec file(s). */
+  private postHandoffClosingSummary(
+    db: Database.Database,
+    now: () => string,
+    ctx: { run: WorkflowRunT; goal: GoalRow },
+    block: unknown,
+    options: RequestNextDecisionOptions
+  ): void {
+    const out = (block ?? {}) as { chosen_direction?: unknown; artifacts?: unknown };
+    const direction = typeof out.chosen_direction === "string" ? out.chosen_direction : null;
+    const artifacts = Array.isArray(out.artifacts) ? out.artifacts : [];
+    const specRefs = artifacts
+      .map((a) => (a && typeof a === "object" ? (a as { reference?: unknown }).reference : undefined))
+      .filter((r): r is string => typeof r === "string");
+
+    const roots = (db
+      .prepare("SELECT path FROM workspaces WHERE goal_id = ? ORDER BY attached_at ASC")
+      .all(ctx.goal.id) as Array<{ path: string }>).map((w) => w.path);
+
+    const verified: string[] = [];
+    const missing: string[] = [];
+    for (const ref of specRefs) {
+      const found = isAbsolute(ref) ? existsSync(ref) : roots.some((root) => existsSync(join(root, ref)));
+      (found ? verified : missing).push(ref);
+    }
+
+    const lines: string[] = ["Design complete."];
+    if (direction) lines.push(`Direction: ${direction}`);
+    if (verified.length > 0) lines.push(`Spec saved: ${verified.join(", ")}`);
+    if (missing.length > 0) lines.push(`Could not verify spec file(s): ${missing.join(", ")}`);
+    if (specRefs.length === 0) lines.push("No spec artifact was reported by the Done step.");
+
+    this.postOrchestratorMessage(db, now, ctx.run.goalId, lines.join("\n"), options);
   }
 
   /**

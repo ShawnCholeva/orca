@@ -1,4 +1,7 @@
 import type Database from "better-sqlite3";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { closeDatabase } from "../../db.js";
@@ -1811,6 +1814,95 @@ describe("OrchestratorService.confirmStep", () => {
       .prepare("SELECT step_result_json FROM workflow_step_runs WHERE id = 'step-1'")
       .get() as { step_result_json: string | null };
     expect(row.step_result_json).toBeNull();
+  });
+
+  it("handoff confirm — verified spec: posts closing summary with direction and spec ref (no 'could not verify')", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupHandoffStepRun(db);
+    seedWorkspace(db); // ws-1 required by seedAgentSession FK
+    seedAgentSession(db);
+
+    // Create a real temp dir and seed the spec file inside it.
+    const tmpBase = join(tmpdir(), `orca-test-${Date.now()}`);
+    const specRelPath = ".orca/specs/2026-06-17-x.md";
+    const specAbsPath = join(tmpBase, specRelPath);
+    mkdirSync(join(tmpBase, ".orca/specs"), { recursive: true });
+    writeFileSync(specAbsPath, "# Design spec");
+
+    try {
+      // Seed a second workspace pointing at the temp dir.
+      db.prepare(
+        "INSERT OR IGNORE INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-tmp', 'goal-1', 'main', ?, 'git', 'ok', ?)"
+      ).run(tmpBase, NOW);
+
+      // Directly insert the pending_completion_json stash (Done block shape).
+      const doneBlock = {
+        summary: "Design is complete",
+        chosen_direction: "Approach A",
+        artifacts: [
+          { type: "spec", reference: specRelPath, description: "design spec" },
+        ],
+      };
+      const stash = { block: doneBlock, scoring: null, finishedAt: NOW };
+      db.prepare(
+        "UPDATE workflow_step_runs SET pending_completion_json = ? WHERE id = 'step-1'"
+      ).run(JSON.stringify(stash));
+
+      const service = makeJudgeService(
+        fakeMediator({ kind: "approve_step_complete" }),
+        vi.fn(async () => "delivered" as const)
+      );
+      await service.confirmStep(db, () => NOW, "run-1", { bus, idFactory });
+
+      const body = lastOrchestratorMessageBody(db);
+      expect(body).toContain("Approach A");
+      expect(body).toContain(specRelPath);
+      expect(body).not.toMatch(/could not verify/i);
+    } finally {
+      rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  it("handoff confirm — missing spec: posts closing summary that flags spec could not be verified", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupHandoffStepRun(db);
+    seedWorkspace(db); // ws-1 required by seedAgentSession FK
+    seedAgentSession(db);
+
+    const tmpBase = join(tmpdir(), `orca-test-${Date.now()}`);
+    mkdirSync(tmpBase, { recursive: true });
+    // NOTE: the spec file is NOT created.
+
+    try {
+      db.prepare(
+        "INSERT OR IGNORE INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-tmp', 'goal-1', 'main', ?, 'git', 'ok', ?)"
+      ).run(tmpBase, NOW);
+
+      const specRelPath = ".orca/specs/2026-06-17-missing.md";
+      const doneBlock = {
+        summary: "Design is complete",
+        chosen_direction: "Approach B",
+        artifacts: [
+          { type: "spec", reference: specRelPath, description: "design spec" },
+        ],
+      };
+      const stash = { block: doneBlock, scoring: null, finishedAt: NOW };
+      db.prepare(
+        "UPDATE workflow_step_runs SET pending_completion_json = ? WHERE id = 'step-1'"
+      ).run(JSON.stringify(stash));
+
+      const service = makeJudgeService(
+        fakeMediator({ kind: "approve_step_complete" }),
+        vi.fn(async () => "delivered" as const)
+      );
+      await service.confirmStep(db, () => NOW, "run-1", { bus, idFactory });
+
+      const body = lastOrchestratorMessageBody(db);
+      expect(body).toMatch(/could not verify/i);
+      expect(body).toContain(specRelPath);
+    } finally {
+      rmSync(tmpBase, { recursive: true, force: true });
+    }
   });
 });
 
