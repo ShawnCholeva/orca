@@ -1,5 +1,6 @@
 import type {
   ExecutionMode,
+  StepCompletionPolicy,
   WorkflowRunStatus,
   WorkflowStepOutputSchema,
 } from "@orca/contracts";
@@ -19,6 +20,7 @@ export interface OrchestratorContextInput {
     outputSchema: WorkflowStepOutputSchema;
     agentAdapterId: string;
     executionMode: ExecutionMode;
+    completionPolicy?: StepCompletionPolicy;
   };
   chatMessages: Array<{
     role: "user" | "orchestrator" | "agent_paraphrased";
