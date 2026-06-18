@@ -64,7 +64,10 @@ export function StepResultCard({ activity }: { activity: Activity }) {
   const r = activity.stepResult;
   if (!r) return null;
   const scored = r.evaluationStatus === "scored";
-  const headline = r.resultSummary ?? r.outcome.reason;
+  // For a failed evaluation, outcome.reason is an internal diagnostic string, so
+  // lead with a short label and keep the raw reason in the drawer.
+  const headline = r.resultSummary ?? (scored ? r.outcome.reason : "Evaluation failed");
+  const reasonInDrawer = r.resultSummary != null || !scored;
   return (
     <div className="step-result-card" data-testid="step-result-card" data-status={r.stepStatus} data-eval={r.evaluationStatus}>
       <div className="step-result-head">
@@ -82,7 +85,7 @@ export function StepResultCard({ activity }: { activity: Activity }) {
           <div className="step-result-state">
             {r.stepStatus}{scored ? ` · ${pct(r.successScore)} · ${r.outcome.handoffReady ? "Ready for handoff" : "Not ready"}` : " · Evaluation failed"}
           </div>
-          {r.resultSummary ? <div className="step-result-reason">{r.outcome.reason}</div> : null}
+          {reasonInDrawer ? <div className="step-result-reason">{r.outcome.reason}</div> : null}
           <div className="step-result-counts">
             {r.outcome.producedArtifactsCount} artifacts · {r.outcome.blockingIssuesCount} blockers · {r.outcome.warningsCount} warnings
           </div>

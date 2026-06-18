@@ -274,7 +274,7 @@ describe("ActivityCard", () => {
     expect(card).toHaveTextContent("Instruction adherence");
   });
 
-  it("shows 'Evaluation failed' in drawer and never a percentage for failed evaluation", () => {
+  it("leads a failed evaluation with a label, hides the raw reason and percentages in the drawer", () => {
     const baseResult = stepResultActivity().stepResult!;
     const failed = stepResultActivity({
       stepResult: {
@@ -287,10 +287,13 @@ describe("ActivityCard", () => {
     });
     render(<ActivityCard activity={failed} />);
     const card = screen.getByTestId("step-result-card");
-    expect(card).not.toHaveTextContent("Evaluation failed");
+    // headline is the short label, not the raw internal reason
+    expect(screen.getByTestId("step-result-summary")).toHaveTextContent("Evaluation failed");
+    expect(card).not.toHaveTextContent("shadow timeout");
     expect(card).not.toHaveTextContent("%");
+    // the raw diagnostic reason lives in the drawer
     fireEvent.click(screen.getByTestId("step-result-expand"));
-    expect(card).toHaveTextContent("Evaluation failed");
+    expect(card).toHaveTextContent("step result evaluation failed: shadow timeout");
     expect(card).not.toHaveTextContent("%");
   });
 
@@ -307,7 +310,7 @@ describe("ActivityCard", () => {
 
     // result summary and artifact are visible without expanding
     expect(screen.getByTestId("step-result-summary")).toHaveTextContent("Recommends Approach A");
-    expect(screen.getByTestId("step-result-artifact")).toHaveTextContent(".orca/specs/x.md");
+    expect(screen.getByTestId("step-result-artifact")).toHaveTextContent("design spec: .orca/specs/x.md");
 
     // quality score percentage is NOT visible before expanding (85% = outputCorrectness, unique)
     expect(screen.queryByText("85%")).not.toBeInTheDocument();
