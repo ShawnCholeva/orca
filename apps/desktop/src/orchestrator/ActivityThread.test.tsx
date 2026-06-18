@@ -264,16 +264,17 @@ describe("ActivityCard", () => {
     } as Activity;
   }
 
-  it("renders a scored result card with a percentage and expands to metrics", () => {
+  it("renders a scored result card and expands to show percentage and metrics", () => {
     render(<ActivityCard activity={stepResultActivity()} />);
     const card = screen.getByTestId("step-result-card");
     expect(card).toHaveTextContent("Investigate");
-    expect(card).toHaveTextContent("82%");
+    expect(card).not.toHaveTextContent("82%");
     fireEvent.click(screen.getByTestId("step-result-expand"));
+    expect(card).toHaveTextContent("82%");
     expect(card).toHaveTextContent("Instruction adherence");
   });
 
-  it("shows 'Evaluation failed' and never a percentage for failed evaluation", () => {
+  it("shows 'Evaluation failed' in drawer and never a percentage for failed evaluation", () => {
     const baseResult = stepResultActivity().stepResult!;
     const failed = stepResultActivity({
       stepResult: {
@@ -286,7 +287,39 @@ describe("ActivityCard", () => {
     });
     render(<ActivityCard activity={failed} />);
     const card = screen.getByTestId("step-result-card");
+    expect(card).not.toHaveTextContent("Evaluation failed");
+    expect(card).not.toHaveTextContent("%");
+    fireEvent.click(screen.getByTestId("step-result-expand"));
     expect(card).toHaveTextContent("Evaluation failed");
     expect(card).not.toHaveTextContent("%");
+  });
+
+  it("leads with resultSummary and shows artifact without expanding; hides scores until expanded", () => {
+    const baseResult = stepResultActivity().stepResult!;
+    const withSummary = stepResultActivity({
+      stepResult: {
+        ...baseResult,
+        resultSummary: "Recommends Approach A",
+        primaryArtifact: { reference: ".orca/specs/x.md", description: "design spec" },
+      },
+    });
+    render(<ActivityCard activity={withSummary} />);
+
+    // result summary and artifact are visible without expanding
+    expect(screen.getByTestId("step-result-summary")).toHaveTextContent("Recommends Approach A");
+    expect(screen.getByTestId("step-result-artifact")).toHaveTextContent(".orca/specs/x.md");
+
+    // quality score percentage is NOT visible before expanding (85% = outputCorrectness, unique)
+    expect(screen.queryByText("85%")).not.toBeInTheDocument();
+
+    // click expand — scores become visible
+    fireEvent.click(screen.getByTestId("step-result-expand"));
+    expect(screen.getByText("85%")).toBeInTheDocument();
+  });
+
+  it("falls back to outcome.reason as the visible headline when resultSummary is absent", () => {
+    // stepResultActivity() has no resultSummary — outcome.reason is "Output complete."
+    render(<ActivityCard activity={stepResultActivity()} />);
+    expect(screen.getByTestId("step-result-summary")).toHaveTextContent("Output complete.");
   });
 });
