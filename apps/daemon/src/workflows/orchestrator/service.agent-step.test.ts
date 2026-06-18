@@ -1341,6 +1341,56 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       .get() as { revise_attempts: number };
     expect(row.revise_attempts).toBe(0);
   });
+
+  it("resultSummary and primaryArtifact are populated on the step result from step output", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.9,
+          quality: {
+            outputCompleteness: 0.9,
+            outputCorrectness: 0.9,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.9,
+            riskLevel: 0.1,
+          },
+          reason: "Output complete.",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+
+    // Step-complete block includes summary + artifacts alongside the required `result` field.
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({
+        result: "implemented",
+        summary: "Recommends Approach A",
+        artifacts: [{ type: "spec", reference: ".orca/specs/x.md", description: "design spec" }],
+      }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    const result = readPersistedStepResult(db, "step-1");
+    expect(result.evaluationStatus).toBe("scored");
+    expect(result.resultSummary).toBe("Recommends Approach A");
+    expect(result.primaryArtifact?.reference).toBe(".orca/specs/x.md");
+  });
 });
 
 describe("OrchestratorService.onUserMessage (user_message trigger)", () => {

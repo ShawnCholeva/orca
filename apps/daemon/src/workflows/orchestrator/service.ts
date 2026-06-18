@@ -2413,7 +2413,8 @@ export class OrchestratorService {
     const facts = this.scoringFacts(db, ctx.stepRun, "passed", finishedAt);
     const proposal = StepResultScoringProposal.safeParse(scoring);
     if (proposal.success) {
-      return buildScoredStepResult(facts, proposal.data);
+      const result = buildScoredStepResult(facts, proposal.data);
+      return this.withResultSummary(db, ctx.stepRun, result);
     }
     if (scoring !== undefined) {
       // Field paths + codes only (never values) so a rejected score is debuggable
@@ -2434,6 +2435,35 @@ export class OrchestratorService {
       warningsCount: facts.outcome.warningsCount,
       reason: scoring === undefined ? "approval omitted scoring proposal" : "invalid step result scoring proposal",
     });
+  }
+
+  /** Attaches the step's own output summary + primary artifact to a built result,
+   *  so the result card can lead with the result rather than the scoring reason. */
+  private withResultSummary(
+    db: Database.Database,
+    stepRun: StepRunRow,
+    result: WorkflowStepResult,
+  ): WorkflowStepResult {
+    const output = this.readStepOutputAsRecord(db, stepRun.workflow_run_id, stepRun.id);
+    if (!output) return result;
+    const summary = typeof output.summary === "string" ? output.summary : undefined;
+    const artifacts = Array.isArray(output.artifacts) ? output.artifacts : [];
+    const chosen =
+      artifacts.find((a) => a && typeof a === "object" && (a as { type?: unknown }).type === "spec") ??
+      artifacts[0];
+    let primaryArtifact: { reference: string; description: string } | undefined;
+    if (chosen && typeof chosen === "object") {
+      const ref = (chosen as { reference?: unknown }).reference;
+      const desc = (chosen as { description?: unknown }).description;
+      if (typeof ref === "string") {
+        primaryArtifact = { reference: ref, description: typeof desc === "string" ? desc : "" };
+      }
+    }
+    return {
+      ...result,
+      ...(summary ? { resultSummary: summary } : {}),
+      ...(primaryArtifact ? { primaryArtifact } : {}),
+    };
   }
 
   /**
