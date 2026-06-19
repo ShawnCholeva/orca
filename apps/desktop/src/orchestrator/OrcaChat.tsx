@@ -107,6 +107,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const [messageError, setMessageError] = useState<string | null>(null);
   const [messageDraft, setMessageDraft] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [answeredQuestionId, setAnsweredQuestionId] = useState<string | null>(null);
   const [awaitingReply, setAwaitingReply] = useState(false);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -413,6 +414,17 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const orcaHasSpoken = messages.some((message) => message.role === "orchestrator");
   const liveActivity = pickLiveActivity(activities);
   const hasLiveActivity = liveActivity !== null;
+
+  // Once the resolved question leaves the live slot (backend caught up), stop
+  // suppressing — a later, different question must be allowed to render.
+  useEffect(() => {
+    if (
+      answeredQuestionId != null &&
+      liveActivity?.pendingQuestion?.questionId !== answeredQuestionId
+    ) {
+      setAnsweredQuestionId(null);
+    }
+  }, [liveActivity?.pendingQuestion?.questionId, answeredQuestionId]);
   // Suppress the "starting" indicator once any persisted agent-activity card is
   // present — the agent has already emitted steps, so there is nothing to wait for.
   const hasAgentActivityCard = activities.some(isAgentActivityCard);
@@ -533,6 +545,22 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     if (!selectedGoalId) return;
     const body = messageDraft.trim();
     if (!body) return;
+
+    const liveQuestionId = liveActivity?.pendingQuestion?.questionId ?? null;
+    if (liveQuestionId) {
+      setSendingMessage(true);
+      setMessageError(null);
+      try {
+        await submitWorkerFreeText(selectedGoalId, liveQuestionId, body);
+        setAnsweredQuestionId(liveQuestionId);
+        setMessageDraft("");
+      } catch (err) {
+        setMessageError(toErrorMessage(err, "Failed to send your answer."));
+      } finally {
+        setSendingMessage(false);
+      }
+      return;
+    }
 
     setSendingMessage(true);
     setMessageError(null);
@@ -712,7 +740,11 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
             {/* Tail indicators: the live agent bubble, the first-turn "starting"
                 hint, and the orchestrator "thinking" dots all pin to the bottom
                 of the timeline so they trail the most recent activity. */}
-            {liveActivity && (
+            {liveActivity &&
+              !(
+                liveActivity.pendingQuestion != null &&
+                liveActivity.pendingQuestion.questionId === answeredQuestionId
+              ) && (
               <LiveActivity
                 goalId={selectedGoalId ?? ""}
                 activity={liveActivity}
@@ -721,6 +753,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                     {...props}
                     onSubmitFreeText={async (text) => {
                       await submitWorkerFreeText(selectedGoalId ?? "", props.pending.questionId, text);
+                      setAnsweredQuestionId(props.pending.questionId);
                     }}
                   />
                 )}

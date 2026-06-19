@@ -1456,6 +1456,53 @@ describe("OrcaChat", () => {
     // silent after the last step.
     await screen.findByText("Workflow complete");
   });
+
+  it("composer text while a worker question is live answers the worker, not the orchestrator", async () => {
+    setupRunLoad();
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity,
+        status: "paused_for_input",
+        currentText: "I need your call on the approach.",
+        sourceKind: "question_pending",
+        pendingQuestion: {
+          questionId: "question-1",
+          toolUseId: "tool-1",
+          questions: [
+            {
+              header: "Approach",
+              question: "Which approach should I use?",
+              multiSelect: false,
+              options: [{ label: "Use hooks", description: "x" }],
+            },
+          ],
+        },
+      },
+    ]);
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("Which approach should I use?");
+    fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
+      target: { value: "a dedicated workspaces tab" },
+    });
+    // Exact "Send" targets the composer button only — the live form's button reads
+    // "Send answer", so a /send/i regex would match two buttons and throw.
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(submitWorkerFreeTextMock).toHaveBeenCalledWith(
+        "goal-1",
+        "question-1",
+        "a dedicated workspaces tab",
+      ),
+    );
+    expect(createOrchestratorMessageMock).not.toHaveBeenCalled();
+    // The live question card is dismissed, so the question no longer renders.
+    await waitFor(() =>
+      expect(screen.queryByText("Which approach should I use?")).not.toBeInTheDocument(),
+    );
+  });
 });
 
 describe("formatElapsed", () => {
