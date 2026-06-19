@@ -4,11 +4,14 @@ import {
   ActivityStep,
   PendingQuestion,
   ProviderRecoveryCheckpoint,
+  StepResultScoringProposal,
+  WorkflowStepOutputSchema,
   WorkflowStepResult,
   type Activity as ActivityT,
   type ActivityStep as ActivityStepT,
   type PendingQuestion as PendingQuestionT
 } from "@orca/contracts";
+import { buildConfirmationSummary } from "../workflows/orchestrator/confirmation-summary.js";
 
 interface ActivityRow {
   id: string;
@@ -108,6 +111,43 @@ function enrichStepResult(db: Database.Database, activity: ActivityT): ActivityT
   });
 }
 
+function enrichConfirmationSummary(db: Database.Database, activity: ActivityT): ActivityT {
+  if (activity.sourceKind !== "step_confirmation_pending") return activity;
+  const row = db
+    .prepare(
+      `SELECT sr.pending_completion_json AS stash,
+              sr.step_template_id,
+              wt.steps_json
+       FROM workflow_step_runs sr
+       LEFT JOIN workflow_runs wr ON wr.id = sr.workflow_run_id
+       LEFT JOIN workflow_templates wt ON wt.id = wr.template_id
+       WHERE sr.id = ?`
+    )
+    .get(activity.stepRunId) as {
+      stash: string | null;
+      step_template_id: string;
+      steps_json: string | null;
+    } | undefined;
+  if (!row?.stash || !row.steps_json) return activity;
+
+  let stash: { block?: unknown; scoring?: unknown; proposal?: unknown };
+  try { stash = JSON.parse(row.stash); } catch { return activity; }
+
+  const steps = JSON.parse(row.steps_json) as Array<{ id: string; outputSchema?: unknown }>;
+  const step = steps.find((s) => s.id === row.step_template_id);
+  const schemaParse = WorkflowStepOutputSchema.safeParse(step?.outputSchema);
+  if (!schemaParse.success) return activity;
+
+  const scoringParse = StepResultScoringProposal.safeParse(stash.scoring);
+  const confirmationSummary = buildConfirmationSummary(
+    schemaParse.data,
+    stash.block,
+    scoringParse.success ? scoringParse.data : null,
+    typeof stash.proposal === "string" ? stash.proposal : null,
+  );
+  return Activity.parse({ ...activity, confirmationSummary });
+}
+
 function enrichProviderRecovery(db: Database.Database, activity: ActivityT): ActivityT {
   if (activity.sourceKind !== "provider_recovery_pending") return activity;
   const row = db
@@ -139,5 +179,6 @@ export function listActivitiesByGoal(
   return rows
     .map((r) => rowToActivity(db, r))
     .map((a) => enrichStepResult(db, a))
+    .map((a) => enrichConfirmationSummary(db, a))
     .map((a) => enrichProviderRecovery(db, a));
 }
