@@ -346,6 +346,9 @@ export const UpdateWorkspaceRequest = z.object({
 }).strict();
 export type UpdateWorkspaceRequest = z.infer<typeof UpdateWorkspaceRequest>;
 
+export const UpdateWorkspaceResponse = z.object({ workspace: Workspace });
+export type UpdateWorkspaceResponse = z.infer<typeof UpdateWorkspaceResponse>;
+
 export const GoalRefinement = z.object({
   goalId: z.string(),
   skillId: z.string(),

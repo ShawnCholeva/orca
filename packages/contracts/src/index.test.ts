@@ -1803,6 +1803,8 @@ import {
   ListWorkspacesResponse,
   CreateWorkspaceRequest,
   UpdateWorkspaceRequest,
+  CreateWorkspaceResponse,
+  UpdateWorkspaceResponse,
 } from "./index.js";
 
 describe("first-class workspace contracts", () => {
@@ -1853,6 +1855,13 @@ describe("first-class workspace contracts", () => {
     expect(CreateWorkspaceRequest.parse({ inputPath: "/r" }).inputPath).toBe("/r");
     expect(() => CreateWorkspaceRequest.parse({ inputPath: "" })).toThrow();
     expect(UpdateWorkspaceRequest.parse({ name: "x" }).name).toBe("x");
+  });
+
+  it("Create/Update responses carry the lean workspace", () => {
+    const ws = { id: "w1", path: "/r", name: "a", description: "",
+      createdAt: "2026-06-19T00:00:00.000Z", updatedAt: "2026-06-19T00:00:00.000Z" };
+    expect(CreateWorkspaceResponse.parse({ workspace: ws }).workspace.id).toBe("w1");
+    expect(UpdateWorkspaceResponse.parse({ workspace: ws }).workspace.id).toBe("w1");
   });
 
   it("new workspace event types parse", () => {
