@@ -86,6 +86,7 @@ describe("runMigrations", () => {
       "0032_gate_decision_ledger_version.sql",
       "0033_workflow_run_template_snapshot.sql",
       "0034_activity_steps.sql",
+      "0035_orchestrator_message_pending_revision.sql",
     ]);
   });
 
@@ -211,6 +212,7 @@ describe("runMigrations", () => {
       "0032_gate_decision_ledger_version.sql",
       "0033_workflow_run_template_snapshot.sql",
       "0034_activity_steps.sql",
+      "0035_orchestrator_message_pending_revision.sql",
     ]);
 
     const goalCount = (
@@ -265,6 +267,7 @@ describe("runMigrations", () => {
       "internal_kind",
       "pending_question",
       "pending_approval",
+      "pending_revision",
     ]);
   });
 
@@ -485,6 +488,7 @@ describe("session tables migration", () => {
       "0032_gate_decision_ledger_version.sql",
       "0033_workflow_run_template_snapshot.sql",
       "0034_activity_steps.sql",
+      "0035_orchestrator_message_pending_revision.sql",
     ]);
 
     const tables = (
@@ -994,6 +998,7 @@ describe("migration 0010 workflows", () => {
       "0032_gate_decision_ledger_version.sql",
       "0033_workflow_run_template_snapshot.sql",
       "0034_activity_steps.sql",
+      "0035_orchestrator_message_pending_revision.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1583,6 +1588,7 @@ describe("migration 0012 orchestration transport", () => {
       "0032_gate_decision_ledger_version.sql",
       "0033_workflow_run_template_snapshot.sql",
       "0034_activity_steps.sql",
+      "0035_orchestrator_message_pending_revision.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
