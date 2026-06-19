@@ -27,6 +27,7 @@ import {
   openEventStream,
   requestNextOrchestratorDecision,
   submitWorkerAnswers,
+  submitWorkerFreeText,
   startWorkflowRun,
   toErrorMessage,
 } from "../api";
@@ -715,7 +716,14 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
               <LiveActivity
                 goalId={selectedGoalId ?? ""}
                 activity={liveActivity}
-                renderQuestionForm={WorkerQuestionForm}
+                renderQuestionForm={(props) => (
+                  <WorkerQuestionForm
+                    {...props}
+                    onSubmitFreeText={async (text) => {
+                      await submitWorkerFreeText(selectedGoalId ?? "", props.pending.questionId, text);
+                    }}
+                  />
+                )}
                 renderProviderRecovery={({ runId, recovery }) => (
                   <ProviderRecoveryCard
                     runId={runId}
@@ -831,7 +839,9 @@ function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage;
       <OrcaMark />
       <div className="msg-body">
         <div className="mono msg-meta">orca</div>
-        <div className="orca-chat-message">{message.body}</div>
+        {/* For a question card the question itself leads; the third-person
+            framing body is suppressed so it isn't shown above the question. */}
+        {!message.pendingQuestion && <div className="orca-chat-message">{message.body}</div>}
         {message.pendingQuestion && (
           <WorkerQuestionForm
             goalId={goalId}
@@ -864,6 +874,7 @@ function WorkerQuestionForm({
   goalId,
   pending,
   onSubmitAnswers,
+  onSubmitFreeText,
 }: {
   goalId: string;
   pending: NonNullable<OrchestratorChatMessage["pendingQuestion"]>;
@@ -871,18 +882,28 @@ function WorkerQuestionForm({
   // (an agent's live AskUserQuestion). Orchestrator ask_user questions pass a
   // handler that posts the answer back as user guidance instead.
   onSubmitAnswers?: (answers: WorkerAnswer[]) => Promise<void>;
+  // Live worker questions also accept a free-text answer ("Something else").
+  // Provided only on the live-activity path; absent for orchestrator ask_user.
+  onSubmitFreeText?: (text: string) => Promise<void>;
 }) {
   const [selections, setSelections] = useState<Record<number, string[]>>({});
   const [submitted, setSubmitted] = useState(false);
   const [expired, setExpired] = useState(false);
+  const [freeTextSelected, setFreeTextSelected] = useState(false);
+  const [freeText, setFreeText] = useState("");
+  const singleQuestion = pending.questions.length === 1;
+  const offerFreeText = singleQuestion && onSubmitFreeText != null;
 
   useEffect(() => {
     setSelections({});
     setSubmitted(false);
     setExpired(false);
+    setFreeTextSelected(false);
+    setFreeText("");
   }, [pending.questionId]);
 
   function toggle(qIndex: number, label: string, multi: boolean) {
+    setFreeTextSelected(false);
     setSelections((prev) => {
       const current = prev[qIndex] ?? [];
       if (multi) {
@@ -893,13 +914,20 @@ function WorkerQuestionForm({
     });
   }
 
-  const allAnswered = pending.questions.every((_, i) => (selections[i]?.length ?? 0) > 0);
+  function chooseFreeText() {
+    setSelections({});
+    setFreeTextSelected(true);
+  }
+
+  const optionsAnswered = pending.questions.every((_, i) => (selections[i]?.length ?? 0) > 0);
+  const canSubmit = freeTextSelected ? freeText.trim().length > 0 : optionsAnswered;
 
   async function handleSubmit() {
     const answers = pending.questions.map((_, i) => ({ questionIndex: i, selectedLabels: selections[i] ?? [] }));
     setSubmitted(true);
     try {
-      if (onSubmitAnswers) await onSubmitAnswers(answers);
+      if (freeTextSelected && onSubmitFreeText) await onSubmitFreeText(freeText.trim());
+      else if (onSubmitAnswers) await onSubmitAnswers(answers);
       else await submitWorkerAnswers(goalId, pending.questionId, answers);
     } catch {
       setSubmitted(false);
@@ -909,10 +937,29 @@ function WorkerQuestionForm({
 
   return (
     <div className="orca-chat-question">
+      <div className="orca-chat-question-header">
+        <svg
+          className="orca-chat-question-header-icon"
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 16v-4" />
+          <path d="M12 8h.01" />
+        </svg>
+        <span>Question</span>
+      </div>
       {pending.questions.map((q, qi) => (
         <fieldset key={qi} className="orca-chat-question-block" disabled={submitted}>
           <legend className="orca-chat-question-legend">
-            {pending.questions.length > 1 && <span>{qi + 1} · </span>}<span>{q.question}</span>
+            {pending.questions.length > 1 && <span className="orca-chat-question-index">{qi + 1} · </span>}<span>{q.question}</span>
           </legend>
           {q.options.map((opt, oi) => {
             const chosen = (selections[qi] ?? []).includes(opt.label);
@@ -922,7 +969,10 @@ function WorkerQuestionForm({
               ? opt.label.slice(0, -recommendedSuffix.length)
               : opt.label;
             return (
-              <label key={oi} className="orca-chat-option-row">
+              <label
+                key={oi}
+                className={`orca-chat-option-row${chosen ? " orca-chat-option-row--selected" : ""}`}
+              >
                 <input
                   type={q.multiSelect ? "checkbox" : "radio"}
                   name={`${pending.questionId}-${qi}`}
@@ -930,29 +980,73 @@ function WorkerQuestionForm({
                   checked={chosen}
                   onChange={() => toggle(qi, opt.label, q.multiSelect)}
                 />
-                <span className="orca-chat-option-label">
-                  {submitted && chosen ? "✓ " : ""}
-                  <span>{displayLabel}</span>
-                  {recommended ? (
-                    <>
-                      {" "}
+                <span className="orca-chat-option-content">
+                  <span className="orca-chat-option-head">
+                    <span className="orca-chat-option-label">
+                      {submitted && chosen ? "✓ " : ""}
+                      {displayLabel}
+                    </span>
+                    {recommended ? (
                       <span className="workflow-decision-badge">Recommended</span>
-                    </>
-                  ) : null}
+                    ) : null}
+                  </span>
+                  {opt.description ? <span className="orca-chat-option-desc">{opt.description}</span> : null}
                 </span>
-                {opt.description ? <span className="orca-chat-option-desc">{opt.description}</span> : null}
               </label>
             );
           })}
+          {offerFreeText && qi === pending.questions.length - 1 ? (
+            <>
+              <label className="orca-chat-option-row">
+                <input
+                  type="radio"
+                  name={`${pending.questionId}-${qi}`}
+                  aria-label="Something else"
+                  checked={freeTextSelected}
+                  onChange={chooseFreeText}
+                />
+                <span className="orca-chat-option-content">
+                  <span className="orca-chat-option-head">
+                    <span className="orca-chat-option-label">Something else</span>
+                  </span>
+                  <span className="orca-chat-option-desc">Write your own response instead of picking an option.</span>
+                </span>
+              </label>
+              {freeTextSelected ? (
+                <textarea
+                  className="orca-chat-option-freetext"
+                  value={freeText}
+                  placeholder="Type your own answer…"
+                  rows={2}
+                  disabled={submitted}
+                  onChange={(e) => setFreeText(e.target.value)}
+                />
+              ) : null}
+            </>
+          ) : null}
         </fieldset>
       ))}
       <button
         type="button"
-        className="submit-button orca-chat-question-submit"
-        disabled={submitted || !allAnswered}
+        className="orca-chat-question-submit"
+        disabled={submitted || !canSubmit}
         onClick={() => void handleSubmit()}
       >
-        {submitted ? "Submitted" : "Submit"}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M5 12h14" />
+          <path d="M13 5l7 7-7 7" />
+        </svg>
+        <span>{submitted ? "Sent" : "Send answer"}</span>
       </button>
       {expired && <p className="form-error" role="alert">This question expired.</p>}
     </div>

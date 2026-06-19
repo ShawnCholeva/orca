@@ -22,6 +22,7 @@ const requestNextOrchestratorDecisionMock = vi.fn();
 const listWorkflowTemplatesMock = vi.fn();
 const startWorkflowRunMock = vi.fn();
 const submitWorkerAnswersMock = vi.fn();
+const submitWorkerFreeTextMock = vi.fn();
 const submitPermissionDecisionMock = vi.fn();
 const setWorkerPermissionModeMock = vi.fn();
 const waitForProviderRecoveryMock = vi.fn();
@@ -45,6 +46,7 @@ vi.mock("../api", () => ({
   listWorkflowTemplates: (...args: unknown[]) => listWorkflowTemplatesMock(...args),
   startWorkflowRun: (...args: unknown[]) => startWorkflowRunMock(...args),
   submitWorkerAnswers: (...args: unknown[]) => submitWorkerAnswersMock(...args),
+  submitWorkerFreeText: (...args: unknown[]) => submitWorkerFreeTextMock(...args),
   submitPermissionDecision: (...args: unknown[]) => submitPermissionDecisionMock(...args),
   setWorkerPermissionMode: (...args: unknown[]) => setWorkerPermissionModeMock(...args),
   waitForProviderRecovery: (...args: unknown[]) => waitForProviderRecoveryMock(...args),
@@ -203,6 +205,8 @@ describe("OrcaChat", () => {
     startWorkflowRunMock.mockReset();
     submitWorkerAnswersMock.mockReset();
     submitWorkerAnswersMock.mockResolvedValue(undefined);
+    submitWorkerFreeTextMock.mockReset();
+    submitWorkerFreeTextMock.mockResolvedValue(undefined);
     submitPermissionDecisionMock.mockReset();
     submitPermissionDecisionMock.mockResolvedValue(undefined);
     setWorkerPermissionModeMock.mockReset();
@@ -613,7 +617,7 @@ describe("OrcaChat", () => {
       />,
     );
 
-    const staleSubmit = screen.queryByRole("button", { name: /submit/i });
+    const staleSubmit = screen.queryByRole("button", { name: /send answer/i });
     if (staleSubmit) fireEvent.click(staleSubmit);
     expect(screen.queryByText("Question q1?")).not.toBeInTheDocument();
     expect(submitWorkerAnswersMock).not.toHaveBeenCalledWith(
@@ -717,13 +721,57 @@ describe("OrcaChat", () => {
     });
     expect(recommendedOption).toHaveAccessibleName("Use hooks (Recommended)");
     fireEvent.click(recommendedOption);
-    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
 
     await waitFor(() =>
       expect(submitWorkerAnswersMock).toHaveBeenCalledWith(
         "goal-1",
         "question-1",
         [{ questionIndex: 0, selectedLabels: ["Use hooks (Recommended)"] }],
+      ),
+    );
+  });
+
+  it("offers 'Something else' on a live worker question and submits free text", async () => {
+    setupRunLoad();
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity,
+        status: "paused_for_input",
+        currentText: "I need your call on the approach.",
+        sourceKind: "question_pending",
+        pendingQuestion: {
+          questionId: "question-1",
+          toolUseId: "tool-1",
+          questions: [
+            {
+              header: "Approach",
+              question: "Which approach should I use?",
+              multiSelect: false,
+              options: [
+                { label: "Use hooks", description: "Matches the existing integration." },
+                { label: "Poll the API", description: "Adds a separate refresh loop." },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("Which approach should I use?");
+    fireEvent.click(screen.getByRole("radio", { name: /something else/i }));
+    fireEvent.change(screen.getByPlaceholderText(/your own answer/i), {
+      target: { value: "a dedicated workspaces tab" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
+
+    await waitFor(() =>
+      expect(submitWorkerFreeTextMock).toHaveBeenCalledWith(
+        "goal-1",
+        "question-1",
+        "a dedicated workspaces tab",
       ),
     );
   });
@@ -761,8 +809,12 @@ describe("OrcaChat", () => {
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
     await screen.findByText("Which did you mean by 'state'?");
+    // The question leads; the third-person framing body is suppressed.
+    expect(
+      screen.queryByText("Step 1 agent needs a decision before it can continue."),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "Active / Archived" }));
-    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
 
     await waitFor(() =>
       expect(createOrchestratorMessageMock).toHaveBeenCalledWith("goal-1", {
@@ -789,8 +841,8 @@ describe("OrcaChat", () => {
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
     fireEvent.click(await screen.findByRole("radio", { name: /First option/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
-    expect(await screen.findByRole("button", { name: "Submitted" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
+    expect(await screen.findByRole("button", { name: "Sent" })).toBeDisabled();
 
     act(() => {
       capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
@@ -799,7 +851,7 @@ describe("OrcaChat", () => {
     const secondOption = await screen.findByRole("radio", { name: /Second option/ });
     expect(secondOption).not.toBeChecked();
     expect(secondOption).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send answer" })).toBeDisabled();
     expect(screen.queryByText("This question expired.")).not.toBeInTheDocument();
   });
 
@@ -977,7 +1029,7 @@ describe("OrcaChat", () => {
     fireEvent.click(screen.getByRole("radio", { name: /Red/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /^A/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /^B/i }));
-    const submit = screen.getByRole("button", { name: /submit/i });
+    const submit = screen.getByRole("button", { name: /send answer/i });
     expect(submit).toBeEnabled();
     fireEvent.click(submit);
     // A message-level question is an orchestrator ask_user: the answer posts
@@ -988,7 +1040,7 @@ describe("OrcaChat", () => {
       }),
     );
     expect(submitWorkerAnswersMock).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByRole("button", { name: /submit/i })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sent" })).toBeDisabled());
   });
 
   it("keeps Submit disabled until every question is answered", async () => {
@@ -1000,7 +1052,7 @@ describe("OrcaChat", () => {
 
     await screen.findByText("favorite color?");
     fireEvent.click(screen.getByRole("radio", { name: /Red/i })); // Q2 still unanswered
-    expect(screen.getByRole("button", { name: /submit/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /send answer/i })).toBeDisabled();
   });
 
   it("shows an expired notice and re-enables Submit when the answer is rejected", async () => {
@@ -1014,11 +1066,11 @@ describe("OrcaChat", () => {
     await screen.findByText("favorite color?");
     fireEvent.click(screen.getByRole("radio", { name: /Red/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /^A/i }));
-    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
 
     await screen.findByText("This question expired.");
     // Controls came back: Submit is enabled again (selections still satisfy the gate).
-    expect(screen.getByRole("button", { name: /submit/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /send answer/i })).toBeEnabled();
   });
 
   it("renders the permission toggle reflecting the goal's mode when a goal is selected", async () => {
