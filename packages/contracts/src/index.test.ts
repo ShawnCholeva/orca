@@ -1617,6 +1617,9 @@ import {
   ExecutionMode,
   AdapterExecutionModeConfig,
   validateAdapterExecutionModeConfig,
+  PendingQuestion,
+  PendingQuestionAnswer,
+  SubmitWorkerAnswersRequest,
 } from "./index.js";
 
 describe("ExecutionMode and AdapterExecutionModeConfig", () => {
@@ -1705,5 +1708,43 @@ describe("ExecutionMode and AdapterExecutionModeConfig", () => {
     };
     const result = validateAdapterExecutionModeConfig(config, ["shadow_session"]);
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("worker question persistence contracts", () => {
+  const baseQuestion = {
+    questionId: "q1",
+    toolUseId: "t1",
+    questions: [
+      { header: "H", question: "Which?", multiSelect: false, options: [{ label: "A", description: "a" }] },
+    ],
+  };
+
+  it("accepts a worker-sourced question with an options answer", () => {
+    const parsed = PendingQuestion.parse({
+      ...baseQuestion,
+      source: "worker",
+      answer: { answers: [{ questionIndex: 0, selectedLabels: ["A"] }] },
+    });
+    expect(parsed.source).toBe("worker");
+    expect(parsed.answer?.answers?.[0]?.selectedLabels).toEqual(["A"]);
+  });
+
+  it("accepts inline free-text and via-chat answers", () => {
+    expect(PendingQuestionAnswer.parse({ freeText: "custom" }).freeText).toBe("custom");
+    expect(PendingQuestionAnswer.parse({ viaChat: true }).viaChat).toBe(true);
+  });
+
+  it("rejects an answer with more than one shape", () => {
+    expect(PendingQuestionAnswer.safeParse({ freeText: "x", viaChat: true }).success).toBe(false);
+  });
+
+  it("still parses a legacy question with no source/answer", () => {
+    expect(PendingQuestion.parse(baseQuestion).source).toBeUndefined();
+  });
+
+  it("accepts fromChat on the answer request and knows the updated event", () => {
+    expect(SubmitWorkerAnswersRequest.parse({ freeText: "x", fromChat: true }).fromChat).toBe(true);
+    expect(DomainEventType.parse("orchestrator.message.updated")).toBe("orchestrator.message.updated");
   });
 });

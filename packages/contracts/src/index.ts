@@ -197,6 +197,7 @@ export const DomainEventType = z.enum([
   "conflict.dismissed",
   "user.feedback.recorded",
   "orchestrator.message.created",
+  "orchestrator.message.updated",
   "goal.orchestrator_model_changed",
   "workflow.template.created",
   "workflow.template.updated",
@@ -1008,11 +1009,34 @@ export const PendingQuestionItem = z
   .strict();
 export type PendingQuestionItem = z.infer<typeof PendingQuestionItem>;
 
+export const WorkerAnswer = z
+  .object({
+    questionIndex: z.number().int().min(0),
+    selectedLabels: z.array(z.string().min(1)).min(1)
+  })
+  .strict();
+export type WorkerAnswer = z.infer<typeof WorkerAnswer>;
+
+export const PendingQuestionAnswer = z
+  .object({
+    answers: z.array(WorkerAnswer).min(1).optional(),
+    freeText: z.string().min(1).max(4000).optional(),
+    viaChat: z.literal(true).optional()
+  })
+  .strict()
+  .refine(
+    (v) => [v.answers != null, v.freeText != null, v.viaChat != null].filter(Boolean).length === 1,
+    { message: "Provide exactly one of answers, freeText, or viaChat" }
+  );
+export type PendingQuestionAnswer = z.infer<typeof PendingQuestionAnswer>;
+
 export const PendingQuestion = z
   .object({
     questionId: z.string().min(1),
     toolUseId: z.string().min(1),
-    questions: z.array(PendingQuestionItem).min(1).max(4)
+    questions: z.array(PendingQuestionItem).min(1).max(4),
+    source: z.enum(["worker", "orchestrator"]).optional(),
+    answer: PendingQuestionAnswer.optional()
   })
   .strict();
 export type PendingQuestion = z.infer<typeof PendingQuestion>;
@@ -1254,18 +1278,11 @@ export type CreateOrchestratorMessageRequest = z.infer<
   typeof CreateOrchestratorMessageRequest
 >;
 
-export const WorkerAnswer = z
-  .object({
-    questionIndex: z.number().int().min(0),
-    selectedLabels: z.array(z.string().min(1)).min(1)
-  })
-  .strict();
-export type WorkerAnswer = z.infer<typeof WorkerAnswer>;
-
 export const SubmitWorkerAnswersRequest = z
   .object({
     answers: z.array(WorkerAnswer).min(1).optional(),
     freeText: z.string().trim().min(1).max(4000).optional(),
+    fromChat: z.boolean().optional()
   })
   .strict()
   .refine((v) => (v.answers != null) !== (v.freeText != null), {
