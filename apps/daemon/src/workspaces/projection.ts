@@ -31,6 +31,8 @@ function stmts(db: Database.Database) {
       byGoal: db.prepare(
         "SELECT w.id,w.path,w.name,w.description,w.created_at,w.updated_at FROM workspaces w " +
         "JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC, w.id ASC"),
+      linksByGoal: db.prepare(
+        "SELECT workspace_id, attached_at FROM goal_workspaces WHERE goal_id = ? ORDER BY attached_at ASC"),
       byIdAndGoal: db.prepare(
         "SELECT w.id,w.path,w.name,w.description,w.created_at,w.updated_at FROM workspaces w " +
         "JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE w.id = ? AND gw.goal_id = ?"),
@@ -97,6 +99,11 @@ export function unlinkGoalWorkspace(db: Database.Database, goalId: string, works
 
 export function listWorkspacesByGoal(db: Database.Database, goalId: string): Workspace[] {
   return (stmts(db).byGoal.all(goalId) as EntityRow[]).map(toWorkspace);
+}
+
+export function listGoalWorkspaceLinks(db: Database.Database, goalId: string): { workspaceId: string; attachedAt: string }[] {
+  type Row = { workspace_id: string; attached_at: string };
+  return (stmts(db).linksByGoal.all(goalId) as Row[]).map((r) => ({ workspaceId: r.workspace_id, attachedAt: r.attached_at }));
 }
 
 export function getWorkspaceByIdAndGoal(db: Database.Database, workspaceId: string, goalId: string): Workspace | null {

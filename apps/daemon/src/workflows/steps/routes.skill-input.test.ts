@@ -222,8 +222,11 @@ describe("submit-input: PTY answer injection", () => {
 
     // Seed a workspace for FK
     db.prepare(
-      "INSERT INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-inject-1', ?, 'main', '/tmp/repo', 'git', 'ok', ?)"
-    ).run(GOAL_ID, NOW);
+      `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run('ws-inject-1', '/tmp/repo', 'main', '', NOW, NOW);
+    db.prepare(
+      `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+    ).run(GOAL_ID, 'ws-inject-1', NOW);
 
     // Seed a running session linked to the step run
     db.prepare(

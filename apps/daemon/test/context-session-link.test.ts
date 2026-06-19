@@ -52,9 +52,11 @@ function seedGoal(db: Database.Database, goalId: string, archived = false): void
 
 function seedWorkspace(db: Database.Database, wsId: string, goalId: string, wsPath: string): void {
   db.prepare(
-    `INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at)
-     VALUES (?, ?, ?, 'ws', 'folder', null, null, 'not_a_repo', ?)`
-  ).run(wsId, goalId, wsPath, NOW);
+    `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(wsId, wsPath, 'ws', '', NOW, NOW);
+  db.prepare(
+    `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run(goalId, wsId, NOW);
 }
 
 describe('context-session-link', () => {

@@ -188,7 +188,7 @@ describe.sequential('context package proof loop', () => {
     expect(createGoalRes.statusCode, createGoalRes.body).toBe(201);
     const goal = CreateGoalResponse.parse(JSON.parse(createGoalRes.body)).goal;
     const workspace = db
-      .prepare('SELECT id FROM workspaces WHERE goal_id = ?')
+      .prepare('SELECT w.id AS id FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ?')
       .get(goal.id) as { id: string };
 
     const memoryCtx = { db, bus: eventBus, now: () => NOW };

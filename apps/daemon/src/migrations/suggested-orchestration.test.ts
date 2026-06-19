@@ -162,7 +162,8 @@ describe("suggested orchestration migration schema", () => {
       "0032_gate_decision_ledger_version.sql",
       "0033_workflow_run_template_snapshot.sql",
       "0034_activity_steps.sql",
-      "0035_orchestrator_message_pending_revision.sql"
+      "0035_orchestrator_message_pending_revision.sql",
+      "0036_workspaces_first_class.sql"
     ]);
 
     const postCounts = {

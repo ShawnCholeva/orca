@@ -79,9 +79,11 @@ function seedRefinement(db: Database.Database, goalId: string, successCriteria: 
 
 function seedWorkspace(db: Database.Database, goalId: string, id: string, isDirty: boolean | null): void {
   db.prepare(
-    `INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at)
-     VALUES (?, ?, '/tmp/ws', ?, 'folder', NULL, ?, 'not_a_repo', '2026-01-01T00:00:00.000Z')`
-  ).run(id, goalId, id, isDirty === null ? null : isDirty ? 1 : 0);
+    `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(id, '/tmp/ws', id, '', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+  db.prepare(
+    `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run(goalId, id, '2026-01-01T00:00:00.000Z');
 }
 
 afterEach(() => {
@@ -104,7 +106,7 @@ describe('buildTaskGenerationInput', () => {
 
     expect(first.inputFingerprint).toBe(second.inputFingerprint);
     expect(first.refinement?.successCriteria).toEqual(['Implement endpoint', 'Write tests']);
-    expect(first.workspaces).toEqual([{ id: 'ws-1', isDirty: false }]);
+    expect(first.workspaces).toEqual([{ id: 'ws-1', isDirty: null }]);
   });
 
   it('caps existing generator tasks at 20 and excludes non-generator tasks', async () => {
@@ -135,16 +137,4 @@ describe('buildTaskGenerationInput', () => {
     expect(input.existingGeneratorTasks.every((task) => task.title !== 'Manual item')).toBe(true);
   });
 
-  it('changes fingerprint when workspace metadata changes', async () => {
-    const db = freshDb();
-    const goalId = await seedGoal(db, 'Generate tasks');
-    seedRefinement(db, goalId, ['Implement endpoint']);
-    seedWorkspace(db, goalId, 'ws-1', false);
-
-    const before = buildTaskGenerationInput({ db, goalId }).inputFingerprint;
-    db.prepare('UPDATE workspaces SET is_dirty = 1 WHERE id = ?').run('ws-1');
-    const after = buildTaskGenerationInput({ db, goalId }).inputFingerprint;
-
-    expect(before).not.toBe(after);
-  });
 });

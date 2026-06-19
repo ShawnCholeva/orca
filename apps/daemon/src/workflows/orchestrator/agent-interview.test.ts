@@ -112,8 +112,11 @@ function seedAgentSessionWithSentinel(
   ).run(goalId, NOW, NOW);
 
   db.prepare(
-    "INSERT INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-int-1', ?, 'main', '/tmp/repo', 'git', 'ok', ?)"
-  ).run(goalId, NOW);
+    `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run('ws-int-1', '/tmp/repo', 'main', '', NOW, NOW);
+  db.prepare(
+    `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run(goalId, 'ws-int-1', NOW);
 
   db.prepare(
     "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', 'desc', 1, 1, 1, ?, '[]', ?, ?)"
@@ -307,8 +310,11 @@ describe("OrchestratorService.onSessionOutputChunk", () => {
       "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'G', 'd', 'active', 1, ?, ?, NULL, NULL, NULL)"
     ).run(goalId, NOW, NOW);
     db.prepare(
-      "INSERT INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-noop-1', ?, 'main', '/tmp', 'git', 'ok', ?)"
-    ).run(goalId, NOW);
+      `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run('ws-noop-1', '/tmp', 'main', '', NOW, NOW);
+    db.prepare(
+      `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+    ).run(goalId, 'ws-noop-1', NOW);
     db.prepare(
       "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES (?, ?, 'ws-noop-1', 'claude-code', 'S', 'running', ?, NULL)"
     ).run(sessionId, goalId, NOW);

@@ -219,9 +219,11 @@ function seedWorkflowWithSession(
   ).run(goalId, NOW, NOW, provider, model);
 
   db.prepare(
-    `INSERT INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at)
-     VALUES ('ws-1', ?, 'main', '/tmp/repo', 'git', 'ok', ?)`
-  ).run(goalId, NOW);
+    `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run('ws-1', '/tmp/repo', 'main', '', NOW, NOW);
+  db.prepare(
+    `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run(goalId, 'ws-1', NOW);
 
   db.prepare(
     `INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at)

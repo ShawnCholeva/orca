@@ -1983,7 +1983,7 @@ export class OrchestratorService {
       .filter((r): r is string => typeof r === "string");
 
     const roots = (db
-      .prepare("SELECT path FROM workspaces WHERE goal_id = ? ORDER BY attached_at ASC")
+      .prepare("SELECT w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC")
       .all(ctx.goal.id) as Array<{ path: string }>).map((w) => w.path);
 
     const verified: string[] = [];
@@ -2118,7 +2118,7 @@ export class OrchestratorService {
     }
 
     const workspaceRows = db
-      .prepare("SELECT name, path FROM workspaces WHERE goal_id = ? ORDER BY attached_at ASC")
+      .prepare("SELECT w.name AS name, w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC")
       .all(ctx.goal.id) as Array<{ name: string; path: string }>;
 
     const objective = composeAgentInitialPrompt({

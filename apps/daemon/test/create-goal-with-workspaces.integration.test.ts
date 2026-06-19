@@ -106,6 +106,8 @@ describe.sequential('daemon integration: full guided goal and workspace loop', (
 
     // Collect bus events in order; must be subscribed BEFORE the first request.
     const publishedEvents: DomainEvent[] = [];
+    let gitCanonicalPath!: string;
+    let folderCanonicalPath!: string;
 
     try {
       const boot1 = await boot(dbDir);
@@ -127,6 +129,7 @@ describe.sequential('daemon integration: full guided goal and workspace loop', (
         expect(body.preview.branch).toBe(expectedBranch);
         expect(body.preview.workspaceType).toBe('repo');
         expect(body.preview.isDirty).toBe(false);
+        gitCanonicalPath = body.preview.path;
       }
 
       // ─── Step 2: inspect plain folder ────────────────────────────────────
@@ -141,6 +144,7 @@ describe.sequential('daemon integration: full guided goal and workspace loop', (
         expect(body.preview.gitProbe).toBe('not_a_repo');
         expect(body.preview.workspaceType).toBe('folder');
         expect(body.preview.branch).toBeNull();
+        folderCanonicalPath = body.preview.path;
       }
 
       // ─── Step 3: POST /v1/goals/refine ───────────────────────────────────
@@ -259,17 +263,12 @@ Constraints:
         expect(body.refinement?.successCriteria).toContain('Ship the feature');
         expect(body.workspaces).toHaveLength(2);
 
-        const gitWs = body.workspaces.find((w) => w.workspaceType === 'repo');
-        const folderWs = body.workspaces.find((w) => w.workspaceType === 'folder');
+        // Workspaces are now lean registry entities (no git fields); identify by path.
+        const gitWs = body.workspaces.find((w) => w.path === gitCanonicalPath);
+        const folderWs = body.workspaces.find((w) => w.path === folderCanonicalPath);
 
         expect(gitWs).toBeDefined();
-        expect(gitWs!.branch).toBe(expectedBranch);
-        expect(gitWs!.gitProbe).toBe('ok');
-        expect(gitWs!.isDirty).toBe(false);
-
         expect(folderWs).toBeDefined();
-        expect(folderWs!.gitProbe).toBe('not_a_repo');
-        expect(folderWs!.branch).toBeNull();
 
         gitWsId = gitWs!.id;
         folderWsId = folderWs!.id;

@@ -10,13 +10,14 @@ import {
   type DomainEvent,
   type DomainEventType,
   type InspectWorkspacePreview,
+  type Workspace,
 } from "@orca/contracts";
 import { getDatabase } from "./db.js";
 import { eventBus, EventBus } from "./events.js";
 import type { SkillRegistry } from "./registry/skill-registry.js";
 import { insertGoalRefinement } from "./goal-refinements.js";
 import { seedRefinementMemory } from "./memory/refinement-seed.js";
-import { insertWorkspace } from "./workspaces/projection.js";
+import { findWorkspaceByPath, insertWorkspaceEntity, linkGoalWorkspace } from "./workspaces/projection.js";
 import type { ModelProviderRegistry } from "./llm/registry.js";
 
 export interface CreateGoalCtx {
@@ -269,29 +270,23 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
     }
 
     for (const { preview, name } of inspected) {
-      const wsId = randomUUID();
+      const existing = findWorkspaceByPath(ctx.db, preview.path);
       const wsName = name ?? preview.name;
-      const wsPayload = {
-        workspaceId: wsId,
+      const ws: Workspace = existing ?? {
+        id: randomUUID(),
         path: preview.path,
         name: wsName,
-        workspaceType: preview.workspaceType,
-        branch: preview.branch,
-        isDirty: preview.isDirty,
-        gitProbe: preview.gitProbe,
+        description: "",
+        createdAt: now,
+        updatedAt: now,
       };
-      toPublish.push(emitEvent("workspace.attached", wsPayload));
-      insertWorkspace(ctx.db, {
-        id: wsId,
-        goalId,
-        path: preview.path,
-        name: wsName,
-        workspaceType: preview.workspaceType,
-        branch: preview.branch,
-        isDirty: preview.isDirty,
-        gitProbe: preview.gitProbe,
-        attachedAt: now,
-      });
+      if (!existing) insertWorkspaceEntity(ctx.db, ws);
+      linkGoalWorkspace(ctx.db, goalId, ws.id, now);
+      toPublish.push(emitEvent("workspace.attached", {
+        workspaceId: ws.id,
+        path: ws.path,
+        name: ws.name,
+      }));
     }
   })();
 

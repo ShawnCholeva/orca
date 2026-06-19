@@ -51,8 +51,11 @@ function seedGoal(db: Database.Database, id: string): void {
 
 function seedWorkspace(db: Database.Database, id: string, goalId: string): void {
   db.prepare(
-    'INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, goalId, '/tmp/ws', 'ws', 'folder', null, null, 'not_a_repo', '2026-01-01T00:00:00.000Z');
+    'INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(id, `/tmp/ws/${id}`, 'ws', '', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+  db.prepare(
+    'INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)'
+  ).run(goalId, id, '2026-01-01T00:00:00.000Z');
 }
 
 function seedSession(db: Database.Database, id: string, goalId: string, workspaceId: string): void {
@@ -170,6 +173,7 @@ describe('context migration 0006_context.sql', () => {
       '0033_workflow_run_template_snapshot.sql',
       '0034_activity_steps.sql',
       '0035_orchestrator_message_pending_revision.sql',
+      '0036_workspaces_first_class.sql',
     ]);
 
     const tables = (
@@ -231,7 +235,10 @@ describe('context migration 0006_context.sql', () => {
     runMigrations(db, m5Dir);
 
     seedGoal(db, 'goal-upgrade');
-    seedWorkspace(db, 'ws-upgrade', 'goal-upgrade');
+    // Pre-0036 schema: seed the legacy per-goal workspaces row so 0036 can migrate it.
+    db.prepare(
+      'INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run('ws-upgrade', 'goal-upgrade', '/tmp/ws-upgrade', 'ws', 'folder', null, null, 'not_a_repo', '2026-01-01T00:00:00.000Z');
     seedSession(db, 'sess-upgrade', 'goal-upgrade', 'ws-upgrade');
 
     const upgrade = runMigrations(db, defaultMigrationsDir());
@@ -266,6 +273,7 @@ describe('context migration 0006_context.sql', () => {
       '0033_workflow_run_template_snapshot.sql',
       '0034_activity_steps.sql',
       '0035_orchestrator_message_pending_revision.sql',
+      '0036_workspaces_first_class.sql',
     ]);
 
     const counts = {

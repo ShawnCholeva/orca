@@ -6,7 +6,8 @@ function seed(db: Database.Database) {
   db.exec(`
     CREATE TABLE goals (id TEXT, title TEXT, description TEXT);
     CREATE TABLE orchestrator_messages (id TEXT, goal_id TEXT, role TEXT, kind TEXT, body TEXT, created_at TEXT);
-    CREATE TABLE workspaces (id TEXT, goal_id TEXT, path TEXT, name TEXT, workspace_type TEXT, branch TEXT, is_dirty INTEGER, git_probe TEXT, attached_at TEXT);
+    CREATE TABLE workspaces (id TEXT, path TEXT, name TEXT, description TEXT, created_at TEXT, updated_at TEXT);
+    CREATE TABLE goal_workspaces (goal_id TEXT, workspace_id TEXT, attached_at TEXT);
     CREATE TABLE workflow_templates (id TEXT PRIMARY KEY, name TEXT, description TEXT, version INTEGER, steps_json TEXT, created_at TEXT, updated_at TEXT);
     CREATE TABLE workflow_runs (id TEXT PRIMARY KEY, goal_id TEXT, template_id TEXT, template_version INTEGER, status TEXT, current_step_run_id TEXT, started_at TEXT);
     CREATE TABLE workflow_step_runs (id TEXT PRIMARY KEY, goal_id TEXT, workflow_run_id TEXT, step_template_id TEXT, ordinal INTEGER, attempt INTEGER, status TEXT, started_at TEXT, fingerprint TEXT, selected_operator_id TEXT);
@@ -29,7 +30,8 @@ function seedActiveRun(db: Database.Database) {
     },
   ]);
   db.exec(`
-    INSERT INTO workspaces VALUES ('ws1','G1','/tmp/ws','My Workspace','local',NULL,0,'{}','2026-01-01T00:00:00Z');
+    INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES ('ws1','/tmp/ws','My Workspace','','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');
+    INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES ('G1','ws1','2026-01-01T00:00:00Z');
     INSERT INTO workflow_templates VALUES ('tpl','Test Template','',1,'${stepsJson.replace(/'/g, "''")}','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');
     INSERT INTO workflow_runs VALUES ('r1','G1','tpl',1,'active','sr1','2026-01-01T00:00:00Z');
     INSERT INTO workflow_step_runs VALUES ('sr1','G1','r1','frame',0,1,'active','2026-01-01T00:00:00Z','fp1','agent:codex');

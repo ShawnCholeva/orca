@@ -40,9 +40,11 @@ function seedSession(db: Database.Database, sessionId: string, goalId = 'g1', wo
   ).run(goalId, now, now);
 
   db.prepare(
-    `INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at)
-     VALUES (?, ?, ?, 'Workspace', 'folder', null, null, 'not_a_repo', ?)`
-  ).run(workspaceId, goalId, process.cwd(), now);
+    `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(workspaceId, `${process.cwd()}/${workspaceId}`, 'Workspace', '', now, now);
+  db.prepare(
+    `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run(goalId, workspaceId, now);
 
   db.prepare(
     `INSERT INTO sessions (

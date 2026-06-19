@@ -7,7 +7,7 @@ import type {
 import { listTasksByGoal } from '../tasks/projection.js';
 import { listMemoryByGoal } from '../memory/projection.js';
 import { listDecisionsByGoal } from '../decisions/projection.js';
-import { listWorkspacesByGoal } from '../workspaces/projection.js';
+import { listGoalWorkspaceLinks } from '../workspaces/projection.js';
 
 const MAX_SESSIONS = 100;
 const MAX_SUMMARIES = 20;
@@ -204,9 +204,9 @@ function buildConflictSnapshot(db: Database.Database, goalId: string): ConflictS
       updatedAt: decision.updatedAt,
     }));
 
-  const workspaces = listWorkspacesByGoal(db, goalId).map((workspace) => ({
-    id: workspace.id,
-    attachedAt: workspace.attachedAt,
+  const workspaces = listGoalWorkspaceLinks(db, goalId).map((link) => ({
+    id: link.workspaceId,
+    attachedAt: link.attachedAt,
   }));
 
   return {

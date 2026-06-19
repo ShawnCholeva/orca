@@ -1357,13 +1357,12 @@ describe('goal refinement and workspace routes', () => {
       payload: { inputPath: wsDir }
     });
     expect(res.statusCode).toBe(201);
-    const body = JSON.parse(res.body) as { workspace: { path: string; workspaceType: string; gitProbe: string } };
+    const body = JSON.parse(res.body) as { workspace: { path: string; name: string } };
     expect(body.workspace.path).toBe(wsDir);
-    expect(body.workspace.workspaceType).toBe('folder');
-    expect(body.workspace.gitProbe).toBe('not_a_repo');
+    expect(typeof body.workspace.name).toBe('string');
   });
 
-  it('POST /v1/goals/:id/workspaces returns 409 on duplicate canonical path', async () => {
+  it('POST /v1/goals/:id/workspaces is idempotent for the same canonical path', async () => {
     const created = CreateGoalResponse.parse(JSON.parse(
       (await server.inject({
         method: 'POST', url: '/v1/goals',
@@ -1372,12 +1371,13 @@ describe('goal refinement and workspace routes', () => {
       })).body
     ));
 
-    await server.inject({
+    const first = await server.inject({
       method: 'POST',
       url: `/v1/goals/${created.goal.id}/workspaces`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: { inputPath: wsDir }
     });
+    const firstWs = (JSON.parse(first.body) as { workspace: { id: string } }).workspace;
 
     const dup = await server.inject({
       method: 'POST',
@@ -1385,9 +1385,14 @@ describe('goal refinement and workspace routes', () => {
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: { inputPath: wsDir }
     });
-    expect(dup.statusCode).toBe(409);
-    const body = JSON.parse(dup.body) as { error: { code: string } };
-    expect(body.error.code).toBe('workspace_duplicate');
+    // Find-or-create + link is idempotent: re-attaching the same path resolves to
+    // the same workspace entity and a single junction row.
+    expect(dup.statusCode).toBe(201);
+    const dupWs = (JSON.parse(dup.body) as { workspace: { id: string } }).workspace;
+    expect(dupWs.id).toBe(firstWs.id);
+
+    const detail = await server.inject({ method: 'GET', url: `/v1/goals/${created.goal.id}`, headers: AUTH_HEADERS });
+    expect((JSON.parse(detail.body) as { workspaces: unknown[] }).workspaces).toHaveLength(1);
   });
 
   it('POST /v1/goals/:id/workspaces without Authorization returns 401', async () => {
@@ -1516,6 +1521,84 @@ describe('goal refinement and workspace routes', () => {
       payload: { inputPath: wsDir }
     });
     expect(res.statusCode).toBe(401);
+  });
+
+  // Workspace registry routes
+  it('POST then GET /v1/workspaces returns the entity with goalCounts', async () => {
+    const create = await server.inject({
+      method: 'POST', url: '/v1/workspaces',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir }
+    });
+    expect(create.statusCode).toBe(201);
+
+    const list = await server.inject({ method: 'GET', url: '/v1/workspaces', headers: AUTH_HEADERS });
+    const body = list.json() as { workspaces: { path: string; goalCounts: { active: number } }[] };
+    expect(body.workspaces).toHaveLength(1);
+    expect(body.workspaces[0]!.goalCounts.active).toBe(0);
+  });
+
+  it('POST /v1/workspaces twice on same path -> 409', async () => {
+    await server.inject({
+      method: 'POST', url: '/v1/workspaces',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir }
+    });
+    const dup = await server.inject({
+      method: 'POST', url: '/v1/workspaces',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir }
+    });
+    expect(dup.statusCode).toBe(409);
+  });
+
+  it('PATCH /v1/workspaces/:id renames', async () => {
+    const created = (await server.inject({
+      method: 'POST', url: '/v1/workspaces',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir }
+    })).json() as { workspace: { id: string } };
+
+    const patched = await server.inject({
+      method: 'PATCH', url: `/v1/workspaces/${created.workspace.id}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { name: 'renamed', description: 'd' }
+    });
+    expect(patched.statusCode).toBe(200);
+    expect((patched.json() as { workspace: { name: string } }).workspace.name).toBe('renamed');
+  });
+
+  it('PATCH /v1/workspaces/:id returns 404 for unknown id', async () => {
+    const res = await server.inject({
+      method: 'PATCH', url: '/v1/workspaces/does-not-exist',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { name: 'x' }
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('GET /v1/workspaces/:id returns associated goals', async () => {
+    const created = CreateGoalResponse.parse(JSON.parse(
+      (await server.inject({
+        method: 'POST', url: '/v1/goals',
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { title: 'ws-goal', workspaces: [{ inputPath: wsDir }] }
+      })).body
+    ));
+
+    const list = (await server.inject({ method: 'GET', url: '/v1/workspaces', headers: AUTH_HEADERS }))
+      .json() as { workspaces: { id: string }[] };
+    const wsId = list.workspaces[0]!.id;
+
+    const res = await server.inject({ method: 'GET', url: `/v1/workspaces/${wsId}`, headers: AUTH_HEADERS });
+    const body = res.json() as { goals: { id: string; status: string }[] };
+    expect(body.goals.map((g) => g.id)).toContain(created.goal.id);
+    expect(body.goals.find((g) => g.id === created.goal.id)!.status).toBe('active');
+  });
+
+  it('GET /v1/workspaces/:id returns 404 for unknown id', async () => {
+    const res = await server.inject({ method: 'GET', url: '/v1/workspaces/nope', headers: AUTH_HEADERS });
+    expect(res.statusCode).toBe(404);
   });
 });
 
@@ -2605,8 +2688,11 @@ describe('POST /v1/workflows/runs/:id/provider-recovery/*', () => {
       "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES ('goal-1', 'Goal', 'desc', 'active', 1, ?, ?, NULL)"
     ).run(NOW, NOW);
     db.prepare(
-      "INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at) VALUES ('ws-1', 'goal-1', '/tmp/ws', 'ws', 'local', NULL, 0, 'clean', ?)"
-    ).run(NOW);
+      `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run('ws-1', '/tmp/ws', 'ws', '', NOW, NOW);
+    db.prepare(
+      `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+    ).run('goal-1', 'ws-1', NOW);
     seedEngineeringTemplate(db, () => NOW);
     db.prepare(
       "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 5, 'active', 'step-1', NULL, ?, NULL)"

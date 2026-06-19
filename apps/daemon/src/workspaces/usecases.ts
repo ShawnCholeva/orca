@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import type { DomainEvent, DomainEventType, Workspace } from "@orca/contracts";
+import type { DomainEvent, DomainEventType, InspectWorkspacePreview, Workspace } from "@orca/contracts";
 import type { EventBus } from "../events.js";
 import { NotFoundError } from "../goals.js";
 import {

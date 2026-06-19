@@ -80,9 +80,11 @@ function seedRefinement(db: Database.Database, goalId: string): void {
 
 function seedWorkspace(db: Database.Database, goalId: string, wsId: string): void {
   db.prepare(
-    `INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at)
-     VALUES (?, ?, '/repo', 'my-repo', 'repo', 'main', 0, 'ok', ?)`
-  ).run(wsId, goalId, NOW);
+    `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(wsId, '/repo', 'my-repo', '', NOW, NOW);
+  db.prepare(
+    `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run(goalId, wsId, NOW);
 }
 
 function seedMemoryItem(
@@ -150,10 +152,11 @@ function seedSession(
   // Sessions require a non-null workspace_id FK. Create a shared throwaway workspace per goal.
   const wsId = options.workspaceId ?? `test-ws-for-${goalId}`;
   db.prepare(
-    `INSERT OR IGNORE INTO workspaces
-       (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at)
-     VALUES (?, ?, '/tmp/test-ws', 'test-ws', 'folder', NULL, NULL, 'not_a_repo', ?)`
-  ).run(wsId, goalId, NOW);
+    `INSERT OR IGNORE INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(wsId, '/tmp/test-ws', 'test-ws', '', NOW, NOW);
+  db.prepare(
+    `INSERT OR IGNORE INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run(goalId, wsId, NOW);
   db.prepare(
     `INSERT INTO sessions
        (id, goal_id, workspace_id, adapter_id, role, instruction, title, status,
@@ -286,8 +289,8 @@ describe('workspace', () => {
     expect(result.input.workspace?.id).toBe('ws-1');
     expect(result.input.workspace?.name).toBe('my-repo');
     expect(result.input.workspace?.pathDisplay).toBe('/repo');
-    expect(result.input.workspace?.branch).toBe('main');
-    expect(result.input.workspace?.dirty).toBe(false);
+    expect(result.input.workspace?.branch).toBeNull();
+    expect(result.input.workspace?.dirty).toBeNull();
   });
 
   it('sets workspace to undefined for foreign workspaceId', () => {

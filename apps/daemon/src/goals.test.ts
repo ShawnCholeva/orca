@@ -412,7 +412,7 @@ describe("createGoal — refined goal path", () => {
     ]);
 
     const wsRows = db
-      .prepare("SELECT path FROM workspaces WHERE goal_id = ?")
+      .prepare("SELECT w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ?")
       .all(goal.id) as { path: string }[];
     expect(wsRows).toHaveLength(2);
     const wsPaths = wsRows.map((r) => r.path).sort();
@@ -531,7 +531,7 @@ describe("createGoal — refined goal path", () => {
     expect(row.description).toBe("Refined desc");
   });
 
-  it("workspace.attached event payload includes workspaceId, path, name, workspaceType, branch, isDirty, gitProbe", async () => {
+  it("workspace.attached event payload includes workspaceId, path, name", async () => {
     const { db, ctx } = setup();
     const refined = makeRefined();
     const wsPath = "/tmp/my-repo";
@@ -563,10 +563,6 @@ describe("createGoal — refined goal path", () => {
     expect(typeof wsPayload.workspaceId).toBe("string");
     expect(wsPayload.path).toBe(wsPath);
     expect(wsPayload.name).toBe("my-repo");
-    expect(wsPayload.workspaceType).toBe("repo");
-    expect(wsPayload.branch).toBe("main");
-    expect(wsPayload.isDirty).toBe(false);
-    expect(wsPayload.gitProbe).toBe("ok");
   });
 
   it("caller-supplied workspace name overrides the inferred name", async () => {
@@ -584,7 +580,7 @@ describe("createGoal — refined goal path", () => {
     );
 
     const wsRow = db
-      .prepare("SELECT name FROM workspaces WHERE goal_id = ?")
+      .prepare("SELECT w.name AS name FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ?")
       .get(goal.id) as { name: string } | undefined;
     expect(wsRow!.name).toBe("custom-name");
   });

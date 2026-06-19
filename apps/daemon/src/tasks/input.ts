@@ -96,7 +96,7 @@ export function buildTaskGenerationInput(
   const workspaces = listWorkspacesByGoal(db, goalId)
     .map((workspace) => ({
       id: workspace.id,
-      isDirty: workspace.isDirty,
+      isDirty: null,
     }))
     .sort((a, b) => a.id.localeCompare(b.id));
 

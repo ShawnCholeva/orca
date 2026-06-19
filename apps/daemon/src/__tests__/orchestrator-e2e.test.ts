@@ -73,8 +73,11 @@ function fakeBrokerNoop(): Pick<
 /** Insert a minimal workspace so the sessions FK is satisfied. */
 function seedWorkspace(db: Database.Database) {
   db.prepare(
-    "INSERT OR IGNORE INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-1', 'goal-1', 'main', '/tmp/repo', 'git', 'ok', ?)"
-  ).run(NOW);
+    `INSERT OR IGNORE INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run('ws-1', '/tmp/repo', 'main', '', NOW, NOW);
+  db.prepare(
+    `INSERT OR IGNORE INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run('goal-1', 'ws-1', NOW);
 }
 
 function stepOutputCount(db: Database.Database, stepRunId: string): number {

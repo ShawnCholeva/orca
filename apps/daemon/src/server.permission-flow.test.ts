@@ -68,9 +68,11 @@ function insertSession(db: ReturnType<typeof openDatabase>, sessionId: string, g
   const now = new Date().toISOString();
   const workspaceId = `ws-${sessionId}`;
   db.prepare(
-    `INSERT INTO workspaces (id, goal_id, path, name, workspace_type, git_probe, attached_at)
-     VALUES (?, ?, ?, 'test', 'folder', 'not_a_repo', ?)`
-  ).run(workspaceId, goalId, `/tmp/ws-${sessionId}`, now);
+    `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(workspaceId, `/tmp/ws-${sessionId}`, 'test', '', now, now);
+  db.prepare(
+    `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run(goalId, workspaceId, now);
   db.prepare(
     `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at)
      VALUES (?, ?, ?, 'claude-code', 'test session', 'created', ?)`
@@ -83,9 +85,11 @@ function insertSession(db: ReturnType<typeof openDatabase>, sessionId: string, g
 function insertWorkspace(db: ReturnType<typeof openDatabase>, workspaceId: string, goalId: string, wsPath: string): void {
   const now = new Date().toISOString();
   db.prepare(
-    `INSERT INTO workspaces (id, goal_id, path, name, workspace_type, git_probe, attached_at)
-     VALUES (?, ?, ?, 'test', 'folder', 'not_a_repo', ?)`
-  ).run(workspaceId, goalId, wsPath, now);
+    `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(workspaceId, wsPath, 'test', '', now, now);
+  db.prepare(
+    `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run(goalId, workspaceId, now);
 }
 
 /**

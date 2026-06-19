@@ -422,8 +422,11 @@ function setupHandoffStepRun(db: Database.Database) {
 /** Insert a minimal workspace so sessions FK is satisfied */
 function seedWorkspace(db: Database.Database) {
   db.prepare(
-    "INSERT OR IGNORE INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-1', 'goal-1', 'main', '/tmp/repo', 'git', 'ok', ?)"
-  ).run(NOW);
+    `INSERT OR IGNORE INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run('ws-1', '/tmp/repo', 'main', '', NOW, NOW);
+  db.prepare(
+    `INSERT OR IGNORE INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run('goal-1', 'ws-1', NOW);
 }
 
 function recommendationCount(db: Database.Database, type?: string): number {
@@ -1919,11 +1922,17 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     setupFirstStepRun(db);
     // Seed two workspaces attached to the goal.
     db.prepare(
-      "INSERT INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-a', 'goal-1', 'frontend', '/home/user/projects/frontend', 'git', 'ok', ?)"
-    ).run(NOW);
+      `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run('ws-a', '/home/user/projects/frontend', 'frontend', '', NOW, NOW);
     db.prepare(
-      "INSERT INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-b', 'goal-1', 'backend', '/home/user/projects/backend', 'git', 'ok', ?)"
-    ).run(NOW);
+      `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+    ).run('goal-1', 'ws-a', NOW);
+    db.prepare(
+      `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run('ws-b', '/home/user/projects/backend', 'backend', '', NOW, NOW);
+    db.prepare(
+      `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+    ).run('goal-1', 'ws-b', NOW);
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-ws" }));
     const service = makeAgentService(makeLauncher(launchFn));
@@ -2022,8 +2031,11 @@ describe("OrchestratorService.confirmStep", () => {
     try {
       // Seed a second workspace pointing at the temp dir.
       db.prepare(
-        "INSERT OR IGNORE INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-tmp', 'goal-1', 'main', ?, 'git', 'ok', ?)"
-      ).run(tmpBase, NOW);
+        `INSERT OR IGNORE INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+      ).run('ws-tmp', tmpBase, 'main', '', NOW, NOW);
+      db.prepare(
+        `INSERT OR IGNORE INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+      ).run('goal-1', 'ws-tmp', NOW);
 
       // Directly insert the pending_completion_json stash (Done block shape).
       const doneBlock = {
@@ -2065,8 +2077,11 @@ describe("OrchestratorService.confirmStep", () => {
 
     try {
       db.prepare(
-        "INSERT OR IGNORE INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-tmp', 'goal-1', 'main', ?, 'git', 'ok', ?)"
-      ).run(tmpBase, NOW);
+        `INSERT OR IGNORE INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+      ).run('ws-tmp', tmpBase, 'main', '', NOW, NOW);
+      db.prepare(
+        `INSERT OR IGNORE INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+      ).run('goal-1', 'ws-tmp', NOW);
 
       const specRelPath = ".orca/specs/2026-06-17-missing.md";
       const doneBlock = {

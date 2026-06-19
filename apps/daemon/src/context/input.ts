@@ -134,8 +134,8 @@ export function buildContextAssemblyInput(
         id: ws.id,
         name: ws.name,
         pathDisplay: ws.path,
-        branch: ws.branch ?? null,
-        dirty: ws.isDirty ?? null,
+        branch: null,
+        dirty: null,
       };
     }
     // Foreign or missing workspace: workspaceInput stays null.

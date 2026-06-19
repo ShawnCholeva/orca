@@ -49,7 +49,6 @@ interface GoalRow {
 
 interface WorkspaceRow {
   id: string;
-  goal_id: string;
   path: string;
 }
 
@@ -64,6 +63,7 @@ let _db: Database.Database | null = null;
 let _stmts: {
   selectGoal: Database.Statement;
   selectWorkspace: Database.Statement;
+  selectWorkspaceLink: Database.Statement;
   insertEvent: Database.Statement;
 } | null = null;
 
@@ -72,7 +72,8 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
     _db = db;
     _stmts = {
       selectGoal: db.prepare('SELECT id, archived_at FROM goals WHERE id = ?'),
-      selectWorkspace: db.prepare('SELECT id, goal_id, path FROM workspaces WHERE id = ?'),
+      selectWorkspace: db.prepare('SELECT id, path FROM workspaces WHERE id = ?'),
+      selectWorkspaceLink: db.prepare('SELECT 1 FROM goal_workspaces WHERE workspace_id = ? AND goal_id = ?'),
       insertEvent: db.prepare(
         'INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)'
       ),
@@ -111,7 +112,7 @@ export async function createSession(
   // Validate workspace exists and is attached to this goal
   const wsRow = stmts.selectWorkspace.get(workspaceId) as WorkspaceRow | undefined;
   if (!wsRow) throw new WorkspaceNotFoundError(workspaceId);
-  if (wsRow.goal_id !== goalId) throw new WorkspaceNotAttachedError(workspaceId, goalId);
+  if (!stmts.selectWorkspaceLink.get(workspaceId, goalId)) throw new WorkspaceNotAttachedError(workspaceId, goalId);
 
   // Validate workspace path is accessible
   try {

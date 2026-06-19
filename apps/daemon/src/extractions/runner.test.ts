@@ -70,9 +70,11 @@ function seedGoal(db: Database.Database, goalId: string): void {
 
 function seedWorkspace(db: Database.Database, wsId: string, goalId: string): void {
   db.prepare(
-    `INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at)
-     VALUES (?, ?, '/tmp/ws', 'ws', 'folder', null, null, 'not_a_repo', '2026-01-01T00:00:00.000Z')`
-  ).run(wsId, goalId);
+    `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(wsId, '/tmp/ws', 'ws', '', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+  db.prepare(
+    `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run(goalId, wsId, '2026-01-01T00:00:00.000Z');
 }
 
 function seedSession(

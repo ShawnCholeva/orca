@@ -67,7 +67,13 @@ import {
   ProviderRecoveryActionRequest,
   ProviderRecoverySwitchRequest,
   ProviderRecoveryCheckpoint,
-  SubmitStepRevisionRequest
+  SubmitStepRevisionRequest,
+  type ListWorkspacesResponse,
+  type GetWorkspaceResponse,
+  CreateWorkspaceRequest,
+  type CreateWorkspaceResponse,
+  UpdateWorkspaceRequest,
+  type UpdateWorkspaceResponse
 } from '@orca/contracts';
 import type { Config } from './config.js';
 import { getDatabase } from './db.js';
@@ -86,11 +92,19 @@ import { eventBus, listEventsSince, type EventBus } from './events.js';
 import { getGoalRefinement } from './goal-refinements.js';
 import { inspectWorkspace } from './workspaces/inspect.js';
 import { WorkspaceInspectionError } from './workspaces/errors.js';
-import { listWorkspacesByGoal } from './workspaces/projection.js';
+import {
+  listWorkspacesByGoal,
+  listWorkspaceSummaries,
+  findWorkspaceById,
+  listGoalViewsForWorkspace,
+} from './workspaces/projection.js';
 import {
   attachWorkspace,
   detachWorkspace,
-  DuplicateWorkspaceError
+  createWorkspace,
+  updateWorkspace,
+  DuplicateWorkspaceError,
+  type WorkspaceCtx
 } from './workspaces/usecases.js';
 import { pluginRegistry } from './registry/plugin-registry.js';
 import { skillRegistry } from './registry/skill-registry.js';
@@ -672,7 +686,7 @@ export function createServer(
     orchestratorMediator,
     // workerSpawn: resolve workspace + adapter spawn, then start the tmux worker.
     async ({ sessionId, goalId, adapterId }) => {
-      const wsRow = db.prepare("SELECT w.path AS path FROM workspaces w WHERE w.goal_id = ? ORDER BY w.attached_at ASC LIMIT 1").get(goalId) as { path: string } | undefined;
+      const wsRow = db.prepare("SELECT w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC LIMIT 1").get(goalId) as { path: string } | undefined;
       if (!wsRow) { console.warn(`[orchestrator] workerSpawn: no workspace for goal ${goalId}`); return; }
       const adapter = adapterRegistry.get(adapterId);
       if (!adapter) { console.warn(`[orchestrator] workerSpawn: no adapter ${adapterId}`); return; }
@@ -728,7 +742,7 @@ export function createServer(
         // For now, a failed reattach is best-effort — the worker may have exited
         // and its StopFailure hook will drive synthesis normally.
         const wsRow = db.prepare(
-          "SELECT w.path AS path FROM workspaces w JOIN sessions s ON s.goal_id = w.goal_id WHERE s.id = ? ORDER BY w.attached_at ASC LIMIT 1"
+          "SELECT w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id JOIN sessions s ON s.goal_id = gw.goal_id WHERE s.id = ? ORDER BY gw.attached_at ASC LIMIT 1"
         ).get(sessionId) as { path: string } | undefined;
         if (wsRow) {
           await workerSessions.reattach(sessionId, wsRow.path);
@@ -741,7 +755,7 @@ export function createServer(
         ).get(stepRunId) as { id: string } | undefined;
         if (sessionRow) {
           const wsRow = db.prepare(
-            "SELECT w.path AS path FROM workspaces w WHERE w.goal_id = ? ORDER BY w.attached_at ASC LIMIT 1"
+            "SELECT w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC LIMIT 1"
           ).get(goalId) as { path: string } | undefined;
           if (wsRow && await workerSessions.reattach(sessionRow.id, wsRow.path)) return; // adopted; no respawn
         }
@@ -999,6 +1013,8 @@ export function createServer(
     return { goal, refinement, workspaces };
   });
 
+  const workspaceCtx: WorkspaceCtx = { db: getDatabase(), bus: eventBus, inspectWorkspace };
+
   server.post('/v1/goals/:id/workspaces', async (request, reply): Promise<AttachWorkspaceResponse | { error: unknown }> => {
     const { id: goalId } = request.params as { id: string };
     const parsed = AttachWorkspaceRequest.safeParse(request.body);
@@ -1009,7 +1025,7 @@ export function createServer(
 
     try {
       const workspace = await attachWorkspace(
-        { db: getDatabase(), bus: eventBus, inspectWorkspace },
+        workspaceCtx,
         { goalId, inputPath: parsed.data.inputPath, name: parsed.data.name }
       );
       reply.status(201);
@@ -1036,7 +1052,7 @@ export function createServer(
 
     try {
       await detachWorkspace(
-        { db: getDatabase(), bus: eventBus, inspectWorkspace },
+        workspaceCtx,
         { goalId, workspaceId }
       );
       reply.code(204).send();
@@ -1063,6 +1079,64 @@ export function createServer(
       if (error instanceof WorkspaceInspectionError) {
         reply.status(inspectionStatus(error));
         return apiError(error.code, error.message);
+      }
+      throw error;
+    }
+  });
+
+  server.get('/v1/workspaces', async (_request, reply): Promise<ListWorkspacesResponse> => {
+    const workspaces = listWorkspaceSummaries(db);
+    return reply.send({ workspaces } satisfies ListWorkspacesResponse);
+  });
+
+  server.get('/v1/workspaces/:id', async (request, reply): Promise<GetWorkspaceResponse | { error: unknown }> => {
+    const { id } = request.params as { id: string };
+    const workspace = findWorkspaceById(db, id);
+    if (!workspace) {
+      reply.status(404);
+      return apiError('not_found', `Workspace not found: ${id}`);
+    }
+    const goals = listGoalViewsForWorkspace(db, id);
+    return reply.send({ workspace, goals } satisfies GetWorkspaceResponse);
+  });
+
+  server.post('/v1/workspaces', async (request, reply): Promise<CreateWorkspaceResponse | { error: unknown }> => {
+    const parsed = CreateWorkspaceRequest.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'validation_failed', issues: parsed.error.issues } as { error: unknown };
+    }
+    try {
+      const workspace = await createWorkspace(workspaceCtx, parsed.data);
+      reply.status(201);
+      return { workspace } satisfies CreateWorkspaceResponse;
+    } catch (error) {
+      if (error instanceof DuplicateWorkspaceError) {
+        reply.status(409);
+        return apiError(error.code, error.message);
+      }
+      if (error instanceof WorkspaceInspectionError) {
+        reply.status(inspectionStatus(error));
+        return apiError(error.code, error.message);
+      }
+      throw error;
+    }
+  });
+
+  server.patch('/v1/workspaces/:id', async (request, reply): Promise<UpdateWorkspaceResponse | { error: unknown }> => {
+    const { id } = request.params as { id: string };
+    const parsed = UpdateWorkspaceRequest.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'validation_failed', issues: parsed.error.issues } as { error: unknown };
+    }
+    try {
+      const workspace = await updateWorkspace(workspaceCtx, { id, ...parsed.data });
+      return reply.send({ workspace } satisfies UpdateWorkspaceResponse);
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        reply.status(404);
+        return apiError('not_found', `Workspace not found: ${id}`);
       }
       throw error;
     }
@@ -1583,7 +1657,7 @@ export function createServer(
         const provider = resolveShadowProvider(adapterId as ShadowAdapterId);
         const rule = provider.permissionRule(pending.toolName, pending.toolInput);
         if (rule) {
-          const wsRow = db.prepare("SELECT w.path AS path FROM workspaces w WHERE w.goal_id = ? ORDER BY w.attached_at ASC LIMIT 1").get(goalId) as { path: string } | undefined;
+          const wsRow = db.prepare("SELECT w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC LIMIT 1").get(goalId) as { path: string } | undefined;
           if (wsRow) provider.writePermissionRule(wsRow.path, rule);
         }
       } catch (err) {

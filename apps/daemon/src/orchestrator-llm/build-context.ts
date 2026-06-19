@@ -20,7 +20,7 @@ function loadWorkspaces(
   goalId: string
 ): OrchestratorContextInput["goal"]["attachedWorkspaces"] {
   const rows = db
-    .prepare("SELECT id, name, path FROM workspaces WHERE goal_id = ? ORDER BY attached_at ASC")
+    .prepare("SELECT w.id AS id, w.name AS name, w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC")
     .all(goalId) as Array<{ id: string; name: string; path: string }>;
   return rows.map((r) => ({ id: r.id, name: r.name, root: r.path }));
 }

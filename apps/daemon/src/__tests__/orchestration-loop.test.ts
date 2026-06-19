@@ -287,7 +287,7 @@ describe.sequential('orchestration proof loop', () => {
     const goalId = goal.id;
 
     const workspaceRow = db
-      .prepare('SELECT id FROM workspaces WHERE goal_id = ?')
+      .prepare('SELECT w.id AS id FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ?')
       .get(goalId) as { id: string };
     const workspaceId = workspaceRow.id;
 
@@ -675,7 +675,7 @@ describe.sequential('orchestration proof loop', () => {
     const goalId = goal.id;
 
     const workspaceRow = db
-      .prepare('SELECT id FROM workspaces WHERE goal_id = ?')
+      .prepare('SELECT w.id AS id FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ?')
       .get(goalId) as { id: string };
 
     // Seed engineer session with implementation evidence

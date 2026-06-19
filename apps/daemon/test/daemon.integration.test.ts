@@ -120,7 +120,7 @@ describe.sequential('daemon integration loop', () => {
     const secondBoot = await boot(dir);
 
     try {
-      expect(firstRows.map((row) => row.name)).toEqual([...migrationFiles, "0035_orchestrator_message_pending_revision.sql"]);
+      expect(firstRows.map((row) => row.name)).toEqual([...migrationFiles]);
       expect(secondBoot.migrationRows).toEqual(firstRows);
     } finally {
       await stop(secondBoot.server);

@@ -83,10 +83,11 @@ function seedLiveWorkflowSession(
 
   const workspaceId = `workspace-${ids.sessionId}`;
   db.prepare(
-    `INSERT INTO workspaces
-       (id, goal_id, path, name, workspace_type, git_probe, attached_at)
-     VALUES (?, ?, ?, 'Activity workspace', 'folder', 'not_a_repo', ?)`
-  ).run(workspaceId, ids.goalId, `/tmp/${workspaceId}`, NOW);
+    `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(workspaceId, `/tmp/${workspaceId}`, 'Activity workspace', '', NOW, NOW);
+  db.prepare(
+    `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run(ids.goalId, workspaceId, NOW);
   db.prepare(
     `INSERT INTO sessions
        (id, goal_id, workspace_id, adapter_id, title, status, created_at,

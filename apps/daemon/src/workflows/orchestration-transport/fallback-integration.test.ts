@@ -85,8 +85,11 @@ function seedWorkflowGraph(db: Database.Database): void {
     "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES ('goal-1', 'Goal', '', 'active', 1, ?, ?, NULL)"
   ).run(NOW, NOW);
   db.prepare(
-    "INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at) VALUES ('ws-1', 'goal-1', '/tmp/ws', 'ws', 'folder', NULL, NULL, 'not_a_repo', ?)"
-  ).run(NOW);
+    `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run('ws-1', '/tmp/ws', 'ws', '', NOW, NOW);
+  db.prepare(
+    `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run('goal-1', 'ws-1', NOW);
   db.prepare(
     "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, '[]', '[]', ?, ?)"
   ).run(NOW, NOW);

@@ -248,8 +248,11 @@ describe("OrchestratorService skill step", () => {
     });
     // Seed a workspace for the goal.
     db.prepare(
-      "INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).run("ws1", "goal-1", "/r", "monorepo", "repo", null, null, "ok", NOW);
+      `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run("ws1", "/r", "monorepo", '', NOW, NOW);
+    db.prepare(
+      `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+    ).run("goal-1", "ws1", NOW);
 
     // Spy broker captures the request payload.
     let capturedPayload: unknown;

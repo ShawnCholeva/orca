@@ -285,7 +285,7 @@ export function buildRecommendationInput(
 
   const workspaces: WorkspaceInput[] = listWorkspacesByGoal(db, goalId).map((w) => ({
     id: w.id,
-    isDirty: w.isDirty,
+    isDirty: null,
   }));
 
   const tasksRaw = listTasksByGoal(db, {
