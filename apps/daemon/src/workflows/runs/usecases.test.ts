@@ -182,6 +182,21 @@ describe("workflow run usecases", () => {
     expect(events[3]?.payload).toMatchObject({ workflowRunId: run.id, resumed: true });
   });
 
+  it("completing a run marks the goal completed", () => {
+    const { db, ctx } = setup();
+    seedGoal(db, "goal-1");
+    seedTemplate(db, "orca/engineering", 1);
+
+    const run = startWorkflowRun(ctx, { goalId: "goal-1", templateId: "orca/engineering" });
+    completeWorkflowRun(ctx, run.id);
+
+    const g = db
+      .prepare("SELECT status, active_workflow_run_id FROM goals WHERE id = ?")
+      .get("goal-1") as { status: string; active_workflow_run_id: string | null };
+    expect(g.status).toBe("completed");
+    expect(g.active_workflow_run_id).toBeNull();
+  });
+
   it("cancel is terminal and clears active goal linkage", () => {
     const { db, events, ctx } = setup();
     seedGoal(db, "goal-1");
