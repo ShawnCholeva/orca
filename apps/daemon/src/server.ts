@@ -212,7 +212,7 @@ import { WorkerSessionManager } from './workflows/orchestrator/worker-session.js
 import { resolveShadowProvider } from './orchestrator-llm/providers/registry.js';
 import { WorkerQuestionStore } from './workflows/orchestrator/worker-questions.js';
 import { PermissionApprovalStore } from './workflows/orchestrator/permission-approvals.js';
-import { validateAnswers, assembleAnswerReason } from './workflows/orchestrator/worker-answer-format.js';
+import { validateAnswers, assembleAnswerReason, assembleFreeTextReason } from './workflows/orchestrator/worker-answer-format.js';
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
 import {
   buildOrchestrationProviderCatalog,
@@ -1434,7 +1434,7 @@ export function createServer(
         const adapterId = (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(sessionId) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code";
         const canRemember = resolveShadowProvider(adapterId as ShadowAdapterId).supportsPermissionPersistence;
         insertMessageWithEvent(
-          { db, bus: eventBus, modelProviderRegistry: daemonContext.modelProviderRegistry, now: daemonContext.now, idFactory: daemonContext.idFactory },
+          { db, bus: eventBus, idFactory: daemonContext.idFactory },
           {
             id: daemonContext.idFactory(),
             goalId,
@@ -1507,11 +1507,33 @@ export function createServer(
     // Not-found OR a goal mismatch both read as "not found" for this goal — never
     // let a question scoped to one goal be answered through another goal's URL.
     if (!pending || pending.goalId !== goalId) { reply.status(404); return { error: { code: "question_not_found" } }; }
-    const invalid = validateAnswers(pending.questions, parsed.data.answers);
-    if (invalid) { reply.status(400); return { error: { code: invalid } }; }
-    const reason = assembleAnswerReason(pending.questions, parsed.data.answers);
+
+    let reason: string;
+    if (parsed.data.freeText != null) {
+      reason = assembleFreeTextReason(parsed.data.freeText);
+    } else {
+      const invalid = validateAnswers(pending.questions, parsed.data.answers!);
+      if (invalid) { reply.status(400); return { error: { code: invalid } }; }
+      reason = assembleAnswerReason(pending.questions, parsed.data.answers!);
+    }
+
     const ok = workerQuestions.resolveAnswers(questionId, reason);
     if (!ok) { reply.status(409); return { error: { code: "already_answered" } }; }
+
+    if (parsed.data.freeText != null) {
+      insertMessageWithEvent(
+        { db, bus: eventBus, idFactory: daemonContext.idFactory },
+        {
+          id: daemonContext.idFactory(),
+          goalId,
+          role: "user",
+          body: parsed.data.freeText,
+          correlationId: daemonContext.idFactory(),
+          createdAt: daemonContext.now(),
+        },
+      );
+    }
+
     const stepContext = resolveStepContext(pending.sessionId);
     if (stepContext) {
       applyActivitySafely("agent.question_answered", {
@@ -2220,7 +2242,7 @@ function postOrchestratorChatReply(
 ): void {
   try {
     insertMessageWithEvent(
-      { db, bus, modelProviderRegistry: ctx.modelProviderRegistry, now: ctx.now, idFactory: ctx.idFactory },
+      { db, bus, idFactory: ctx.idFactory },
       {
         id: ctx.idFactory(),
         goalId,

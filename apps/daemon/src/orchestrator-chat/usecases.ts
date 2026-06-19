@@ -214,7 +214,7 @@ function readCurrentStep(
 }
 
 export function insertMessageWithEvent(
-  ctx: OrchestratorChatCtx,
+  ctx: Pick<OrchestratorChatCtx, "db" | "bus" | "idFactory">,
   message: {
     id: string;
     goalId: string;

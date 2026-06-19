@@ -69,7 +69,7 @@ describe("listOrchestratorMessagesByGoal pendingApproval", () => {
     seedGoal(db, "g1");
     const approval = { approvalId: "a1", sessionId: "s1", toolName: "Bash", summary: "ls" };
     insertMessageWithEvent(
-      { db, bus: stubBus(), modelProviderRegistry: {} as never, now: () => "2026-06-03T00:00:00.000Z", idFactory: () => "m1" },
+      { db, bus: stubBus(), idFactory: () => "m1" },
       { id: "m1", goalId: "g1", role: "orchestrator", body: "The agent wants to run a command.",
         correlationId: "c1", createdAt: "2026-06-03T00:00:00.000Z", pendingApproval: approval },
     );

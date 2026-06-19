@@ -663,6 +663,58 @@ describe("daemon activity integration", () => {
     expect(duplicateResponse.statusCode).toBe(200);
   });
 
+  it("resolves a worker question from a free-text answer and records it in chat", async () => {
+    const ids = {
+      goalId: "goal-question-freetext",
+      runId: "run-question-freetext",
+      stepRunId: "step-question-freetext",
+      sessionId: "session-question-freetext",
+    };
+    const questions: PendingQuestionItem[] = [
+      {
+        header: "Release Plan",
+        question: "When should this ship?",
+        multiSelect: false,
+        options: [
+          { label: "Ship now", description: "Release immediately." },
+          { label: "Wait", description: "Hold for another review." },
+        ],
+      },
+    ];
+    seedLiveWorkflowSession(db, ids);
+    expect(
+      (await postToolUse(server, ids.sessionId, "tool-use-question-freetext")).statusCode,
+    ).toBe(200);
+
+    const elicitPromise = postElicit(server, ids.sessionId, "question-tool-freetext", questions);
+    const recorded = await waitForRecordedQuestion(db, ids);
+
+    const answer = await server.inject({
+      method: "POST",
+      url: `/v1/goals/${ids.goalId}/worker-questions/${recorded.pendingQuestion.questionId}/answer`,
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+      payload: { freeText: "a dedicated workspaces tab" },
+    });
+    const elicit = await elicitPromise;
+
+    expect(answer.statusCode).toBe(200);
+    expect(elicit.json()).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason:
+          'User answered via Orca chat with a custom response: "a dedicated workspaces tab". ' +
+          "Treat the AskUserQuestion as fully answered with this response and continue. " +
+          "Do not call AskUserQuestion again.",
+      },
+    });
+
+    const chatRows = db
+      .prepare("SELECT role, body FROM orchestrator_messages WHERE goal_id = ? ORDER BY rowid")
+      .all(ids.goalId) as Array<{ role: string; body: string }>;
+    expect(chatRows).toContainEqual({ role: "user", body: "a dedicated workspaces tab" });
+  });
+
   it("opens one live activity when a workflow step starts", async () => {
     const ids = {
       goalId: "goal-step-start",

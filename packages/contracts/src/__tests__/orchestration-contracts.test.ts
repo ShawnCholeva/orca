@@ -948,7 +948,7 @@ describe("PendingQuestion (multi-question)", () => {
 describe("SubmitWorkerAnswersRequest", () => {
   it("parses answers with selected labels", () => {
     const r = SubmitWorkerAnswersRequest.parse({ answers: [{ questionIndex: 0, selectedLabels: ["Red"] }] });
-    expect(r.answers[0]!.selectedLabels).toEqual(["Red"]);
+    expect(r.answers![0]!.selectedLabels).toEqual(["Red"]);
   });
   it("rejects an answer with no labels", () => {
     expect(() => SubmitWorkerAnswersRequest.parse({ answers: [{ questionIndex: 0, selectedLabels: [] }] })).toThrow();
