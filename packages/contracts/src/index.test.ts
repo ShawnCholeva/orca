@@ -14,6 +14,7 @@ import {
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
   CheckStep,
+  ConfirmationSummary,
   CreateOrchestratorMessageRequest,
   CreateOrchestratorMessageResponse,
   CreateGoalDecisionRequest,
@@ -1746,5 +1747,32 @@ describe("worker question persistence contracts", () => {
   it("accepts fromChat on the answer request and knows the updated event", () => {
     expect(SubmitWorkerAnswersRequest.parse({ freeText: "x", fromChat: true }).fromChat).toBe(true);
     expect(DomainEventType.parse("orchestrator.message.updated")).toBe("orchestrator.message.updated");
+  });
+});
+
+describe("ConfirmationSummary", () => {
+  it("accepts string and string[] field values and a nullable scoring", () => {
+    const parsed = ConfirmationSummary.parse({
+      lead: "The frame is complete.",
+      fields: [
+        { label: "Problem", value: "Users cannot rename workspaces." },
+        { label: "Constraints", value: ["one folder = one workspace", "unique names"] },
+      ],
+      scoring: null,
+    });
+    expect(parsed.fields).toHaveLength(2);
+  });
+
+  it("rides on Activity as an optional field", () => {
+    const base = {
+      id: "a1", goalId: "g1", workflowRunId: "r1", stepRunId: "s1",
+      agentSessionId: null, turnOrdinal: 0, status: "paused_for_input",
+      currentText: "x", finalSummary: null, sourceKind: "step_confirmation_pending",
+      workCategory: null, confidence: null,
+      createdAt: "2026-06-18T00:00:00.000Z", updatedAt: "2026-06-18T00:00:00.000Z",
+      completedAt: null, steps: [],
+      confirmationSummary: { lead: "ok", fields: [], scoring: null },
+    };
+    expect(Activity.parse(base).confirmationSummary?.lead).toBe("ok");
   });
 });

@@ -1197,6 +1197,22 @@ export const ActivityStep = z
   .strict();
 export type ActivityStep = z.infer<typeof ActivityStep>;
 
+export const ConfirmationSummary = z
+  .object({
+    lead: z.string().max(4000),
+    fields: z
+      .array(
+        z.object({
+          label: z.string().min(1).max(128),
+          value: z.union([z.string().max(4000), z.array(z.string().max(4000)).max(64)]),
+        }).strict()
+      )
+      .max(32),
+    scoring: StepResultScoringProposal.nullable(),
+  })
+  .strict();
+export type ConfirmationSummary = z.infer<typeof ConfirmationSummary>;
+
 export const Activity = z
   .object({
     id: z.string(),
@@ -1214,6 +1230,7 @@ export const Activity = z
     pendingQuestion: PendingQuestion.optional(),
     stepName: z.string().max(256).optional(),
     stepResult: WorkflowStepResult.optional(),
+    confirmationSummary: ConfirmationSummary.optional(),
     providerRecovery: ProviderRecoveryCheckpoint.optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
