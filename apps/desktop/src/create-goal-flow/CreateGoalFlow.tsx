@@ -1,17 +1,18 @@
-import { useReducer, useEffect } from "react";
+import { useReducer, useEffect, useRef } from "react";
 import { reducer, initialState } from "./state";
 import type { WorkflowFailedState } from "./state";
 import { RoughGoalStep } from "./steps/RoughGoalStep";
 import { CoordinateStep } from "./steps/CoordinateStep";
-import { createGoalAndStartWorkflow } from "../api";
+import { createGoalAndStartWorkflow, inspectWorkspace } from "../api";
 import type { ApiError } from "../api";
 import type { ConnectionStatus } from "../api";
-import type { OrchestratorModelChoice } from "@orca/contracts";
+import type { InspectWorkspacePreview, OrchestratorModelChoice } from "@orca/contracts";
 
 type Props = {
   onClose: () => void;
   onDone: (goalId: string) => void;
   connectionStatus: ConnectionStatus;
+  initialWorkspacePath?: string;
 };
 
 const STEP_LABELS = ["Describe", "Coordinate"];
@@ -55,8 +56,11 @@ function WorkflowFailedPanel({
   );
 }
 
-export function CreateGoalFlow({ onClose, onDone, connectionStatus: _connectionStatus }: Props) {
+export function CreateGoalFlow({ onClose, onDone, connectionStatus: _connectionStatus, initialWorkspacePath }: Props) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  // Pre-fetched workspace preview for seeding; resolved before user reaches coordinate phase.
+  const pendingPreview = useRef<{ preview: InspectWorkspacePreview; inputPath: string } | null>(null);
+  const previewSeeded = useRef(false);
 
   useEffect(() => {
     if (state.phase !== "submitting") return;
@@ -114,6 +118,27 @@ export function CreateGoalFlow({ onClose, onDone, connectionStatus: _connectionS
     void run();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.phase]);
+
+  // Pre-fetch the initial workspace on mount so it's ready when the user reaches coordinate phase.
+  useEffect(() => {
+    if (!initialWorkspacePath) return;
+    let cancelled = false;
+    inspectWorkspace({ inputPath: initialWorkspacePath }).then(({ preview }) => {
+      if (!cancelled) pendingPreview.current = { preview, inputPath: initialWorkspacePath };
+    }).catch(() => {
+      // Silently ignore — user can browse manually in the coordinate step.
+    });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Seed the pre-fetched workspace the first time coordinate phase is entered.
+  useEffect(() => {
+    if (state.phase !== "coordinate" || previewSeeded.current || !pendingPreview.current) return;
+    previewSeeded.current = true;
+    const { preview, inputPath } = pendingPreview.current;
+    dispatch({ type: "inspectSucceeded", preview, inputPath, name: preview.name });
   }, [state.phase]);
 
   const currentStep = stepIndex(state.phase);

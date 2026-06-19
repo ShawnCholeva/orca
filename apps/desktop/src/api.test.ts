@@ -32,14 +32,11 @@ const goal = {
 
 const workspace = {
   id: "ws-1",
-  goalId: "goal-1",
   path: "/tmp/workspace",
   name: "workspace",
-  workspaceType: "folder" as const,
-  branch: null,
-  isDirty: null,
-  gitProbe: "not_a_repo" as const,
-  attachedAt: now,
+  description: "",
+  createdAt: now,
+  updatedAt: now,
 };
 
 const memoryItem = {
@@ -493,10 +490,10 @@ describe("desktop api client", () => {
         preview: {
           path: workspace.path,
           name: workspace.name,
-          workspaceType: workspace.workspaceType,
-          branch: workspace.branch,
-          isDirty: workspace.isDirty,
-          gitProbe: workspace.gitProbe,
+          workspaceType: "folder",
+          branch: null,
+          isDirty: null,
+          gitProbe: "not_a_repo",
         },
       }),
     );

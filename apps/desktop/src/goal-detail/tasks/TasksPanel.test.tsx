@@ -19,14 +19,11 @@ const now = "2026-01-01T00:00:00.000Z";
 
 const workspace: Workspace = {
   id: "ws-1",
-  goalId: "goal-1",
   path: "/tmp/repo",
   name: "repo",
-  workspaceType: "folder",
-  branch: null,
-  isDirty: null,
-  gitProbe: "not_a_repo",
-  attachedAt: now,
+  description: "",
+  createdAt: now,
+  updatedAt: now,
 };
 
 function makeTask(overrides: Partial<Task> = {}): Task {

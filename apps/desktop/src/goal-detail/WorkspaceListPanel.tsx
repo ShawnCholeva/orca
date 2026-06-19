@@ -102,13 +102,6 @@ export function WorkspaceListPanel({ goalId, workspaces, onChanged }: Props) {
               <div className="workspace-list-item-info">
                 <span className="workspace-list-name">{ws.name}</span>
                 <span className="workspace-list-path">{ws.path}</span>
-                <div className="workspace-chips">
-                  <span className="chip chip--type">{ws.workspaceType}</span>
-                  {ws.branch && <span className="chip chip--branch">{ws.branch}</span>}
-                  {ws.isDirty === true && (
-                    <span className="chip chip--dirty" title="Uncommitted changes">dirty</span>
-                  )}
-                </div>
               </div>
               <button
                 type="button"

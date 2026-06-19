@@ -12,14 +12,11 @@ const now = "2026-01-01T00:00:00.000Z";
 
 const workspace: Workspace = {
   id: "ws-1",
-  goalId: "goal-1",
   path: "/tmp/repo",
   name: "repo",
-  workspaceType: "folder" as const,
-  branch: null,
-  isDirty: null,
-  gitProbe: "not_a_repo" as const,
-  attachedAt: now,
+  description: "",
+  createdAt: now,
+  updatedAt: now,
 };
 
 function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {

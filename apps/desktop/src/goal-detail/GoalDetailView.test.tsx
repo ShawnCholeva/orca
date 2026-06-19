@@ -32,17 +32,14 @@ const refinement = {
   refinedAt: now,
 };
 
-function makeWorkspace(id: string, name: string, attachedAt: string): Workspace {
+function makeWorkspace(id: string, name: string, _attachedAt: string): Workspace {
   return {
     id,
-    goalId: "goal-1",
     path: `/home/user/${name}`,
     name,
-    workspaceType: "folder" as const,
-    branch: null,
-    isDirty: null,
-    gitProbe: "not_a_repo" as const,
-    attachedAt,
+    description: "",
+    createdAt: now,
+    updatedAt: now,
   };
 }
 

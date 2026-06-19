@@ -51,6 +51,7 @@ export default function App() {
   const [currentGoalId, setCurrentGoalId] = useState<string | null>(null);
   const [detailRefreshKey, setDetailRefreshKey] = useState(0);
   const [showCreateFlow, setShowCreateFlow] = useState(false);
+  const [createFlowWorkspacePath, setCreateFlowWorkspacePath] = useState<string | undefined>(undefined);
   const [showSettings, setShowSettings] = useState(false);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [selectedOrchestratorGoalId, setSelectedOrchestratorGoalId] = useState<string | null>(null);
@@ -186,6 +187,7 @@ export default function App() {
 
   function handleCreateFlowDone(goalId: string) {
     setShowCreateFlow(false);
+    setCreateFlowWorkspacePath(undefined);
     setSelectedOrchestratorGoalId(goalId);
     setActiveTab("orchestrator");
     setMode("list");
@@ -401,7 +403,7 @@ export default function App() {
             {activeTab === "workspaces" ? (
               <section className="workspaces-pane" role="tabpanel" aria-label="Workspaces">
                 <WorkspacesPage
-                  onCreateGoal={() => setShowCreateFlow(true)}
+                  onCreateGoal={(ws) => { setCreateFlowWorkspacePath(ws?.path); setShowCreateFlow(true); }}
                   onOpenGoal={() => setActiveTab("orchestrator")}
                 />
               </section>
@@ -466,8 +468,9 @@ export default function App() {
       {showCreateFlow && (
         <CreateGoalFlow
           connectionStatus={connectionStatus}
-          onClose={() => setShowCreateFlow(false)}
+          onClose={() => { setShowCreateFlow(false); setCreateFlowWorkspacePath(undefined); }}
           onDone={handleCreateFlowDone}
+          initialWorkspacePath={createFlowWorkspacePath}
         />
       )}
 

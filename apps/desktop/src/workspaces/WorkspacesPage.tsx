@@ -19,7 +19,7 @@ import {
 import type { WorkspaceSummary, WorkspaceGoalView, Workspace, InspectWorkspacePreview } from "@orca/contracts";
 
 interface WorkspacesPageProps {
-  onCreateGoal: () => void;
+  onCreateGoal: (workspace?: Workspace) => void;
   onOpenGoal?: (goal: WorkspaceGoalView) => void;
 }
 
@@ -280,7 +280,7 @@ function WorkspaceDetail({
   ws: Workspace;
   goals: WorkspaceGoalView[];
   onOpenGoal?: (goal: WorkspaceGoalView) => void;
-  onCreateGoal: () => void;
+  onCreateGoal: (workspace?: Workspace) => void;
   onManage: () => void;
 }) {
   const grouped = GOAL_STATE_ORDER
@@ -325,7 +325,7 @@ function WorkspaceDetail({
           <Btn kind="quiet" size="sm" icon={<Icon.settings />} onClick={onManage}>
             Manage
           </Btn>
-          <Btn kind="primary" size="sm" icon={<Icon.plus />} onClick={onCreateGoal}>
+          <Btn kind="primary" size="sm" icon={<Icon.plus />} onClick={() => onCreateGoal(ws)}>
             New goal
           </Btn>
         </div>
@@ -346,7 +346,7 @@ function WorkspaceDetail({
           <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 4, marginBottom: 12 }}>
             Create a goal scoped to {ws.name} to start coordinating agents.
           </div>
-          <Btn kind="primary" size="sm" icon={<Icon.plus />} onClick={onCreateGoal}>
+          <Btn kind="primary" size="sm" icon={<Icon.plus />} onClick={() => onCreateGoal(ws)}>
             New goal
           </Btn>
         </div>

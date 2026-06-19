@@ -62,14 +62,11 @@ function makePkg(overrides: Partial<ContextPackage> = {}): ContextPackage {
 
 const workspace = {
   id: "ws-1",
-  goalId: "goal-1",
   path: "/tmp/repo",
   name: "repo",
-  workspaceType: "folder" as const,
-  branch: null,
-  isDirty: null,
-  gitProbe: "not_a_repo" as const,
-  attachedAt: now,
+  description: "",
+  createdAt: now,
+  updatedAt: now,
 };
 
 const adapters = [
