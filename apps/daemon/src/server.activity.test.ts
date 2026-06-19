@@ -1154,4 +1154,37 @@ describe("daemon activity integration", () => {
     });
     await elicitPromise;
   });
+
+  it("revise-step routes return 202, submit validates feedback is non-empty", async () => {
+    const ids = {
+      goalId: "goal-revise",
+      runId: "run-revise",
+      stepRunId: "step-revise",
+      sessionId: "session-revise",
+    };
+    seedLiveWorkflowSession(db, ids);
+
+    const r1 = await server.inject({
+      method: "POST",
+      url: `/v1/workflows/runs/${ids.runId}/revise-step`,
+      headers: AUTH_HEADERS,
+    });
+    expect(r1.statusCode).toBe(202);
+
+    const r2 = await server.inject({
+      method: "POST",
+      url: `/v1/workflows/runs/${ids.runId}/revise-step/submit`,
+      payload: { feedback: "tighten the success metric" },
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+    });
+    expect(r2.statusCode).toBe(202);
+
+    const bad = await server.inject({
+      method: "POST",
+      url: `/v1/workflows/runs/${ids.runId}/revise-step/submit`,
+      payload: { feedback: "" },
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+    });
+    expect(bad.statusCode).toBe(400);
+  });
 });

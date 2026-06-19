@@ -66,7 +66,8 @@ import {
   PutSettingsRequest,
   ProviderRecoveryActionRequest,
   ProviderRecoverySwitchRequest,
-  ProviderRecoveryCheckpoint
+  ProviderRecoveryCheckpoint,
+  SubmitStepRevisionRequest
 } from '@orca/contracts';
 import type { Config } from './config.js';
 import { getDatabase } from './db.js';
@@ -1647,6 +1648,32 @@ export function createServer(
       getDatabase(),
       daemonContext.now,
       request.params.id,
+      { bus: eventBus, idFactory: daemonContext.idFactory }
+    );
+    return reply.code(202).send({ ok: true });
+  });
+
+  server.post<{ Params: { id: string } }>("/v1/workflows/runs/:id/revise-step", async (request, reply) => {
+    await orchestratorService.requestStepRevision(
+      getDatabase(),
+      daemonContext.now,
+      request.params.id,
+      { bus: eventBus, idFactory: daemonContext.idFactory }
+    );
+    return reply.code(202).send({ ok: true });
+  });
+
+  server.post<{ Params: { id: string } }>("/v1/workflows/runs/:id/revise-step/submit", async (request, reply) => {
+    const parsed = SubmitStepRevisionRequest.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: "validation_failed", issues: parsed.error.issues };
+    }
+    await orchestratorService.submitStepRevision(
+      getDatabase(),
+      daemonContext.now,
+      request.params.id,
+      parsed.data.feedback,
       { bus: eventBus, idFactory: daemonContext.idFactory }
     );
     return reply.code(202).send({ ok: true });
