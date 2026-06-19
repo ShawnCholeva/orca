@@ -250,7 +250,9 @@ export function completeWorkflowRun(
       .run(now, runId);
     ctx.db
       .prepare(
-        "UPDATE goals SET active_workflow_run_id = NULL, status = 'completed', updated_at = ? WHERE id = ? AND active_workflow_run_id = ?"
+        "UPDATE goals SET active_workflow_run_id = NULL, " +
+          "status = CASE WHEN status = 'archived' THEN status ELSE 'completed' END, " +
+          "updated_at = ? WHERE id = ? AND active_workflow_run_id = ?"
       )
       .run(now, run.goalId, runId);
     const event = appendWorkflowEvent(

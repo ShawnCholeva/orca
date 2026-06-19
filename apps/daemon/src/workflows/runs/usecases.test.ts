@@ -197,6 +197,27 @@ describe("workflow run usecases", () => {
     expect(g.active_workflow_run_id).toBeNull();
   });
 
+  it("completing a run does not un-archive an archived goal", () => {
+    const { db, ctx } = setup();
+    seedGoal(db, "goal-1");
+    seedTemplate(db, "orca/engineering", 1);
+
+    const run = startWorkflowRun(ctx, { goalId: "goal-1", templateId: "orca/engineering" });
+
+    // Archive the goal while the run is still active (active_workflow_run_id remains set)
+    db.prepare(
+      "UPDATE goals SET status = 'archived', archived_at = ? WHERE id = ?"
+    ).run(NOW, "goal-1");
+
+    completeWorkflowRun(ctx, run.id);
+
+    const g = db
+      .prepare("SELECT status, active_workflow_run_id FROM goals WHERE id = ?")
+      .get("goal-1") as { status: string; active_workflow_run_id: string | null };
+    expect(g.status).toBe("archived");
+    expect(g.active_workflow_run_id).toBeNull();
+  });
+
   it("cancel is terminal and clears active goal linkage", () => {
     const { db, events, ctx } = setup();
     seedGoal(db, "goal-1");
