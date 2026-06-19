@@ -22,7 +22,7 @@ function hasMaxSerializedBytes(value: unknown, maxBytes: number): boolean {
   return utf8ByteLength(JSON.stringify(value)) <= maxBytes;
 }
 
-export const GoalStatus = z.enum(["active", "archived"]);
+export const GoalStatus = z.enum(["active", "completed", "archived"]);
 export type GoalStatus = z.infer<typeof GoalStatus>;
 
 export const WorkerPermissionMode = z.enum(["ask", "auto"]);
@@ -154,6 +154,8 @@ export const DomainEventType = z.enum([
   "goal.refined",
   "workspace.attached",
   "workspace.removed",
+  "workspace.created",
+  "workspace.updated",
   "session.created",
   "session.started",
   "session.exited",
@@ -282,16 +284,67 @@ export type GitProbe = z.infer<typeof GitProbe>;
 
 export const Workspace = z.object({
   id: z.string(),
-  goalId: z.string(),
+  path: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+export type Workspace = z.infer<typeof Workspace>;
+
+export const InspectWorkspacePreview = z.object({
   path: z.string(),
   name: z.string(),
   workspaceType: WorkspaceType,
   branch: z.string().nullable(),
   isDirty: z.boolean().nullable(),
-  gitProbe: GitProbe,
-  attachedAt: z.string().datetime()
+  gitProbe: GitProbe
 });
-export type Workspace = z.infer<typeof Workspace>;
+export type InspectWorkspacePreview = z.infer<typeof InspectWorkspacePreview>;
+
+export const WorkspaceSummary = Workspace.extend({
+  goalCounts: z.object({
+    active: z.number().int().nonnegative(),
+    completed: z.number().int().nonnegative(),
+    archived: z.number().int().nonnegative()
+  })
+});
+export type WorkspaceSummary = z.infer<typeof WorkspaceSummary>;
+
+export const WorkspaceGoalView = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  status: GoalStatus,
+  createdAt: z.string().datetime(),
+  progress: z.number().min(0).max(1).nullable()
+});
+export type WorkspaceGoalView = z.infer<typeof WorkspaceGoalView>;
+
+export const ListWorkspacesResponse = z.object({ workspaces: z.array(WorkspaceSummary) });
+export type ListWorkspacesResponse = z.infer<typeof ListWorkspacesResponse>;
+
+export const GetWorkspaceResponse = z.object({
+  workspace: Workspace,
+  goals: z.array(WorkspaceGoalView)
+});
+export type GetWorkspaceResponse = z.infer<typeof GetWorkspaceResponse>;
+
+export const CreateWorkspaceRequest = z.object({
+  inputPath: z.string().min(1).max(1024),
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().max(2000).optional()
+}).strict();
+export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequest>;
+
+export const CreateWorkspaceResponse = z.object({ workspace: Workspace });
+export type CreateWorkspaceResponse = z.infer<typeof CreateWorkspaceResponse>;
+
+export const UpdateWorkspaceRequest = z.object({
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().max(2000).optional()
+}).strict();
+export type UpdateWorkspaceRequest = z.infer<typeof UpdateWorkspaceRequest>;
 
 export const GoalRefinement = z.object({
   goalId: z.string(),
@@ -322,13 +375,6 @@ export const InspectWorkspaceRequest = z
   })
   .strict();
 export type InspectWorkspaceRequest = z.infer<typeof InspectWorkspaceRequest>;
-
-export const InspectWorkspacePreview = Workspace.omit({
-  id: true,
-  goalId: true,
-  attachedAt: true
-});
-export type InspectWorkspacePreview = z.infer<typeof InspectWorkspacePreview>;
 
 export const InspectWorkspaceResponse = z.object({
   preview: InspectWorkspacePreview

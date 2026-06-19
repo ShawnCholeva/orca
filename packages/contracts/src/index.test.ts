@@ -126,14 +126,20 @@ const goalFixture = Goal.parse({
 
 const workspaceFixture = Workspace.parse({
   id: "ws-1",
-  goalId: "goal-1",
+  path: "/home/user/repo",
+  name: "repo",
+  description: "",
+  createdAt: now,
+  updatedAt: now
+});
+
+const workspacePreviewFixture = InspectWorkspacePreview.parse({
   path: "/home/user/repo",
   name: "repo",
   workspaceType: "repo",
   branch: "main",
   isDirty: false,
-  gitProbe: "ok",
-  attachedAt: now
+  gitProbe: "ok"
 });
 
 const guidedOutputFixture = GuidedRefinementOutput.parse({
@@ -242,7 +248,7 @@ describe("goal refinement and workspace contracts", () => {
 
   it("parses Workspace and rejects invalid workspace shape", () => {
     expectRoundTrip(Workspace.parse, workspaceFixture, workspaceFixture);
-    expect(() => Workspace.parse({ ...workspaceFixture, workspaceType: "archive" })).toThrow();
+    expect(() => Workspace.parse({ ...workspaceFixture, createdAt: "not-a-date" })).toThrow();
   });
 
   it("parses GoalRefinement and rejects non-array fields", () => {
@@ -298,14 +304,7 @@ describe("goal refinement and workspace contracts", () => {
   });
 
   it("parses InspectWorkspacePreview and response", () => {
-    const preview = {
-      path: workspaceFixture.path,
-      name: workspaceFixture.name,
-      workspaceType: workspaceFixture.workspaceType,
-      branch: workspaceFixture.branch,
-      isDirty: workspaceFixture.isDirty,
-      gitProbe: workspaceFixture.gitProbe
-    };
+    const preview = workspacePreviewFixture;
 
     expectRoundTrip(InspectWorkspacePreview.parse, preview, preview);
     expectRoundTrip(InspectWorkspaceResponse.parse, { preview }, { preview });
@@ -1794,5 +1793,74 @@ describe("PendingRevision", () => {
     expect(SubmitStepRevisionRequest.safeParse({ feedback: "" }).success).toBe(false);
     expect(SubmitStepRevisionRequest.parse({ feedback: "tighten the success metric" }).feedback)
       .toBe("tighten the success metric");
+  });
+});
+
+import {
+  GoalStatus,
+  WorkspaceSummary,
+  GetWorkspaceResponse,
+  ListWorkspacesResponse,
+  CreateWorkspaceRequest,
+  UpdateWorkspaceRequest,
+} from "./index.js";
+
+describe("first-class workspace contracts", () => {
+  it("GoalStatus includes completed", () => {
+    expect(GoalStatus.parse("completed")).toBe("completed");
+    expect(() => GoalStatus.parse("paused")).toThrow();
+  });
+
+  it("Workspace is the lean entity (no goalId/git fields)", () => {
+    const ws = Workspace.parse({
+      id: "w1", path: "/repo/a", name: "a", description: "",
+      createdAt: "2026-06-19T00:00:00.000Z", updatedAt: "2026-06-19T00:00:00.000Z",
+    });
+    expect(ws.path).toBe("/repo/a");
+    expect(() => Workspace.parse({ id: "w1", goalId: "g1" } as unknown)).toThrow();
+  });
+
+  it("InspectWorkspacePreview keeps transient git fields", () => {
+    const p = InspectWorkspacePreview.parse({
+      path: "/repo/a", name: "a", workspaceType: "repo",
+      branch: "main", isDirty: false, gitProbe: "ok",
+    });
+    expect(p.gitProbe).toBe("ok");
+  });
+
+  it("WorkspaceSummary carries goalCounts", () => {
+    const s = WorkspaceSummary.parse({
+      id: "w1", path: "/repo/a", name: "a", description: "",
+      createdAt: "2026-06-19T00:00:00.000Z", updatedAt: "2026-06-19T00:00:00.000Z",
+      goalCounts: { active: 2, completed: 1, archived: 0 },
+    });
+    expect(s.goalCounts.active).toBe(2);
+  });
+
+  it("GetWorkspaceResponse carries goals with nullable progress", () => {
+    const r = GetWorkspaceResponse.parse({
+      workspace: { id: "w1", path: "/r", name: "a", description: "",
+        createdAt: "2026-06-19T00:00:00.000Z", updatedAt: "2026-06-19T00:00:00.000Z" },
+      goals: [{ id: "g1", title: "T", description: "D", status: "active",
+        createdAt: "2026-06-19T00:00:00.000Z", progress: 0.5 },
+        { id: "g2", title: "T2", description: "", status: "completed",
+        createdAt: "2026-06-19T00:00:00.000Z", progress: null }],
+    });
+    expect(r.goals[1]!.progress).toBeNull();
+  });
+
+  it("Create/Update requests validate", () => {
+    expect(CreateWorkspaceRequest.parse({ inputPath: "/r" }).inputPath).toBe("/r");
+    expect(() => CreateWorkspaceRequest.parse({ inputPath: "" })).toThrow();
+    expect(UpdateWorkspaceRequest.parse({ name: "x" }).name).toBe("x");
+  });
+
+  it("new workspace event types parse", () => {
+    expect(DomainEventType.parse("workspace.created")).toBe("workspace.created");
+    expect(DomainEventType.parse("workspace.updated")).toBe("workspace.updated");
+  });
+
+  it("ListWorkspacesResponse parses", () => {
+    expect(ListWorkspacesResponse.parse({ workspaces: [] }).workspaces).toEqual([]);
   });
 });
