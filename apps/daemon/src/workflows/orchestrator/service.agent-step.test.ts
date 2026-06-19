@@ -33,6 +33,8 @@ import type { ShadowAsk } from "./recover-step-scoring.js";
 import { setSupervisionMode } from "../../settings/store.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import type { ProviderRecoveryCheckpoint } from "@orca/contracts";
+import { listOrchestratorMessagesByGoal } from "../../orchestrator-chat/projection.js";
+import { listActivitiesByGoal } from "../../activities/projection.js";
 import {
   OrchestratorProviderRecoveryInvalidTransitionError,
   OrchestratorProviderRecoveryNotFoundError,
@@ -1993,6 +1995,102 @@ describe("OrchestratorService.continueAllPausedSteps", () => {
     await service.continueAllPausedSteps(db, () => NOW, { bus, idFactory });
     const row = db.prepare("SELECT step_result_json FROM workflow_step_runs WHERE id = 'step-1'").get() as { step_result_json: string | null };
     expect(row.step_result_json).toBeNull();
+  });
+});
+
+describe("OrchestratorService.requestStepRevision / submitStepRevision", () => {
+  /** Helper: drive a step to a confirmation pause (pending_completion_json set, activity step_confirmation_pending). */
+  async function driveToConfirmationPause(
+    db: ReturnType<typeof setupHarness>["db"],
+    bus: ReturnType<typeof setupHarness>["bus"],
+    idFactory: ReturnType<typeof setupHarness>["idFactory"],
+    service: ReturnType<typeof makeJudgeService>
+  ): Promise<void> {
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "supervised", NOW);
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+  }
+
+  it("requestStepRevision posts a 'What would you like to revise?' message with a pendingRevision marker", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.82,
+          quality: {
+            outputCompleteness: 0.8,
+            outputCorrectness: 0.85,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.8,
+            riskLevel: 0.2,
+          },
+          reason: "ok",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+
+    // Arrange: drive the step to a confirmation pause (pending_completion_json set).
+    await driveToConfirmationPause(db, bus, idFactory, service);
+
+    await service.requestStepRevision(db, () => NOW, "run-1", { bus, idFactory });
+    const msgs = listOrchestratorMessagesByGoal(db, "goal-1");
+    const prompt = msgs.find((m) => m.pendingRevision?.workflowRunId === "run-1");
+    expect(prompt?.body).toBe("What would you like to revise?");
+    expect(prompt?.role).toBe("orchestrator");
+  });
+
+  it("submitStepRevision clears the marker + stash, relays feedback, and resumes the step", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.82,
+          quality: {
+            outputCompleteness: 0.8,
+            outputCorrectness: 0.85,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.8,
+            riskLevel: 0.2,
+          },
+          reason: "ok",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+
+    // Arrange: drive to confirmation pause.
+    await driveToConfirmationPause(db, bus, idFactory, service);
+
+    await service.requestStepRevision(db, () => NOW, "run-1", { bus, idFactory });
+    await service.submitStepRevision(db, () => NOW, "run-1", "tighten the success metric", { bus, idFactory });
+
+    // stash cleared:
+    const stash = db.prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = ?").get("step-1") as { pending_completion_json: string | null };
+    expect(stash.pending_completion_json).toBeNull();
+    // marker cleared:
+    const msgs = listOrchestratorMessagesByGoal(db, "goal-1");
+    expect(msgs.some((m) => m.pendingRevision != null)).toBe(false);
+    // user feedback persisted as a chat bubble:
+    expect(msgs.some((m) => m.role === "user" && m.body === "tighten the success metric")).toBe(true);
+    // activity resumed (no longer paused at confirmation):
+    const activities = listActivitiesByGoal(db, "goal-1");
+    expect(activities.some((a) => a.sourceKind === "step_confirmation_pending")).toBe(false);
   });
 });
 

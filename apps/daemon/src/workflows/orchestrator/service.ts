@@ -1903,6 +1903,61 @@ export class OrchestratorService {
     }
   }
 
+  /** Posts the conversational revision prompt and marks the step awaiting a
+   *  revision. No-op if the step is not paused at a confirmation. */
+  async requestStepRevision(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run || !run.currentStepRunId) return;
+    const stash = db
+      .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = ?")
+      .get(run.currentStepRunId) as { pending_completion_json: string | null } | undefined;
+    if (!stash?.pending_completion_json) return;
+    this.postOrchestratorMessage(
+      db, now, run.goalId, "What would you like to revise?", options,
+      "orchestrator", undefined, { workflowRunId: runId }
+    );
+  }
+
+  /** Accepts the user's revision text: persists it as a user bubble, clears the
+   *  pending marker + completion stash, relays the feedback to the live step
+   *  agent, and resumes the step. Idempotent once the stash is cleared. */
+  async submitStepRevision(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    feedback: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run || !run.currentStepRunId) return;
+    const stepRun = readStepRun(db, run.currentStepRunId);
+    const stashRow = db
+      .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = ?")
+      .get(stepRun.id) as { pending_completion_json: string | null } | undefined;
+    if (!stashRow?.pending_completion_json) return; // idempotent no-op
+
+    // Persist the user's revision as a chat bubble (no mediator trigger).
+    this.postOrchestratorMessage(db, now, run.goalId, feedback, options, "user");
+
+    db.prepare(
+      "UPDATE orchestrator_messages SET pending_revision = NULL WHERE goal_id = ? AND json_extract(pending_revision, '$.workflowRunId') = ?"
+    ).run(run.goalId, runId);
+    db.prepare("UPDATE workflow_step_runs SET pending_completion_json = NULL WHERE id = ?").run(stepRun.id);
+
+    const activityCtx = { db, bus: options.bus ?? new EventBus() };
+    resumeFromConfirmation(activityCtx, { stepRunId: stepRun.id });
+
+    const sessionRow = db
+      .prepare("SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('running','starting') ORDER BY started_at DESC LIMIT 1")
+      .get(stepRun.id) as { id: string } | undefined;
+    await this.reviseStep(db, now, { run, stepRun }, sessionRow?.id ?? null, feedback, options);
+  }
+
   /** Posts the Done step's closing summary and best-effort verifies the spec file(s). */
   private postHandoffClosingSummary(
     db: Database.Database,
