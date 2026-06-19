@@ -21,6 +21,7 @@ import { BootstrapErrorScreen } from "./chrome/BootstrapErrorScreen";
 import { NoReadyAgentsBanner } from "./chrome/NoReadyAgentsBanner";
 import { OrcaChat } from "./orchestrator/OrcaChat";
 import { WorkflowsPage } from "./workflows/WorkflowsPage";
+import { WorkspacesPage } from "./workspaces/WorkspacesPage";
 import { EmptyGoalsView } from "./empty-state/EmptyGoalsView";
 import { SettingsModal, GearIcon } from "./settings/SettingsModal";
 import "./orchestrator/orchestrator.css";
@@ -30,7 +31,7 @@ type OnboardingState = "checking" | "needs-onboarding" | "complete" | "error";
 
 type AppMode = "list" | "detail";
 
-type WorkspaceTab = "orchestrator" | "workflows" | "reasoning";
+type WorkspaceTab = "workspaces" | "orchestrator" | "workflows" | "reasoning";
 
 function toErrorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -326,6 +327,18 @@ export default function App() {
                 <button
                   type="button"
                   role="tab"
+                  aria-selected={activeTab === "workspaces"}
+                  className={`orchestrator-tab${activeTab === "workspaces" ? " orchestrator-tab--active" : ""}`}
+                  onClick={() => setActiveTab("workspaces")}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" />
+                  </svg>
+                  Workspaces
+                </button>
+                <button
+                  type="button"
+                  role="tab"
                   aria-selected={activeTab === "orchestrator"}
                   className={`orchestrator-tab${activeTab === "orchestrator" ? " orchestrator-tab--active" : ""}`}
                   onClick={() => setActiveTab("orchestrator")}
@@ -385,7 +398,14 @@ export default function App() {
               </div>
             )}
 
-            {activeTab === "orchestrator" ? (
+            {activeTab === "workspaces" ? (
+              <section className="workspaces-pane" role="tabpanel" aria-label="Workspaces">
+                <WorkspacesPage
+                  onCreateGoal={() => setShowCreateFlow(true)}
+                  onOpenGoal={() => setActiveTab("orchestrator")}
+                />
+              </section>
+            ) : activeTab === "orchestrator" ? (
               <section className="orchestrator-pane" role="tabpanel" aria-label="Orchestrator">
                 {goals.length === 0 ? (
                   <EmptyGoalsView

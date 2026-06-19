@@ -501,6 +501,12 @@
   display: flex;
 }
 
+.workspaces-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .reasoning-card {
   background: var(--panel);
   border: 1px solid var(--hairline);
