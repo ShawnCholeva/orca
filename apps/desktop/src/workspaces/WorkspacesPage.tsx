@@ -1,56 +1,79 @@
 // Workspaces tab — a repo-scoped home for goals. Left: the workspace list.
-// Right: the selected workspace's profile plus every goal whose repos touch it,
-// grouped by state. Ported from the design prototype's view-workspaces.jsx;
-// workspaces live in local state (no backend) and seed a fixed list.
+// Right: the selected workspace's profile plus every goal grouped by status.
+// Data comes from the daemon API; changes are reflected via the event stream.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Icon } from "./icons";
 import { Btn, Pill, Tip, Field, inputStyle } from "./primitives";
+import { GOAL_STATE_META, GOAL_STATE_ORDER, slugify } from "./data";
 import {
-  GOAL_STATE_META,
-  GOAL_STATE_ORDER,
-  SEED_WORKSPACES,
-  SEED_GOALS,
-  FS_FOLDERS,
-  slugify,
-  goalsInWorkspace,
-  type Workspace,
-  type WorkspaceGoal,
-} from "./data";
+  listWorkspaces,
+  getWorkspace,
+  createWorkspace as apiCreateWorkspace,
+  updateWorkspace as apiUpdateWorkspace,
+  inspectWorkspace,
+  openEventStream,
+  ApiError,
+} from "../api";
+import type { WorkspaceSummary, WorkspaceGoalView, Workspace, InspectWorkspacePreview } from "@orca/contracts";
 
 interface WorkspacesPageProps {
   onCreateGoal: () => void;
-  onOpenGoal?: (goal: WorkspaceGoal) => void;
+  onOpenGoal?: (goal: WorkspaceGoalView) => void;
 }
 
-// Preview the empty state without wiping the seed list: ?workspaces=empty or a
-// window flag the harness can set.
-function forceEmptyWorkspaces(): boolean {
-  if (typeof window === "undefined") return false;
-  if ((window as unknown as { __forceEmptyWorkspaces?: boolean }).__forceEmptyWorkspaces) return true;
-  return new URLSearchParams(window.location.search).get("workspaces") === "empty";
+function formatAge(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const diffH = Math.floor(diffMs / (1000 * 60 * 60));
+  if (diffH < 1) return "<1h";
+  if (diffH < 24) return `${diffH}h`;
+  return `${Math.floor(diffH / 24)}d`;
 }
 
 export function WorkspacesPage({ onCreateGoal, onOpenGoal }: WorkspacesPageProps) {
-  const goals = SEED_GOALS;
-  const [workspaces, setWorkspaces] = useState<Workspace[]>(() =>
-    forceEmptyWorkspaces() ? [] : SEED_WORKSPACES,
-  );
-  const [selId, setSelId] = useState<string | null>(workspaces[0]?.id ?? null);
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [selId, setSelId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<{ workspace: Workspace; goals: WorkspaceGoalView[] } | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(false);
-  const selected = workspaces.find((w) => w.id === selId) ?? workspaces[0] ?? null;
 
-  function addWorkspace(ws: Workspace) {
-    setWorkspaces((list) => [...list, ws]);
-    setSelId(ws.id);
-    setCreating(false);
+  async function loadList() {
+    const list = await listWorkspaces();
+    setWorkspaces(list);
+    setSelId((prev) => {
+      if (prev && list.some((w) => w.id === prev)) return prev;
+      return list[0]?.id ?? null;
+    });
   }
 
-  function updateWorkspace(id: string, patch: Partial<Workspace>) {
-    setWorkspaces((list) => list.map((w) => (w.id === id ? { ...w, ...patch } : w)));
-    setEditing(false);
-  }
+  useEffect(() => {
+    void loadList();
+    const stream = openEventStream({
+      onEvent(event) {
+        if (event.type.startsWith("workspace.") || event.type.startsWith("goal.")) {
+          void loadList();
+        }
+      },
+      onStatus() {},
+    });
+    return () => stream.close();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!selId) {
+      setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    getWorkspace(selId).then((res) => {
+      if (!cancelled) setDetail(res);
+    }).catch(() => {
+      if (!cancelled) setDetail(null);
+    });
+    return () => { cancelled = true; };
+  }, [selId]);
 
   if (!workspaces.length && !creating) {
     return (
@@ -104,7 +127,7 @@ export function WorkspacesPage({ onCreateGoal, onOpenGoal }: WorkspacesPageProps
             className="mono"
             style={{ fontSize: 10.5, color: "var(--text-3)", letterSpacing: 1.2, textTransform: "uppercase" }}
           >
-            {selected?.org ?? "local"}
+            local
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
             <h1 style={{ margin: 0, fontSize: 19, fontWeight: 600, letterSpacing: -0.3 }}>Workspaces</h1>
@@ -122,7 +145,6 @@ export function WorkspacesPage({ onCreateGoal, onOpenGoal }: WorkspacesPageProps
             <WorkspaceRow
               key={ws.id}
               ws={ws}
-              goals={goals}
               selected={ws.id === selId}
               onSelect={() => setSelId(ws.id)}
             />
@@ -131,27 +153,40 @@ export function WorkspacesPage({ onCreateGoal, onOpenGoal }: WorkspacesPageProps
       </div>
 
       {/* ── Selected workspace detail ── */}
-      {selected && (
+      {detail && (
         <WorkspaceDetail
-          ws={selected}
-          goals={goalsInWorkspace(selected, goals)}
+          ws={detail.workspace}
+          goals={detail.goals}
           onOpenGoal={onOpenGoal}
           onCreateGoal={onCreateGoal}
           onManage={() => setEditing(true)}
         />
       )}
 
-      {editing && selected && (
+      {editing && detail && (
         <WorkspaceEditModal
-          ws={selected}
-          existing={workspaces}
+          ws={detail.workspace}
           onClose={() => setEditing(false)}
-          onSave={(patch) => updateWorkspace(selected.id, patch)}
+          onSave={async (patch) => {
+            await apiUpdateWorkspace(detail.workspace.id, patch);
+            await loadList();
+            const updated = await getWorkspace(detail.workspace.id);
+            setDetail(updated);
+            setEditing(false);
+          }}
         />
       )}
 
       {creating && (
-        <WorkspaceCreateModal existing={workspaces} onClose={() => setCreating(false)} onCreate={addWorkspace} />
+        <WorkspaceCreateModal
+          onClose={() => setCreating(false)}
+          onCreate={async (inputPath, name, description) => {
+            const ws = await apiCreateWorkspace({ inputPath, name, description });
+            await loadList();
+            setSelId(ws.id);
+            setCreating(false);
+          }}
+        />
       )}
     </div>
   );
@@ -159,18 +194,15 @@ export function WorkspacesPage({ onCreateGoal, onOpenGoal }: WorkspacesPageProps
 
 function WorkspaceRow({
   ws,
-  goals,
   selected,
   onSelect,
 }: {
-  ws: Workspace;
-  goals: WorkspaceGoal[];
+  ws: WorkspaceSummary;
   selected: boolean;
   onSelect: () => void;
 }) {
-  const wgoals = goalsInWorkspace(ws, goals);
-  const live = wgoals.reduce((n, g) => n + g.sessions, 0);
-  const active = wgoals.filter((g) => g.state === "active").length;
+  const total = ws.goalCounts.active + ws.goalCounts.completed + ws.goalCounts.archived;
+  const active = ws.goalCounts.active;
   return (
     <button
       onClick={onSelect}
@@ -231,20 +263,9 @@ function WorkspaceRow({
           {ws.name}
         </div>
         <div className="mono" style={{ fontSize: 10.5, color: "var(--text-3)", marginTop: 1 }}>
-          {wgoals.length} goal{wgoals.length !== 1 ? "s" : ""}
-          {active > 0 ? ` · ${active} active` : ""}
+          {total} goal{total !== 1 ? "s" : ""} · {active} active
         </div>
       </div>
-      {live > 0 && (
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
-          <span
-            style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--run)", boxShadow: "0 0 0 3px var(--run-soft)" }}
-          />
-          <span className="mono" style={{ fontSize: 10.5, color: "var(--run)" }}>
-            {live}
-          </span>
-        </span>
-      )}
     </button>
   );
 }
@@ -257,14 +278,14 @@ function WorkspaceDetail({
   onManage,
 }: {
   ws: Workspace;
-  goals: WorkspaceGoal[];
-  onOpenGoal?: (goal: WorkspaceGoal) => void;
+  goals: WorkspaceGoalView[];
+  onOpenGoal?: (goal: WorkspaceGoalView) => void;
   onCreateGoal: () => void;
   onManage: () => void;
 }) {
-  const grouped = GOAL_STATE_ORDER.map((st) => ({ state: st, items: goals.filter((g) => g.state === st) })).filter(
-    (grp) => grp.items.length > 0,
-  );
+  const grouped = GOAL_STATE_ORDER
+    .map((st) => ({ status: st, items: goals.filter((g) => g.status === st) }))
+    .filter((grp) => grp.items.length > 0);
 
   return (
     <div className="scroll" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "20px 24px 28px" }}>
@@ -291,12 +312,14 @@ function WorkspaceDetail({
             className="mono"
             style={{ fontSize: 10.5, color: "var(--text-3)", letterSpacing: 1.2, textTransform: "uppercase" }}
           >
-            {ws.org} / workspace
+            workspace
           </div>
           <h1 style={{ margin: "3px 0 0", fontSize: 24, fontWeight: 600, letterSpacing: -0.4 }}>{ws.name}</h1>
-          <p style={{ margin: "7px 0 0", fontSize: 13, lineHeight: 1.55, color: "var(--text-2)", maxWidth: "64ch" }}>
-            {ws.desc}
-          </p>
+          {ws.description && (
+            <p style={{ margin: "7px 0 0", fontSize: 13, lineHeight: 1.55, color: "var(--text-2)", maxWidth: "64ch" }}>
+              {ws.description}
+            </p>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
           <Btn kind="quiet" size="sm" icon={<Icon.settings />} onClick={onManage}>
@@ -329,8 +352,8 @@ function WorkspaceDetail({
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          {grouped.map(({ state, items }) => (
-            <div key={state}>
+          {grouped.map(({ status, items }) => (
+            <div key={status}>
               <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
                 <span
                   className="mono"
@@ -342,7 +365,7 @@ function WorkspaceDetail({
                     fontWeight: 600,
                   }}
                 >
-                  {GOAL_STATE_META[state].label}
+                  {GOAL_STATE_META[status].label}
                 </span>
                 <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }}>
                   {items.length}
@@ -362,11 +385,10 @@ function WorkspaceDetail({
   );
 }
 
-function WorkspaceGoalCard({ g, onOpen }: { g: WorkspaceGoal; onOpen: () => void }) {
+function WorkspaceGoalCard({ g, onOpen }: { g: WorkspaceGoalView; onOpen: () => void }) {
   const [hover, setHover] = useState(false);
-  const meta = GOAL_STATE_META[g.state];
-  const live = g.sessions > 0;
-  const muted = g.state === "abandoned" || g.state === "completed";
+  const meta = GOAL_STATE_META[g.status];
+  const muted = g.status === "completed" || g.status === "archived";
 
   return (
     <div
@@ -390,15 +412,9 @@ function WorkspaceGoalCard({ g, onOpen }: { g: WorkspaceGoal; onOpen: () => void
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
         <span style={{ width: 14, marginTop: 2, flexShrink: 0, display: "inline-flex", justifyContent: "center" }}>
-          {live ? (
-            <span
-              style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--run)", boxShadow: "0 0 0 3px var(--run-soft)" }}
-            />
-          ) : g.state === "completed" ? (
+          {g.status === "completed" ? (
             <Icon.check size={13} color="var(--run)" />
-          ) : g.state === "paused" ? (
-            <Icon.pause size={11} color="var(--warn)" />
-          ) : g.state === "abandoned" ? (
+          ) : g.status === "archived" ? (
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--text-4)" }} />
           ) : (
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--text-3)" }} />
@@ -411,13 +427,11 @@ function WorkspaceGoalCard({ g, onOpen }: { g: WorkspaceGoal; onOpen: () => void
               fontWeight: 600,
               color: "var(--text)",
               lineHeight: 1.35,
-              textDecoration: g.state === "abandoned" ? "line-through" : "none",
-              textDecorationColor: "var(--text-4)",
             }}
           >
-            {g.name}
+            {g.title}
           </div>
-          {g.summary && (
+          {g.description && (
             <div
               style={{
                 fontSize: 12,
@@ -431,15 +445,15 @@ function WorkspaceGoalCard({ g, onOpen }: { g: WorkspaceGoal; onOpen: () => void
                 textOverflow: "ellipsis",
               }}
             >
-              {g.summary}
+              {g.description}
             </div>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 5 }}>
-            <Pill tone={meta.tone} dot={live} size="xs">
+            <Pill tone={meta.tone} size="xs">
               {meta.label}
             </Pill>
             <span className="mono" style={{ fontSize: 10.5, color: "var(--text-4)" }}>
-              {g.age}
+              {formatAge(g.createdAt)}
             </span>
           </div>
         </div>
@@ -456,8 +470,8 @@ function WorkspaceGoalCard({ g, onOpen }: { g: WorkspaceGoal; onOpen: () => void
         </span>
       </div>
 
-      {/* progress (only for in-flight goals) */}
-      {g.state !== "completed" && g.state !== "abandoned" && (
+      {/* progress — only for active goals with a non-null progress value */}
+      {g.status === "active" && g.progress != null && (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ flex: 1, height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
             <div style={{ width: `${Math.round(g.progress * 100)}%`, height: "100%", background: "var(--accent)" }} />
@@ -474,29 +488,31 @@ function WorkspaceGoalCard({ g, onOpen }: { g: WorkspaceGoal; onOpen: () => void
 // ── Manage workspace (edit name + description) ──
 function WorkspaceEditModal({
   ws,
-  existing,
   onClose,
   onSave,
 }: {
   ws: Workspace;
-  existing: Workspace[];
   onClose: () => void;
-  onSave: (patch: Partial<Workspace>) => void;
+  onSave: (patch: { name?: string; description?: string }) => Promise<void>;
 }) {
   const [name, setName] = useState(ws.name);
-  const [desc, setDesc] = useState(ws.desc === "No description yet." ? "" : ws.desc);
+  const [desc, setDesc] = useState(ws.description);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const slug = slugify(name);
-  const taken = new Set(existing.filter((w) => w.id !== ws.id).map((w) => w.id));
-  const dupe = Boolean(slug) && taken.has(slug);
-  const valid = Boolean(name.trim()) && !dupe;
+  const valid = Boolean(name.trim());
 
-  function submit() {
-    if (!valid) return;
-    onSave({ name: name.trim(), desc: desc.trim() || "No description yet." });
+  async function submit() {
+    if (!valid || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({ name: name.trim(), description: desc.trim() });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Save failed");
+      setSaving(false);
+    }
   }
-
-  const repo = ws.repos[0] ?? "—";
 
   return (
     <ModalShell onClose={onClose}>
@@ -517,15 +533,10 @@ function WorkspaceEditModal({
             autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submit();
-            }}
+            onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
             placeholder="Workspace name"
-            style={{ ...inputStyle, borderColor: dupe ? "var(--warn)" : "var(--hairline)" }}
+            style={inputStyle}
           />
-          {dupe && (
-            <span className="mono" style={{ fontSize: 11, color: "var(--warn)" }}>{`“${slug}” already exists`}</span>
-          )}
         </Field>
 
         <Field label="Description" hint="What this workspace owns.">
@@ -555,9 +566,11 @@ function WorkspaceEditModal({
             }}
           >
             <Icon.folder size={13} color="var(--text-4)" />
-            {repo}
+            {ws.path}
           </span>
         </Field>
+
+        {error && <span className="mono" style={{ fontSize: 11, color: "var(--err)" }}>{error}</span>}
       </div>
 
       <footer style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderTop: "1px solid var(--hairline)" }}>
@@ -565,55 +578,67 @@ function WorkspaceEditModal({
           Cancel
         </Btn>
         <div style={{ flex: 1 }} />
-        <Btn kind="primary" size="sm" icon={<Icon.check />} onClick={submit} disabled={!valid}>
-          Save changes
+        <Btn kind="primary" size="sm" icon={<Icon.check />} onClick={() => void submit()} disabled={!valid || saving}>
+          {saving ? "Saving…" : "Save changes"}
         </Btn>
       </footer>
     </ModalShell>
   );
 }
 
-// ── Create workspace (pick a folder) ──
-// A workspace is a single repo folder. Pick one; optionally override its name.
+// ── Create workspace (browse for a folder, inspect, confirm) ──
 function WorkspaceCreateModal({
-  existing,
   onClose,
   onCreate,
 }: {
-  existing: Workspace[];
   onClose: () => void;
-  onCreate: (ws: Workspace) => void;
+  onCreate: (inputPath: string, name?: string, description?: string) => Promise<void>;
 }) {
-  const taken = new Set(existing.map((w) => w.id));
-  const folders = FS_FOLDERS.map((name) => ({ name, path: `~/code/${name}`, added: taken.has(slugify(name)) }));
-
-  const [sel, setSel] = useState<{ name: string; path: string } | null>(null);
+  const [inputPath, setInputPath] = useState<string | null>(null);
+  const [preview, setPreview] = useState<InspectWorkspacePreview | null>(null);
+  const [inspecting, setInspecting] = useState(false);
+  const [inspectError, setInspectError] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [touchedName, setTouchedName] = useState(false);
   const [desc, setDesc] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  // name defaults to the folder name until the user overrides it
-  const effectiveName = touchedName ? name : sel ? sel.name : "";
-  const slug = slugify(effectiveName);
-  const dupe = Boolean(slug) && taken.has(slug);
-  const valid = Boolean(sel) && Boolean(slug) && !dupe;
-
-  function pick(f: { name: string; path: string; added: boolean }) {
-    if (f.added) return;
-    setSel({ name: f.name, path: f.path });
-    if (!touchedName) setName("");
+  async function handleBrowse() {
+    const selected = await openDialog({ directory: true, multiple: false });
+    if (!selected) return;
+    const path = selected as string;
+    setInspecting(true);
+    setInspectError(null);
+    setPreview(null);
+    try {
+      const res = await inspectWorkspace({ inputPath: path });
+      setInputPath(path);
+      setPreview(res.preview);
+      setName(res.preview.name);
+    } catch (err) {
+      setInspectError(err instanceof ApiError ? err.message : "Inspection failed");
+    } finally {
+      setInspecting(false);
+    }
   }
 
-  function submit() {
-    if (!valid || !sel) return;
-    onCreate({
-      id: slug,
-      name: effectiveName.trim(),
-      org: "local",
-      desc: desc.trim() || "No description yet.",
-      repos: [sel.path],
-    });
+  async function submit() {
+    if (!inputPath || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onCreate(inputPath, name.trim() || undefined, desc.trim() || undefined);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "workspace_duplicate") {
+        setSaveError("This folder has already been added.");
+      } else {
+        setSaveError(err instanceof ApiError ? err.message : "Create failed");
+      }
+      setSaving(false);
+    }
   }
+
+  const valid = Boolean(inputPath) && !inspecting;
 
   return (
     <ModalShell onClose={onClose}>
@@ -628,130 +653,84 @@ function WorkspaceCreateModal({
         <Btn icon={<Icon.close />} size="xs" onClick={onClose} title="Close" />
       </header>
 
-      {/* path bar */}
-      <div
-        className="mono"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "8px 16px",
-          fontSize: 11.5,
-          color: "var(--text-3)",
-          borderBottom: "1px solid var(--hairline)",
-          background: "var(--panel-2)",
-        }}
-      >
-        <Icon.folder size={12} color="var(--text-4)" />
-        ~/code
-      </div>
+      <div className="scroll" style={{ flex: 1, padding: 20, overflow: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Btn kind="quiet" size="sm" icon={<Icon.folder />} onClick={() => void handleBrowse()} disabled={inspecting}>
+            {inspecting ? "Inspecting…" : "Browse…"}
+          </Btn>
+          {preview && (
+            <span className="mono" style={{ fontSize: 11.5, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {preview.path}
+            </span>
+          )}
+        </div>
 
-      <div className="scroll" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 6 }}>
-        {folders.map((f) => {
-          const on = sel?.name === f.name;
-          return (
-            <button
-              key={f.name}
-              disabled={f.added}
-              onClick={() => pick(f)}
-              onDoubleClick={() => {
-                if (!f.added) {
-                  setSel({ name: f.name, path: f.path });
-                  setTimeout(submit, 0);
-                }
-              }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                width: "100%",
-                padding: "8px 9px",
-                borderRadius: 7,
-                marginBottom: 2,
-                cursor: f.added ? "default" : "pointer",
-                background: on ? "var(--accent-soft)" : "transparent",
-                border: "none",
-                fontFamily: "inherit",
-                textAlign: "left",
-                opacity: f.added ? 0.5 : 1,
-              }}
-              onMouseEnter={(e) => {
-                if (!on && !f.added) e.currentTarget.style.background = "rgba(255,255,255,0.04)";
-              }}
-              onMouseLeave={(e) => {
-                if (!on) e.currentTarget.style.background = "transparent";
-              }}
-            >
-              <Icon.folder size={15} color={on ? "var(--accent)" : "var(--text-3)"} />
+        {inspectError && (
+          <span className="mono" style={{ fontSize: 11, color: "var(--err)" }}>{inspectError}</span>
+        )}
+
+        {preview && (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               <span
                 className="mono"
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  fontSize: 12.5,
-                  color: on ? "var(--text)" : "var(--text-2)",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
+                style={{ fontSize: 11, padding: "3px 8px", borderRadius: 5, background: "var(--panel-2)", border: "1px solid var(--hairline)", color: "var(--text-2)" }}
               >
-                {f.name}
+                {preview.workspaceType}
               </span>
-              {f.added && (
-                <span className="mono" style={{ fontSize: 10, color: "var(--text-4)", textTransform: "uppercase", letterSpacing: 0.6 }}>
-                  Added
+              {preview.branch && (
+                <span
+                  className="mono"
+                  style={{ fontSize: 11, padding: "3px 8px", borderRadius: 5, background: "var(--panel-2)", border: "1px solid var(--hairline)", color: "var(--text-2)" }}
+                >
+                  {preview.branch}
                 </span>
               )}
-            </button>
-          );
-        })}
-      </div>
+              {preview.isDirty === true && (
+                <span
+                  className="mono"
+                  style={{ fontSize: 11, padding: "3px 8px", borderRadius: 5, background: "var(--warn-soft)", border: "1px solid transparent", color: "var(--warn)" }}
+                >
+                  dirty
+                </span>
+              )}
+            </div>
 
-      {/* optional name override — appears once a folder is chosen */}
-      {sel && (
-        <div style={{ padding: "12px 16px", borderTop: "1px solid var(--hairline)", display: "flex", flexDirection: "column", gap: 6 }}>
-          <label className="mono" style={{ fontSize: 10, color: "var(--text-3)", letterSpacing: 1, textTransform: "uppercase" }}>
-            Workspace name
-          </label>
-          <input
-            value={effectiveName}
-            onChange={(e) => {
-              setTouchedName(true);
-              setName(e.target.value);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submit();
-            }}
-            placeholder={sel.name}
-            style={{ ...inputStyle, borderColor: dupe ? "var(--warn)" : "var(--hairline)" }}
-          />
-          <span className="mono" style={{ fontSize: 11, color: dupe ? "var(--warn)" : "var(--text-4)" }}>
-            {dupe ? `“${slug}” already exists` : sel.path}
-          </span>
-          <label
-            className="mono"
-            style={{ fontSize: 10, color: "var(--text-3)", letterSpacing: 1, textTransform: "uppercase", marginTop: 4 }}
-          >
-            Description{" "}
-            <span style={{ textTransform: "none", letterSpacing: 0, color: "var(--text-4)" }}>· optional</span>
-          </label>
-          <textarea
-            value={desc}
-            onChange={(e) => setDesc(e.target.value)}
-            placeholder="What this workspace owns."
-            rows={2}
-            style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
-          />
-        </div>
-      )}
+            <Field label="Workspace name">
+              <input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
+                placeholder={preview.name}
+                style={inputStyle}
+              />
+            </Field>
+
+            <Field label="Description" hint="optional">
+              <textarea
+                value={desc}
+                onChange={(e) => setDesc(e.target.value)}
+                placeholder="What this workspace owns."
+                rows={2}
+                style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
+              />
+            </Field>
+          </>
+        )}
+
+        {saveError && (
+          <span className="mono" style={{ fontSize: 11, color: "var(--err)" }}>{saveError}</span>
+        )}
+      </div>
 
       <footer style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderTop: "1px solid var(--hairline)" }}>
         <Btn kind="ghost" size="sm" onClick={onClose}>
           Cancel
         </Btn>
         <div style={{ flex: 1 }} />
-        <Btn kind="primary" size="sm" icon={<Icon.check />} onClick={submit} disabled={!valid}>
-          Add workspace
+        <Btn kind="primary" size="sm" icon={<Icon.check />} onClick={() => void submit()} disabled={!valid || saving}>
+          {saving ? "Adding…" : "Add workspace"}
         </Btn>
       </footer>
     </ModalShell>
