@@ -109,7 +109,7 @@ export function composeOrchestratorPrompt(input: OrchestratorPromptInput): Orche
     "If your reply asks the user anything — any decision, choice, or clarification, including anything you would phrase ending in a '?' — you MUST return ask_user with structured options. Never place a question to the user in the body of paraphrase_agent_message, answer_user_directly, or escalate_to_user; those bodies are statements, not questions.",
     "When the user answers an ask_user, you receive it as a user_message; forward_to_agent so the answer reaches the step agent.",
     "Honor the current step's completionPolicy (context.currentStep.completionPolicy):",
-    "- interview: never approve_step_complete while the step output's open_questions is non-empty or the synthesized result is unconfirmed by the user — use ask_user (one decision at a time, with a recommended answer) until the queue is drained, then ask the user to confirm.",
+    "- interview: never approve_step_complete while the step output's open_questions is non-empty — use ask_user (one decision at a time, with a recommended answer) until the queue is drained, then approve_step_complete. The user confirms or revises the synthesized result on the completion card, so do not ask a separate confirmation question.",
     "- reasoning: pause at any material fork (options that genuinely diverge and are the user's to decide) via ask_user; never approve_step_complete while such a decision is pending.",
     "- handoff: open_questions is a recorded deliverable and does not block completion, but still ask_user for any genuine decision (for example, where to save an artifact).",
     "Return exactly one structured action.",

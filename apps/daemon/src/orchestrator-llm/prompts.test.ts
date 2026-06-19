@@ -159,4 +159,14 @@ describe("composeOrchestratorPrompt", () => {
     expect(systemPrompt).toMatch(/interview/i);
     expect(systemPrompt).toMatch(/open_questions/);
   });
+
+  it("interview policy blocks completion on open questions but does not require a separate confirm ask_user", () => {
+    const { systemPrompt } = composeOrchestratorPrompt({
+      triggerKind: "agent_response",
+      context: {} as never,
+      triggerPayload: {} as never,
+    });
+    expect(systemPrompt).toMatch(/interview: never approve_step_complete while the step output's open_questions is non-empty/);
+    expect(systemPrompt).not.toMatch(/ask the user to confirm/);
+  });
 });

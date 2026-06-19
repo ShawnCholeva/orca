@@ -120,4 +120,12 @@ describe("Brainstorm participatory revision", () => {
     expect(step("done").instructions).toMatch(/\.orca\/specs/);
     expect(step("done").instructions).toMatch(/do not finish silently/i);
   });
+
+  it("Frame step no longer instructs the agent to ask the user to confirm", () => {
+    const brainstorm = BUILTIN_TEMPLATE_CATALOG.find((t) => t.id === "orca/brainstorm")!;
+    const frame = brainstorm.steps.find((s) => s.id === "frame")!;
+    expect(frame.completionPolicy).toBe("interview");
+    expect(frame.instructions).not.toMatch(/ask the user to confirm/i);
+    expect(frame.instructions).toMatch(/complete/i);
+  });
 });
