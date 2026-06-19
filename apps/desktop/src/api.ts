@@ -1005,6 +1005,7 @@ export async function submitWorkerFreeText(
   goalId: string,
   questionId: string,
   freeText: string,
+  opts?: { fromChat?: boolean },
 ): Promise<void> {
   const { baseUrl, token } = await loadConfig();
   return requestVoid(
@@ -1015,7 +1016,7 @@ export async function submitWorkerFreeText(
         "Content-Type": "application/json",
         ...authHeaders(token),
       },
-      body: JSON.stringify({ freeText }),
+      body: JSON.stringify({ freeText, ...(opts?.fromChat ? { fromChat: true } : {}) }),
     },
     "Submit worker free-text answer failed",
   );
