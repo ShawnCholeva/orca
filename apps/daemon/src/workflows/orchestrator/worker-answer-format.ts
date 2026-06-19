@@ -42,3 +42,12 @@ export function assembleAnswerReason(
     "exactly these selections and continue. Do not call AskUserQuestion again."
   );
 }
+
+/** Deny-reason text carrying the user's own free-text answer. */
+export function assembleFreeTextReason(text: string): string {
+  return (
+    `User answered via Orca chat with a custom response: "${text}". ` +
+    "Treat the AskUserQuestion as fully answered with this response and continue. " +
+    "Do not call AskUserQuestion again."
+  );
+}
