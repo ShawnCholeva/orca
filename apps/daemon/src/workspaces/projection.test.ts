@@ -1,156 +1,87 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import type Database from "better-sqlite3";
+import { expect, it } from "vitest";
+import Database from "better-sqlite3";
+import { runMigrations, defaultMigrationsDir } from "../migrations.js";
+import * as P from "./projection.js";
 
-import type { Workspace } from "@orca/contracts";
-import type { Config } from "../config.js";
-import { closeDatabase, openDatabase } from "../db.js";
-import { defaultMigrationsDir, runMigrations } from "../migrations.js";
-import {
-  deleteWorkspace,
-  DuplicateWorkspaceError,
-  findWorkspaceByPath,
-  insertWorkspace,
-  listWorkspacesByGoal,
-  resetPreparedStatements,
-} from "./projection.js";
-
-const tempDirs: string[] = [];
-
-function createConfig(dataDir: string): Config {
-  return {
-    dataDir,
-    port: 8787,
-    logLevel: "silent",
-    sessionOutputTailBytes: 1024 * 1024,
-    sessionStopGraceMs: 5000,
-    sessionWsBufferLimitBytes: 1024 * 1024,
-    memoryExtractionMaxInputBytes: 131072,
-    memoryExtractionTimeoutMs: 15000,
-    getAuthToken: () => "test-token",
-  };
-}
-
-function setup(): Database.Database {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "orca-workspace-projection-test-"));
-  tempDirs.push(dir);
-  const db = openDatabase(createConfig(dir));
+function freshDb() {
+  const db = new Database(":memory:");
   runMigrations(db, defaultMigrationsDir());
+  P.resetPreparedStatements();
   return db;
 }
 
-function insertGoalRow(db: Database.Database, goalId: string): void {
-  const now = "2026-01-01T00:00:00.000Z";
-  db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-  ).run(goalId, "Goal", "", "active", 1, now, now, null);
+const ISO = "2026-06-19T00:00:00.000Z";
+
+function goal(db: Database.Database, id: string, status = "active") {
+  db.prepare("INSERT INTO goals (id,title,description,status,created_at,updated_at) VALUES (?,?,?,?,?,?)")
+    .run(id, id, "", status, ISO, ISO);
 }
 
-function workspaceRow(overrides: Partial<Workspace> = {}): Workspace {
-  return {
-    id: overrides.id ?? "ws-1",
-    goalId: overrides.goalId ?? "goal-1",
-    path: overrides.path ?? "/tmp/a",
-    name: overrides.name ?? "a",
-    workspaceType: overrides.workspaceType ?? "folder",
-    branch: overrides.branch ?? null,
-    isDirty: overrides.isDirty ?? null,
-    gitProbe: overrides.gitProbe ?? "not_a_repo",
-    attachedAt: overrides.attachedAt ?? "2026-01-01T01:00:00.000Z",
-  };
-}
-
-afterEach(() => {
-  closeDatabase();
-  resetPreparedStatements();
-  for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
+it("insert + find by id and path", () => {
+  const db = freshDb();
+  P.insertWorkspaceEntity(db, { id: "w1", path: "/r/a", name: "a", description: "", createdAt: ISO, updatedAt: ISO });
+  expect(P.findWorkspaceById(db, "w1")!.path).toBe("/r/a");
+  expect(P.findWorkspaceByPath(db, "/r/a")!.id).toBe("w1");
+  expect(P.findWorkspaceByPath(db, "/nope")).toBeNull();
 });
 
-describe("workspace projections", () => {
-  it("inserts and finds a workspace by path", () => {
-    const db = setup();
-    insertGoalRow(db, "goal-1");
-    const workspace = workspaceRow({
-      workspaceType: "repo",
-      branch: "main",
-      isDirty: false,
-      gitProbe: "ok",
-    });
+it("update entity returns patched row", () => {
+  const db = freshDb();
+  P.insertWorkspaceEntity(db, { id: "w1", path: "/r/a", name: "a", description: "", createdAt: ISO, updatedAt: ISO });
+  const out = P.updateWorkspaceEntity(db, "w1", { name: "renamed", description: "d" }, "2026-06-20T00:00:00.000Z");
+  expect(out!.name).toBe("renamed");
+  expect(out!.description).toBe("d");
+  expect(out!.updatedAt).toBe("2026-06-20T00:00:00.000Z");
+});
 
-    insertWorkspace(db, workspace);
+it("link/unlink and summaries with goalCounts", () => {
+  const db = freshDb();
+  goal(db, "g1", "active"); goal(db, "g2", "completed");
+  P.insertWorkspaceEntity(db, { id: "w1", path: "/r/a", name: "a", description: "", createdAt: ISO, updatedAt: ISO });
+  P.linkGoalWorkspace(db, "g1", "w1", ISO);
+  P.linkGoalWorkspace(db, "g2", "w1", ISO);
+  const [s] = P.listWorkspaceSummaries(db);
+  expect(s.goalCounts).toEqual({ active: 1, completed: 1, archived: 0 });
+  expect(P.listWorkspacesByGoal(db, "g1").map((w) => w.id)).toEqual(["w1"]);
+  expect(P.unlinkGoalWorkspace(db, "g2", "w1")).toBe(true);
+  expect(P.listWorkspaceSummaries(db)[0].goalCounts.completed).toBe(0);
+});
 
-    const found = findWorkspaceByPath(db, "goal-1", "/tmp/a");
-    expect(found).toEqual(workspace);
-  });
+it("goal views for a workspace include archived via archived_at", () => {
+  const db = freshDb();
+  goal(db, "g1", "active");
+  db.prepare("UPDATE goals SET status='archived', archived_at=? WHERE id='g1'").run(ISO);
+  P.insertWorkspaceEntity(db, { id: "w1", path: "/r/a", name: "a", description: "", createdAt: ISO, updatedAt: ISO });
+  P.linkGoalWorkspace(db, "g1", "w1", ISO);
+  const views = P.listGoalViewsForWorkspace(db, "w1");
+  expect(views[0]).toMatchObject({ id: "g1", status: "archived", progress: null });
+});
 
-  it("lists workspaces ordered by attached_at ASC then id ASC", () => {
-    const db = setup();
-    insertGoalRow(db, "goal-1");
+it("getWorkspaceByIdAndGoal returns entity when linked, null when not linked", () => {
+  const db = freshDb();
+  goal(db, "g1");
+  goal(db, "g2");
+  P.insertWorkspaceEntity(db, { id: "w1", path: "/r/a", name: "a", description: "", createdAt: ISO, updatedAt: ISO });
+  P.linkGoalWorkspace(db, "g1", "w1", ISO);
+  const found = P.getWorkspaceByIdAndGoal(db, "w1", "g1");
+  expect(found).not.toBeNull();
+  expect(found!.id).toBe("w1");
+  expect(P.getWorkspaceByIdAndGoal(db, "w1", "g2")).toBeNull();
+  expect(P.getWorkspaceByIdAndGoal(db, "w1", "nonexistent")).toBeNull();
+});
 
-    const later = workspaceRow({
-      id: "ws-3",
-      path: "/tmp/c",
-      name: "c",
-      attachedAt: "2026-01-01T02:00:00.000Z",
-    });
-    const tie1 = workspaceRow({
-      id: "ws-1",
-      path: "/tmp/a",
-      name: "a",
-      attachedAt: "2026-01-01T01:00:00.000Z",
-    });
-    const tie2 = workspaceRow({
-      id: "ws-2",
-      path: "/tmp/b",
-      name: "b",
-      attachedAt: "2026-01-01T01:00:00.000Z",
-    });
+it("insertWorkspaceEntity throws DuplicateWorkspaceError on duplicate path", () => {
+  const db = freshDb();
+  P.insertWorkspaceEntity(db, { id: "w1", path: "/r/a", name: "a", description: "", createdAt: ISO, updatedAt: ISO });
+  expect(() =>
+    P.insertWorkspaceEntity(db, { id: "w2", path: "/r/a", name: "b", description: "", createdAt: ISO, updatedAt: ISO })
+  ).toThrow(P.DuplicateWorkspaceError);
+  expect(() =>
+    P.insertWorkspaceEntity(db, { id: "w2", path: "/r/a", name: "b", description: "", createdAt: ISO, updatedAt: ISO })
+  ).toThrow(expect.objectContaining({ path: "/r/a" }));
+});
 
-    insertWorkspace(db, later);
-    insertWorkspace(db, tie2);
-    insertWorkspace(db, tie1);
-
-    const ordered = listWorkspacesByGoal(db, "goal-1");
-    expect(ordered.map((workspace) => workspace.id)).toEqual(["ws-1", "ws-2", "ws-3"]);
-  });
-
-  it("deleteWorkspace returns true when deleted and false when missing", () => {
-    const db = setup();
-    insertGoalRow(db, "goal-1");
-    insertWorkspace(db, workspaceRow());
-
-    expect(deleteWorkspace(db, "goal-1", "ws-1")).toBe(true);
-    expect(deleteWorkspace(db, "goal-1", "ws-1")).toBe(false);
-  });
-
-  it("duplicate (goal_id, path) raises DuplicateWorkspaceError", () => {
-    const db = setup();
-    insertGoalRow(db, "goal-1");
-    insertWorkspace(db, workspaceRow({ id: "ws-1", path: "/tmp/dup" }));
-
-    expect(() => insertWorkspace(db, workspaceRow({ id: "ws-2", path: "/tmp/dup" }))).toThrow(
-      DuplicateWorkspaceError,
-    );
-    expect(() => insertWorkspace(db, workspaceRow({ id: "ws-2", path: "/tmp/dup" }))).toThrow(
-      expect.objectContaining({ code: "workspace_duplicate" }),
-    );
-  });
-
-  it("returns empty list for goal with no workspaces", () => {
-    const db = setup();
-    insertGoalRow(db, "goal-1");
-
-    expect(listWorkspacesByGoal(db, "goal-1")).toEqual([]);
-  });
-
-  it("findWorkspaceByPath returns null when not present", () => {
-    const db = setup();
-    insertGoalRow(db, "goal-1");
-
-    expect(findWorkspaceByPath(db, "goal-1", "/tmp/missing")).toBeNull();
-  });
+it("updateWorkspaceEntity returns null for missing id", () => {
+  const db = freshDb();
+  expect(P.updateWorkspaceEntity(db, "nonexistent", { name: "x" }, ISO)).toBeNull();
 });
