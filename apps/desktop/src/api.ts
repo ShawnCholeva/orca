@@ -1729,6 +1729,28 @@ export async function confirmStep(runId: string): Promise<void> {
   );
 }
 
+export async function requestStepRevision(runId: string): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  await requestVoid(
+    `${baseUrl}/v1/workflows/runs/${runId}/revise-step`,
+    { method: "POST", headers: authHeaders(token) },
+    "Failed to start revision",
+  );
+}
+
+export async function submitStepRevision(runId: string, feedback: string): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  await requestVoid(
+    `${baseUrl}/v1/workflows/runs/${runId}/revise-step/submit`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify({ feedback }),
+    },
+    "Failed to submit revision",
+  );
+}
+
 async function postProviderRecovery(
   runId: string,
   action: "wait" | "retry" | "refresh" | "switch",

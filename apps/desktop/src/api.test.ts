@@ -1485,6 +1485,27 @@ describe("desktop api client", () => {
     );
   });
 
+  it("requestStepRevision POSTs to revise-step", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 202 }));
+    await api.requestStepRevision("run-1");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("/v1/workflows/runs/run-1/revise-step"),
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("submitStepRevision POSTs to revise-step/submit with feedback body", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 202 }));
+    await api.submitStepRevision("run-1", "my feedback");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("/v1/workflows/runs/run-1/revise-step/submit"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ feedback: "my feedback" }),
+      })
+    );
+  });
+
   describe("readiness api", () => {
     it("runReadinessCheck POSTs and returns reports", async () => {
       fetchMock.mockResolvedValueOnce(
