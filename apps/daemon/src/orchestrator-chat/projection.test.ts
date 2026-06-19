@@ -1,11 +1,11 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
 import { runMigrations } from "../migrations.js";
 import { EventBus } from "../events.js";
 import { listOrchestratorMessagesByGoal } from "./projection.js";
-import { insertMessageWithEvent } from "./usecases.js";
+import { insertMessageWithEvent, recordWorkerQuestionAnswer } from "./usecases.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIG_DIR = path.resolve(__dirname, "../../migrations");
@@ -75,5 +75,43 @@ describe("listOrchestratorMessagesByGoal pendingApproval", () => {
     );
     const messages = listOrchestratorMessagesByGoal(db, "g1");
     expect(messages[0]!.pendingApproval).toMatchObject(approval);
+  });
+});
+
+describe("recordWorkerQuestionAnswer", () => {
+  it("merges the answer into the matching worker-question message", () => {
+    const db = makeMigratedDb();
+    seedGoal(db, "g1");
+    const bus = { publish: vi.fn() };
+    const ctx = { db, bus, idFactory: () => "evt-1" };
+    insertMessageWithEvent(
+      { db, bus: stubBus(), idFactory: () => "m1" },
+      {
+        id: "m1", goalId: "g1", role: "orchestrator", body: "Which?",
+        correlationId: "c1", createdAt: "2026-06-18T00:00:00.000Z",
+        pendingQuestion: {
+          questionId: "q1", toolUseId: "t1", source: "worker",
+          questions: [{ header: "H", question: "Which?", multiSelect: false, options: [{ label: "A", description: "a" }] }],
+        },
+      },
+    );
+
+    const ok = recordWorkerQuestionAnswer(ctx, {
+      goalId: "g1", questionId: "q1",
+      answer: { answers: [{ questionIndex: 0, selectedLabels: ["A"] }] },
+    });
+
+    expect(ok).toBe(true);
+    const msgs = listOrchestratorMessagesByGoal(db, "g1");
+    expect(msgs[0]!.pendingQuestion?.answer?.answers?.[0]?.selectedLabels).toEqual(["A"]);
+    expect(bus.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "orchestrator.message.updated", goalId: "g1" }),
+    );
+  });
+
+  it("returns false when no message matches", () => {
+    const db = makeMigratedDb();
+    const ctx = { db, bus: { publish: vi.fn() }, idFactory: () => "evt" };
+    expect(recordWorkerQuestionAnswer(ctx, { goalId: "g1", questionId: "nope", answer: { viaChat: true } })).toBe(false);
   });
 });
