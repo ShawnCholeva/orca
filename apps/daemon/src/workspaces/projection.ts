@@ -118,7 +118,7 @@ export function listGoalViewsForWorkspace(db: Database.Database, workspaceId: st
     let progress: number | null = null;
     if (g.status === "active" && g.run_id) {
       const p = stmts(db).runProgress.get(g.run_id) as { total: number; done: number };
-      progress = p.total > 0 ? p.done / p.total : 0;
+      progress = p.total > 0 ? p.done / p.total : null;
     }
     return WorkspaceGoalView.parse({
       id: g.id, title: g.title, description: g.description, status: g.status, createdAt: g.created_at, progress,

@@ -85,3 +85,19 @@ it("updateWorkspaceEntity returns null for missing id", () => {
   const db = freshDb();
   expect(P.updateWorkspaceEntity(db, "nonexistent", { name: "x" }, ISO)).toBeNull();
 });
+
+it("active goal with workflow run but no step-runs has progress === null", () => {
+  const db = freshDb();
+  goal(db, "g1", "active");
+  db.prepare(
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 0, ?, ?, ?, ?)"
+  ).run("tpl1", "T", "", 1, "[]", "[]", ISO, ISO);
+  db.prepare(
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, started_at) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run("run1", "g1", "tpl1", 1, "active", ISO);
+  db.prepare("UPDATE goals SET active_workflow_run_id = ? WHERE id = ?").run("run1", "g1");
+  P.insertWorkspaceEntity(db, { id: "w1", path: "/r/a", name: "a", description: "", createdAt: ISO, updatedAt: ISO });
+  P.linkGoalWorkspace(db, "g1", "w1", ISO);
+  const views = P.listGoalViewsForWorkspace(db, "w1");
+  expect(views[0]).toMatchObject({ id: "g1", status: "active", progress: null });
+});
