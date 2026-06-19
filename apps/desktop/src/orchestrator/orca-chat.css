@@ -547,6 +547,16 @@
   background: var(--accent-soft, rgba(91, 140, 255, 0.08));
 }
 
+/* A pending question supplies its own card chrome; the wrapping bubble must not
+   double it up with a second border/background. */
+.activity-bubble.activity-bubble--question,
+.activity-bubble.activity-bubble--question[data-status="paused_for_input"] {
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+}
+
 .step-result-card {
   align-self: flex-start;
   max-width: 720px;
@@ -863,10 +873,6 @@
   transition: border-color 0.12s, background 0.12s;
 }
 .orca-chat-option-row:hover { border-color: var(--hairline-strong); }
-.orca-chat-option-row--selected {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
 .orca-chat-option-row input { margin: 0; flex: none; margin-top: 3px; }
 .orca-chat-option-content { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .orca-chat-option-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }

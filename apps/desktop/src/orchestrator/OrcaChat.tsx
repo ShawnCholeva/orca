@@ -1002,10 +1002,7 @@ function WorkerQuestionForm({
               ? opt.label.slice(0, -recommendedSuffix.length)
               : opt.label;
             return (
-              <label
-                key={oi}
-                className={`orca-chat-option-row${chosen ? " orca-chat-option-row--selected" : ""}`}
-              >
+              <label key={oi} className="orca-chat-option-row">
                 <input
                   type={q.multiSelect ? "checkbox" : "radio"}
                   name={`${pending.questionId}-${qi}`}

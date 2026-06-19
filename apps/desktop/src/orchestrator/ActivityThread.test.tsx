@@ -73,7 +73,8 @@ describe("LiveActivity", () => {
       />,
     );
 
-    expect(screen.getByText("I need your call on signals.")).toBeInTheDocument();
+    // The pending question leads the card; the generic voice line is suppressed.
+    expect(screen.queryByText("I need your call on signals.")).not.toBeInTheDocument();
     expect(screen.getByText("g1: Which passed?")).toBeInTheDocument();
   });
 

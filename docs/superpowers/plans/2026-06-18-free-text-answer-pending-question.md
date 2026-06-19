@@ -686,7 +686,9 @@ it("composer text while a worker question is live answers the worker, not the or
   fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
     target: { value: "a dedicated workspaces tab" },
   });
-  fireEvent.click(screen.getByRole("button", { name: /send/i }));
+  // Exact "Send" targets the composer button only — the live form's button reads
+  // "Send answer", so a /send/i regex would match two buttons and throw.
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
   await waitFor(() =>
     expect(submitWorkerFreeTextMock).toHaveBeenCalledWith(

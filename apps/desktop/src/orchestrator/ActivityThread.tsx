@@ -144,13 +144,19 @@ export function LiveActivity({
     activity.status === "paused_for_input" &&
     activity.sourceKind === "provider_recovery_pending" &&
     activity.providerRecovery != null;
+  // When a question is pending, the question itself leads the card; the generic
+  // "I need your call on …" voice line would just be redundant above it.
+  const hasPendingQuestion =
+    activity.status === "paused_for_input" && activity.pendingQuestion != null;
   return (
     <div
-      className="activity-bubble"
+      className={`activity-bubble${hasPendingQuestion ? " activity-bubble--question" : ""}`}
       data-testid="activity-bubble"
       data-status={activity.status}
     >
-      <div className="activity-bubble-text">{activity.currentText}</div>
+      {hasPendingQuestion ? null : (
+        <div className="activity-bubble-text">{activity.currentText}</div>
+      )}
       {activity.status === "paused_for_input" && activity.pendingQuestion ? (
         <QuestionForm goalId={goalId} pending={activity.pendingQuestion} />
       ) : null}
