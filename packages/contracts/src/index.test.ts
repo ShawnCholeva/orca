@@ -80,6 +80,7 @@ import {
   PatchGoalDecisionRequest,
   PatchGoalMemoryRequest,
   OrchestratorChatMessage,
+  PendingRevision,
   RepairAction,
   RefineGoalRequest,
   RefineGoalResponse,
@@ -103,6 +104,7 @@ import {
   StopSessionRequest,
   StopSessionResponse,
   SkillExtensionPoint,
+  SubmitStepRevisionRequest,
   Workspace,
   WorkspaceType,
   CreateGoalAndStartWorkflowRequest,
@@ -1774,5 +1776,23 @@ describe("ConfirmationSummary", () => {
       confirmationSummary: { lead: "ok", fields: [], scoring: null },
     };
     expect(Activity.parse(base).confirmationSummary?.lead).toBe("ok");
+  });
+});
+
+describe("PendingRevision", () => {
+  it("rides on OrchestratorChatMessage", () => {
+    const msg = OrchestratorChatMessage.parse({
+      id: "m1", goalId: "g1", role: "orchestrator", kind: "message",
+      body: "What would you like to revise?", correlationId: null,
+      createdAt: "2026-06-18T00:00:00.000Z",
+      pendingRevision: { workflowRunId: "r1" },
+    });
+    expect(msg.pendingRevision?.workflowRunId).toBe("r1");
+  });
+
+  it("SubmitStepRevisionRequest requires non-empty feedback", () => {
+    expect(SubmitStepRevisionRequest.safeParse({ feedback: "" }).success).toBe(false);
+    expect(SubmitStepRevisionRequest.parse({ feedback: "tighten the success metric" }).feedback)
+      .toBe("tighten the success metric");
   });
 });

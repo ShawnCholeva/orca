@@ -1259,6 +1259,11 @@ export const UpdateWorkerPermissionModeRequest = z
   .strict();
 export type UpdateWorkerPermissionModeRequest = z.infer<typeof UpdateWorkerPermissionModeRequest>;
 
+export const PendingRevision = z
+  .object({ workflowRunId: z.string().min(1) })
+  .strict();
+export type PendingRevision = z.infer<typeof PendingRevision>;
+
 export const OrchestratorChatMessage = z
   .object({
     id: z.string(),
@@ -1272,7 +1277,8 @@ export const OrchestratorChatMessage = z
     internalKind: OrchestratorInternalThoughtKind.nullable().optional(),
     createdAt: z.string().datetime(),
     pendingQuestion: PendingQuestion.optional(),
-    pendingApproval: PendingApproval.optional()
+    pendingApproval: PendingApproval.optional(),
+    pendingRevision: PendingRevision.optional()
   })
   .strict();
 export type OrchestratorChatMessage = z.infer<typeof OrchestratorChatMessage>;
@@ -1285,6 +1291,11 @@ export const ListOrchestratorMessagesResponse = z
 export type ListOrchestratorMessagesResponse = z.infer<
   typeof ListOrchestratorMessagesResponse
 >;
+
+export const SubmitStepRevisionRequest = z
+  .object({ feedback: z.string().min(1).max(4000) })
+  .strict();
+export type SubmitStepRevisionRequest = z.infer<typeof SubmitStepRevisionRequest>;
 
 export const CreateOrchestratorMessageRequest = z
   .object({
