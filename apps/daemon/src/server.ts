@@ -58,6 +58,7 @@ import {
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
   type PendingQuestionItem,
+  type PendingQuestionAnswer,
   SubmitWorkerAnswersRequest,
   CheckSystemReadinessResponse,
   SubmitPermissionDecisionRequest,
@@ -191,7 +192,7 @@ import { reconcileStepResultActivities } from './activities/step-result-activity
 import { extractReasoningSince } from './activities/transcript.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
-import { insertMessageWithEvent } from './orchestrator-chat/usecases.js';
+import { insertMessageWithEvent, recordWorkerQuestionAnswer } from './orchestrator-chat/usecases.js';
 import { registerShadowHookRoutes } from './shadow-hooks/routes.js';
 import { ShadowSessionManager, shadowSessionId, type ShadowAdapterId } from './orchestrator-llm/shadow-session.js';
 import {
@@ -1526,18 +1527,24 @@ export function createServer(
     if (!pending || pending.goalId !== goalId) { reply.status(404); return { error: { code: "question_not_found" } }; }
 
     let reason: string;
+    let answer: PendingQuestionAnswer;
     if (parsed.data.freeText != null) {
       reason = assembleFreeTextReason(parsed.data.freeText);
+      answer = parsed.data.fromChat ? { viaChat: true } : { freeText: parsed.data.freeText };
     } else {
       const invalid = validateAnswers(pending.questions, parsed.data.answers!);
       if (invalid) { reply.status(400); return { error: { code: invalid } }; }
       reason = assembleAnswerReason(pending.questions, parsed.data.answers!);
+      answer = { answers: parsed.data.answers! };
     }
 
     const ok = workerQuestions.resolveAnswers(questionId, reason);
     if (!ok) { reply.status(409); return { error: { code: "already_answered" } }; }
 
-    if (parsed.data.freeText != null) {
+    // Composer answers post the user's text as a chat message; card answers
+    // (options or inline "Something else") render inline on the question bubble
+    // and add no separate user message.
+    if (parsed.data.freeText != null && parsed.data.fromChat) {
       insertMessageWithEvent(
         { db, bus: eventBus, idFactory: daemonContext.idFactory },
         {
@@ -1551,15 +1558,11 @@ export function createServer(
       );
     }
 
-    const stepContext = resolveStepContext(pending.sessionId);
-    if (stepContext) {
-      applyActivitySafely("agent.question_answered", {
-        kind: "turn_completed",
-        stepRunId: stepContext.stepRunId,
-        summary: "Forwarding your response to the agent.",
-        confidence: null,
-      });
-    }
+    recordWorkerQuestionAnswer(
+      { db, bus: eventBus, idFactory: daemonContext.idFactory },
+      { goalId, questionId, answer },
+    );
+
     return { ok: true };
   });
 

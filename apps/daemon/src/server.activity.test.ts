@@ -566,19 +566,63 @@ describe("daemon activity integration", () => {
           "User answered via Orca chat. Q1 'Release Plan': Ship now. These are the user's final answers — treat the AskUserQuestion as fully answered with exactly these selections and continue. Do not call AskUserQuestion again.",
       },
     });
+    // The answer is recorded on the question message; no "Forwarding" activity.
+    const messages = ListOrchestratorMessagesResponse.parse(
+      (await server.inject({ method: "GET", url: `/v1/goals/${ids.goalId}/orchestrator-messages`, headers: AUTH_HEADERS })).json(),
+    );
+    const answered = messages.messages.find((m) => m.pendingQuestion?.source === "worker");
+    expect(answered?.pendingQuestion?.answer?.answers?.[0]?.selectedLabels).toEqual(["Ship now"]);
+
     const activitiesResponse = await server.inject({
-      method: "GET",
-      url: `/v1/goals/${ids.goalId}/activities`,
-      headers: AUTH_HEADERS,
+      method: "GET", url: `/v1/goals/${ids.goalId}/activities`, headers: AUTH_HEADERS,
     });
     const activities = ListActivitiesResponse.parse(activitiesResponse.json());
-    expect(activities.items[0]).toMatchObject({
-      status: "completed",
-      sourceKind: "turn_completed",
-      finalSummary: "Forwarding your response to the agent.",
-      confidence: null,
+    expect(activities.items.some((a) => a.finalSummary === "Forwarding your response to the agent.")).toBe(false);
+  });
+
+  it("records inline free-text from the card without inserting a user message", async () => {
+    const ids = {
+      goalId: "goal-question-card-freetext",
+      runId: "run-question-card-freetext",
+      stepRunId: "step-question-card-freetext",
+      sessionId: "session-question-card-freetext",
+    };
+    const questions: PendingQuestionItem[] = [
+      {
+        header: "Release Plan",
+        question: "When should this ship?",
+        multiSelect: false,
+        options: [
+          { label: "Ship now", description: "Release immediately." },
+          { label: "Wait", description: "Hold for another review." },
+        ],
+      },
+    ];
+    seedLiveWorkflowSession(db, ids);
+    expect(
+      (await postToolUse(server, ids.sessionId, "tool-use-question-card-freetext")).statusCode,
+    ).toBe(200);
+
+    const elicitPromise = postElicit(server, ids.sessionId, "question-tool-card-freetext", questions);
+    const recorded = await waitForRecordedQuestion(db, ids);
+
+    const before = ListOrchestratorMessagesResponse.parse(
+      (await server.inject({ method: "GET", url: `/v1/goals/${ids.goalId}/orchestrator-messages`, headers: AUTH_HEADERS })).json(),
+    ).messages.length;
+
+    await server.inject({
+      method: "POST",
+      url: `/v1/goals/${ids.goalId}/worker-questions/${recorded.pendingQuestion.questionId}/answer`,
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+      payload: { freeText: "do it my way" }, // no fromChat -> card path
     });
-    expect(activities.items[0]?.pendingQuestion).toBeUndefined();
+    await elicitPromise;
+
+    const after = ListOrchestratorMessagesResponse.parse(
+      (await server.inject({ method: "GET", url: `/v1/goals/${ids.goalId}/orchestrator-messages`, headers: AUTH_HEADERS })).json(),
+    ).messages;
+    expect(after.length).toBe(before); // no extra user message
+    expect(after.find((m) => m.pendingQuestion?.source === "worker")?.pendingQuestion?.answer?.freeText).toBe("do it my way");
   });
 
   it("does not duplicate activity or chat side effects for a repeated question toolUseId", async () => {
@@ -708,10 +752,12 @@ describe("daemon activity integration", () => {
       },
     });
 
-    const chatRows = db
-      .prepare("SELECT role, body FROM orchestrator_messages WHERE goal_id = ? ORDER BY rowid")
-      .all(ids.goalId) as Array<{ role: string; body: string }>;
-    expect(chatRows).toContainEqual({ role: "user", body: "a dedicated workspaces tab" });
+    // Card free-text: answer is stored on the question message; no separate user message.
+    const afterMessages = ListOrchestratorMessagesResponse.parse(
+      (await server.inject({ method: "GET", url: `/v1/goals/${ids.goalId}/orchestrator-messages`, headers: AUTH_HEADERS })).json(),
+    ).messages;
+    expect(afterMessages.find((m) => m.pendingQuestion?.source === "worker")?.pendingQuestion?.answer?.freeText).toBe("a dedicated workspaces tab");
+    expect(afterMessages.some((m) => m.role === "user")).toBe(false);
   });
 
   it("opens one live activity when a workflow step starts", async () => {
