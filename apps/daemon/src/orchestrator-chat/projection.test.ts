@@ -82,7 +82,8 @@ describe("recordWorkerQuestionAnswer", () => {
   it("merges the answer into the matching worker-question message", () => {
     const db = makeMigratedDb();
     seedGoal(db, "g1");
-    const bus = { publish: vi.fn() };
+    const bus = new EventBus();
+    const publishSpy = vi.spyOn(bus, "publish");
     const ctx = { db, bus, idFactory: () => "evt-1" };
     insertMessageWithEvent(
       { db, bus: stubBus(), idFactory: () => "m1" },
@@ -104,14 +105,14 @@ describe("recordWorkerQuestionAnswer", () => {
     expect(ok).toBe(true);
     const msgs = listOrchestratorMessagesByGoal(db, "g1");
     expect(msgs[0]!.pendingQuestion?.answer?.answers?.[0]?.selectedLabels).toEqual(["A"]);
-    expect(bus.publish).toHaveBeenCalledWith(
+    expect(publishSpy).toHaveBeenCalledWith(
       expect.objectContaining({ type: "orchestrator.message.updated", goalId: "g1" }),
     );
   });
 
   it("returns false when no message matches", () => {
     const db = makeMigratedDb();
-    const ctx = { db, bus: { publish: vi.fn() }, idFactory: () => "evt" };
+    const ctx = { db, bus: new EventBus(), idFactory: () => "evt" };
     expect(recordWorkerQuestionAnswer(ctx, { goalId: "g1", questionId: "nope", answer: { viaChat: true } })).toBe(false);
   });
 });

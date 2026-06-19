@@ -894,6 +894,11 @@
   outline: none;
   border-color: var(--accent-line);
 }
+.orca-chat-question-answered-note {
+  margin: 8px 0 0 22px;
+  font-size: 12px;
+  color: var(--text-4);
+}
 .orca-chat-question-submit {
   align-self: flex-start;
   margin-top: 2px;
