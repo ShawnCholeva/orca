@@ -404,7 +404,16 @@ export default function App() {
               <section className="workspaces-pane" role="tabpanel" aria-label="Workspaces">
                 <WorkspacesPage
                   onCreateGoal={(ws) => { setCreateFlowWorkspacePath(ws?.path); setShowCreateFlow(true); }}
-                  onOpenGoal={() => setActiveTab("orchestrator")}
+                  onOpenGoal={(goal) => {
+                    // Active/completed goals live in the orchestrator rail; select + show them there.
+                    // Archived goals are filtered out of that list, so open their detail view instead.
+                    if (goals.some((g) => g.id === goal.id)) {
+                      setSelectedOrchestratorGoalId(goal.id);
+                      setActiveTab("orchestrator");
+                    } else {
+                      openGoalDetail(goal.id);
+                    }
+                  }}
                 />
               </section>
             ) : activeTab === "orchestrator" ? (
