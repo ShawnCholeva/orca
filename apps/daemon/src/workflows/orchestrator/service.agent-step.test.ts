@@ -317,6 +317,40 @@ function setupAgentStepRun(db: Database.Database, opts: { guardrailsJson?: strin
   ).run(step.id, step.ordinal, NOW);
 }
 
+/** Seed a 2-step engineering run with step-1 active (ordinal 0) so completing it
+ *  advances to a fresh step-2 (ordinal 1) — i.e. step-1 is NOT terminal. */
+function setupTwoStepAgentRun(db: Database.Database) {
+  const step1 = makeStep({
+    id: "implement",
+    ordinal: 0,
+    name: "Implement",
+    instructions: "Write the implementation.",
+    outputSchema: [{ key: "result", type: "string", required: true }],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+  });
+  const step2 = makeStep({
+    id: "verify",
+    ordinal: 1,
+    name: "Verify",
+    instructions: "Verify the implementation.",
+    outputSchema: [{ key: "result", type: "string", required: true }],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+  });
+
+  db.prepare(
+    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+  ).run("goal-1", NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', 'desc', 1, 1, 1, ?, '[]', ?, ?)"
+  ).run(JSON.stringify([step1, step2]), NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)"
+  ).run(NOW);
+  db.prepare(
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-1', 'goal-1', 'run-1', ?, ?, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1', NULL, NULL, NULL, NULL)"
+  ).run(step1.id, step1.ordinal, NOW);
+}
+
 /** Seed an interview step workflow (completionPolicy: "interview") */
 function setupInterviewStepRun(db: Database.Database) {
   const step = {
@@ -1392,6 +1426,110 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     expect(result.evaluationStatus).toBe("scored");
     expect(result.resultSummary).toBe("Recommends Approach A");
     expect(result.primaryArtifact?.reference).toBe(".orca/specs/x.md");
+  });
+
+  it("advances a non-terminal step whose output summary exceeds the result-summary cap", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupTwoStepAgentRun(db);
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    // A summary longer than WorkflowStepResult.resultSummary's 2000-char cap.
+    const longSummary = "A".repeat(2500);
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.9,
+          quality: {
+            outputCompleteness: 0.9,
+            outputCorrectness: 0.9,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.9,
+            riskLevel: 0.1,
+          },
+          reason: "Output complete.",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({ result: "implemented", summary: longSummary }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // The step must complete and the run must advance to a fresh next step —
+    // an over-length summary must not strand the step "active".
+    const step1 = db
+      .prepare("SELECT status FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { status: string };
+    expect(step1.status).toBe("passed");
+    const run = db
+      .prepare("SELECT current_step_run_id FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { current_step_run_id: string | null };
+    expect(run.current_step_run_id).not.toBe("step-1");
+    expect(run.current_step_run_id).toBeTruthy();
+
+    // The denormalized summary is truncated to fit its own contract.
+    const result = readPersistedStepResult(db, "step-1");
+    expect(result.resultSummary.length).toBeLessThanOrEqual(2000);
+  });
+
+  it("uses the latest step_output (not a stale earlier one) for the result summary", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupTwoStepAgentRun(db);
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    // A stale earlier step_output (e.g. from a prior completion attempt).
+    db.prepare(
+      "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-old', 'goal-1', 'run-1', 'step-1', 'step_output', 'Old', ?, 'orchestrator', NULL, NULL, NULL, ?)"
+    ).run(JSON.stringify({ result: "old", summary: "STALE SUMMARY" }), "2025-01-01T00:00:00.000Z");
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.9,
+          quality: {
+            outputCompleteness: 0.9,
+            outputCorrectness: 0.9,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.9,
+            riskLevel: 0.1,
+          },
+          reason: "Output complete.",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({ result: "implemented", summary: "FRESH SUMMARY" }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    const result = readPersistedStepResult(db, "step-1");
+    expect(result.resultSummary).toBe("FRESH SUMMARY");
   });
 });
 

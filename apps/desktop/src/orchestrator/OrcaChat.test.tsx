@@ -1633,6 +1633,84 @@ describe("OrcaChat", () => {
     expect(await screen.findByTestId("answer-thinking")).toBeInTheDocument();
     expect(screen.getByTestId("answer-thinking")).toHaveTextContent("Thinking…");
   });
+
+  it("keeps the Thinking… row when an invisible activity lands, and clears it only once a visible card arrives", async () => {
+    setupRunLoad();
+    listActivitiesMock.mockResolvedValue([]);
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "wq-1", goalId: "goal-1", role: "orchestrator", kind: "message",
+          body: "I need your call on the approach.", correlationId: null, createdAt: now,
+          pendingQuestion: {
+            questionId: "question-1", toolUseId: "tool-1", source: "worker",
+            questions: [
+              {
+                header: "Approach",
+                question: "Which approach should I use?",
+                multiSelect: false,
+                options: [{ label: "Use hooks", description: "x" }],
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+    openEventStreamMock.mockImplementation(
+      ({ onEvent }: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+        capturedOnEvent = onEvent;
+        return { close: vi.fn() };
+      },
+    );
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("Which approach should I use?");
+    await waitFor(() => expect(listActivitiesMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
+      target: { value: "use hooks" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByTestId("answer-thinking")).toBeInTheDocument();
+
+    // The agent resumes and creates a fresh turn that has no steps yet: it is
+    // neither a timeline card nor a live activity, so nothing visible has
+    // replaced the Thinking row — it must stay up rather than blank out.
+    const invisibleTurn: Activity = {
+      ...activeActivity,
+      id: "activity-resumed",
+      status: "active",
+      sourceKind: "tool_use",
+      steps: [],
+      createdAt: "2099-01-01T00:00:00.000Z",
+    };
+    listActivitiesMock.mockResolvedValue([invisibleTurn]);
+    act(() => {
+      capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
+    });
+
+    await waitFor(() => expect(listActivitiesMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("answer-thinking")).toBeInTheDocument();
+
+    // Once the turn accumulates a step it becomes a visible agent-activity card,
+    // which is what should retire the Thinking row.
+    const visibleCard: Activity = {
+      ...invisibleTurn,
+      steps: [{ id: "s1", text: "Wiring up the hook...", category: "editing", status: "active", createdAt: "2099-01-01T00:00:00.000Z" }],
+    };
+    listActivitiesMock.mockResolvedValue([visibleCard]);
+    act(() => {
+      capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
+    });
+
+    expect(await screen.findByText("Wiring up the hook...")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("answer-thinking")).toBeNull());
+  });
 });
 
 describe("formatElapsed", () => {

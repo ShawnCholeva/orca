@@ -341,6 +341,12 @@ function nowWithFirstTimestamp(now: () => string, fixed: string): () => string {
   };
 }
 
+/** Clamps a display string to a schema char limit, marking truncation with an
+ *  ellipsis so the cutoff is visible. Returns the input unchanged when it fits. */
+function clampToLimit(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
 /** The template step id backing a graph step node (defaults to the node id). */
 function gateDestinationStepTemplateId(graph: WorkflowGraph, nodeId: string): string {
   const node = graph.nodes.find((n) => n.id === nodeId);
@@ -2506,7 +2512,11 @@ export class OrchestratorService {
   ): WorkflowStepResult {
     const output = this.readStepOutputAsRecord(db, stepRun.workflow_run_id, stepRun.id);
     if (!output) return result;
-    const summary = typeof output.summary === "string" ? output.summary : undefined;
+    // These are denormalized display fields; the full text lives in the
+    // step_output artifact. Clamp to the WorkflowStepResult schema's own limits
+    // so an over-length agent summary can't fail validation and strand the step.
+    const summary =
+      typeof output.summary === "string" ? clampToLimit(output.summary, 2000) : undefined;
     const artifacts = Array.isArray(output.artifacts) ? output.artifacts : [];
     const chosen =
       artifacts.find((a) => a && typeof a === "object" && (a as { type?: unknown }).type === "spec") ??
@@ -2516,7 +2526,10 @@ export class OrchestratorService {
       const ref = (chosen as { reference?: unknown }).reference;
       const desc = (chosen as { description?: unknown }).description;
       if (typeof ref === "string") {
-        primaryArtifact = { reference: ref, description: typeof desc === "string" ? desc : "" };
+        primaryArtifact = {
+          reference: clampToLimit(ref, 1024),
+          description: clampToLimit(typeof desc === "string" ? desc : "", 512),
+        };
       }
     }
     return {
@@ -3222,7 +3235,7 @@ export class OrchestratorService {
   ): Record<string, unknown> | null {
     const row = db
       .prepare(
-        "SELECT body FROM workflow_artifacts WHERE workflow_run_id = ? AND step_run_id = ? AND type = 'step_output' LIMIT 1"
+        "SELECT body FROM workflow_artifacts WHERE workflow_run_id = ? AND step_run_id = ? AND type = 'step_output' ORDER BY created_at DESC, rowid DESC LIMIT 1"
       )
       .get(runId, stepRunId) as { body: string } | undefined;
     if (!row) return null;

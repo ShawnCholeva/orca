@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Activity } from "@orca/contracts";
 import type { ComponentType } from "react";
 
@@ -130,6 +130,13 @@ export function LiveActivity({
   onRevise?: (runId: string) => void;
 }) {
   const [scoresOpen, setScoresOpen] = useState(false);
+  const confirmationScoring = activity.confirmationSummary?.scoring ?? null;
+  const metricsRef = useRef<HTMLDListElement>(null);
+  // When the scores expand, bring the newly-revealed metrics into view so they
+  // aren't left below the fold under the button row.
+  useEffect(() => {
+    if (scoresOpen) metricsRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [scoresOpen]);
   const isConfirmation =
     activity.status === "paused_for_input" &&
     activity.sourceKind === "step_confirmation_pending";
@@ -161,29 +168,6 @@ export function LiveActivity({
                   ))}
                 </dl>
               ) : null}
-              {activity.confirmationSummary.scoring ? (
-                <div className="step-confirm-scores">
-                  <button
-                    type="button"
-                    data-testid="confirm-scores-toggle"
-                    className="step-confirm-scores-toggle"
-                    onClick={() => setScoresOpen((o) => !o)}
-                  >
-                    {scoresOpen ? "Hide scores" : "Scores"}
-                  </button>
-                  {scoresOpen ? (
-                    <dl className="step-result-metrics">
-                      <div><dt>Success</dt><dd>{Math.round(activity.confirmationSummary.scoring.successScore * 100)}%</dd></div>
-                      <div><dt>Output completeness</dt><dd>{Math.round(activity.confirmationSummary.scoring.quality.outputCompleteness * 100)}%</dd></div>
-                      <div><dt>Output correctness</dt><dd>{Math.round(activity.confirmationSummary.scoring.quality.outputCorrectness * 100)}%</dd></div>
-                      <div><dt>Instruction adherence</dt><dd>{Math.round(activity.confirmationSummary.scoring.quality.instructionAdherence * 100)}%</dd></div>
-                      <div><dt>Downstream readiness</dt><dd>{Math.round(activity.confirmationSummary.scoring.quality.downstreamReadiness * 100)}%</dd></div>
-                      <div><dt>Risk level (higher = riskier)</dt><dd>{Math.round(activity.confirmationSummary.scoring.quality.riskLevel * 100)}%</dd></div>
-                      <div><dt>Handoff</dt><dd>{activity.confirmationSummary.scoring.handoffReady ? "Ready" : "Not ready"}</dd></div>
-                    </dl>
-                  ) : null}
-                </div>
-              ) : null}
             </>
           ) : null}
           <div className="step-confirm-actions">
@@ -203,7 +187,43 @@ export function LiveActivity({
             >
               Revise
             </button>
+            {confirmationScoring ? (
+              <button
+                type="button"
+                data-testid="confirm-scores-toggle"
+                className="step-confirm-scores-toggle"
+                aria-expanded={scoresOpen}
+                onClick={() => setScoresOpen((o) => !o)}
+              >
+                <span>Scores</span>
+                <svg
+                  className="step-confirm-scores-caret"
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            ) : null}
           </div>
+          {scoresOpen && confirmationScoring ? (
+            <dl ref={metricsRef} className="step-result-metrics step-confirm-metrics">
+              <div><dt>Success</dt><dd>{Math.round(confirmationScoring.successScore * 100)}%</dd></div>
+              <div><dt>Output completeness</dt><dd>{Math.round(confirmationScoring.quality.outputCompleteness * 100)}%</dd></div>
+              <div><dt>Output correctness</dt><dd>{Math.round(confirmationScoring.quality.outputCorrectness * 100)}%</dd></div>
+              <div><dt>Instruction adherence</dt><dd>{Math.round(confirmationScoring.quality.instructionAdherence * 100)}%</dd></div>
+              <div><dt>Downstream readiness</dt><dd>{Math.round(confirmationScoring.quality.downstreamReadiness * 100)}%</dd></div>
+              <div><dt>Risk level (higher = riskier)</dt><dd>{Math.round(confirmationScoring.quality.riskLevel * 100)}%</dd></div>
+              <div><dt>Handoff</dt><dd>{confirmationScoring.handoffReady ? "Ready" : "Not ready"}</dd></div>
+            </dl>
+          ) : null}
         </div>
       ) : null}
       {isProviderRecovery && ProviderRecovery && activity.providerRecovery ? (

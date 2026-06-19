@@ -937,31 +937,57 @@
 .orca-chat-approval-always:disabled { opacity: 0.5; cursor: default; }
 .orca-chat-approval-status { font-size: 12px; opacity: 0.8; margin: 6px 0 0; }
 
-.step-confirm-lead { font-weight: 600; margin-bottom: 8px; }
-.step-confirm-fields { display: grid; gap: 6px; margin: 0 0 10px; }
-.step-confirm-field dt { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .65; }
+.step-confirm-lead { font-weight: 600; margin-bottom: 16px; }
+.step-confirm-fields { display: grid; gap: 16px; margin: 0 0 16px; }
+.step-confirm-field dt { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text); margin-bottom: 5px; }
 .step-confirm-field dd { margin: 0; }
 .step-confirm-field ul { margin: 2px 0 0; padding-left: 16px; }
-.step-confirm-scores { margin-bottom: 10px; }
-.step-confirm-scores-toggle { background: none; border: none; padding: 0; cursor: pointer; opacity: .75; }
+.step-confirm-scores-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--text-3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.step-confirm-scores-toggle:hover { color: var(--text); }
+.step-confirm-scores-caret { transition: transform 0.15s ease; }
+.step-confirm-scores-toggle[aria-expanded="true"] .step-confirm-scores-caret { transform: rotate(180deg); }
 .step-confirm-actions {
   display: flex;
   gap: 8px;
   align-items: center;
+  margin-top: 16px;
+}
+.step-confirm-actions .step-confirm-scores-toggle { margin-left: auto; }
+.step-confirm-metrics { margin-top: 16px; }
+.step-confirm-continue-btn,
+.step-confirm-revise-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
 }
 .step-confirm-continue-btn {
-  background: var(--accent);
-  color: var(--accent-contrast, #0b0b0b);
-  border: none;
-  border-radius: 6px;
-  padding: 6px 14px;
-  cursor: pointer;
+  color: var(--text);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
 }
-.step-confirm-revise-btn { background: none; }
-.step-confirm-hint {
-  color: var(--text-3);
-  font-size: 12px;
+.step-confirm-continue-btn:hover { border-color: var(--text); }
+.step-confirm-revise-btn {
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
 }
+.step-confirm-revise-btn:hover { color: var(--text); border-color: var(--accent-line); }
 
 /* Provider recovery card — scoped to avoid touching general chat elements */
 .provider-recovery-card {

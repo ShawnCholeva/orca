@@ -462,14 +462,21 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     setAnswerPendingSince(Date.now());
   }
 
-  // Clear the "Thinking…" tail once the next real event lands.
+  // Clear the "Thinking…" tail once something the user can actually see replaces
+  // it. Gating on *visible* output (a timeline card, a live activity, or an orca
+  // reply) — not any activity — avoids a blank gap when the resumed agent first
+  // creates a turn with no steps yet: that activity is neither a timeline card
+  // nor a live activity, so the Thinking row must stay up until it has content.
   useEffect(() => {
     if (answerPendingSince == null) return;
     const since = answerPendingSince;
-    const newActivity = activities.some((a) => Date.parse(a.createdAt) > since);
+    const newCard = activities.some(
+      (a) => isTimelineCard(a) && Date.parse(a.createdAt) > since,
+    );
+    const newLiveActivity = hasLiveActivity;
     const orcaReplied = messages.some((m) => m.role !== "user" && Date.parse(m.createdAt) > since);
-    if (newActivity || orcaReplied) setAnswerPendingSince(null);
-  }, [answerPendingSince, activities, messages]);
+    if (newCard || newLiveActivity || orcaReplied) setAnswerPendingSince(null);
+  }, [answerPendingSince, activities, messages, hasLiveActivity]);
 
   // Safety timeout: clear after 20s in case no event lands.
   useEffect(() => {
