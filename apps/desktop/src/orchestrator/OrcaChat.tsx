@@ -26,6 +26,8 @@ import {
   listWorkflowTemplates,
   openEventStream,
   requestNextOrchestratorDecision,
+  requestStepRevision,
+  submitStepRevision,
   submitWorkerAnswers,
   submitWorkerFreeText,
   submitOrchestratorAnswer,
@@ -453,6 +455,9 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
       (m) => m.pendingQuestion?.source === "worker" && m.pendingQuestion.answer == null,
     )?.pendingQuestion?.questionId ?? null;
 
+  const pendingRevisionRunId =
+    [...messages].reverse().find((m) => m.pendingRevision != null)?.pendingRevision?.workflowRunId ?? null;
+
   function markAnswerPending() {
     setAnswerPendingSince(Date.now());
   }
@@ -569,6 +574,14 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     }
   }
 
+  async function handleRevise(runId: string) {
+    try {
+      await requestStepRevision(runId);
+    } finally {
+      setRefreshNonce((current) => current + 1);
+    }
+  }
+
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedGoalId) return;
@@ -585,6 +598,21 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
         setMessageDraft("");
       } catch (err) {
         setMessageError(toErrorMessage(err, "Failed to send your answer."));
+      } finally {
+        setSendingMessage(false);
+      }
+      return;
+    }
+
+    if (pendingRevisionRunId) {
+      setSendingMessage(true);
+      setMessageError(null);
+      try {
+        await submitStepRevision(pendingRevisionRunId, body);
+        markAnswerPending();
+        setMessageDraft("");
+      } catch (err) {
+        setMessageError(toErrorMessage(err, "Failed to send your revision."));
       } finally {
         setSendingMessage(false);
       }
@@ -770,7 +798,9 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
             {/* Tail indicators: the live agent bubble, the first-turn "starting"
                 hint, and the orchestrator "thinking" dots all pin to the bottom
                 of the timeline so they trail the most recent activity. */}
-            {liveActivity && (
+            {liveActivity &&
+              !(liveActivity.sourceKind === "step_confirmation_pending" &&
+                pendingRevisionRunId === liveActivity.workflowRunId) && (
               <LiveActivity
                 activity={liveActivity}
                 renderProviderRecovery={({ runId, recovery }) => (
@@ -781,6 +811,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                   />
                 )}
                 onContinue={handleContinue}
+                onRevise={handleRevise}
               />
             )}
 

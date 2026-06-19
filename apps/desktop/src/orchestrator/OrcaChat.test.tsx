@@ -30,6 +30,8 @@ const waitForProviderRecoveryMock = vi.fn();
 const retryProviderRecoveryMock = vi.fn();
 const refreshProviderRecoveryMock = vi.fn();
 const switchProviderRecoveryMock = vi.fn();
+const requestStepRevisionMock = vi.fn();
+const submitStepRevisionMock = vi.fn();
 
 vi.mock("../api", () => ({
   confirmStep: (...args: unknown[]) => confirmStepMock(...args),
@@ -55,6 +57,8 @@ vi.mock("../api", () => ({
   retryProviderRecovery: (...args: unknown[]) => retryProviderRecoveryMock(...args),
   refreshProviderRecovery: (...args: unknown[]) => refreshProviderRecoveryMock(...args),
   switchProviderRecovery: (...args: unknown[]) => switchProviderRecoveryMock(...args),
+  requestStepRevision: (...args: unknown[]) => requestStepRevisionMock(...args),
+  submitStepRevision: (...args: unknown[]) => submitStepRevisionMock(...args),
   toErrorMessage: (err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback,
 }));
@@ -226,6 +230,10 @@ describe("OrcaChat", () => {
     refreshProviderRecoveryMock.mockResolvedValue(undefined);
     switchProviderRecoveryMock.mockReset();
     switchProviderRecoveryMock.mockResolvedValue(undefined);
+    requestStepRevisionMock.mockReset();
+    requestStepRevisionMock.mockResolvedValue(undefined);
+    submitStepRevisionMock.mockReset();
+    submitStepRevisionMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -1530,6 +1538,56 @@ describe("OrcaChat", () => {
     // And the chat must surface that the workflow finished, instead of going
     // silent after the last step.
     await screen.findByText("Workflow complete");
+  });
+
+  it("composer reroutes to submitStepRevision when a pendingRevision message is present", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-rev", goalId: "goal-1", role: "orchestrator", kind: "message",
+          body: "Here is the step result.", correlationId: "c1", createdAt: now,
+          pendingRevision: { workflowRunId: "r1" },
+        },
+      ],
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByPlaceholderText("Message Orca…");
+    fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
+      target: { value: "Please add more tests." },
+    });
+    fireEvent.click(screen.getByText("Send"));
+
+    await waitFor(() =>
+      expect(submitStepRevisionMock).toHaveBeenCalledWith("r1", "Please add more tests."),
+    );
+    expect(createOrchestratorMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("clicking the Revise button on a step-confirmation-pending activity calls requestStepRevision", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity,
+        id: "a-confirm-revise",
+        workflowRunId: "r1",
+        status: "paused_for_input",
+        sourceKind: "step_confirmation_pending",
+        currentText: "Completeness 90% · Ready for handoff.",
+      },
+    ]);
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const btn = await screen.findByTestId("step-confirm-revise");
+    fireEvent.click(btn);
+
+    await waitFor(() =>
+      expect(requestStepRevisionMock).toHaveBeenCalledWith("r1"),
+    );
   });
 
   it("composer answers the pending worker question via submitWorkerFreeText and shows Thinking…", async () => {
