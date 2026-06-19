@@ -1462,13 +1462,14 @@ export class OrchestratorService {
         if (getSupervisionMode(db) === "supervised" || ctx.stepTpl.completionPolicy === "handoff") {
           const scoringParse = StepResultScoringProposal.safeParse(action.scoring);
           const scoring = scoringParse.success ? scoringParse.data : undefined;
+          const proposal = extractProposal(responseText);
           db.prepare(
             "UPDATE workflow_step_runs SET pending_completion_json = ? WHERE id = ?"
           ).run(
-            JSON.stringify({ block: block ?? {}, scoring: scoring ?? null, finishedAt }),
+            JSON.stringify({ block: block ?? {}, scoring: scoring ?? null, finishedAt, proposal }),
             ctx.stepRun.id
           );
-          const summary = summarizeScoring(scoring, extractProposal(responseText));
+          const summary = summarizeScoring(scoring, proposal);
           const activityCtx = { db, bus: options.bus ?? new EventBus() };
           openOrUpdateLive(activityCtx, {
             goalId: ctx.run.goalId,
