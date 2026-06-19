@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { ListActivitiesResponse, type PendingQuestionItem } from "@orca/contracts";
+import { ListActivitiesResponse, ListOrchestratorMessagesResponse, type PendingQuestionItem } from "@orca/contracts";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -454,7 +454,7 @@ describe("daemon activity integration", () => {
     }
   });
 
-  it("pauses a live activity with the exact worker question without posting chat", async () => {
+  it("inserts a worker-question chat message and settles the activity thread at ask time (legacy pending test)", async () => {
     const ids = {
       goalId: "goal-question-pending",
       runId: "run-question-pending",
@@ -495,13 +495,11 @@ describe("daemon activity integration", () => {
     });
     const elicit = await elicitPromise;
 
-    expect(recorded.activity).toMatchObject({
-      status: "paused_for_input",
-      current_text: "I need your call on release plan.",
-    });
+    // The question is now a chat message, not an activity pause.
     expect(recorded.pendingQuestion).toEqual({
       questionId: expect.any(String),
       toolUseId: "question-tool-pending",
+      source: "worker",
       questions,
     });
     const chatRows = db
@@ -509,8 +507,8 @@ describe("daemon activity integration", () => {
         "SELECT body FROM orchestrator_messages WHERE goal_id = ? ORDER BY rowid"
       )
       .all(ids.goalId) as Array<{ body: string }>;
-    expect(chatRows).not.toContainEqual({
-      body: "The agent needs your input.",
+    expect(chatRows).toContainEqual({
+      body: "I need your call on release plan.",
     });
     expect(answer.statusCode).toBe(200);
     expect(elicit.statusCode).toBe(200);
@@ -644,7 +642,8 @@ describe("daemon activity integration", () => {
     expect(activityEventsAfterDuplicate).toBe(
       activityEventsBeforeDuplicate
     );
-    expect(chatCount).toBe(0);
+    // One message inserted by the first elicit; the duplicate elicit must not insert a second.
+    expect(chatCount).toBe(1);
 
     const answer = await server.inject({
       method: "POST",
@@ -1056,5 +1055,57 @@ describe("daemon activity integration", () => {
       count: number;
     };
     expect(count.count).toBe(0);
+  });
+
+  it("inserts a worker-question chat message and settles the activity thread on ask", async () => {
+    const ids = {
+      goalId: "goal-question-msg",
+      runId: "run-question-msg",
+      stepRunId: "step-question-msg",
+      sessionId: "session-question-msg",
+    };
+    const questions: PendingQuestionItem[] = [
+      {
+        header: "Release Plan",
+        question: "Ship?",
+        multiSelect: false,
+        options: [{ label: "Ship now", description: "go" }],
+      },
+    ];
+    seedLiveWorkflowSession(db, ids);
+    expect(
+      (await postToolUse(server, ids.sessionId, "tool-use-question-msg")).statusCode,
+    ).toBe(200);
+
+    const elicitPromise = postElicit(server, ids.sessionId, "question-tool-msg", questions);
+    await waitForRecordedQuestion(db, ids);
+
+    const messagesResponse = await server.inject({
+      method: "GET",
+      url: `/v1/goals/${ids.goalId}/orchestrator-messages`,
+      headers: AUTH_HEADERS,
+    });
+    const messages = ListOrchestratorMessagesResponse.parse(messagesResponse.json());
+    const q = messages.messages.find((m) => m.pendingQuestion?.source === "worker");
+    expect(q?.pendingQuestion?.questions).toHaveLength(1);
+
+    const activitiesResponse = await server.inject({
+      method: "GET",
+      url: `/v1/goals/${ids.goalId}/activities`,
+      headers: AUTH_HEADERS,
+    });
+    const activities = ListActivitiesResponse.parse(activitiesResponse.json());
+    // The pre-question activity is settled, not paused, and carries no pending question.
+    expect(activities.items[0]?.status).not.toBe("paused_for_input");
+    expect(activities.items[0]?.pendingQuestion).toBeUndefined();
+
+    // Clean up — let the elicit resolve so the test doesn't hang.
+    await server.inject({
+      method: "POST",
+      url: `/v1/goals/${ids.goalId}/worker-questions/${(messages.messages.find((m) => m.pendingQuestion?.source === "worker")!.pendingQuestion!.questionId)}/answer`,
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+      payload: { answers: [{ questionIndex: 0, selectedLabels: ["Ship now"] }] },
+    });
+    await elicitPromise;
   });
 });

@@ -1472,17 +1472,34 @@ export function createServer(
         questions: payload.questions,
       });
       if (isNew) {
-        const stepContext = resolveStepContext(sessionId);
-        if (stepContext) {
-          applyActivitySafely("agent.question_pending", {
-            kind: "question_pending",
-            stepRunId: stepContext.stepRunId,
-            text: orcaVoiceQuestionText(payload.questions),
+        // Persist the worker question as a first-class chat message so it lives
+        // in chat history and can render an answered state later.
+        insertMessageWithEvent(
+          { db, bus: eventBus, idFactory: daemonContext.idFactory },
+          {
+            id: daemonContext.idFactory(),
+            goalId,
+            role: "orchestrator",
+            body: orcaVoiceQuestionText(payload.questions),
+            correlationId: daemonContext.idFactory(),
+            createdAt: daemonContext.now(),
             pendingQuestion: {
               questionId,
               toolUseId: payload.toolUseId,
+              source: "worker",
               questions: payload.questions,
             },
+          },
+        );
+        // Settle the current activity thread (empty summary -> expireLive) so the
+        // agent's post-answer work opens a fresh thread after the question bubble.
+        const stepContext = resolveStepContext(sessionId);
+        if (stepContext) {
+          applyActivitySafely("agent.question_pending", {
+            kind: "turn_completed",
+            stepRunId: stepContext.stepRunId,
+            summary: "",
+            confidence: null,
           });
         }
       }
