@@ -78,6 +78,19 @@ describe("listOrchestratorMessagesByGoal pendingApproval", () => {
   });
 });
 
+describe("listOrchestratorMessagesByGoal pendingRevision", () => {
+  it("round-trips a message's pendingRevision payload", () => {
+    const db = makeMigratedDb();
+    seedGoal(db, "g1");
+    const pr = JSON.stringify({ workflowRunId: "r1" });
+    db.prepare(
+      "INSERT INTO orchestrator_messages (id, goal_id, role, kind, body, correlation_id, created_at, pending_revision) VALUES (?,?,?,?,?,?,?,?)"
+    ).run("m1", "g1", "orchestrator", "message", "Revision needed", "c1", "2026-01-01T00:00:01.000Z", pr);
+    const msgs = listOrchestratorMessagesByGoal(db, "g1");
+    expect(msgs[0]!.pendingRevision?.workflowRunId).toBe("r1");
+  });
+});
+
 describe("recordWorkerQuestionAnswer", () => {
   it("merges the answer into the matching worker-question message", () => {
     const db = makeMigratedDb();

@@ -1381,7 +1381,7 @@ export class OrchestratorService {
           toolUseId: idFactory(),
           questions: action.questions,
         };
-        this.postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options, pendingQuestion);
+        this.postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options, "orchestrator", pendingQuestion);
         return { postedChatReply: true };
       }
       case "forward_to_agent": {
@@ -1733,7 +1733,9 @@ export class OrchestratorService {
     goalId: string,
     body: string,
     options: RequestNextDecisionOptions,
-    pendingQuestion?: PendingQuestionT
+    role: "orchestrator" | "user" = "orchestrator",
+    pendingQuestion?: PendingQuestionT,
+    pendingRevision?: { workflowRunId: string }
   ): void {
     const idFactory = options.idFactory ?? randomUUID;
     const messageId = idFactory();
@@ -1742,17 +1744,19 @@ export class OrchestratorService {
     const event = db.transaction(() => {
       db.prepare(
         `INSERT INTO orchestrator_messages
-          (id, goal_id, role, kind, body, correlation_id, created_at, pending_question)
-         VALUES (?, ?, 'orchestrator', 'message', ?, ?, ?, ?)`
+          (id, goal_id, role, kind, body, correlation_id, created_at, pending_question, pending_revision)
+         VALUES (?, ?, ?, 'message', ?, ?, ?, ?, ?)`
       ).run(
         messageId,
         goalId,
+        role,
         body,
         correlationId,
         createdAt,
-        pendingQuestion ? JSON.stringify(pendingQuestion) : null
+        pendingQuestion ? JSON.stringify(pendingQuestion) : null,
+        pendingRevision ? JSON.stringify(pendingRevision) : null
       );
-      const payload = { messageId, role: "orchestrator" as const };
+      const payload = { messageId, role };
       const eventId = idFactory();
       const result = db
         .prepare(
