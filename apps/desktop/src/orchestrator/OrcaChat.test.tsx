@@ -1515,3 +1515,33 @@ describe("formatElapsed", () => {
     expect(formatElapsed(-1_000)).toBe("0:00");
   });
 });
+
+const workerMsg = {
+  id: "m1", goalId: "g1", role: "orchestrator", kind: "message", body: "Which?",
+  correlationId: null, createdAt: "2026-06-18T00:00:00.000Z",
+  pendingQuestion: {
+    questionId: "q1", toolUseId: "t1", source: "worker",
+    questions: [{ header: "H", question: "Which?", multiSelect: false, options: [{ label: "A", description: "a" }] }],
+  },
+} as const;
+
+describe("ChatMessageRow worker questions", () => {
+  beforeEach(() => submitWorkerAnswersMock.mockClear());
+
+  it("submits a pending worker question to the worker endpoint", async () => {
+    const { ChatMessageRow } = await import("./OrcaChat");
+    render(<ChatMessageRow message={workerMsg as never} goalId="g1" />);
+    fireEvent.click(screen.getByLabelText("A"));
+    fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
+    await waitFor(() =>
+      expect(submitWorkerAnswersMock).toHaveBeenCalledWith("g1", "q1", [{ questionIndex: 0, selectedLabels: ["A"] }]),
+    );
+  });
+
+  it("renders the read-only view once answered", async () => {
+    const { ChatMessageRow } = await import("./OrcaChat");
+    const answered = { ...workerMsg, pendingQuestion: { ...workerMsg.pendingQuestion, answer: { answers: [{ questionIndex: 0, selectedLabels: ["A"] }] } } };
+    render(<ChatMessageRow message={answered as never} goalId="g1" />);
+    expect(screen.getByTestId("worker-question-answered")).toBeInTheDocument();
+  });
+});

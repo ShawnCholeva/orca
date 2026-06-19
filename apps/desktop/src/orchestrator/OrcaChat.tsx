@@ -41,6 +41,7 @@ import {
 import { AgentActivity } from "./AgentActivity";
 import { PermissionApprovalCard } from "./PermissionApprovalCard";
 import { ProviderRecoveryCard } from "./ProviderRecoveryCard";
+import { WorkerQuestionAnswered } from "./WorkerQuestionAnswered";
 import { WorkerPermissionToggle } from "./WorkerPermissionToggle";
 import { WorkflowTracker, type TrackerStep } from "./components/WorkflowTracker";
 import "./orca-chat.css";
@@ -858,7 +859,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   );
 }
 
-function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage; goalId: string }) {
+export function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage; goalId: string }) {
   if (message.role === "user") {
     return (
       <div className="msg msg--user">
@@ -875,13 +876,23 @@ function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage;
         {/* For a question card the question itself leads; the third-person
             framing body is suppressed so it isn't shown above the question. */}
         {!message.pendingQuestion && <div className="orca-chat-message">{message.body}</div>}
-        {message.pendingQuestion && (
+        {message.pendingQuestion && message.pendingQuestion.source === "worker" ? (
+          message.pendingQuestion.answer ? (
+            <WorkerQuestionAnswered pending={message.pendingQuestion} />
+          ) : (
+            <WorkerQuestionForm
+              goalId={goalId}
+              pending={message.pendingQuestion}
+              onSubmitFreeText={async (text) => {
+                await submitWorkerFreeText(goalId, message.pendingQuestion!.questionId, text, { fromChat: false });
+              }}
+            />
+          )
+        ) : message.pendingQuestion ? (
           <WorkerQuestionForm
             goalId={goalId}
             pending={message.pendingQuestion}
             onSubmitAnswers={async (answers) => {
-              // An orchestrator ask_user: the answer is user guidance. Post it
-              // as a user message so it flows through the mediator to the agent.
               const questions = message.pendingQuestion!.questions;
               const body = questions
                 .map((q, i) => {
@@ -892,7 +903,7 @@ function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage;
               await createOrchestratorMessage(goalId, { body });
             }}
           />
-        )}
+        ) : null}
         {message.pendingApproval && (
           <PermissionApprovalCard goalId={goalId} pending={message.pendingApproval} />
         )}
