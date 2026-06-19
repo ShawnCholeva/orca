@@ -33,7 +33,6 @@ describe("LiveActivity", () => {
   it("renders the live bubble's current text", () => {
     render(
       <LiveActivity
-        goalId="g1"
         activity={mk({ currentText: "Reading through the codebase..." })}
       />,
     );
@@ -45,7 +44,6 @@ describe("LiveActivity", () => {
     const onContinue = vi.fn();
     render(
       <LiveActivity
-        goalId="g1"
         activity={mk({
           workflowRunId: "r1",
           status: "paused_for_input",
@@ -98,7 +96,6 @@ describe("LiveActivity", () => {
 
     render(
       <LiveActivity
-        goalId="g1"
         activity={mk({
           workflowRunId: "run-1",
           status: "paused_for_input",
@@ -119,7 +116,6 @@ describe("LiveActivity", () => {
 
     render(
       <LiveActivity
-        goalId="g1"
         activity={mk({
           status: "paused_for_input",
           sourceKind: "step_confirmation_pending",

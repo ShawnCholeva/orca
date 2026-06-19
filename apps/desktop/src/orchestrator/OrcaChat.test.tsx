@@ -1477,7 +1477,7 @@ describe("OrcaChat", () => {
     await screen.findByText("Workflow complete");
   });
 
-  it("composer text goes to the orchestrator; worker questions are answered via their chat form", async () => {
+  it("composer answers the pending worker question via submitWorkerFreeText and shows Thinking…", async () => {
     setupRunLoad();
     listOrchestratorMessagesMock.mockResolvedValue({
       messages: [
@@ -1498,10 +1498,6 @@ describe("OrcaChat", () => {
         },
       ],
     });
-    createOrchestratorMessageMock.mockResolvedValue({
-      message: { ...userMessage, id: "msg-u2", body: "a dedicated workspaces tab" },
-      reply: null,
-    });
     const { OrcaChat } = await import("./OrcaChat");
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
@@ -1509,15 +1505,20 @@ describe("OrcaChat", () => {
     fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
       target: { value: "a dedicated workspaces tab" },
     });
-    // "Send" in the composer goes to the orchestrator now (not the worker).
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     await waitFor(() =>
-      expect(createOrchestratorMessageMock).toHaveBeenCalledWith("goal-1", {
-        body: "a dedicated workspaces tab",
-      }),
+      expect(submitWorkerFreeTextMock).toHaveBeenCalledWith(
+        "goal-1",
+        "question-1",
+        "a dedicated workspaces tab",
+        { fromChat: true },
+      ),
     );
-    expect(submitWorkerFreeTextMock).not.toHaveBeenCalled();
+    expect(createOrchestratorMessageMock).not.toHaveBeenCalled();
+    // The transient "Thinking…" indicator should appear after answering.
+    expect(await screen.findByTestId("answer-thinking")).toBeInTheDocument();
+    expect(screen.getByTestId("answer-thinking")).toHaveTextContent("Thinking…");
   });
 });
 

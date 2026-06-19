@@ -108,7 +108,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const [messageError, setMessageError] = useState<string | null>(null);
   const [messageDraft, setMessageDraft] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
-  const [answeredQuestionId, setAnsweredQuestionId] = useState<string | null>(null);
+  const [answerPendingSince, setAnswerPendingSince] = useState<number | null>(null);
   const [awaitingReply, setAwaitingReply] = useState(false);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -358,6 +358,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
         if (
           event.type === "goal.orchestrator_model_changed" ||
           event.type === "orchestrator.message.created" ||
+          event.type === "orchestrator.message.updated" ||
           event.type === "activity.changed" ||
           event.type.startsWith("workflow.") ||
           event.type.startsWith("recommendation.")
@@ -416,16 +417,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const liveActivity = pickLiveActivity(activities);
   const hasLiveActivity = liveActivity !== null;
 
-  // Once the resolved question leaves the live slot (backend caught up), stop
-  // suppressing — a later, different question must be allowed to render.
-  useEffect(() => {
-    if (
-      answeredQuestionId != null &&
-      liveActivity?.pendingQuestion?.questionId !== answeredQuestionId
-    ) {
-      setAnsweredQuestionId(null);
-    }
-  }, [liveActivity?.pendingQuestion?.questionId, answeredQuestionId]);
   // Suppress the "starting" indicator once any persisted agent-activity card is
   // present — the agent has already emitted steps, so there is nothing to wait for.
   const hasAgentActivityCard = activities.some(isAgentActivityCard);
@@ -444,6 +435,33 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, [showStarting]);
+
+  // The latest unanswered worker question in the message list — the composer
+  // routes its text here instead of to the orchestrator when this is non-null.
+  const pendingWorkerQuestionId =
+    [...messages].reverse().find(
+      (m) => m.pendingQuestion?.source === "worker" && m.pendingQuestion.answer == null,
+    )?.pendingQuestion?.questionId ?? null;
+
+  function markAnswerPending() {
+    setAnswerPendingSince(Date.now());
+  }
+
+  // Clear the "Thinking…" tail once the next real event lands.
+  useEffect(() => {
+    if (answerPendingSince == null) return;
+    const since = answerPendingSince;
+    const newActivity = activities.some((a) => Date.parse(a.createdAt) > since);
+    const orcaReplied = messages.some((m) => m.role !== "user" && Date.parse(m.createdAt) > since);
+    if (newActivity || orcaReplied) setAnswerPendingSince(null);
+  }, [answerPendingSince, activities, messages]);
+
+  // Safety timeout: clear after 20s in case no event lands.
+  useEffect(() => {
+    if (answerPendingSince == null) return;
+    const id = setTimeout(() => setAnswerPendingSince(null), 20000);
+    return () => clearTimeout(id);
+  }, [answerPendingSince]);
 
   const startingElapsed =
     workflowState.stepRun?.startedAt != null
@@ -547,13 +565,13 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     const body = messageDraft.trim();
     if (!body) return;
 
-    const liveQuestionId = liveActivity?.pendingQuestion?.questionId ?? null;
+    const liveQuestionId = pendingWorkerQuestionId;
     if (liveQuestionId) {
       setSendingMessage(true);
       setMessageError(null);
       try {
-        await submitWorkerFreeText(selectedGoalId, liveQuestionId, body);
-        setAnsweredQuestionId(liveQuestionId);
+        await submitWorkerFreeText(selectedGoalId, liveQuestionId, body, { fromChat: true });
+        markAnswerPending();
         setMessageDraft("");
       } catch (err) {
         setMessageError(toErrorMessage(err, "Failed to send your answer."));
@@ -721,6 +739,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                   key={entry.key}
                   message={entry.message}
                   goalId={selectedGoalId ?? ""}
+                  onWorkerAnswered={markAnswerPending}
                 />
               ) : entry.activity.sourceKind === "step_result" ? (
                 <ActivityCard key={entry.key} activity={entry.activity} />
@@ -741,13 +760,8 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
             {/* Tail indicators: the live agent bubble, the first-turn "starting"
                 hint, and the orchestrator "thinking" dots all pin to the bottom
                 of the timeline so they trail the most recent activity. */}
-            {liveActivity &&
-              !(
-                liveActivity.pendingQuestion != null &&
-                liveActivity.pendingQuestion.questionId === answeredQuestionId
-              ) && (
+            {liveActivity && (
               <LiveActivity
-                goalId={selectedGoalId ?? ""}
                 activity={liveActivity}
                 renderProviderRecovery={({ runId, recovery }) => (
                   <ProviderRecoveryCard
@@ -758,6 +772,12 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                 )}
                 onContinue={handleContinue}
               />
+            )}
+
+            {answerPendingSince != null && (
+              <div data-testid="answer-thinking">
+                <ThinkingRow label="Thinking…" />
+              </div>
             )}
 
             {showStarting && (
@@ -850,7 +870,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   );
 }
 
-export function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage; goalId: string }) {
+export function ChatMessageRow({ message, goalId, onWorkerAnswered }: { message: OrchestratorChatMessage; goalId: string; onWorkerAnswered?: () => void }) {
   if (message.role === "user") {
     return (
       <div className="msg msg--user">
@@ -874,8 +894,13 @@ export function ChatMessageRow({ message, goalId }: { message: OrchestratorChatM
             <WorkerQuestionForm
               goalId={message.goalId}
               pending={message.pendingQuestion}
+              onSubmitAnswers={async (answers) => {
+                await submitWorkerAnswers(message.goalId, message.pendingQuestion!.questionId, answers);
+                onWorkerAnswered?.();
+              }}
               onSubmitFreeText={async (text) => {
                 await submitWorkerFreeText(message.goalId, message.pendingQuestion!.questionId, text, { fromChat: false });
+                onWorkerAnswered?.();
               }}
             />
           )

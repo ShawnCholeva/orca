@@ -119,12 +119,10 @@ export function ActivityCard({ activity }: { activity: Activity }) {
 // The live "working" bubble for the active step's agent, pinned to the tail of
 // the timeline. Handles confirmation checkpoints and provider recovery.
 export function LiveActivity({
-  goalId,
   activity,
   renderProviderRecovery: ProviderRecovery,
   onContinue,
 }: {
-  goalId: string;
   activity: Activity;
   renderProviderRecovery?: ComponentType<ProviderRecoveryProps>;
   onContinue?: (runId: string) => void;
