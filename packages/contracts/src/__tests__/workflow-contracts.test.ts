@@ -1105,6 +1105,29 @@ describe("OrchestratorAction", () => {
   it("rejects unknown kind", () => {
     expect(() => OrchestratorAction.parse({ kind: "explode" })).toThrow();
   });
+  it("parses ask_user with structured questions", () => {
+    const parsed = OrchestratorAction.parse({
+      kind: "ask_user",
+      body: "Step 1 agent needs a decision before it can continue.",
+      questions: [
+        {
+          header: "State",
+          question: "Which did you mean by 'state'?",
+          multiSelect: false,
+          options: [
+            { label: "Active / Archived", description: "Group by goal status." },
+            { label: "Running / Idle", description: "Group by active workflow run." },
+          ],
+        },
+      ],
+    });
+    expect(parsed.kind).toBe("ask_user");
+  });
+  it("rejects ask_user with no questions", () => {
+    expect(() =>
+      OrchestratorAction.parse({ kind: "ask_user", body: "hi", questions: [] }),
+    ).toThrow();
+  });
 });
 
 describe("StepAgentChoice + agentPreference", () => {

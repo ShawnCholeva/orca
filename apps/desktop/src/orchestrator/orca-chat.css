@@ -547,6 +547,16 @@
   background: var(--accent-soft, rgba(91, 140, 255, 0.08));
 }
 
+/* A pending question supplies its own card chrome; the wrapping bubble must not
+   double it up with a second border/background. */
+.activity-bubble.activity-bubble--question,
+.activity-bubble.activity-bubble--question[data-status="paused_for_input"] {
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+}
+
 .step-result-card {
   align-self: flex-start;
   max-width: 720px;
@@ -799,7 +809,6 @@
 }
 
 .orca-chat-option-label {
-  display: block;
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
@@ -814,12 +823,99 @@
   margin-top: 2px;
 }
 
-.orca-chat-question { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
-.orca-chat-question-block { border: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
-.orca-chat-question-legend { font-size: 12px; opacity: 0.85; padding: 0; margin-bottom: 2px; }
-.orca-chat-option-row { display: flex; align-items: baseline; gap: 6px; font-size: 13px; cursor: pointer; }
-.orca-chat-option-row input { margin: 0; }
-.orca-chat-question-submit { align-self: flex-start; margin-top: 4px; }
+.orca-chat-question {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+  max-width: 720px;
+  padding: 14px 16px 14px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--panel-2);
+}
+/* Accent rail down the left edge (blue → purple), like the reference card. */
+.orca-chat-question::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+}
+.orca-chat-question-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.orca-chat-question-header-icon { flex: none; }
+.orca-chat-question-block { border: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.orca-chat-question-legend { font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.4; padding: 0; margin-bottom: 8px; }
+.orca-chat-question-index { opacity: 0.6; font-weight: 500; }
+.orca-chat-option-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  background: var(--panel);
+  transition: border-color 0.12s, background 0.12s;
+}
+.orca-chat-option-row:hover { border-color: var(--hairline-strong); }
+.orca-chat-option-row input { margin: 0; flex: none; margin-top: 3px; }
+.orca-chat-option-content { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.orca-chat-option-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.orca-chat-option-freetext {
+  margin: 4px 0 0 22px;
+  min-height: 48px;
+  max-height: 140px;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.orca-chat-option-freetext:focus {
+  outline: none;
+  border-color: var(--accent-line);
+}
+.orca-chat-question-answered-note {
+  margin: 8px 0 0 22px;
+  font-size: 12px;
+  color: var(--text-4);
+}
+.orca-chat-question-submit {
+  align-self: flex-start;
+  margin-top: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.orca-chat-question-submit:hover:not(:disabled) { border-color: var(--accent-line); background: var(--accent-soft); }
 .orca-chat-question-submit:disabled { opacity: 0.5; cursor: default; }
 
 /* Worker tool-permission mode toggle */
@@ -841,24 +937,57 @@
 .orca-chat-approval-always:disabled { opacity: 0.5; cursor: default; }
 .orca-chat-approval-status { font-size: 12px; opacity: 0.8; margin: 6px 0 0; }
 
+.step-confirm-lead { font-weight: 600; margin-bottom: 16px; }
+.step-confirm-fields { display: grid; gap: 16px; margin: 0 0 16px; }
+.step-confirm-field dt { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text); margin-bottom: 5px; }
+.step-confirm-field dd { margin: 0; }
+.step-confirm-field ul { margin: 2px 0 0; padding-left: 16px; }
+.step-confirm-scores-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--text-3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.step-confirm-scores-toggle:hover { color: var(--text); }
+.step-confirm-scores-caret { transition: transform 0.15s ease; }
+.step-confirm-scores-toggle[aria-expanded="true"] .step-confirm-scores-caret { transform: rotate(180deg); }
 .step-confirm-actions {
   display: flex;
+  gap: 8px;
   align-items: center;
-  gap: 12px;
-  margin-top: 8px;
+  margin-top: 16px;
+}
+.step-confirm-actions .step-confirm-scores-toggle { margin-left: auto; }
+.step-confirm-metrics { margin-top: 16px; }
+.step-confirm-continue-btn,
+.step-confirm-revise-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
 }
 .step-confirm-continue-btn {
-  background: var(--accent);
-  color: var(--accent-contrast, #0b0b0b);
-  border: none;
-  border-radius: 6px;
-  padding: 6px 14px;
-  cursor: pointer;
+  color: var(--text);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
 }
-.step-confirm-hint {
-  color: var(--text-3);
-  font-size: 12px;
+.step-confirm-continue-btn:hover { border-color: var(--text); }
+.step-confirm-revise-btn {
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
 }
+.step-confirm-revise-btn:hover { color: var(--text); border-color: var(--accent-line); }
 
 /* Provider recovery card — scoped to avoid touching general chat elements */
 .provider-recovery-card {

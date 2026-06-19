@@ -1001,6 +1001,47 @@ export async function submitWorkerAnswers(
   );
 }
 
+export async function submitOrchestratorAnswer(
+  goalId: string,
+  questionId: string,
+  body: { answers: { questionIndex: number; selectedLabels: string[] }[] } | { freeText: string },
+): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  return requestVoid(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/orchestrator-questions/${encodeURIComponent(questionId)}/answer`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(body),
+    },
+    "Submit orchestrator answer failed",
+  );
+}
+
+export async function submitWorkerFreeText(
+  goalId: string,
+  questionId: string,
+  freeText: string,
+  opts?: { fromChat?: boolean },
+): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  return requestVoid(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/worker-questions/${encodeURIComponent(questionId)}/answer`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify({ freeText, ...(opts?.fromChat ? { fromChat: true } : {}) }),
+    },
+    "Submit worker free-text answer failed",
+  );
+}
+
 export async function submitPermissionDecision(
   goalId: string,
   approvalId: string,
@@ -1685,6 +1726,28 @@ export async function confirmStep(runId: string): Promise<void> {
     `${baseUrl}/v1/workflows/runs/${runId}/confirm-step`,
     { method: "POST", headers: authHeaders(token) },
     "Failed to confirm step",
+  );
+}
+
+export async function requestStepRevision(runId: string): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  await requestVoid(
+    `${baseUrl}/v1/workflows/runs/${runId}/revise-step`,
+    { method: "POST", headers: authHeaders(token) },
+    "Failed to start revision",
+  );
+}
+
+export async function submitStepRevision(runId: string, feedback: string): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  await requestVoid(
+    `${baseUrl}/v1/workflows/runs/${runId}/revise-step/submit`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify({ feedback }),
+    },
+    "Failed to submit revision",
   );
 }
 

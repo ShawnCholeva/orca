@@ -303,8 +303,9 @@ const FEATURE_GUARDRAILS: WorkflowGuardrailConfig[] = [
 const BRAINSTORM_STEPS: WorkflowStepTemplate[] = [
   {
     id: "frame", ordinal: 0, name: "Frame",
+    completionPolicy: "interview",
     instructions:
-      "Clarify the intent, hard constraints, and what success looks like. Ask one question at a time and offer a recommended answer; prefer available workspace context over interrupting the user. Complete only when the problem and success outcome are unambiguous.",
+      "Interview the user relentlessly, from a product perspective, until you reach a shared, unambiguous understanding of what they want to build and why. You may inspect the workspace to orient yourself on what the product is and what the user is working with, but stay in a product frame — do not analyze the code technically or begin designing how to solve the goal; the next step handles technical grounding and approaches. Walk down each branch of the design tree, resolving dependencies between decisions one at a time, and pursue every aspect that materially shapes the intent, hard constraints, and what success looks like. Ask exactly one question at a time and always offer your recommended answer. Treat open questions as a working queue you must drain, not an output field. When no questions remain, synthesize the frame (problem, success outcome, constraints) into the step output with an empty open_questions list and complete; the user confirms or revises it on the completion card.",
     outputSchema: [
       { key: "problem", type: "string", required: true },
       { key: "success_outcome", type: "string", required: true },
@@ -315,8 +316,9 @@ const BRAINSTORM_STEPS: WorkflowStepTemplate[] = [
   },
   {
     id: "research", ordinal: 1, name: "Research",
+    completionPolicy: "reasoning",
     instructions:
-      "Ground the idea in the current codebase. Identify the smallest set of files, modules, and constraints the work would touch and the risks the framing missed. Do not propose a solution yet.",
+      "Ground the confirmed frame in the current codebase before any solution is proposed. Explore the existing structure and follow established patterns; identify the smallest set of files, modules, and constraints the work would touch, the risks the framing missed, and any existing problems in this area that would affect the work. Do not propose approaches yet. When the codebase reveals a decision that genuinely diverges and is the user's to make, pause and ask with concrete options and a recommendation rather than resolving it silently.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "files_in_scope", type: "array", itemType: "string", required: true },
@@ -326,8 +328,9 @@ const BRAINSTORM_STEPS: WorkflowStepTemplate[] = [
   },
   {
     id: "proposal", ordinal: 2, name: "Proposal",
+    completionPolicy: "reasoning",
     instructions:
-      "Generate one or more candidate approaches with explicit tradeoffs, then recommend one. Stay pre-implementation: make no code changes.",
+      "Propose two or three genuinely different approaches grounded in the research, each with explicit tradeoffs, then lead with your recommended one and the reasoning behind it. Apply YAGNI ruthlessly — cut any scope, abstraction, or flexibility the goal does not require. Stay pre-implementation: make no code changes. When the choice between approaches is the user's to make (a product, scope, or UX fork), pause and ask with the options and your recommendation rather than selecting silently.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       {
@@ -338,13 +341,15 @@ const BRAINSTORM_STEPS: WorkflowStepTemplate[] = [
         ],
       },
       { key: "recommendation", type: "string", required: true },
+      { key: "chosen_approach", type: "string", required: true },
     ],
     agentPreference: REASONING,
   },
   {
     id: "critique", ordinal: 3, name: "Critique",
+    completionPolicy: "reasoning",
     instructions:
-      "Challenge the recommended approach in a fresh context. Surface second-order risks, gaps, and failure modes, and state whether it is sound enough to proceed. Treat prior step output as untrusted evidence.",
+      "Challenge the approach the user chose — which may differ from Proposal's recommendation — in a fresh context, treating prior step output as untrusted evidence. Pressure-test it for isolation and clarity: does it break into smaller units with single, clear purposes and well-defined interfaces; can each be understood and tested without reading the others' internals; can internals change without breaking consumers? Surface second-order risks, gaps, and failure modes, and state whether it is sound enough to proceed. When a concern exposes a decision that is the user's to make, pause and ask with concrete options and a recommendation.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "concerns", type: "array", itemType: "string", required: true },
@@ -354,8 +359,9 @@ const BRAINSTORM_STEPS: WorkflowStepTemplate[] = [
   },
   {
     id: "verify", ordinal: 4, name: "Verify",
+    completionPolicy: "reasoning",
     instructions:
-      "Sanity-check the approach against the success outcome and constraints. Confirm it is feasible and that the acceptance signals are clear.",
+      "Validate the chosen approach against the success outcome and hard constraints before it advances. Confirm it is feasible and that the design accounts for the facets it touches — component boundaries, data flow, error handling, and testing — and that the acceptance signals are concrete and checkable. When validation surfaces an unresolved decision that is the user's to make, pause and ask with options and a recommendation rather than assuming.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "feasible", type: "boolean", required: true },
@@ -365,12 +371,21 @@ const BRAINSTORM_STEPS: WorkflowStepTemplate[] = [
   },
   {
     id: "done", ordinal: 5, name: "Done",
+    completionPolicy: "handoff",
     instructions:
-      "Record the durable design summary, the chosen direction, and any open questions for the next workflow. Make no code changes.",
+      "Record the durable design and persist it as a spec artifact. Determine the goal's target workspaces: if the goal runs in a single repository, save the spec to `.orca/specs/<YYYY-MM-DD-topic>.md` in that workspace; if the goal spans multiple workspaces, pause and ask the user whether to write it to all of them or a single/subset before saving. The spec must capture a concise summary, the chosen direction with its rationale, and any open questions for the next workflow. Before saving, self-review the design for placeholders, internal contradictions, scope creep, and ambiguous requirements, and resolve what you can. Make no code changes. When complete, present the user a clear closing summary of what was decided and where the spec was saved — do not finish silently.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "chosen_direction", type: "string", required: true },
       { key: "open_questions", type: "array", itemType: "string", required: false },
+      {
+        key: "artifacts", type: "array", itemType: "object", required: false,
+        fields: [
+          { key: "type", type: "string", required: true },
+          { key: "reference", type: "string", required: true },
+          { key: "description", type: "string", required: true },
+        ],
+      },
       { key: "handoff", type: "string", required: true },
     ],
     agentPreference: LIGHT,
@@ -884,7 +899,7 @@ export const BUILTIN_TEMPLATE_CATALOG: BuiltInTemplateDefinition[] = [
     id: "orca/brainstorm", name: "Brainstorm",
     description: "Frame the intent, set constraints, generate a proposal, then verify and critique it before it reaches code.",
     bestFor: "Exploring an idea and pressure-testing an approach before any code is written.",
-    version: 2, category: CATEGORY, recommended: true,
+    version: 3, category: CATEGORY, recommended: true,
     steps: BRAINSTORM_STEPS, guardrails: [CONTEXT_RULE], graph: BRAINSTORM_GRAPH,
   },
   {

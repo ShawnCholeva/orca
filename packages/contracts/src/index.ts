@@ -197,6 +197,7 @@ export const DomainEventType = z.enum([
   "conflict.dismissed",
   "user.feedback.recorded",
   "orchestrator.message.created",
+  "orchestrator.message.updated",
   "goal.orchestrator_model_changed",
   "workflow.template.created",
   "workflow.template.updated",
@@ -1008,11 +1009,34 @@ export const PendingQuestionItem = z
   .strict();
 export type PendingQuestionItem = z.infer<typeof PendingQuestionItem>;
 
+export const WorkerAnswer = z
+  .object({
+    questionIndex: z.number().int().min(0),
+    selectedLabels: z.array(z.string().min(1)).min(1)
+  })
+  .strict();
+export type WorkerAnswer = z.infer<typeof WorkerAnswer>;
+
+export const PendingQuestionAnswer = z
+  .object({
+    answers: z.array(WorkerAnswer).min(1).optional(),
+    freeText: z.string().min(1).max(4000).optional(),
+    viaChat: z.literal(true).optional()
+  })
+  .strict()
+  .refine(
+    (v) => [v.answers != null, v.freeText != null, v.viaChat != null].filter(Boolean).length === 1,
+    { message: "Provide exactly one of answers, freeText, or viaChat" }
+  );
+export type PendingQuestionAnswer = z.infer<typeof PendingQuestionAnswer>;
+
 export const PendingQuestion = z
   .object({
     questionId: z.string().min(1),
     toolUseId: z.string().min(1),
-    questions: z.array(PendingQuestionItem).min(1).max(4)
+    questions: z.array(PendingQuestionItem).min(1).max(4),
+    source: z.enum(["worker", "orchestrator"]).optional(),
+    answer: PendingQuestionAnswer.optional()
   })
   .strict();
 export type PendingQuestion = z.infer<typeof PendingQuestion>;
@@ -1173,6 +1197,22 @@ export const ActivityStep = z
   .strict();
 export type ActivityStep = z.infer<typeof ActivityStep>;
 
+export const ConfirmationSummary = z
+  .object({
+    lead: z.string().max(4000),
+    fields: z
+      .array(
+        z.object({
+          label: z.string().min(1).max(128),
+          value: z.union([z.string().max(4000), z.array(z.string().max(4000)).max(64)]),
+        }).strict()
+      )
+      .max(32),
+    scoring: StepResultScoringProposal.nullable(),
+  })
+  .strict();
+export type ConfirmationSummary = z.infer<typeof ConfirmationSummary>;
+
 export const Activity = z
   .object({
     id: z.string(),
@@ -1190,6 +1230,7 @@ export const Activity = z
     pendingQuestion: PendingQuestion.optional(),
     stepName: z.string().max(256).optional(),
     stepResult: WorkflowStepResult.optional(),
+    confirmationSummary: ConfirmationSummary.optional(),
     providerRecovery: ProviderRecoveryCheckpoint.optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
@@ -1218,6 +1259,11 @@ export const UpdateWorkerPermissionModeRequest = z
   .strict();
 export type UpdateWorkerPermissionModeRequest = z.infer<typeof UpdateWorkerPermissionModeRequest>;
 
+export const PendingRevision = z
+  .object({ workflowRunId: z.string().min(1) })
+  .strict();
+export type PendingRevision = z.infer<typeof PendingRevision>;
+
 export const OrchestratorChatMessage = z
   .object({
     id: z.string(),
@@ -1231,7 +1277,8 @@ export const OrchestratorChatMessage = z
     internalKind: OrchestratorInternalThoughtKind.nullable().optional(),
     createdAt: z.string().datetime(),
     pendingQuestion: PendingQuestion.optional(),
-    pendingApproval: PendingApproval.optional()
+    pendingApproval: PendingApproval.optional(),
+    pendingRevision: PendingRevision.optional()
   })
   .strict();
 export type OrchestratorChatMessage = z.infer<typeof OrchestratorChatMessage>;
@@ -1245,6 +1292,11 @@ export type ListOrchestratorMessagesResponse = z.infer<
   typeof ListOrchestratorMessagesResponse
 >;
 
+export const SubmitStepRevisionRequest = z
+  .object({ feedback: z.string().min(1).max(4000) })
+  .strict();
+export type SubmitStepRevisionRequest = z.infer<typeof SubmitStepRevisionRequest>;
+
 export const CreateOrchestratorMessageRequest = z
   .object({
     body: z.string().trim().min(1).max(4000)
@@ -1254,17 +1306,16 @@ export type CreateOrchestratorMessageRequest = z.infer<
   typeof CreateOrchestratorMessageRequest
 >;
 
-export const WorkerAnswer = z
-  .object({
-    questionIndex: z.number().int().min(0),
-    selectedLabels: z.array(z.string().min(1)).min(1)
-  })
-  .strict();
-export type WorkerAnswer = z.infer<typeof WorkerAnswer>;
-
 export const SubmitWorkerAnswersRequest = z
-  .object({ answers: z.array(WorkerAnswer).min(1) })
-  .strict();
+  .object({
+    answers: z.array(WorkerAnswer).min(1).optional(),
+    freeText: z.string().trim().min(1).max(4000).optional(),
+    fromChat: z.boolean().optional()
+  })
+  .strict()
+  .refine((v) => (v.answers != null) !== (v.freeText != null), {
+    message: "Provide exactly one of answers or freeText",
+  });
 export type SubmitWorkerAnswersRequest = z.infer<typeof SubmitWorkerAnswersRequest>;
 
 export const CreateOrchestratorMessageResponse = z

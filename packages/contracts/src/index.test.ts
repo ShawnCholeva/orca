@@ -14,6 +14,7 @@ import {
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
   CheckStep,
+  ConfirmationSummary,
   CreateOrchestratorMessageRequest,
   CreateOrchestratorMessageResponse,
   CreateGoalDecisionRequest,
@@ -79,6 +80,7 @@ import {
   PatchGoalDecisionRequest,
   PatchGoalMemoryRequest,
   OrchestratorChatMessage,
+  PendingRevision,
   RepairAction,
   RefineGoalRequest,
   RefineGoalResponse,
@@ -102,6 +104,7 @@ import {
   StopSessionRequest,
   StopSessionResponse,
   SkillExtensionPoint,
+  SubmitStepRevisionRequest,
   Workspace,
   WorkspaceType,
   CreateGoalAndStartWorkflowRequest,
@@ -1617,6 +1620,9 @@ import {
   ExecutionMode,
   AdapterExecutionModeConfig,
   validateAdapterExecutionModeConfig,
+  PendingQuestion,
+  PendingQuestionAnswer,
+  SubmitWorkerAnswersRequest,
 } from "./index.js";
 
 describe("ExecutionMode and AdapterExecutionModeConfig", () => {
@@ -1705,5 +1711,88 @@ describe("ExecutionMode and AdapterExecutionModeConfig", () => {
     };
     const result = validateAdapterExecutionModeConfig(config, ["shadow_session"]);
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("worker question persistence contracts", () => {
+  const baseQuestion = {
+    questionId: "q1",
+    toolUseId: "t1",
+    questions: [
+      { header: "H", question: "Which?", multiSelect: false, options: [{ label: "A", description: "a" }] },
+    ],
+  };
+
+  it("accepts a worker-sourced question with an options answer", () => {
+    const parsed = PendingQuestion.parse({
+      ...baseQuestion,
+      source: "worker",
+      answer: { answers: [{ questionIndex: 0, selectedLabels: ["A"] }] },
+    });
+    expect(parsed.source).toBe("worker");
+    expect(parsed.answer?.answers?.[0]?.selectedLabels).toEqual(["A"]);
+  });
+
+  it("accepts inline free-text and via-chat answers", () => {
+    expect(PendingQuestionAnswer.parse({ freeText: "custom" }).freeText).toBe("custom");
+    expect(PendingQuestionAnswer.parse({ viaChat: true }).viaChat).toBe(true);
+  });
+
+  it("rejects an answer with more than one shape", () => {
+    expect(PendingQuestionAnswer.safeParse({ freeText: "x", viaChat: true }).success).toBe(false);
+  });
+
+  it("still parses a legacy question with no source/answer", () => {
+    expect(PendingQuestion.parse(baseQuestion).source).toBeUndefined();
+  });
+
+  it("accepts fromChat on the answer request and knows the updated event", () => {
+    expect(SubmitWorkerAnswersRequest.parse({ freeText: "x", fromChat: true }).fromChat).toBe(true);
+    expect(DomainEventType.parse("orchestrator.message.updated")).toBe("orchestrator.message.updated");
+  });
+});
+
+describe("ConfirmationSummary", () => {
+  it("accepts string and string[] field values and a nullable scoring", () => {
+    const parsed = ConfirmationSummary.parse({
+      lead: "The frame is complete.",
+      fields: [
+        { label: "Problem", value: "Users cannot rename workspaces." },
+        { label: "Constraints", value: ["one folder = one workspace", "unique names"] },
+      ],
+      scoring: null,
+    });
+    expect(parsed.fields).toHaveLength(2);
+  });
+
+  it("rides on Activity as an optional field", () => {
+    const base = {
+      id: "a1", goalId: "g1", workflowRunId: "r1", stepRunId: "s1",
+      agentSessionId: null, turnOrdinal: 0, status: "paused_for_input",
+      currentText: "x", finalSummary: null, sourceKind: "step_confirmation_pending",
+      workCategory: null, confidence: null,
+      createdAt: "2026-06-18T00:00:00.000Z", updatedAt: "2026-06-18T00:00:00.000Z",
+      completedAt: null, steps: [],
+      confirmationSummary: { lead: "ok", fields: [], scoring: null },
+    };
+    expect(Activity.parse(base).confirmationSummary?.lead).toBe("ok");
+  });
+});
+
+describe("PendingRevision", () => {
+  it("rides on OrchestratorChatMessage", () => {
+    const msg = OrchestratorChatMessage.parse({
+      id: "m1", goalId: "g1", role: "orchestrator", kind: "message",
+      body: "What would you like to revise?", correlationId: null,
+      createdAt: "2026-06-18T00:00:00.000Z",
+      pendingRevision: { workflowRunId: "r1" },
+    });
+    expect(msg.pendingRevision?.workflowRunId).toBe("r1");
+  });
+
+  it("SubmitStepRevisionRequest requires non-empty feedback", () => {
+    expect(SubmitStepRevisionRequest.safeParse({ feedback: "" }).success).toBe(false);
+    expect(SubmitStepRevisionRequest.parse({ feedback: "tighten the success metric" }).feedback)
+      .toBe("tighten the success metric");
   });
 });

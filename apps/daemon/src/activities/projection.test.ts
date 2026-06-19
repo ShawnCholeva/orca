@@ -143,3 +143,79 @@ describe("listActivitiesByGoal step_result enrichment", () => {
     expect(other.stepResult).toBeUndefined();
   });
 });
+
+describe("enrichConfirmationSummary", () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    runMigrations(db, defaultMigrationsDir());
+    db.prepare(
+      `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+       VALUES ('g1', 'Goal', '', 'active', 1, '2026-06-09', '2026-06-09', NULL)`
+    ).run();
+    db.prepare(
+      `INSERT INTO workflow_templates (
+         id, name, description, version, is_built_in, is_locked, steps_json,
+         guardrails_json, created_at, updated_at
+       ) VALUES ('tpl1', 'Test', '', 1, 0, 0, ?, '[]', '2026-06-09', '2026-06-09')`
+    ).run(
+      JSON.stringify([
+        { id: "frame", name: "Frame", outputSchema: [{ key: "problem", type: "string", required: true }] },
+      ])
+    );
+    db.prepare(
+      `INSERT INTO workflow_runs (
+         id, goal_id, template_id, template_version, status,
+         current_step_run_id, blocked_reason, started_at, finished_at
+       ) VALUES ('r1', 'g1', 'tpl1', 1, 'paused', 'sr1', NULL, '2026-06-09', NULL)`
+    ).run();
+    db.prepare(
+      `INSERT INTO workflow_step_runs (
+         id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status,
+         satisfied_exit_criteria_json, outstanding_exit_criteria_json,
+         blocked_reason, started_at, finished_at, fingerprint, pending_completion_json
+       ) VALUES ('sr1', 'g1', 'r1', 'frame', 0, 1, 'active', '[]', '[]',
+                 NULL, '2026-06-09', NULL, 'fp1', ?)`
+    ).run(
+      JSON.stringify({
+        block: { problem: "Can't rename" },
+        scoring: {
+          successScore: 0.9,
+          quality: {
+            outputCompleteness: 0.9,
+            outputCorrectness: 0.9,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.9,
+            riskLevel: 0.1,
+          },
+          reason: "Done.",
+          handoffReady: true,
+        },
+        finishedAt: "2026-06-09T00:00:00.000Z",
+        proposal: "p",
+      })
+    );
+    db.prepare(
+      `INSERT INTO activities (
+         id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+         status, current_text, final_summary, source_kind, work_category, confidence,
+         pending_question, created_at, updated_at, completed_at
+       ) VALUES ('a-conf', 'g1', 'r1', 'sr1', NULL, 0, 'paused_for_input', 'Awaiting confirmation', NULL,
+                 'step_confirmation_pending', NULL, NULL, NULL,
+                 '2026-06-09T00:00:00.000Z', '2026-06-09T00:00:00.000Z', NULL)`
+    ).run();
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("attaches confirmationSummary to a step_confirmation_pending activity from the stash", () => {
+    const activities = listActivitiesByGoal(db, "g1");
+    const confirm = activities.find((a) => a.sourceKind === "step_confirmation_pending");
+    expect(confirm?.confirmationSummary?.lead).toBe("Done.");
+    expect(confirm?.confirmationSummary?.fields).toEqual([{ label: "Problem", value: "Can't rename" }]);
+    expect(confirm?.confirmationSummary?.scoring?.successScore).toBe(0.9);
+  });
+});

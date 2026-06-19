@@ -1,4 +1,7 @@
 import type Database from "better-sqlite3";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { closeDatabase } from "../../db.js";
@@ -30,6 +33,8 @@ import type { ShadowAsk } from "./recover-step-scoring.js";
 import { setSupervisionMode } from "../../settings/store.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import type { ProviderRecoveryCheckpoint } from "@orca/contracts";
+import { listOrchestratorMessagesByGoal } from "../../orchestrator-chat/projection.js";
+import { listActivitiesByGoal } from "../../activities/projection.js";
 import {
   OrchestratorProviderRecoveryInvalidTransitionError,
   OrchestratorProviderRecoveryNotFoundError,
@@ -305,6 +310,108 @@ function setupAgentStepRun(db: Database.Database, opts: { guardrailsJson?: strin
 
   db.prepare(
     "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)"
+  ).run(NOW);
+
+  db.prepare(
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-1', 'goal-1', 'run-1', ?, ?, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1', NULL, NULL, NULL, NULL)"
+  ).run(step.id, step.ordinal, NOW);
+}
+
+/** Seed a 2-step engineering run with step-1 active (ordinal 0) so completing it
+ *  advances to a fresh step-2 (ordinal 1) — i.e. step-1 is NOT terminal. */
+function setupTwoStepAgentRun(db: Database.Database) {
+  const step1 = makeStep({
+    id: "implement",
+    ordinal: 0,
+    name: "Implement",
+    instructions: "Write the implementation.",
+    outputSchema: [{ key: "result", type: "string", required: true }],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+  });
+  const step2 = makeStep({
+    id: "verify",
+    ordinal: 1,
+    name: "Verify",
+    instructions: "Verify the implementation.",
+    outputSchema: [{ key: "result", type: "string", required: true }],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+  });
+
+  db.prepare(
+    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+  ).run("goal-1", NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', 'desc', 1, 1, 1, ?, '[]', ?, ?)"
+  ).run(JSON.stringify([step1, step2]), NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)"
+  ).run(NOW);
+  db.prepare(
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-1', 'goal-1', 'run-1', ?, ?, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1', NULL, NULL, NULL, NULL)"
+  ).run(step1.id, step1.ordinal, NOW);
+}
+
+/** Seed an interview step workflow (completionPolicy: "interview") */
+function setupInterviewStepRun(db: Database.Database) {
+  const step = {
+    id: "frame",
+    ordinal: 0,
+    name: "Frame",
+    completionPolicy: "interview" as const,
+    instructions: "Interview the user until the scope is clear.",
+    outputSchema: [
+      { key: "problem", type: "string", required: true },
+      { key: "success_outcome", type: "string", required: true },
+      { key: "constraints", type: "array", itemType: "string", required: true },
+      { key: "open_questions", type: "array", itemType: "string", required: false },
+    ],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+  };
+
+  db.prepare(
+    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+  ).run("goal-1", NOW, NOW);
+
+  db.prepare(
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/brainstorm', 'Brainstorm', 'desc', 1, 1, 1, ?, '[]', ?, ?)"
+  ).run(JSON.stringify([step]), NOW, NOW);
+
+  db.prepare(
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/brainstorm', 1, 'active', 'step-1', NULL, ?, NULL)"
+  ).run(NOW);
+
+  db.prepare(
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-1', 'goal-1', 'run-1', ?, ?, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1', NULL, NULL, NULL, NULL)"
+  ).run(step.id, step.ordinal, NOW);
+}
+
+/** Seed a workflow with a handoff-policy step (completionPolicy: "handoff") */
+function setupHandoffStepRun(db: Database.Database) {
+  const step = {
+    id: "done",
+    ordinal: 0,
+    name: "Done",
+    completionPolicy: "handoff" as const,
+    instructions: "Produce a spec for the user to review.",
+    outputSchema: [
+      { key: "problem", type: "string", required: true },
+      { key: "success_outcome", type: "string", required: true },
+      { key: "constraints", type: "array", itemType: "string", required: true },
+      { key: "open_questions", type: "array", itemType: "string", required: false },
+    ],
+    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+  };
+
+  db.prepare(
+    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+  ).run("goal-1", NOW, NOW);
+
+  db.prepare(
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/brainstorm', 'Brainstorm', 'desc', 1, 1, 1, ?, '[]', ?, ?)"
+  ).run(JSON.stringify([step]), NOW, NOW);
+
+  db.prepare(
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/brainstorm', 1, 'active', 'step-1', NULL, ?, NULL)"
   ).run(NOW);
 
   db.prepare(
@@ -708,6 +815,55 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     ).toHaveLength(1);
   });
 
+  it("ask_user posts a chat message carrying an interactive pending_question", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "ask_user",
+        body: "Step 1 agent needs a decision before it can continue.",
+        questions: [
+          {
+            header: "State",
+            question: "Which did you mean by 'state'?",
+            multiSelect: false,
+            options: [
+              { label: "Active / Archived", description: "Group by goal status." },
+              { label: "Running / Idle", description: "Group by active workflow run." },
+            ],
+          },
+        ],
+      }),
+      deliver
+    );
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText: "I need a decision from the user." },
+      { bus, idFactory }
+    );
+
+    const row = db
+      .prepare(
+        "SELECT body, pending_question FROM orchestrator_messages WHERE goal_id = 'goal-1' ORDER BY created_at DESC, rowid DESC LIMIT 1"
+      )
+      .get() as { body: string; pending_question: string | null };
+    expect(row.body).toContain("needs a decision");
+    expect(row.pending_question).toBeTruthy();
+    const pq = JSON.parse(row.pending_question!);
+    expect(pq.questions[0].options).toHaveLength(2);
+    expect(pq.questionId).toBeTruthy();
+    expect(pq.toolUseId).toBeTruthy();
+    // The step agent was not told to advance — it stays paused on the decision.
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
   it("supervised: holds at checkpoint — no result, stash set, activity paused", async () => {
     const { db, bus, idFactory } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" });
@@ -1032,6 +1188,348 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     expect(row.revise_attempts).toBe(3);
     expect(orchestratorMessageCount(db)).toBe(1);
     expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("interview step with open_questions: refuses completion and revises instead", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupInterviewStepRun(db);
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async (_sid: string, _text: string) => "delivered" as const);
+    // The mediator approves (called once via judgeAgentResponse); the backstop
+    // overrides that approval and revises instead.
+    const mediator = spyMediator({ kind: "approve_step_complete" });
+    const service = makeJudgeService(mediator, deliver);
+
+    // Schema-valid interview block, but open_questions is non-empty.
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({
+        problem: "Build a dashboard",
+        success_outcome: "Users can view metrics",
+        constraints: [],
+        open_questions: ["Should we support dark mode?"],
+      }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    expect(mediator.calls).toBe(1);
+    // Step did NOT complete: no step_output artifact written.
+    expect(stepOutputCount(db)).toBe(0);
+    // Revise path was taken: revise_attempts incremented.
+    const row = db
+      .prepare("SELECT revise_attempts FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { revise_attempts: number };
+    expect(row.revise_attempts).toBe(1);
+    // Feedback was delivered to the agent.
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver.mock.calls[0]![1]).toContain("open questions");
+  });
+
+  it("handoff step in unsupervised mode: pauses for confirmation (pending_completion_json set, no step_output)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupHandoffStepRun(db);
+    seedWorkspace(db);
+    seedAgentSession(db);
+    // Explicitly unsupervised — the handoff policy must override this and still pause.
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.9,
+          quality: {
+            outputCompleteness: 0.9,
+            outputCorrectness: 0.9,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.9,
+            riskLevel: 0.1,
+          },
+          reason: "Spec looks complete.",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({
+        problem: "Build a dashboard",
+        success_outcome: "Users can view metrics",
+        constraints: [],
+        open_questions: [],
+      }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // Must be paused: stash set, no step_output written.
+    const row = db
+      .prepare(
+        "SELECT step_result_json, pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'"
+      )
+      .get() as { step_result_json: string | null; pending_completion_json: string | null };
+    expect(row.step_result_json).toBeNull();
+    expect(row.pending_completion_json).not.toBeNull();
+    expect(stepOutputCount(db)).toBe(0);
+    // Activity is paused for user confirmation.
+    const act = db
+      .prepare(
+        "SELECT status, source_kind FROM activities WHERE step_run_id = 'step-1' ORDER BY turn_ordinal DESC LIMIT 1"
+      )
+      .get() as { status: string; source_kind: string };
+    expect(act.status).toBe("paused_for_input");
+    expect(act.source_kind).toBe("step_confirmation_pending");
+  });
+
+  it("reasoning step in unsupervised mode: auto-completes (control case)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" }); // default completionPolicy (reasoning/undefined)
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.82,
+          quality: {
+            outputCompleteness: 0.8,
+            outputCorrectness: 0.85,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.8,
+            riskLevel: 0.2,
+          },
+          reason: "ok",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // Must auto-complete: result written, no stash.
+    const result = readPersistedStepResult(db, "step-1");
+    expect(result.evaluationStatus).toBe("scored");
+    const row = db
+      .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { pending_completion_json: string | null };
+    expect(row.pending_completion_json).toBeNull();
+  });
+
+  it("interview step with empty open_questions: completes normally", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupInterviewStepRun(db);
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), deliver);
+
+    // Empty open_questions → backstop must not fire.
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({
+        problem: "Build a dashboard",
+        success_outcome: "Users can view metrics",
+        constraints: [],
+        open_questions: [],
+      }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // Step completed: step_output artifact written.
+    expect(stepOutputCount(db)).toBe(1);
+    const row = db
+      .prepare("SELECT revise_attempts FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { revise_attempts: number };
+    expect(row.revise_attempts).toBe(0);
+  });
+
+  it("resultSummary and primaryArtifact are populated on the step result from step output", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.9,
+          quality: {
+            outputCompleteness: 0.9,
+            outputCorrectness: 0.9,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.9,
+            riskLevel: 0.1,
+          },
+          reason: "Output complete.",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+
+    // Step-complete block includes summary + artifacts alongside the required `result` field.
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({
+        result: "implemented",
+        summary: "Recommends Approach A",
+        artifacts: [{ type: "spec", reference: ".orca/specs/x.md", description: "design spec" }],
+      }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    const result = readPersistedStepResult(db, "step-1");
+    expect(result.evaluationStatus).toBe("scored");
+    expect(result.resultSummary).toBe("Recommends Approach A");
+    expect(result.primaryArtifact?.reference).toBe(".orca/specs/x.md");
+  });
+
+  it("advances a non-terminal step whose output summary exceeds the result-summary cap", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupTwoStepAgentRun(db);
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    // A summary longer than WorkflowStepResult.resultSummary's 2000-char cap.
+    const longSummary = "A".repeat(2500);
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.9,
+          quality: {
+            outputCompleteness: 0.9,
+            outputCorrectness: 0.9,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.9,
+            riskLevel: 0.1,
+          },
+          reason: "Output complete.",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({ result: "implemented", summary: longSummary }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // The step must complete and the run must advance to a fresh next step —
+    // an over-length summary must not strand the step "active".
+    const step1 = db
+      .prepare("SELECT status FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { status: string };
+    expect(step1.status).toBe("passed");
+    const run = db
+      .prepare("SELECT current_step_run_id FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { current_step_run_id: string | null };
+    expect(run.current_step_run_id).not.toBe("step-1");
+    expect(run.current_step_run_id).toBeTruthy();
+
+    // The denormalized summary is truncated to fit its own contract.
+    const result = readPersistedStepResult(db, "step-1");
+    expect(result.resultSummary.length).toBeLessThanOrEqual(2000);
+  });
+
+  it("uses the latest step_output (not a stale earlier one) for the result summary", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupTwoStepAgentRun(db);
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    // A stale earlier step_output (e.g. from a prior completion attempt).
+    db.prepare(
+      "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-old', 'goal-1', 'run-1', 'step-1', 'step_output', 'Old', ?, 'orchestrator', NULL, NULL, NULL, ?)"
+    ).run(JSON.stringify({ result: "old", summary: "STALE SUMMARY" }), "2025-01-01T00:00:00.000Z");
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.9,
+          quality: {
+            outputCompleteness: 0.9,
+            outputCorrectness: 0.9,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.9,
+            riskLevel: 0.1,
+          },
+          reason: "Output complete.",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({ result: "implemented", summary: "FRESH SUMMARY" }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    const result = readPersistedStepResult(db, "step-1");
+    expect(result.resultSummary).toBe("FRESH SUMMARY");
   });
 });
 
@@ -1415,6 +1913,31 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     expect(recommendationCount(db, "complete_workflow_run")).toBe(1);
     expect(launchFn).not.toHaveBeenCalled();
   });
+
+  it("startWorkflowFirstStep includes attached workspaces in the step agent objective", async () => {
+    const { db } = setupHarness();
+    setupFirstStepRun(db);
+    // Seed two workspaces attached to the goal.
+    db.prepare(
+      "INSERT INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-a', 'goal-1', 'frontend', '/home/user/projects/frontend', 'git', 'ok', ?)"
+    ).run(NOW);
+    db.prepare(
+      "INSERT INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-b', 'goal-1', 'backend', '/home/user/projects/backend', 'git', 'ok', ?)"
+    ).run(NOW);
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-ws" }));
+    const service = makeAgentService(makeLauncher(launchFn));
+
+    await service.startWorkflowFirstStep(db, () => NOW, "run-1");
+
+    expect(launchFn).toHaveBeenCalledOnce();
+    expect(launchFn).toHaveBeenCalledWith(
+      expect.objectContaining({ objective: expect.stringContaining("# Workspaces") })
+    );
+    expect(launchFn).toHaveBeenCalledWith(
+      expect.objectContaining({ objective: expect.stringContaining("/home/user/projects/frontend") })
+    );
+  });
 });
 
 describe("OrchestratorService.confirmStep", () => {
@@ -1482,6 +2005,95 @@ describe("OrchestratorService.confirmStep", () => {
       .get() as { step_result_json: string | null };
     expect(row.step_result_json).toBeNull();
   });
+
+  it("handoff confirm — verified spec: posts closing summary with direction and spec ref (no 'could not verify')", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupHandoffStepRun(db);
+    seedWorkspace(db); // ws-1 required by seedAgentSession FK
+    seedAgentSession(db);
+
+    // Create a real temp dir and seed the spec file inside it.
+    const tmpBase = join(tmpdir(), `orca-test-${Date.now()}`);
+    const specRelPath = ".orca/specs/2026-06-17-phase3-verify-unique.md";
+    const specAbsPath = join(tmpBase, specRelPath);
+    mkdirSync(join(tmpBase, ".orca/specs"), { recursive: true });
+    writeFileSync(specAbsPath, "# Design spec");
+
+    try {
+      // Seed a second workspace pointing at the temp dir.
+      db.prepare(
+        "INSERT OR IGNORE INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-tmp', 'goal-1', 'main', ?, 'git', 'ok', ?)"
+      ).run(tmpBase, NOW);
+
+      // Directly insert the pending_completion_json stash (Done block shape).
+      const doneBlock = {
+        summary: "Design is complete",
+        chosen_direction: "Approach A",
+        artifacts: [
+          { type: "spec", reference: specRelPath, description: "design spec" },
+        ],
+      };
+      const stash = { block: doneBlock, scoring: null, finishedAt: NOW };
+      db.prepare(
+        "UPDATE workflow_step_runs SET pending_completion_json = ? WHERE id = 'step-1'"
+      ).run(JSON.stringify(stash));
+
+      const service = makeJudgeService(
+        fakeMediator({ kind: "approve_step_complete" }),
+        vi.fn(async () => "delivered" as const)
+      );
+      await service.confirmStep(db, () => NOW, "run-1", { bus, idFactory });
+
+      const body = lastOrchestratorMessageBody(db);
+      expect(body).toContain("Approach A");
+      expect(body).toContain("2026-06-17-phase3-verify-unique.md");
+      expect(body).not.toMatch(/could not verify/i);
+    } finally {
+      rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  it("handoff confirm — missing spec: posts closing summary that flags spec could not be verified", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupHandoffStepRun(db);
+    seedWorkspace(db); // ws-1 required by seedAgentSession FK
+    seedAgentSession(db);
+
+    const tmpBase = join(tmpdir(), `orca-test-${Date.now()}`);
+    mkdirSync(tmpBase, { recursive: true });
+    // NOTE: the spec file is NOT created.
+
+    try {
+      db.prepare(
+        "INSERT OR IGNORE INTO workspaces (id, goal_id, name, path, workspace_type, git_probe, attached_at) VALUES ('ws-tmp', 'goal-1', 'main', ?, 'git', 'ok', ?)"
+      ).run(tmpBase, NOW);
+
+      const specRelPath = ".orca/specs/2026-06-17-missing.md";
+      const doneBlock = {
+        summary: "Design is complete",
+        chosen_direction: "Approach B",
+        artifacts: [
+          { type: "spec", reference: specRelPath, description: "design spec" },
+        ],
+      };
+      const stash = { block: doneBlock, scoring: null, finishedAt: NOW };
+      db.prepare(
+        "UPDATE workflow_step_runs SET pending_completion_json = ? WHERE id = 'step-1'"
+      ).run(JSON.stringify(stash));
+
+      const service = makeJudgeService(
+        fakeMediator({ kind: "approve_step_complete" }),
+        vi.fn(async () => "delivered" as const)
+      );
+      await service.confirmStep(db, () => NOW, "run-1", { bus, idFactory });
+
+      const body = lastOrchestratorMessageBody(db);
+      expect(body).toMatch(/could not verify/i);
+      expect(body).toContain(specRelPath);
+    } finally {
+      rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("OrchestratorService.continueAllPausedSteps", () => {
@@ -1521,6 +2133,102 @@ describe("OrchestratorService.continueAllPausedSteps", () => {
     await service.continueAllPausedSteps(db, () => NOW, { bus, idFactory });
     const row = db.prepare("SELECT step_result_json FROM workflow_step_runs WHERE id = 'step-1'").get() as { step_result_json: string | null };
     expect(row.step_result_json).toBeNull();
+  });
+});
+
+describe("OrchestratorService.requestStepRevision / submitStepRevision", () => {
+  /** Helper: drive a step to a confirmation pause (pending_completion_json set, activity step_confirmation_pending). */
+  async function driveToConfirmationPause(
+    db: ReturnType<typeof setupHarness>["db"],
+    bus: ReturnType<typeof setupHarness>["bus"],
+    idFactory: ReturnType<typeof setupHarness>["idFactory"],
+    service: ReturnType<typeof makeJudgeService>
+  ): Promise<void> {
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "supervised", NOW);
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+  }
+
+  it("requestStepRevision posts a 'What would you like to revise?' message with a pendingRevision marker", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.82,
+          quality: {
+            outputCompleteness: 0.8,
+            outputCorrectness: 0.85,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.8,
+            riskLevel: 0.2,
+          },
+          reason: "ok",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+
+    // Arrange: drive the step to a confirmation pause (pending_completion_json set).
+    await driveToConfirmationPause(db, bus, idFactory, service);
+
+    await service.requestStepRevision(db, () => NOW, "run-1", { bus, idFactory });
+    const msgs = listOrchestratorMessagesByGoal(db, "goal-1");
+    const prompt = msgs.find((m) => m.pendingRevision?.workflowRunId === "run-1");
+    expect(prompt?.body).toBe("What would you like to revise?");
+    expect(prompt?.role).toBe("orchestrator");
+  });
+
+  it("submitStepRevision clears the marker + stash, relays feedback, and resumes the step", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.82,
+          quality: {
+            outputCompleteness: 0.8,
+            outputCorrectness: 0.85,
+            instructionAdherence: 0.9,
+            downstreamReadiness: 0.8,
+            riskLevel: 0.2,
+          },
+          reason: "ok",
+          handoffReady: true,
+        },
+      }),
+      deliver
+    );
+
+    // Arrange: drive to confirmation pause.
+    await driveToConfirmationPause(db, bus, idFactory, service);
+
+    await service.requestStepRevision(db, () => NOW, "run-1", { bus, idFactory });
+    await service.submitStepRevision(db, () => NOW, "run-1", "tighten the success metric", { bus, idFactory });
+
+    // stash cleared:
+    const stash = db.prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = ?").get("step-1") as { pending_completion_json: string | null };
+    expect(stash.pending_completion_json).toBeNull();
+    // marker cleared:
+    const msgs = listOrchestratorMessagesByGoal(db, "goal-1");
+    expect(msgs.some((m) => m.pendingRevision != null)).toBe(false);
+    // user feedback persisted as a chat bubble:
+    expect(msgs.some((m) => m.role === "user" && m.body === "tighten the success metric")).toBe(true);
+    // activity resumed (no longer paused at confirmation):
+    const activities = listActivitiesByGoal(db, "goal-1");
+    expect(activities.some((a) => a.sourceKind === "step_confirmation_pending")).toBe(false);
   });
 });
 

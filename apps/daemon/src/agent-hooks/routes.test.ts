@@ -166,6 +166,7 @@ describe("POST /v1/agent-hooks/tool-use", () => {
       toolName: "Bash",
       toolInput: { command: "ls" },
       toolUseId: "t1",
+      transcriptPath: "/tmp/transcript.jsonl",
     });
     expect(res.json()).toEqual({ continue: true });
     expect(res.body).not.toContain("permissionDecision");

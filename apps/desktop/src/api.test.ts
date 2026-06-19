@@ -1485,6 +1485,27 @@ describe("desktop api client", () => {
     );
   });
 
+  it("requestStepRevision POSTs to revise-step", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 202 }));
+    await api.requestStepRevision("run-1");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("/v1/workflows/runs/run-1/revise-step"),
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("submitStepRevision POSTs to revise-step/submit with feedback body", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 202 }));
+    await api.submitStepRevision("run-1", "my feedback");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("/v1/workflows/runs/run-1/revise-step/submit"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ feedback: "my feedback" }),
+      })
+    );
+  });
+
   describe("readiness api", () => {
     it("runReadinessCheck POSTs and returns reports", async () => {
       fetchMock.mockResolvedValueOnce(
@@ -1578,6 +1599,17 @@ describe("desktop api client", () => {
           body: JSON.stringify({ checkpointId, adapterId: "codex" }),
         }),
       );
+    });
+
+    it("submitWorkerFreeText posts freeText to the worker-answer route", async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+
+      await api.submitWorkerFreeText("goal-1", "q-1", "a dedicated workspaces tab");
+
+      const [url, init] = fetchMock.mock.calls[0]!;
+      expect(String(url)).toContain("/v1/goals/goal-1/worker-questions/q-1/answer");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ freeText: "a dedicated workspaces tab" });
     });
   });
 });

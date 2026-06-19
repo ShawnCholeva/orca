@@ -1,11 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Activity } from "@orca/contracts";
 import type { ComponentType } from "react";
-
-type QuestionFormProps = {
-  goalId: string;
-  pending: NonNullable<Activity["pendingQuestion"]>;
-};
 
 type ProviderRecoveryProps = {
   runId: string;
@@ -48,8 +43,7 @@ export function pickLiveActivity(activities: Activity[]): Activity | null {
     if (
       activity?.status === "paused_for_input" &&
       (activity.sourceKind === "step_confirmation_pending" ||
-        activity.sourceKind === "provider_recovery_pending" ||
-        activity.pendingQuestion != null)
+        activity.sourceKind === "provider_recovery_pending")
     ) {
       return activity;
     }
@@ -64,35 +58,47 @@ export function StepResultCard({ activity }: { activity: Activity }) {
   const r = activity.stepResult;
   if (!r) return null;
   const scored = r.evaluationStatus === "scored";
+  // For a failed evaluation, outcome.reason is an internal diagnostic string, so
+  // lead with a short label and keep the raw reason in the drawer.
+  const headline = r.resultSummary ?? (scored ? r.outcome.reason : "Evaluation failed");
+  const reasonInDrawer = r.resultSummary != null || !scored;
   return (
     <div className="step-result-card" data-testid="step-result-card" data-status={r.stepStatus} data-eval={r.evaluationStatus}>
       <div className="step-result-head">
         <span className="step-result-name">{activity.stepName ?? "Step"}</span>
-        <span className="step-result-state">{r.stepStatus}</span>
-        {scored ? <span className="step-result-score">{pct(r.successScore)}</span> : <span className="step-result-eval-failed">Evaluation failed</span>}
-        {scored ? <span className="step-result-handoff">{r.outcome.handoffReady ? "Ready for handoff" : "Not ready"}</span> : null}
         <button type="button" data-testid="step-result-expand" onClick={() => setOpen((o) => !o)}>{open ? "Hide" : "Details"}</button>
       </div>
-      <div className="step-result-reason">{r.outcome.reason}</div>
-      <div className="step-result-counts">
-        {r.outcome.producedArtifactsCount} artifacts · {r.outcome.blockingIssuesCount} blockers · {r.outcome.warningsCount} warnings
-      </div>
+      <div className="step-result-summary" data-testid="step-result-summary">{headline}</div>
+      {r.primaryArtifact ? (
+        <div className="step-result-artifact" data-testid="step-result-artifact" title={r.primaryArtifact.reference}>
+          {r.primaryArtifact.description || "Artifact"}: {r.primaryArtifact.reference}
+        </div>
+      ) : null}
       {open ? (
-        <dl className="step-result-metrics">
-          {scored ? (
-            <>
-              <div><dt>Output completeness</dt><dd>{pct(r.quality.outputCompleteness)}</dd></div>
-              <div><dt>Output correctness</dt><dd>{pct(r.quality.outputCorrectness)}</dd></div>
-              <div><dt>Instruction adherence</dt><dd>{pct(r.quality.instructionAdherence)}</dd></div>
-              <div><dt>Downstream readiness</dt><dd>{pct(r.quality.downstreamReadiness)}</dd></div>
-              <div><dt>Risk level (higher = riskier)</dt><dd>{pct(r.quality.riskLevel)}</dd></div>
-            </>
-          ) : null}
-          <div><dt>Duration</dt><dd>{r.performance.durationSeconds}s</dd></div>
-          <div><dt>Retries</dt><dd>{r.performance.retries}</dd></div>
-          {r.performance.totalTurns !== undefined ? <div><dt>Total turns</dt><dd>{r.performance.totalTurns}</dd></div> : null}
-          {r.performance.toolCalls !== undefined ? <div><dt>Tool calls</dt><dd>{r.performance.toolCalls}</dd></div> : null}
-        </dl>
+        <div className="step-result-details">
+          <div className="step-result-state">
+            {r.stepStatus}{scored ? ` · ${pct(r.successScore)} · ${r.outcome.handoffReady ? "Ready for handoff" : "Not ready"}` : " · Evaluation failed"}
+          </div>
+          {reasonInDrawer ? <div className="step-result-reason">{r.outcome.reason}</div> : null}
+          <div className="step-result-counts">
+            {r.outcome.producedArtifactsCount} artifacts · {r.outcome.blockingIssuesCount} blockers · {r.outcome.warningsCount} warnings
+          </div>
+          <dl className="step-result-metrics">
+            {scored ? (
+              <>
+                <div><dt>Output completeness</dt><dd>{pct(r.quality.outputCompleteness)}</dd></div>
+                <div><dt>Output correctness</dt><dd>{pct(r.quality.outputCorrectness)}</dd></div>
+                <div><dt>Instruction adherence</dt><dd>{pct(r.quality.instructionAdherence)}</dd></div>
+                <div><dt>Downstream readiness</dt><dd>{pct(r.quality.downstreamReadiness)}</dd></div>
+                <div><dt>Risk level (higher = riskier)</dt><dd>{pct(r.quality.riskLevel)}</dd></div>
+              </>
+            ) : null}
+            <div><dt>Duration</dt><dd>{r.performance.durationSeconds}s</dd></div>
+            <div><dt>Retries</dt><dd>{r.performance.retries}</dd></div>
+            {r.performance.totalTurns !== undefined ? <div><dt>Total turns</dt><dd>{r.performance.totalTurns}</dd></div> : null}
+            {r.performance.toolCalls !== undefined ? <div><dt>Tool calls</dt><dd>{r.performance.toolCalls}</dd></div> : null}
+          </dl>
+        </div>
       ) : null}
     </div>
   );
@@ -111,20 +117,26 @@ export function ActivityCard({ activity }: { activity: Activity }) {
 }
 
 // The live "working" bubble for the active step's agent, pinned to the tail of
-// the timeline. Carries the embedded question form when the agent is paused.
+// the timeline. Handles confirmation checkpoints and provider recovery.
 export function LiveActivity({
-  goalId,
   activity,
-  renderQuestionForm: QuestionForm,
   renderProviderRecovery: ProviderRecovery,
   onContinue,
+  onRevise,
 }: {
-  goalId: string;
   activity: Activity;
-  renderQuestionForm: ComponentType<QuestionFormProps>;
   renderProviderRecovery?: ComponentType<ProviderRecoveryProps>;
   onContinue?: (runId: string) => void;
+  onRevise?: (runId: string) => void;
 }) {
+  const [scoresOpen, setScoresOpen] = useState(false);
+  const confirmationScoring = activity.confirmationSummary?.scoring ?? null;
+  const metricsRef = useRef<HTMLDListElement>(null);
+  // When the scores expand, bring the newly-revealed metrics into view so they
+  // aren't left below the fold under the button row.
+  useEffect(() => {
+    if (scoresOpen) metricsRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [scoresOpen]);
   const isConfirmation =
     activity.status === "paused_for_input" &&
     activity.sourceKind === "step_confirmation_pending";
@@ -133,35 +145,89 @@ export function LiveActivity({
     activity.sourceKind === "provider_recovery_pending" &&
     activity.providerRecovery != null;
   return (
-    <div
-      className="activity-bubble"
-      data-testid="activity-bubble"
-      data-status={activity.status}
-    >
-      <div className="activity-bubble-text">{activity.currentText}</div>
-      {activity.status === "paused_for_input" && activity.pendingQuestion ? (
-        <QuestionForm goalId={goalId} pending={activity.pendingQuestion} />
+    <div className="activity-bubble" data-testid="activity-bubble" data-status={activity.status}>
+      {!(isConfirmation && activity.confirmationSummary) ? (
+        <div className="activity-bubble-text">{activity.currentText}</div>
       ) : null}
       {isConfirmation ? (
-        <div className="step-confirm-actions">
-          <button
-            type="button"
-            data-testid="step-confirm-continue"
-            className="step-confirm-continue-btn"
-            onClick={() => onContinue?.(activity.workflowRunId)}
-          >
-            Continue
-          </button>
-          <span className="step-confirm-hint">
-            Continue accepts this result and advances the workflow. Type revisions in chat to send it back to the agent.
-          </span>
+        <div className="step-confirm" data-testid="step-confirm">
+          {activity.confirmationSummary ? (
+            <>
+              <div className="step-confirm-lead">{activity.confirmationSummary.lead}</div>
+              {activity.confirmationSummary.fields.length > 0 ? (
+                <dl className="step-confirm-fields">
+                  {activity.confirmationSummary.fields.map((f, i) => (
+                    <div key={i} className="step-confirm-field">
+                      <dt>{f.label}</dt>
+                      <dd>
+                        {Array.isArray(f.value) ? (
+                          <ul>{f.value.map((v, j) => <li key={j}>{v}</li>)}</ul>
+                        ) : f.value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+            </>
+          ) : null}
+          <div className="step-confirm-actions">
+            <button
+              type="button"
+              data-testid="step-confirm-continue"
+              className="step-confirm-continue-btn"
+              onClick={() => onContinue?.(activity.workflowRunId)}
+            >
+              Continue
+            </button>
+            <button
+              type="button"
+              data-testid="step-confirm-revise"
+              className="step-confirm-revise-btn"
+              onClick={() => onRevise?.(activity.workflowRunId)}
+            >
+              Revise
+            </button>
+            {confirmationScoring ? (
+              <button
+                type="button"
+                data-testid="confirm-scores-toggle"
+                className="step-confirm-scores-toggle"
+                aria-expanded={scoresOpen}
+                onClick={() => setScoresOpen((o) => !o)}
+              >
+                <span>Scores</span>
+                <svg
+                  className="step-confirm-scores-caret"
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            ) : null}
+          </div>
+          {scoresOpen && confirmationScoring ? (
+            <dl ref={metricsRef} className="step-result-metrics step-confirm-metrics">
+              <div><dt>Success</dt><dd>{Math.round(confirmationScoring.successScore * 100)}%</dd></div>
+              <div><dt>Output completeness</dt><dd>{Math.round(confirmationScoring.quality.outputCompleteness * 100)}%</dd></div>
+              <div><dt>Output correctness</dt><dd>{Math.round(confirmationScoring.quality.outputCorrectness * 100)}%</dd></div>
+              <div><dt>Instruction adherence</dt><dd>{Math.round(confirmationScoring.quality.instructionAdherence * 100)}%</dd></div>
+              <div><dt>Downstream readiness</dt><dd>{Math.round(confirmationScoring.quality.downstreamReadiness * 100)}%</dd></div>
+              <div><dt>Risk level (higher = riskier)</dt><dd>{Math.round(confirmationScoring.quality.riskLevel * 100)}%</dd></div>
+              <div><dt>Handoff</dt><dd>{confirmationScoring.handoffReady ? "Ready" : "Not ready"}</dd></div>
+            </dl>
+          ) : null}
         </div>
       ) : null}
       {isProviderRecovery && ProviderRecovery && activity.providerRecovery ? (
-        <ProviderRecovery
-          runId={activity.workflowRunId}
-          recovery={activity.providerRecovery}
-        />
+        <ProviderRecovery runId={activity.workflowRunId} recovery={activity.providerRecovery} />
       ) : null}
     </div>
   );

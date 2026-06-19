@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PendingQuestionItem, WorkerAnswer } from "@orca/contracts";
-import { validateAnswers, assembleAnswerReason } from "./worker-answer-format.js";
+import { validateAnswers, assembleAnswerReason, assembleFreeTextReason } from "./worker-answer-format.js";
 
 const single: PendingQuestionItem = {
   header: "Color", question: "favorite color?", multiSelect: false,
@@ -41,5 +41,15 @@ describe("assembleAnswerReason", () => {
     expect(reason).toContain("Q1 'Color': Red");
     expect(reason).toContain("Q2 'Feat': A, B");
     expect(reason).toContain("Do not call AskUserQuestion again");
+  });
+});
+
+describe("assembleFreeTextReason", () => {
+  it("wraps the user's words as a final, answer-bearing deny reason", () => {
+    expect(assembleFreeTextReason("a dedicated workspaces tab")).toBe(
+      "User answered via Orca chat with a custom response: \"a dedicated workspaces tab\". " +
+        "Treat the AskUserQuestion as fully answered with this response and continue. " +
+        "Do not call AskUserQuestion again.",
+    );
   });
 });

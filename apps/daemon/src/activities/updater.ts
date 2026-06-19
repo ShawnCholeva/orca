@@ -105,6 +105,21 @@ export class ActivityUpdater {
         });
         return;
 
+      case "reasoning_note": {
+        const text = signal.text.trim();
+        if (text.length === 0) return;
+        appendActivityStep(ctx, {
+          goalId: signal.goalId,
+          workflowRunId: signal.workflowRunId,
+          stepRunId: signal.stepRunId,
+          agentSessionId: signal.agentSessionId,
+          text,
+          category: "other",
+          diff: null,
+        });
+        return;
+      }
+
       case "turn_completed": {
         const summary = signal.summary.trim();
         if (summary.length > 0) {

@@ -144,8 +144,12 @@ export function WorkflowTracker({
         {steps.map((step, i) => {
           const done = completed || i < activeIndex || (i === activeIndex && !activeRunning);
           const isActive = !completed && activeRunning && i === activeIndex;
-          const dotColor = done || isActive ? "var(--accent)" : "transparent";
-          const ringColor = done || isActive ? "var(--accent)" : "var(--hairline-strong)";
+          const dotColor = done ? "var(--run)" : isActive ? "var(--accent)" : "transparent";
+          const ringColor = done
+            ? "var(--run)"
+            : isActive
+              ? "var(--accent)"
+              : "var(--hairline-strong)";
           return (
             <Fragment key={i}>
               <div
@@ -226,19 +230,34 @@ export function WorkflowTracker({
                   </span>
                 )}
               </div>
-              {i < steps.length - 1 && (
-                <div
-                  style={{
-                    flex: 1,
-                    minWidth: 12,
-                    height: 2,
-                    marginTop: 11,
-                    borderRadius: 1,
-                    background: i < activeIndex ? "var(--accent)" : "var(--hairline)",
-                    transition: "background 160ms ease",
-                  }}
-                />
-              )}
+              {i < steps.length - 1 &&
+                (() => {
+                  // The connector joins step i and step i+1. It's between two
+                  // completed steps when the next step is done (step i is then
+                  // necessarily done too), so it goes green to match the
+                  // completed checkmark. Otherwise blue once we're past step i.
+                  const nextDone =
+                    completed ||
+                    i + 1 < activeIndex ||
+                    (i + 1 === activeIndex && !activeRunning);
+                  return (
+                    <div
+                      style={{
+                        flex: 1,
+                        minWidth: 12,
+                        height: 2,
+                        marginTop: 11,
+                        borderRadius: 1,
+                        background: nextDone
+                          ? "var(--run)"
+                          : i < activeIndex
+                            ? "var(--accent)"
+                            : "var(--hairline)",
+                        transition: "background 160ms ease",
+                      }}
+                    />
+                  );
+                })()}
             </Fragment>
           );
         })}

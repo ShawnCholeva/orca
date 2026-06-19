@@ -40,6 +40,31 @@ describe("composeAgentInitialPrompt", () => {
     });
     expect(out).toMatch(/Just a title/);
   });
+
+  it("renders a Workspaces section when workspaces are provided", () => {
+    const prompt = composeAgentInitialPrompt({
+      goalTitle: "G",
+      goalDescription: "",
+      stepInstructions: "do it",
+      outputSchema: [{ key: "summary", type: "string", required: true }],
+      priorStepArtifacts: [],
+      workspaces: [{ name: "api", root: "/repos/api" }, { name: "web", root: "/repos/web" }],
+    });
+    expect(prompt).toMatch(/# Workspaces/);
+    expect(prompt).toMatch(/api/);
+    expect(prompt).toMatch(/\/repos\/web/);
+  });
+
+  it("omits the Workspaces section when none are provided", () => {
+    const prompt = composeAgentInitialPrompt({
+      goalTitle: "G",
+      goalDescription: "",
+      stepInstructions: "do it",
+      outputSchema: [{ key: "summary", type: "string", required: true }],
+      priorStepArtifacts: [],
+    });
+    expect(prompt).not.toMatch(/# Workspaces/);
+  });
 });
 
 describe("composeOrchestratorPrompt", () => {
@@ -53,6 +78,26 @@ describe("composeOrchestratorPrompt", () => {
     expect(sys).toContain("scoring");
     expect(sys).toContain("successScore");
     expect(sys).toContain("riskLevel");
+  });
+
+  it("advertises ask_user for blocking decisions and forbids 'finished' framing while waiting", () => {
+    const sys = composeOrchestratorPrompt({
+      triggerKind: "agent_response",
+      context: {} as never,
+      triggerPayload: {} as never,
+    }).systemPrompt;
+    expect(sys).toContain("ask_user");
+    expect(sys).toContain("questions");
+    expect(sys).toMatch(/waiting on the user|waiting, not done/i);
+  });
+
+  it("forbids putting a user-facing question in a prose body instead of ask_user", () => {
+    const sys = composeOrchestratorPrompt({
+      triggerKind: "agent_response",
+      context: {} as never,
+      triggerPayload: {} as never,
+    }).systemPrompt;
+    expect(sys).toMatch(/never place a question to the user in the body/i);
   });
 
   it("describes role and produces a structured response shape request", () => {
@@ -102,5 +147,26 @@ describe("composeOrchestratorPrompt", () => {
     expect(out.systemPrompt).toMatch(/"body"/);
     expect(out.systemPrompt).toMatch(/forward_to_agent[^]*"translated"/);
     expect(out.systemPrompt).toMatch(/revise_step[^]*"feedback"/);
+  });
+
+  it("instructs the mediator to honor completionPolicy", () => {
+    const { systemPrompt } = composeOrchestratorPrompt({
+      triggerKind: "agent_response",
+      context: {} as never,
+      triggerPayload: {} as never,
+    });
+    expect(systemPrompt).toMatch(/completionPolicy/);
+    expect(systemPrompt).toMatch(/interview/i);
+    expect(systemPrompt).toMatch(/open_questions/);
+  });
+
+  it("interview policy blocks completion on open questions but does not require a separate confirm ask_user", () => {
+    const { systemPrompt } = composeOrchestratorPrompt({
+      triggerKind: "agent_response",
+      context: {} as never,
+      triggerPayload: {} as never,
+    });
+    expect(systemPrompt).toMatch(/interview: never approve_step_complete while the step output's open_questions is non-empty/);
+    expect(systemPrompt).not.toMatch(/ask the user to confirm/);
   });
 });

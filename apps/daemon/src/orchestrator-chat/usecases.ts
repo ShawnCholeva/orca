@@ -6,6 +6,7 @@ import {
   CreateOrchestratorMessageRequest,
   CreateOrchestratorMessageResponse,
   OrchestratorChatMessage,
+  PendingQuestion,
   type CreateOrchestratorMessageRequest as CreateOrchestratorMessageRequestT,
   type CreateOrchestratorMessageResponse as CreateOrchestratorMessageResponseT,
   type DomainEvent,
@@ -13,6 +14,7 @@ import {
   type OrchestratorChatMessage as OrchestratorChatMessageT,
   type PendingApproval as PendingApprovalT,
   type PendingQuestion as PendingQuestionT,
+  type PendingQuestionAnswer as PendingQuestionAnswerT,
 } from "@orca/contracts";
 
 import type { EventBus } from "../events.js";
@@ -214,7 +216,7 @@ function readCurrentStep(
 }
 
 export function insertMessageWithEvent(
-  ctx: OrchestratorChatCtx,
+  ctx: Pick<OrchestratorChatCtx, "db" | "bus" | "idFactory">,
   message: {
     id: string;
     goalId: string;
@@ -281,4 +283,45 @@ export function insertMessageWithEvent(
     ...(message.pendingQuestion != null ? { pendingQuestion: message.pendingQuestion } : {}),
     ...(message.pendingApproval != null ? { pendingApproval: message.pendingApproval } : {}),
   });
+}
+
+export function recordWorkerQuestionAnswer(
+  ctx: Pick<OrchestratorChatCtx, "db" | "bus" | "idFactory">,
+  input: { goalId: string; questionId: string; answer: PendingQuestionAnswerT }
+): boolean {
+  const idFactory = ctx.idFactory ?? randomUUID;
+  const stagedEvent = ctx.db.transaction(() => {
+    const row = ctx.db
+      .prepare(
+        `SELECT id, pending_question FROM orchestrator_messages
+          WHERE goal_id = ? AND json_extract(pending_question, '$.questionId') = ?
+          LIMIT 1`
+      )
+      .get(input.goalId, input.questionId) as { id: string; pending_question: string } | undefined;
+    if (row == null) return undefined;
+
+    const pending = PendingQuestion.parse(JSON.parse(row.pending_question));
+    const next = { ...pending, answer: input.answer };
+    ctx.db
+      .prepare("UPDATE orchestrator_messages SET pending_question = ? WHERE id = ?")
+      .run(JSON.stringify(next), row.id);
+
+    const payload = { messageId: row.id };
+    const eventId = idFactory();
+    const result = ctx.db
+      .prepare("INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(eventId, "orchestrator.message.updated", input.goalId, JSON.stringify(payload), new Date().toISOString());
+    return {
+      seq: Number(result.lastInsertRowid),
+      id: eventId,
+      type: "orchestrator.message.updated",
+      goalId: input.goalId,
+      payload,
+      createdAt: new Date().toISOString(),
+    } satisfies DomainEvent;
+  })();
+
+  if (stagedEvent === undefined) return false;
+  ctx.bus.publish(stagedEvent);
+  return true;
 }

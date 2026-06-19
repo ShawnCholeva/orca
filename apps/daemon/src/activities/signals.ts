@@ -52,4 +52,12 @@ export type ActivitySignal =
       workflowRunId: string;
       stepRunId: string;
       agentSessionId: string | null;
+    }
+  | {
+      kind: "reasoning_note";
+      goalId: string;
+      workflowRunId: string;
+      stepRunId: string;
+      agentSessionId: string | null;
+      text: string;
     };

@@ -46,7 +46,7 @@ export interface AgentHookRouteDeps {
   ): Promise<"allow" | "deny">;
   onToolUse(
     sessionId: string,
-    payload: { toolName: string; toolInput: unknown; toolUseId: string },
+    payload: { toolName: string; toolInput: unknown; toolUseId: string; transcriptPath: string | undefined },
   ): Promise<void>;
 }
 
@@ -81,6 +81,7 @@ export function registerAgentHookRoutes(server: FastifyInstance, deps: AgentHook
         toolName: body.data.tool_name,
         toolInput: body.data.tool_input,
         toolUseId: body.data.tool_use_id,
+        transcriptPath: body.data.transcript_path,
       });
     }
     return { continue: true };

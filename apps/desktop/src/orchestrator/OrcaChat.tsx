@@ -26,7 +26,11 @@ import {
   listWorkflowTemplates,
   openEventStream,
   requestNextOrchestratorDecision,
+  requestStepRevision,
+  submitStepRevision,
   submitWorkerAnswers,
+  submitWorkerFreeText,
+  submitOrchestratorAnswer,
   startWorkflowRun,
   toErrorMessage,
 } from "../api";
@@ -106,6 +110,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const [messageError, setMessageError] = useState<string | null>(null);
   const [messageDraft, setMessageDraft] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [answerPendingSince, setAnswerPendingSince] = useState<number | null>(null);
   const [awaitingReply, setAwaitingReply] = useState(false);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -150,6 +155,16 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     scrolledGoalRef.current = selectedGoalId;
     scrolledMessageIdRef.current = lastId;
   }, [selectedGoalId, messagesLoading, messages]);
+
+  // The transient "Thinking…" row after an answer is a tail element, not a
+  // message, so the message-change scroll above doesn't fire — and an answered
+  // question no longer posts a user bubble to trigger it. Pin it into view.
+  useEffect(() => {
+    if (answerPendingSince == null) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [answerPendingSince]);
 
   useEffect(() => {
     if (!recoveryExpanded) return;
@@ -355,6 +370,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
         if (
           event.type === "goal.orchestrator_model_changed" ||
           event.type === "orchestrator.message.created" ||
+          event.type === "orchestrator.message.updated" ||
           event.type === "activity.changed" ||
           event.type.startsWith("workflow.") ||
           event.type.startsWith("recommendation.")
@@ -412,6 +428,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const orcaHasSpoken = messages.some((message) => message.role === "orchestrator");
   const liveActivity = pickLiveActivity(activities);
   const hasLiveActivity = liveActivity !== null;
+
   // Suppress the "starting" indicator once any persisted agent-activity card is
   // present — the agent has already emitted steps, so there is nothing to wait for.
   const hasAgentActivityCard = activities.some(isAgentActivityCard);
@@ -430,6 +447,43 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, [showStarting]);
+
+  // The latest unanswered worker question in the message list — the composer
+  // routes its text here instead of to the orchestrator when this is non-null.
+  const pendingWorkerQuestionId =
+    [...messages].reverse().find(
+      (m) => m.pendingQuestion?.source === "worker" && m.pendingQuestion.answer == null,
+    )?.pendingQuestion?.questionId ?? null;
+
+  const pendingRevisionRunId =
+    [...messages].reverse().find((m) => m.pendingRevision != null)?.pendingRevision?.workflowRunId ?? null;
+
+  function markAnswerPending() {
+    setAnswerPendingSince(Date.now());
+  }
+
+  // Clear the "Thinking…" tail once something the user can actually see replaces
+  // it. Gating on *visible* output (a timeline card, a live activity, or an orca
+  // reply) — not any activity — avoids a blank gap when the resumed agent first
+  // creates a turn with no steps yet: that activity is neither a timeline card
+  // nor a live activity, so the Thinking row must stay up until it has content.
+  useEffect(() => {
+    if (answerPendingSince == null) return;
+    const since = answerPendingSince;
+    const newCard = activities.some(
+      (a) => isTimelineCard(a) && Date.parse(a.createdAt) > since,
+    );
+    const newLiveActivity = hasLiveActivity;
+    const orcaReplied = messages.some((m) => m.role !== "user" && Date.parse(m.createdAt) > since);
+    if (newCard || newLiveActivity || orcaReplied) setAnswerPendingSince(null);
+  }, [answerPendingSince, activities, messages, hasLiveActivity]);
+
+  // Safety timeout: clear after 20s in case no event lands.
+  useEffect(() => {
+    if (answerPendingSince == null) return;
+    const id = setTimeout(() => setAnswerPendingSince(null), 20000);
+    return () => clearTimeout(id);
+  }, [answerPendingSince]);
 
   const startingElapsed =
     workflowState.stepRun?.startedAt != null
@@ -527,11 +581,50 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     }
   }
 
+  async function handleRevise(runId: string) {
+    try {
+      await requestStepRevision(runId);
+    } finally {
+      setRefreshNonce((current) => current + 1);
+    }
+  }
+
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedGoalId) return;
     const body = messageDraft.trim();
     if (!body) return;
+
+    const liveQuestionId = pendingWorkerQuestionId;
+    if (liveQuestionId) {
+      setSendingMessage(true);
+      setMessageError(null);
+      try {
+        await submitWorkerFreeText(selectedGoalId, liveQuestionId, body, { fromChat: true });
+        markAnswerPending();
+        setMessageDraft("");
+      } catch (err) {
+        setMessageError(toErrorMessage(err, "Failed to send your answer."));
+      } finally {
+        setSendingMessage(false);
+      }
+      return;
+    }
+
+    if (pendingRevisionRunId) {
+      setSendingMessage(true);
+      setMessageError(null);
+      try {
+        await submitStepRevision(pendingRevisionRunId, body);
+        markAnswerPending();
+        setMessageDraft("");
+      } catch (err) {
+        setMessageError(toErrorMessage(err, "Failed to send your revision."));
+      } finally {
+        setSendingMessage(false);
+      }
+      return;
+    }
 
     setSendingMessage(true);
     setMessageError(null);
@@ -691,6 +784,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                   key={entry.key}
                   message={entry.message}
                   goalId={selectedGoalId ?? ""}
+                  onWorkerAnswered={markAnswerPending}
                 />
               ) : entry.activity.sourceKind === "step_result" ? (
                 <ActivityCard key={entry.key} activity={entry.activity} />
@@ -711,11 +805,11 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
             {/* Tail indicators: the live agent bubble, the first-turn "starting"
                 hint, and the orchestrator "thinking" dots all pin to the bottom
                 of the timeline so they trail the most recent activity. */}
-            {liveActivity && (
+            {liveActivity &&
+              !(liveActivity.sourceKind === "step_confirmation_pending" &&
+                pendingRevisionRunId === liveActivity.workflowRunId) && (
               <LiveActivity
-                goalId={selectedGoalId ?? ""}
                 activity={liveActivity}
-                renderQuestionForm={WorkerQuestionForm}
                 renderProviderRecovery={({ runId, recovery }) => (
                   <ProviderRecoveryCard
                     runId={runId}
@@ -724,7 +818,14 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                   />
                 )}
                 onContinue={handleContinue}
+                onRevise={handleRevise}
               />
+            )}
+
+            {answerPendingSince != null && (
+              <div data-testid="answer-thinking">
+                <ThinkingRow label="Thinking…" />
+              </div>
             )}
 
             {showStarting && (
@@ -817,7 +918,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   );
 }
 
-function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage; goalId: string }) {
+export function ChatMessageRow({ message, goalId, onWorkerAnswered }: { message: OrchestratorChatMessage; goalId: string; onWorkerAnswered?: () => void }) {
   if (message.role === "user") {
     return (
       <div className="msg msg--user">
@@ -831,10 +932,40 @@ function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage;
       <OrcaMark />
       <div className="msg-body">
         <div className="mono msg-meta">orca</div>
-        <div className="orca-chat-message">{message.body}</div>
-        {message.pendingQuestion && (
-          <WorkerQuestionForm goalId={goalId} pending={message.pendingQuestion} />
-        )}
+        {/* For a question card the question itself leads; the third-person
+            framing body is suppressed so it isn't shown above the question. */}
+        {!message.pendingQuestion && <div className="orca-chat-message">{message.body}</div>}
+        {message.pendingQuestion && message.pendingQuestion.source === "worker" ? (
+          // Worker question: an agent's AskUserQuestion tool call is blocked on
+          // this; answering resolves it and persists the answer on the message.
+          <WorkerQuestionForm
+            goalId={message.goalId}
+            pending={message.pendingQuestion}
+            onSubmitAnswers={async (answers) => {
+              await submitWorkerAnswers(message.goalId, message.pendingQuestion!.questionId, answers);
+              onWorkerAnswered?.();
+            }}
+            onSubmitFreeText={async (text) => {
+              await submitWorkerFreeText(message.goalId, message.pendingQuestion!.questionId, text, { fromChat: false });
+              onWorkerAnswered?.();
+            }}
+          />
+        ) : message.pendingQuestion ? (
+          // Orchestrator ask_user: persist the answer on the question and forward
+          // it to the mediator as guidance — no echoed user bubble.
+          <WorkerQuestionForm
+            goalId={goalId}
+            pending={message.pendingQuestion}
+            onSubmitAnswers={async (answers) => {
+              await submitOrchestratorAnswer(goalId, message.pendingQuestion!.questionId, { answers });
+              onWorkerAnswered?.();
+            }}
+            onSubmitFreeText={async (text) => {
+              await submitOrchestratorAnswer(goalId, message.pendingQuestion!.questionId, { freeText: text });
+              onWorkerAnswered?.();
+            }}
+          />
+        ) : null}
         {message.pendingApproval && (
           <PermissionApprovalCard goalId={goalId} pending={message.pendingApproval} />
         )}
@@ -843,24 +974,53 @@ function ChatMessageRow({ message, goalId }: { message: OrchestratorChatMessage;
   );
 }
 
+type WorkerAnswer = { questionIndex: number; selectedLabels: string[] };
+
 function WorkerQuestionForm({
   goalId,
   pending,
+  onSubmitAnswers,
+  onSubmitFreeText,
 }: {
   goalId: string;
   pending: NonNullable<OrchestratorChatMessage["pendingQuestion"]>;
+  // Override the submit path. Default submits to the worker-question endpoint
+  // (an agent's live AskUserQuestion). Orchestrator ask_user questions pass a
+  // handler that posts the answer back as user guidance instead.
+  onSubmitAnswers?: (answers: WorkerAnswer[]) => Promise<void>;
+  // Both worker and orchestrator questions accept a free-text answer
+  // ("Something else"), so the user is never boxed into the offered options.
+  onSubmitFreeText?: (text: string) => Promise<void>;
 }) {
-  const [selections, setSelections] = useState<Record<number, string[]>>({});
-  const [submitted, setSubmitted] = useState(false);
+  // Once a question carries a persisted answer it renders read-only, driven by
+  // that answer — so the answered state survives reloads and goal switches and
+  // looks identical for worker and orchestrator questions.
+  const answer = pending.answer ?? null;
+  const [selections, setSelections] = useState<Record<number, string[]>>(() => selectionsFromAnswer(answer));
+  // Local optimistic flag for an in-flight submit; a persisted answer also makes
+  // the card read-only (covers composer/cross-session answers on this message).
+  const [localSubmitted, setLocalSubmitted] = useState(false);
   const [expired, setExpired] = useState(false);
+  const [freeTextSelected, setFreeTextSelected] = useState(answer?.freeText != null);
+  const [freeText, setFreeText] = useState(answer?.freeText ?? "");
+  const singleQuestion = pending.questions.length === 1;
+  const offerFreeText = singleQuestion && onSubmitFreeText != null;
+  const answeredViaChat = answer?.viaChat === true;
+  const submitted = localSubmitted || answer != null;
 
+  // Reset (or re-seed from a persisted answer) when the question itself changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on questionId only
   useEffect(() => {
-    setSelections({});
-    setSubmitted(false);
+    const a = pending.answer ?? null;
+    setSelections(selectionsFromAnswer(a));
+    setLocalSubmitted(false);
     setExpired(false);
+    setFreeTextSelected(a?.freeText != null);
+    setFreeText(a?.freeText ?? "");
   }, [pending.questionId]);
 
   function toggle(qIndex: number, label: string, multi: boolean) {
+    setFreeTextSelected(false);
     setSelections((prev) => {
       const current = prev[qIndex] ?? [];
       if (multi) {
@@ -871,26 +1031,60 @@ function WorkerQuestionForm({
     });
   }
 
-  const allAnswered = pending.questions.every((_, i) => (selections[i]?.length ?? 0) > 0);
+  function chooseFreeText() {
+    setSelections({});
+    setFreeTextSelected(true);
+  }
+
+  const optionsAnswered = pending.questions.every((_, i) => (selections[i]?.length ?? 0) > 0);
+  const canSubmit = freeTextSelected ? freeText.trim().length > 0 : optionsAnswered;
 
   async function handleSubmit() {
     const answers = pending.questions.map((_, i) => ({ questionIndex: i, selectedLabels: selections[i] ?? [] }));
-    setSubmitted(true);
+    setLocalSubmitted(true);
     try {
-      await submitWorkerAnswers(goalId, pending.questionId, answers);
+      if (freeTextSelected && onSubmitFreeText) await onSubmitFreeText(freeText.trim());
+      else if (onSubmitAnswers) await onSubmitAnswers(answers);
+      else await submitWorkerAnswers(goalId, pending.questionId, answers);
     } catch {
-      setSubmitted(false);
+      setLocalSubmitted(false);
       setExpired(true);
     }
   }
 
   return (
     <div className="orca-chat-question">
+      <div className="orca-chat-question-header">
+        <svg
+          className="orca-chat-question-header-icon"
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 16v-4" />
+          <path d="M12 8h.01" />
+        </svg>
+        <span>Question</span>
+      </div>
       {pending.questions.map((q, qi) => (
-        <fieldset key={qi} className="orca-chat-question-block" disabled={submitted}>
-          <legend className="orca-chat-question-legend">
-            {pending.questions.length > 1 && <span>{qi + 1} · </span>}<span>{q.question}</span>
-          </legend>
+        // A plain <div role="group"> rather than <fieldset>: WKWebView stretches
+        // a fieldset flex-item past its content, leaving a gap above the button.
+        <div
+          key={qi}
+          className="orca-chat-question-block"
+          role="group"
+          aria-labelledby={`${pending.questionId}-${qi}-label`}
+        >
+          <div className="orca-chat-question-legend" id={`${pending.questionId}-${qi}-label`}>
+            {pending.questions.length > 1 && <span className="orca-chat-question-index">{qi + 1} · </span>}<span>{q.question}</span>
+          </div>
           {q.options.map((opt, oi) => {
             const chosen = (selections[qi] ?? []).includes(opt.label);
             const recommendedSuffix = " (Recommended)";
@@ -905,35 +1099,91 @@ function WorkerQuestionForm({
                   name={`${pending.questionId}-${qi}`}
                   aria-label={opt.label}
                   checked={chosen}
+                  disabled={submitted}
                   onChange={() => toggle(qi, opt.label, q.multiSelect)}
                 />
-                <span className="orca-chat-option-label">
-                  {submitted && chosen ? "✓ " : ""}
-                  <span>{displayLabel}</span>
-                  {recommended ? (
-                    <>
-                      {" "}
+                <span className="orca-chat-option-content">
+                  <span className="orca-chat-option-head">
+                    <span className="orca-chat-option-label">
+                      {submitted && chosen ? "✓ " : ""}
+                      {displayLabel}
+                    </span>
+                    {recommended ? (
                       <span className="workflow-decision-badge">Recommended</span>
-                    </>
-                  ) : null}
+                    ) : null}
+                  </span>
+                  {opt.description ? <span className="orca-chat-option-desc">{opt.description}</span> : null}
                 </span>
-                {opt.description ? <span className="orca-chat-option-desc">{opt.description}</span> : null}
               </label>
             );
           })}
-        </fieldset>
+          {offerFreeText && qi === pending.questions.length - 1 ? (
+            <>
+              <label className="orca-chat-option-row">
+                <input
+                  type="radio"
+                  name={`${pending.questionId}-${qi}`}
+                  aria-label="Something else"
+                  checked={freeTextSelected}
+                  disabled={submitted}
+                  onChange={chooseFreeText}
+                />
+                <span className="orca-chat-option-content">
+                  <span className="orca-chat-option-head">
+                    <span className="orca-chat-option-label">Something else</span>
+                  </span>
+                  <span className="orca-chat-option-desc">Write your own response instead of picking an option.</span>
+                </span>
+              </label>
+              {freeTextSelected ? (
+                <textarea
+                  className="orca-chat-option-freetext"
+                  value={freeText}
+                  placeholder="Type your own answer…"
+                  rows={2}
+                  disabled={submitted}
+                  onChange={(e) => setFreeText(e.target.value)}
+                />
+              ) : null}
+            </>
+          ) : null}
+        </div>
       ))}
       <button
         type="button"
-        className="submit-button orca-chat-question-submit"
-        disabled={submitted || !allAnswered}
+        className="orca-chat-question-submit"
+        disabled={submitted || !canSubmit}
         onClick={() => void handleSubmit()}
       >
-        {submitted ? "Submitted" : "Submit"}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M5 12h14" />
+          <path d="M13 5l7 7-7 7" />
+        </svg>
+        <span>{submitted ? "Sent" : "Send answer"}</span>
       </button>
+      {answeredViaChat && <p className="orca-chat-question-answered-note">Answered in chat.</p>}
       {expired && <p className="form-error" role="alert">This question expired.</p>}
     </div>
   );
+}
+
+// Seed the form's per-question selections from a persisted options answer (if
+// any), so an already-answered question renders with the chosen options marked.
+function selectionsFromAnswer(
+  answer: NonNullable<OrchestratorChatMessage["pendingQuestion"]>["answer"] | null,
+): Record<number, string[]> {
+  if (answer?.answers == null) return {};
+  return Object.fromEntries(answer.answers.map((a) => [a.questionIndex, a.selectedLabels]));
 }
 
 function SystemCard(props: {

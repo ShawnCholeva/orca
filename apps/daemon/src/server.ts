@@ -58,6 +58,7 @@ import {
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
   type PendingQuestionItem,
+  type PendingQuestionAnswer,
   SubmitWorkerAnswersRequest,
   CheckSystemReadinessResponse,
   SubmitPermissionDecisionRequest,
@@ -65,7 +66,8 @@ import {
   PutSettingsRequest,
   ProviderRecoveryActionRequest,
   ProviderRecoverySwitchRequest,
-  ProviderRecoveryCheckpoint
+  ProviderRecoveryCheckpoint,
+  SubmitStepRevisionRequest
 } from '@orca/contracts';
 import type { Config } from './config.js';
 import { getDatabase } from './db.js';
@@ -181,15 +183,17 @@ import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js';
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerActivityRoutes } from './activities/routes.js';
-import { categorizeClaudeTool, narrateToolDetail } from './activities/claude-adapter.js';
+import { categorizeClaudeTool, isLowSignalTool, narrateToolDetail } from './activities/claude-adapter.js';
+import { deriveTurnSummary } from './activities/turn-summary.js';
 import { reconstructEditDiff } from './activities/diff.js';
 import type { ActivitySignal } from './activities/signals.js';
 import type { ActivityStoreCtx } from './activities/store.js';
 import { ActivityUpdater } from './activities/updater.js';
 import { reconcileStepResultActivities } from './activities/step-result-activity.js';
+import { extractReasoningSince } from './activities/transcript.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
-import { insertMessageWithEvent } from './orchestrator-chat/usecases.js';
+import { insertMessageWithEvent, recordWorkerQuestionAnswer } from './orchestrator-chat/usecases.js';
 import { registerShadowHookRoutes } from './shadow-hooks/routes.js';
 import { ShadowSessionManager, shadowSessionId, type ShadowAdapterId } from './orchestrator-llm/shadow-session.js';
 import {
@@ -210,7 +214,7 @@ import { WorkerSessionManager } from './workflows/orchestrator/worker-session.js
 import { resolveShadowProvider } from './orchestrator-llm/providers/registry.js';
 import { WorkerQuestionStore } from './workflows/orchestrator/worker-questions.js';
 import { PermissionApprovalStore } from './workflows/orchestrator/permission-approvals.js';
-import { validateAnswers, assembleAnswerReason } from './workflows/orchestrator/worker-answer-format.js';
+import { validateAnswers, assembleAnswerReason, assembleFreeTextReason } from './workflows/orchestrator/worker-answer-format.js';
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
 import {
   buildOrchestrationProviderCatalog,
@@ -557,6 +561,7 @@ export function createServer(
   const permissionApprovals = new PermissionApprovalStore(daemonContext.idFactory);
   const PERMISSION_DECISION_TIMEOUT_MS = 1_790_000; // ~under the 1800s PermissionRequest hook timeout; then deny
   const activityUpdater = new ActivityUpdater();
+  const reasoningCursors = new Map<string, number>();
   const activityCtx: ActivityStoreCtx = {
     db,
     bus: eventBus,
@@ -1386,6 +1391,26 @@ export function createServer(
     onToolUse: async (sessionId, payload) => {
       const stepContext = resolveStepContext(sessionId);
       if (!stepContext) return;
+      if (payload.transcriptPath) {
+        try {
+          const text = readFileSync(payload.transcriptPath, "utf8");
+          const prev = reasoningCursors.get(stepContext.stepRunId) ?? 0;
+          const { notes, cursor } = extractReasoningSince(text, prev);
+          reasoningCursors.set(stepContext.stepRunId, cursor);
+          for (const note of notes) {
+            applyActivitySafely("agent.reasoning_note", {
+              kind: "reasoning_note",
+              ...stepContext,
+              text: note,
+            });
+          }
+        } catch {
+          // transcript read/parse must never break tool_use handling
+        }
+      }
+      // Curate the checklist: searches and read-only look-around are low signal —
+      // skip them so the persisted steps stay substantive (reads, edits, runs).
+      if (isLowSignalTool(payload.toolName, payload.toolInput)) return;
       applyActivitySafely("agent.tool_use", {
         kind: "tool_use",
         ...stepContext,
@@ -1411,7 +1436,7 @@ export function createServer(
         const adapterId = (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(sessionId) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code";
         const canRemember = resolveShadowProvider(adapterId as ShadowAdapterId).supportsPermissionPersistence;
         insertMessageWithEvent(
-          { db, bus: eventBus, modelProviderRegistry: daemonContext.modelProviderRegistry, now: daemonContext.now, idFactory: daemonContext.idFactory },
+          { db, bus: eventBus, idFactory: daemonContext.idFactory },
           {
             id: daemonContext.idFactory(),
             goalId,
@@ -1449,17 +1474,34 @@ export function createServer(
         questions: payload.questions,
       });
       if (isNew) {
-        const stepContext = resolveStepContext(sessionId);
-        if (stepContext) {
-          applyActivitySafely("agent.question_pending", {
-            kind: "question_pending",
-            stepRunId: stepContext.stepRunId,
-            text: orcaVoiceQuestionText(payload.questions),
+        // Persist the worker question as a first-class chat message so it lives
+        // in chat history and can render an answered state later.
+        insertMessageWithEvent(
+          { db, bus: eventBus, idFactory: daemonContext.idFactory },
+          {
+            id: daemonContext.idFactory(),
+            goalId,
+            role: "orchestrator",
+            body: orcaVoiceQuestionText(payload.questions),
+            correlationId: daemonContext.idFactory(),
+            createdAt: daemonContext.now(),
             pendingQuestion: {
               questionId,
               toolUseId: payload.toolUseId,
+              source: "worker",
               questions: payload.questions,
             },
+          },
+        );
+        // Settle the current activity thread (empty summary -> expireLive) so the
+        // agent's post-answer work opens a fresh thread after the question bubble.
+        const stepContext = resolveStepContext(sessionId);
+        if (stepContext) {
+          applyActivitySafely("agent.question_pending", {
+            kind: "turn_completed",
+            stepRunId: stepContext.stepRunId,
+            summary: "",
+            confidence: null,
           });
         }
       }
@@ -1484,21 +1526,44 @@ export function createServer(
     // Not-found OR a goal mismatch both read as "not found" for this goal — never
     // let a question scoped to one goal be answered through another goal's URL.
     if (!pending || pending.goalId !== goalId) { reply.status(404); return { error: { code: "question_not_found" } }; }
-    const invalid = validateAnswers(pending.questions, parsed.data.answers);
-    if (invalid) { reply.status(400); return { error: { code: invalid } }; }
-    const reason = assembleAnswerReason(pending.questions, parsed.data.answers);
+
+    let reason: string;
+    let answer: PendingQuestionAnswer;
+    if (parsed.data.freeText != null) {
+      reason = assembleFreeTextReason(parsed.data.freeText);
+      answer = parsed.data.fromChat ? { viaChat: true } : { freeText: parsed.data.freeText };
+    } else {
+      const invalid = validateAnswers(pending.questions, parsed.data.answers!);
+      if (invalid) { reply.status(400); return { error: { code: invalid } }; }
+      reason = assembleAnswerReason(pending.questions, parsed.data.answers!);
+      answer = { answers: parsed.data.answers! };
+    }
+
     const ok = workerQuestions.resolveAnswers(questionId, reason);
     if (!ok) { reply.status(409); return { error: { code: "already_answered" } }; }
-    const stepContext = resolveStepContext(pending.sessionId);
-    if (stepContext) {
-      const headers = pending.questions.map((question) => question.header).join(", ");
-      applyActivitySafely("agent.question_answered", {
-        kind: "turn_completed",
-        stepRunId: stepContext.stepRunId,
-        summary: `Asked about ${headers}; recorded your answer.`,
-        confidence: null,
-      });
+
+    // Composer answers post the user's text as a chat message; card answers
+    // (options or inline "Something else") render inline on the question bubble
+    // and add no separate user message.
+    if (parsed.data.freeText != null && parsed.data.fromChat) {
+      insertMessageWithEvent(
+        { db, bus: eventBus, idFactory: daemonContext.idFactory },
+        {
+          id: daemonContext.idFactory(),
+          goalId,
+          role: "user",
+          body: parsed.data.freeText,
+          correlationId: daemonContext.idFactory(),
+          createdAt: daemonContext.now(),
+        },
+      );
     }
+
+    recordWorkerQuestionAnswer(
+      { db, bus: eventBus, idFactory: daemonContext.idFactory },
+      { goalId, questionId, answer },
+    );
+
     return { ok: true };
   });
 
@@ -1583,6 +1648,32 @@ export function createServer(
       getDatabase(),
       daemonContext.now,
       request.params.id,
+      { bus: eventBus, idFactory: daemonContext.idFactory }
+    );
+    return reply.code(202).send({ ok: true });
+  });
+
+  server.post<{ Params: { id: string } }>("/v1/workflows/runs/:id/revise-step", async (request, reply) => {
+    await orchestratorService.requestStepRevision(
+      getDatabase(),
+      daemonContext.now,
+      request.params.id,
+      { bus: eventBus, idFactory: daemonContext.idFactory }
+    );
+    return reply.code(202).send({ ok: true });
+  });
+
+  server.post<{ Params: { id: string } }>("/v1/workflows/runs/:id/revise-step/submit", async (request, reply) => {
+    const parsed = SubmitStepRevisionRequest.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: "validation_failed", issues: parsed.error.issues };
+    }
+    await orchestratorService.submitStepRevision(
+      getDatabase(),
+      daemonContext.now,
+      request.params.id,
+      parsed.data.feedback,
       { bus: eventBus, idFactory: daemonContext.idFactory }
     );
     return reply.code(202).send({ ok: true });
@@ -2189,14 +2280,6 @@ function orcaVoiceQuestionText(questions: PendingQuestionItem[]): string {
   return `I need your input on a few things, starting with ${first.header.toLowerCase()}.`;
 }
 
-function deriveTurnSummary(responseText: string): string {
-  const firstMeaningfulLine = responseText
-    .split(/\r\n?|\n/)
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  return (firstMeaningfulLine ?? "").slice(0, 280);
-}
-
 function postOrchestratorChatReply(
   db: ReturnType<typeof getDatabase>,
   bus: EventBus,
@@ -2206,7 +2289,7 @@ function postOrchestratorChatReply(
 ): void {
   try {
     insertMessageWithEvent(
-      { db, bus, modelProviderRegistry: ctx.modelProviderRegistry, now: ctx.now, idFactory: ctx.idFactory },
+      { db, bus, idFactory: ctx.idFactory },
       {
         id: ctx.idFactory(),
         goalId,

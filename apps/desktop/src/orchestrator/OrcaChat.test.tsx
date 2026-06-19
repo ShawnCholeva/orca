@@ -22,12 +22,16 @@ const requestNextOrchestratorDecisionMock = vi.fn();
 const listWorkflowTemplatesMock = vi.fn();
 const startWorkflowRunMock = vi.fn();
 const submitWorkerAnswersMock = vi.fn();
+const submitWorkerFreeTextMock = vi.fn();
+const submitOrchestratorAnswerMock = vi.fn();
 const submitPermissionDecisionMock = vi.fn();
 const setWorkerPermissionModeMock = vi.fn();
 const waitForProviderRecoveryMock = vi.fn();
 const retryProviderRecoveryMock = vi.fn();
 const refreshProviderRecoveryMock = vi.fn();
 const switchProviderRecoveryMock = vi.fn();
+const requestStepRevisionMock = vi.fn();
+const submitStepRevisionMock = vi.fn();
 
 vi.mock("../api", () => ({
   confirmStep: (...args: unknown[]) => confirmStepMock(...args),
@@ -45,12 +49,16 @@ vi.mock("../api", () => ({
   listWorkflowTemplates: (...args: unknown[]) => listWorkflowTemplatesMock(...args),
   startWorkflowRun: (...args: unknown[]) => startWorkflowRunMock(...args),
   submitWorkerAnswers: (...args: unknown[]) => submitWorkerAnswersMock(...args),
+  submitWorkerFreeText: (...args: unknown[]) => submitWorkerFreeTextMock(...args),
+  submitOrchestratorAnswer: (...args: unknown[]) => submitOrchestratorAnswerMock(...args),
   submitPermissionDecision: (...args: unknown[]) => submitPermissionDecisionMock(...args),
   setWorkerPermissionMode: (...args: unknown[]) => setWorkerPermissionModeMock(...args),
   waitForProviderRecovery: (...args: unknown[]) => waitForProviderRecoveryMock(...args),
   retryProviderRecovery: (...args: unknown[]) => retryProviderRecoveryMock(...args),
   refreshProviderRecovery: (...args: unknown[]) => refreshProviderRecoveryMock(...args),
   switchProviderRecovery: (...args: unknown[]) => switchProviderRecoveryMock(...args),
+  requestStepRevision: (...args: unknown[]) => requestStepRevisionMock(...args),
+  submitStepRevision: (...args: unknown[]) => submitStepRevisionMock(...args),
   toErrorMessage: (err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback,
 }));
@@ -203,6 +211,10 @@ describe("OrcaChat", () => {
     startWorkflowRunMock.mockReset();
     submitWorkerAnswersMock.mockReset();
     submitWorkerAnswersMock.mockResolvedValue(undefined);
+    submitWorkerFreeTextMock.mockReset();
+    submitWorkerFreeTextMock.mockResolvedValue(undefined);
+    submitOrchestratorAnswerMock.mockReset();
+    submitOrchestratorAnswerMock.mockResolvedValue(undefined);
     submitPermissionDecisionMock.mockReset();
     submitPermissionDecisionMock.mockResolvedValue(undefined);
     setWorkerPermissionModeMock.mockReset();
@@ -218,6 +230,10 @@ describe("OrcaChat", () => {
     refreshProviderRecoveryMock.mockResolvedValue(undefined);
     switchProviderRecoveryMock.mockReset();
     switchProviderRecoveryMock.mockResolvedValue(undefined);
+    requestStepRevisionMock.mockReset();
+    requestStepRevisionMock.mockResolvedValue(undefined);
+    submitStepRevisionMock.mockReset();
+    submitStepRevisionMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -575,7 +591,7 @@ describe("OrcaChat", () => {
     expect(openEventStreamMock).toHaveBeenCalledTimes(1);
   });
 
-  it("hides the previous goal activity while the next goal load is pending", async () => {
+  it("does not submit a goal-1 worker answer to goal-2 after switching goals", async () => {
     getGoalDetailMock.mockImplementation((goalId: string) => {
       if (goalId === "goal-1") {
         return Promise.resolve({ goal, refinement: null, workspaces: [] });
@@ -583,14 +599,22 @@ describe("OrcaChat", () => {
       return new Promise(() => {});
     });
     listOrchestratorMessagesMock.mockImplementation((goalId: string) => {
-      if (goalId === "goal-1") return Promise.resolve({ messages: [] });
-      return new Promise(() => {});
-    });
-    listActivitiesMock.mockImplementation((goalId: string) => {
       if (goalId === "goal-1") {
-        return Promise.resolve([pausedActivity("q1", "Keep goal one")]);
+        return Promise.resolve({
+          messages: [
+            {
+              id: "wq-1", goalId: "goal-1", role: "orchestrator", kind: "message",
+              body: "I need your input.", correlationId: null, createdAt: now,
+              pendingQuestion: {
+                questionId: "q1", toolUseId: "t1", source: "worker",
+                questions: [{ header: "Approach", question: "Question q1?", multiSelect: false,
+                  options: [{ label: "Keep goal one", description: "Option description" }] }],
+              },
+            },
+          ],
+        });
       }
-      return new Promise<Activity[]>(() => {});
+      return new Promise(() => {});
     });
     const { OrcaChat } = await import("./OrcaChat");
 
@@ -613,9 +637,9 @@ describe("OrcaChat", () => {
       />,
     );
 
-    const staleSubmit = screen.queryByRole("button", { name: /submit/i });
+    // Any stale submit button on screen must not route to goal-2.
+    const staleSubmit = screen.queryByRole("button", { name: /send answer/i });
     if (staleSubmit) fireEvent.click(staleSubmit);
-    expect(screen.queryByText("Question q1?")).not.toBeInTheDocument();
     expect(submitWorkerAnswersMock).not.toHaveBeenCalledWith(
       "goal-2",
       "q1",
@@ -674,35 +698,28 @@ describe("OrcaChat", () => {
 
   it("shows a Recommended badge but submits the original option label", async () => {
     setupRunLoad();
-    listActivitiesMock.mockResolvedValue([
-      {
-        ...activeActivity,
-        status: "paused_for_input",
-        currentText: "I need your call on the implementation approach.",
-        sourceKind: "question_pending",
-        pendingQuestion: {
-          questionId: "question-1",
-          toolUseId: "tool-1",
-          questions: [
-            {
-              header: "Approach",
-              question: "Which approach should I use?",
-              multiSelect: false,
-              options: [
-                {
-                  label: "Use hooks (Recommended)",
-                  description: "Matches the existing integration.",
-                },
-                {
-                  label: "Poll the API",
-                  description: "Adds a separate refresh loop.",
-                },
-              ],
-            },
-          ],
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "wq-1", goalId: "goal-1", role: "orchestrator", kind: "message",
+          body: "I need your call on the implementation approach.", correlationId: null, createdAt: now,
+          pendingQuestion: {
+            questionId: "question-1", toolUseId: "tool-1", source: "worker",
+            questions: [
+              {
+                header: "Approach",
+                question: "Which approach should I use?",
+                multiSelect: false,
+                options: [
+                  { label: "Use hooks (Recommended)", description: "Matches the existing integration." },
+                  { label: "Poll the API", description: "Adds a separate refresh loop." },
+                ],
+              },
+            ],
+          },
         },
-      },
-    ]);
+      ],
+    });
     const { OrcaChat } = await import("./OrcaChat");
 
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
@@ -717,7 +734,7 @@ describe("OrcaChat", () => {
     });
     expect(recommendedOption).toHaveAccessibleName("Use hooks (Recommended)");
     fireEvent.click(recommendedOption);
-    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
 
     await waitFor(() =>
       expect(submitWorkerAnswersMock).toHaveBeenCalledWith(
@@ -728,11 +745,169 @@ describe("OrcaChat", () => {
     );
   });
 
-  it("resets question state when a refreshed activity has a new question id", async () => {
+  it("offers 'Something else' on a live worker question and submits free text", async () => {
     setupRunLoad();
-    listActivitiesMock
-      .mockResolvedValueOnce([pausedActivity("q1", "First option")])
-      .mockResolvedValueOnce([pausedActivity("q2", "Second option")]);
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "wq-1", goalId: "goal-1", role: "orchestrator", kind: "message",
+          body: "I need your call on the approach.", correlationId: null, createdAt: now,
+          pendingQuestion: {
+            questionId: "question-1", toolUseId: "tool-1", source: "worker",
+            questions: [
+              {
+                header: "Approach",
+                question: "Which approach should I use?",
+                multiSelect: false,
+                options: [
+                  { label: "Use hooks", description: "Matches the existing integration." },
+                  { label: "Poll the API", description: "Adds a separate refresh loop." },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("Which approach should I use?");
+    fireEvent.click(screen.getByRole("radio", { name: /something else/i }));
+    fireEvent.change(screen.getByPlaceholderText(/your own answer/i), {
+      target: { value: "a dedicated workspaces tab" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
+
+    await waitFor(() =>
+      expect(submitWorkerFreeTextMock).toHaveBeenCalledWith(
+        "goal-1",
+        "question-1",
+        "a dedicated workspaces tab",
+        expect.anything(),
+      ),
+    );
+  });
+
+  it("answers an orchestrator ask_user via the orchestrator-answer endpoint, with no user bubble and a Thinking row", async () => {
+    setupRunLoad();
+    const askMessage: OrchestratorChatMessage = {
+      id: "msg-ask",
+      goalId: "goal-1",
+      role: "orchestrator",
+      kind: "message",
+      body: "Step 1 agent needs a decision before it can continue.",
+      correlationId: "corr-ask",
+      createdAt: now,
+      pendingQuestion: {
+        questionId: "oq-1",
+        toolUseId: "ot-1",
+        questions: [
+          {
+            header: "State",
+            question: "Which did you mean by 'state'?",
+            multiSelect: false,
+            options: [
+              { label: "Active / Archived", description: "Group by goal status." },
+              { label: "Running / Idle", description: "Group by active workflow run." },
+            ],
+          },
+        ],
+      },
+    };
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [askMessage] });
+    createOrchestratorMessageMock.mockResolvedValue({ message: askMessage, reply: null });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("Which did you mean by 'state'?");
+    // The question leads; the third-person framing body is suppressed.
+    expect(
+      screen.queryByText("Step 1 agent needs a decision before it can continue."),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Active / Archived" }));
+    fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
+
+    await waitFor(() =>
+      expect(submitOrchestratorAnswerMock).toHaveBeenCalledWith("goal-1", "oq-1", {
+        answers: [{ questionIndex: 0, selectedLabels: ["Active / Archived"] }],
+      }),
+    );
+    // No echoed user chat message; the Thinking row shows instead.
+    expect(createOrchestratorMessageMock).not.toHaveBeenCalled();
+    expect(submitWorkerAnswersMock).not.toHaveBeenCalled();
+    expect(await screen.findByTestId("answer-thinking")).toBeInTheDocument();
+  });
+
+  it("offers 'Something else' on an orchestrator ask_user question and submits free text", async () => {
+    setupRunLoad();
+    const askMessage: OrchestratorChatMessage = {
+      id: "msg-ask2",
+      goalId: "goal-1",
+      role: "orchestrator",
+      kind: "message",
+      body: "Step 1 agent needs a decision.",
+      correlationId: "corr-ask2",
+      createdAt: now,
+      pendingQuestion: {
+        questionId: "oq-2",
+        toolUseId: "ot-2",
+        questions: [
+          {
+            header: "Surface",
+            question: "Which part of Orca?",
+            multiSelect: false,
+            options: [{ label: "Desktop UI", description: "the app" }],
+          },
+        ],
+      },
+    };
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [askMessage] });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("Which part of Orca?");
+    fireEvent.click(screen.getByRole("radio", { name: /something else/i }));
+    fireEvent.change(screen.getByPlaceholderText(/your own answer/i), {
+      target: { value: "the workflows tab" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
+
+    await waitFor(() =>
+      expect(submitOrchestratorAnswerMock).toHaveBeenCalledWith("goal-1", "oq-2", {
+        freeText: "the workflows tab",
+      }),
+    );
+    expect(createOrchestratorMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("renders a new chat message question fresh when the question id changes", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock
+      .mockResolvedValueOnce({
+        messages: [{
+          id: "wq-1", goalId: "goal-1", role: "orchestrator", kind: "message",
+          body: "I need input.", correlationId: null, createdAt: now,
+          pendingQuestion: {
+            questionId: "q1", toolUseId: "t1", source: "worker",
+            questions: [{ header: "Approach", question: "Question q1?", multiSelect: false,
+              options: [{ label: "First option", description: "Option description" }] }],
+          },
+        }],
+      })
+      .mockResolvedValueOnce({
+        messages: [{
+          id: "wq-2", goalId: "goal-1", role: "orchestrator", kind: "message",
+          body: "Another question.", correlationId: null, createdAt: now,
+          pendingQuestion: {
+            questionId: "q2", toolUseId: "t2", source: "worker",
+            questions: [{ header: "Approach", question: "Question q2?", multiSelect: false,
+              options: [{ label: "Second option", description: "Option description" }] }],
+          },
+        }],
+      });
     let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
     openEventStreamMock.mockImplementation(
       ({ onEvent }: { onEvent: (event: { type: string; goalId: string }) => void }) => {
@@ -745,18 +920,17 @@ describe("OrcaChat", () => {
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
     fireEvent.click(await screen.findByRole("radio", { name: /First option/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
-    expect(await screen.findByRole("button", { name: "Submitted" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
+    expect(await screen.findByRole("button", { name: "Sent" })).toBeDisabled();
 
     act(() => {
-      capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
+      capturedOnEvent!({ type: "orchestrator.message.created", goalId: "goal-1" });
     });
 
     const secondOption = await screen.findByRole("radio", { name: /Second option/ });
     expect(secondOption).not.toBeChecked();
     expect(secondOption).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled();
-    expect(screen.queryByText("This question expired.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send answer" })).toBeDisabled();
   });
 
   it("shows a thinking indicator while a blocking (one_shot) send is in flight, before the reply lands", async () => {
@@ -933,14 +1107,23 @@ describe("OrcaChat", () => {
     fireEvent.click(screen.getByRole("radio", { name: /Red/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /^A/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /^B/i }));
-    const submit = screen.getByRole("button", { name: /submit/i });
+    const submit = screen.getByRole("button", { name: /send answer/i });
     expect(submit).toBeEnabled();
     fireEvent.click(submit);
-    await waitFor(() => expect(submitWorkerAnswersMock).toHaveBeenCalledWith("goal-1", "q1", [
-      { questionIndex: 0, selectedLabels: ["Red"] },
-      { questionIndex: 1, selectedLabels: ["A", "B"] },
-    ]));
-    await waitFor(() => expect(screen.getByRole("button", { name: /submit/i })).toBeDisabled());
+    // A message-level question is an orchestrator ask_user: the answer persists
+    // on the question and forwards to the mediator — not the worker endpoint and
+    // not a separate user chat message.
+    await waitFor(() =>
+      expect(submitOrchestratorAnswerMock).toHaveBeenCalledWith("goal-1", "q1", {
+        answers: [
+          { questionIndex: 0, selectedLabels: ["Red"] },
+          { questionIndex: 1, selectedLabels: ["A", "B"] },
+        ],
+      }),
+    );
+    expect(createOrchestratorMessageMock).not.toHaveBeenCalled();
+    expect(submitWorkerAnswersMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sent" })).toBeDisabled());
   });
 
   it("keeps Submit disabled until every question is answered", async () => {
@@ -952,13 +1135,13 @@ describe("OrcaChat", () => {
 
     await screen.findByText("favorite color?");
     fireEvent.click(screen.getByRole("radio", { name: /Red/i })); // Q2 still unanswered
-    expect(screen.getByRole("button", { name: /submit/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /send answer/i })).toBeDisabled();
   });
 
   it("shows an expired notice and re-enables Submit when the answer is rejected", async () => {
     setupRunLoad();
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [pendingMsg] });
-    submitWorkerAnswersMock.mockRejectedValueOnce(new Error("question_not_found"));
+    submitOrchestratorAnswerMock.mockRejectedValueOnce(new Error("question_not_found"));
     const { OrcaChat } = await import("./OrcaChat");
 
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
@@ -966,11 +1149,11 @@ describe("OrcaChat", () => {
     await screen.findByText("favorite color?");
     fireEvent.click(screen.getByRole("radio", { name: /Red/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /^A/i }));
-    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
 
     await screen.findByText("This question expired.");
     // Controls came back: Submit is enabled again (selections still satisfy the gate).
-    expect(screen.getByRole("button", { name: /submit/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /send answer/i })).toBeEnabled();
   });
 
   it("renders the permission toggle reflecting the goal's mode when a goal is selected", async () => {
@@ -1356,6 +1539,178 @@ describe("OrcaChat", () => {
     // silent after the last step.
     await screen.findByText("Workflow complete");
   });
+
+  it("composer reroutes to submitStepRevision when a pendingRevision message is present", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-rev", goalId: "goal-1", role: "orchestrator", kind: "message",
+          body: "Here is the step result.", correlationId: "c1", createdAt: now,
+          pendingRevision: { workflowRunId: "r1" },
+        },
+      ],
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByPlaceholderText("Message Orca…");
+    fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
+      target: { value: "Please add more tests." },
+    });
+    fireEvent.click(screen.getByText("Send"));
+
+    await waitFor(() =>
+      expect(submitStepRevisionMock).toHaveBeenCalledWith("r1", "Please add more tests."),
+    );
+    expect(createOrchestratorMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("clicking the Revise button on a step-confirmation-pending activity calls requestStepRevision", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity,
+        id: "a-confirm-revise",
+        workflowRunId: "r1",
+        status: "paused_for_input",
+        sourceKind: "step_confirmation_pending",
+        currentText: "Completeness 90% · Ready for handoff.",
+      },
+    ]);
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const btn = await screen.findByTestId("step-confirm-revise");
+    fireEvent.click(btn);
+
+    await waitFor(() =>
+      expect(requestStepRevisionMock).toHaveBeenCalledWith("r1"),
+    );
+  });
+
+  it("composer answers the pending worker question via submitWorkerFreeText and shows Thinking…", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "wq-1", goalId: "goal-1", role: "orchestrator", kind: "message",
+          body: "I need your call on the approach.", correlationId: null, createdAt: now,
+          pendingQuestion: {
+            questionId: "question-1", toolUseId: "tool-1", source: "worker",
+            questions: [
+              {
+                header: "Approach",
+                question: "Which approach should I use?",
+                multiSelect: false,
+                options: [{ label: "Use hooks", description: "x" }],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("Which approach should I use?");
+    fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
+      target: { value: "a dedicated workspaces tab" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(submitWorkerFreeTextMock).toHaveBeenCalledWith(
+        "goal-1",
+        "question-1",
+        "a dedicated workspaces tab",
+        { fromChat: true },
+      ),
+    );
+    expect(createOrchestratorMessageMock).not.toHaveBeenCalled();
+    // The transient "Thinking…" indicator should appear after answering.
+    expect(await screen.findByTestId("answer-thinking")).toBeInTheDocument();
+    expect(screen.getByTestId("answer-thinking")).toHaveTextContent("Thinking…");
+  });
+
+  it("keeps the Thinking… row when an invisible activity lands, and clears it only once a visible card arrives", async () => {
+    setupRunLoad();
+    listActivitiesMock.mockResolvedValue([]);
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "wq-1", goalId: "goal-1", role: "orchestrator", kind: "message",
+          body: "I need your call on the approach.", correlationId: null, createdAt: now,
+          pendingQuestion: {
+            questionId: "question-1", toolUseId: "tool-1", source: "worker",
+            questions: [
+              {
+                header: "Approach",
+                question: "Which approach should I use?",
+                multiSelect: false,
+                options: [{ label: "Use hooks", description: "x" }],
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+    openEventStreamMock.mockImplementation(
+      ({ onEvent }: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+        capturedOnEvent = onEvent;
+        return { close: vi.fn() };
+      },
+    );
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("Which approach should I use?");
+    await waitFor(() => expect(listActivitiesMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
+      target: { value: "use hooks" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByTestId("answer-thinking")).toBeInTheDocument();
+
+    // The agent resumes and creates a fresh turn that has no steps yet: it is
+    // neither a timeline card nor a live activity, so nothing visible has
+    // replaced the Thinking row — it must stay up rather than blank out.
+    const invisibleTurn: Activity = {
+      ...activeActivity,
+      id: "activity-resumed",
+      status: "active",
+      sourceKind: "tool_use",
+      steps: [],
+      createdAt: "2099-01-01T00:00:00.000Z",
+    };
+    listActivitiesMock.mockResolvedValue([invisibleTurn]);
+    act(() => {
+      capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
+    });
+
+    await waitFor(() => expect(listActivitiesMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("answer-thinking")).toBeInTheDocument();
+
+    // Once the turn accumulates a step it becomes a visible agent-activity card,
+    // which is what should retire the Thinking row.
+    const visibleCard: Activity = {
+      ...invisibleTurn,
+      steps: [{ id: "s1", text: "Wiring up the hook...", category: "editing", status: "active", createdAt: "2099-01-01T00:00:00.000Z" }],
+    };
+    listActivitiesMock.mockResolvedValue([visibleCard]);
+    act(() => {
+      capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
+    });
+
+    expect(await screen.findByText("Wiring up the hook...")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("answer-thinking")).toBeNull());
+  });
 });
 
 describe("formatElapsed", () => {
@@ -1366,5 +1721,66 @@ describe("formatElapsed", () => {
     expect(formatElapsed(65_000)).toBe("1:05");
     expect(formatElapsed(600_000)).toBe("10:00");
     expect(formatElapsed(-1_000)).toBe("0:00");
+  });
+});
+
+const workerMsg = {
+  id: "m1", goalId: "g1", role: "orchestrator", kind: "message", body: "Which?",
+  correlationId: null, createdAt: "2026-06-18T00:00:00.000Z",
+  pendingQuestion: {
+    questionId: "q1", toolUseId: "t1", source: "worker",
+    questions: [{ header: "H", question: "Which?", multiSelect: false, options: [{ label: "A", description: "a" }] }],
+  },
+} as const;
+
+describe("ChatMessageRow worker questions", () => {
+  beforeEach(() => submitWorkerAnswersMock.mockClear());
+
+  it("submits a pending worker question to the worker endpoint", async () => {
+    const { ChatMessageRow } = await import("./OrcaChat");
+    render(<ChatMessageRow message={workerMsg as never} goalId="g1" />);
+    fireEvent.click(screen.getByLabelText("A"));
+    fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
+    await waitFor(() =>
+      expect(submitWorkerAnswersMock).toHaveBeenCalledWith("g1", "q1", [{ questionIndex: 0, selectedLabels: ["A"] }]),
+    );
+  });
+
+  it("renders an answered question read-only: chosen option marked, button shows Sent", async () => {
+    const { ChatMessageRow } = await import("./OrcaChat");
+    const answered = { ...workerMsg, pendingQuestion: { ...workerMsg.pendingQuestion, answer: { answers: [{ questionIndex: 0, selectedLabels: ["A"] }] } } };
+    render(<ChatMessageRow message={answered as never} goalId="g1" />);
+    expect(screen.getByText(/✓\s*A/)).toBeInTheDocument();
+    const sent = screen.getByRole("button", { name: "Sent" });
+    expect(sent).toBeDisabled();
+    // 'Something else' stays listed (unchecked) so the offered options are complete.
+    expect(screen.getByRole("radio", { name: /something else/i })).not.toBeChecked();
+  });
+
+  it("shows the inline free-text answer when answered with 'Something else'", async () => {
+    const { ChatMessageRow } = await import("./OrcaChat");
+    const answered = { ...workerMsg, pendingQuestion: { ...workerMsg.pendingQuestion, answer: { freeText: "do it my way" } } };
+    render(<ChatMessageRow message={answered as never} goalId="g1" />);
+    expect(screen.getByDisplayValue("do it my way")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sent" })).toBeDisabled();
+  });
+
+  it("shows an answered-in-chat note when answered via the composer", async () => {
+    const { ChatMessageRow } = await import("./OrcaChat");
+    const answered = { ...workerMsg, pendingQuestion: { ...workerMsg.pendingQuestion, answer: { viaChat: true } } };
+    render(<ChatMessageRow message={answered as never} goalId="g1" />);
+    expect(screen.getByText(/answered in chat/i)).toBeInTheDocument();
+  });
+
+  it("flips to read-only when a persisted answer lands on the same question message", async () => {
+    const { ChatMessageRow } = await import("./OrcaChat");
+    const { rerender } = render(<ChatMessageRow message={workerMsg as never} goalId="g1" />);
+    // Pending: still selectable, no Sent button yet.
+    expect(screen.getByRole("button", { name: /send answer/i })).toBeInTheDocument();
+    // The composer answer persists {viaChat:true} on the same message id.
+    const answered = { ...workerMsg, pendingQuestion: { ...workerMsg.pendingQuestion, answer: { viaChat: true } } };
+    rerender(<ChatMessageRow message={answered as never} goalId="g1" />);
+    expect(screen.getByRole("button", { name: "Sent" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "A" })).toBeDisabled();
   });
 });

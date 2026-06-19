@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrchestratorContext } from "./context.js";
+import { buildOrchestratorContext, type OrchestratorContextInput } from "./context.js";
 
 describe("buildOrchestratorContext", () => {
   it("assembles goal + run + current step + conversation + prior artifacts", () => {
@@ -34,5 +34,21 @@ describe("buildOrchestratorContext", () => {
     });
     expect(ctx.conversation.currentStepAgentTurns.length).toBeLessThan(20);
     expect(ctx.conversation.currentStepAgentTurns.at(-1)?.ts).toBe("t19");
+  });
+});
+
+function baseInput(): OrchestratorContextInput {
+  return {
+    goal: { id: "g1", title: "T", description: "D", attachedWorkspaces: [] },
+    run: { templateId: "tpl", templateVersion: 1, ordinal: 0, status: "active" },
+    currentStep: { id: "frame", instructions: "i", outputSchema: [{ key: "x", type: "string", required: true }], agentAdapterId: "claude-code", executionMode: "shadow_session", completionPolicy: "interview" },
+    chatMessages: [], currentStepAgentTurns: [], priorStepArtifacts: [], payloadBudgetBytes: 64 * 1024,
+  };
+}
+
+describe("buildOrchestratorContext completionPolicy", () => {
+  it("carries completionPolicy through to the invocation context", () => {
+    const ctx = buildOrchestratorContext(baseInput());
+    expect(ctx.currentStep.completionPolicy).toBe("interview");
   });
 });

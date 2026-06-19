@@ -13,6 +13,7 @@ import {
   type ModelProviderId,
   type OperatorDescriptor,
   type OrchestratorAction,
+  type PendingQuestion as PendingQuestionT,
   type StepResultScoringFacts,
   type StepAgentChoice,
   type WorkflowDecisionTrace,
@@ -80,6 +81,8 @@ import {
 import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
 import { adapterIdForProvider } from "../../orchestrator-llm/model-provider-llm-client.js";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { SHADOW_LLM_TIMEOUT_MS } from "../../orchestrator-llm/shadow-llm-client.js";
 import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
 import { resolveShadowProvider } from "../../orchestrator-llm/providers/registry.js";
@@ -94,7 +97,7 @@ import { getSupervisionMode } from "../../settings/store.js";
 import { expireConfirmation, openOrUpdateLive, pauseForConfirmation, pauseForProviderRecovery, resumeFromConfirmation, resumeFromProviderRecovery } from "../../activities/store.js";
 import { setSessionStatus } from "../../sessions/projection.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
-import { summarizeScoring } from "./scoring-summary.js";
+import { extractProposal, summarizeScoring } from "./scoring-summary.js";
 
 export interface StepDispatchCapabilities {
   isAdapterReady(adapterId: string): Promise<boolean>;
@@ -336,6 +339,12 @@ function nowWithFirstTimestamp(now: () => string, fixed: string): () => string {
     }
     return now();
   };
+}
+
+/** Clamps a display string to a schema char limit, marking truncation with an
+ *  ellipsis so the cutoff is visible. Returns the input unchanged when it fits. */
+function clampToLimit(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
 /** The template step id backing a graph step node (defaults to the node id). */
@@ -1368,6 +1377,19 @@ export class OrchestratorService {
         this.postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options);
         return { postedChatReply: true };
       }
+      case "ask_user": {
+        // The step agent needs a decision. Surface it as an interactive choice
+        // (pending_question on the chat message); the user's answer flows back
+        // as ordinary guidance via onUserMessage → forward_to_agent.
+        const idFactory = options.idFactory ?? randomUUID;
+        const pendingQuestion: PendingQuestionT = {
+          questionId: idFactory(),
+          toolUseId: idFactory(),
+          questions: action.questions,
+        };
+        this.postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options, "orchestrator", pendingQuestion);
+        return { postedChatReply: true };
+      }
       case "forward_to_agent": {
         // If this step is paused at a confirmation checkpoint, the user is refining:
         // record the divergence signal, clear the stash, and resume the activity.
@@ -1425,18 +1447,35 @@ export class OrchestratorService {
       }
       case "approve_step_complete": {
         const block = extractOrcaStepCompleteBlock(responseText);
+
+        if (ctx.stepTpl.completionPolicy === "interview") {
+          // An absent open_questions field is treated as empty (step may complete).
+          const openQuestions = (block as { open_questions?: unknown } | null)?.open_questions;
+          if (Array.isArray(openQuestions) && openQuestions.length > 0) {
+            return this.reviseStep(
+              db,
+              now,
+              ctx,
+              sessionId,
+              "This interview step still has unresolved open questions. Resolve each one with the user (one at a time, with a recommended answer), then present the synthesized result and ask the user to confirm before completing.",
+              options
+            );
+          }
+        }
+
         const finishedAt = now();
 
-        if (getSupervisionMode(db) === "supervised") {
+        if (getSupervisionMode(db) === "supervised" || ctx.stepTpl.completionPolicy === "handoff") {
           const scoringParse = StepResultScoringProposal.safeParse(action.scoring);
           const scoring = scoringParse.success ? scoringParse.data : undefined;
+          const proposal = extractProposal(responseText);
           db.prepare(
             "UPDATE workflow_step_runs SET pending_completion_json = ? WHERE id = ?"
           ).run(
-            JSON.stringify({ block: block ?? {}, scoring: scoring ?? null, finishedAt }),
+            JSON.stringify({ block: block ?? {}, scoring: scoring ?? null, finishedAt, proposal }),
             ctx.stepRun.id
           );
-          const summary = summarizeScoring(scoring);
+          const summary = summarizeScoring(scoring, proposal);
           const activityCtx = { db, bus: options.bus ?? new EventBus() };
           openOrUpdateLive(activityCtx, {
             goalId: ctx.run.goalId,
@@ -1699,7 +1738,10 @@ export class OrchestratorService {
     now: () => string,
     goalId: string,
     body: string,
-    options: RequestNextDecisionOptions
+    options: RequestNextDecisionOptions,
+    role: "orchestrator" | "user" = "orchestrator",
+    pendingQuestion?: PendingQuestionT,
+    pendingRevision?: { workflowRunId: string }
   ): void {
     const idFactory = options.idFactory ?? randomUUID;
     const messageId = idFactory();
@@ -1708,10 +1750,19 @@ export class OrchestratorService {
     const event = db.transaction(() => {
       db.prepare(
         `INSERT INTO orchestrator_messages
-          (id, goal_id, role, kind, body, correlation_id, created_at)
-         VALUES (?, ?, 'orchestrator', 'message', ?, ?, ?)`
-      ).run(messageId, goalId, body, correlationId, createdAt);
-      const payload = { messageId, role: "orchestrator" as const };
+          (id, goal_id, role, kind, body, correlation_id, created_at, pending_question, pending_revision)
+         VALUES (?, ?, ?, 'message', ?, ?, ?, ?, ?)`
+      ).run(
+        messageId,
+        goalId,
+        role,
+        body,
+        correlationId,
+        createdAt,
+        pendingQuestion ? JSON.stringify(pendingQuestion) : null,
+        pendingRevision ? JSON.stringify(pendingRevision) : null
+      );
+      const payload = { messageId, role };
       const eventId = idFactory();
       const result = db
         .prepare(
@@ -1852,6 +1903,103 @@ export class OrchestratorService {
       stepResultByStepRunId: { ...options.stepResultByStepRunId, [stepRun.id]: stepResult },
       terminalFinishedAtByStepRunId: { ...options.terminalFinishedAtByStepRunId, [stepRun.id]: stash.finishedAt },
     });
+
+    if (stepTpl.completionPolicy === "handoff") {
+      this.postHandoffClosingSummary(db, now, ctx, stash.block, options);
+    }
+  }
+
+  /** Posts the conversational revision prompt and marks the step awaiting a
+   *  revision. No-op if the step is not paused at a confirmation. */
+  async requestStepRevision(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run || !run.currentStepRunId) return;
+    const stash = db
+      .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = ?")
+      .get(run.currentStepRunId) as { pending_completion_json: string | null } | undefined;
+    if (!stash?.pending_completion_json) return;
+    this.postOrchestratorMessage(
+      db, now, run.goalId, "What would you like to revise?", options,
+      "orchestrator", undefined, { workflowRunId: runId }
+    );
+  }
+
+  /** Accepts the user's revision text: persists it as a user bubble, clears the
+   *  pending marker + completion stash, relays the feedback to the live step
+   *  agent, and resumes the step. Idempotent once the stash is cleared. */
+  async submitStepRevision(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    feedback: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run || !run.currentStepRunId) return;
+    const stepRun = readStepRun(db, run.currentStepRunId);
+    const stashRow = db
+      .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = ?")
+      .get(stepRun.id) as { pending_completion_json: string | null } | undefined;
+    if (!stashRow?.pending_completion_json) return; // idempotent no-op
+
+    // Persist the user's revision as a chat bubble (no mediator trigger).
+    this.postOrchestratorMessage(db, now, run.goalId, feedback, options, "user");
+
+    db.prepare(
+      "UPDATE orchestrator_messages SET pending_revision = NULL WHERE goal_id = ? AND json_extract(pending_revision, '$.workflowRunId') = ?"
+    ).run(run.goalId, runId);
+    db.prepare("UPDATE workflow_step_runs SET pending_completion_json = NULL WHERE id = ?").run(stepRun.id);
+
+    const activityCtx = { db, bus: options.bus ?? new EventBus() };
+    resumeFromConfirmation(activityCtx, { stepRunId: stepRun.id });
+
+    const sessionRow = db
+      .prepare("SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('running','starting') ORDER BY started_at DESC LIMIT 1")
+      .get(stepRun.id) as { id: string } | undefined;
+    await this.reviseStep(db, now, { run, stepRun }, sessionRow?.id ?? null, feedback, options);
+  }
+
+  /** Posts the Done step's closing summary and best-effort verifies the spec file(s). */
+  private postHandoffClosingSummary(
+    db: Database.Database,
+    now: () => string,
+    ctx: { run: WorkflowRunT; goal: GoalRow },
+    block: unknown,
+    options: RequestNextDecisionOptions
+  ): void {
+    const out = (block ?? {}) as { chosen_direction?: unknown; artifacts?: unknown };
+    const direction = typeof out.chosen_direction === "string" ? out.chosen_direction : null;
+    const artifacts = Array.isArray(out.artifacts) ? out.artifacts : [];
+    const specRefs = artifacts
+      .filter((a): a is { type: unknown; reference: unknown } => {
+        return a && typeof a === "object" && (a as { type?: unknown }).type === "spec";
+      })
+      .map((a) => a.reference)
+      .filter((r): r is string => typeof r === "string");
+
+    const roots = (db
+      .prepare("SELECT path FROM workspaces WHERE goal_id = ? ORDER BY attached_at ASC")
+      .all(ctx.goal.id) as Array<{ path: string }>).map((w) => w.path);
+
+    const verified: string[] = [];
+    const missing: string[] = [];
+    for (const ref of specRefs) {
+      const found = isAbsolute(ref) ? existsSync(ref) : roots.some((root) => existsSync(join(root, ref)));
+      (found ? verified : missing).push(ref);
+    }
+
+    const lines: string[] = ["Design complete."];
+    if (direction) lines.push(`Direction: ${direction}`);
+    if (verified.length > 0) lines.push(`Spec saved: ${verified.join(", ")}`);
+    if (missing.length > 0) lines.push(`Could not verify spec file(s): ${missing.join(", ")}`);
+    if (specRefs.length === 0) lines.push("No spec artifact was reported by the Done step.");
+
+    this.postOrchestratorMessage(db, now, ctx.run.goalId, lines.join("\n"), options);
   }
 
   /**
@@ -1969,6 +2117,10 @@ export class OrchestratorService {
       this.commitDeterministicStepSelection(db, now, ctx, dispatch, options);
     }
 
+    const workspaceRows = db
+      .prepare("SELECT name, path FROM workspaces WHERE goal_id = ? ORDER BY attached_at ASC")
+      .all(ctx.goal.id) as Array<{ name: string; path: string }>;
+
     const objective = composeAgentInitialPrompt({
       goalTitle: ctx.goal.title,
       goalDescription: ctx.goal.description,
@@ -1976,6 +2128,7 @@ export class OrchestratorService {
       outputSchema: ctx.stepTpl.outputSchema,
       priorStepArtifacts: this.collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.id),
       repairContext: this.latestRejectingGate(db, ctx.run.id),
+      workspaces: workspaceRows.map((w) => ({ name: w.name, root: w.path })),
     });
 
     try {
@@ -2326,7 +2479,8 @@ export class OrchestratorService {
     const facts = this.scoringFacts(db, ctx.stepRun, "passed", finishedAt);
     const proposal = StepResultScoringProposal.safeParse(scoring);
     if (proposal.success) {
-      return buildScoredStepResult(facts, proposal.data);
+      const result = buildScoredStepResult(facts, proposal.data);
+      return this.withResultSummary(db, ctx.stepRun, result);
     }
     if (scoring !== undefined) {
       // Field paths + codes only (never values) so a rejected score is debuggable
@@ -2347,6 +2501,42 @@ export class OrchestratorService {
       warningsCount: facts.outcome.warningsCount,
       reason: scoring === undefined ? "approval omitted scoring proposal" : "invalid step result scoring proposal",
     });
+  }
+
+  /** Attaches the step's own output summary + primary artifact to a built result,
+   *  so the result card can lead with the result rather than the scoring reason. */
+  private withResultSummary(
+    db: Database.Database,
+    stepRun: StepRunRow,
+    result: WorkflowStepResult,
+  ): WorkflowStepResult {
+    const output = this.readStepOutputAsRecord(db, stepRun.workflow_run_id, stepRun.id);
+    if (!output) return result;
+    // These are denormalized display fields; the full text lives in the
+    // step_output artifact. Clamp to the WorkflowStepResult schema's own limits
+    // so an over-length agent summary can't fail validation and strand the step.
+    const summary =
+      typeof output.summary === "string" ? clampToLimit(output.summary, 2000) : undefined;
+    const artifacts = Array.isArray(output.artifacts) ? output.artifacts : [];
+    const chosen =
+      artifacts.find((a) => a && typeof a === "object" && (a as { type?: unknown }).type === "spec") ??
+      artifacts[0];
+    let primaryArtifact: { reference: string; description: string } | undefined;
+    if (chosen && typeof chosen === "object") {
+      const ref = (chosen as { reference?: unknown }).reference;
+      const desc = (chosen as { description?: unknown }).description;
+      if (typeof ref === "string") {
+        primaryArtifact = {
+          reference: clampToLimit(ref, 1024),
+          description: clampToLimit(typeof desc === "string" ? desc : "", 512),
+        };
+      }
+    }
+    return {
+      ...result,
+      ...(summary ? { resultSummary: summary } : {}),
+      ...(primaryArtifact ? { primaryArtifact } : {}),
+    };
   }
 
   /**
@@ -3045,7 +3235,7 @@ export class OrchestratorService {
   ): Record<string, unknown> | null {
     const row = db
       .prepare(
-        "SELECT body FROM workflow_artifacts WHERE workflow_run_id = ? AND step_run_id = ? AND type = 'step_output' LIMIT 1"
+        "SELECT body FROM workflow_artifacts WHERE workflow_run_id = ? AND step_run_id = ? AND type = 'step_output' ORDER BY created_at DESC, rowid DESC LIMIT 1"
       )
       .get(runId, stepRunId) as { body: string } | undefined;
     if (!row) return null;

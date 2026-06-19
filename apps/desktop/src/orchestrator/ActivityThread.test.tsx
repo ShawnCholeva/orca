@@ -29,72 +29,33 @@ const mk = (over: Partial<Activity> = {}): Activity => ({
   ...over,
 });
 
-const unusedQuestionForm = () => null;
-
 describe("LiveActivity", () => {
   it("renders the live bubble's current text", () => {
     render(
       <LiveActivity
-        goalId="g1"
         activity={mk({ currentText: "Reading through the codebase..." })}
-        renderQuestionForm={unusedQuestionForm}
       />,
     );
 
     expect(screen.getByText("Reading through the codebase...")).toBeInTheDocument();
   });
 
-  it("renders the embedded question form when paused", () => {
-    render(
-      <LiveActivity
-        goalId="g1"
-        activity={mk({
-          status: "paused_for_input",
-          currentText: "I need your call on signals.",
-          sourceKind: "question_pending",
-          pendingQuestion: {
-            questionId: "q1",
-            toolUseId: "t1",
-            questions: [
-              {
-                header: "Signals",
-                question: "Which passed?",
-                multiSelect: true,
-                options: [{ label: "A", description: "x" }],
-              },
-            ],
-          },
-        })}
-        renderQuestionForm={({ goalId, pending }) => (
-          <div>
-            {goalId}: {pending.questions[0]?.question}
-          </div>
-        )}
-      />,
-    );
-
-    expect(screen.getByText("I need your call on signals.")).toBeInTheDocument();
-    expect(screen.getByText("g1: Which passed?")).toBeInTheDocument();
-  });
-
   it("renders a Continue button on a supervised confirmation checkpoint", () => {
     const onContinue = vi.fn();
     render(
       <LiveActivity
-        goalId="g1"
         activity={mk({
           workflowRunId: "r1",
           status: "paused_for_input",
           currentText: "Completeness 90% · Correctness 85% · Ready for handoff — Continue or send revisions.",
           sourceKind: "step_confirmation_pending",
         })}
-        renderQuestionForm={unusedQuestionForm}
         onContinue={onContinue}
       />,
     );
     expect(screen.getByText(/Completeness 90%/)).toBeInTheDocument();
-    expect(screen.getByText(/accepts this result and advances/i)).toBeInTheDocument();
-    expect(screen.getByText(/type revisions in chat/i)).toBeInTheDocument();
+    expect(screen.getByTestId("step-confirm-continue")).toBeInTheDocument();
+    expect(screen.getByTestId("step-confirm-revise")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("step-confirm-continue"));
     expect(onContinue).toHaveBeenCalledWith("r1");
   });
@@ -135,7 +96,6 @@ describe("LiveActivity", () => {
 
     render(
       <LiveActivity
-        goalId="g1"
         activity={mk({
           workflowRunId: "run-1",
           status: "paused_for_input",
@@ -143,7 +103,6 @@ describe("LiveActivity", () => {
           providerRecovery: recovery,
           currentText: "Claude Code reached its session limit.",
         })}
-        renderQuestionForm={unusedQuestionForm}
         renderProviderRecovery={MockRecoveryCard}
       />,
     );
@@ -157,12 +116,10 @@ describe("LiveActivity", () => {
 
     render(
       <LiveActivity
-        goalId="g1"
         activity={mk({
           status: "paused_for_input",
           sourceKind: "step_confirmation_pending",
         })}
-        renderQuestionForm={unusedQuestionForm}
         renderProviderRecovery={MockRecoveryCard}
         onContinue={vi.fn()}
       />,
@@ -170,6 +127,38 @@ describe("LiveActivity", () => {
 
     expect(screen.queryByTestId("mock-recovery-card")).toBeNull();
   });
+});
+
+const confirmActivity = {
+  id: "a1", goalId: "g1", workflowRunId: "r1", stepRunId: "s1", agentSessionId: null,
+  turnOrdinal: 0, status: "paused_for_input", currentText: "fallback",
+  finalSummary: null, sourceKind: "step_confirmation_pending", workCategory: null,
+  confidence: null, createdAt: "t", updatedAt: "t", completedAt: null, steps: [],
+  stepName: "Frame",
+  confirmationSummary: {
+    lead: "The frame is complete.",
+    fields: [
+      { label: "Problem", value: "Cannot rename workspaces" },
+      { label: "Constraints", value: ["unique names", "one folder = one workspace"] },
+    ],
+    scoring: { successScore: 0.9, quality: { outputCompleteness: 0.95, outputCorrectness: 0.95, instructionAdherence: 0.9, downstreamReadiness: 0.9, riskLevel: 0.1 }, reason: "ok", handoffReady: true },
+  },
+} as any;
+
+it("renders lead, fields, a collapsed scores dropdown, and Continue + Revise", () => {
+  const onContinue = vi.fn(); const onRevise = vi.fn();
+  render(<LiveActivity activity={confirmActivity} onContinue={onContinue} onRevise={onRevise} />);
+  expect(screen.getByText("The frame is complete.")).toBeInTheDocument();
+  expect(screen.getByText("Cannot rename workspaces")).toBeInTheDocument();
+  expect(screen.getByText("unique names")).toBeInTheDocument();
+  // scores hidden until expanded
+  expect(screen.queryByText(/Output completeness/i)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByTestId("confirm-scores-toggle"));
+  expect(screen.getByText(/Output completeness/i)).toBeInTheDocument();
+  fireEvent.click(screen.getByTestId("step-confirm-revise"));
+  expect(onRevise).toHaveBeenCalledWith("r1");
+  fireEvent.click(screen.getByTestId("step-confirm-continue"));
+  expect(onContinue).toHaveBeenCalledWith("r1");
 });
 
 describe("pickLiveActivity", () => {
@@ -188,14 +177,6 @@ describe("pickLiveActivity", () => {
         mk({ id: "recovery", status: "paused_for_input", sourceKind: "provider_recovery_pending" }),
       ])?.id,
     ).toBe("recovery");
-
-    // paused_for_input with a pending question → shown
-    expect(
-      pickLiveActivity([
-        mk({ id: "q1", status: "paused_for_input", sourceKind: "question_pending",
-          pendingQuestion: { questionId: "q1", toolUseId: "t1", questions: [] } }),
-      ])?.id,
-    ).toBe("q1");
 
     // active tool_use (no pause interaction) → not shown
     expect(
@@ -217,6 +198,16 @@ describe("pickLiveActivity", () => {
         mk({ id: "c1", status: "completed", finalSummary: "done", sourceKind: "turn_completed" }),
       ]),
     ).toBeNull();
+  });
+
+  it("ignores a pending-question activity (questions are chat messages now)", () => {
+    const activity = {
+      // minimal Activity with status paused_for_input + a pendingQuestion, no confirmation/recovery
+      status: "paused_for_input", sourceKind: "question_pending",
+      pendingQuestion: { questionId: "q1", toolUseId: "t1", source: "worker", questions: [] },
+      steps: [],
+    } as never;
+    expect(pickLiveActivity([activity])).toBeNull();
   });
 });
 
@@ -264,16 +255,17 @@ describe("ActivityCard", () => {
     } as Activity;
   }
 
-  it("renders a scored result card with a percentage and expands to metrics", () => {
+  it("renders a scored result card and expands to show percentage and metrics", () => {
     render(<ActivityCard activity={stepResultActivity()} />);
     const card = screen.getByTestId("step-result-card");
     expect(card).toHaveTextContent("Investigate");
-    expect(card).toHaveTextContent("82%");
+    expect(card).not.toHaveTextContent("82%");
     fireEvent.click(screen.getByTestId("step-result-expand"));
+    expect(card).toHaveTextContent("82%");
     expect(card).toHaveTextContent("Instruction adherence");
   });
 
-  it("shows 'Evaluation failed' and never a percentage for failed evaluation", () => {
+  it("leads a failed evaluation with a label, hides the raw reason and percentages in the drawer", () => {
     const baseResult = stepResultActivity().stepResult!;
     const failed = stepResultActivity({
       stepResult: {
@@ -286,7 +278,42 @@ describe("ActivityCard", () => {
     });
     render(<ActivityCard activity={failed} />);
     const card = screen.getByTestId("step-result-card");
-    expect(card).toHaveTextContent("Evaluation failed");
+    // headline is the short label, not the raw internal reason
+    expect(screen.getByTestId("step-result-summary")).toHaveTextContent("Evaluation failed");
+    expect(card).not.toHaveTextContent("shadow timeout");
     expect(card).not.toHaveTextContent("%");
+    // the raw diagnostic reason lives in the drawer
+    fireEvent.click(screen.getByTestId("step-result-expand"));
+    expect(card).toHaveTextContent("step result evaluation failed: shadow timeout");
+    expect(card).not.toHaveTextContent("%");
+  });
+
+  it("leads with resultSummary and shows artifact without expanding; hides scores until expanded", () => {
+    const baseResult = stepResultActivity().stepResult!;
+    const withSummary = stepResultActivity({
+      stepResult: {
+        ...baseResult,
+        resultSummary: "Recommends Approach A",
+        primaryArtifact: { reference: ".orca/specs/x.md", description: "design spec" },
+      },
+    });
+    render(<ActivityCard activity={withSummary} />);
+
+    // result summary and artifact are visible without expanding
+    expect(screen.getByTestId("step-result-summary")).toHaveTextContent("Recommends Approach A");
+    expect(screen.getByTestId("step-result-artifact")).toHaveTextContent("design spec: .orca/specs/x.md");
+
+    // quality score percentage is NOT visible before expanding (85% = outputCorrectness, unique)
+    expect(screen.queryByText("85%")).not.toBeInTheDocument();
+
+    // click expand — scores become visible
+    fireEvent.click(screen.getByTestId("step-result-expand"));
+    expect(screen.getByText("85%")).toBeInTheDocument();
+  });
+
+  it("falls back to outcome.reason as the visible headline when resultSummary is absent", () => {
+    // stepResultActivity() has no resultSummary — outcome.reason is "Output complete."
+    render(<ActivityCard activity={stepResultActivity()} />);
+    expect(screen.getByTestId("step-result-summary")).toHaveTextContent("Output complete.");
   });
 });

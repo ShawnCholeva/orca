@@ -269,4 +269,20 @@ describe("ActivityUpdater steps", () => {
     u.apply(c, { kind: "weak_signal_tick", ...sig });
     expect(getLiveForStepRun(c.db, "s1")!.steps).toEqual([]);
   });
+
+  it("appends a reasoning note as an activity step", () => {
+    const c = ctx();
+    const u = new ActivityUpdater();
+    u.apply(c, { kind: "step_started", ...sig, stepName: "Root Cause" });
+    u.apply(c, {
+      kind: "reasoning_note",
+      ...sig,
+      text: "Comparing an app-wide table against per-goal storage",
+    });
+    const live = getLiveForStepRun(c.db, "s1")!;
+    expect(live.steps.map((s) => s.text)).toEqual([
+      "Comparing an app-wide table against per-goal storage",
+    ]);
+    expect(live.steps[0].status).toBe("active");
+  });
 });
