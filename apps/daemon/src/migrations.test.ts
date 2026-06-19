@@ -1,11 +1,88 @@
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
 
 import type { Config } from "./config.js";
 import { closeDatabase, openDatabase } from "./db.js";
-import { defaultMigrationsDir, runMigrations } from "./migrations.js";
+import { defaultMigrationsDir, migrationFiles, runMigrations } from "./migrations.js";
+
+// ---------------------------------------------------------------------------
+// In-memory migration helpers for targeted migration tests
+// ---------------------------------------------------------------------------
+
+const MIGRATIONS_WITH_FK_OFF = new Set([
+  "0011_workflow_recommendation_types.sql",
+  "0036_workspaces_first_class.sql",
+]);
+
+function applyMigrationsUpTo(db: Database.Database, stopBefore: string): void {
+  const dir = defaultMigrationsDir();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS _migrations (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      applied_at TEXT NOT NULL
+    )
+  `);
+  const insertMigration = db.prepare(
+    "INSERT INTO _migrations (name, applied_at) VALUES (?, ?)"
+  );
+
+  // migrationFiles is the ordered known list; 0035 is an extra file on disk
+  const orderedFiles = [
+    ...migrationFiles,
+    "0035_orchestrator_message_pending_revision.sql",
+  ];
+
+  for (const file of orderedFiles) {
+    if (file === stopBefore) break;
+    const sql = readFileSync(path.join(dir, file), "utf-8");
+    if (MIGRATIONS_WITH_FK_OFF.has(file)) {
+      const fk = db.pragma("foreign_keys", { simple: true }) as number;
+      db.pragma("foreign_keys = OFF");
+      try {
+        db.transaction(() => {
+          db.exec(sql);
+          insertMigration.run(file, new Date().toISOString());
+        })();
+      } finally {
+        db.pragma(`foreign_keys = ${fk ? "ON" : "OFF"}`);
+      }
+    } else {
+      db.transaction(() => {
+        db.exec(sql);
+        insertMigration.run(file, new Date().toISOString());
+      })();
+    }
+  }
+}
+
+function applyMigration(db: Database.Database, file: string): void {
+  const dir = defaultMigrationsDir();
+  const sql = readFileSync(path.join(dir, file), "utf-8");
+  const insertMigration = db.prepare(
+    "INSERT OR IGNORE INTO _migrations (name, applied_at) VALUES (?, ?)"
+  );
+  if (MIGRATIONS_WITH_FK_OFF.has(file)) {
+    const fk = db.pragma("foreign_keys", { simple: true }) as number;
+    db.pragma("foreign_keys = OFF");
+    try {
+      db.transaction(() => {
+        db.exec(sql);
+        insertMigration.run(file, new Date().toISOString());
+      })();
+    } finally {
+      db.pragma(`foreign_keys = ${fk ? "ON" : "OFF"}`);
+    }
+  } else {
+    db.transaction(() => {
+      db.exec(sql);
+      insertMigration.run(file, new Date().toISOString());
+    })();
+  }
+}
 
 const tempDirs: string[] = [];
 
@@ -87,6 +164,7 @@ describe("runMigrations", () => {
       "0033_workflow_run_template_snapshot.sql",
       "0034_activity_steps.sql",
       "0035_orchestrator_message_pending_revision.sql",
+      "0036_workspaces_first_class.sql",
     ]);
   });
 
@@ -154,8 +232,9 @@ describe("runMigrations", () => {
     expect(indices).toContain("idx_events_type_seq");
     expect(indices).toContain("idx_goals_updated_at");
     expect(indices).toContain("idx_goals_status");
-    expect(indices).toContain("idx_workspaces_goal_path");
-    expect(indices).toContain("idx_workspaces_goal_attached");
+    // idx_workspaces_goal_path and idx_workspaces_goal_attached were on the old
+    // per-goal workspaces table; 0036 replaced it with a canonical entity table.
+    expect(indices).toContain("idx_goal_workspaces_workspace");
   });
 
   it("upgrades a base-schema database to 0002 without losing rows", () => {
@@ -213,6 +292,7 @@ describe("runMigrations", () => {
       "0033_workflow_run_template_snapshot.sql",
       "0034_activity_steps.sql",
       "0035_orchestrator_message_pending_revision.sql",
+      "0036_workspaces_first_class.sql",
     ]);
 
     const goalCount = (
@@ -232,17 +312,16 @@ describe("runMigrations", () => {
       name: string;
     }[];
 
+    // After 0036 the workspaces table is a canonical entity (workspace == repo)
     expect(columns.map((column) => column.name)).toEqual([
       "id",
-      "goal_id",
       "path",
       "name",
-      "workspace_type",
-      "branch",
-      "is_dirty",
-      "git_probe",
-      "attached_at"
+      "description",
+      "created_at",
+      "updated_at",
     ]);
+    expect(columns.some((column) => column.name === "goal_id")).toBe(false);
     expect(columns.some((column) => column.name === "input_path")).toBe(false);
   });
 
@@ -372,24 +451,26 @@ describe("runMigrations", () => {
     expect(idx).toBeTruthy();
   });
 
-  it("enforces foreign keys for workspaces.goal_id", () => {
+  it("enforces foreign keys for goal_workspaces.goal_id", () => {
+    // After 0036 the goal<->workspace link is in goal_workspaces, not workspaces.
     const db = freshDb();
     runMigrations(db, defaultMigrationsDir());
 
+    db.prepare(
+      "INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(
+      "ws-ent-1",
+      "/tmp/example",
+      "example",
+      "",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z"
+    );
+
     expect(() => {
       db.prepare(
-        "INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      ).run(
-        "workspace-1",
-        "missing-goal",
-        "/tmp/example",
-        "example",
-        "folder",
-        null,
-        null,
-        "not_a_repo",
-        "2026-01-01T00:00:00.000Z"
-      );
+        "INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)"
+      ).run("missing-goal", "ws-ent-1", "2026-01-01T00:00:00.000Z");
     }).toThrow(/FOREIGN KEY constraint failed/);
   });
 });
@@ -403,8 +484,11 @@ describe("session tables migration", () => {
 
   function seedWorkspace(db: ReturnType<typeof freshDb>, id: string, goalId: string) {
     db.prepare(
-      "INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).run(id, goalId, "/tmp/ws", "ws", "folder", null, null, "not_a_repo", "2026-01-01T00:00:00.000Z");
+      "INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(id, `/tmp/ws-${id}`, "ws", "", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+    db.prepare(
+      "INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)"
+    ).run(goalId, id, "2026-01-01T00:00:00.000Z");
   }
 
   function seedSession(db: ReturnType<typeof freshDb>, id: string, goalId: string, workspaceId: string) {
@@ -489,6 +573,7 @@ describe("session tables migration", () => {
       "0033_workflow_run_template_snapshot.sql",
       "0034_activity_steps.sql",
       "0035_orchestrator_message_pending_revision.sql",
+      "0036_workspaces_first_class.sql",
     ]);
 
     const tables = (
@@ -565,8 +650,11 @@ describe("memory tables migration", () => {
 
   function seedWorkspace(db: ReturnType<typeof freshDb>, id: string, goalId: string) {
     db.prepare(
-      "INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).run(id, goalId, "/tmp/ws-memory", "ws-memory", "folder", null, null, "not_a_repo", "2026-01-01T00:00:00.000Z");
+      "INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(id, `/tmp/ws-memory-${id}`, "ws-memory", "", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+    db.prepare(
+      "INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)"
+    ).run(goalId, id, "2026-01-01T00:00:00.000Z");
   }
 
   function seedSession(db: ReturnType<typeof freshDb>, id: string, goalId: string, workspaceId: string) {
@@ -999,6 +1087,7 @@ describe("migration 0010 workflows", () => {
       "0033_workflow_run_template_snapshot.sql",
       "0034_activity_steps.sql",
       "0035_orchestrator_message_pending_revision.sql",
+      "0036_workspaces_first_class.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1589,9 +1678,44 @@ describe("migration 0012 orchestration transport", () => {
       "0033_workflow_run_template_snapshot.sql",
       "0034_activity_steps.sql",
       "0035_orchestrator_message_pending_revision.sql",
+      "0036_workspaces_first_class.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
     expect(rerun.applied).toEqual([]);
+  });
+});
+
+describe("migration 0036 workspaces first class", () => {
+  it("0036 migrates per-goal workspaces into entity + junction and remaps tasks", () => {
+    const db = new Database(":memory:");
+    // apply everything BEFORE 0036
+    applyMigrationsUpTo(db, "0036_workspaces_first_class.sql");
+    const now = "2026-06-19T00:00:00.000Z";
+    db.exec(`INSERT INTO goals (id,title,description,status,autonomy_level,created_at,updated_at,archived_at) VALUES
+      ('g1','G1','','active',1,'${now}','${now}',NULL),('g2','G2','','active',1,'${now}','${now}',NULL)`);
+    // same path attached to two goals -> one entity, two links
+    db.exec(`INSERT INTO workspaces (id,goal_id,path,name,workspace_type,branch,is_dirty,git_probe,attached_at) VALUES
+      ('ws1','g1','/repo/a','a','repo','main',0,'ok','${now}'),
+      ('ws2','g2','/repo/a','a','repo','main',0,'ok','${now}'),
+      ('ws3','g1','/repo/b','b','repo',NULL,NULL,'not_a_repo','${now}')`);
+    db.exec(`INSERT INTO tasks (id,goal_id,parent_task_id,workspace_id,role,status,origin,title,description,fingerprint,created_at,updated_at)
+      VALUES ('t1','g1',NULL,'ws3','engineer','open','user','T','','fp-t1','${now}','${now}')`);
+
+    applyMigration(db, "0036_workspaces_first_class.sql");
+
+    const entities = db.prepare("SELECT path FROM workspaces ORDER BY path").all() as { path: string }[];
+    expect(entities.map((e) => e.path)).toEqual(["/repo/a", "/repo/b"]);
+    const links = db.prepare("SELECT count(*) AS c FROM goal_workspaces").get() as { c: number };
+    expect(links.c).toBe(3);
+    // tasks.workspace_id now points at the /repo/b entity
+    const taskWs = db.prepare(
+      "SELECT w.path FROM tasks t JOIN workspaces w ON w.id = t.workspace_id WHERE t.id='t1'"
+    ).get() as { path: string };
+    expect(taskWs.path).toBe("/repo/b");
+    // entity has no git columns
+    const cols = db.prepare("PRAGMA table_info(workspaces)").all() as { name: string }[];
+    expect(cols.map((c) => c.name)).toEqual(
+      ["id","path","name","description","created_at","updated_at"]);
   });
 });

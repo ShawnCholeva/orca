@@ -10,6 +10,7 @@ const ORCHESTRATION_TRANSPORT_MIGRATION = "0012_orchestration_transport.sql";
 const ORCHESTRATOR_MESSAGES_MIGRATION = "0013_orchestrator_messages.sql";
 const WORKFLOW_STEP_RUNS_OPERATOR_SELECTION_MIGRATION =
   "0014_workflow_step_runs_operator_selection.sql";
+const WORKSPACES_FIRST_CLASS_MIGRATION = "0036_workspaces_first_class.sql";
 
 export const migrationFiles = [
   "0001_init.sql",
@@ -45,6 +46,8 @@ export const migrationFiles = [
   "0032_gate_decision_ledger_version.sql",
   "0033_workflow_run_template_snapshot.sql",
   "0034_activity_steps.sql",
+  "0035_orchestrator_message_pending_revision.sql",
+  WORKSPACES_FIRST_CLASS_MIGRATION,
 ] as const;
 
 export function runMigrations(
@@ -97,6 +100,21 @@ export function runMigrations(
     const sql = readFileSync(path.join(dir, file), "utf-8");
 
     if (file === WORKFLOW_RECOMMENDATION_TYPES_MIGRATION) {
+      const foreignKeys = db.pragma("foreign_keys", { simple: true }) as number;
+      db.pragma("foreign_keys = OFF");
+      try {
+        db.transaction(() => {
+          db.exec(sql);
+          insertMigration.run(file, now);
+        })();
+      } finally {
+        db.pragma(`foreign_keys = ${foreignKeys ? "ON" : "OFF"}`);
+      }
+      applied.push(file);
+      continue;
+    }
+
+    if (file === WORKSPACES_FIRST_CLASS_MIGRATION) {
       const foreignKeys = db.pragma("foreign_keys", { simple: true }) as number;
       db.pragma("foreign_keys = OFF");
       try {
