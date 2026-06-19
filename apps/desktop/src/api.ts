@@ -11,6 +11,14 @@ import {
   AssociateTaskSessionResponse,
   AttachWorkspaceRequest,
   AttachWorkspaceResponse,
+  CreateWorkspaceRequest,
+  CreateWorkspaceResponse,
+  GetWorkspaceResponse,
+  ListWorkspacesResponse,
+  UpdateWorkspaceRequest,
+  UpdateWorkspaceResponse,
+  type WorkspaceSummary,
+  type Workspace,
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
   CheckSystemReadinessResponse,
@@ -700,6 +708,35 @@ export async function detachWorkspace(
     },
     "Detach workspace failed",
   );
+}
+
+export async function listWorkspaces(): Promise<WorkspaceSummary[]> {
+  const { baseUrl, token } = await loadConfig();
+  const body = await requestJson(`${baseUrl}/v1/workspaces`, { headers: authHeaders(token) },
+    ListWorkspacesResponse, "List workspaces failed");
+  return body.workspaces;
+}
+
+export async function getWorkspace(id: string): Promise<GetWorkspaceResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(`${baseUrl}/v1/workspaces/${encodeURIComponent(id)}`, { headers: authHeaders(token) },
+    GetWorkspaceResponse, "Get workspace failed");
+}
+
+export async function createWorkspace(body: CreateWorkspaceRequest): Promise<Workspace> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await requestJson(`${baseUrl}/v1/workspaces`,
+    { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(token) }, body: JSON.stringify(CreateWorkspaceRequest.parse(body)) },
+    CreateWorkspaceResponse, "Create workspace failed");
+  return res.workspace;
+}
+
+export async function updateWorkspace(id: string, body: UpdateWorkspaceRequest): Promise<Workspace> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await requestJson(`${baseUrl}/v1/workspaces/${encodeURIComponent(id)}`,
+    { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders(token) }, body: JSON.stringify(UpdateWorkspaceRequest.parse(body)) },
+    UpdateWorkspaceResponse, "Update workspace failed");
+  return res.workspace;
 }
 
 export async function updateGoal(

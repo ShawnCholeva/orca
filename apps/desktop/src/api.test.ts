@@ -1612,4 +1612,50 @@ describe("desktop api client", () => {
       expect(JSON.parse(String(init?.body))).toEqual({ freeText: "a dedicated workspaces tab" });
     });
   });
+
+  describe("workspace registry", () => {
+    const registryWorkspace = {
+      id: "reg-ws-1",
+      path: "/projects/my-app",
+      name: "my-app",
+      description: "",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const workspaceSummary = {
+      ...registryWorkspace,
+      goalCounts: { active: 1, completed: 0, archived: 0 },
+    };
+
+    it("listWorkspaces fetches all workspaces and returns summaries", async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(200, { workspaces: [workspaceSummary] }),
+      );
+
+      const result = await api.listWorkspaces();
+
+      expect(result).toHaveLength(1);
+      expect(result[0]!.id).toBe("reg-ws-1");
+      expect(result[0]!.goalCounts.active).toBe(1);
+      const [url, init] = fetchMock.mock.calls[0]!;
+      expect(url).toBe("http://127.0.0.1:8787/v1/workspaces");
+      expect(init?.method).toBeUndefined();
+    });
+
+    it("createWorkspace posts body and returns workspace", async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(201, { workspace: registryWorkspace }),
+      );
+
+      const result = await api.createWorkspace({ inputPath: "/projects/my-app", name: "my-app" });
+
+      expect(result.id).toBe("reg-ws-1");
+      expect(result.path).toBe("/projects/my-app");
+      const [url, init] = fetchMock.mock.calls[0]!;
+      expect(url).toBe("http://127.0.0.1:8787/v1/workspaces");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ inputPath: "/projects/my-app", name: "my-app" });
+    });
+  });
 });
