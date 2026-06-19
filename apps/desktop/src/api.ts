@@ -1001,6 +1001,26 @@ export async function submitWorkerAnswers(
   );
 }
 
+export async function submitWorkerFreeText(
+  goalId: string,
+  questionId: string,
+  freeText: string,
+): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  return requestVoid(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/worker-questions/${encodeURIComponent(questionId)}/answer`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify({ freeText }),
+    },
+    "Submit worker free-text answer failed",
+  );
+}
+
 export async function submitPermissionDecision(
   goalId: string,
   approvalId: string,

@@ -1579,5 +1579,16 @@ describe("desktop api client", () => {
         }),
       );
     });
+
+    it("submitWorkerFreeText posts freeText to the worker-answer route", async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+
+      await api.submitWorkerFreeText("goal-1", "q-1", "a dedicated workspaces tab");
+
+      const [url, init] = fetchMock.mock.calls[0]!;
+      expect(String(url)).toContain("/v1/goals/goal-1/worker-questions/q-1/answer");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ freeText: "a dedicated workspaces tab" });
+    });
   });
 });
