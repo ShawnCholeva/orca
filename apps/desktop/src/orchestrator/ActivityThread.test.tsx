@@ -54,8 +54,8 @@ describe("LiveActivity", () => {
       />,
     );
     expect(screen.getByText(/Completeness 90%/)).toBeInTheDocument();
-    expect(screen.getByText(/accepts this result and advances/i)).toBeInTheDocument();
-    expect(screen.getByText(/type revisions in chat/i)).toBeInTheDocument();
+    expect(screen.getByTestId("step-confirm-continue")).toBeInTheDocument();
+    expect(screen.getByTestId("step-confirm-revise")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("step-confirm-continue"));
     expect(onContinue).toHaveBeenCalledWith("r1");
   });
@@ -127,6 +127,38 @@ describe("LiveActivity", () => {
 
     expect(screen.queryByTestId("mock-recovery-card")).toBeNull();
   });
+});
+
+const confirmActivity = {
+  id: "a1", goalId: "g1", workflowRunId: "r1", stepRunId: "s1", agentSessionId: null,
+  turnOrdinal: 0, status: "paused_for_input", currentText: "fallback",
+  finalSummary: null, sourceKind: "step_confirmation_pending", workCategory: null,
+  confidence: null, createdAt: "t", updatedAt: "t", completedAt: null, steps: [],
+  stepName: "Frame",
+  confirmationSummary: {
+    lead: "The frame is complete.",
+    fields: [
+      { label: "Problem", value: "Cannot rename workspaces" },
+      { label: "Constraints", value: ["unique names", "one folder = one workspace"] },
+    ],
+    scoring: { successScore: 0.9, quality: { outputCompleteness: 0.95, outputCorrectness: 0.95, instructionAdherence: 0.9, downstreamReadiness: 0.9, riskLevel: 0.1 }, reason: "ok", handoffReady: true },
+  },
+} as any;
+
+it("renders lead, fields, a collapsed scores dropdown, and Continue + Revise", () => {
+  const onContinue = vi.fn(); const onRevise = vi.fn();
+  render(<LiveActivity activity={confirmActivity} onContinue={onContinue} onRevise={onRevise} />);
+  expect(screen.getByText("The frame is complete.")).toBeInTheDocument();
+  expect(screen.getByText("Cannot rename workspaces")).toBeInTheDocument();
+  expect(screen.getByText("unique names")).toBeInTheDocument();
+  // scores hidden until expanded
+  expect(screen.queryByText(/Output completeness/i)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByTestId("confirm-scores-toggle"));
+  expect(screen.getByText(/Output completeness/i)).toBeInTheDocument();
+  fireEvent.click(screen.getByTestId("step-confirm-revise"));
+  expect(onRevise).toHaveBeenCalledWith("r1");
+  fireEvent.click(screen.getByTestId("step-confirm-continue"));
+  expect(onContinue).toHaveBeenCalledWith("r1");
 });
 
 describe("pickLiveActivity", () => {

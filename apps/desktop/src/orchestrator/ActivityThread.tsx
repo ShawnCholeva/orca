@@ -122,11 +122,14 @@ export function LiveActivity({
   activity,
   renderProviderRecovery: ProviderRecovery,
   onContinue,
+  onRevise,
 }: {
   activity: Activity;
   renderProviderRecovery?: ComponentType<ProviderRecoveryProps>;
   onContinue?: (runId: string) => void;
+  onRevise?: (runId: string) => void;
 }) {
+  const [scoresOpen, setScoresOpen] = useState(false);
   const isConfirmation =
     activity.status === "paused_for_input" &&
     activity.sourceKind === "step_confirmation_pending";
@@ -136,20 +139,71 @@ export function LiveActivity({
     activity.providerRecovery != null;
   return (
     <div className="activity-bubble" data-testid="activity-bubble" data-status={activity.status}>
-      <div className="activity-bubble-text">{activity.currentText}</div>
+      {!(isConfirmation && activity.confirmationSummary) ? (
+        <div className="activity-bubble-text">{activity.currentText}</div>
+      ) : null}
       {isConfirmation ? (
-        <div className="step-confirm-actions">
-          <button
-            type="button"
-            data-testid="step-confirm-continue"
-            className="step-confirm-continue-btn"
-            onClick={() => onContinue?.(activity.workflowRunId)}
-          >
-            Continue
-          </button>
-          <span className="step-confirm-hint">
-            Continue accepts this result and advances the workflow. Type revisions in chat to send it back to the agent.
-          </span>
+        <div className="step-confirm" data-testid="step-confirm">
+          {activity.confirmationSummary ? (
+            <>
+              <div className="step-confirm-lead">{activity.confirmationSummary.lead}</div>
+              {activity.confirmationSummary.fields.length > 0 ? (
+                <dl className="step-confirm-fields">
+                  {activity.confirmationSummary.fields.map((f, i) => (
+                    <div key={i} className="step-confirm-field">
+                      <dt>{f.label}</dt>
+                      <dd>
+                        {Array.isArray(f.value) ? (
+                          <ul>{f.value.map((v, j) => <li key={j}>{v}</li>)}</ul>
+                        ) : f.value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+              {activity.confirmationSummary.scoring ? (
+                <div className="step-confirm-scores">
+                  <button
+                    type="button"
+                    data-testid="confirm-scores-toggle"
+                    className="step-confirm-scores-toggle"
+                    onClick={() => setScoresOpen((o) => !o)}
+                  >
+                    {scoresOpen ? "Hide scores" : "Scores"}
+                  </button>
+                  {scoresOpen ? (
+                    <dl className="step-result-metrics">
+                      <div><dt>Success</dt><dd>{Math.round(activity.confirmationSummary.scoring.successScore * 100)}%</dd></div>
+                      <div><dt>Output completeness</dt><dd>{Math.round(activity.confirmationSummary.scoring.quality.outputCompleteness * 100)}%</dd></div>
+                      <div><dt>Output correctness</dt><dd>{Math.round(activity.confirmationSummary.scoring.quality.outputCorrectness * 100)}%</dd></div>
+                      <div><dt>Instruction adherence</dt><dd>{Math.round(activity.confirmationSummary.scoring.quality.instructionAdherence * 100)}%</dd></div>
+                      <div><dt>Downstream readiness</dt><dd>{Math.round(activity.confirmationSummary.scoring.quality.downstreamReadiness * 100)}%</dd></div>
+                      <div><dt>Risk level (higher = riskier)</dt><dd>{Math.round(activity.confirmationSummary.scoring.quality.riskLevel * 100)}%</dd></div>
+                      <div><dt>Handoff</dt><dd>{activity.confirmationSummary.scoring.handoffReady ? "Ready" : "Not ready"}</dd></div>
+                    </dl>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          ) : null}
+          <div className="step-confirm-actions">
+            <button
+              type="button"
+              data-testid="step-confirm-continue"
+              className="step-confirm-continue-btn"
+              onClick={() => onContinue?.(activity.workflowRunId)}
+            >
+              Continue
+            </button>
+            <button
+              type="button"
+              data-testid="step-confirm-revise"
+              className="step-confirm-revise-btn"
+              onClick={() => onRevise?.(activity.workflowRunId)}
+            >
+              Revise
+            </button>
+          </div>
         </div>
       ) : null}
       {isProviderRecovery && ProviderRecovery && activity.providerRecovery ? (
