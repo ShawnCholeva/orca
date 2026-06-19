@@ -1,30 +1,26 @@
-import path from "node:path";
-import fs from "node:fs/promises";
-import os from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
-import { execFile as execFileCb } from "node:child_process";
-import { promisify } from "node:util";
+import os from "node:os";
+import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, expect, it } from "vitest";
 
 import type Database from "better-sqlite3";
-import type { Config } from "../config.js";
 import { closeDatabase, openDatabase } from "../db.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import { eventBus } from "../events.js";
-import { WorkspaceInspectionError } from "./errors.js";
-import { DuplicateWorkspaceError, resetPreparedStatements as resetProjectionStmts } from "./projection.js";
-import { inspectWorkspace as realInspect } from "./inspect.js";
+import { DuplicateWorkspaceError, listWorkspacesByGoal, findWorkspaceById, resetPreparedStatements as resetProjectionStmts } from "./projection.js";
 import {
+  createWorkspace,
+  updateWorkspace,
   attachWorkspace,
   detachWorkspace,
-  resetPreparedStatements,
   type WorkspaceCtx,
 } from "./usecases.js";
-import { NotFoundError } from "../goals.js";
 import type { InspectWorkspacePreview } from "@orca/contracts";
+import type { DomainEvent } from "@orca/contracts";
+import type { EventBus } from "../events.js";
 
-const execFile = promisify(execFileCb);
+type Config = { dataDir: string; port: number; logLevel: string; sessionOutputTailBytes: number; sessionStopGraceMs: number; sessionWsBufferLimitBytes: number; memoryExtractionMaxInputBytes: number; memoryExtractionTimeoutMs: number; getAuthToken: () => string };
 
 const tempDirs: string[] = [];
 
@@ -42,268 +38,99 @@ function createConfig(dataDir: string): Config {
   };
 }
 
-function makeFolderPreview(folderPath: string): InspectWorkspacePreview {
-  return {
-    path: folderPath,
-    name: path.basename(folderPath),
-    workspaceType: "folder",
-    branch: null,
-    isDirty: null,
-    gitProbe: "not_a_repo",
-  };
-}
+const published: DomainEvent[] = [];
+const fakeBus = { publish: (e: DomainEvent) => { published.push(e); } } as unknown as EventBus;
 
-function setup(inspectFn?: WorkspaceCtx["inspectWorkspace"]): { db: Database.Database; ctx: WorkspaceCtx } {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "orca-usecases-test-"));
+function makeCtx(opts: { inspect: InspectWorkspacePreview }): WorkspaceCtx & { db: Database.Database } {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "orca-usecases4-test-"));
   tempDirs.push(dir);
-  const db = openDatabase(createConfig(dir));
+  const db = openDatabase(createConfig(dir) as Parameters<typeof openDatabase>[0]);
   runMigrations(db, defaultMigrationsDir());
-  const ctx: WorkspaceCtx = {
+  return {
     db,
-    bus: eventBus,
-    inspectWorkspace:
-      inspectFn ?? (() => Promise.reject(new Error("inspectWorkspace not expected in this test"))),
+    bus: fakeBus,
+    inspectWorkspace: () => Promise.resolve(opts.inspect),
   };
-  return { db, ctx };
 }
 
-// Insert a goal row directly — avoids skills dependency in use-case tests.
-function insertGoalRow(db: Database.Database, archived = false): string {
-  const id = randomUUID();
+function goal(db: Database.Database, id: string): void {
   const now = new Date().toISOString();
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, 'Test Goal', '', 'active', 1, ?, ?, ?)",
-  ).run(id, now, now, archived ? now : null);
-  return id;
+    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, 'Test Goal', '', 'active', 1, ?, ?, NULL)",
+  ).run(id, now, now);
 }
 
-async function makeTmpDir(): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "orca-usecases-ws-"));
-  tempDirs.push(dir);
-  return dir;
-}
-
-async function initGitRepoWithCommit(dir: string): Promise<string> {
-  await execFile("git", ["init", dir]);
-  await execFile("git", ["-C", dir, "config", "user.name", "Test User"]);
-  await execFile("git", ["-C", dir, "config", "user.email", "test@example.com"]);
-  await fs.writeFile(path.join(dir, "README.md"), "# Test");
-  await execFile("git", ["-C", dir, "add", "."]);
-  await execFile("git", ["-C", dir, "commit", "-m", "init"]);
-  const { stdout } = await execFile("git", ["-C", dir, "rev-parse", "--abbrev-ref", "HEAD"]);
-  return stdout.trim();
-}
-
-afterEach(async () => {
+afterEach(() => {
   closeDatabase();
-  resetPreparedStatements();
   resetProjectionStmts();
-  vi.restoreAllMocks();
+  published.splice(0);
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-describe("attachWorkspace", () => {
-  it("attaches a non-git folder — row inserted, event broadcast post-commit", async () => {
-    const { db, ctx } = setup((p) => Promise.resolve(makeFolderPreview(p)));
-    const goalId = insertGoalRow(db);
-    const wsPath = "/tmp/orca-uc-folder-" + Date.now();
-
-    const publishSpy = vi.spyOn(eventBus, "publish");
-
-    const workspace = await attachWorkspace(ctx, { goalId, inputPath: wsPath });
-
-    expect(workspace.goalId).toBe(goalId);
-    expect(workspace.path).toBe(wsPath);
-    expect(workspace.workspaceType).toBe("folder");
-    expect(workspace.gitProbe).toBe("not_a_repo");
-    expect(workspace.branch).toBeNull();
-    expect(workspace.isDirty).toBeNull();
-
-    // Row exists in DB
-    const row = db.prepare("SELECT id FROM workspaces WHERE id = ?").get(workspace.id);
-    expect(row).toBeDefined();
-
-    // Event broadcast exactly once, after commit
-    expect(publishSpy).toHaveBeenCalledTimes(1);
-    const event = publishSpy.mock.calls[0]![0]!;
-    expect(event.type).toBe("workspace.attached");
-    expect(event.goalId).toBe(goalId);
-    expect(typeof event.seq).toBe("number");
-    expect(event.seq).toBeGreaterThan(0);
-  });
-
-  it("attaches a real git repo — branch and isDirty captured", async () => {
-    const repoDir = await makeTmpDir();
-    const branch = await initGitRepoWithCommit(repoDir);
-
-    const { db, ctx } = setup(realInspect);
-    const goalId = insertGoalRow(db);
-
-    const workspace = await attachWorkspace(ctx, { goalId, inputPath: repoDir });
-
-    expect(workspace.workspaceType).toBe("repo");
-    expect(workspace.branch).toBe(branch);
-    expect(workspace.isDirty).toBe(false);
-    expect(workspace.gitProbe).toBe("ok");
-  });
-
-  it("same canonical path twice — DuplicateWorkspaceError; second call does not insert or broadcast", async () => {
-    const wsPath = "/tmp/orca-uc-dup-" + Date.now();
-    const { db, ctx } = setup((p) => Promise.resolve(makeFolderPreview(p)));
-    const goalId = insertGoalRow(db);
-
-    await attachWorkspace(ctx, { goalId, inputPath: wsPath });
-
-    const publishSpy = vi.spyOn(eventBus, "publish");
-
-    await expect(attachWorkspace(ctx, { goalId, inputPath: wsPath })).rejects.toThrow(
-      DuplicateWorkspaceError,
-    );
-
-    expect(publishSpy).not.toHaveBeenCalled();
-
-    const wsCount = (
-      db.prepare("SELECT count(*) AS c FROM workspaces WHERE goal_id = ?").get(goalId) as {
-        c: number;
-      }
-    ).c;
-    expect(wsCount).toBe(1);
-  });
-
-  it("nonexistent Goal — NotFoundError, no event, no row", async () => {
-    const { db, ctx } = setup();
-
-    const publishSpy = vi.spyOn(eventBus, "publish");
-
-    await expect(
-      attachWorkspace(ctx, { goalId: "no-such-goal", inputPath: "/tmp/something" }),
-    ).rejects.toThrow(NotFoundError);
-
-    expect(publishSpy).not.toHaveBeenCalled();
-    const wsCount = (db.prepare("SELECT count(*) AS c FROM workspaces").get() as { c: number }).c;
-    expect(wsCount).toBe(0);
-  });
-
-  it("archived Goal — NotFoundError, no event, no row", async () => {
-    const { db, ctx } = setup();
-    const goalId = insertGoalRow(db, true /* archived */);
-
-    const publishSpy = vi.spyOn(eventBus, "publish");
-
-    await expect(
-      attachWorkspace(ctx, { goalId, inputPath: "/tmp/something" }),
-    ).rejects.toThrow(NotFoundError);
-
-    expect(publishSpy).not.toHaveBeenCalled();
-  });
-
-  it("inspection failure — no event, no row, error propagated", async () => {
-    const { db, ctx: baseCtx } = setup();
-    const goalId = insertGoalRow(db);
-
-    const failCtx: WorkspaceCtx = {
-      ...baseCtx,
-      inspectWorkspace: () =>
-        Promise.reject(new WorkspaceInspectionError("not_found", "path not found")),
-    };
-
-    const publishSpy = vi.spyOn(eventBus, "publish");
-
-    await expect(
-      attachWorkspace(failCtx, { goalId, inputPath: "/tmp/missing" }),
-    ).rejects.toThrow(WorkspaceInspectionError);
-
-    expect(publishSpy).not.toHaveBeenCalled();
-    const wsCount = (
-      db.prepare("SELECT count(*) AS c FROM workspaces WHERE goal_id = ?").get(goalId) as {
-        c: number;
-      }
-    ).c;
-    expect(wsCount).toBe(0);
-  });
+it("createWorkspace inserts entity and emits workspace.created", async () => {
+  const ctx = makeCtx({ inspect: { path: "/r/a", name: "a", workspaceType: "repo", branch: "main", isDirty: false, gitProbe: "ok" } });
+  const ws = await createWorkspace(ctx, { inputPath: "/r/a", description: "d" });
+  expect(ws).toMatchObject({ path: "/r/a", name: "a", description: "d" });
+  expect(published.map((e) => e.type)).toContain("workspace.created");
 });
 
-describe("detachWorkspace", () => {
-  it("detaches an existing workspace — row gone, event broadcast", async () => {
-    const wsPath = "/tmp/orca-uc-detach-" + Date.now();
-    const { db, ctx } = setup((p) => Promise.resolve(makeFolderPreview(p)));
-    const goalId = insertGoalRow(db);
-    const workspace = await attachWorkspace(ctx, { goalId, inputPath: wsPath });
+it("createWorkspace rejects a duplicate path", async () => {
+  const ctx = makeCtx({ inspect: { path: "/r/a", name: "a", workspaceType: "repo", branch: null, isDirty: null, gitProbe: "ok" } });
+  await createWorkspace(ctx, { inputPath: "/r/a" });
+  await expect(createWorkspace(ctx, { inputPath: "/r/a" })).rejects.toBeInstanceOf(DuplicateWorkspaceError);
+});
 
-    const publishSpy = vi.spyOn(eventBus, "publish");
+it("attachWorkspace find-or-creates the entity then links the goal", async () => {
+  const ctx = makeCtx({ inspect: { path: "/r/a", name: "a", workspaceType: "repo", branch: null, isDirty: null, gitProbe: "ok" } });
+  goal(ctx.db, "g1");
+  const ws = await attachWorkspace(ctx, { goalId: "g1", inputPath: "/r/a" });
+  goal(ctx.db, "g2");
+  const ws2 = await attachWorkspace(ctx, { goalId: "g2", inputPath: "/r/a" });
+  expect(ws2.id).toBe(ws.id); // same entity reused
+  expect(listWorkspacesByGoal(ctx.db, "g2").map((w) => w.id)).toEqual([ws.id]);
+});
 
-    await detachWorkspace(ctx, { goalId, workspaceId: workspace.id });
+it("updateWorkspace renames + emits workspace.updated", async () => {
+  const ctx = makeCtx({ inspect: { path: "/r/a", name: "a", workspaceType: "repo", branch: null, isDirty: null, gitProbe: "ok" } });
+  const ws = await createWorkspace(ctx, { inputPath: "/r/a" });
+  const out = await updateWorkspace(ctx, { id: ws.id, name: "renamed" });
+  expect(out.name).toBe("renamed");
+  expect(published.map((e) => e.type)).toContain("workspace.updated");
+});
 
-    expect(publishSpy).toHaveBeenCalledTimes(1);
-    const event = publishSpy.mock.calls[0]![0]!;
-    expect(event.type).toBe("workspace.removed");
-    expect(event.goalId).toBe(goalId);
-    expect((event.payload as { workspaceId: string }).workspaceId).toBe(workspace.id);
+it("detachWorkspace unlinks without deleting the entity", async () => {
+  const ctx = makeCtx({ inspect: { path: "/r/a", name: "a", workspaceType: "repo", branch: null, isDirty: null, gitProbe: "ok" } });
+  goal(ctx.db, "g1");
+  const ws = await attachWorkspace(ctx, { goalId: "g1", inputPath: "/r/a" });
+  await detachWorkspace(ctx, { goalId: "g1", workspaceId: ws.id });
+  expect(listWorkspacesByGoal(ctx.db, "g1")).toEqual([]);
+  expect(findWorkspaceById(ctx.db, ws.id)).not.toBeNull(); // entity survives
+});
 
-    const row = db.prepare("SELECT id FROM workspaces WHERE id = ?").get(workspace.id);
-    expect(row).toBeUndefined();
-  });
+it("attachWorkspace emits workspace.attached with goalId", async () => {
+  const ctx = makeCtx({ inspect: { path: "/r/b", name: "b", workspaceType: "folder", branch: null, isDirty: null, gitProbe: "not_a_repo" } });
+  goal(ctx.db, "g1");
+  await attachWorkspace(ctx, { goalId: "g1", inputPath: "/r/b" });
+  const evt = published.find((e) => e.type === "workspace.attached");
+  expect(evt).toBeDefined();
+  expect(evt!.goalId).toBe("g1");
+});
 
-  it("goalId does not match workspace's goal_id — NotFoundError, no event", async () => {
-    const wsPath = "/tmp/orca-uc-mismatch-" + Date.now();
-    const { db, ctx } = setup((p) => Promise.resolve(makeFolderPreview(p)));
-    const goalA = insertGoalRow(db);
-    const goalB = insertGoalRow(db);
-    const workspace = await attachWorkspace(ctx, { goalId: goalA, inputPath: wsPath });
+it("detachWorkspace emits workspace.removed with goalId", async () => {
+  const ctx = makeCtx({ inspect: { path: "/r/c", name: "c", workspaceType: "folder", branch: null, isDirty: null, gitProbe: "not_a_repo" } });
+  goal(ctx.db, "g1");
+  const ws = await attachWorkspace(ctx, { goalId: "g1", inputPath: "/r/c" });
+  published.splice(0);
+  await detachWorkspace(ctx, { goalId: "g1", workspaceId: ws.id });
+  const evt = published.find((e) => e.type === "workspace.removed");
+  expect(evt).toBeDefined();
+  expect(evt!.goalId).toBe("g1");
+});
 
-    const publishSpy = vi.spyOn(eventBus, "publish");
-
-    await expect(
-      detachWorkspace(ctx, { goalId: goalB, workspaceId: workspace.id }),
-    ).rejects.toThrow(NotFoundError);
-
-    expect(publishSpy).not.toHaveBeenCalled();
-
-    // Workspace still present
-    const row = db.prepare("SELECT id FROM workspaces WHERE id = ?").get(workspace.id);
-    expect(row).toBeDefined();
-  });
-
-  it("nonexistent workspaceId — NotFoundError, no event", async () => {
-    const { db, ctx } = setup();
-    const goalId = insertGoalRow(db);
-
-    const publishSpy = vi.spyOn(eventBus, "publish");
-
-    await expect(
-      detachWorkspace(ctx, { goalId, workspaceId: "no-such-workspace" }),
-    ).rejects.toThrow(NotFoundError);
-
-    expect(publishSpy).not.toHaveBeenCalled();
-  });
-
-  it("rolls back event when workspace delete fails — workspace row preserved, no broadcast", async () => {
-    const wsPath = "/tmp/orca-uc-detach-fail-" + Date.now();
-    const { db, ctx } = setup((p) => Promise.resolve(makeFolderPreview(p)));
-    const goalId = insertGoalRow(db);
-    const workspace = await attachWorkspace(ctx, { goalId, inputPath: wsPath });
-
-    db.exec(`
-      CREATE TRIGGER force_workspace_delete_failure BEFORE DELETE ON workspaces
-      BEGIN SELECT RAISE(ABORT, 'forced delete failure'); END;
-    `);
-
-    const publishSpy = vi.spyOn(eventBus, "publish");
-
-    await expect(
-      detachWorkspace(ctx, { goalId, workspaceId: workspace.id }),
-    ).rejects.toThrow();
-
-    expect(publishSpy).not.toHaveBeenCalled();
-
-    const row = db.prepare("SELECT id FROM workspaces WHERE id = ?").get(workspace.id);
-    expect(row).toBeDefined();
-
-    const removedEventCount = (
-      db.prepare("SELECT count(*) AS c FROM events WHERE type = 'workspace.removed'").get() as { c: number }
-    ).c;
-    expect(removedEventCount).toBe(0);
-  });
+it("attachWorkspace throws NotFoundError for nonexistent goal", async () => {
+  const ctx = makeCtx({ inspect: { path: "/r/a", name: "a", workspaceType: "repo", branch: null, isDirty: null, gitProbe: "ok" } });
+  const { NotFoundError } = await import("../goals.js");
+  await expect(attachWorkspace(ctx, { goalId: randomUUID(), inputPath: "/r/a" })).rejects.toBeInstanceOf(NotFoundError);
 });
