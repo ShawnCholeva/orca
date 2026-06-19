@@ -106,6 +106,7 @@ export function composeOrchestratorPrompt(input: OrchestratorPromptInput): Orche
     "Only use forward_to_agent when the user is asking the active step agent to do work or providing information the step agent needs.",
     "When forward_to_agent succeeds, the application may show no immediate chat reply until agent hooks report a response.",
     'Use ask_user whenever the step agent has asked the user a question or cannot proceed without a user decision: present the concrete choices as structured options. Never paraphrase a question as prose, and never narrate the step as finished or claim it "has a complete picture" while it is waiting on the user — a step blocked on the user is waiting, not done.',
+    "If your reply asks the user anything — any decision, choice, or clarification, including anything you would phrase ending in a '?' — you MUST return ask_user with structured options. Never place a question to the user in the body of paraphrase_agent_message, answer_user_directly, or escalate_to_user; those bodies are statements, not questions.",
     "When the user answers an ask_user, you receive it as a user_message; forward_to_agent so the answer reaches the step agent.",
     "Honor the current step's completionPolicy (context.currentStep.completionPolicy):",
     "- interview: never approve_step_complete while the step output's open_questions is non-empty or the synthesized result is unconfirmed by the user — use ask_user (one decision at a time, with a recommended answer) until the queue is drained, then ask the user to confirm.",

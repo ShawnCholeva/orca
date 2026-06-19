@@ -91,6 +91,15 @@ describe("composeOrchestratorPrompt", () => {
     expect(sys).toMatch(/waiting on the user|waiting, not done/i);
   });
 
+  it("forbids putting a user-facing question in a prose body instead of ask_user", () => {
+    const sys = composeOrchestratorPrompt({
+      triggerKind: "agent_response",
+      context: {} as never,
+      triggerPayload: {} as never,
+    }).systemPrompt;
+    expect(sys).toMatch(/never place a question to the user in the body/i);
+  });
+
   it("describes role and produces a structured response shape request", () => {
     const out = composeOrchestratorPrompt({
       triggerKind: "agent_response",

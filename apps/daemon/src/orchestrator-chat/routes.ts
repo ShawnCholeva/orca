@@ -4,16 +4,25 @@ import {
   CreateOrchestratorMessageRequest,
   CreateOrchestratorMessageResponse,
   ListOrchestratorMessagesResponse,
+  PendingQuestion,
+  SubmitWorkerAnswersRequest,
+  type PendingQuestionAnswer,
 } from "@orca/contracts";
 
 import type { EventBus } from "../events.js";
 import type { ModelProviderRegistry } from "../llm/registry.js";
+import {
+  assembleAnswerReason,
+  assembleFreeTextReason,
+  validateAnswers,
+} from "../workflows/orchestrator/worker-answer-format.js";
 import { listOrchestratorMessagesByGoal } from "./projection.js";
 import {
   createOrchestratorMessage,
   GoalOrchestratorModelMissingError,
   OrchestratorChatGoalNotFoundError,
   OrchestratorChatProviderUnavailableError,
+  recordWorkerQuestionAnswer,
 } from "./usecases.js";
 import type { ShadowAdapterId } from "../orchestrator-llm/shadow-session.js";
 
@@ -103,5 +112,61 @@ export function registerOrchestratorChatRoutes(
       }
       throw error;
     }
+  });
+
+  // Answer an orchestrator ask_user question. Unlike a worker question (which
+  // blocks an agent tool call and is answered through its own route), an
+  // orchestrator question is answered by (1) persisting the answer onto the
+  // question message so it renders answered and survives reloads, and (2)
+  // forwarding the selection to the mediator as guidance — without posting a
+  // separate user chat bubble.
+  server.post("/v1/goals/:goalId/orchestrator-questions/:questionId/answer", async (request, reply) => {
+    const { goalId, questionId } = request.params as { goalId: string; questionId: string };
+    const parsed = SubmitWorkerAnswersRequest.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: "validation_failed", issues: parsed.error.issues };
+    }
+
+    const row = deps.db
+      .prepare(
+        `SELECT pending_question FROM orchestrator_messages
+           WHERE goal_id = ? AND json_extract(pending_question, '$.questionId') = ?
+           LIMIT 1`
+      )
+      .get(goalId, questionId) as { pending_question: string } | undefined;
+    if (row == null) {
+      reply.status(404);
+      return apiError("question_not_found", `Question not found: ${questionId}`);
+    }
+
+    const pending = PendingQuestion.parse(JSON.parse(row.pending_question));
+
+    let answer: PendingQuestionAnswer;
+    let reason: string;
+    if (parsed.data.freeText != null) {
+      answer = { freeText: parsed.data.freeText };
+      reason = assembleFreeTextReason(parsed.data.freeText);
+    } else {
+      const invalid = validateAnswers(pending.questions, parsed.data.answers!);
+      if (invalid) {
+        reply.status(400);
+        return apiError(invalid, "Invalid answers for this question");
+      }
+      answer = { answers: parsed.data.answers! };
+      reason = assembleAnswerReason(pending.questions, parsed.data.answers!);
+    }
+
+    recordWorkerQuestionAnswer(
+      { db: deps.db, bus: deps.bus, idFactory: deps.idFactory },
+      { goalId, questionId, answer }
+    );
+
+    if (deps.onUserMessage) {
+      // Best-effort mediator forward; never block the answer ack.
+      void deps.onUserMessage(goalId, reason).catch(() => {});
+    }
+
+    return { ok: true };
   });
 }

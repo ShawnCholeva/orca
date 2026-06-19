@@ -20,6 +20,7 @@ import type { ModelCompletionRequest, ModelProvider } from "../llm/types.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import { createServer } from "../server.js";
 import { registerOrchestratorChatRoutes } from "./routes.js";
+import { listOrchestratorMessagesByGoal } from "./projection.js";
 
 const tempDirs: string[] = [];
 const AUTH_HEADERS = { authorization: "Bearer test-token" } as const;
@@ -177,5 +178,77 @@ describe("orchestrator chat routes", () => {
 
     expect(invoked).toBe(true);
     expect(response.statusCode).toBe(201);
+  });
+
+  function seedOrchestratorQuestion(goalId: string): void {
+    const pq = JSON.stringify({
+      questionId: "q1",
+      toolUseId: "t1",
+      source: "orchestrator",
+      questions: [
+        {
+          header: "Surface",
+          question: "Which part of Orca?",
+          multiSelect: false,
+          options: [
+            { label: "Desktop UI", description: "the app" },
+            { label: "Daemon", description: "the server" },
+          ],
+        },
+      ],
+    });
+    db.prepare(
+      "INSERT INTO orchestrator_messages (id, goal_id, role, kind, body, correlation_id, created_at, pending_question) VALUES (?,?,?,?,?,?,?,?)"
+    ).run("om-q1", goalId, "orchestrator", "message", "Agent asks", "c1", NOW, pq);
+  }
+
+  it("POST orchestrator-questions/:id/answer persists answer, forwards to mediator, adds no user bubble", async () => {
+    seedGoal(db, "goal-1");
+    seedOrchestratorQuestion("goal-1");
+
+    const app = Fastify();
+    let forwarded: string | null = null;
+    registerOrchestratorChatRoutes(app, {
+      db,
+      bus: eventBus,
+      modelProviderRegistry: fakeRegistry(),
+      now: () => NOW,
+      idFactory: (() => {
+        let nextId = 0;
+        return () => `ans-id-${++nextId}`;
+      })(),
+      onUserMessage: async (_goalId, body) => {
+        forwarded = body;
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/goals/goal-1/orchestrator-questions/q1/answer",
+      headers: { "content-type": "application/json" },
+      payload: { answers: [{ questionIndex: 0, selectedLabels: ["Desktop UI"] }] },
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+
+    const messages = listOrchestratorMessagesByGoal(db, "goal-1");
+    const answered = messages.find((m) => m.id === "om-q1");
+    expect(answered?.pendingQuestion?.answer?.answers?.[0]?.selectedLabels).toEqual(["Desktop UI"]);
+    expect(forwarded).toContain("Desktop UI");
+    expect(messages.some((m) => m.role === "user")).toBe(false);
+  });
+
+  it("POST orchestrator-questions/:id/answer returns 404 when the question is unknown", async () => {
+    seedGoal(db, "goal-1");
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/v1/goals/goal-1/orchestrator-questions/nope/answer",
+      headers: { "content-type": "application/json", ...AUTH_HEADERS },
+      payload: { answers: [{ questionIndex: 0, selectedLabels: ["Desktop UI"] }] },
+    });
+
+    expect(response.statusCode).toBe(404);
   });
 });

@@ -1001,6 +1001,26 @@ export async function submitWorkerAnswers(
   );
 }
 
+export async function submitOrchestratorAnswer(
+  goalId: string,
+  questionId: string,
+  body: { answers: { questionIndex: number; selectedLabels: string[] }[] } | { freeText: string },
+): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  return requestVoid(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/orchestrator-questions/${encodeURIComponent(questionId)}/answer`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(body),
+    },
+    "Submit orchestrator answer failed",
+  );
+}
+
 export async function submitWorkerFreeText(
   goalId: string,
   questionId: string,

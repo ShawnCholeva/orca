@@ -28,6 +28,7 @@ import {
   requestNextOrchestratorDecision,
   submitWorkerAnswers,
   submitWorkerFreeText,
+  submitOrchestratorAnswer,
   startWorkflowRun,
   toErrorMessage,
 } from "../api";
@@ -41,7 +42,6 @@ import {
 import { AgentActivity } from "./AgentActivity";
 import { PermissionApprovalCard } from "./PermissionApprovalCard";
 import { ProviderRecoveryCard } from "./ProviderRecoveryCard";
-import { WorkerQuestionAnswered } from "./WorkerQuestionAnswered";
 import { WorkerPermissionToggle } from "./WorkerPermissionToggle";
 import { WorkflowTracker, type TrackerStep } from "./components/WorkflowTracker";
 import "./orca-chat.css";
@@ -153,6 +153,16 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     scrolledGoalRef.current = selectedGoalId;
     scrolledMessageIdRef.current = lastId;
   }, [selectedGoalId, messagesLoading, messages]);
+
+  // The transient "Thinking…" row after an answer is a tail element, not a
+  // message, so the message-change scroll above doesn't fire — and an answered
+  // question no longer posts a user bubble to trigger it. Pin it into view.
+  useEffect(() => {
+    if (answerPendingSince == null) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [answerPendingSince]);
 
   useEffect(() => {
     if (!recoveryExpanded) return;
@@ -888,35 +898,33 @@ export function ChatMessageRow({ message, goalId, onWorkerAnswered }: { message:
             framing body is suppressed so it isn't shown above the question. */}
         {!message.pendingQuestion && <div className="orca-chat-message">{message.body}</div>}
         {message.pendingQuestion && message.pendingQuestion.source === "worker" ? (
-          message.pendingQuestion.answer ? (
-            <WorkerQuestionAnswered pending={message.pendingQuestion} />
-          ) : (
-            <WorkerQuestionForm
-              goalId={message.goalId}
-              pending={message.pendingQuestion}
-              onSubmitAnswers={async (answers) => {
-                await submitWorkerAnswers(message.goalId, message.pendingQuestion!.questionId, answers);
-                onWorkerAnswered?.();
-              }}
-              onSubmitFreeText={async (text) => {
-                await submitWorkerFreeText(message.goalId, message.pendingQuestion!.questionId, text, { fromChat: false });
-                onWorkerAnswered?.();
-              }}
-            />
-          )
+          // Worker question: an agent's AskUserQuestion tool call is blocked on
+          // this; answering resolves it and persists the answer on the message.
+          <WorkerQuestionForm
+            goalId={message.goalId}
+            pending={message.pendingQuestion}
+            onSubmitAnswers={async (answers) => {
+              await submitWorkerAnswers(message.goalId, message.pendingQuestion!.questionId, answers);
+              onWorkerAnswered?.();
+            }}
+            onSubmitFreeText={async (text) => {
+              await submitWorkerFreeText(message.goalId, message.pendingQuestion!.questionId, text, { fromChat: false });
+              onWorkerAnswered?.();
+            }}
+          />
         ) : message.pendingQuestion ? (
+          // Orchestrator ask_user: persist the answer on the question and forward
+          // it to the mediator as guidance — no echoed user bubble.
           <WorkerQuestionForm
             goalId={goalId}
             pending={message.pendingQuestion}
             onSubmitAnswers={async (answers) => {
-              const questions = message.pendingQuestion!.questions;
-              const body = questions
-                .map((q, i) => {
-                  const labels = answers.find((a) => a.questionIndex === i)?.selectedLabels ?? [];
-                  return `${q.header || q.question}: ${labels.join(", ")}`;
-                })
-                .join("\n");
-              await createOrchestratorMessage(goalId, { body });
+              await submitOrchestratorAnswer(goalId, message.pendingQuestion!.questionId, { answers });
+              onWorkerAnswered?.();
+            }}
+            onSubmitFreeText={async (text) => {
+              await submitOrchestratorAnswer(goalId, message.pendingQuestion!.questionId, { freeText: text });
+              onWorkerAnswered?.();
             }}
           />
         ) : null}
@@ -942,24 +950,35 @@ function WorkerQuestionForm({
   // (an agent's live AskUserQuestion). Orchestrator ask_user questions pass a
   // handler that posts the answer back as user guidance instead.
   onSubmitAnswers?: (answers: WorkerAnswer[]) => Promise<void>;
-  // Live worker questions also accept a free-text answer ("Something else").
-  // Provided only on the live-activity path; absent for orchestrator ask_user.
+  // Both worker and orchestrator questions accept a free-text answer
+  // ("Something else"), so the user is never boxed into the offered options.
   onSubmitFreeText?: (text: string) => Promise<void>;
 }) {
-  const [selections, setSelections] = useState<Record<number, string[]>>({});
-  const [submitted, setSubmitted] = useState(false);
+  // Once a question carries a persisted answer it renders read-only, driven by
+  // that answer — so the answered state survives reloads and goal switches and
+  // looks identical for worker and orchestrator questions.
+  const answer = pending.answer ?? null;
+  const [selections, setSelections] = useState<Record<number, string[]>>(() => selectionsFromAnswer(answer));
+  // Local optimistic flag for an in-flight submit; a persisted answer also makes
+  // the card read-only (covers composer/cross-session answers on this message).
+  const [localSubmitted, setLocalSubmitted] = useState(false);
   const [expired, setExpired] = useState(false);
-  const [freeTextSelected, setFreeTextSelected] = useState(false);
-  const [freeText, setFreeText] = useState("");
+  const [freeTextSelected, setFreeTextSelected] = useState(answer?.freeText != null);
+  const [freeText, setFreeText] = useState(answer?.freeText ?? "");
   const singleQuestion = pending.questions.length === 1;
   const offerFreeText = singleQuestion && onSubmitFreeText != null;
+  const answeredViaChat = answer?.viaChat === true;
+  const submitted = localSubmitted || answer != null;
 
+  // Reset (or re-seed from a persisted answer) when the question itself changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on questionId only
   useEffect(() => {
-    setSelections({});
-    setSubmitted(false);
+    const a = pending.answer ?? null;
+    setSelections(selectionsFromAnswer(a));
+    setLocalSubmitted(false);
     setExpired(false);
-    setFreeTextSelected(false);
-    setFreeText("");
+    setFreeTextSelected(a?.freeText != null);
+    setFreeText(a?.freeText ?? "");
   }, [pending.questionId]);
 
   function toggle(qIndex: number, label: string, multi: boolean) {
@@ -984,13 +1003,13 @@ function WorkerQuestionForm({
 
   async function handleSubmit() {
     const answers = pending.questions.map((_, i) => ({ questionIndex: i, selectedLabels: selections[i] ?? [] }));
-    setSubmitted(true);
+    setLocalSubmitted(true);
     try {
       if (freeTextSelected && onSubmitFreeText) await onSubmitFreeText(freeText.trim());
       else if (onSubmitAnswers) await onSubmitAnswers(answers);
       else await submitWorkerAnswers(goalId, pending.questionId, answers);
     } catch {
-      setSubmitted(false);
+      setLocalSubmitted(false);
       setExpired(true);
     }
   }
@@ -1017,10 +1036,17 @@ function WorkerQuestionForm({
         <span>Question</span>
       </div>
       {pending.questions.map((q, qi) => (
-        <fieldset key={qi} className="orca-chat-question-block" disabled={submitted}>
-          <legend className="orca-chat-question-legend">
+        // A plain <div role="group"> rather than <fieldset>: WKWebView stretches
+        // a fieldset flex-item past its content, leaving a gap above the button.
+        <div
+          key={qi}
+          className="orca-chat-question-block"
+          role="group"
+          aria-labelledby={`${pending.questionId}-${qi}-label`}
+        >
+          <div className="orca-chat-question-legend" id={`${pending.questionId}-${qi}-label`}>
             {pending.questions.length > 1 && <span className="orca-chat-question-index">{qi + 1} · </span>}<span>{q.question}</span>
-          </legend>
+          </div>
           {q.options.map((opt, oi) => {
             const chosen = (selections[qi] ?? []).includes(opt.label);
             const recommendedSuffix = " (Recommended)";
@@ -1035,6 +1061,7 @@ function WorkerQuestionForm({
                   name={`${pending.questionId}-${qi}`}
                   aria-label={opt.label}
                   checked={chosen}
+                  disabled={submitted}
                   onChange={() => toggle(qi, opt.label, q.multiSelect)}
                 />
                 <span className="orca-chat-option-content">
@@ -1060,6 +1087,7 @@ function WorkerQuestionForm({
                   name={`${pending.questionId}-${qi}`}
                   aria-label="Something else"
                   checked={freeTextSelected}
+                  disabled={submitted}
                   onChange={chooseFreeText}
                 />
                 <span className="orca-chat-option-content">
@@ -1081,7 +1109,7 @@ function WorkerQuestionForm({
               ) : null}
             </>
           ) : null}
-        </fieldset>
+        </div>
       ))}
       <button
         type="button"
@@ -1105,9 +1133,19 @@ function WorkerQuestionForm({
         </svg>
         <span>{submitted ? "Sent" : "Send answer"}</span>
       </button>
+      {answeredViaChat && <p className="orca-chat-question-answered-note">Answered in chat.</p>}
       {expired && <p className="form-error" role="alert">This question expired.</p>}
     </div>
   );
+}
+
+// Seed the form's per-question selections from a persisted options answer (if
+// any), so an already-answered question renders with the chosen options marked.
+function selectionsFromAnswer(
+  answer: NonNullable<OrchestratorChatMessage["pendingQuestion"]>["answer"] | null,
+): Record<number, string[]> {
+  if (answer?.answers == null) return {};
+  return Object.fromEntries(answer.answers.map((a) => [a.questionIndex, a.selectedLabels]));
 }
 
 function SystemCard(props: {
