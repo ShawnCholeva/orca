@@ -30,11 +30,7 @@ function applyMigrationsUpTo(db: Database.Database, stopBefore: string): void {
     "INSERT INTO _migrations (name, applied_at) VALUES (?, ?)"
   );
 
-  // migrationFiles is the ordered known list; 0035 is an extra file on disk
-  const orderedFiles = [
-    ...migrationFiles,
-    "0035_orchestrator_message_pending_revision.sql",
-  ];
+  const orderedFiles = [...migrationFiles];
 
   for (const file of orderedFiles) {
     if (file === stopBefore) break;
