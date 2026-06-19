@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import type { DomainEvent, DomainEventType, InspectWorkspacePreview, Workspace } from "@orca/contracts";
+import type { DomainEvent, DomainEventType, Workspace } from "@orca/contracts";
 import type { EventBus } from "../events.js";
 import { NotFoundError } from "../goals.js";
 import {
@@ -16,10 +16,17 @@ export interface WorkspaceCtx {
   inspectWorkspace(inputPath: string): Promise<InspectWorkspacePreview>;
 }
 
-function emit(ctx: WorkspaceCtx, type: DomainEventType, goalId: string | null, payload: Record<string, unknown>): void {
+function commitWithEvent(
+  ctx: WorkspaceCtx,
+  type: DomainEventType,
+  goalId: string | null,
+  payload: Record<string, unknown>,
+  mutate: () => void,
+): void {
   const now = new Date().toISOString();
   let event!: DomainEvent;
   ctx.db.transaction(() => {
+    mutate();
     const id = randomUUID();
     const result = ctx.db.prepare(
       "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -27,16 +34,6 @@ function emit(ctx: WorkspaceCtx, type: DomainEventType, goalId: string | null, p
     event = { seq: Number(result.lastInsertRowid), id, type, goalId, payload, createdAt: now };
   })();
   ctx.bus.publish(event);
-}
-
-// find-or-create the canonical entity for a path (no event)
-function ensureEntity(ctx: WorkspaceCtx, preview: InspectWorkspacePreview, name?: string): { ws: Workspace; created: boolean } {
-  const existing = findWorkspaceByPath(ctx.db, preview.path);
-  if (existing) return { ws: existing, created: false };
-  const now = new Date().toISOString();
-  const ws: Workspace = { id: randomUUID(), path: preview.path, name: name ?? preview.name, description: "", createdAt: now, updatedAt: now };
-  insertWorkspaceEntity(ctx.db, ws);
-  return { ws, created: true };
 }
 
 export async function createWorkspace(
@@ -50,8 +47,9 @@ export async function createWorkspace(
     id: randomUUID(), path: preview.path, name: input.name ?? preview.name,
     description: input.description ?? "", createdAt: now, updatedAt: now,
   };
-  insertWorkspaceEntity(ctx.db, ws);
-  emit(ctx, "workspace.created", null, { workspaceId: ws.id, path: ws.path, name: ws.name });
+  commitWithEvent(ctx, "workspace.created", null, { workspaceId: ws.id, path: ws.path, name: ws.name }, () => {
+    insertWorkspaceEntity(ctx.db, ws);
+  });
   return ws;
 }
 
@@ -59,9 +57,12 @@ export async function updateWorkspace(
   ctx: WorkspaceCtx,
   input: { id: string; name?: string; description?: string },
 ): Promise<Workspace> {
-  const updated = updateWorkspaceEntity(ctx.db, input.id, { name: input.name, description: input.description }, new Date().toISOString());
-  if (!updated) throw new NotFoundError(input.id);
-  emit(ctx, "workspace.updated", null, { workspaceId: updated.id, name: updated.name });
+  const existing = findWorkspaceById(ctx.db, input.id);
+  if (!existing) throw new NotFoundError(input.id);
+  let updated!: Workspace;
+  commitWithEvent(ctx, "workspace.updated", null, { workspaceId: input.id, name: input.name ?? existing.name }, () => {
+    updated = updateWorkspaceEntity(ctx.db, input.id, { name: input.name, description: input.description }, new Date().toISOString())!;
+  });
   return updated;
 }
 
@@ -72,9 +73,13 @@ export async function attachWorkspace(
   const goalRow = ctx.db.prepare("SELECT id, archived_at FROM goals WHERE id = ?").get(input.goalId) as { id: string; archived_at: string | null } | undefined;
   if (!goalRow || goalRow.archived_at !== null) throw new NotFoundError(input.goalId);
   const preview = await ctx.inspectWorkspace(input.inputPath);
-  const { ws } = ensureEntity(ctx, preview, input.name);
-  linkGoalWorkspace(ctx.db, input.goalId, ws.id, new Date().toISOString());
-  emit(ctx, "workspace.attached", input.goalId, { workspaceId: ws.id, path: ws.path, name: ws.name });
+  const existing = findWorkspaceByPath(ctx.db, preview.path);
+  const now = new Date().toISOString();
+  const ws: Workspace = existing ?? { id: randomUUID(), path: preview.path, name: input.name ?? preview.name, description: "", createdAt: now, updatedAt: now };
+  commitWithEvent(ctx, "workspace.attached", input.goalId, { workspaceId: ws.id, path: ws.path, name: ws.name }, () => {
+    if (!existing) insertWorkspaceEntity(ctx.db, ws);
+    linkGoalWorkspace(ctx.db, input.goalId, ws.id, new Date().toISOString());
+  });
   return ws;
 }
 
@@ -82,7 +87,9 @@ export async function detachWorkspace(
   ctx: WorkspaceCtx,
   input: { goalId: string; workspaceId: string },
 ): Promise<void> {
-  const removed = unlinkGoalWorkspace(ctx.db, input.goalId, input.workspaceId);
-  if (!removed) throw new NotFoundError(input.workspaceId);
-  emit(ctx, "workspace.removed", input.goalId, { workspaceId: input.workspaceId });
+  const linked = ctx.db.prepare("SELECT 1 FROM goal_workspaces WHERE goal_id = ? AND workspace_id = ?").get(input.goalId, input.workspaceId);
+  if (!linked) throw new NotFoundError(input.workspaceId);
+  commitWithEvent(ctx, "workspace.removed", input.goalId, { workspaceId: input.workspaceId }, () => {
+    unlinkGoalWorkspace(ctx.db, input.goalId, input.workspaceId);
+  });
 }
