@@ -1263,8 +1263,14 @@ export const WorkerAnswer = z
 export type WorkerAnswer = z.infer<typeof WorkerAnswer>;
 
 export const SubmitWorkerAnswersRequest = z
-  .object({ answers: z.array(WorkerAnswer).min(1) })
-  .strict();
+  .object({
+    answers: z.array(WorkerAnswer).min(1).optional(),
+    freeText: z.string().trim().min(1).max(4000).optional(),
+  })
+  .strict()
+  .refine((v) => (v.answers != null) !== (v.freeText != null), {
+    message: "Provide exactly one of answers or freeText",
+  });
 export type SubmitWorkerAnswersRequest = z.infer<typeof SubmitWorkerAnswersRequest>;
 
 export const CreateOrchestratorMessageResponse = z

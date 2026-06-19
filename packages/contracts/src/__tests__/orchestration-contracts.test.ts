@@ -956,6 +956,25 @@ describe("SubmitWorkerAnswersRequest", () => {
   it("rejects empty answers", () => {
     expect(() => SubmitWorkerAnswersRequest.parse({ answers: [] })).toThrow();
   });
+  it("SubmitWorkerAnswersRequest accepts a free-text answer", () => {
+    const r = SubmitWorkerAnswersRequest.parse({ freeText: "a dedicated workspaces tab" });
+    expect(r.freeText).toBe("a dedicated workspaces tab");
+    expect(r.answers).toBeUndefined();
+  });
+  it("SubmitWorkerAnswersRequest rejects empty free text", () => {
+    expect(() => SubmitWorkerAnswersRequest.parse({ freeText: "   " })).toThrow();
+  });
+  it("SubmitWorkerAnswersRequest rejects both answers and freeText", () => {
+    expect(() =>
+      SubmitWorkerAnswersRequest.parse({
+        answers: [{ questionIndex: 0, selectedLabels: ["Red"] }],
+        freeText: "something",
+      }),
+    ).toThrow();
+  });
+  it("SubmitWorkerAnswersRequest rejects neither answers nor freeText", () => {
+    expect(() => SubmitWorkerAnswersRequest.parse({})).toThrow();
+  });
 });
 
 describe("ProviderRecovery contracts", () => {
