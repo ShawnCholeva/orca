@@ -29,53 +29,16 @@ const mk = (over: Partial<Activity> = {}): Activity => ({
   ...over,
 });
 
-const unusedQuestionForm = () => null;
-
 describe("LiveActivity", () => {
   it("renders the live bubble's current text", () => {
     render(
       <LiveActivity
         goalId="g1"
         activity={mk({ currentText: "Reading through the codebase..." })}
-        renderQuestionForm={unusedQuestionForm}
       />,
     );
 
     expect(screen.getByText("Reading through the codebase...")).toBeInTheDocument();
-  });
-
-  it("renders the embedded question form when paused", () => {
-    render(
-      <LiveActivity
-        goalId="g1"
-        activity={mk({
-          status: "paused_for_input",
-          currentText: "I need your call on signals.",
-          sourceKind: "question_pending",
-          pendingQuestion: {
-            questionId: "q1",
-            toolUseId: "t1",
-            questions: [
-              {
-                header: "Signals",
-                question: "Which passed?",
-                multiSelect: true,
-                options: [{ label: "A", description: "x" }],
-              },
-            ],
-          },
-        })}
-        renderQuestionForm={({ goalId, pending }) => (
-          <div>
-            {goalId}: {pending.questions[0]?.question}
-          </div>
-        )}
-      />,
-    );
-
-    // The pending question leads the card; the generic voice line is suppressed.
-    expect(screen.queryByText("I need your call on signals.")).not.toBeInTheDocument();
-    expect(screen.getByText("g1: Which passed?")).toBeInTheDocument();
   });
 
   it("renders a Continue button on a supervised confirmation checkpoint", () => {
@@ -89,7 +52,6 @@ describe("LiveActivity", () => {
           currentText: "Completeness 90% · Correctness 85% · Ready for handoff — Continue or send revisions.",
           sourceKind: "step_confirmation_pending",
         })}
-        renderQuestionForm={unusedQuestionForm}
         onContinue={onContinue}
       />,
     );
@@ -144,7 +106,6 @@ describe("LiveActivity", () => {
           providerRecovery: recovery,
           currentText: "Claude Code reached its session limit.",
         })}
-        renderQuestionForm={unusedQuestionForm}
         renderProviderRecovery={MockRecoveryCard}
       />,
     );
@@ -163,7 +124,6 @@ describe("LiveActivity", () => {
           status: "paused_for_input",
           sourceKind: "step_confirmation_pending",
         })}
-        renderQuestionForm={unusedQuestionForm}
         renderProviderRecovery={MockRecoveryCard}
         onContinue={vi.fn()}
       />,
@@ -190,14 +150,6 @@ describe("pickLiveActivity", () => {
       ])?.id,
     ).toBe("recovery");
 
-    // paused_for_input with a pending question → shown
-    expect(
-      pickLiveActivity([
-        mk({ id: "q1", status: "paused_for_input", sourceKind: "question_pending",
-          pendingQuestion: { questionId: "q1", toolUseId: "t1", questions: [] } }),
-      ])?.id,
-    ).toBe("q1");
-
     // active tool_use (no pause interaction) → not shown
     expect(
       pickLiveActivity([
@@ -218,6 +170,16 @@ describe("pickLiveActivity", () => {
         mk({ id: "c1", status: "completed", finalSummary: "done", sourceKind: "turn_completed" }),
       ]),
     ).toBeNull();
+  });
+
+  it("ignores a pending-question activity (questions are chat messages now)", () => {
+    const activity = {
+      // minimal Activity with status paused_for_input + a pendingQuestion, no confirmation/recovery
+      status: "paused_for_input", sourceKind: "question_pending",
+      pendingQuestion: { questionId: "q1", toolUseId: "t1", source: "worker", questions: [] },
+      steps: [],
+    } as never;
+    expect(pickLiveActivity([activity])).toBeNull();
   });
 });
 

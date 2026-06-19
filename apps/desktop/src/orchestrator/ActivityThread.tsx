@@ -2,11 +2,6 @@ import { useState } from "react";
 import type { Activity } from "@orca/contracts";
 import type { ComponentType } from "react";
 
-type QuestionFormProps = {
-  goalId: string;
-  pending: NonNullable<Activity["pendingQuestion"]>;
-};
-
 type ProviderRecoveryProps = {
   runId: string;
   recovery: NonNullable<Activity["providerRecovery"]>;
@@ -48,8 +43,7 @@ export function pickLiveActivity(activities: Activity[]): Activity | null {
     if (
       activity?.status === "paused_for_input" &&
       (activity.sourceKind === "step_confirmation_pending" ||
-        activity.sourceKind === "provider_recovery_pending" ||
-        activity.pendingQuestion != null)
+        activity.sourceKind === "provider_recovery_pending")
     ) {
       return activity;
     }
@@ -123,17 +117,15 @@ export function ActivityCard({ activity }: { activity: Activity }) {
 }
 
 // The live "working" bubble for the active step's agent, pinned to the tail of
-// the timeline. Carries the embedded question form when the agent is paused.
+// the timeline. Handles confirmation checkpoints and provider recovery.
 export function LiveActivity({
   goalId,
   activity,
-  renderQuestionForm: QuestionForm,
   renderProviderRecovery: ProviderRecovery,
   onContinue,
 }: {
   goalId: string;
   activity: Activity;
-  renderQuestionForm: ComponentType<QuestionFormProps>;
   renderProviderRecovery?: ComponentType<ProviderRecoveryProps>;
   onContinue?: (runId: string) => void;
 }) {
@@ -144,22 +136,9 @@ export function LiveActivity({
     activity.status === "paused_for_input" &&
     activity.sourceKind === "provider_recovery_pending" &&
     activity.providerRecovery != null;
-  // When a question is pending, the question itself leads the card; the generic
-  // "I need your call on …" voice line would just be redundant above it.
-  const hasPendingQuestion =
-    activity.status === "paused_for_input" && activity.pendingQuestion != null;
   return (
-    <div
-      className={`activity-bubble${hasPendingQuestion ? " activity-bubble--question" : ""}`}
-      data-testid="activity-bubble"
-      data-status={activity.status}
-    >
-      {hasPendingQuestion ? null : (
-        <div className="activity-bubble-text">{activity.currentText}</div>
-      )}
-      {activity.status === "paused_for_input" && activity.pendingQuestion ? (
-        <QuestionForm goalId={goalId} pending={activity.pendingQuestion} />
-      ) : null}
+    <div className="activity-bubble" data-testid="activity-bubble" data-status={activity.status}>
+      <div className="activity-bubble-text">{activity.currentText}</div>
       {isConfirmation ? (
         <div className="step-confirm-actions">
           <button
@@ -176,10 +155,7 @@ export function LiveActivity({
         </div>
       ) : null}
       {isProviderRecovery && ProviderRecovery && activity.providerRecovery ? (
-        <ProviderRecovery
-          runId={activity.workflowRunId}
-          recovery={activity.providerRecovery}
-        />
+        <ProviderRecovery runId={activity.workflowRunId} recovery={activity.providerRecovery} />
       ) : null}
     </div>
   );

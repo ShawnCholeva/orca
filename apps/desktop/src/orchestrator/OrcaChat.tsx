@@ -749,15 +749,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
               <LiveActivity
                 goalId={selectedGoalId ?? ""}
                 activity={liveActivity}
-                renderQuestionForm={(props) => (
-                  <WorkerQuestionForm
-                    {...props}
-                    onSubmitFreeText={async (text) => {
-                      await submitWorkerFreeText(selectedGoalId ?? "", props.pending.questionId, text);
-                      setAnsweredQuestionId(props.pending.questionId);
-                    }}
-                  />
-                )}
                 renderProviderRecovery={({ runId, recovery }) => (
                   <ProviderRecoveryCard
                     runId={runId}
@@ -881,10 +872,10 @@ export function ChatMessageRow({ message, goalId }: { message: OrchestratorChatM
             <WorkerQuestionAnswered pending={message.pendingQuestion} />
           ) : (
             <WorkerQuestionForm
-              goalId={goalId}
+              goalId={message.goalId}
               pending={message.pendingQuestion}
               onSubmitFreeText={async (text) => {
-                await submitWorkerFreeText(goalId, message.pendingQuestion!.questionId, text, { fromChat: false });
+                await submitWorkerFreeText(message.goalId, message.pendingQuestion!.questionId, text, { fromChat: false });
               }}
             />
           )
