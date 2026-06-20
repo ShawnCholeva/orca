@@ -6,7 +6,13 @@ export interface ResolverResult {
   stdout: string;
 }
 
-const DENY = '{"decision":"deny","reason":"orca daemon unreachable"}';
+function offlineDeny(relUrl: string): string {
+  if (relUrl.includes("/v1/agent-hooks/permission")) {
+    return JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny" } } });
+  }
+  // elicit (AskUserQuestion / PreToolUse) and any other non-spoolable interactive hook
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "orca daemon unreachable" } });
+}
 
 export async function resolveAndDeliver(args: {
   dataDir: string;
@@ -22,7 +28,7 @@ export async function resolveAndDeliver(args: {
       enqueueSpool(args.dataDir, { relUrl: args.relUrl, body: args.body }, args.now);
       return { exitCode: 0, stdout: "" };
     }
-    return { exitCode: 0, stdout: DENY };
+    return { exitCode: 0, stdout: offlineDeny(args.relUrl) };
   };
 
   const disc = readDiscoveryFile(args.dataDir);

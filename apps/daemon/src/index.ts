@@ -30,7 +30,7 @@ export interface DaemonStartHandles {
 
 async function drainSpool(dataDir: string, baseUrl: string, token: string): Promise<void> {
   const { listSpool, removeSpool, shouldAgeOut } = await import("./discovery/spool.js");
-  const { writeFileSync } = await import("node:fs");
+  const { writeFileSync, renameSync } = await import("node:fs");
   const now = () => new Date().toISOString();
   for (const { file, entry } of listSpool(dataDir)) {
     if (shouldAgeOut(entry, now, 5, 24 * 60 * 60 * 1000)) { removeSpool(file); continue; }
@@ -42,7 +42,9 @@ async function drainSpool(dataDir: string, baseUrl: string, token: string): Prom
       });
       if (res.ok) { removeSpool(file); continue; }
     } catch { /* leave for retry */ }
-    writeFileSync(file, JSON.stringify({ ...entry, attempts: entry.attempts + 1 }), "utf8");
+    const tmp = `${file}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ ...entry, attempts: entry.attempts + 1 }), "utf8");
+    renameSync(tmp, file);
   }
 }
 

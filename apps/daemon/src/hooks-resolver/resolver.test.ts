@@ -42,7 +42,7 @@ describe("resolveAndDeliver", () => {
     expect(listSpool(dir)).toHaveLength(1);
   });
 
-  it("denies (no spool) when not spoolable and daemon unreachable", async () => {
+  it("denies (no spool) when not spoolable and daemon unreachable (permission)", async () => {
     writeDiscoveryFile(dir, disc); // url points at closed port
     const fetchImpl = (async () => { throw new Error("ECONNREFUSED"); }) as unknown as typeof fetch;
     const r = await resolveAndDeliver({
@@ -50,7 +50,21 @@ describe("resolveAndDeliver", () => {
       body: "{}", spoolable: false, now, fetchImpl,
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain("deny");
+    expect(JSON.parse(r.stdout)).toEqual({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny" } } });
+    expect(listSpool(dir)).toHaveLength(0);
+  });
+
+  it("denies (no spool) when not spoolable and daemon unreachable (elicit)", async () => {
+    writeDiscoveryFile(dir, disc); // url points at closed port
+    const fetchImpl = (async () => { throw new Error("ECONNREFUSED"); }) as unknown as typeof fetch;
+    const r = await resolveAndDeliver({
+      dataDir: dir, relUrl: "/v1/agent-hooks/elicit?sessionId=s1",
+      body: "{}", spoolable: false, now, fetchImpl,
+    });
+    expect(r.exitCode).toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.hookSpecificOutput.hookEventName).toBe("PreToolUse");
+    expect(parsed.hookSpecificOutput.permissionDecision).toBe("deny");
     expect(listSpool(dir)).toHaveLength(0);
   });
 
