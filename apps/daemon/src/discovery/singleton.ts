@@ -34,7 +34,7 @@ export function acquireLock(dataDir: string): boolean {
   // Lock exists — steal it only if its holder is dead.
   let holder = NaN;
   try { holder = Number.parseInt(readFileSync(path, "utf8").trim(), 10); } catch { /* unreadable */ }
-  if (Number.isInteger(holder) && isPidAlive(holder)) return false;
+  if (!Number.isInteger(holder) || isPidAlive(holder)) return false;
   rmSync(path, { force: true });
   return tryCreate(path);
 }

@@ -20,6 +20,11 @@ describe("singleton lock", () => {
     expect(acquireLock(dir)).toBe(true);
   });
 
+  it("does NOT steal a lock whose pid is unreadable/corrupt", () => {
+    writeFileSync(lockFilePath(dir), "not-a-pid", "utf8");
+    expect(acquireLock(dir)).toBe(false);
+  });
+
   it("releaseLock removes our lock", () => {
     acquireLock(dir);
     releaseLock(dir);
