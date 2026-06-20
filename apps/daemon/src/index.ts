@@ -145,9 +145,51 @@ function isMainEntrypoint(): boolean {
   return import.meta.url === pathToFileURL(entrypoint).href;
 }
 
-if (isMainEntrypoint()) {
-  startDaemon().catch((err) => {
-    console.error('[orca-daemon] fatal:', err);
-    process.exit(1);
+async function runHookSubcommand(relUrl: string, spool: boolean): Promise<void> {
+  const { loadConfig } = await import("./config.js");
+  const { resolveAndDeliver } = await import("./hooks-resolver/resolver.js");
+  const cfg = loadConfig();
+  const body = await new Promise<string>((resolve) => {
+    let data = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (c) => { data += c; });
+    process.stdin.on("end", () => resolve(data));
+    if (process.stdin.isTTY) resolve(""); // no piped input
   });
+  const result = await resolveAndDeliver({
+    dataDir: cfg.dataDir, relUrl, body, spoolable: spool,
+    now: () => new Date().toISOString(),
+  });
+  if (result.stdout) process.stdout.write(result.stdout);
+  process.exit(result.exitCode);
+}
+
+async function runStopSubcommand(): Promise<void> {
+  const { loadConfig } = await import("./config.js");
+  const { readDiscoveryFile } = await import("./discovery/discovery-file.js");
+  const { isPidAlive } = await import("./discovery/singleton.js");
+  const cfg = loadConfig();
+  const rec = readDiscoveryFile(cfg.dataDir);
+  if (rec && isPidAlive(rec.pid)) {
+    try { process.kill(rec.pid, "SIGTERM"); } catch { /* already gone */ }
+  }
+  process.exit(0);
+}
+
+if (isMainEntrypoint()) {
+  const [sub, ...rest] = process.argv.slice(2);
+  if (sub === "hook") {
+    const relUrl = rest[0] ?? "";
+    runHookSubcommand(relUrl, rest.includes("--spool")).catch((err) => {
+      console.error("[orca-daemon] hook error:", err);
+      process.exit(0); // never block the agent
+    });
+  } else if (sub === "--stop") {
+    runStopSubcommand().catch(() => process.exit(0));
+  } else {
+    startDaemon().catch((err) => {
+      console.error("[orca-daemon] fatal:", err);
+      process.exit(1);
+    });
+  }
 }
