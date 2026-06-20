@@ -97,11 +97,17 @@ fn daemon_data_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         let base = std::env::var("APPDATA").unwrap_or_default();
+        let base = if base.is_empty() {
+            let home = std::env::var("USERPROFILE").unwrap_or_default();
+            format!("{home}\\AppData\\Roaming")
+        } else {
+            base
+        };
         return PathBuf::from(base).join("Orca");
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let home = std::env::var("HOME").expect("HOME env var not set");
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
         PathBuf::from(home).join(".orca")
     }
 }
@@ -125,15 +131,17 @@ fn health_ok(url: &str) -> bool {
     // addr may be "127.0.0.1:8787" or "127.0.0.1:8787/some/path" — take only host:port
     let host_port = addr.split('/').next().unwrap_or(addr);
 
-    let mut stream = match std::net::TcpStream::connect_timeout(
-        &host_port
-            .parse()
-            .unwrap_or_else(|_| "127.0.0.1:8787".parse().unwrap()),
-        Duration::from_secs(2),
-    ) {
+    let addr: std::net::SocketAddr = match host_port.parse() {
+        Ok(a) => a,
+        Err(_) => return false,
+    };
+
+    let mut stream = match std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2)) {
         Ok(s) => s,
         Err(_) => return false,
     };
+
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
 
     let request = format!("GET /v1/health HTTP/1.0\r\nHost: {host_port}\r\nConnection: close\r\n\r\n");
     if stream.write_all(request.as_bytes()).is_err() {
