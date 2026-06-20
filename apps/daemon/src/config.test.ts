@@ -47,6 +47,37 @@ it("exposes a non-empty hookResolverCommand", () => {
   expect(cfg.hookResolverCommand.length).toBeGreaterThan(0);
 });
 
+it("hookResolverCommand re-invokes the daemon exactly as launched (carries execArgv loader flags)", () => {
+  // Regression: dropping process.execArgv made the baked hook command
+  // `node src/index.ts ...`, which under tsx (dev) fails with ERR_MODULE_NOT_FOUND
+  // because plain node can't resolve the `.js`-specified TS imports. The resolver
+  // must re-invoke with the same loader flags the daemon itself was started with.
+  const prev = process.env.ORCA_SIDECAR_BIN;
+  delete process.env.ORCA_SIDECAR_BIN;
+  try {
+    const cfg = loadConfig();
+    expect(cfg.hookResolverCommand).toEqual([
+      process.execPath,
+      ...process.execArgv,
+      process.argv[1] ?? "",
+    ]);
+  } finally {
+    if (prev === undefined) delete process.env.ORCA_SIDECAR_BIN;
+    else process.env.ORCA_SIDECAR_BIN = prev;
+  }
+});
+
+it("hookResolverCommand uses ORCA_SIDECAR_BIN verbatim when set (prod SEA)", () => {
+  const prev = process.env.ORCA_SIDECAR_BIN;
+  process.env.ORCA_SIDECAR_BIN = "/opt/orca/orca-daemon";
+  try {
+    expect(loadConfig().hookResolverCommand).toEqual(["/opt/orca/orca-daemon"]);
+  } finally {
+    if (prev === undefined) delete process.env.ORCA_SIDECAR_BIN;
+    else process.env.ORCA_SIDECAR_BIN = prev;
+  }
+});
+
 describe("loadConfig", () => {
   it("uses ORCA_DATA_DIR override and ensures the directory exists", () => {
     const dataDir = mkdtempSync(path.join(os.tmpdir(), "orca-config-test-"));

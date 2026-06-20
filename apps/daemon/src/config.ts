@@ -104,10 +104,15 @@ export function loadConfig(): Config {
       : MemoryExtractionTimeoutMsSchema.parse(env.ORCA_MEMORY_EXTRACTION_TIMEOUT_MS);
 
   const sidecarBin = process.env.ORCA_SIDECAR_BIN?.trim();
+  // Re-invoke the daemon entry the SAME way this process was launched. In dev the
+  // daemon runs under tsx (`node --import <tsx-loader> src/index.ts`), so the loader
+  // flags live in process.execArgv — dropping them makes `node src/index.ts` fail to
+  // resolve the `.js`-specified TS imports (ERR_MODULE_NOT_FOUND). execArgv is empty
+  // for a plain compiled entry, so this is correct for prod's non-SEA fallback too.
   const hookResolverCommand =
     sidecarBin && sidecarBin.length > 0
       ? [sidecarBin]
-      : [process.execPath, process.argv[1] ?? ""];
+      : [process.execPath, ...process.execArgv, process.argv[1] ?? ""];
 
   return {
     dataDir,
