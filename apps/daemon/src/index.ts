@@ -28,8 +28,34 @@ export interface DaemonStartHandles {
   close: () => Promise<void>;
 }
 
+async function drainSpool(dataDir: string, baseUrl: string, token: string): Promise<void> {
+  const { listSpool, removeSpool, shouldAgeOut } = await import("./discovery/spool.js");
+  const { writeFileSync } = await import("node:fs");
+  const now = () => new Date().toISOString();
+  for (const { file, entry } of listSpool(dataDir)) {
+    if (shouldAgeOut(entry, now, 5, 24 * 60 * 60 * 1000)) { removeSpool(file); continue; }
+    try {
+      const res = await fetch(`${baseUrl}${entry.relUrl}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: entry.body,
+      });
+      if (res.ok) { removeSpool(file); continue; }
+    } catch { /* leave for retry */ }
+    writeFileSync(file, JSON.stringify({ ...entry, attempts: entry.attempts + 1 }), "utf8");
+  }
+}
+
 export async function startDaemon(): Promise<DaemonStartHandles> {
   const config = loadConfig();
+
+  const { acquireLock, releaseLock } = await import("./discovery/singleton.js");
+  const { writeDiscoveryFile, removeDiscoveryFile } = await import("./discovery/discovery-file.js");
+  if (!acquireLock(config.dataDir)) {
+    console.error("[orca-daemon] another healthy daemon holds the lock — exiting");
+    process.exit(0);
+  }
+
   const db = openDatabase(config);
 
   const migrationsDir = sidecarMigrationsDir() ?? defaultMigrationsDir();
@@ -126,15 +152,32 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
     await server.listen({ host: '127.0.0.1', port: config.port });
   } catch (err) {
     server.log.error(err);
+    releaseLock(config.dataDir);
     process.exit(1);
   }
 
-  registerShutdown(server, extractionRunner);
+  const addr = server.server.address();
+  const boundPort = typeof addr === "object" && addr ? addr.port : config.port;
+  const token = config.getAuthToken();
+  writeDiscoveryFile(config.dataDir, {
+    version: 1,
+    url: `http://127.0.0.1:${boundPort}`,
+    token,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    protocol: "http",
+  });
+
+  await drainSpool(config.dataDir, `http://127.0.0.1:${boundPort}`, token);
+
+  registerShutdown(server, extractionRunner, config.dataDir);
 
   return {
     close: async () => {
       extractionRunner.stop();
       await server.close();
+      removeDiscoveryFile(config.dataDir);
+      releaseLock(config.dataDir);
     },
   };
 }

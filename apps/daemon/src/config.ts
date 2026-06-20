@@ -33,7 +33,7 @@ const EnvSchema = z.object({
   ORCA_MEMORY_EXTRACTION_TIMEOUT_MS: z.string().optional()
 });
 
-const PortSchema = z.coerce.number().int().min(1).max(65535);
+const PortSchema = z.coerce.number().int().min(0).max(65535);
 const SessionOutputTailBytesSchema = z.coerce.number().int().positive();
 const SessionStopGraceMsSchema = z.coerce.number().int().positive();
 const SessionWsBufferLimitBytesSchema = z.coerce.number().int().positive();

@@ -26,11 +26,16 @@ function readPackageVersion(): string {
   }
 }
 
+let defaultRegistriesBootstrapped = false;
+
 export function bootstrapRegistries(registries?: {
   plugins: PluginRegistry;
   skills: SkillRegistry;
   adapters?: AdapterRegistry;
 }): void {
+  // When using the default singletons, skip if already bootstrapped (idempotent for tests).
+  if (!registries && defaultRegistriesBootstrapped) return;
+
   const plugins = registries?.plugins ?? pluginRegistry;
   const skills = registries?.skills ?? skillRegistry;
   const adapters = registries?.adapters ?? adapterRegistry;
@@ -54,6 +59,7 @@ export function bootstrapRegistries(registries?: {
     plugins.freeze();
     skills.freeze();
     adapters.freeze();
+    if (!registries) defaultRegistriesBootstrapped = true;
     console.info(
       `registries.bootstrap.ok plugins=${plugins.list().length} skills=${skills.list().length}`
     );

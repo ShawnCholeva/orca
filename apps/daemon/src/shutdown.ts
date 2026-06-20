@@ -6,7 +6,7 @@ const SHUTDOWN_BUDGET_MS = 5000;
 
 // Registers SIGTERM/SIGINT handlers that drain in-flight requests, close WS
 // clients, and flush the DB before exiting. Must be called after server.listen.
-export function registerShutdown(server: FastifyInstance, extractionRunner?: ExtractionRunner): void {
+export function registerShutdown(server: FastifyInstance, extractionRunner?: ExtractionRunner, dataDir?: string): void {
   let isShuttingDown = false;
 
   async function shutdown(signal: string): Promise<void> {
@@ -30,6 +30,13 @@ export function registerShutdown(server: FastifyInstance, extractionRunner?: Ext
       }
 
       await server.close();
+
+      if (dataDir) {
+        const { removeDiscoveryFile } = await import('./discovery/discovery-file.js');
+        const { releaseLock } = await import('./discovery/singleton.js');
+        removeDiscoveryFile(dataDir);
+        releaseLock(dataDir);
+      }
 
       closeDatabase();
 
