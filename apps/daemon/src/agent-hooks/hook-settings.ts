@@ -1,55 +1,43 @@
-export function agentHookUrl(port: number, sessionId: string, failure = false): string {
-  const base = `http://127.0.0.1:${port}/v1/agent-hooks/stop?sessionId=${encodeURIComponent(sessionId)}`;
-  return failure ? `${base}&failure=1` : base;
+function shellQuote(arg: string): string {
+  return /^[A-Za-z0-9_/.:=-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
-export function elicitHookUrl(port: number, sessionId: string): string {
-  return `http://127.0.0.1:${port}/v1/agent-hooks/elicit?sessionId=${encodeURIComponent(sessionId)}`;
+function resolverCmd(prefix: string[], relUrl: string, spool: boolean): string {
+  const parts = [...prefix, "hook", relUrl, ...(spool ? ["--spool"] : [])];
+  return parts.map(shellQuote).join(" ");
 }
 
-export function permissionHookUrl(port: number, sessionId: string): string {
-  return `http://127.0.0.1:${port}/v1/agent-hooks/permission?sessionId=${encodeURIComponent(sessionId)}`;
-}
-
-export function toolUseHookUrl(port: number, sessionId: string): string {
-  return `http://127.0.0.1:${port}/v1/agent-hooks/tool-use?sessionId=${encodeURIComponent(sessionId)}`;
-}
-
-interface HttpHook {
-  type: "http";
-  url: string;
-  headers: Record<string, string>;
+interface CommandHook {
+  type: "command";
+  command: string;
   timeout?: number;
 }
 
 export interface AgentHookSettings {
   hooks: {
-    Stop: Array<{ hooks: HttpHook[] }>;
-    StopFailure: Array<{ hooks: HttpHook[] }>;
-    PreToolUse?: Array<{ matcher: string; hooks: HttpHook[] }>;
-    PermissionRequest?: Array<{ matcher: string; hooks: HttpHook[] }>;
+    Stop: Array<{ hooks: CommandHook[] }>;
+    StopFailure: Array<{ hooks: CommandHook[] }>;
+    PreToolUse?: Array<{ matcher: string; hooks: CommandHook[] }>;
+    PermissionRequest?: Array<{ matcher: string; hooks: CommandHook[] }>;
   };
 }
 
 export function buildAgentHookSettings(args: {
   sessionId: string;
-  port: number;
-  authToken: string;
+  resolverCommand: string[];
 }): AgentHookSettings {
-  const headers = { Authorization: `Bearer ${args.authToken}` };
+  const sid = encodeURIComponent(args.sessionId);
+  const cmd = (relUrl: string, spool: boolean) => resolverCmd(args.resolverCommand, relUrl, spool);
   return {
     hooks: {
-      Stop: [{ hooks: [{ type: "http", url: agentHookUrl(args.port, args.sessionId, false), headers }] }],
-      StopFailure: [{ hooks: [{ type: "http", url: agentHookUrl(args.port, args.sessionId, true), headers }] }],
+      Stop: [{ hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/stop?sessionId=${sid}`, true) }] }],
+      StopFailure: [{ hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/stop?sessionId=${sid}&failure=1`, true) }] }],
       PreToolUse: [
-        { matcher: "AskUserQuestion", hooks: [{ type: "http", url: elicitHookUrl(args.port, args.sessionId), headers, timeout: 600 }] },
-        { matcher: "*", hooks: [{ type: "http", url: toolUseHookUrl(args.port, args.sessionId), headers, timeout: 5 }] },
+        { matcher: "AskUserQuestion", hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/elicit?sessionId=${sid}`, false), timeout: 600 }] },
+        { matcher: "*", hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/tool-use?sessionId=${sid}`, true), timeout: 5 }] },
       ],
       PermissionRequest: [
-        {
-          matcher: "*",
-          hooks: [{ type: "http", url: permissionHookUrl(args.port, args.sessionId), headers, timeout: 1800 }],
-        },
+        { matcher: "*", hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/permission?sessionId=${sid}`, false), timeout: 1800 }] },
       ],
     },
   };

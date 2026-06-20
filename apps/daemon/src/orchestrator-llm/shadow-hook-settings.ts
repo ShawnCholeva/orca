@@ -1,33 +1,34 @@
-export function shadowHookUrl(port: number, goalId: string, failure = false): string {
-  const base = `http://127.0.0.1:${port}/v1/shadow-hooks/stop?goalId=${encodeURIComponent(goalId)}`;
-  return failure ? `${base}&failure=1` : base;
+function shellQuote(arg: string): string {
+  return /^[A-Za-z0-9_/.:=-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
-interface HttpHook {
-  type: "http";
-  url: string;
-  headers: Record<string, string>;
+function resolverCmd(prefix: string[], relUrl: string, spool: boolean): string {
+  const parts = [...prefix, "hook", relUrl, ...(spool ? ["--spool"] : [])];
+  return parts.map(shellQuote).join(" ");
+}
+
+interface CommandHook {
+  type: "command";
+  command: string;
 }
 
 export interface ShadowHookSettings {
   hooks: {
-    Stop: Array<{ hooks: HttpHook[] }>;
-    StopFailure: Array<{ hooks: HttpHook[] }>;
+    Stop: Array<{ hooks: CommandHook[] }>;
+    StopFailure: Array<{ hooks: CommandHook[] }>;
   };
 }
 
 export function buildShadowHookSettings(args: {
   goalId: string;
-  port: number;
-  authToken: string;
+  resolverCommand: string[];
 }): ShadowHookSettings {
-  // The hook endpoint sits behind the daemon's Bearer auth; without this header
-  // Claude's http hook POST is rejected 401 and the reply is never delivered.
-  const headers = { Authorization: `Bearer ${args.authToken}` };
+  const gid = encodeURIComponent(args.goalId);
+  const cmd = (relUrl: string, spool: boolean) => resolverCmd(args.resolverCommand, relUrl, spool);
   return {
     hooks: {
-      Stop: [{ hooks: [{ type: "http", url: shadowHookUrl(args.port, args.goalId, false), headers }] }],
-      StopFailure: [{ hooks: [{ type: "http", url: shadowHookUrl(args.port, args.goalId, true), headers }] }],
+      Stop: [{ hooks: [{ type: "command", command: cmd(`/v1/shadow-hooks/stop?goalId=${gid}`, true) }] }],
+      StopFailure: [{ hooks: [{ type: "command", command: cmd(`/v1/shadow-hooks/stop?goalId=${gid}&failure=1`, true) }] }],
     },
   };
 }
