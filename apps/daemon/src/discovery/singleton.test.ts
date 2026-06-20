@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireLock, releaseLock, lockFilePath, isPidAlive } from "./singleton.js";
+import { acquireLock, releaseLock, breakLock, lockFilePath, isPidAlive } from "./singleton.js";
 
 describe("singleton lock", () => {
   let dir: string;
@@ -37,5 +37,17 @@ describe("singleton lock", () => {
 
   it("isPidAlive false for impossible pid", () => {
     expect(isPidAlive(999999999)).toBe(false);
+  });
+
+  it("breakLock removes a foreign live-looking pid's lockfile so acquireLock succeeds", () => {
+    // Write a lockfile with our own pid (simulates a live holder we don't own)
+    writeFileSync(lockFilePath(dir), String(process.pid), "utf8");
+    // acquireLock would fail because the pid is alive
+    expect(acquireLock(dir)).toBe(false);
+    // breakLock forcibly removes it
+    breakLock(dir);
+    // Now acquireLock succeeds and writes our pid
+    expect(acquireLock(dir)).toBe(true);
+    expect(existsSync(lockFilePath(dir))).toBe(true);
   });
 });

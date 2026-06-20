@@ -51,11 +51,22 @@ async function drainSpool(dataDir: string, baseUrl: string, token: string): Prom
 export async function startDaemon(): Promise<DaemonStartHandles> {
   const config = loadConfig();
 
-  const { acquireLock, releaseLock } = await import("./discovery/singleton.js");
-  const { writeDiscoveryFile, removeDiscoveryFile } = await import("./discovery/discovery-file.js");
+  const { acquireLock, releaseLock, breakLock } = await import("./discovery/singleton.js");
+  const { writeDiscoveryFile, removeDiscoveryFile, readDiscoveryFile } = await import("./discovery/discovery-file.js");
+  const { probeHealth } = await import("./discovery/health.js");
   if (!acquireLock(config.dataDir)) {
-    console.error("[orca-daemon] another healthy daemon holds the lock — exiting");
-    process.exit(0);
+    const rec = readDiscoveryFile(config.dataDir);
+    if (rec && (await probeHealth(rec.url))) {
+      console.error("[orca-daemon] a healthy daemon is already running — exiting");
+      process.exit(0);
+    }
+    // Lock holder is hung (alive pid, not serving) or stale — take over.
+    console.error("[orca-daemon] stale/hung lock holder — taking over");
+    breakLock(config.dataDir);
+    if (!acquireLock(config.dataDir)) {
+      console.error("[orca-daemon] lost takeover race — exiting");
+      process.exit(0);
+    }
   }
 
   const db = openDatabase(config);

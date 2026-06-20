@@ -46,3 +46,7 @@ export function releaseLock(dataDir: string): void {
     if (holder === process.pid) rmSync(path, { force: true });
   } catch { /* nothing to release */ }
 }
+
+export function breakLock(dataDir: string): void {
+  rmSync(lockFilePath(dataDir), { force: true });
+}
