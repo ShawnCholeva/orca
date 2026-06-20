@@ -55,7 +55,7 @@ export interface ShadowProvider {
   /** Whether this provider can persist a per-command "always allow" permission rule. */
   readonly supportsPermissionPersistence: boolean;
   launch(deps: { binOverride?: string }): ShadowLaunch;
-  hookConfig(args: { goalId: string; port: number; authToken: string }): ShadowHookConfig;
+  hookConfig(args: { goalId: string; resolverCommand: string[] }): ShadowHookConfig;
   /**
    * Hook config for a workflow-step worker session of this provider. Returns files
    * to write under the worker's private config dir plus spawn args/env to append.
@@ -64,8 +64,7 @@ export interface ShadowProvider {
   workerHookConfig(args: {
     goalId: string;
     sessionId: string;
-    port: number;
-    authToken: string;
+    resolverCommand: string[];
     configDir: string;
   }): {
     files: { relPath: string; contents: string }[];

@@ -20,7 +20,7 @@ import type { InspectWorkspacePreview } from "@orca/contracts";
 import type { DomainEvent } from "@orca/contracts";
 import type { EventBus } from "../events.js";
 
-type Config = { dataDir: string; port: number; logLevel: string; sessionOutputTailBytes: number; sessionStopGraceMs: number; sessionWsBufferLimitBytes: number; memoryExtractionMaxInputBytes: number; memoryExtractionTimeoutMs: number; getAuthToken: () => string };
+type Config = { dataDir: string; port: number; logLevel: string; sessionOutputTailBytes: number; sessionStopGraceMs: number; sessionWsBufferLimitBytes: number; memoryExtractionMaxInputBytes: number; memoryExtractionTimeoutMs: number; hookResolverCommand: string[]; getAuthToken: () => string };
 
 const tempDirs: string[] = [];
 
@@ -34,6 +34,7 @@ function createConfig(dataDir: string): Config {
     sessionWsBufferLimitBytes: 1024 * 1024,
     memoryExtractionMaxInputBytes: 131072,
     memoryExtractionTimeoutMs: 15000,
+    hookResolverCommand: ["node", "test-daemon.js"],
     getAuthToken: () => "test-token",
   };
 }

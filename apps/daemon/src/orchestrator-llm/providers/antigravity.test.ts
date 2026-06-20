@@ -9,7 +9,6 @@ import { AntigravityShadowProvider } from "./antigravity.js";
 
 type HookRequest = {
   url: string;
-  authorization: string | undefined;
   body: { last_assistant_message?: string };
 };
 
@@ -27,7 +26,7 @@ describe("AntigravityShadowProvider", () => {
 
   it("writes hooks.json and relay script under .agents", () => {
     const provider = new AntigravityShadowProvider();
-    const cfg = provider.hookConfig({ goalId: "g1", port: 17333, authToken: "tok" });
+    const cfg = provider.hookConfig({ goalId: "g1", resolverCommand: [process.execPath, "test-daemon.js"] });
     expect(cfg.files.map((f) => f.relPath).sort()).toEqual([
       ".agents/hooks.json",
       ".agents/orca-stop-hook.cjs",
@@ -45,7 +44,7 @@ describe("AntigravityShadowProvider", () => {
 
   it("relay posts the latest assistant or model transcript message", async () => {
     await withHookServer(async ({ port, requests }) => {
-      const cwd = await writeRelay({ port, authToken: "tok" });
+      const cwd = await writeRelay({ port });
       const transcriptPath = join(cwd, "transcript.jsonl");
       await writeFile(
         transcriptPath,
@@ -69,7 +68,7 @@ describe("AntigravityShadowProvider", () => {
 
   it("relay accepts undiscriminated assistant-shaped transcript fields", async () => {
     await withHookServer(async ({ port, requests }) => {
-      const cwd = await writeRelay({ port, authToken: "tok" });
+      const cwd = await writeRelay({ port });
       const transcriptPath = join(cwd, "transcript.jsonl");
       await writeFile(
         transcriptPath,
@@ -89,7 +88,7 @@ describe("AntigravityShadowProvider", () => {
 
   it("relay posts failure input with failure flag and text", async () => {
     await withHookServer(async ({ port, requests }) => {
-      const cwd = await writeRelay({ port, authToken: "tok" });
+      const cwd = await writeRelay({ port });
 
       await runRelay(cwd, { error: "model crashed" });
 
@@ -101,7 +100,7 @@ describe("AntigravityShadowProvider", () => {
 
   it("relay reports malformed or missing transcript as a failure", async () => {
     await withHookServer(async ({ port, requests }) => {
-      const cwd = await writeRelay({ port, authToken: "tok" });
+      const cwd = await writeRelay({ port });
 
       await runRelay(cwd, { transcriptPath: join(cwd, "missing.jsonl") });
 
@@ -111,7 +110,7 @@ describe("AntigravityShadowProvider", () => {
     });
 
     await withHookServer(async ({ port, requests }) => {
-      const cwd = await writeRelay({ port, authToken: "tok" });
+      const cwd = await writeRelay({ port });
       const transcriptPath = join(cwd, "malformed.jsonl");
       await writeFile(transcriptPath, "{not json}\n");
 
@@ -122,28 +121,32 @@ describe("AntigravityShadowProvider", () => {
       expect(requests[0]!.body.last_assistant_message).toMatch(/malformed transcript entry/);
     });
   });
-
-  it("relay treats auth token interpolation syntax as literal text", async () => {
-    await withHookServer(async ({ port, requests }) => {
-      const token = "tok-${process.pid}";
-      const cwd = await writeRelay({ port, authToken: token });
-      const transcriptPath = join(cwd, "transcript.jsonl");
-      await writeFile(transcriptPath, `${JSON.stringify({ role: "assistant", text: "done" })}\n`);
-
-      await runRelay(cwd, { transcriptPath });
-
-      expect(requests).toHaveLength(1);
-      expect(requests[0]!.authorization).toBe(`Bearer ${token}`);
-    });
-  });
 });
 
-async function writeRelay(args: { port: number; authToken: string }) {
+/**
+ * Build the resolver command for tests: a Node.js inline script that forwards
+ * the `hook <relUrl> [--spool]` invocation to the test HTTP server via fetch.
+ * Called as: node -e <script> hook <relUrl> [--spool] (stdin = JSON body)
+ */
+function makeTestResolverCommand(port: number): string[] {
+  // The resolver is called as: <bin> <...args> hook <relUrl> [--spool]
+  // We receive relUrl in process.argv at the position after "hook".
+  const script =
+    `const relUrl=process.argv[process.argv.indexOf('hook')+1];` +
+    `const chunks=[];process.stdin.on('data',d=>chunks.push(d));` +
+    `process.stdin.on('end',async()=>{` +
+    `const body=Buffer.concat(chunks);` +
+    `await fetch('http://127.0.0.1:${port}'+relUrl,{method:'POST',headers:{'Content-Type':'application/json'},body});` +
+    `});`;
+  return [process.execPath, "-e", script];
+}
+
+async function writeRelay(args: { port: number }) {
   const cwd = await mkdtemp(join(tmpdir(), "orca-antigravity-relay-"));
   const agentsDir = join(cwd, ".agents");
   await mkdir(agentsDir);
   const provider = new AntigravityShadowProvider();
-  const cfg = provider.hookConfig({ goalId: "g1", port: args.port, authToken: args.authToken });
+  const cfg = provider.hookConfig({ goalId: "g1", resolverCommand: makeTestResolverCommand(args.port) });
   const relay = cfg.files.find((f) => f.relPath === ".agents/orca-stop-hook.cjs");
   if (!relay) throw new Error("missing relay script");
   await writeFile(join(cwd, relay.relPath), relay.contents);
@@ -163,7 +166,6 @@ async function withHookServer(
     req.on("end", () => {
       requests.push({
         url: req.url ?? "",
-        authorization: req.headers.authorization,
         body: raw ? JSON.parse(raw) : {},
       });
       res.writeHead(204);

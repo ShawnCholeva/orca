@@ -48,6 +48,7 @@ function createConfig(dataDir: string): Config {
     sessionWsBufferLimitBytes: 1024 * 1024,
     memoryExtractionMaxInputBytes: 131072,
     memoryExtractionTimeoutMs: 15000,
+    hookResolverCommand: ["node", "test-daemon.js"],
     getAuthToken: () => 'test-token',
   };
 }

@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { loadConfig } from "./config";
+import { loadConfig } from "./config.js";
 
 const UuidSchema = z.string().uuid();
 
@@ -39,6 +39,12 @@ afterEach(() => {
   for (const dirPath of createdDirs.splice(0)) {
     rmSync(dirPath, { recursive: true, force: true });
   }
+});
+
+it("exposes a non-empty hookResolverCommand", () => {
+  const cfg = loadConfig();
+  expect(Array.isArray(cfg.hookResolverCommand)).toBe(true);
+  expect(cfg.hookResolverCommand.length).toBeGreaterThan(0);
 });
 
 describe("loadConfig", () => {

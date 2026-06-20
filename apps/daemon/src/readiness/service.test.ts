@@ -43,6 +43,7 @@ beforeEach(() => {
     dataDir: dir, port: 0, logLevel: "silent",
     sessionOutputTailBytes: 1024, sessionStopGraceMs: 100, sessionWsBufferLimitBytes: 1024,
     memoryExtractionMaxInputBytes: 1024, memoryExtractionTimeoutMs: 1000,
+    hookResolverCommand: ["node", "test-daemon.js"],
     getAuthToken: () => "t",
   });
   runMigrations(db, defaultMigrationsDir());

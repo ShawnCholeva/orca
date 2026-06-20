@@ -40,10 +40,11 @@ export interface WorkerSessionDeps {
   privateRoot: string;        // daemon-private dir, e.g. <dataDir>/workers
   daemonPort: number;
   authToken: string;
+  hookResolverCommand: string[];
   claudeBin: string;
   resolveProvider: (adapterId: string) => {
     displayName?: string;
-    workerHookConfig: (args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) =>
+    workerHookConfig: (args: { goalId: string; sessionId: string; resolverCommand: string[]; configDir: string }) =>
       {
         files: { relPath: string; contents: string }[];
         copyFiles?: { relPath: string; sourcePath: string }[];
@@ -95,8 +96,7 @@ export class WorkerSessionManager {
     const hookCfg = provider.workerHookConfig({
       goalId: input.goalId,
       sessionId: input.sessionId,
-      port: this.deps.daemonPort,
-      authToken: this.deps.authToken,
+      resolverCommand: this.deps.hookResolverCommand,
       configDir: cfgDir,
     });
     for (const file of hookCfg.files) {

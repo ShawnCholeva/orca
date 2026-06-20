@@ -35,7 +35,7 @@ export class CodexShadowProvider implements ShadowProvider {
     };
   }
 
-  hookConfig(args: { goalId: string; port: number; authToken: string }): ShadowHookConfig {
+  hookConfig(args: { goalId: string; resolverCommand: string[] }): ShadowHookConfig {
     return {
       files: [
         { relPath: ".codex/config.toml", contents: "[features]\nhooks = true\n" },
@@ -47,7 +47,7 @@ export class CodexShadowProvider implements ShadowProvider {
     };
   }
 
-  workerHookConfig(args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) {
+  workerHookConfig(args: { goalId: string; sessionId: string; resolverCommand: string[]; configDir: string }) {
     // CODEX_HOME points Codex at this private dir; config.toml + hooks.json live at
     // its root (CODEX_HOME *is* the codex home, so no `.codex/` prefix here).
     const codexHome = process.env["CODEX_HOME"] ?? join(homedir(), ".codex");
@@ -71,6 +71,7 @@ export class CodexShadowProvider implements ShadowProvider {
       env: { CODEX_HOME: args.configDir },
     };
   }
+
 
   permissionRule(_toolName: string, _toolInput: unknown): string | null {
     return null;
@@ -138,47 +139,32 @@ export class CodexShadowProvider implements ShadowProvider {
   }
 }
 
-function buildCodexHookSettings(args: { goalId: string; port: number; authToken: string }): unknown {
-  const commandFor = (failure: boolean) => [
-    "curl",
-    "-fsS",
-    "-X", "POST",
-    "-H", shellArg(`Authorization: Bearer ${args.authToken}`),
-    "-H", shellArg("Content-Type: application/json"),
-    "--data-binary", "@-",
-    // Discard the daemon's response body: Codex parses the Stop hook's stdout as
-    // stop-hook JSON and errors on the ack. Capture happens from the POSTed body.
-    "-o", "/dev/null",
-    shellArg(
-      `http://127.0.0.1:${args.port}/v1/shadow-hooks/stop?goalId=${encodeURIComponent(args.goalId)}${failure ? "&failure=1" : ""}`,
-    ),
-  ].join(" ");
+function shellQuote(arg: string): string {
+  return /^[A-Za-z0-9_/.:=-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+function resolverCmd(prefix: string[], relUrl: string, spool: boolean): string {
+  const parts = [...prefix, "hook", relUrl, ...(spool ? ["--spool"] : [])];
+  return parts.map(shellQuote).join(" ");
+}
+
+function buildCodexHookSettings(args: { goalId: string; resolverCommand: string[] }): unknown {
+  const gid = encodeURIComponent(args.goalId);
+  const cmd = (relUrl: string, spool: boolean) => resolverCmd(args.resolverCommand, relUrl, spool);
   return {
     hooks: {
-      Stop: [{ hooks: [{ type: "command", command: commandFor(false) }] }],
-      StopFailure: [{ hooks: [{ type: "command", command: commandFor(true) }] }],
+      Stop: [{ hooks: [{ type: "command", command: cmd(`/v1/shadow-hooks/stop?goalId=${gid}`, true) }] }],
+      StopFailure: [{ hooks: [{ type: "command", command: cmd(`/v1/shadow-hooks/stop?goalId=${gid}&failure=1`, true) }] }],
     },
   };
 }
 
 function buildCodexWorkerHookSettings(args: {
   sessionId: string;
-  port: number;
-  authToken: string;
+  resolverCommand: string[];
 }): unknown {
   const sid = encodeURIComponent(args.sessionId);
-  const auth = `Authorization: Bearer ${args.authToken}`;
-  const stopCommand = (failure: boolean) => [
-    "curl",
-    "-fsS",
-    "-X", "POST",
-    "-H", shellArg(auth),
-    "-H", shellArg("Content-Type: application/json"),
-    "--data-binary", "@-",
-    // Discard the daemon ack: Codex parses Stop-hook stdout as JSON and errors on it.
-    "-o", "/dev/null",
-    shellArg(`http://127.0.0.1:${args.port}/v1/agent-hooks/stop?sessionId=${sid}${failure ? "&failure=1" : ""}`),
-  ].join(" ");
+  const cmd = (relUrl: string, spool: boolean) => resolverCmd(args.resolverCommand, relUrl, spool);
 
   // Codex omits tool_use_id on PermissionRequest (verified codex-cli 0.136.0). The
   // shared store dedups purely on toolUseId, so an empty id would collide across the
@@ -196,31 +182,23 @@ function buildCodexWorkerHookSettings(args: {
     "const sig=require('crypto').createHash('sha1').update(String(b.tool_name||'')+JSON.stringify(b.tool_input||{})).digest('hex').slice(0,12);" +
     "b.tool_use_id=String(b.session_id||'')+':'+String(b.turn_id||'')+':'+sig;" +
     "process.stdout.write(JSON.stringify(b))});";
+  const permResolverCmd = args.resolverCommand.map(shellQuote).join(" ");
   const permCommand = [
-    "node", "-e", shellArg(relay),
+    "node", "-e", shellQuote(relay),
     "|",
-    "curl",
-    "-fsS",
-    "-X", "POST",
-    "-H", shellArg(auth),
-    "-H", shellArg("Content-Type: application/json"),
-    "--data-binary", "@-",
-    shellArg(`http://127.0.0.1:${args.port}/v1/agent-hooks/permission?sessionId=${sid}`),
+    permResolverCmd, "hook",
+    shellQuote(`/v1/agent-hooks/permission?sessionId=${sid}`),
   ].join(" ");
 
   return {
     hooks: {
-      Stop: [{ hooks: [{ type: "command", command: stopCommand(false) }] }],
-      StopFailure: [{ hooks: [{ type: "command", command: stopCommand(true) }] }],
+      Stop: [{ hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/stop?sessionId=${sid}`, true) }] }],
+      StopFailure: [{ hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/stop?sessionId=${sid}&failure=1`, true) }] }],
       // timeout mirrors the Claude PermissionRequest hook (1800s): the hook blocks the
       // turn while the daemon awaits the operator's decision, so it must outlast a human.
       PermissionRequest: [{ hooks: [{ type: "command", command: permCommand, timeout: 1800 }] }],
     },
   };
-}
-
-function shellArg(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function extractCodexPaneAction(output: string): string | null {

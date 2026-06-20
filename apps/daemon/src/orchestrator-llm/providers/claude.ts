@@ -123,7 +123,7 @@ export class ClaudeShadowProvider implements ShadowProvider {
     return { bin: deps.binOverride ?? process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude" };
   }
 
-  hookConfig(args: { goalId: string; port: number; authToken: string }): ShadowHookConfig {
+  hookConfig(args: { goalId: string; resolverCommand: string[] }): ShadowHookConfig {
     return {
       files: [
         {
@@ -134,10 +134,10 @@ export class ClaudeShadowProvider implements ShadowProvider {
     };
   }
 
-  workerHookConfig(args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) {
+  workerHookConfig(args: { goalId: string; sessionId: string; resolverCommand: string[]; configDir: string }) {
     // goalId is part of the shared seam signature; Claude's worker hooks key off
     // sessionId only (the daemon resolves goal from session), so it's unused here.
-    const settings = buildAgentHookSettings({ sessionId: args.sessionId, port: args.port, authToken: args.authToken });
+    const settings = buildAgentHookSettings({ sessionId: args.sessionId, resolverCommand: args.resolverCommand });
     return {
       files: [{ relPath: "settings.json", contents: JSON.stringify(settings, null, 2) }],
       spawnArgs: ["--settings", join(args.configDir, "settings.json")],

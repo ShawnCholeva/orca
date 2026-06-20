@@ -17,7 +17,8 @@ function createConfig(dataDir: string): Config {
     dataDir, port: 8787, logLevel: "silent",
     sessionOutputTailBytes: 1024 * 1024, sessionStopGraceMs: 5000,
     sessionWsBufferLimitBytes: 1024 * 1024, memoryExtractionMaxInputBytes: 131072,
-    memoryExtractionTimeoutMs: 15000, getAuthToken: () => "test-token",
+    memoryExtractionTimeoutMs: 15000,
+    hookResolverCommand: ["node", "test-daemon.js"], getAuthToken: () => "test-token",
   };
 }
 

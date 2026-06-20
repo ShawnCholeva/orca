@@ -27,6 +27,7 @@ function deps(root: string, tmux: ReturnType<typeof fakeTmux>, ready = true) {
     shadowRoot: root,
     daemonPort: 8787,
     authToken: "test-token",
+    hookResolverCommand: ["node", "test-daemon.js"],
     isReady: async () => ready,
     tmux,
     pollMs: 1,
@@ -36,7 +37,7 @@ function deps(root: string, tmux: ReturnType<typeof fakeTmux>, ready = true) {
 }
 
 describe("ShadowSessionManager spawn integration", () => {
-  it("writes .claude/settings.local.json with the hook URL into the goal dir", async () => {
+  it("writes .claude/settings.local.json with the hook command into the goal dir", async () => {
     const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
     const tmux = fakeTmux();
     const m = new ShadowSessionManager(deps(root, tmux));
@@ -44,8 +45,8 @@ describe("ShadowSessionManager spawn integration", () => {
     const p = join(root, "G1", ".claude", "settings.local.json");
     expect(existsSync(p)).toBe(true);
     const cfg = JSON.parse(readFileSync(p, "utf8"));
-    expect(cfg.hooks.Stop[0].hooks[0].url).toContain("goalId=G1");
-    expect(cfg.hooks.StopFailure[0].hooks[0].url).toContain("failure=1");
+    expect(cfg.hooks.Stop[0].hooks[0].command).toContain("goalId=G1");
+    expect(cfg.hooks.StopFailure[0].hooks[0].command).toContain("failure=1");
   });
 
   it("writes Codex project-local hook config when spawning a codex shadow session", async () => {
@@ -59,10 +60,9 @@ describe("ShadowSessionManager spawn integration", () => {
     const hooks = JSON.parse(readFileSync(hooksPath, "utf8"));
     expect(hooks.hooks.Stop[0].hooks[0].command).toContain("goalId=G1");
     expect(hooks.hooks.StopFailure[0].hooks[0].command).toContain("failure=1");
-    // Stop/StopFailure discard the daemon ack so Codex doesn't error parsing it as
-    // stop-hook JSON; turn capture comes from the POSTed last_assistant_message.
-    expect(hooks.hooks.Stop[0].hooks[0].command).toContain("/dev/null");
-    expect(hooks.hooks.StopFailure[0].hooks[0].command).toContain("/dev/null");
+    // Stop/StopFailure now use the resolver command (not curl), so no /dev/null.
+    expect(hooks.hooks.Stop[0].hooks[0].command).toContain("test-daemon.js");
+    expect(hooks.hooks.StopFailure[0].hooks[0].command).toContain("test-daemon.js");
   });
 
   it("uses the codex binary when spawning a codex shadow session", async () => {
@@ -85,14 +85,15 @@ describe("ShadowSessionManager spawn integration", () => {
     await expect(m.spawn("G1")).rejects.toThrow(/not ready|sign in/i);
   });
 
-  it("uses the current daemonPort after setDaemonPort", async () => {
+  it("uses the current daemonPort after setDaemonPort (hook commands use resolver, not port)", async () => {
     const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
     const tmux = fakeTmux();
     const m = new ShadowSessionManager(deps(root, tmux));
     m.setDaemonPort(41234);
     await m.spawn("G2");
     const cfg = JSON.parse(readFileSync(join(root, "G2", ".claude", "settings.local.json"), "utf8"));
-    expect(cfg.hooks.Stop[0].hooks[0].url).toContain(":41234/");
+    // Hook commands now use the resolver command, not an HTTP URL with port.
+    expect(cfg.hooks.Stop[0].hooks[0].command).toContain("goalId=G2");
   });
 
   it("issues a new-session tmux call with the goal dir as cwd", async () => {

@@ -49,6 +49,7 @@ export interface Config {
   sessionWsBufferLimitBytes: number;
   memoryExtractionMaxInputBytes: number;
   memoryExtractionTimeoutMs: number;
+  hookResolverCommand: string[];
   getAuthToken: () => string;
 }
 
@@ -102,6 +103,12 @@ export function loadConfig(): Config {
       ? DEFAULT_MEMORY_EXTRACTION_TIMEOUT_MS
       : MemoryExtractionTimeoutMsSchema.parse(env.ORCA_MEMORY_EXTRACTION_TIMEOUT_MS);
 
+  const sidecarBin = process.env.ORCA_SIDECAR_BIN?.trim();
+  const hookResolverCommand =
+    sidecarBin && sidecarBin.length > 0
+      ? [sidecarBin]
+      : [process.execPath, process.argv[1] ?? ""];
+
   return {
     dataDir,
     port,
@@ -111,6 +118,7 @@ export function loadConfig(): Config {
     sessionWsBufferLimitBytes,
     memoryExtractionMaxInputBytes,
     memoryExtractionTimeoutMs,
+    hookResolverCommand,
     getAuthToken: () => authToken
   };
 }

@@ -29,7 +29,8 @@ function dbg(goalId: string, msg: string): void {
 export interface ShadowSessionDeps {
   shadowRoot: string;                 // e.g. ~/.orca/shadow
   daemonPort: number;                 // bound port; mutable via setDaemonPort
-  authToken: string;                  // daemon Bearer token; injected into hook headers so the Stop hook clears auth
+  authToken: string;                  // daemon Bearer token; used by the HTTP server layer
+  hookResolverCommand: string[];      // argv to invoke daemon's hook subcommand (passed to hookConfig)
   isReady: (adapterId?: ShadowAdapterId) => Promise<boolean>; // adapter.checkAuth in prod; ()=>true in tests
   claudeBin?: string;                 // default ORCA_CLAUDE_CODE_BIN ?? "claude"
   codexBin?: string;                  // default ORCA_CODEX_BIN ?? "codex"
@@ -286,7 +287,7 @@ export class ShadowSessionManager {
   }
 
   private writeHookConfig(provider: ShadowProvider, goalId: string, dir: string): void {
-    const { files } = provider.hookConfig({ goalId, port: this.deps.daemonPort, authToken: this.deps.authToken });
+    const { files } = provider.hookConfig({ goalId, resolverCommand: this.deps.hookResolverCommand });
     for (const file of files) {
       const target = join(dir, file.relPath);
       mkdirSync(dirname(target), { recursive: true });

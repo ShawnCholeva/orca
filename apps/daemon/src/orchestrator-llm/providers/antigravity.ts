@@ -22,7 +22,7 @@ export class AntigravityShadowProvider implements ShadowProvider {
     return { bin: deps.binOverride ?? process.env["ORCA_ANTIGRAVITY_BIN"] ?? "agy" };
   }
 
-  hookConfig(args: { goalId: string; port: number; authToken: string }): ShadowHookConfig {
+  hookConfig(args: { goalId: string; resolverCommand: string[] }): ShadowHookConfig {
     return {
       files: [
         {
@@ -37,7 +37,7 @@ export class AntigravityShadowProvider implements ShadowProvider {
     };
   }
 
-  workerHookConfig(_args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) {
+  workerHookConfig(_args: { goalId: string; sessionId: string; resolverCommand: string[]; configDir: string }) {
     return { files: [], spawnArgs: [] };
   }
 
@@ -101,40 +101,38 @@ function buildAntigravityHookSettings(): unknown {
   };
 }
 
-function buildStopHookRelay(args: { goalId: string; port: number; authToken: string }): string {
-  const url = `http://127.0.0.1:${args.port}/v1/shadow-hooks/stop?goalId=${encodeURIComponent(args.goalId)}`;
+function buildStopHookRelay(args: { goalId: string; resolverCommand: string[] }): string {
+  const relUrlStop = `/v1/shadow-hooks/stop?goalId=${encodeURIComponent(args.goalId)}`;
+  const relUrlFail = `/v1/shadow-hooks/stop?goalId=${encodeURIComponent(args.goalId)}&failure=1`;
+  const resolverJson = JSON.stringify(args.resolverCommand);
   return `const fs = require("node:fs");
+const { spawnSync } = require("node:child_process");
 
-const ORCA_URL = ${JSON.stringify(url)};
-const ORCA_TOKEN = ${JSON.stringify(args.authToken)};
+const RESOLVER = ${resolverJson};
+const REL_URL_STOP = ${JSON.stringify(relUrlStop)};
+const REL_URL_FAIL = ${JSON.stringify(relUrlFail)};
+
+function callHook(relUrl, body) {
+  const [bin, ...hookArgs] = RESOLVER;
+  const result = spawnSync(bin, [...hookArgs, "hook", relUrl, "--spool"], {
+    input: JSON.stringify(body),
+    encoding: "utf8",
+  });
+  if (result.error) throw result.error;
+}
 
 let raw = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { raw += chunk; });
-process.stdin.on("end", async () => {
+process.stdin.on("end", () => {
   try {
     const input = raw.trim() ? JSON.parse(raw) : {};
     const failure = Boolean(input.error) || input.fullyIdle === false || input.terminationReason === "error";
     const text = failure ? String(input.error || input.terminationReason || "antigravity stop failure") : readLatestAssistantText(input.transcriptPath);
-    const target = failure ? ORCA_URL + "&failure=1" : ORCA_URL;
-    await fetch(target, {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + ORCA_TOKEN,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ last_assistant_message: text }),
-    });
+    callHook(failure ? REL_URL_FAIL : REL_URL_STOP, { last_assistant_message: text });
     process.stdout.write(JSON.stringify({ decision: "allow" }));
   } catch (err) {
-    await fetch(ORCA_URL + "&failure=1", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + ORCA_TOKEN,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ last_assistant_message: err instanceof Error ? err.message : String(err) }),
-    }).catch(() => undefined);
+    try { callHook(REL_URL_FAIL, { last_assistant_message: err instanceof Error ? err.message : String(err) }); } catch { /* best-effort */ }
     process.stdout.write(JSON.stringify({ decision: "allow" }));
   }
 });

@@ -27,7 +27,8 @@ function fakeTmux(paneByCall: string[] = []): TmuxRunner & { calls: string[][] }
 describe("WorkerSessionManager.isTmuxAlive", () => {
   it("reflects tmux has-session, not DB status", async () => {
     const base = mkdtempSync(join(tmpdir(), "orca-worker-"));
-    const deps = { privateRoot: base, daemonPort: 8787, authToken: "tok", claudeBin: "claude", captureSink: () => {}, resolveProvider };
+    const deps = { privateRoot: base, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", captureSink: () => {}, resolveProvider };
     // tmux runner where has-session returns code 1 (dead) for one id, 0 (alive) otherwise.
     const aliveTmux: TmuxRunner = { run: async (args) => ({ stdout: "", stderr: "", code: args[0] === "has-session" ? 0 : 0 }) };
     const deadTmux: TmuxRunner = { run: async (args) => ({ stdout: "", stderr: "", code: args[0] === "has-session" ? 1 : 0 }) };
@@ -42,6 +43,7 @@ describe("WorkerSessionManager.spawn", () => {
     const tmux = fakeTmux(["auto mode on"]);
     const mgr = new WorkerSessionManager({
       privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"],
       claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
       resolveProvider,
     });
@@ -49,7 +51,7 @@ describe("WorkerSessionManager.spawn", () => {
     // private settings written, NOT under /repo
     expect(existsSync(join(privateRoot, "sess-1", "settings.json"))).toBe(true);
     const settings = JSON.parse(readFileSync(join(privateRoot, "sess-1", "settings.json"), "utf8"));
-    expect(settings.hooks.Stop[0].hooks[0].url).toContain("sessionId=sess-1");
+    expect(settings.hooks.Stop[0].hooks[0].command).toContain("sessionId=sess-1");
     // new-session used the workspace cwd and layered hooks via --settings (NOT CLAUDE_CONFIG_DIR)
     const newSess = tmux.calls.find((c) => c[0] === "new-session")!;
     expect(newSess).toContain("/repo");
@@ -64,13 +66,14 @@ describe("WorkerSessionManager.spawn", () => {
     const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
     const tmux = fakeTmux(["auto mode on"]);
     const fakeProvider = {
-      workerHookConfig: (args: { goalId: string; sessionId: string; port: number; authToken: string; configDir: string }) => ({
+      workerHookConfig: (args: { goalId: string; sessionId: string; resolverCommand: string[]; configDir: string }) => ({
         files: [{ relPath: "settings.json", contents: '{"hooks":{}}' }],
         spawnArgs: ["--settings", join(args.configDir, "settings.json")],
       }),
     };
     const mgr = new WorkerSessionManager({
       privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"],
       claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
       resolveProvider: (_adapterId) => fakeProvider,
     });
@@ -95,6 +98,7 @@ describe("WorkerSessionManager.spawn", () => {
     };
     const mgr = new WorkerSessionManager({
       privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"],
       claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
       resolveProvider: (_adapterId) => fakeProvider,
     });
@@ -118,6 +122,7 @@ describe("WorkerSessionManager.spawn", () => {
     };
     const mgr = new WorkerSessionManager({
       privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"],
       claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
       resolveProvider: (_adapterId) => fakeProvider,
     });
@@ -145,6 +150,7 @@ describe("WorkerSessionManager.spawn", () => {
     };
     const mgr = new WorkerSessionManager({
       privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"],
       claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
       resolveProvider: (_adapterId) => fakeProvider,
     });
@@ -162,7 +168,8 @@ describe("WorkerSessionManager.startTail", () => {
     const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
     const chunks: string[] = [];
     const mgr = new WorkerSessionManager({
-      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude",
+      privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude",
       tmux: fakeTmux(["auto mode on"]),
       captureSink: (_sid, buf) => void chunks.push(buf.toString("utf8")),
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
@@ -182,7 +189,8 @@ describe("WorkerSessionManager.startTail", () => {
     const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
     const chunks: string[] = [];
     const mgr = new WorkerSessionManager({
-      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude",
+      privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude",
       tmux: fakeTmux(),
       captureSink: (_sid, buf) => void chunks.push(buf.toString("utf8")),
       pollMs: 1,
@@ -218,7 +226,8 @@ describe("WorkerSessionManager.startTail", () => {
     });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const mgr = new WorkerSessionManager({
-      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude",
+      privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude",
       tmux: fakeTmux(),
       captureSink,
       pollMs: 1,
@@ -247,7 +256,8 @@ describe("WorkerSessionManager.startTail", () => {
     });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const mgr = new WorkerSessionManager({
-      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude",
+      privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude",
       tmux: fakeTmux(),
       captureSink,
       pollMs: 1,
@@ -283,7 +293,8 @@ describe("WorkerSessionManager.deliver", () => {
     const tmux = fakeTmux(["auto mode on", "esc to interrupt", "esc to interrupt", "❯ "]);
     const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
     const mgr = new WorkerSessionManager({
-      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux,
+      privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux,
       captureSink: () => {}, startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
       idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
       resolveProvider,
@@ -309,7 +320,8 @@ describe("WorkerSessionManager.deliver", () => {
     const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
     const codexProvider = { workerHookConfig: () => ({ files: [], spawnArgs: [] }) };
     const mgr = new WorkerSessionManager({
-      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux,
+      privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux,
       captureSink: () => {}, startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
       idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
       resolveProvider: (_adapterId) => codexProvider,
@@ -321,7 +333,8 @@ describe("WorkerSessionManager.deliver", () => {
   it("deliver returns no_session for an unknown session", async () => {
     const mgr = new WorkerSessionManager({
       privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
-      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux: fakeTmux(), captureSink: () => {},
+      daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux: fakeTmux(), captureSink: () => {},
       resolveProvider,
     });
     expect(await mgr.deliver("nope", "x")).toBe("no_session");
@@ -335,7 +348,8 @@ describe("WorkerSessionManager.deliver", () => {
     const tmux = fakeTmux(["auto mode on", idlePane]);
     const mgr = new WorkerSessionManager({
       privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
-      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
+      daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
       idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
       resolveProvider,
@@ -352,7 +366,8 @@ describe("WorkerSessionManager.reattach", () => {
     const marked: string[] = [];
     const mgr = new WorkerSessionManager({
       privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
-      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
+      daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
       markRunning: (id) => void marked.push(id),
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
       resolveProvider,
@@ -375,6 +390,7 @@ describe("WorkerSessionManager.reattach", () => {
       privateRoot,
       daemonPort: 8787,
       authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"],
       claudeBin: "claude",
       tmux: fakeTmux(["auto mode on"]),
       captureSink: () => void events.push("capture"),
@@ -403,7 +419,8 @@ describe("WorkerSessionManager.reattach", () => {
 
     const mgr = new WorkerSessionManager({
       privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
-      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
+      daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
       resolveProvider,
     });
     const adopted = await mgr.reattach("sess-missing", "/repo");
@@ -416,7 +433,8 @@ describe("WorkerSessionManager.reattach", () => {
     // No markRunning provided — should not throw
     const mgr = new WorkerSessionManager({
       privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
-      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
+      daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
       resolveProvider,
     });
@@ -429,7 +447,8 @@ describe("WorkerSessionManager.reattach", () => {
     const marked: string[] = [];
     const mgr = new WorkerSessionManager({
       privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
-      daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux, captureSink: () => {},
+      daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
       markRunning: (id) => void marked.push(id),
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
       resolveProvider,
@@ -445,7 +464,8 @@ describe("WorkerSessionManager.waitForProviderReset", () => {
     const tmux = fakeTmux(["auto mode on"]);
     const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
     const mgr = new WorkerSessionManager({
-      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux,
+      privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux,
       captureSink: () => {}, startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
       resolveProvider,
     });
@@ -464,7 +484,8 @@ describe("WorkerSessionManager.waitForProviderReset", () => {
     const tmux = fakeTmux();
     const privateRoot = mkdtempSync(join(tmpdir(), "orca-worker-"));
     const mgr = new WorkerSessionManager({
-      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux,
+      privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux,
       captureSink: () => {}, pollMs: 1,
       resolveProvider,
     });
@@ -487,7 +508,8 @@ describe("WorkerSessionManager.waitForProviderReset", () => {
       displayName: "Antigravity",
     };
     const mgr = new WorkerSessionManager({
-      privateRoot, daemonPort: 8787, authToken: "tok", claudeBin: "claude", tmux,
+      privateRoot, daemonPort: 8787, authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux,
       captureSink: () => {}, pollMs: 1,
       resolveProvider: (_adapterId) => noWaitProvider,
     });
@@ -504,6 +526,7 @@ describe("WorkerSessionManager.terminate", () => {
       privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
       daemonPort: 8787,
       authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"],
       claudeBin: "claude",
       tmux,
       captureSink: () => {},

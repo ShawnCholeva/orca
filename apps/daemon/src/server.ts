@@ -547,6 +547,7 @@ export function createServer(
     shadowRoot: path.join(config.dataDir, "shadow"),
     daemonPort: config.port,
     authToken: config.getAuthToken(),
+    hookResolverCommand: config.hookResolverCommand,
     isReady: async (adapterId = "claude-code") => {
       const adapter = adapterRegistry.get(adapterId);
       if (!adapter) return false;
@@ -563,6 +564,7 @@ export function createServer(
     privateRoot: path.join(config.dataDir, "workers"),
     daemonPort: 0, // set after listen via setDaemonPort, mirroring the shadow
     authToken: config.getAuthToken(),
+    hookResolverCommand: config.hookResolverCommand,
     claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
     resolveProvider: (adapterId) => resolveShadowProvider(adapterId as ShadowAdapterId),
     captureSink: (sessionId, chunk) => sessionOutputStore.appendChunk(sessionId, chunk),
