@@ -169,6 +169,7 @@ fn health_ok(url: &str) -> bool {
 
 /// Spawn the daemon as a completely detached process (its own session, not tied to
 /// the app's process group). Stdio goes to data_dir/daemon.log.
+/// NOTE: detachment is Unix-only (setsid). On Windows the daemon is not yet detached from the app's process/job and may be terminated on app exit — known best-effort limitation (see daemon-independent-service spec).
 fn spawn_detached(
     app: &AppHandle,
     port: u16,

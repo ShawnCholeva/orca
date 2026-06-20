@@ -72,7 +72,6 @@ export class CodexShadowProvider implements ShadowProvider {
     };
   }
 
-
   permissionRule(_toolName: string, _toolInput: unknown): string | null {
     return null;
   }
@@ -182,6 +181,7 @@ function buildCodexWorkerHookSettings(args: {
     "const sig=require('crypto').createHash('sha1').update(String(b.tool_name||'')+JSON.stringify(b.tool_input||{})).digest('hex').slice(0,12);" +
     "b.tool_use_id=String(b.session_id||'')+':'+String(b.turn_id||'')+':'+sig;" +
     "process.stdout.write(JSON.stringify(b))});";
+  // Permission needs the tool_use_id correlated onto stdin before the resolver, so it goes through a small node relay instead of the plain cmd() helper.
   const permResolverCmd = args.resolverCommand.map(shellQuote).join(" ");
   const permCommand = [
     "node", "-e", shellQuote(relay),

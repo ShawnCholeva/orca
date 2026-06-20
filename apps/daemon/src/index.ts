@@ -191,7 +191,6 @@ function isMainEntrypoint(): boolean {
 }
 
 async function runHookSubcommand(relUrl: string, spool: boolean): Promise<void> {
-  const { loadConfig } = await import("./config.js");
   const { resolveAndDeliver } = await import("./hooks-resolver/resolver.js");
   const cfg = loadConfig();
   const body = await new Promise<string>((resolve) => {
@@ -210,7 +209,6 @@ async function runHookSubcommand(relUrl: string, spool: boolean): Promise<void> 
 }
 
 async function runStopSubcommand(): Promise<void> {
-  const { loadConfig } = await import("./config.js");
   const { readDiscoveryFile } = await import("./discovery/discovery-file.js");
   const { isPidAlive } = await import("./discovery/singleton.js");
   const cfg = loadConfig();
