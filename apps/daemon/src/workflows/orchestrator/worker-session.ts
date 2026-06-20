@@ -38,7 +38,6 @@ export interface WorkerSpawnInput {
 
 export interface WorkerSessionDeps {
   privateRoot: string;        // daemon-private dir, e.g. <dataDir>/workers
-  daemonPort: number;
   authToken: string;
   hookResolverCommand: string[];
   claudeBin: string;
@@ -85,7 +84,6 @@ export class WorkerSessionManager {
     this.tmux = deps.tmux ?? defaultTmuxRunner();
   }
 
-  setDaemonPort(port: number): void { this.deps.daemonPort = port; }
   private name(sessionId: string): string { return `orca-worker-${sessionId}`; }
 
   async spawn(input: WorkerSpawnInput): Promise<void> {

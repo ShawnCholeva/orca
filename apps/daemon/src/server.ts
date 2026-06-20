@@ -545,7 +545,6 @@ export function createServer(
   // Shadow session manager for the orchestrator-LLM (tmux-backed).
   const shadowSessions = new ShadowSessionManager({
     shadowRoot: path.join(config.dataDir, "shadow"),
-    daemonPort: config.port,
     authToken: config.getAuthToken(),
     hookResolverCommand: config.hookResolverCommand,
     isReady: async (adapterId = "claude-code") => {
@@ -562,7 +561,6 @@ export function createServer(
   // Worker session manager for orchestrator-dispatched agent sessions (tmux-backed).
   const workerSessions = new WorkerSessionManager({
     privateRoot: path.join(config.dataDir, "workers"),
-    daemonPort: 0, // set after listen via setDaemonPort, mirroring the shadow
     authToken: config.getAuthToken(),
     hookResolverCommand: config.hookResolverCommand,
     claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
@@ -656,15 +654,6 @@ export function createServer(
       agentSessionId: row.agent_session_id,
     };
   };
-
-  // Update the hook endpoint URLs with the actual bound port after listen.
-  server.addHook("onListen", async () => {
-    const addr = server.server.address();
-    if (addr && typeof addr === "object" && typeof addr.port === "number") {
-      shadowSessions.setDaemonPort(addr.port);
-      workerSessions.setDaemonPort(addr.port);
-    }
-  });
 
   const shadowClient = new ShadowSessionLlmClient(shadowSessions, {
     timeoutMs: SHADOW_LLM_TIMEOUT_MS,

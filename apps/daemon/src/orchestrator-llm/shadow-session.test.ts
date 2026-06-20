@@ -25,7 +25,6 @@ function fakeTmux(paneScript: string[] = ["❯ \n auto mode on"]) {
 function deps(root: string, tmux: ReturnType<typeof fakeTmux>, ready = true) {
   return {
     shadowRoot: root,
-    daemonPort: 8787,
     authToken: "test-token",
     hookResolverCommand: ["node", "test-daemon.js"],
     isReady: async () => ready,

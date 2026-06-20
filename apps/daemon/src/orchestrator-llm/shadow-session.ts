@@ -28,7 +28,6 @@ function dbg(goalId: string, msg: string): void {
 
 export interface ShadowSessionDeps {
   shadowRoot: string;                 // e.g. ~/.orca/shadow
-  daemonPort: number;                 // bound port; mutable via setDaemonPort
   authToken: string;                  // daemon Bearer token; used by the HTTP server layer
   hookResolverCommand: string[];      // argv to invoke daemon's hook subcommand (passed to hookConfig)
   isReady: (adapterId?: ShadowAdapterId) => Promise<boolean>; // adapter.checkAuth in prod; ()=>true in tests
@@ -75,7 +74,6 @@ export class ShadowSessionManager {
   }
 
   has(goalId: string): boolean { return this.sessions.has(goalId); }
-  setDaemonPort(port: number): void { this.deps.daemonPort = port; }
 
   private tmuxName(goalId: string): string { return `orca-shadow-${goalId}`; }
 
@@ -95,7 +93,7 @@ export class ShadowSessionManager {
     // tmux runs this via `sh -c`, so quote any token containing whitespace (e.g. a bin path with spaces).
     const command = [bin, ...args].map((token) => (/\s/.test(token) ? JSON.stringify(token) : token)).join(" ");
     const started = await newSession(this.tmux, name, dir, command);
-    dbg(goalId, `tmux new-session code=${started.code} adapter=${adapterId} name=${name} command=${command} dir=${dir} port=${this.deps.daemonPort}`);
+    dbg(goalId, `tmux new-session code=${started.code} adapter=${adapterId} name=${name} command=${command} dir=${dir}`);
     const ready = this.startup(goalId, name, provider);
     // Prevent an unhandled-rejection warning when nobody is awaiting `ready` yet
     // (askOnce still observes the rejection via `await pre.ready`).

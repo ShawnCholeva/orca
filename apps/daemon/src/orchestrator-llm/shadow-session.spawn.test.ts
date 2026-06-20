@@ -25,7 +25,6 @@ function fakeTmux(paneScript: string[] = ["❯ \n auto mode on"]) {
 function deps(root: string, tmux: ReturnType<typeof fakeTmux>, ready = true) {
   return {
     shadowRoot: root,
-    daemonPort: 8787,
     authToken: "test-token",
     hookResolverCommand: ["node", "test-daemon.js"],
     isReady: async () => ready,
@@ -83,17 +82,6 @@ describe("ShadowSessionManager spawn integration", () => {
     const tmux = fakeTmux();
     const m = new ShadowSessionManager(deps(root, tmux, false));
     await expect(m.spawn("G1")).rejects.toThrow(/not ready|sign in/i);
-  });
-
-  it("uses the current daemonPort after setDaemonPort (hook commands use resolver, not port)", async () => {
-    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
-    const tmux = fakeTmux();
-    const m = new ShadowSessionManager(deps(root, tmux));
-    m.setDaemonPort(41234);
-    await m.spawn("G2");
-    const cfg = JSON.parse(readFileSync(join(root, "G2", ".claude", "settings.local.json"), "utf8"));
-    // Hook commands now use the resolver command, not an HTTP URL with port.
-    expect(cfg.hooks.Stop[0].hooks[0].command).toContain("goalId=G2");
   });
 
   it("issues a new-session tmux call with the goal dir as cwd", async () => {
