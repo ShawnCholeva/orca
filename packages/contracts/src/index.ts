@@ -135,6 +135,8 @@ export type ListGoalsResponse = z.infer<typeof ListGoalsResponse>;
 
 export const HealthResponse = z.object({
   status: z.literal("ok"),
+  service: z.string(),
+  pid: z.number().int().nonnegative(),
   version: z.string(),
   startedAt: z.string(),
   registries: z

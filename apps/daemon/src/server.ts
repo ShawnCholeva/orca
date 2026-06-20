@@ -345,6 +345,8 @@ export function createServer(
 
   server.get('/v1/health', async (): Promise<HealthResponse> => ({
     status: 'ok',
+    service: 'orca-daemon',
+    pid: process.pid,
     version: pkg.version,
     startedAt,
     registries: {

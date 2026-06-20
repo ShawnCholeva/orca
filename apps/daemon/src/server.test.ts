@@ -183,6 +183,8 @@ describe('server routes', () => {
     expect(typeof body.version).toBe('string');
     expect(typeof body.startedAt).toBe('string');
     expect(body.registries).toEqual({ plugins: 2, skills: 2 });
+    expect(body.service).toBe("orca-daemon");
+    expect(typeof body.pid).toBe("number");
   });
 
   it('GET /v1/plugins returns built-in plugins in sorted order', async () => {
