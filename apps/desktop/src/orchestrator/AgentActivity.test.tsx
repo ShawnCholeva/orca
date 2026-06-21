@@ -1,7 +1,7 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Activity } from "@orca/contracts";
-import { AgentActivity } from "./AgentActivity";
+import { AgentActivity, CodeChangeCard } from "./AgentActivity";
 
 const baseActivity = (over: Partial<Activity>): Activity => ({
   id: "a1", goalId: "g1", workflowRunId: "r1", stepRunId: "s1", agentSessionId: null,
@@ -31,14 +31,38 @@ describe("AgentActivity", () => {
     expect(screen.getByText("Found the double-charge bug.")).toBeTruthy();
   });
 
-  it("expands an edit step into its diff", () => {
+  it("no longer renders diffs inside the activity card (they are external cards now)", () => {
     render(<AgentActivity activity={baseActivity({
       steps: [{ id: "1", text: "Edited verifier.ts", category: "editing", status: "done", createdAt: "t",
         diff: { filePath: "verifier.ts", additions: 1, deletions: 1, hunks: [{ oldStart: 42, newStart: 42,
-          lines: [{ kind: "remove", text: "old()" }, { kind: "add", text: "new()" }] }] } }],
+          lines: [{ kind: "remove", text: "old()" }, { kind: "add", text: "new()" }] }] } }] as never,
     })} />);
-    expect(screen.queryByText("old()")).toBeNull();        // collapsed by default
-    fireEvent.click(screen.getByTestId("agent-activity-diff-toggle"));
+    expect(screen.getByText("Edited verifier.ts")).toBeTruthy();
+    expect(screen.queryByTestId("agent-activity-diff-toggle")).toBeNull();
+    expect(screen.queryByTestId("code-change-card")).toBeNull();
+  });
+});
+
+describe("CodeChangeCard", () => {
+  it("renders the file, stats, caption, and diff lines pre-expanded", () => {
+    render(
+      <CodeChangeCard
+        caption="Edited verifier.ts"
+        diff={{
+          filePath: "verifier.ts",
+          additions: 1,
+          deletions: 1,
+          hunks: [{ oldStart: 42, newStart: 42, lines: [
+            { kind: "remove", text: "old()" },
+            { kind: "add", text: "new()" },
+          ] }],
+        }}
+      />,
+    );
+    const card = screen.getByTestId("code-change-card");
+    expect(card).toHaveTextContent("verifier.ts");
+    expect(card).toHaveTextContent("Edited verifier.ts");
+    // diff body is shown without any toggle
     expect(screen.getByText("old()")).toBeTruthy();
     expect(screen.getByText("new()")).toBeTruthy();
   });

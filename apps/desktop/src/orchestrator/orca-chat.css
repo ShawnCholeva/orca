@@ -1141,12 +1141,15 @@
 .agent-activity-check { color: #3fb950; flex: 0 0 auto; margin-top: 2px; }
 .agent-activity-pulse { margin-top: 6px; }
 .agent-activity-summary { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); }
-.agent-activity-diff { width: 100%; margin-top: 4px; }
-.agent-activity-diff-toggle { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: inherit; cursor: pointer; font: inherit; padding: 0; }
-.agent-activity-diff-file { font-family: var(--mono, monospace); opacity: 0.85; }
 .diff-add { color: #3fb950; }
 .diff-del { color: #f85149; }
 .agent-activity-diff-body { margin: 4px 0 0; overflow-x: auto; font-family: var(--mono, monospace); font-size: 12px; }
+
+/* Code change rendered as its own pre-expanded chat card (note #2). */
+.code-change-card { width: 100%; margin: 6px 0; border: 1px solid var(--hairline); border-radius: 10px; background: var(--panel); padding: 8px 10px; }
+.code-change-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.code-change-file { font-family: var(--mono, monospace); font-size: 12px; color: var(--text-2); }
+.code-change-caption { font-size: 11px; color: var(--text-3); margin-top: 2px; }
 .diff-line { display: flex; gap: 8px; white-space: pre; }
 .diff-line--add { background: rgba(63,185,80,0.12); }
 .diff-line--remove { background: rgba(248,81,73,0.12); }

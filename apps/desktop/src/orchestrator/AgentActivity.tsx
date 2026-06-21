@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { Activity, ActivityDiff, ActivityStep } from "@orca/contracts";
 
 export function AgentActivity({ activity }: { activity: Activity }) {
@@ -39,46 +38,36 @@ function StepRow({ step, done }: { step: ActivityStep; done: boolean }) {
     >
       {done ? <Check /> : <Pulse />}
       <span className={`agent-activity-step-text${done ? " is-done" : ""}`}>{step.text}</span>
-      {step.diff ? <DiffBlock diff={step.diff} /> : null}
     </div>
   );
 }
 
-function DiffBlock({ diff }: { diff: ActivityDiff }) {
-  const [open, setOpen] = useState(false);
+// A code change rendered as its own pre-expanded chat message (outside the
+// activity thread) so diffs break up the timeline instead of hiding behind a
+// toggle inside an agent activity card.
+export function CodeChangeCard({ diff, caption }: { diff: ActivityDiff; caption?: string }) {
   return (
-    <div className="agent-activity-diff">
-      <button
-        type="button"
-        className="agent-activity-diff-toggle"
-        data-testid="agent-activity-diff-toggle"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span className="agent-activity-diff-chevron">{open ? "▾" : "▸"}</span>
-        <span className="agent-activity-diff-file">{diff.filePath}</span>
+    <div className="code-change-card" data-testid="code-change-card">
+      <div className="code-change-head">
+        <span className="code-change-file">{diff.filePath}</span>
         <span className="agent-activity-diff-stat">
           <span className="diff-add">+{diff.additions}</span>{" "}
           <span className="diff-del">−{diff.deletions}</span>
         </span>
-      </button>
-      {open ? (
-        <pre className="agent-activity-diff-body">
-          {diff.hunks.flatMap((hunk, hi) =>
-            hunk.lines.map((line, li) => {
-              const oldNo = hunk.oldStart;
-              const newNo = hunk.newStart;
-              return (
-                <div key={`${hi}-${li}`} className={`diff-line diff-line--${line.kind}`}>
-                  <span className="diff-gutter">
-                    {newNo === null ? "" : line.kind === "remove" ? "-" : "+"}
-                  </span>
-                  <span className="diff-text">{line.text}</span>
-                </div>
-              );
-            })
-          )}
-        </pre>
-      ) : null}
+      </div>
+      {caption ? <div className="code-change-caption">{caption}</div> : null}
+      <pre className="agent-activity-diff-body">
+        {diff.hunks.flatMap((hunk, hi) =>
+          hunk.lines.map((line, li) => (
+            <div key={`${hi}-${li}`} className={`diff-line diff-line--${line.kind}`}>
+              <span className="diff-gutter">
+                {line.kind === "remove" ? "-" : line.kind === "add" ? "+" : ""}
+              </span>
+              <span className="diff-text">{line.text}</span>
+            </div>
+          ))
+        )}
+      </pre>
     </div>
   );
 }

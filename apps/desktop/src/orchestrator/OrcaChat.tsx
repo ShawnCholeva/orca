@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type {
   Activity,
+  ActivityDiff,
   Goal,
   GoalDetailResponse,
   OrchestratorChatMessage,
@@ -44,7 +45,7 @@ import {
   isTimelineCard,
   pickLiveActivity,
 } from "./ActivityThread";
-import { AgentActivity } from "./AgentActivity";
+import { AgentActivity, CodeChangeCard } from "./AgentActivity";
 import { PermissionApprovalCard } from "./PermissionApprovalCard";
 import { ProviderRecoveryCard } from "./ProviderRecoveryCard";
 import { WorkerPermissionToggle } from "./WorkerPermissionToggle";
@@ -78,7 +79,8 @@ type ActivityState = {
 // result cards interleaved with messages in the order things actually happened.
 type TimelineEntry =
   | { kind: "message"; at: string; key: string; message: OrchestratorChatMessage }
-  | { kind: "card"; at: string; key: string; activity: Activity };
+  | { kind: "card"; at: string; key: string; activity: Activity }
+  | { kind: "diff"; at: string; key: string; diff: ActivityDiff; caption: string };
 
 const EMPTY_WORKFLOW_STATE: WorkflowState = {
   detail: null,
@@ -640,6 +642,21 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
       key: `a:${activity.id}`,
       activity,
     })),
+    // Code changes render as their own pre-expanded cards in the timeline rather
+    // than collapsed inside the activity card. They sort just after their source
+    // activity card (key `a:` < `d:` at the same timestamp).
+    ...activities.flatMap((activity) =>
+      (activity.steps ?? [])
+        .map((step, index) => ({ step, index }))
+        .filter(({ step }) => step.diff != null)
+        .map(({ step, index }) => ({
+          kind: "diff" as const,
+          at: activity.createdAt,
+          key: `d:${activity.id}:${String(index).padStart(4, "0")}`,
+          diff: step.diff!,
+          caption: step.text,
+        })),
+    ),
   ].sort((left, right) =>
     left.at === right.at
       ? left.key.localeCompare(right.key)
@@ -913,6 +930,8 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                   goalId={selectedGoalId ?? ""}
                   onWorkerAnswered={markAnswerPending}
                 />
+              ) : entry.kind === "diff" ? (
+                <CodeChangeCard key={entry.key} diff={entry.diff} caption={entry.caption} />
               ) : entry.activity.sourceKind === "step_result" ? (
                 <ActivityCard key={entry.key} activity={entry.activity} />
               ) : (
