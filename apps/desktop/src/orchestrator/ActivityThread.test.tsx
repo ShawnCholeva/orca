@@ -128,6 +128,26 @@ describe("LiveActivity", () => {
 
     expect(screen.queryByTestId("mock-recovery-card")).toBeNull();
   });
+
+  it("renders Approve/Reject on a parked gate decision and calls onGateDecide", () => {
+    const onGateDecide = vi.fn();
+    render(
+      <LiveActivity
+        activity={mk({
+          workflowRunId: "r1",
+          status: "paused_for_input",
+          currentText: 'Gate "Verdict" needs your approval to continue.',
+          sourceKind: "gate_decision_pending",
+        })}
+        onGateDecide={onGateDecide}
+      />,
+    );
+    expect(screen.getByText(/Gate "Verdict" needs your approval/)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("gate-decision-approve"));
+    expect(onGateDecide).toHaveBeenCalledWith("r1", "approved");
+    fireEvent.click(screen.getByTestId("gate-decision-reject"));
+    expect(onGateDecide).toHaveBeenCalledWith("r1", "rejected");
+  });
 });
 
 const confirmActivity = {
@@ -178,6 +198,13 @@ describe("pickLiveActivity", () => {
         mk({ id: "recovery", status: "paused_for_input", sourceKind: "provider_recovery_pending" }),
       ])?.id,
     ).toBe("recovery");
+
+    // gate_decision_pending → shown (survives restart; rebuilt from activities)
+    expect(
+      pickLiveActivity([
+        mk({ id: "gate", status: "paused_for_input", sourceKind: "gate_decision_pending" }),
+      ])?.id,
+    ).toBe("gate");
 
     // active tool_use (no pause interaction) → not shown
     expect(
@@ -237,6 +264,19 @@ describe("ActivityCard", () => {
   it("renders a completed summary", () => {
     render(<ActivityCard activity={mk({ status: "completed", finalSummary: "12/12 pass", sourceKind: "turn_completed" })} />);
     expect(screen.getByTestId("activity-summary")).toHaveTextContent("12/12 pass");
+  });
+
+  it("renders a persisted gate_decision card with the outcome", () => {
+    render(
+      <ActivityCard
+        activity={mk({
+          status: "completed",
+          finalSummary: 'Approved the "Verdict" gate.',
+          sourceKind: "gate_decision",
+        })}
+      />,
+    );
+    expect(screen.getByTestId("gate-decision-card")).toHaveTextContent('Approved the "Verdict" gate.');
   });
 
   function stepResultActivity(over: Partial<Activity> = {}): Activity {

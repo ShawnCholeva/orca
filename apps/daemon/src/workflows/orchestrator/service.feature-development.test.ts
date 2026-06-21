@@ -243,7 +243,9 @@ describe("OrchestratorService — feature development loop", () => {
     seedFDRunAtValidation(db, bus);
     const service = makeService(fakeGateBroker("rejected"));
 
+    // Reaching the gate parks for a human decision; the user rejects.
     await service.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });
+    await service.decideGate(db, () => NOW, "run-fd", "rejected", { bus, idFactory });
 
     // Gate decision recorded with rejected outcome routing to execution.
     const decisions = listGateDecisionsForRun(db, "run-fd");
@@ -251,7 +253,6 @@ describe("OrchestratorService — feature development loop", () => {
       nodeId: "gate",
       outcome: "rejected",
       selectedEdgeTo: "execution",
-      issueRefs: ["i1"],
     });
 
     // A second execution attempt (attempt 2) was inserted.
@@ -269,7 +270,9 @@ describe("OrchestratorService — feature development loop", () => {
     seedFDRunAtValidation(db, bus);
     const service = makeService(fakeGateBroker("approved"));
 
+    // Reaching the gate parks for a human decision; the user approves.
     await service.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });
+    await service.decideGate(db, () => NOW, "run-fd", "approved", { bus, idFactory });
 
     const decisions = listGateDecisionsForRun(db, "run-fd");
     expect(decisions.at(-1)).toMatchObject({

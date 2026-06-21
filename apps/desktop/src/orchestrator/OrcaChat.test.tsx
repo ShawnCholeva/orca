@@ -32,6 +32,8 @@ const refreshProviderRecoveryMock = vi.fn();
 const switchProviderRecoveryMock = vi.fn();
 const requestStepRevisionMock = vi.fn();
 const submitStepRevisionMock = vi.fn();
+const listRecommendationsMock = vi.fn();
+const acceptRecommendationMock = vi.fn();
 
 vi.mock("../api", () => ({
   confirmStep: (...args: unknown[]) => confirmStepMock(...args),
@@ -59,6 +61,8 @@ vi.mock("../api", () => ({
   switchProviderRecovery: (...args: unknown[]) => switchProviderRecoveryMock(...args),
   requestStepRevision: (...args: unknown[]) => requestStepRevisionMock(...args),
   submitStepRevision: (...args: unknown[]) => submitStepRevisionMock(...args),
+  listRecommendations: (...args: unknown[]) => listRecommendationsMock(...args),
+  acceptRecommendation: (...args: unknown[]) => acceptRecommendationMock(...args),
   toErrorMessage: (err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback,
 }));
@@ -234,6 +238,10 @@ describe("OrcaChat", () => {
     requestStepRevisionMock.mockResolvedValue(undefined);
     submitStepRevisionMock.mockReset();
     submitStepRevisionMock.mockResolvedValue(undefined);
+    listRecommendationsMock.mockReset();
+    listRecommendationsMock.mockResolvedValue({ recommendations: [], generations: [] });
+    acceptRecommendationMock.mockReset();
+    acceptRecommendationMock.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -1538,6 +1546,91 @@ describe("OrcaChat", () => {
     // And the chat must surface that the workflow finished, instead of going
     // silent after the last step.
     await screen.findByText("Workflow complete");
+  });
+
+  // The real parked-terminal state (per the daemon): the final step stays
+  // status='active' with finished_at set, awaiting acceptance of the proposed
+  // complete_workflow_run recommendation. The tracker must surface an "Approve
+  // to complete" affordance that accepts that recommendation so the run + goal
+  // flip to 'completed' via the existing completeWorkflowRun path.
+  it("surfaces an approve-to-complete affordance and accepts the complete_workflow_run recommendation", async () => {
+    getGoalDetailMock.mockResolvedValue({
+      goal: { ...goal, activeWorkflowRunId: "run-1" },
+      refinement: null,
+      workspaces: [],
+    });
+    getWorkflowRunMock.mockResolvedValue({
+      run: {
+        id: "run-1",
+        goalId: "goal-1",
+        templateId: "orca/bug-triage",
+        templateVersion: 1,
+        status: "active",
+        currentStepRunId: "step-verify",
+        startedAt: now,
+        finishedAt: null,
+        blockedReason: null,
+      },
+    });
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-verify",
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepTemplateId: "verify",
+        ordinal: 3,
+        attempt: 1,
+        // Parked: work finished but the run is not complete — awaiting approval.
+        status: "active",
+        startedAt: now,
+        finishedAt: now,
+        blockedReason: null,
+      },
+    });
+    getWorkflowTemplateMock.mockResolvedValue({
+      template: {
+        name: "Bug Triage & Fix",
+        steps: [
+          { id: "triage", ordinal: 0, name: "Triage" },
+          { id: "reproduce", ordinal: 1, name: "Reproduce" },
+          { id: "fix", ordinal: 2, name: "Fix" },
+          { id: "verify", ordinal: 3, name: "Verify" },
+        ],
+      },
+    });
+    listWorkflowDecisionsMock.mockResolvedValue({ decisions: [] });
+    listWorkflowRunArtifactsMock.mockResolvedValue({ artifacts: [] });
+    listRecommendationsMock.mockResolvedValue({
+      recommendations: [
+        {
+          id: "rec-complete-1",
+          goalId: "goal-1",
+          type: "complete_workflow_run",
+          status: "proposed",
+          proposedAction: {
+            kind: "complete_workflow_run",
+            workflowRunId: "run-1",
+            workflowStepRunId: "step-verify",
+          },
+        },
+      ],
+      generations: [],
+    });
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("Bug Triage & Fix");
+    // The parked terminal step must not read as running.
+    expect(screen.queryByText("running")).toBeNull();
+
+    // The approve-to-complete affordance appears once the recommendation loads.
+    const approve = await screen.findByRole("button", { name: /approve to complete/i });
+    fireEvent.click(approve);
+
+    await waitFor(() =>
+      expect(acceptRecommendationMock).toHaveBeenCalledWith("rec-complete-1", {}),
+    );
   });
 
   it("composer reroutes to submitStepRevision when a pendingRevision message is present", async () => {

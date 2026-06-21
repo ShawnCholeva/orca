@@ -23,6 +23,7 @@ export function isAgentActivityCard(activity: Activity): boolean {
     activity.sourceKind !== "step_result" &&
     activity.sourceKind !== "step_confirmation_pending" &&
     activity.sourceKind !== "provider_recovery_pending" &&
+    activity.sourceKind !== "gate_decision_pending" &&
     (activity.steps.length > 0 || isMeaningfulCompleted(activity))
   );
 }
@@ -43,6 +44,7 @@ export function pickLiveActivity(activities: Activity[]): Activity | null {
     if (
       activity?.status === "paused_for_input" &&
       (activity.sourceKind === "step_confirmation_pending" ||
+        activity.sourceKind === "gate_decision_pending" ||
         activity.sourceKind === "provider_recovery_pending")
     ) {
       return activity;
@@ -149,6 +151,13 @@ export function ActivityCard({ activity }: { activity: Activity }) {
   if (activity.sourceKind === "step_result") {
     return <StepResultCard activity={activity} />;
   }
+  if (activity.sourceKind === "gate_decision") {
+    return (
+      <div className="gate-decision-card" data-testid="gate-decision-card">
+        ✓ {activity.finalSummary}
+      </div>
+    );
+  }
   return (
     <div className="activity-summary" data-testid="activity-summary">
       {activity.finalSummary}
@@ -163,11 +172,15 @@ export function LiveActivity({
   renderProviderRecovery: ProviderRecovery,
   onContinue,
   onRevise,
+  onGateDecide,
+  gateDeciding = false,
 }: {
   activity: Activity;
   renderProviderRecovery?: ComponentType<ProviderRecoveryProps>;
   onContinue?: (runId: string) => void;
   onRevise?: (runId: string) => void;
+  onGateDecide?: (runId: string, outcome: "approved" | "rejected") => void;
+  gateDeciding?: boolean;
 }) {
   const [scoresOpen, setScoresOpen] = useState(false);
   const confirmationScoring = activity.confirmationSummary?.scoring ?? null;
@@ -180,6 +193,8 @@ export function LiveActivity({
   const isConfirmation =
     activity.status === "paused_for_input" &&
     activity.sourceKind === "step_confirmation_pending";
+  const isGateDecision =
+    activity.status === "paused_for_input" && activity.sourceKind === "gate_decision_pending";
   const isProviderRecovery =
     activity.status === "paused_for_input" &&
     activity.sourceKind === "provider_recovery_pending" &&
@@ -188,6 +203,30 @@ export function LiveActivity({
     <div className="activity-bubble" data-testid="activity-bubble" data-status={activity.status}>
       {!(isConfirmation && activity.confirmationSummary) ? (
         <div className="activity-bubble-text">{activity.currentText}</div>
+      ) : null}
+      {isGateDecision ? (
+        <div className="step-confirm" data-testid="gate-decision">
+          <div className="step-confirm-actions">
+            <button
+              type="button"
+              data-testid="gate-decision-approve"
+              className="step-confirm-continue-btn"
+              disabled={gateDeciding}
+              onClick={() => onGateDecide?.(activity.workflowRunId, "approved")}
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              data-testid="gate-decision-reject"
+              className="step-confirm-revise-btn"
+              disabled={gateDeciding}
+              onClick={() => onGateDecide?.(activity.workflowRunId, "rejected")}
+            >
+              Reject
+            </button>
+          </div>
+        </div>
       ) : null}
       {isConfirmation ? (
         <div className="step-confirm" data-testid="step-confirm">

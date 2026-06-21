@@ -42,7 +42,6 @@ import {
   nextAttemptForStep,
 } from "../steps/usecases.js";
 import { effectiveGraph, resolveGateNext, resolveStepNext } from "../graph/graph-routing.js";
-import { evaluateGate } from "./gate-evaluation.js";
 import { nextTraversalSeq, recordGateDecision } from "../gates/usecases.js";
 import { listGateDecisionsForRun } from "../gates/projection.js";
 import { loadRunTemplate } from "../runs/run-template.js";
@@ -94,7 +93,7 @@ import {
 } from "./recover-step-scoring.js";
 import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
 import { getSupervisionMode } from "../../settings/store.js";
-import { expireConfirmation, openOrUpdateLive, pauseForConfirmation, pauseForProviderRecovery, resumeFromConfirmation, resumeFromProviderRecovery } from "../../activities/store.js";
+import { expireConfirmation, openOrUpdateLive, pauseForConfirmation, pauseForGateDecision, pauseForProviderRecovery, resolveGateDecisionActivity, resumeFromConfirmation, resumeFromProviderRecovery } from "../../activities/store.js";
 import { setSessionStatus } from "../../sessions/projection.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
 import { extractProposal, summarizeScoring } from "./scoring-summary.js";
@@ -3108,17 +3107,15 @@ export class OrchestratorService {
       this.publish(options.bus, stagedEvents);
 
       if (result.kind === "gate") {
-        const sourceStepOutput = this.readStepOutputAsRecord(db, run.id, stepRun.id);
-        await this.evaluateAndRouteGate(
+        this.parkForGateApproval(
           db,
           now,
-          { run, stepRun, stepTpl, template, goal, gateNodeId: result.nodeId, sourceStepOutput },
+          { run, stepRun, stepTpl, template, goal, gateNodeId: result.nodeId },
           options
         );
-        // A missing gate or failed evaluation blocks the run; do not recurse.
-        // A supervised gate pause leaves the run active but parked on the gate
-        // (current_step_run_id = NULL) awaiting Continue; do not recurse there
-        // either (the Continue/confirmGate path resumes routing).
+        // A missing gate blocks the run; do not recurse. Otherwise the gate is
+        // parked awaiting a human approve/reject (current_step_run_id = NULL);
+        // do not recurse either — the decideGate path resumes routing.
         const after = getWorkflowRunById(db, run.id);
         if (!after || after.status !== "active" || !after.currentStepRunId) {
           return this.commitNoopLatestDecision(db, run.id, stepRun.id);
@@ -3257,7 +3254,14 @@ export class OrchestratorService {
    * a step destination inserts a fresh attempt of that step (its agent is then
    * selected/spawned by the requestNextDecision recursion of the caller).
    */
-  private async evaluateAndRouteGate(
+  /**
+   * The run cursor has advanced to a gate (current_node_kind='gate'). Gates are
+   * always resolved by a human approve/reject decision — there is no LLM
+   * auto-evaluation. We stash the gate + source step, park a confirmation
+   * activity, and leave the run active with current_step_run_id NULL until
+   * decideGate records the chosen outcome and routes.
+   */
+  private parkForGateApproval(
     db: Database.Database,
     now: () => string,
     ctx: {
@@ -3267,11 +3271,10 @@ export class OrchestratorService {
       template: WorkflowTemplateT;
       goal: GoalRow;
       gateNodeId: string;
-      sourceStepOutput: Record<string, unknown> | null;
     },
     options: RequestNextDecisionOptions
-  ): Promise<void> {
-    const { run, stepRun, stepTpl, template, goal, gateNodeId, sourceStepOutput } = ctx;
+  ): void {
+    const { run, stepRun, stepTpl, template, goal, gateNodeId } = ctx;
     const graph = effectiveGraph(template.graph, template.steps);
     const gateNode = graph.nodes.find((n) => n.id === gateNodeId && n.type === "gate");
     if (!gateNode) {
@@ -3285,78 +3288,95 @@ export class OrchestratorService {
       return;
     }
 
-    if (!goal.orchestrator_provider || !goal.orchestrator_model) {
-      this.blockRun(
+    const stagedEvents: DomainEvent[] = [];
+    db.transaction(() => {
+      db.prepare("UPDATE workflow_runs SET pending_gate_route_json = ? WHERE id = ?").run(
+        JSON.stringify({
+          awaitingHumanDecision: true,
+          gateNodeId: gateNode.id,
+          sourceStepRunId: stepRun.id,
+        }),
+        run.id
+      );
+      // Record a decision so the caller (commitNoopLatestDecision) has a trace to
+      // return while the run is parked awaiting the user's gate decision.
+      recordDecisionInTx(
         db,
         now,
-        { run, stepRun, stepTpl, goal },
-        "gate evaluation failed: orchestrator model not configured",
-        options
-      );
-      return;
-    }
-
-    const ledger = latestCommittedLedger(db, run.id);
-    const evaluation = await evaluateGate(
-      { broker: this.broker },
-      {
-        goalId: goal.id,
-        workflowRunId: run.id,
-        providerId: goal.orchestrator_provider,
-        modelId: goal.orchestrator_model,
-        goal: { id: goal.id, description: goal.description },
-        gate: {
-          nodeId: gateNode.id,
-          name: gateNode.name,
-          instructions: gateNode.instructions ?? gateNode.condition ?? "",
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          stepRunId: stepRun.id,
+          decisionType: "evaluate_gate",
+          selectedAction: `gate:${gateNode.id}:await_human`,
+          reason: `Gate "${gateNode.name}" awaiting human approval`,
+          influencedBy: [
+            { kind: "workflow_step", id: stepTpl.id, label: stepTpl.name, effect: "satisfied" },
+          ],
+          inputFingerprint: decisionFingerprint({
+            runId: run.id,
+            stepRunId: stepRun.id,
+            decisionType: "evaluate_gate",
+            payload: `${gateNode.id}:await_human`,
+          }),
         },
-        sourceStepOutput,
-        priorGateDecisions: listGateDecisionsForRun(db, run.id).map((d) => ({
-          nodeId: d.nodeId,
-          outcome: d.outcome,
-          reason: d.reason,
-        })),
-        availableOutcomes: ["approved", "rejected"],
-        // Take the most recent 35 records and truncate note to 500 chars so the
-        // committedLedger field can never exceed the GateEvaluationRequest size guard.
-        committedLedger: ledger.records.slice(-35).map((r) => ({
-          id: r.id,
-          recordType: r.recordType,
-          status: r.status,
-          note: r.note.slice(0, 500),
-        })),
-      }
-    );
-
-    if (!evaluation.ok) {
-      this.blockRun(
-        db,
-        now,
-        { run, stepRun, stepTpl, goal },
-        `gate evaluation failed: ${evaluation.reason}`,
-        options
+        { idFactory: options.idFactory, stagedEvents }
       );
-      return;
-    }
-
-    const dest = resolveGateNext(graph, gateNode.id, evaluation.decision.outcome);
-    const seq = nextTraversalSeq(db, run.id);
-    recordGateDecision(db, now, {
+    })();
+    this.publish(options.bus, stagedEvents);
+    const activityCtx = { db, bus: options.bus ?? new EventBus() };
+    pauseForGateDecision(activityCtx, {
       goalId: goal.id,
       workflowRunId: run.id,
-      nodeId: gateNode.id,
-      traversalSeq: seq,
-      outcome: evaluation.decision.outcome,
-      reason: evaluation.decision.reason,
-      selectedEdgeTo: dest.kind === "terminal" ? "" : dest.nodeId,
-      inputsConsidered: evaluation.decision.inputsConsidered,
-      issueRefs: evaluation.decision.issueRefs,
-      ledgerVersion: ledger.version,
+      stepRunId: stepRun.id,
+      gateName: gateNode.name,
     });
+  }
 
+  /**
+   * Resolve a gate parked awaiting a human decision. Records the chosen outcome
+   * as the gate decision (deduped by traversal_seq), then performs the route via
+   * routeGateDestination. Idempotent: a missing or non-human stash is a no-op so
+   * a double-submit cannot double-route.
+   */
+  async decideGate(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    outcome: "approved" | "rejected",
+    options: RequestNextDecisionOptions & { reason?: string } = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run) return;
+    const stashRow = db
+      .prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id = ?")
+      .get(runId) as { pending_gate_route_json: string | null } | undefined;
+    if (!stashRow?.pending_gate_route_json) return; // idempotent no-op
+
+    let stash: { awaitingHumanDecision?: boolean; gateNodeId: string; sourceStepRunId: string };
+    try {
+      stash = JSON.parse(stashRow.pending_gate_route_json);
+    } catch {
+      db.prepare("UPDATE workflow_runs SET pending_gate_route_json = NULL WHERE id = ?").run(runId);
+      return;
+    }
+    if (!stash.awaitingHumanDecision) return; // not a human-gated park
+
+    const template = loadRunTemplate(db, run);
+    if (!template) return;
+    const goal = readGoal(db, run.goalId);
+    const graph = effectiveGraph(template.graph, template.steps);
+    const gateNode = graph.nodes.find((n) => n.id === stash.gateNodeId && n.type === "gate");
+    if (!gateNode) {
+      db.prepare("UPDATE workflow_runs SET pending_gate_route_json = NULL WHERE id = ?").run(runId);
+      return;
+    }
+
+    const dest = resolveGateNext(graph, gateNode.id, outcome);
+    const stepRun = readStepRun(db, stash.sourceStepRunId);
+    const stepTpl =
+      template.steps.find((s) => s.id === stepRun.step_template_id) ?? template.steps[0]!;
     if (dest.kind !== "step" && dest.kind !== "gate") {
-      // resolveGateNext only ever classifies edges to step/gate nodes; a terminal
-      // destination is unreachable. Guard defensively so the run never stalls.
       this.blockRun(
         db,
         now,
@@ -3367,78 +3387,51 @@ export class OrchestratorService {
       return;
     }
 
-    // Supervised mode: pause for user confirmation BEFORE routing to the
-    // destination. The decision is already recorded (and deduped by
-    // traversal_seq); we stash the deferred route and park a confirmation
-    // activity on the source step. The Continue action (confirmGate) consumes
-    // the stash and performs the deferred route exactly once.
-    if (getSupervisionMode(db) === "supervised") {
-      const summary = `Gate "${gateNode.name}" ${evaluation.decision.outcome}: ${evaluation.decision.reason}`;
-      const stagedEvents: DomainEvent[] = [];
-      db.transaction(() => {
-        db.prepare("UPDATE workflow_runs SET pending_gate_route_json = ? WHERE id = ?").run(
-          JSON.stringify({
-            gateNodeId: gateNode.id,
-            outcome: evaluation.decision.outcome,
-            destNodeId: dest.nodeId,
-            destKind: dest.kind,
-            traversalSeq: seq,
-            sourceStepRunId: stepRun.id,
-          }),
-          run.id
-        );
-        // Record an evaluate_gate decision so the caller has a trace to return
-        // while the run is parked awaiting Continue.
-        recordDecisionInTx(
-          db,
-          now,
-          {
-            goalId: goal.id,
-            workflowRunId: run.id,
-            stepRunId: stepRun.id,
-            decisionType: "evaluate_gate",
-            selectedAction: `gate:${evaluation.decision.outcome}:await_confirmation`,
-            reason: evaluation.decision.reason,
-            influencedBy: [
-              {
-                kind: "workflow_step",
-                id: stepTpl.id,
-                label: stepTpl.name,
-                effect: "satisfied",
-              },
-            ],
-            inputFingerprint: decisionFingerprint({
-              runId: run.id,
-              stepRunId: stepRun.id,
-              decisionType: "evaluate_gate",
-              payload: `${gateNode.id}:${seq}`,
-            }),
-          },
-          { idFactory: options.idFactory, stagedEvents }
-        );
-      })();
-      this.publish(options.bus, stagedEvents);
-      const activityCtx = { db, bus: options.bus ?? new EventBus() };
-      openOrUpdateLive(activityCtx, {
-        goalId: goal.id,
-        workflowRunId: run.id,
-        stepRunId: stepRun.id,
-        agentSessionId: null,
-        sourceKind: "step_started",
-        currentText: summary,
-        workCategory: null,
-      });
-      pauseForConfirmation(activityCtx, { stepRunId: stepRun.id, summary });
-      return;
-    }
+    const ledger = latestCommittedLedger(db, run.id);
+    const seq = nextTraversalSeq(db, run.id);
+    // Clear the stash first so a racing submit cannot double-route.
+    db.prepare("UPDATE workflow_runs SET pending_gate_route_json = NULL WHERE id = ?").run(runId);
+    recordGateDecision(db, now, {
+      goalId: goal.id,
+      workflowRunId: run.id,
+      nodeId: gateNode.id,
+      traversalSeq: seq,
+      outcome,
+      reason: options.reason?.trim() || `${outcome} by user`,
+      selectedEdgeTo: dest.nodeId,
+      inputsConsidered: [],
+      issueRefs: [],
+      ledgerVersion: ledger.version,
+    });
+    resolveGateDecisionActivity(
+      { db, bus: options.bus ?? new EventBus() },
+      { stepRunId: stash.sourceStepRunId, gateName: gateNode.name, outcome }
+    );
 
     await this.routeGateDestination(
       db,
       now,
-      { run, template, goal, sourceStepRunId: stepRun.id },
+      { run, template, goal, sourceStepRunId: stash.sourceStepRunId },
       { kind: dest.kind, nodeId: dest.nodeId },
       options
     );
+
+    // If the destination is a step, spawn its agent exactly once (mirrors
+    // advanceToNextStep). A gate destination re-parks inside routeGateDestination
+    // and leaves current_step_run_id NULL, so nothing spawns here.
+    const after = getWorkflowRunById(db, runId);
+    if (after && after.status === "active" && after.currentStepRunId) {
+      const nextStepRun = readStepRun(db, after.currentStepRunId);
+      const nextTpl = template.steps.find((s) => s.id === nextStepRun.step_template_id);
+      if (nextTpl) {
+        await this.spawnStepAgent(
+          db,
+          now,
+          { run: after, stepRun: nextStepRun, stepTpl: nextTpl, template, goal },
+          options
+        );
+      }
+    }
   }
 
   /**
@@ -3482,11 +3475,10 @@ export class OrchestratorService {
         );
         return;
       }
-      const sourceStepOutput = this.readStepOutputAsRecord(db, run.id, stepRun.id);
-      await this.evaluateAndRouteGate(
+      this.parkForGateApproval(
         db,
         now,
-        { run, stepRun, stepTpl, template, goal, gateNodeId: dest.nodeId, sourceStepOutput },
+        { run, stepRun, stepTpl, template, goal, gateNodeId: dest.nodeId },
         options
       );
       return;
@@ -3540,6 +3532,7 @@ export class OrchestratorService {
     if (!stashRow?.pending_gate_route_json) return; // idempotent no-op
 
     let stash: {
+      awaitingHumanDecision?: boolean;
       gateNodeId: string;
       outcome: string;
       destNodeId: string;
@@ -3553,6 +3546,9 @@ export class OrchestratorService {
       db.prepare("UPDATE workflow_runs SET pending_gate_route_json = NULL WHERE id = ?").run(runId);
       return;
     }
+    // A human-gated park is resolved by decideGate (the user picks the outcome),
+    // not by Continue — leave it parked so confirmGate/resume cannot auto-route it.
+    if (stash.awaitingHumanDecision) return;
 
     const template = loadRunTemplate(db, run);
     if (!template) return;

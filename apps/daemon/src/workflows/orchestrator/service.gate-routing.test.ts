@@ -66,38 +66,26 @@ function fakeAgentSelector(): Pick<
 }
 
 /**
- * Broker that returns a gate proposal for evaluate_gate requests and a benign
- * step-scoring proposal otherwise, so the run can reach the gate.
+ * Broker that returns a benign step-scoring proposal so the active step can be
+ * scored and the run can advance to the gate. Gates are NOT evaluated by the
+ * broker anymore — they park for a human decideGate call — so the evaluate_gate
+ * branch is gone.
  */
-function fakeGateBroker(gate: {
-  outcome: "approved" | "rejected";
-  reason: string;
-  inputsConsidered: string[];
-  issueRefs?: string[];
-}): Pick<OrchestrationTransportBroker, "propose"> {
+function fakeStepBroker(): Pick<OrchestrationTransportBroker, "propose"> {
   return {
-    async propose(request: unknown, options?: BrokerCompatibilityOptions) {
-      const kind = (request as { kind?: string }).kind;
-      const proposal =
-        kind === "evaluate_gate"
-          ? {
-              outcome: gate.outcome,
-              reason: gate.reason,
-              inputsConsidered: gate.inputsConsidered,
-              ...(gate.issueRefs ? { issueRefs: gate.issueRefs } : {}),
-            }
-          : {
-              successScore: 0.82,
-              quality: {
-                outputCompleteness: 0.8,
-                outputCorrectness: 0.8,
-                instructionAdherence: 0.85,
-                downstreamReadiness: 0.8,
-                riskLevel: 0.2,
-              },
-              reason: "Ready for next step.",
-              handoffReady: true,
-            };
+    async propose(_request: unknown, options?: BrokerCompatibilityOptions) {
+      const proposal = {
+        successScore: 0.82,
+        quality: {
+          outputCompleteness: 0.8,
+          outputCorrectness: 0.8,
+          instructionAdherence: 0.85,
+          downstreamReadiness: 0.8,
+          riskLevel: 0.2,
+        },
+        reason: "Ready for next step.",
+        handoffReady: true,
+      };
       const validated = options?.validateProposal
         ? await options.validateProposal(proposal)
         : { accepted: true as const, parsed: proposal };
@@ -222,15 +210,47 @@ afterEach(() => {
 });
 
 describe("OrchestratorService gate routing", () => {
-  it("routes through a gate and approves to the terminal step", async () => {
+  it("parks at the gate awaiting a human decision (no auto-eval), then approves to the terminal step", async () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtValidation(db);
-    const service = makeService(
-      fakeGateBroker({ outcome: "approved", reason: "validation passed", inputsConsidered: ["validation"] })
-    );
+    const service = makeService(fakeStepBroker());
 
     await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    // Reaching the gate parks the run for a human decision — no LLM was called,
+    // no gate decision recorded yet, cursor parked on the gate.
+    const parked = db
+      .prepare(
+        "SELECT current_node_id, current_node_kind, current_step_run_id, pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'"
+      )
+      .get() as {
+      current_node_id: string;
+      current_node_kind: string;
+      current_step_run_id: string | null;
+      pending_gate_route_json: string | null;
+    };
+    expect(parked.current_node_id).toBe("gate");
+    expect(parked.current_node_kind).toBe("gate");
+    expect(parked.current_step_run_id).toBeNull();
+    expect(JSON.parse(parked.pending_gate_route_json!)).toMatchObject({
+      awaitingHumanDecision: true,
+      gateNodeId: "gate",
+      sourceStepRunId: "step-validation",
+    });
+    expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(0);
+
+    // A paused gate-decision activity is parked on the source step (persisted so
+    // the chat can rebuild the Approve/Reject card after a daemon restart).
+    const activity = db
+      .prepare(
+        "SELECT source_kind FROM activities WHERE step_run_id = 'step-validation' AND status = 'paused_for_input' LIMIT 1"
+      )
+      .get() as { source_kind: string } | undefined;
+    expect(activity?.source_kind).toBe("gate_decision_pending");
+
+    // User approves → decision recorded, cursor routed to the terminal step.
+    await service.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
 
     const decisions = listGateDecisionsForRun(db, "run-1");
     expect(decisions.at(-1)).toMatchObject({
@@ -239,21 +259,65 @@ describe("OrchestratorService gate routing", () => {
       selectedEdgeTo: "done",
       traversalSeq: 1,
     });
-    // Cursor moved to the terminal `done` step.
     const run = db
-      .prepare("SELECT current_node_id, current_node_kind FROM workflow_runs WHERE id = 'run-1'")
-      .get() as { current_node_id: string; current_node_kind: string };
+      .prepare("SELECT current_node_id, current_node_kind, pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { current_node_id: string; current_node_kind: string; pending_gate_route_json: string | null };
     expect(run.current_node_id).toBe("done");
     expect(run.current_node_kind).toBe("step");
+    expect(run.pending_gate_route_json).toBeNull();
+
+    // The decision persists as a completed gate_decision activity card so it
+    // remains in the chat thread (and survives a daemon restart).
+    const decisionCard = db
+      .prepare(
+        "SELECT status, source_kind, final_summary FROM activities WHERE step_run_id = 'step-validation' AND source_kind = 'gate_decision' LIMIT 1"
+      )
+      .get() as { status: string; source_kind: string; final_summary: string } | undefined;
+    expect(decisionCard?.status).toBe("completed");
+    expect(decisionCard?.final_summary).toMatch(/Approved/i);
+  });
+
+  it("decideGate is idempotent: a second submit does not double-route", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "unsupervised", NOW);
+    seedRunAtValidation(db);
+    const service = makeService(fakeStepBroker());
+
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await service.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
+    // Second submit is a no-op (stash already cleared).
+    await service.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
+
+    const doneRuns = db
+      .prepare("SELECT attempt FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = 'done'")
+      .all() as Array<{ attempt: number }>;
+    expect(doneRuns).toHaveLength(1);
+    expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(1);
+  });
+
+  it("confirmGate does not auto-route a human-gated park", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "supervised", NOW);
+    seedRunAtValidation(db);
+    const service = makeService(fakeStepBroker());
+
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    // Continue must NOT resolve a human gate — only decideGate can.
+    await service.confirmGate(db, () => NOW, "run-1", { bus, idFactory });
+
+    const run = db
+      .prepare("SELECT current_node_kind, pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { current_node_kind: string; pending_gate_route_json: string | null };
+    expect(run.current_node_kind).toBe("gate");
+    expect(run.pending_gate_route_json).not.toBeNull();
+    expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(0);
   });
 
   it("emits a mark_run_complete recommendation when the terminal step finishes, without completing the run", async () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtTerminalDoneStep(db);
-    const service = makeService(
-      fakeGateBroker({ outcome: "approved", reason: "n/a", inputsConsidered: [] })
-    );
+    const service = makeService(fakeStepBroker());
 
     await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
@@ -277,16 +341,10 @@ describe("OrchestratorService gate routing", () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtValidation(db);
-    const service = makeService(
-      fakeGateBroker({
-        outcome: "rejected",
-        reason: "bug",
-        inputsConsidered: ["validation"],
-        issueRefs: ["i1"],
-      })
-    );
+    const service = makeService(fakeStepBroker());
 
     await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await service.decideGate(db, () => NOW, "run-1", "rejected", { bus, idFactory });
 
     const execRuns = db
       .prepare(
@@ -299,137 +357,34 @@ describe("OrchestratorService gate routing", () => {
     expect(decisions.at(-1)).toMatchObject({
       outcome: "rejected",
       selectedEdgeTo: "execution",
-      issueRefs: ["i1"],
     });
   });
 
-  it("includes the latest downstream step output and the rejecting gate reason on a revisit", async () => {
+  it("surfaces the prior step output and the user's rejection reason on a backward revisit", async () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtValidation(db);
     const launch = vi.fn(async (_ctx: WorkflowLaunchContext) => ({ sessionId: "sess-1" }));
-    const service = makeService(
-      fakeGateBroker({
-        outcome: "rejected",
-        reason: "bug in parser",
-        inputsConsidered: ["validation"],
-        issueRefs: ["i1"],
-      }),
-      makeLauncher(launch)
-    );
+    const service = makeService(fakeStepBroker(), makeLauncher(launch));
 
-    await service.advanceToNextStep(db, () => NOW, "run-1", { bus, idFactory });
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await service.decideGate(db, () => NOW, "run-1", "rejected", {
+      bus,
+      idFactory,
+      reason: "bug in parser",
+    });
 
     // The fresh Execution attempt's agent was launched with a composed objective.
     expect(launch).toHaveBeenCalledTimes(1);
     const objective = launch.mock.calls[0]![0].objective;
 
-    // Prior-artifact selection includes the DOWNSTREAM validation output (higher
-    // ordinal) — the recency-based collector no longer filters it out.
+    // Prior-artifact selection includes the DOWNSTREAM validation output.
     expect(objective).toMatch(/prior step: validation/);
     expect(objective).toMatch(/all good/);
 
-    // The rejecting gate reason + issue refs are surfaced as repair context.
+    // The user's rejection reason is surfaced as repair context.
     expect(objective).toMatch(/Repair context/);
     expect(objective).toMatch(/bug in parser/);
-    expect(objective).toMatch(/i1/);
-  });
-
-  it("supervised: records the gate decision but pauses before routing to the destination", async () => {
-    const { db, bus, idFactory } = setupHarness();
-    setSupervisionMode(db, "supervised", NOW);
-    seedRunAtValidation(db);
-    const service = makeService(
-      fakeGateBroker({ outcome: "approved", reason: "validation passed", inputsConsidered: ["validation"] })
-    );
-
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
-
-    // Decision is recorded with the resolved destination edge.
-    const decisions = listGateDecisionsForRun(db, "run-1");
-    expect(decisions.at(-1)).toMatchObject({
-      nodeId: "gate",
-      outcome: "approved",
-      selectedEdgeTo: "done",
-      traversalSeq: 1,
-    });
-
-    // Cursor stays parked on the gate; destination step is NOT routed/spawned.
-    const run = db
-      .prepare(
-        "SELECT current_node_id, current_node_kind, current_step_run_id, pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'"
-      )
-      .get() as {
-      current_node_id: string;
-      current_node_kind: string;
-      current_step_run_id: string | null;
-      pending_gate_route_json: string | null;
-    };
-    expect(run.current_node_id).toBe("gate");
-    expect(run.current_node_kind).toBe("gate");
-    expect(run.current_step_run_id).toBeNull();
-
-    // Route stash is set for the Continue path.
-    expect(run.pending_gate_route_json).not.toBeNull();
-    const stash = JSON.parse(run.pending_gate_route_json!) as {
-      gateNodeId: string;
-      outcome: string;
-      destNodeId: string;
-      traversalSeq: number;
-    };
-    expect(stash).toMatchObject({
-      gateNodeId: "gate",
-      outcome: "approved",
-      destNodeId: "done",
-      traversalSeq: 1,
-    });
-
-    // No destination step_run row exists yet.
-    const doneRuns = db
-      .prepare("SELECT id FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = 'done'")
-      .all();
-    expect(doneRuns).toHaveLength(0);
-
-    // A paused confirmation activity is parked on the source step.
-    const activity = db
-      .prepare(
-        "SELECT status, source_kind FROM activities WHERE step_run_id = 'step-validation' AND status = 'paused_for_input' LIMIT 1"
-      )
-      .get() as { status: string; source_kind: string } | undefined;
-    expect(activity?.source_kind).toBe("step_confirmation_pending");
-  });
-
-  it("supervised: confirmGate consumes the stash and routes to the destination, idempotently", async () => {
-    const { db, bus, idFactory } = setupHarness();
-    setSupervisionMode(db, "supervised", NOW);
-    seedRunAtValidation(db);
-    const service = makeService(
-      fakeGateBroker({ outcome: "approved", reason: "validation passed", inputsConsidered: ["validation"] })
-    );
-
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
-    // Continue.
-    await service.confirmGate(db, () => NOW, "run-1", { bus, idFactory });
-
-    // Cursor advanced to the terminal `done` step; stash cleared.
-    const run = db
-      .prepare("SELECT current_node_id, current_node_kind, pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'")
-      .get() as { current_node_id: string; current_node_kind: string; pending_gate_route_json: string | null };
-    expect(run.current_node_id).toBe("done");
-    expect(run.current_node_kind).toBe("step");
-    expect(run.pending_gate_route_json).toBeNull();
-
-    const doneRuns = db
-      .prepare("SELECT attempt FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = 'done'")
-      .all() as Array<{ attempt: number }>;
-    expect(doneRuns).toHaveLength(1);
-
-    // Double-Continue is a no-op: no second destination attempt.
-    await service.confirmGate(db, () => NOW, "run-1", { bus, idFactory });
-    const doneRunsAfter = db
-      .prepare("SELECT attempt FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = 'done'")
-      .all() as Array<{ attempt: number }>;
-    expect(doneRunsAfter).toHaveLength(1);
   });
 
   it("records the current committed ledger_version on the gate decision", async () => {
@@ -477,11 +432,10 @@ describe("OrchestratorService gate routing", () => {
     const committedVersion = latestCommittedLedger(db, "run-1").version;
     expect(committedVersion).toBe(2);
 
-    const service = makeService(
-      fakeGateBroker({ outcome: "approved", reason: "validation passed", inputsConsidered: ["validation"] })
-    );
+    const service = makeService(fakeStepBroker());
 
     await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await service.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
 
     const decisions = listGateDecisionsForRun(db, "run-1");
     expect(decisions.at(-1)?.ledgerVersion).toBe(committedVersion);

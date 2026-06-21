@@ -13,14 +13,17 @@ import type {
 
 import type { ConnectionStatus } from "../api";
 import {
+  acceptRecommendation,
   confirmStep,
   createOrchestratorMessage,
+  decideGate,
   getGoalDetail,
   getWorkflowRun,
   getWorkflowStepRun,
   getWorkflowTemplate,
   listActivities,
   listOrchestratorMessages,
+  listRecommendations,
   listWorkflowDecisions,
   listWorkflowRunArtifacts,
   listWorkflowTemplates,
@@ -112,6 +115,12 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const [sendingMessage, setSendingMessage] = useState(false);
   const [answerPendingSince, setAnswerPendingSince] = useState<number | null>(null);
   const [awaitingReply, setAwaitingReply] = useState(false);
+  // The proposed complete_workflow_run recommendation id for the parked terminal
+  // step, fetched only while awaiting approval, plus the in-flight accept flag.
+  const [completionRecId, setCompletionRecId] = useState<string | null>(null);
+  const [approvingCompletion, setApprovingCompletion] = useState(false);
+  // In-flight flag while submitting a human gate approve/reject decision.
+  const [decidingGate, setDecidingGate] = useState(false);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Track which goal each data set has already loaded for, so SSE-driven
@@ -524,8 +533,27 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     name: step.name,
     role: step.agentPreference?.[0]?.adapterId,
   }));
+  // A run parked at a gate has current_step_run_id = NULL (so workflowState.stepRun
+  // is null). Detect it from the run cursor + template graph so the tracker shows
+  // the gate's source step awaiting approval instead of falling back to step 0.
+  const gateNode =
+    workflowState.run?.currentNodeKind === "gate" && workflowState.run.currentNodeId
+      ? workflowState.template?.graph?.nodes.find(
+          (node) => node.id === workflowState.run?.currentNodeId && node.type === "gate",
+        )
+      : undefined;
+  const awaitingGate = gateNode != null;
+  // The step whose edge leads into the parked gate — the tracker anchors the
+  // "awaiting approval" affordance on it.
+  const gateSourceStepIndex = (() => {
+    if (!awaitingGate || !workflowState.template?.graph) return -1;
+    const edge = workflowState.template.graph.edges.find((e) => e.to === gateNode!.id);
+    if (!edge) return -1;
+    return sortedSteps.findIndex((step) => step.id === edge.from);
+  })();
   const trackerActiveIndex = (() => {
     if (sortedSteps.length === 0) return 0;
+    if (awaitingGate && gateSourceStepIndex >= 0) return gateSourceStepIndex;
     const byId = workflowState.stepRun
       ? sortedSteps.findIndex((step) => step.id === workflowState.stepRun?.stepTemplateId)
       : -1;
@@ -546,7 +574,49 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const workflowFinished =
     workflowState.stepRun?.status === "passed" &&
     trackerActiveIndex === sortedSteps.length - 1;
+  // The terminal step parks the run "active" with finished_at set while awaiting
+  // completion approval (the complete_workflow_run recommendation). In that state
+  // the work is done but the goal is not complete, so the tracker must show
+  // "awaiting approval" rather than a finished check (which read as "done").
+  const awaitingApproval =
+    workflowState.stepRun?.status === "active" &&
+    workflowState.stepRun?.finishedAt != null &&
+    trackerActiveIndex === sortedSteps.length - 1;
   const showTracker = workflowState.run !== null && trackerSteps.length > 0;
+
+  // Load the proposed complete_workflow_run recommendation for the parked run so
+  // the tracker can surface an "Approve to complete" affordance. Only fetched
+  // while awaiting approval; cleared otherwise.
+  const runId = workflowState.run?.id ?? null;
+  useEffect(() => {
+    if (!awaitingApproval || !selectedGoalId || !runId) {
+      setCompletionRecId(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const body = await listRecommendations(selectedGoalId, {
+          status: "proposed",
+          type: "complete_workflow_run",
+          limit: 50,
+          includeGenerations: false,
+        });
+        if (cancelled) return;
+        const match = body.recommendations.find(
+          (rec) =>
+            rec.proposedAction.kind === "complete_workflow_run" &&
+            rec.proposedAction.workflowRunId === runId,
+        );
+        setCompletionRecId(match?.id ?? null);
+      } catch {
+        if (!cancelled) setCompletionRecId(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [awaitingApproval, selectedGoalId, runId, refreshNonce]);
 
   const startingLabel = workflowState.stepRun
     ? `Step ${workflowState.stepRun.ordinal + 1}${
@@ -603,6 +673,34 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
       await confirmStep(runId);
     } finally {
       setRefreshNonce((current) => current + 1);
+    }
+  }
+
+  async function handleApproveCompletion() {
+    if (!completionRecId) return;
+    setApprovingCompletion(true);
+    setActionError(null);
+    try {
+      await acceptRecommendation(completionRecId, {});
+      setRefreshNonce((current) => current + 1);
+    } catch (err) {
+      setActionError(toErrorMessage(err, "Failed to complete workflow."));
+    } finally {
+      setApprovingCompletion(false);
+    }
+  }
+
+  async function handleGateDecision(outcome: "approved" | "rejected") {
+    if (!runId) return;
+    setDecidingGate(true);
+    setActionError(null);
+    try {
+      await decideGate(runId, outcome);
+      setRefreshNonce((current) => current + 1);
+    } catch (err) {
+      setActionError(toErrorMessage(err, "Failed to submit gate decision."));
+    } finally {
+      setDecidingGate(false);
     }
   }
 
@@ -681,6 +779,10 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
           activeIndex={trackerActiveIndex}
           activeRunning={activeStepRunning}
           completed={workflowFinished}
+          awaitingApproval={awaitingApproval}
+          onApprove={completionRecId ? () => void handleApproveCompletion() : undefined}
+          approving={approvingCompletion}
+          awaitingGate={awaitingGate}
           onViewWorkflows={onViewWorkflows}
         />
       )}
@@ -844,6 +946,8 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                 )}
                 onContinue={handleContinue}
                 onRevise={handleRevise}
+                onGateDecide={(_runId, outcome) => void handleGateDecision(outcome)}
+                gateDeciding={decidingGate}
               />
             )}
 

@@ -1193,6 +1193,10 @@ export const ActivitySourceKind = z.enum([
   "step_result",
   "step_confirmation_pending",
   "provider_recovery_pending",
+  // A gate awaiting a human approve/reject decision (live, persisted so it
+  // survives a daemon restart), and the persisted record once decided.
+  "gate_decision_pending",
+  "gate_decision",
 ]);
 export type ActivitySourceKind = z.infer<typeof ActivitySourceKind>;
 

@@ -21,6 +21,21 @@ type Props = {
   // When the workflow has finished, every step is done and the header reads
   // "Completed" instead of a step position.
   completed?: boolean;
+  // When the terminal step has done its work but the run is parked "active"
+  // awaiting completion approval (the complete_workflow_run recommendation is
+  // still proposed), the step must NOT render as a finished green check — that
+  // reads as "done" and is why users think the goal completed. Instead it shows
+  // an explicit "awaiting approval" indicator.
+  awaitingApproval?: boolean;
+  // Approve the parked terminal step's completion (accepts the pending
+  // complete_workflow_run recommendation). Only surfaced while awaitingApproval.
+  onApprove?: () => void;
+  // Whether an approval request is in flight, to disable the button.
+  approving?: boolean;
+  // When the run is parked at a gate awaiting a human approve/reject decision,
+  // the step at activeIndex (the gate's source step) renders "awaiting approval".
+  // The Approve/Reject action lives in the chat thread, not here.
+  awaitingGate?: boolean;
   onViewWorkflows?: () => void;
 };
 
@@ -75,6 +90,10 @@ export function WorkflowTracker({
   activeIndex,
   activeRunning = true,
   completed = false,
+  awaitingApproval = false,
+  onApprove,
+  approving = false,
+  awaitingGate = false,
   onViewWorkflows,
 }: Props) {
   if (steps.length === 0) return null;
@@ -114,6 +133,27 @@ export function WorkflowTracker({
           </span>
         )}
         <div style={{ flex: 1 }} />
+        {awaitingApproval && onApprove && (
+          <button
+            type="button"
+            onClick={onApprove}
+            disabled={approving}
+            style={{
+              all: "unset",
+              cursor: approving ? "default" : "pointer",
+              fontSize: 11,
+              fontWeight: 600,
+              color: "#fff",
+              background: "var(--accent)",
+              padding: "4px 11px",
+              borderRadius: 6,
+              opacity: approving ? 0.6 : 1,
+              marginRight: 12,
+            }}
+          >
+            {approving ? "Approving…" : "Approve to complete"}
+          </button>
+        )}
         {onViewWorkflows && (
           <button
             type="button"
@@ -142,12 +182,18 @@ export function WorkflowTracker({
       {/* stepper */}
       <div style={{ display: "flex", alignItems: "flex-start" }}>
         {steps.map((step, i) => {
-          const done = completed || i < activeIndex || (i === activeIndex && !activeRunning);
+          const isAwaiting = !completed && (awaitingApproval || awaitingGate) && i === activeIndex;
+          const done =
+            completed || i < activeIndex || (i === activeIndex && !activeRunning && !isAwaiting);
           const isActive = !completed && activeRunning && i === activeIndex;
-          const dotColor = done ? "var(--run)" : isActive ? "var(--accent)" : "transparent";
+          const dotColor = done
+            ? "var(--run)"
+            : isActive || isAwaiting
+              ? "var(--accent)"
+              : "transparent";
           const ringColor = done
             ? "var(--run)"
-            : isActive
+            : isActive || isAwaiting
               ? "var(--accent)"
               : "var(--hairline-strong)";
           return (
@@ -178,7 +224,7 @@ export function WorkflowTracker({
                     transition: "background 160ms ease, box-shadow 160ms ease",
                   }}
                 >
-                  {done ? (
+                  {done || isAwaiting ? (
                     <CheckIcon size={13} color="#fff" />
                   ) : (
                     <span
@@ -197,8 +243,13 @@ export function WorkflowTracker({
                   style={{
                     fontSize: 11,
                     lineHeight: 1.3,
-                    fontWeight: isActive ? 600 : 500,
-                    color: isActive ? "var(--text)" : done ? "var(--text-2)" : "var(--text-4)",
+                    fontWeight: isActive || isAwaiting ? 600 : 500,
+                    color:
+                      isActive || isAwaiting
+                        ? "var(--text)"
+                        : done
+                          ? "var(--text-2)"
+                          : "var(--text-4)",
                     textWrap: "pretty",
                   }}
                 >
@@ -227,6 +278,31 @@ export function WorkflowTracker({
                       }}
                     />
                     running
+                  </span>
+                )}
+                {isAwaiting && (
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: 9,
+                      letterSpacing: 0.8,
+                      textTransform: "uppercase",
+                      color: "var(--accent)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: "50%",
+                        background: "var(--accent)",
+                        boxShadow: "0 0 0 3px var(--accent-soft)",
+                      }}
+                    />
+                    awaiting approval
                   </span>
                 )}
               </div>

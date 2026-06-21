@@ -1756,6 +1756,29 @@ export function createServer(
     return reply.code(202).send({ ok: true });
   });
 
+  server.post<{ Params: { id: string }; Body: { outcome?: string; reason?: string } }>(
+    "/v1/workflows/runs/:id/decide-gate",
+    async (request, reply) => {
+      const outcome = request.body?.outcome;
+      if (outcome !== "approved" && outcome !== "rejected") {
+        reply.status(400);
+        return { error: "validation_failed", message: "outcome must be 'approved' or 'rejected'" };
+      }
+      await orchestratorService.decideGate(
+        getDatabase(),
+        daemonContext.now,
+        request.params.id,
+        outcome,
+        {
+          bus: eventBus,
+          idFactory: daemonContext.idFactory,
+          ...(typeof request.body?.reason === "string" ? { reason: request.body.reason } : {}),
+        }
+      );
+      return reply.code(202).send({ ok: true });
+    }
+  );
+
   // ---- Provider-limit recovery action routes ----
   // Routes validate the body + map domain errors; persistence, transitions, and
   // idempotency live inside the OrchestratorService methods (Task 5).

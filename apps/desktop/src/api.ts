@@ -1766,6 +1766,23 @@ export async function confirmStep(runId: string): Promise<void> {
   );
 }
 
+export async function decideGate(
+  runId: string,
+  outcome: "approved" | "rejected",
+  reason?: string,
+): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  await requestVoid(
+    `${baseUrl}/v1/workflows/runs/${runId}/decide-gate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify(reason ? { outcome, reason } : { outcome }),
+    },
+    "Failed to submit gate decision",
+  );
+}
+
 export async function requestStepRevision(runId: string): Promise<void> {
   const { baseUrl, token } = await loadConfig();
   await requestVoid(

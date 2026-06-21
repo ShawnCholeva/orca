@@ -382,6 +382,71 @@ export function pauseForConfirmation(
   return activity;
 }
 
+// Open (or reuse) a persisted gate-decision activity awaiting a human
+// approve/reject. It is its own activity row (sourceKind gate_decision_pending,
+// status paused_for_input) so it survives a daemon restart and the chat can
+// rebuild the live Approve/Reject card from the activities list alone.
+export function pauseForGateDecision(
+  ctx: ActivityStoreCtx,
+  input: { goalId: string; workflowRunId: string; stepRunId: string; gateName: string }
+): ActivityT {
+  let event: DomainEvent | undefined;
+  const activity = ctx.db.transaction(() => {
+    const now = currentTime(ctx);
+    const text = `Gate "${input.gateName}" needs your approval to continue.`;
+    const existing = getLiveForStepRun(ctx.db, input.stepRunId);
+    if (existing?.sourceKind === "gate_decision_pending") return existing; // idempotent re-park
+
+    const id = nextActivityId(ctx);
+    const turnOrdinal = nextTurnOrdinal(ctx.db, input.stepRunId);
+    ctx.db
+      .prepare(
+        `INSERT INTO activities (
+           id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+           status, current_text, final_summary, source_kind, work_category, confidence,
+           pending_question, created_at, updated_at, completed_at
+         ) VALUES (?, ?, ?, ?, NULL, ?, 'paused_for_input', ?, NULL, 'gate_decision_pending', NULL, NULL, NULL, ?, ?, NULL)`
+      )
+      .run(id, input.goalId, input.workflowRunId, input.stepRunId, turnOrdinal, text, now, now);
+    const inserted = getActivityById(ctx.db, id);
+    if (inserted === undefined) throw new Error(`Activity insert failed: ${id}`);
+    event = insertActivityChangedEvent(ctx.db, inserted, now);
+    return inserted;
+  })();
+  publishActivityChanged(ctx, event);
+  return activity;
+}
+
+// Resolve the parked gate-decision activity into a persisted record of the
+// chosen outcome (sourceKind gate_decision, completed) so it stays in the thread.
+export function resolveGateDecisionActivity(
+  ctx: ActivityStoreCtx,
+  input: { stepRunId: string; gateName: string; outcome: "approved" | "rejected" }
+): ActivityT | undefined {
+  let event: DomainEvent | undefined;
+  const activity = ctx.db.transaction(() => {
+    const live = getLiveForStepRun(ctx.db, input.stepRunId);
+    if (live === undefined || live.sourceKind !== "gate_decision_pending") return undefined;
+    const now = currentTime(ctx);
+    const verb = input.outcome === "approved" ? "Approved" : "Sent back";
+    const summary = `${verb} the "${input.gateName}" gate.`;
+    ctx.db
+      .prepare(
+        `UPDATE activities
+         SET status = 'completed', source_kind = 'gate_decision', current_text = ?,
+             final_summary = ?, completed_at = ?, updated_at = ?
+         WHERE id = ?`
+      )
+      .run(summary, summary, now, now, live.id);
+    const resolved = getActivityById(ctx.db, live.id);
+    if (resolved === undefined) throw new Error(`Activity disappeared: ${live.id}`);
+    event = insertActivityChangedEvent(ctx.db, resolved, now);
+    return resolved;
+  })();
+  publishActivityChanged(ctx, event);
+  return activity;
+}
+
 export function resumeFromConfirmation(
   ctx: ActivityStoreCtx,
   input: { stepRunId: string }

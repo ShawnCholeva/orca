@@ -69,6 +69,79 @@ describe("WorkflowTracker", () => {
     expect(screen.queryByText("running")).toBeNull();
   });
 
+  it("surfaces 'awaiting approval' for a parked terminal step instead of a finished check", () => {
+    // The terminal step has passed its work but the run is parked "active"
+    // awaiting completion approval (the complete_workflow_run recommendation is
+    // still proposed). This is NOT the same as a genuinely completed run: the
+    // tracker must communicate that approval is still required rather than
+    // rendering the step as a finished green check, which reads as "done" and is
+    // exactly why the user thought the goal had completed.
+    render(
+      <WorkflowTracker
+        workflowName="Engineering"
+        steps={steps}
+        activeIndex={2}
+        activeRunning={false}
+        awaitingApproval
+      />,
+    );
+
+    // Surfaces an awaiting-approval indicator.
+    expect(screen.getByText(/awaiting approval/i)).toBeInTheDocument();
+    // Must not pulse running, and must not read as fully completed.
+    expect(screen.queryByText("running")).toBeNull();
+    expect(screen.queryByText("Completed")).toBeNull();
+  });
+
+  it("renders an 'approve to complete' affordance and calls onApprove when awaiting approval", () => {
+    const onApprove = vi.fn();
+    render(
+      <WorkflowTracker
+        workflowName="Engineering"
+        steps={steps}
+        activeIndex={2}
+        activeRunning={false}
+        awaitingApproval
+        onApprove={onApprove}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: /approve to complete/i });
+    button.click();
+    expect(onApprove).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not render the approve affordance unless awaiting approval", () => {
+    const onApprove = vi.fn();
+    render(
+      <WorkflowTracker
+        workflowName="Engineering"
+        steps={steps}
+        activeIndex={1}
+        onApprove={onApprove}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /approve to complete/i })).toBeNull();
+  });
+
+  it("marks the gate's source step 'awaiting approval' when parked at a gate (no inline buttons)", () => {
+    render(
+      <WorkflowTracker
+        workflowName="Bug Triage & Fix"
+        steps={steps}
+        activeIndex={2}
+        activeRunning={false}
+        awaitingGate
+      />,
+    );
+
+    // The approve/reject action lives in the chat thread, not the tracker.
+    expect(screen.getByText(/awaiting approval/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^reject$/i })).toBeNull();
+  });
+
   it("calls onViewWorkflows when the view button is clicked", () => {
     const onViewWorkflows = vi.fn();
     render(
