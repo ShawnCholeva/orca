@@ -9,7 +9,9 @@ import {
   WorkflowStepResult,
   type Activity as ActivityT,
   type ActivityStep as ActivityStepT,
-  type PendingQuestion as PendingQuestionT
+  type ConfirmationSummary as ConfirmationSummaryT,
+  type PendingQuestion as PendingQuestionT,
+  type WorkflowStepResult as WorkflowStepResultT
 } from "@orca/contracts";
 import { buildConfirmationSummary } from "../workflows/orchestrator/confirmation-summary.js";
 
@@ -81,6 +83,47 @@ function rowToActivity(db: Database.Database, row: ActivityRow): ActivityT {
   });
 }
 
+/** Rebuilds the confirmation-card frame for a confirmed step_result activity so
+ *  the chat keeps a static copy of the card the user approved. Returns undefined
+ *  unless a confirmation was actually shown and resolved (an `expired`
+ *  step_confirmation_pending sibling) and the step's output + schema are present. */
+function rebuildConfirmedFrame(
+  db: Database.Database,
+  stepRunId: string,
+  stepTemplateId: string,
+  stepsJson: string | null,
+  stepResult: WorkflowStepResultT
+): ConfirmationSummaryT | undefined {
+  const confirmed = db
+    .prepare(
+      `SELECT 1 FROM activities
+       WHERE step_run_id = ? AND source_kind = 'step_confirmation_pending' AND status = 'expired'
+       LIMIT 1`
+    )
+    .get(stepRunId);
+  if (!confirmed || !stepsJson) return undefined;
+
+  const steps = JSON.parse(stepsJson) as Array<{ id: string; outputSchema?: unknown }>;
+  const step = steps.find((s) => s.id === stepTemplateId);
+  const schemaParse = WorkflowStepOutputSchema.safeParse(step?.outputSchema);
+  if (!schemaParse.success) return undefined;
+
+  const artifact = db
+    .prepare(
+      `SELECT body FROM workflow_artifacts
+       WHERE step_run_id = ? AND type = 'step_output'
+       ORDER BY created_at DESC, rowid DESC LIMIT 1`
+    )
+    .get(stepRunId) as { body: string } | undefined;
+  if (!artifact) return undefined;
+
+  let block: unknown;
+  try { block = JSON.parse(artifact.body); } catch { return undefined; }
+
+  const leadText = stepResult.resultSummary ?? stepResult.outcome.reason;
+  return buildConfirmationSummary(schemaParse.data, block, null, leadText);
+}
+
 function enrichStepResult(db: Database.Database, activity: ActivityT): ActivityT {
   if (activity.sourceKind !== "step_result" || activity.stepRunId === null) return activity;
   const row = db
@@ -104,10 +147,19 @@ function enrichStepResult(db: Database.Database, activity: ActivityT): ActivityT
     const steps = JSON.parse(row.steps_json) as Array<{ id: string; name?: string }>;
     stepName = steps.find((s) => s.id === row.step_template_id)?.name;
   }
+  const stepResult = WorkflowStepResult.parse(JSON.parse(row.result_json));
+  const confirmationSummary = rebuildConfirmedFrame(
+    db,
+    activity.stepRunId,
+    row.step_template_id,
+    row.steps_json,
+    stepResult
+  );
   return Activity.parse({
     ...activity,
     ...(stepName !== undefined ? { stepName } : {}),
-    stepResult: WorkflowStepResult.parse(JSON.parse(row.result_json)),
+    stepResult,
+    ...(confirmationSummary !== undefined ? { confirmationSummary } : {}),
   });
 }
 

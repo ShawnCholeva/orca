@@ -219,3 +219,121 @@ describe("enrichConfirmationSummary", () => {
     expect(confirm?.confirmationSummary?.scoring?.successScore).toBe(0.9);
   });
 });
+
+describe("step_result confirmed-frame enrichment", () => {
+  let db: Database.Database;
+
+  const RESULT_JSON = JSON.stringify({
+    stepId: "s1",
+    stepStatus: "completed",
+    evaluationStatus: "scored",
+    successScore: 0.82,
+    quality: {
+      outputCompleteness: 0.8, outputCorrectness: 0.85,
+      instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2,
+    },
+    performance: { durationSeconds: 96, retries: 0 },
+    outcome: {
+      reason: "Output complete.", producedArtifactsCount: 1,
+      blockingIssuesCount: 0, warningsCount: 0, handoffReady: true,
+    },
+    resultSummary: "Replaces folder-browse with a registered-workspace picker.",
+  });
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    runMigrations(db, defaultMigrationsDir());
+    db.prepare(
+      `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+       VALUES ('g1', 'Goal', '', 'active', 1, '2026-06-21', '2026-06-21', NULL)`
+    ).run();
+    db.prepare(
+      `INSERT INTO workflow_templates (
+         id, name, description, version, is_built_in, is_locked, steps_json,
+         guardrails_json, created_at, updated_at
+       ) VALUES ('tpl1', 'Test', '', 1, 0, 0, ?, '[]', '2026-06-21', '2026-06-21')`
+    ).run(
+      JSON.stringify([
+        {
+          id: "frame",
+          name: "Coordinate",
+          outputSchema: [
+            { key: "problem", type: "string", required: true },
+            { key: "constraints", type: "array", itemType: "string", required: true },
+          ],
+        },
+      ])
+    );
+    db.prepare(
+      `INSERT INTO workflow_runs (
+         id, goal_id, template_id, template_version, status,
+         current_step_run_id, blocked_reason, started_at, finished_at
+       ) VALUES ('r1', 'g1', 'tpl1', 1, 'completed', 's1', NULL, '2026-06-21', '2026-06-21')`
+    ).run();
+    db.prepare(
+      `INSERT INTO workflow_step_runs (
+         id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status,
+         satisfied_exit_criteria_json, outstanding_exit_criteria_json,
+         blocked_reason, started_at, finished_at, fingerprint, step_result_json
+       ) VALUES ('s1', 'g1', 'r1', 'frame', 0, 1, 'passed', '[]', '[]',
+                 NULL, '2026-06-21', '2026-06-21', 'fp1', ?)`
+    ).run(RESULT_JSON);
+    db.prepare(
+      `INSERT INTO workflow_artifacts (
+         id, goal_id, workflow_run_id, step_run_id, type, title, body, source, created_at
+       ) VALUES ('art1', 'g1', 'r1', 's1', 'step_output', 'Coordinate', ?, 'orchestrator', '2026-06-21T00:00:00.000Z')`
+    ).run(
+      JSON.stringify({
+        problem: "The Coordinate step makes users browse the filesystem.",
+        constraints: ["No inline folder browsing", "A goal may attach multiple workspaces"],
+        _completion: { confidence: "medium", assumptions: [], openQuestions: [], whyComplete: "x" },
+      })
+    );
+    // The persisted step_result card.
+    db.prepare(
+      `INSERT INTO activities (
+         id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+         status, current_text, final_summary, source_kind, work_category, confidence,
+         pending_question, created_at, updated_at, completed_at
+       ) VALUES ('a-res', 'g1', 'r1', 's1', NULL, 1, 'completed', '', NULL,
+                 'step_result', NULL, NULL, NULL,
+                 '2026-06-21T00:01:00.000Z', '2026-06-21T00:01:00.000Z', '2026-06-21T00:01:00.000Z')`
+    ).run();
+  });
+
+  afterEach(() => db.close());
+
+  function insertExpiredConfirmation() {
+    db.prepare(
+      `INSERT INTO activities (
+         id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+         status, current_text, final_summary, source_kind, work_category, confidence,
+         pending_question, created_at, updated_at, completed_at
+       ) VALUES ('a-conf', 'g1', 'r1', 's1', NULL, 0, 'expired', 'Awaiting confirmation', NULL,
+                 'step_confirmation_pending', NULL, NULL, NULL,
+                 '2026-06-21T00:00:30.000Z', '2026-06-21T00:00:30.000Z', '2026-06-21T00:00:45.000Z')`
+    ).run();
+  }
+
+  it("rebuilds the frame when a confirmation was shown and resolved", () => {
+    insertExpiredConfirmation();
+    const a = listActivitiesByGoal(db, "g1").find((x) => x.id === "a-res")!;
+    expect(a.confirmationSummary?.lead).toBe(
+      "Replaces folder-browse with a registered-workspace picker."
+    );
+    expect(a.confirmationSummary?.fields).toEqual([
+      { label: "Problem", value: "The Coordinate step makes users browse the filesystem." },
+      { label: "Constraints", value: ["No inline folder browsing", "A goal may attach multiple workspaces"] },
+    ]);
+    // Scores stay on stepResult; the rebuilt frame's scoring is null.
+    expect(a.confirmationSummary?.scoring).toBeNull();
+    expect(a.stepResult?.successScore).toBe(0.82);
+  });
+
+  it("leaves an auto-completed step_result (no confirmation shown) compact", () => {
+    // No expired step_confirmation_pending sibling.
+    const a = listActivitiesByGoal(db, "g1").find((x) => x.id === "a-res")!;
+    expect(a.confirmationSummary).toBeUndefined();
+    expect(a.stepResult).toBeDefined();
+  });
+});
