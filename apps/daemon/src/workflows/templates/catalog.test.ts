@@ -129,3 +129,88 @@ describe("Brainstorm participatory revision", () => {
     expect(frame.instructions).toMatch(/complete/i);
   });
 });
+
+describe("Bug Triage & Fix systematic debugging (Four Phases)", () => {
+  const bugfix = BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === "orca/bug-triage-fix")!;
+  const step = (id: string) => bugfix.steps.find((s) => s.id === id)!;
+
+  it("bumps the template version to 4", () => {
+    expect(bugfix.version).toBe(4);
+  });
+
+  it("names its steps after the four phases plus Done", () => {
+    expect(bugfix.steps.map((s) => s.id)).toEqual([
+      "root_cause",
+      "pattern_analysis",
+      "hypothesis",
+      "implementation",
+      "done",
+    ]);
+    expect(step("root_cause").name).toBe("Root Cause Investigation");
+    expect(step("pattern_analysis").name).toBe("Pattern Analysis");
+    expect(step("hypothesis").name).toBe("Hypothesis & Testing");
+    expect(step("implementation").name).toBe("Implementation");
+  });
+
+  it("assigns the expected completion policies", () => {
+    expect(step("root_cause").completionPolicy).toBe("interview");
+    expect(step("pattern_analysis").completionPolicy).toBe("reasoning");
+    expect(step("hypothesis").completionPolicy).toBe("reasoning");
+    expect(step("implementation").completionPolicy).toBe("reasoning");
+    expect(step("done").completionPolicy).toBe("handoff");
+  });
+
+  it("makes Phase 1 an interview that reproduces, enforces the Iron Law, and confirms on the card", () => {
+    const ins = step("root_cause").instructions;
+    expect(ins).toMatch(/reproduce/i);
+    expect(ins).toMatch(/no fix|do not .*fix/i);
+    expect(ins).toMatch(/empty open_questions list/i);
+    expect(ins).toMatch(/completion card/i);
+    const field = step("root_cause").outputSchema.find((f) => f.key === "open_questions");
+    expect(field).toMatchObject({ key: "open_questions", type: "array", required: false });
+  });
+
+  it("requires Pattern Analysis to compare against working examples", () => {
+    expect(step("pattern_analysis").instructions).toMatch(/working example/i);
+    const keys = step("pattern_analysis").outputSchema.map((f) => f.key);
+    expect(keys).toContain("working_examples");
+    expect(keys).toContain("differences");
+  });
+
+  it("requires a single hypothesis and a failing test in Phase 3", () => {
+    expect(step("hypothesis").instructions).toMatch(/single[^.]*hypothesis|one hypothesis/i);
+    const keys = step("hypothesis").outputSchema.map((f) => f.key);
+    expect(keys).toContain("hypothesis");
+    expect(keys).toContain("failing_test");
+  });
+
+  it("tells reasoning steps to pause at a material fork", () => {
+    for (const id of ["pattern_analysis", "hypothesis", "implementation"]) {
+      expect(step(id).instructions).toMatch(/pause and ask/i);
+    }
+  });
+
+  it("routes a failed verdict gate back to Root Cause Investigation", () => {
+    const graph = bugfix.graph!;
+    const verdict = graph.nodes.find((n) => n.type === "gate");
+    expect(verdict?.id).toBe("verdict");
+    const approved = graph.edges.find((e) => e.from === "verdict" && e.port === "approved");
+    const rejected = graph.edges.find((e) => e.from === "verdict" && e.port === "rejected");
+    expect(approved?.to).toBe("done");
+    expect(rejected?.to).toBe("root_cause");
+  });
+
+  it("wires the validation guardrail to the renamed implementation step", () => {
+    const rule = bugfix.guardrails?.find((g) => g.kind === "validation_rule");
+    expect((rule?.configJson as { appliesToSteps?: string[] })?.appliesToSteps).toEqual([
+      "implementation",
+    ]);
+  });
+
+  it("gives Done a handoff that self-reviews and does not finish silently", () => {
+    const field = step("done").outputSchema.find((f) => f.key === "open_questions");
+    expect(field?.type).toBe("array");
+    expect(step("done").instructions).toMatch(/self-review/i);
+    expect(step("done").instructions).toMatch(/do not finish silently/i);
+  });
+});

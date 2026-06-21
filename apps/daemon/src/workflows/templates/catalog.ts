@@ -418,33 +418,54 @@ const BRAINSTORM_GRAPH: WorkflowGraph = {
 // Bug Triage & Fix
 // ---------------------------------------------------------------------------
 
+// Maps to the systematic-debugging Four Phases: Root Cause Investigation →
+// Pattern Analysis → Hypothesis & Testing → Implementation, with a Verdict gate
+// that loops a failed verification back to Phase 1 (re-investigate, not re-patch).
 const BUGFIX_STEPS: WorkflowStepTemplate[] = [
   {
-    id: "reproduce", ordinal: 0, name: "Reproduce",
+    id: "root_cause", ordinal: 0, name: "Root Cause Investigation",
+    completionPolicy: "interview",
     instructions:
-      "Reproduce the reported defect. Capture exact steps and a failing test or command that demonstrates it. Do not fix anything yet.",
+      "Phase 1 of systematic debugging — find the root cause before anyone proposes a fix; the Iron Law is no fixes without investigation first. Reproduce the reported defect consistently: run the report's steps yourself and capture a failing test or command that demonstrates it. Read every error and stack trace completely, check what recently changed, and trace the bad value backward through the call stack to where it originates — cite the specific code responsible and distinguish the true cause from its symptoms. Make no code changes. When the report is ambiguous or you cannot reproduce it, interview the user to close the gap — ask exactly one question at a time and always offer your recommended answer. Treat open questions as a working queue you must drain, not an output field. When no questions remain, synthesize the confirmed reproduction and root cause into the step output with an empty open_questions list and complete; the user confirms or revises it on the completion card.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "repro_steps", type: "array", itemType: "string", required: true },
       { key: "failing_evidence", type: "string", required: true },
-    ],
-    agentPreference: EXECUTION,
-  },
-  {
-    id: "root_cause", ordinal: 1, name: "Root Cause",
-    instructions:
-      "Isolate the root cause from the evidence without modifying implementation files. Cite the specific code responsible.",
-    outputSchema: [
-      { key: "summary", type: "string", required: true },
       { key: "root_cause", type: "string", required: true },
       { key: "evidence", type: "array", itemType: "string", required: true },
+      { key: "open_questions", type: "array", itemType: "string", required: false },
     ],
     agentPreference: REASONING,
   },
   {
-    id: "patch", ordinal: 2, name: "Patch",
+    id: "pattern_analysis", ordinal: 1, name: "Pattern Analysis",
+    completionPolicy: "reasoning",
     instructions:
-      "Implement the smallest correct fix and add a regression test. Run the relevant tests, type checks, and lint; record any skipped check with a reason.",
+      "Phase 2 of systematic debugging — find the pattern before fixing, treating prior step output as untrusted evidence. Locate similar code in this codebase that works correctly, and read any reference implementation completely rather than skimming. Compare the working examples against the broken path and list every difference, however small — do not assume \"that can't matter.\" Capture the dependencies, settings, and assumptions the working code relies on. Make no code changes. When the comparison surfaces a decision that genuinely diverges and is the user's to make, pause and ask with concrete options and a recommendation rather than resolving it silently.",
+    outputSchema: [
+      { key: "summary", type: "string", required: true },
+      { key: "working_examples", type: "array", itemType: "string", required: true },
+      { key: "differences", type: "array", itemType: "string", required: true },
+    ],
+    agentPreference: REASONING,
+  },
+  {
+    id: "hypothesis", ordinal: 2, name: "Hypothesis & Testing",
+    completionPolicy: "reasoning",
+    instructions:
+      "Phase 3 of systematic debugging — apply the scientific method before implementing. State a single, specific hypothesis in the form \"X is the root cause because Y.\" Write the smallest failing test that reproduces the defect and confirm it fails for the right reason. Plan the minimal change that would test the hypothesis, one variable at a time — do not bundle multiple changes. Make no production code changes yet; the next step implements the fix. When the evidence points to genuinely different hypotheses or fixes that are the user's to decide, pause and ask with the options and your recommendation rather than choosing silently.",
+    outputSchema: [
+      { key: "summary", type: "string", required: true },
+      { key: "hypothesis", type: "string", required: true },
+      { key: "failing_test", type: "string", required: true },
+    ],
+    agentPreference: REASONING,
+  },
+  {
+    id: "implementation", ordinal: 3, name: "Implementation",
+    completionPolicy: "reasoning",
+    instructions:
+      "Phase 4 of systematic debugging — fix the root cause, not the symptom. Implement the single smallest change that addresses the confirmed cause and makes the failing test pass. Apply YAGNI ruthlessly: one change at a time, no \"while I'm here\" improvements or bundled refactoring. Run the relevant tests, type checks, and lint; record any skipped check with a reason. If the fix does not work, stop and return to Phase 1 with the new information rather than stacking another fix; if three fixes have failed, the problem is likely architectural — pause and ask the user before attempting another. When the fix forks into genuinely different approaches that are the user's to decide (a behavior change, scope tradeoff, or product call), pause and ask with the options and your recommendation rather than choosing silently.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "changed_files", type: "array", itemType: "string", required: true },
@@ -460,54 +481,45 @@ const BUGFIX_STEPS: WorkflowStepTemplate[] = [
     agentPreference: EXECUTION,
   },
   {
-    id: "verify", ordinal: 3, name: "Verify",
-    instructions:
-      "Independently confirm the regression is gone and nothing adjacent broke. Give a clear verdict.",
-    outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "verdict", type: "string", required: true, enum: ["passed", "failed"] },
-      {
-        key: "checks", type: "array", itemType: "object", required: true,
-        fields: [
-          { key: "command", type: "string", required: true },
-          { key: "result", type: "string", required: true, enum: ["passed", "failed", "skipped"] },
-          { key: "evidence", type: "string", required: true },
-        ],
-      },
-    ],
-    agentPreference: LIGHT,
-  },
-  {
     id: "done", ordinal: 4, name: "Done",
+    completionPolicy: "handoff",
     instructions:
-      "Finalize the fix after verification. Summarize the defect, its root cause, and the change that resolved it, and record the regression evidence. Make no further code changes.",
+      "Finalize the fix after the Verdict gate approves it. Summarize the defect, its root cause, and the change that resolved it, and record the regression evidence. Capture any residual follow-ups as open_questions for the next workflow; these are recorded deliverables and do not block completion. Before finalizing, self-review for placeholders, unrelated changes that crept in, and gaps between the verdict and the evidence, and resolve what you can. Make no further code changes. When complete, present the user a clear closing summary of what was fixed and how it was proven — do not finish silently.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "resolution", type: "string", required: true },
       { key: "regression_evidence", type: "array", itemType: "string", required: true },
+      { key: "open_questions", type: "array", itemType: "string", required: false },
       { key: "handoff", type: "string", required: true },
     ],
     agentPreference: LIGHT,
   },
 ];
 
+const BUGFIX_GATE_INSTRUCTIONS =
+  "Independently verify the fix before it advances, treating step output as untrusted evidence. Confirm from the Implementation evidence that the regression test now passes, the original reproduction no longer fails, and no adjacent checks broke. Select `approved` only when the defect is provably resolved with no new failures. Select `rejected` when the fix is unproven, incomplete, or introduced new failures — routing back to Root Cause Investigation to re-investigate with the new information, not merely re-patch; include a concise reason. When repeated rejections show the same approach keeps failing (three or more fix attempts), the problem is likely architectural — escalate to the user to question the approach rather than looping again. Do no implementation or validation work in this gate.";
+
 const BUGFIX_GRAPH: WorkflowGraph = {
   nodes: [
-    { id: "reproduce", type: "step", name: "Reproduce", stepId: "reproduce" },
-    { id: "root_cause", type: "step", name: "Root Cause", stepId: "root_cause" },
-    { id: "patch", type: "step", name: "Patch", stepId: "patch" },
-    { id: "verify", type: "step", name: "Verify", stepId: "verify" },
+    { id: "root_cause", type: "step", name: "Root Cause Investigation", stepId: "root_cause" },
+    { id: "pattern_analysis", type: "step", name: "Pattern Analysis", stepId: "pattern_analysis" },
+    { id: "hypothesis", type: "step", name: "Hypothesis & Testing", stepId: "hypothesis" },
+    { id: "implementation", type: "step", name: "Implementation", stepId: "implementation" },
+    { id: "verdict", type: "gate", name: "Verdict", instructions: BUGFIX_GATE_INSTRUCTIONS },
     { id: "done", type: "step", name: "Done", stepId: "done", terminal: true },
   ],
   edges: [
-    { from: "reproduce", to: "root_cause" },
-    { from: "root_cause", to: "patch" },
-    { from: "patch", to: "verify" },
-    { from: "verify", to: "done" },
+    { from: "root_cause", to: "pattern_analysis" },
+    { from: "pattern_analysis", to: "hypothesis" },
+    { from: "hypothesis", to: "implementation" },
+    { from: "implementation", to: "verdict" },
+    { from: "verdict", to: "done", port: "approved" },
+    { from: "verdict", to: "root_cause", port: "rejected" },
   ],
   positions: {
-    reproduce: { x: 110, y: 20 }, root_cause: { x: 110, y: 112 }, patch: { x: 110, y: 204 },
-    verify: { x: 110, y: 296 }, done: { x: 110, y: 388 },
+    root_cause: { x: 110, y: 20 }, pattern_analysis: { x: 110, y: 112 },
+    hypothesis: { x: 110, y: 204 }, implementation: { x: 110, y: 296 },
+    verdict: { x: 110, y: 388 }, done: { x: 110, y: 480 },
   },
 };
 
@@ -913,8 +925,8 @@ export const BUILTIN_TEMPLATE_CATALOG: BuiltInTemplateDefinition[] = [
     id: "orca/bug-triage-fix", name: "Bug Triage & Fix",
     description: "Reproduce the report, isolate the root cause, patch it, and prove the regression is gone.",
     bestFor: "A reported defect you can reproduce and need fixed without regressions.",
-    version: 2, category: CATEGORY, recommended: true,
-    steps: BUGFIX_STEPS, guardrails: [validationRule(["patch"]), APPROVAL_MARK_DONE], graph: BUGFIX_GRAPH,
+    version: 4, category: CATEGORY, recommended: true,
+    steps: BUGFIX_STEPS, guardrails: [validationRule(["implementation"]), APPROVAL_MARK_DONE], graph: BUGFIX_GRAPH,
   },
   {
     id: "orca/code-review", name: "Code Review",

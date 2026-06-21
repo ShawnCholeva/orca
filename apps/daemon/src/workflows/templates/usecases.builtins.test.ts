@@ -102,7 +102,7 @@ describe("upgradeInstalledBuiltInTemplates", () => {
     const row = db
       .prepare("SELECT version, steps_json, graph_json FROM workflow_templates WHERE id = ?")
       .get("orca/bug-triage-fix") as { version: number; steps_json: string; graph_json: string | null };
-    expect(row.version).toBe(2);
+    expect(row.version).toBe(4);
     expect(row.steps_json).toContain('"id":"done"');
     expect(row.graph_json).not.toBeNull();
   });
