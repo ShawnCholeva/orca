@@ -125,6 +125,9 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   // Last message id we scrolled for, so we re-pin to the bottom when a new
   // message arrives (user send or orca reply) but not on unrelated refreshes.
   const scrolledMessageIdRef = useRef<string | null>(null);
+  // Last tail card (live confirmation/step card or terminal card) we scrolled for,
+  // so a newly-arrived card jumps into view exactly once.
+  const scrolledTailKeyRef = useRef<string | null>(null);
 
   const selectedGoal = goals.find((goal) => goal.id === selectedGoalId) ?? null;
   const connected = connectionStatus === "open";
@@ -137,6 +140,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     setAwaitingReply(false);
     scrolledGoalRef.current = null;
     scrolledMessageIdRef.current = null;
+    scrolledTailKeyRef.current = null;
   }, [selectedGoalId]);
 
   // Pin the scroll to the latest message on first view of a goal's chat, and
@@ -428,6 +432,27 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const orcaHasSpoken = messages.some((message) => message.role === "orchestrator");
   const liveActivity = pickLiveActivity(activities);
   const hasLiveActivity = liveActivity !== null;
+
+  // A step-result / confirmation card (Continue / Revise) arrives through the
+  // activity stream — as a live tail activity or a terminal timeline card — not as a
+  // chat message, so the message-change scroll above never fires for it. Without this
+  // the card lands below the fold and the user never sees it sitting there awaiting
+  // an action. Pin to the bottom once whenever a new tail card appears.
+  const timelineCards = activities.filter(isTimelineCard);
+  const lastTimelineCardId = timelineCards.length ? timelineCards[timelineCards.length - 1].id : null;
+  const tailCardKey = liveActivity
+    ? `live:${liveActivity.id}`
+    : lastTimelineCardId
+      ? `card:${lastTimelineCardId}`
+      : null;
+  useEffect(() => {
+    if (tailCardKey == null) return;
+    if (scrolledTailKeyRef.current === tailCardKey) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    scrolledTailKeyRef.current = tailCardKey;
+  }, [tailCardKey]);
 
   // Suppress the "starting" indicator once any persisted agent-activity card is
   // present — the agent has already emitted steps, so there is nothing to wait for.
