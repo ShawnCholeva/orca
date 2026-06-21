@@ -357,6 +357,41 @@ describe("WorkerSessionManager.deliver", () => {
     await mgr.spawn({ sessionId: "sess-churn", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
     expect(await mgr.deliver("sess-churn", "b")).toBe("delivered");
   });
+
+  it("moves to end then re-submits when a short answer stays in the box", async () => {
+    // Repro of the wedge: a one-line answer renders inline in the composer (not as a
+    // "[Pasted text]" placeholder), so if the first submit doesn't land (cursor parked
+    // mid-text after a re-render, or a dropped keystroke), the text sits in the box. A
+    // non-empty ❯ box never matches the empty-prompt idle check, so every later
+    // deliver() times out ("did not become idle in time"). deliver must move the cursor
+    // to the end (Claude only submits on Enter at end-of-input) and re-send End+Enter
+    // until the box actually clears.
+    const tmux = fakeTmux([
+      "auto mode on",                                  // spawn readiness
+      "❯ ",                                            // deliver: idle, empty prompt → paste
+      "❯ Under every workspace it's attached to",      // after 1st submit: text still in box
+      "esc to interrupt",                              // after 2nd submit: submitted (busy)
+    ]);
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
+      resolveProvider,
+    });
+    await mgr.spawn({ sessionId: "sess-stuck", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    expect(await mgr.deliver("sess-stuck", "Under every workspace it's attached to")).toBe("delivered");
+    const ends = tmux.calls.filter((c) => c[0] === "send-keys" && c[3] === "End").length;
+    const enters = tmux.calls.filter((c) => c[0] === "send-keys" && c[3] === "Enter").length;
+    expect(enters).toBe(2);          // first submit didn't land → deliver retried
+    expect(ends).toBe(2);            // each Enter is preceded by an End (cursor → end)
+    // Every Enter must be immediately preceded by an End in the call stream.
+    const keys = tmux.calls.filter((c) => c[0] === "send-keys").map((c) => c[3]);
+    for (let i = 0; i < keys.length; i++) {
+      if (keys[i] === "Enter") expect(keys[i - 1]).toBe("End");
+    }
+  });
 });
 
 describe("WorkerSessionManager.reattach", () => {

@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync, copyFileSync, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { join, dirname } from "node:path";
 import {
-  defaultTmuxRunner, newSession, capturePane, sendEnter, paste, pipePaneToFile, killSession, hasSession,
+  defaultTmuxRunner, newSession, capturePane, sendEnter, sendKey, paste, pipePaneToFile, killSession, hasSession,
   type TmuxRunner,
 } from "../../tmux/runner.js";
 
@@ -222,12 +222,29 @@ export class WorkerSessionManager {
     const buf = `orca-worker-${sessionId}`;
     await paste(this.tmux, s.name, buf, text);
     await sleep(this.deps.postPasteMs ?? 250);
+    // Claude only submits on Enter when the cursor is at the END of the composer.
+    // A fresh bracketed paste normally leaves it there, but a re-rendered/reattached
+    // pane can park the cursor mid-text, and then Enter inserts a newline instead of
+    // submitting — the answer sits in the box and wedges the worker (a non-empty ❯ box
+    // never matches the empty-prompt idle check, so every later deliver() times out).
+    // Move to the end first; End is a no-op when already there.
+    await sendKey(this.tmux, s.name, "End");
     await sendEnter(this.tmux, s.name);
 
-    // Confirm submission: the input box should no longer hold the pasted placeholder.
-    await sleep(poll);
-    const after = await capturePane(this.tmux, s.name);
-    if (/\[Pasted text/i.test(after)) { await sendEnter(this.tmux, s.name); } // retry once
+    // Confirm submission: after Enter the composer should clear — the pane returns to
+    // an idle (empty) prompt or the agent starts working. If our text is still sitting
+    // in the box, the Enter didn't submit (cursor not at end, or a dropped keystroke).
+    // A short answer renders inline (not as a "[Pasted text]" placeholder), so the only
+    // reliable signal is the box clearing. Re-send End+Enter until it does.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await sleep(poll);
+      const after = await capturePane(this.tmux, s.name);
+      const cleared =
+        BUSY_DEFAULT.test(after) || PROMPT_IDLE.test(after) || CODEX_PROMPT_IDLE.test(after);
+      if (cleared) break;
+      await sendKey(this.tmux, s.name, "End");
+      await sendEnter(this.tmux, s.name);
+    }
     return "delivered";
   }
 
