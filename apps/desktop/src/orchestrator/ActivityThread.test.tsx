@@ -301,6 +301,8 @@ describe("ActivityCard", () => {
     const card = screen.getByTestId("step-result-card");
     expect(card).toHaveTextContent("Investigate");
     expect(card).not.toHaveTextContent("82%");
+    // The expander is now a bottom "Scores" toggle (was a top "Details" button).
+    expect(screen.getByTestId("step-result-expand")).toHaveTextContent("Scores");
     fireEvent.click(screen.getByTestId("step-result-expand"));
     expect(card).toHaveTextContent("82%");
     expect(card).toHaveTextContent("Instruction adherence");

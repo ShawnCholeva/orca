@@ -99,7 +99,6 @@ export function StepResultCard({ activity }: { activity: Activity }) {
     <div className="step-result-card" data-testid="step-result-card" data-status={r.stepStatus} data-eval={r.evaluationStatus}>
       <div className="step-result-head">
         <span className="step-result-name">{activity.stepName ?? "Step"}</span>
-        <button type="button" data-testid="step-result-expand" onClick={() => setOpen((o) => !o)}>{open ? "Hide" : "Details"}</button>
       </div>
       {frame ? (
         <ConfirmationFrame summary={frame} />
@@ -111,6 +110,38 @@ export function StepResultCard({ activity }: { activity: Activity }) {
           {r.primaryArtifact.description || "Artifact"}: {r.primaryArtifact.reference}
         </div>
       ) : null}
+      <div className="step-result-footer">
+        {frame ? (
+          <span className="step-result-confirmed" data-testid="step-result-confirmed">
+            ✓ You chose Continue
+          </span>
+        ) : (
+          <span />
+        )}
+        <button
+          type="button"
+          data-testid="step-result-expand"
+          className="step-confirm-scores-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <span>Scores</span>
+          <svg
+            className="step-confirm-scores-caret"
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+      </div>
       {open ? (
         <div className="step-result-details">
           <div className="step-result-state">
@@ -135,11 +166,6 @@ export function StepResultCard({ activity }: { activity: Activity }) {
             {r.performance.totalTurns !== undefined ? <div><dt>Total turns</dt><dd>{r.performance.totalTurns}</dd></div> : null}
             {r.performance.toolCalls !== undefined ? <div><dt>Tool calls</dt><dd>{r.performance.toolCalls}</dd></div> : null}
           </dl>
-        </div>
-      ) : null}
-      {frame ? (
-        <div className="step-result-confirmed" data-testid="step-result-confirmed">
-          ✓ You chose Continue
         </div>
       ) : null}
     </div>

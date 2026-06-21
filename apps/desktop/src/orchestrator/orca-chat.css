@@ -622,21 +622,18 @@
   color: #b91c1c;
 }
 
-.step-result-head button {
-  margin-left: auto;
-  font-size: 11px;
-  padding: 3px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--hairline);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-3);
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+.step-result-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
 }
 
-.step-result-head button:hover {
-  background: rgba(255, 255, 255, 0.07);
-  color: var(--text);
+/* The Scores toggle sits at the bottom-right of the footer (mirrors the live
+   confirmation card); pin it right even when the confirmed line is absent. */
+.step-result-footer .step-confirm-scores-toggle {
+  margin-left: auto;
 }
 
 .step-result-reason {
