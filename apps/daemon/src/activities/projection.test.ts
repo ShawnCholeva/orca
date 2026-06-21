@@ -336,4 +336,27 @@ describe("step_result confirmed-frame enrichment", () => {
     expect(a.confirmationSummary).toBeUndefined();
     expect(a.stepResult).toBeDefined();
   });
+
+  it("uses the latest step_output block after a revise-then-continue cycle", () => {
+    insertExpiredConfirmation();
+    // A newer step_output artifact (the re-synthesized block after a Revise) must
+    // win — the projection's ORDER BY created_at DESC selects the block tied to the
+    // Continue the user actually saw.
+    db.prepare(
+      `INSERT INTO workflow_artifacts (
+         id, goal_id, workflow_run_id, step_run_id, type, title, body, source, created_at
+       ) VALUES ('art2', 'g1', 'r1', 's1', 'step_output', 'Coordinate', ?, 'orchestrator', '2026-06-21T00:05:00.000Z')`
+    ).run(
+      JSON.stringify({
+        problem: "Revised problem statement.",
+        constraints: ["Revised constraint"],
+        _completion: { confidence: "high", assumptions: [], openQuestions: [], whyComplete: "x" },
+      })
+    );
+    const a = listActivitiesByGoal(db, "g1").find((x) => x.id === "a-res")!;
+    expect(a.confirmationSummary?.fields).toEqual([
+      { label: "Problem", value: "Revised problem statement." },
+      { label: "Constraints", value: ["Revised constraint"] },
+    ]);
+  });
 });
