@@ -55,7 +55,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [selectedOrchestratorGoalId, setSelectedOrchestratorGoalId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>("orchestrator");
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("workspaces");
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);

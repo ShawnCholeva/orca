@@ -82,7 +82,7 @@ describe("WorkspacesPage", () => {
 
     render(<WorkspacesPage onCreateGoal={vi.fn()} />);
 
-    expect(await screen.findByRole("heading", { name: "Create your first workspace" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Create your first workspace." })).toBeInTheDocument();
   });
 
   it("empty state: clicking 'Add a folder' opens the create modal", async () => {
@@ -90,7 +90,7 @@ describe("WorkspacesPage", () => {
 
     render(<WorkspacesPage onCreateGoal={vi.fn()} />);
 
-    await screen.findByRole("heading", { name: "Create your first workspace" });
+    await screen.findByRole("heading", { name: "Create your first workspace." });
     fireEvent.click(screen.getByRole("button", { name: /Add a folder/i }));
 
     expect(screen.getByText("Choose a folder")).toBeInTheDocument();

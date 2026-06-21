@@ -19,6 +19,10 @@ vi.mock("./workflows/WorkflowsPage", () => ({
   WorkflowsPage: () => <div data-testid="workflows-stub">WorkflowsPage</div>,
 }));
 
+vi.mock("./workspaces/WorkspacesPage", () => ({
+  WorkspacesPage: () => <div data-testid="workspaces-stub">WorkspacesPage</div>,
+}));
+
 const fetchHealthMock = vi.fn();
 const listAgentsMock = vi.fn();
 const listGoalsMock = vi.fn();
@@ -109,6 +113,8 @@ describe("App tab visibility with zero goals", () => {
 
   it("shows the create-goal empty state in the Orchestrator pane", async () => {
     await renderApp();
+
+    fireEvent.click(screen.getByRole("tab", { name: /Orchestrator/ }));
 
     expect(
       screen.getByRole("button", { name: /create your first goal/i }),

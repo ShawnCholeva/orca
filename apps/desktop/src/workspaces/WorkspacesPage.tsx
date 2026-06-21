@@ -7,6 +7,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Icon } from "./icons";
 import { Btn, Pill, Tip, Field, inputStyle } from "./primitives";
 import { GOAL_STATE_META, GOAL_STATE_ORDER, slugify } from "./data";
+import "../empty-state/empty-state.css";
 import {
   listWorkspaces,
   getWorkspace,
@@ -76,40 +77,11 @@ export function WorkspacesPage({ onCreateGoal, onOpenGoal }: WorkspacesPageProps
   }, [selId]);
 
   if (!workspaces.length && !creating) {
-    return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <div style={{ maxWidth: 420, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center" }}>
-          <div
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 15,
-              marginBottom: 20,
-              background: "var(--accent-soft)",
-              border: "1px solid var(--accent-line)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--accent)",
-            }}
-          >
-            <Icon.workspace size={26} />
-          </div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: -0.4 }}>Create your first workspace</h1>
-          <p style={{ margin: "10px 0 22px", fontSize: 13.5, lineHeight: 1.6, color: "var(--text-2)" }}>
-            A workspace points Orca at a single repository folder. Add one to organize your goals and start coordinating
-            agents against that codebase.
-          </p>
-          <Btn kind="primary" size="md" icon={<Icon.folder />} onClick={() => setCreating(true)}>
-            Add a folder
-          </Btn>
-        </div>
-      </div>
-    );
+    return <EmptyWorkspacesView onCreate={() => setCreating(true)} />;
   }
 
   return (
-    <div style={{ display: "flex", height: "100%", minHeight: 0, position: "relative" }}>
+    <div style={{ display: "flex", width: "100%", height: "100%", minHeight: 0, position: "relative" }}>
       {/* ── Workspace list ── */}
       <div
         style={{
@@ -188,6 +160,93 @@ export function WorkspacesPage({ onCreateGoal, onOpenGoal }: WorkspacesPageProps
           }}
         />
       )}
+    </div>
+  );
+}
+
+const WORKSPACE_HINTS = [
+  {
+    title: "Point at a repo",
+    body: "A workspace maps to one repository folder on your machine.",
+  },
+  {
+    title: "Group your goals",
+    body: "Every goal you create is scoped to its workspace.",
+  },
+  {
+    title: "Local-first",
+    body: "Orca reads the folder directly — nothing leaves your machine.",
+  },
+];
+
+function EmptyWorkspacesView({ onCreate }: { onCreate: () => void }) {
+  return (
+    <div className="empty-goals">
+      <div className="empty-goals-wash" aria-hidden="true" />
+      <div className="empty-goals-inner">
+        <EmptyWorkspacesMark />
+        <h1 className="empty-goals-title">Create your first workspace.</h1>
+        <p className="empty-goals-body">
+          A workspace points Orca at a single repository folder. Add one to
+          organize your goals and start coordinating agents against that
+          codebase.
+        </p>
+        <div className="empty-goals-actions">
+          <button type="button" className="empty-goals-btn" onClick={onCreate}>
+            <Icon.folder size={14} />
+            Add a folder
+          </button>
+        </div>
+
+        <div className="empty-goals-hints">
+          {WORKSPACE_HINTS.map((hint, i) => (
+            <div key={hint.title} className="empty-goals-hint">
+              <div className="empty-goals-hint-num">
+                {String(i + 1).padStart(2, "0")}
+              </div>
+              <div className="empty-goals-hint-title">{hint.title}</div>
+              <div className="empty-goals-hint-body">{hint.body}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyWorkspacesMark() {
+  return (
+    <div className="empty-goals-mark">
+      <svg viewBox="0 0 116 116" width="116" height="116" aria-hidden="true">
+        <defs>
+          <linearGradient id="empty-workspaces-ring" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="var(--accent)" />
+            <stop offset="100%" stopColor="var(--accent-2, #8B5CF6)" />
+          </linearGradient>
+        </defs>
+        <circle
+          cx="58"
+          cy="58"
+          r="52"
+          fill="none"
+          stroke="var(--hairline)"
+          strokeWidth="1"
+          strokeDasharray="3 5"
+        />
+        <circle
+          cx="58"
+          cy="58"
+          r="38"
+          fill="none"
+          stroke="url(#empty-workspaces-ring)"
+          strokeWidth="1.5"
+          strokeDasharray="120 360"
+        />
+        <circle cx="58" cy="58" r="22" fill="var(--accent-soft)" />
+      </svg>
+      <div className="empty-goals-mark-center" style={{ color: "var(--accent)" }}>
+        <Icon.workspace size={22} />
+      </div>
     </div>
   );
 }
@@ -671,31 +730,6 @@ function WorkspaceCreateModal({
 
         {preview && (
           <>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <span
-                className="mono"
-                style={{ fontSize: 11, padding: "3px 8px", borderRadius: 5, background: "var(--panel-2)", border: "1px solid var(--hairline)", color: "var(--text-2)" }}
-              >
-                {preview.workspaceType}
-              </span>
-              {preview.branch && (
-                <span
-                  className="mono"
-                  style={{ fontSize: 11, padding: "3px 8px", borderRadius: 5, background: "var(--panel-2)", border: "1px solid var(--hairline)", color: "var(--text-2)" }}
-                >
-                  {preview.branch}
-                </span>
-              )}
-              {preview.isDirty === true && (
-                <span
-                  className="mono"
-                  style={{ fontSize: 11, padding: "3px 8px", borderRadius: 5, background: "var(--warn-soft)", border: "1px solid transparent", color: "var(--warn)" }}
-                >
-                  dirty
-                </span>
-              )}
-            </div>
-
             <Field label="Workspace name">
               <input
                 autoFocus
