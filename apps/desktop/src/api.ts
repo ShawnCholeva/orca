@@ -1766,6 +1766,15 @@ export async function confirmStep(runId: string): Promise<void> {
   );
 }
 
+export async function interruptStep(runId: string): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  await requestVoid(
+    `${baseUrl}/v1/workflows/runs/${runId}/interrupt`,
+    { method: "POST", headers: authHeaders(token) },
+    "Failed to interrupt step",
+  );
+}
+
 export async function decideGate(
   runId: string,
   outcome: "approved" | "rejected",

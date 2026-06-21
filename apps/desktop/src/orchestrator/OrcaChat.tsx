@@ -22,6 +22,7 @@ import {
   getWorkflowRun,
   getWorkflowStepRun,
   getWorkflowTemplate,
+  interruptStep,
   listActivities,
   listOrchestratorMessages,
   listRecommendations,
@@ -620,6 +621,28 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     };
   }, [awaitingApproval, selectedGoalId, runId, refreshNonce]);
 
+  // Escape interrupts the running step agent so the user can course-correct:
+  // it aborts the agent's current turn and focuses the composer. The correction
+  // typed there is forwarded to the now-idle agent through the normal send path.
+  // Active only while a step agent is genuinely running.
+  useEffect(() => {
+    if (!activeStepRunning || !runId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      void (async () => {
+        try {
+          await interruptStep(runId);
+          composerFormRef.current?.querySelector("textarea")?.focus();
+        } catch (err) {
+          setActionError(toErrorMessage(err, "Failed to interrupt the agent."));
+        }
+      })();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [activeStepRunning, runId]);
+
   const startingLabel = workflowState.stepRun
     ? `Step ${workflowState.stepRun.ordinal + 1}${
         workflowState.stepName ? ` · ${workflowState.stepName}` : ""
@@ -720,6 +743,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
       setDecidingGate(false);
     }
   }
+
 
   async function handleRevise(runId: string) {
     try {

@@ -389,7 +389,9 @@ export class OrchestratorService {
       composeRecoveryScoringPrompt,
     // Drives a provider's terminal "wait for limit reset" interaction against the
     // worker's live tmux session (preserved-session Wait/Retry).
-    private readonly workerWait?: (sessionId: string, adapterId: string) => Promise<void>
+    private readonly workerWait?: (sessionId: string, adapterId: string) => Promise<void>,
+    // Interrupts the worker's current turn (sends Escape) so the user can course-correct.
+    private readonly workerInterrupt?: (sessionId: string) => Promise<void>
   ) {
     this.sessionOutputStore = sessionOutputStore ?? NULL_OUTPUT_STORE;
   }
@@ -3509,6 +3511,29 @@ export class OrchestratorService {
       }
     );
     this.publish(options.bus, stagedEvents);
+  }
+
+  /**
+   * Interrupt the agent currently running the run's active step (sends Escape to
+   * its worker) so the user can course-correct. The session stays alive and idle;
+   * the user's next message is forwarded to it as the correction. Returns true
+   * when a live session was interrupted.
+   */
+  async interruptStepAgent(
+    db: Database.Database,
+    _now: () => string,
+    runId: string
+  ): Promise<boolean> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run || !run.currentStepRunId) return false;
+    const sessionRow = db
+      .prepare(
+        "SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('running','starting') ORDER BY started_at DESC LIMIT 1"
+      )
+      .get(run.currentStepRunId) as { id: string } | undefined;
+    if (!sessionRow?.id) return false;
+    await this.workerInterrupt?.(sessionRow.id);
+    return true;
   }
 
   /**

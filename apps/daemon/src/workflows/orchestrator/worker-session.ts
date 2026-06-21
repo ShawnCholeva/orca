@@ -287,6 +287,22 @@ export class WorkerSessionManager {
   }
 
   /**
+   * Interrupt the agent's current turn by sending Escape to its live tmux
+   * session (the same key Claude Code surfaces as "esc to interrupt"). The
+   * session is left alive and idle so a follow-up correction can be delivered.
+   * Tolerates a session missing from the in-memory map (derives the tmux name)
+   * so a live agent can be interrupted after a daemon restart.
+   */
+  async interrupt(sessionId: string): Promise<void> {
+    const name = this.sessions.get(sessionId)?.name ?? this.name(sessionId);
+    if (!(await hasSession(this.tmux, name))) return;
+    // Two Escapes: the first stops generation, the second clears any leftover
+    // composer/menu state so the worker returns to an idle prompt.
+    await sendKey(this.tmux, name, "Escape");
+    await sendKey(this.tmux, name, "Escape");
+  }
+
+  /**
    * Drives the provider's terminal "wait for the limit to reset" interaction
    * against the worker's live tmux session (e.g. Claude Code's Enter selection).
    * Tolerates a session missing from the in-memory map by deriving the

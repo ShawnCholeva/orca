@@ -3003,3 +3003,56 @@ async function service_expectThrow(service: OrchestratorService, db: Database.Da
     service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex")
   ).rejects.toThrow();
 }
+
+describe("OrchestratorService.interruptStepAgent", () => {
+  function makeInterruptService(
+    workerInterrupt: (sessionId: string) => Promise<void>
+  ): OrchestratorService {
+    return new OrchestratorService(
+      fakeAgentSelector(),
+      fakeBrokerNoop(),
+      { async list() { return [agentOperatorDescriptor()]; } },
+      makeLauncher(),
+      undefined, // sessionOutputStore
+      fakeStepDispatch(),
+      undefined, // orchestratorMediator
+      undefined, // workerSpawn
+      undefined, // workerDeliver
+      undefined, // workerTerminate
+      undefined, // shadowAsk
+      undefined, // recoveryPromptComposer
+      undefined, // workerWait
+      workerInterrupt
+    );
+  }
+
+  it("interrupts the live worker session for the run's active step", async () => {
+    const { db } = setupHarness();
+    setupAgentStepRun(db);
+    seedWorkspace(db);
+    seedAgentSession(db); // running 'sess-judge' linked to 'step-1'
+    const interrupted: string[] = [];
+    const service = makeInterruptService(async (sessionId) => {
+      interrupted.push(sessionId);
+    });
+
+    const ok = await service.interruptStepAgent(db, () => NOW, "run-1");
+
+    expect(ok).toBe(true);
+    expect(interrupted).toEqual(["sess-judge"]);
+  });
+
+  it("returns false when the active step has no live session", async () => {
+    const { db } = setupHarness();
+    setupAgentStepRun(db); // no session seeded
+    const interrupted: string[] = [];
+    const service = makeInterruptService(async (sessionId) => {
+      interrupted.push(sessionId);
+    });
+
+    const ok = await service.interruptStepAgent(db, () => NOW, "run-1");
+
+    expect(ok).toBe(false);
+    expect(interrupted).toEqual([]);
+  });
+});

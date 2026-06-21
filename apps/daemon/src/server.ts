@@ -695,7 +695,9 @@ export function createServer(
     undefined,
     // workerWait: drives a provider's terminal "wait for limit reset" interaction
     // against the worker's live tmux session (preserved-session Wait/Retry).
-    (sessionId, adapterId) => workerSessions.waitForProviderReset(sessionId, adapterId)
+    (sessionId, adapterId) => workerSessions.waitForProviderReset(sessionId, adapterId),
+    // workerInterrupt: sends Escape to the worker so the user can course-correct.
+    (sessionId) => workerSessions.interrupt(sessionId)
   );
   // Wire the late-binding ref so the onChunkAppended callback is live.
   _orchestratorServiceRef.current = orchestratorService;
@@ -1754,6 +1756,15 @@ export function createServer(
       { bus: eventBus, idFactory: daemonContext.idFactory }
     );
     return reply.code(202).send({ ok: true });
+  });
+
+  server.post<{ Params: { id: string } }>("/v1/workflows/runs/:id/interrupt", async (request, reply) => {
+    const interrupted = await orchestratorService.interruptStepAgent(
+      getDatabase(),
+      daemonContext.now,
+      request.params.id
+    );
+    return reply.code(202).send({ ok: true, interrupted });
   });
 
   server.post<{ Params: { id: string }; Body: { outcome?: string; reason?: string } }>(
