@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ActivityCard,
   LiveActivity,
+  StepResultCard,
   isTimelineCard,
   pickLiveActivity,
 } from "./ActivityThread";
@@ -315,5 +316,65 @@ describe("ActivityCard", () => {
     // stepResultActivity() has no resultSummary — outcome.reason is "Output complete."
     render(<ActivityCard activity={stepResultActivity()} />);
     expect(screen.getByTestId("step-result-summary")).toHaveTextContent("Output complete.");
+  });
+});
+
+describe("StepResultCard confirmed frame", () => {
+  const base: Activity = {
+    id: "sr", goalId: "g1", workflowRunId: "r1", stepRunId: "s1",
+    agentSessionId: null, turnOrdinal: 1, status: "completed",
+    currentText: "", finalSummary: null, sourceKind: "step_result",
+    workCategory: null, confidence: null, stepName: "Coordinate",
+    stepResult: {
+      stepId: "s1", stepStatus: "completed", evaluationStatus: "scored",
+      successScore: 0.82,
+      quality: {
+        outputCompleteness: 0.8, outputCorrectness: 0.85,
+        instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2,
+      },
+      performance: { durationSeconds: 96, retries: 0 },
+      outcome: {
+        reason: "Output complete.", producedArtifactsCount: 1,
+        blockingIssuesCount: 0, warningsCount: 0, handoffReady: true,
+      },
+      resultSummary: "Replaces folder-browse with a registered-workspace picker.",
+    },
+    createdAt: "2026-06-21T00:00:00.000Z",
+    updatedAt: "2026-06-21T00:00:00.000Z",
+    completedAt: "2026-06-21T00:00:00.000Z",
+    steps: [],
+  };
+
+  it("renders the frame, scores toggle, and 'You chose Continue', no buttons", () => {
+    const activity: Activity = {
+      ...base,
+      confirmationSummary: {
+        lead: "Replaces folder-browse with a registered-workspace picker.",
+        fields: [
+          { label: "Problem", value: "Users browse the filesystem." },
+          { label: "Constraints", value: ["No inline folder browsing", "Multiple workspaces"] },
+        ],
+        scoring: null,
+      },
+    };
+    render(<StepResultCard activity={activity} />);
+    expect(screen.getByText("Problem")).toBeInTheDocument();
+    expect(screen.getByText("Users browse the filesystem.")).toBeInTheDocument();
+    expect(screen.getByText("No inline folder browsing")).toBeInTheDocument();
+    expect(screen.getByTestId("step-result-confirmed")).toHaveTextContent("You chose Continue");
+    // Scores still live behind the Details toggle.
+    expect(screen.getByTestId("step-result-expand")).toBeInTheDocument();
+    // No interactive Continue/Revise actions persist.
+    expect(screen.queryByTestId("step-confirm-continue")).toBeNull();
+    expect(screen.queryByTestId("step-confirm-revise")).toBeNull();
+  });
+
+  it("renders the compact card when there is no confirmationSummary", () => {
+    render(<StepResultCard activity={base} />);
+    expect(screen.getByTestId("step-result-summary")).toHaveTextContent(
+      "Replaces folder-browse with a registered-workspace picker."
+    );
+    expect(screen.queryByText("Problem")).toBeNull();
+    expect(screen.queryByTestId("step-result-confirmed")).toBeNull();
   });
 });

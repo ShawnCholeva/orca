@@ -53,6 +53,36 @@ export function pickLiveActivity(activities: Activity[]): Activity | null {
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
+// The synthesized frame body (lead + fields) shared by the live confirmation
+// card and the persisted step-result card.
+export function ConfirmationFrame({
+  summary,
+}: {
+  summary: NonNullable<Activity["confirmationSummary"]>;
+}) {
+  return (
+    <>
+      <div className="step-confirm-lead">{summary.lead}</div>
+      {summary.fields.length > 0 ? (
+        <dl className="step-confirm-fields">
+          {summary.fields.map((f, i) => (
+            <div key={i} className="step-confirm-field">
+              <dt>{f.label}</dt>
+              <dd>
+                {Array.isArray(f.value) ? (
+                  <ul>{f.value.map((v, j) => <li key={j}>{v}</li>)}</ul>
+                ) : (
+                  f.value
+                )}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </>
+  );
+}
+
 export function StepResultCard({ activity }: { activity: Activity }) {
   const [open, setOpen] = useState(false);
   const r = activity.stepResult;
@@ -62,13 +92,18 @@ export function StepResultCard({ activity }: { activity: Activity }) {
   // lead with a short label and keep the raw reason in the drawer.
   const headline = r.resultSummary ?? (scored ? r.outcome.reason : "Evaluation failed");
   const reasonInDrawer = r.resultSummary != null || !scored;
+  const frame = activity.confirmationSummary;
   return (
     <div className="step-result-card" data-testid="step-result-card" data-status={r.stepStatus} data-eval={r.evaluationStatus}>
       <div className="step-result-head">
         <span className="step-result-name">{activity.stepName ?? "Step"}</span>
         <button type="button" data-testid="step-result-expand" onClick={() => setOpen((o) => !o)}>{open ? "Hide" : "Details"}</button>
       </div>
-      <div className="step-result-summary" data-testid="step-result-summary">{headline}</div>
+      {frame ? (
+        <ConfirmationFrame summary={frame} />
+      ) : (
+        <div className="step-result-summary" data-testid="step-result-summary">{headline}</div>
+      )}
       {r.primaryArtifact ? (
         <div className="step-result-artifact" data-testid="step-result-artifact" title={r.primaryArtifact.reference}>
           {r.primaryArtifact.description || "Artifact"}: {r.primaryArtifact.reference}
@@ -98,6 +133,11 @@ export function StepResultCard({ activity }: { activity: Activity }) {
             {r.performance.totalTurns !== undefined ? <div><dt>Total turns</dt><dd>{r.performance.totalTurns}</dd></div> : null}
             {r.performance.toolCalls !== undefined ? <div><dt>Tool calls</dt><dd>{r.performance.toolCalls}</dd></div> : null}
           </dl>
+        </div>
+      ) : null}
+      {frame ? (
+        <div className="step-result-confirmed" data-testid="step-result-confirmed">
+          ✓ You chose Continue
         </div>
       ) : null}
     </div>
@@ -152,23 +192,7 @@ export function LiveActivity({
       {isConfirmation ? (
         <div className="step-confirm" data-testid="step-confirm">
           {activity.confirmationSummary ? (
-            <>
-              <div className="step-confirm-lead">{activity.confirmationSummary.lead}</div>
-              {activity.confirmationSummary.fields.length > 0 ? (
-                <dl className="step-confirm-fields">
-                  {activity.confirmationSummary.fields.map((f, i) => (
-                    <div key={i} className="step-confirm-field">
-                      <dt>{f.label}</dt>
-                      <dd>
-                        {Array.isArray(f.value) ? (
-                          <ul>{f.value.map((v, j) => <li key={j}>{v}</li>)}</ul>
-                        ) : f.value}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              ) : null}
-            </>
+            <ConfirmationFrame summary={activity.confirmationSummary} />
           ) : null}
           <div className="step-confirm-actions">
             <button
