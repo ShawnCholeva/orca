@@ -31,6 +31,20 @@ describe("AgentActivity", () => {
     expect(screen.getByText("Found the double-charge bug.")).toBeTruthy();
   });
 
+  it("renders a cut-short step as interrupted (paused), not a check, when the activity finished while still active", () => {
+    render(<AgentActivity activity={baseActivity({
+      status: "completed", finalSummary: "Interrupted — send a correction to resume.",
+      steps: [
+        { id: "1", text: "Read verifier.ts", category: "reading", status: "done", createdAt: "t" },
+        { id: "2", text: "Editing file", category: "editing", status: "active", createdAt: "t" },
+      ],
+    })} />);
+    const interrupted = screen.getByTestId("agent-activity-interrupted");
+    expect(interrupted.textContent).toContain("Editing file");
+    // The cut step must NOT pulse and must NOT be rendered as a running/active row.
+    expect(screen.queryByTestId("agent-activity-active")).toBeNull();
+  });
+
   it("no longer renders diffs inside the activity card (they are external cards now)", () => {
     render(<AgentActivity activity={baseActivity({
       steps: [{ id: "1", text: "Edited verifier.ts", category: "editing", status: "done", createdAt: "t",

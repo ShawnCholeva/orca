@@ -1762,7 +1762,8 @@ export function createServer(
     const interrupted = await orchestratorService.interruptStepAgent(
       getDatabase(),
       daemonContext.now,
-      request.params.id
+      request.params.id,
+      { bus: eventBus }
     );
     return reply.code(202).send({ ok: true, interrupted });
   });

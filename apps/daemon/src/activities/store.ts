@@ -574,6 +574,44 @@ export function completeLive(
   return activity;
 }
 
+/**
+ * Finalize the live turn because the user interrupted it (ESC). Mirrors
+ * completeLive but deliberately leaves the in-progress step marked 'active': the
+ * step did NOT finish, so the timeline can render it with an interrupted glyph
+ * instead of a success check (a finished activity carrying an active step is the
+ * interrupted signal). The activity itself flips to 'completed' so it stops
+ * pulsing and shows the summary.
+ */
+export function interruptLive(
+  ctx: ActivityStoreCtx,
+  input: { stepRunId: string; finalSummary: string }
+): ActivityT | undefined {
+  let event: DomainEvent | undefined;
+  const activity = ctx.db.transaction(() => {
+    const live = getLiveForStepRun(ctx.db, input.stepRunId);
+    if (live === undefined) return undefined;
+    if (live.sourceKind === "step_confirmation_pending") return undefined;
+
+    const now = currentTime(ctx);
+    ctx.db
+      .prepare(
+        `UPDATE activities
+         SET status = 'completed', final_summary = ?, source_kind = 'turn_completed',
+             pending_question = NULL, updated_at = ?, completed_at = ?
+         WHERE id = ?`
+      )
+      .run(input.finalSummary, now, now, live.id);
+
+    const interrupted = getActivityById(ctx.db, live.id);
+    if (interrupted === undefined) throw new Error(`Activity disappeared: ${live.id}`);
+    event = insertActivityChangedEvent(ctx.db, interrupted, now);
+    return interrupted;
+  })();
+
+  publishActivityChanged(ctx, event);
+  return activity;
+}
+
 export function expireLive(
   ctx: ActivityStoreCtx,
   input: { stepRunId: string }

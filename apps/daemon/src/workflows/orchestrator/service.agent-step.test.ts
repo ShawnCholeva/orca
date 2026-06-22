@@ -35,6 +35,7 @@ import { latestCommittedLedger } from "../ledger/projection.js";
 import type { ProviderRecoveryCheckpoint } from "@orca/contracts";
 import { listOrchestratorMessagesByGoal } from "../../orchestrator-chat/projection.js";
 import { listActivitiesByGoal } from "../../activities/projection.js";
+import { appendActivityStep, openOrUpdateLive } from "../../activities/store.js";
 import {
   OrchestratorProviderRecoveryInvalidTransitionError,
   OrchestratorProviderRecoveryNotFoundError,
@@ -3040,6 +3041,66 @@ describe("OrchestratorService.interruptStepAgent", () => {
 
     expect(ok).toBe(true);
     expect(interrupted).toEqual(["sess-judge"]);
+  });
+
+  it("finalizes the in-flight activity so the card stops pulsing and shows it was interrupted", async () => {
+    const { db, bus } = setupHarness();
+    setupAgentStepRun(db);
+    seedWorkspace(db);
+    seedAgentSession(db);
+    const events: Array<{ type: string; payload: unknown }> = [];
+    bus.subscribe((event) => events.push(event));
+    // A live turn mid-work: one active step pulsing in the timeline card.
+    openOrUpdateLive(
+      { db, bus },
+      {
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepRunId: "step-1",
+        agentSessionId: "sess-judge",
+        sourceKind: "tool_use",
+        currentText: "Working…",
+        workCategory: null,
+      }
+    );
+    appendActivityStep(
+      { db, bus },
+      {
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepRunId: "step-1",
+        agentSessionId: "sess-judge",
+        text: "Editing file",
+        category: null,
+        diff: null,
+      }
+    );
+    events.length = 0;
+
+    const service = makeInterruptService(async () => {});
+    const ok = await service.interruptStepAgent(db, () => NOW, "run-1", { bus });
+
+    expect(ok).toBe(true);
+    const activity = db
+      .prepare(
+        "SELECT status, final_summary FROM activities WHERE step_run_id = 'step-1' AND source_kind != 'step_result' ORDER BY turn_ordinal DESC LIMIT 1"
+      )
+      .get() as { status: string; final_summary: string | null };
+    expect(activity.status).toBe("completed");
+    expect(activity.final_summary).toBeTruthy();
+    // The interrupted step stays 'active' inside the finished activity — the
+    // signal the timeline uses to render a paused glyph instead of a check.
+    const activeSteps = db
+      .prepare("SELECT COUNT(*) AS c FROM activity_steps WHERE status = 'active'")
+      .get() as { c: number };
+    expect(activeSteps.c).toBe(1);
+    expect(
+      events.some(
+        (e) =>
+          e.type === "activity.changed" &&
+          (e.payload as { stepRunId?: string }).stepRunId === "step-1"
+      )
+    ).toBe(true);
   });
 
   it("returns false when the active step has no live session", async () => {

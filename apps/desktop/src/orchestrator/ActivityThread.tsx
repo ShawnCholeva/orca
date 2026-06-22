@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Activity } from "@orca/contracts";
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 
 type ProviderRecoveryProps = {
   runId: string;
@@ -85,6 +85,101 @@ export function ConfirmationFrame({
   );
 }
 
+type ScoreMetrics = {
+  successScore: number;
+  quality: {
+    outputCompleteness: number;
+    outputCorrectness: number;
+    instructionAdherence: number;
+    downstreamReadiness: number;
+    riskLevel: number;
+  };
+  handoffReady: boolean;
+};
+
+function ScoresCaret() {
+  return (
+    <svg
+      className="step-confirm-scores-caret"
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
+// Shared card for both the live confirmation checkpoint (Continue / Revise) and
+// the persisted result after a selection (✓ You chose Continue). Identical frame
+// + scores layout; only the `action` row differs between the two callers.
+export function ConfirmationCard({
+  summary,
+  scores,
+  action,
+  scoresTestid,
+  fallbackText,
+  testid = "activity-bubble",
+}: {
+  summary: NonNullable<Activity["confirmationSummary"]> | null;
+  scores: ScoreMetrics | null;
+  action: ReactNode;
+  scoresTestid: string;
+  fallbackText?: string;
+  testid?: string;
+}) {
+  const [scoresOpen, setScoresOpen] = useState(false);
+  const metricsRef = useRef<HTMLDListElement>(null);
+  // When the scores expand, bring the newly-revealed metrics into view so they
+  // aren't left below the fold under the action row.
+  useEffect(() => {
+    if (scoresOpen) metricsRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [scoresOpen]);
+  return (
+    <div className="activity-bubble" data-testid={testid}>
+      {summary ? (
+        <ConfirmationFrame summary={summary} />
+      ) : fallbackText ? (
+        <div className="activity-bubble-text">{fallbackText}</div>
+      ) : null}
+      <div className="step-confirm" data-testid="step-confirm">
+        <div className="step-confirm-actions">
+          {action}
+          {scores ? (
+            <button
+              type="button"
+              data-testid={scoresTestid}
+              className="step-confirm-scores-toggle"
+              aria-expanded={scoresOpen}
+              onClick={() => setScoresOpen((o) => !o)}
+            >
+              <span>Scores</span>
+              <ScoresCaret />
+            </button>
+          ) : null}
+        </div>
+        {scoresOpen && scores ? (
+          <dl ref={metricsRef} className="step-result-metrics step-confirm-metrics">
+            <div><dt>Success</dt><dd>{pct(scores.successScore)}</dd></div>
+            <div><dt>Output completeness</dt><dd>{pct(scores.quality.outputCompleteness)}</dd></div>
+            <div><dt>Output correctness</dt><dd>{pct(scores.quality.outputCorrectness)}</dd></div>
+            <div><dt>Instruction adherence</dt><dd>{pct(scores.quality.instructionAdherence)}</dd></div>
+            <div><dt>Downstream readiness</dt><dd>{pct(scores.quality.downstreamReadiness)}</dd></div>
+            <div><dt>Risk level (higher = riskier)</dt><dd>{pct(scores.quality.riskLevel)}</dd></div>
+            <div><dt>Handoff</dt><dd>{scores.handoffReady ? "Ready" : "Not ready"}</dd></div>
+          </dl>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function StepResultCard({ activity }: { activity: Activity }) {
   const [open, setOpen] = useState(false);
   const r = activity.stepResult;
@@ -95,29 +190,40 @@ export function StepResultCard({ activity }: { activity: Activity }) {
   const headline = r.resultSummary ?? (scored ? r.outcome.reason : "Evaluation failed");
   const reasonInDrawer = r.resultSummary != null || !scored;
   const frame = activity.confirmationSummary;
+  // A step confirmed via the supervised checkpoint persists with its frame. Render
+  // it identically to the live confirmation card (same ConfirmationCard), only
+  // swapping the Continue / Revise actions for "✓ You chose Continue".
+  if (frame) {
+    return (
+      <ConfirmationCard
+        summary={frame}
+        scores={
+          scored
+            ? { successScore: r.successScore, quality: r.quality, handoffReady: r.outcome.handoffReady }
+            : null
+        }
+        scoresTestid="step-result-expand"
+        action={
+          <span className="step-result-confirmed" data-testid="step-result-confirmed">
+            ✓ You chose Continue
+          </span>
+        }
+      />
+    );
+  }
   return (
     <div className="step-result-card" data-testid="step-result-card" data-status={r.stepStatus} data-eval={r.evaluationStatus}>
       <div className="step-result-head">
         <span className="step-result-name">{activity.stepName ?? "Step"}</span>
       </div>
-      {frame ? (
-        <ConfirmationFrame summary={frame} />
-      ) : (
-        <div className="step-result-summary" data-testid="step-result-summary">{headline}</div>
-      )}
+      <div className="step-result-summary" data-testid="step-result-summary">{headline}</div>
       {r.primaryArtifact ? (
         <div className="step-result-artifact" data-testid="step-result-artifact" title={r.primaryArtifact.reference}>
           {r.primaryArtifact.description || "Artifact"}: {r.primaryArtifact.reference}
         </div>
       ) : null}
       <div className="step-result-footer">
-        {frame ? (
-          <span className="step-result-confirmed" data-testid="step-result-confirmed">
-            ✓ You chose Continue
-          </span>
-        ) : (
-          <span />
-        )}
+        <span />
         <button
           type="button"
           data-testid="step-result-expand"
@@ -208,14 +314,6 @@ export function LiveActivity({
   onGateDecide?: (runId: string, outcome: "approved" | "rejected") => void;
   gateDeciding?: boolean;
 }) {
-  const [scoresOpen, setScoresOpen] = useState(false);
-  const confirmationScoring = activity.confirmationSummary?.scoring ?? null;
-  const metricsRef = useRef<HTMLDListElement>(null);
-  // When the scores expand, bring the newly-revealed metrics into view so they
-  // aren't left below the fold under the button row.
-  useEffect(() => {
-    if (scoresOpen) metricsRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [scoresOpen]);
   const isConfirmation =
     activity.status === "paused_for_input" &&
     activity.sourceKind === "step_confirmation_pending";
@@ -225,11 +323,48 @@ export function LiveActivity({
     activity.status === "paused_for_input" &&
     activity.sourceKind === "provider_recovery_pending" &&
     activity.providerRecovery != null;
+
+  // The live checkpoint shares its card with the persisted result (ConfirmationCard);
+  // here the action row offers Continue / Revise.
+  if (isConfirmation) {
+    const scoring = activity.confirmationSummary?.scoring ?? null;
+    return (
+      <ConfirmationCard
+        summary={activity.confirmationSummary ?? null}
+        scores={
+          scoring
+            ? { successScore: scoring.successScore, quality: scoring.quality, handoffReady: scoring.handoffReady }
+            : null
+        }
+        scoresTestid="confirm-scores-toggle"
+        fallbackText={activity.currentText}
+        action={
+          <>
+            <button
+              type="button"
+              data-testid="step-confirm-continue"
+              className="step-confirm-continue-btn"
+              onClick={() => onContinue?.(activity.workflowRunId)}
+            >
+              Continue
+            </button>
+            <button
+              type="button"
+              data-testid="step-confirm-revise"
+              className="step-confirm-revise-btn"
+              onClick={() => onRevise?.(activity.workflowRunId)}
+            >
+              Revise
+            </button>
+          </>
+        }
+      />
+    );
+  }
+
   return (
     <div className="activity-bubble" data-testid="activity-bubble" data-status={activity.status}>
-      {!(isConfirmation && activity.confirmationSummary) ? (
-        <div className="activity-bubble-text">{activity.currentText}</div>
-      ) : null}
+      <div className="activity-bubble-text">{activity.currentText}</div>
       {isGateDecision ? (
         <div className="step-confirm" data-testid="gate-decision">
           <div className="step-confirm-actions">
@@ -252,67 +387,6 @@ export function LiveActivity({
               Reject
             </button>
           </div>
-        </div>
-      ) : null}
-      {isConfirmation ? (
-        <div className="step-confirm" data-testid="step-confirm">
-          {activity.confirmationSummary ? (
-            <ConfirmationFrame summary={activity.confirmationSummary} />
-          ) : null}
-          <div className="step-confirm-actions">
-            <button
-              type="button"
-              data-testid="step-confirm-continue"
-              className="step-confirm-continue-btn"
-              onClick={() => onContinue?.(activity.workflowRunId)}
-            >
-              Continue
-            </button>
-            <button
-              type="button"
-              data-testid="step-confirm-revise"
-              className="step-confirm-revise-btn"
-              onClick={() => onRevise?.(activity.workflowRunId)}
-            >
-              Revise
-            </button>
-            {confirmationScoring ? (
-              <button
-                type="button"
-                data-testid="confirm-scores-toggle"
-                className="step-confirm-scores-toggle"
-                aria-expanded={scoresOpen}
-                onClick={() => setScoresOpen((o) => !o)}
-              >
-                <span>Scores</span>
-                <svg
-                  className="step-confirm-scores-caret"
-                  width="11"
-                  height="11"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M6 9l6 6 6-6" />
-                </svg>
-              </button>
-            ) : null}
-          </div>
-          {scoresOpen && confirmationScoring ? (
-            <dl ref={metricsRef} className="step-result-metrics step-confirm-metrics">
-              <div><dt>Success</dt><dd>{Math.round(confirmationScoring.successScore * 100)}%</dd></div>
-              <div><dt>Output completeness</dt><dd>{Math.round(confirmationScoring.quality.outputCompleteness * 100)}%</dd></div>
-              <div><dt>Output correctness</dt><dd>{Math.round(confirmationScoring.quality.outputCorrectness * 100)}%</dd></div>
-              <div><dt>Instruction adherence</dt><dd>{Math.round(confirmationScoring.quality.instructionAdherence * 100)}%</dd></div>
-              <div><dt>Downstream readiness</dt><dd>{Math.round(confirmationScoring.quality.downstreamReadiness * 100)}%</dd></div>
-              <div><dt>Risk level (higher = riskier)</dt><dd>{Math.round(confirmationScoring.quality.riskLevel * 100)}%</dd></div>
-              <div><dt>Handoff</dt><dd>{confirmationScoring.handoffReady ? "Ready" : "Not ready"}</dd></div>
-            </dl>
-          ) : null}
         </div>
       ) : null}
       {isProviderRecovery && ProviderRecovery && activity.providerRecovery ? (

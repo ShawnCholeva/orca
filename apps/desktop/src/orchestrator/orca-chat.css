@@ -436,23 +436,19 @@
   min-width: 0;
 }
 
+/* Match the gap the other orca cards put between the "orca" label and their body
+   (question card uses margin-top: 8px); the step-result and live-activity cards
+   have no own top margin, so add it when they sit under the label. */
+.msg--orca .msg-body > .step-result-card,
+.msg--orca .msg-body > .activity-bubble {
+  margin-top: 8px;
+}
+
 .msg-text {
   margin: 0;
   font-size: 13px;
   line-height: 1.6;
   color: var(--text);
-}
-
-.orca-mark {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2, #8b5cf6));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 4px 14px rgba(91, 140, 255, 0.30);
-  flex-shrink: 0;
 }
 
 .thinking-bubble {
@@ -562,8 +558,8 @@
   max-width: 720px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 13px;
+  gap: 8px;
+  padding: 12px 14px;
   border-radius: 10px;
   border: 1px solid var(--hairline);
   background: var(--panel-2);
@@ -586,7 +582,13 @@
 
 .step-result-name {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.step-result-summary {
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--text);
 }
 
@@ -848,7 +850,7 @@
   top: 0;
   bottom: 0;
   width: 3px;
-  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+  background: var(--accent);
 }
 .orca-chat-question-header {
   display: flex;
@@ -1133,14 +1135,33 @@
     var(--panel-2);
 }
 
-.agent-activity { border: 1px solid var(--border, rgba(255,255,255,0.10)); border-radius: 10px; padding: 10px 12px; margin: 6px 0; }
-.agent-activity-head { font-weight: 600; margin-bottom: 6px; }
-.agent-activity-steps { display: flex; flex-direction: column; gap: 4px; }
-.agent-activity-step { display: flex; align-items: flex-start; gap: 8px; }
-.agent-activity-step-text.is-done { opacity: 0.6; }
-.agent-activity-check { color: #3fb950; flex: 0 0 auto; margin-top: 2px; }
-.agent-activity-pulse { margin-top: 6px; }
-.agent-activity-summary { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); }
+.agent-activity {
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 6px 0;
+  background: var(--panel-2);
+}
+.agent-activity-head {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+.agent-activity-steps { display: flex; flex-direction: column; gap: 6px; }
+.agent-activity-step { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--text); line-height: 1.5; }
+.agent-activity-step-text.is-done { opacity: 0.9; }
+/* Check and Pulse share a fixed-width centered slot so the step text aligns
+   between done rows (check) and the active row (dots). */
+.agent-activity-check { color: #3fb950; flex: 0 0 14px; display: inline-flex; justify-content: center; margin-top: 3px; }
+/* An interrupted (cut-short) step: paused glyph in a muted amber so it reads as
+   "stopped, not finished" rather than the green success check. */
+.agent-activity-paused { color: #d29922; flex: 0 0 14px; display: inline-flex; justify-content: center; margin-top: 3px; }
+.agent-activity-pulse { flex: 0 0 14px; justify-content: center; gap: 2px; margin-top: 8px; }
+.agent-activity-pulse span { width: 3px; height: 3px; }
+.agent-activity-summary { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hairline); font-size: 13px; color: var(--text-2); line-height: 1.5; }
 .diff-add { color: #3fb950; }
 .diff-del { color: #f85149; }
 .agent-activity-diff-body { margin: 4px 0 0; overflow-x: auto; font-family: var(--mono, monospace); font-size: 12px; }

@@ -7,6 +7,11 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
+// OrcaMark reads the theme; tests don't mount a ThemeProvider, so stub it.
+vi.mock("../theme/ThemeProvider", () => ({
+  useTheme: () => ({ theme: { mode: "dark" } }),
+}));
+
 const confirmStepMock = vi.fn();
 const createOrchestratorMessageMock = vi.fn();
 const getGoalDetailMock = vi.fn();

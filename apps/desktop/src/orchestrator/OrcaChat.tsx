@@ -46,6 +46,8 @@ import {
   isTimelineCard,
   pickLiveActivity,
 } from "./ActivityThread";
+import { OrcaMark as OrcaLogo } from "../onboarding/glyphs";
+import { useTheme } from "../theme/ThemeProvider";
 import { AgentActivity, CodeChangeCard } from "./AgentActivity";
 import { PermissionApprovalCard } from "./PermissionApprovalCard";
 import { ProviderRecoveryCard } from "./ProviderRecoveryCard";
@@ -957,9 +959,21 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
               ) : entry.kind === "diff" ? (
                 <CodeChangeCard key={entry.key} diff={entry.diff} caption={entry.caption} />
               ) : entry.activity.sourceKind === "step_result" ? (
-                <ActivityCard key={entry.key} activity={entry.activity} />
+                <div key={entry.key} className="msg msg--orca">
+                  <OrcaMark />
+                  <div className="msg-body">
+                    <div className="mono msg-meta">orca</div>
+                    <ActivityCard activity={entry.activity} />
+                  </div>
+                </div>
               ) : (
-                <AgentActivity key={entry.key} activity={entry.activity} />
+                <div key={entry.key} className="msg msg--orca">
+                  <OrcaMark />
+                  <div className="msg-body">
+                    <div className="mono msg-meta">orca</div>
+                    <AgentActivity activity={entry.activity} />
+                  </div>
+                </div>
               )
             )}
 
@@ -978,20 +992,26 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
             {liveActivity &&
               !(liveActivity.sourceKind === "step_confirmation_pending" &&
                 pendingRevisionRunId === liveActivity.workflowRunId) && (
-              <LiveActivity
-                activity={liveActivity}
-                renderProviderRecovery={({ runId, recovery }) => (
-                  <ProviderRecoveryCard
-                    runId={runId}
-                    recovery={recovery}
-                    onChanged={() => setRefreshNonce((current) => current + 1)}
+              <div className="msg msg--orca">
+                <OrcaMark />
+                <div className="msg-body">
+                  <div className="mono msg-meta">orca</div>
+                  <LiveActivity
+                    activity={liveActivity}
+                    renderProviderRecovery={({ runId, recovery }) => (
+                      <ProviderRecoveryCard
+                        runId={runId}
+                        recovery={recovery}
+                        onChanged={() => setRefreshNonce((current) => current + 1)}
+                      />
+                    )}
+                    onContinue={handleContinue}
+                    onRevise={handleRevise}
+                    onGateDecide={(_runId, outcome) => void handleGateDecision(outcome)}
+                    gateDeciding={decidingGate}
                   />
-                )}
-                onContinue={handleContinue}
-                onRevise={handleRevise}
-                onGateDecide={(_runId, outcome) => void handleGateDecision(outcome)}
-                gateDeciding={decidingGate}
-              />
+                </div>
+              </div>
             )}
 
             {answerPendingSince != null && (
@@ -1293,7 +1313,7 @@ function WorkerQuestionForm({
             <>
               <label className="orca-chat-option-row">
                 <input
-                  type="radio"
+                  type={q.multiSelect ? "checkbox" : "radio"}
                   name={`${pending.questionId}-${qi}`}
                   aria-label="Something else"
                   checked={freeTextSelected}
@@ -1424,15 +1444,8 @@ function ThinkingRow({ label }: { label: string }) {
 }
 
 function OrcaMark() {
-  return (
-    <div className="orca-mark" aria-hidden>
-      <svg width="14" height="14" viewBox="0 0 14 14">
-        <circle cx="7" cy="7" r="1.6" fill="#fff" />
-        <circle cx="7" cy="7" r="3.5" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="1" />
-        <circle cx="7" cy="7" r="5.5" fill="none" stroke="rgba(255,255,255,0.30)" strokeWidth="1" />
-      </svg>
-    </div>
-  );
+  const { theme } = useTheme();
+  return <OrcaLogo size={28} mode={theme.mode} />;
 }
 
 export function formatElapsed(ms: number): string {

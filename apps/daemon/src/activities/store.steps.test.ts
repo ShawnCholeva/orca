@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { EventBus } from "../events.js";
-import { appendActivityStep, completeLive, expireLive, getLiveForStepRun } from "./store.js";
+import { appendActivityStep, completeLive, expireLive, getLiveForStepRun, interruptLive } from "./store.js";
 
 function ctx() {
   const db = new Database(":memory:");
@@ -51,6 +51,18 @@ describe("activity steps", () => {
     expect(row.final_summary).toBe("Found the bug.");
     const stepStatus = c.db.prepare("SELECT status FROM activity_steps").get() as any;
     expect(stepStatus.status).toBe("done");
+  });
+
+  it("interruptLive completes the activity but leaves the cut step active", () => {
+    appendActivityStep(c, { ...base, text: "Read verifier.ts", category: "reading", diff: null });
+    appendActivityStep(c, { ...base, text: "Editing file", category: "editing", diff: null });
+    interruptLive(c, { stepRunId: "s1", finalSummary: "Interrupted — send a correction to resume." });
+    const row = c.db.prepare("SELECT status, final_summary FROM activities WHERE step_run_id='s1'").get() as any;
+    expect(row.status).toBe("completed");
+    expect(row.final_summary).toBe("Interrupted — send a correction to resume.");
+    // First step done, the in-progress step stays active (the interrupted signal).
+    const statuses = c.db.prepare("SELECT status FROM activity_steps ORDER BY ordinal").all() as any[];
+    expect(statuses.map((s) => s.status)).toEqual(["done", "active"]);
   });
 
   it("expireLive marks the active step done", () => {

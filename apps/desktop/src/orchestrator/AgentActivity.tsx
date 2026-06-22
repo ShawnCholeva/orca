@@ -2,20 +2,25 @@ import type { Activity, ActivityDiff, ActivityStep } from "@orca/contracts";
 
 export function AgentActivity({ activity }: { activity: Activity }) {
   const completed = activity.status === "completed";
+  // A finished activity (completed/expired) that still carries an active step was
+  // cut short — the user interrupted it. Render that step as paused, not running.
+  const finished = activity.status === "completed" || activity.status === "expired";
   // The active line is the last step still marked active; if there is none yet
   // (step opened, no tool call run), fall back to a single pulse.
   const activeStep = [...activity.steps].reverse().find((s) => s.status === "active") ?? null;
   const doneSteps = activity.steps.filter((s) => s.status === "done");
-  const showInitialPulse = !completed && activeStep === null && activity.steps.length === 0;
+  const showInitialPulse = !finished && activeStep === null && activity.steps.length === 0;
 
   return (
     <div className="agent-activity" data-testid="agent-activity" data-status={activity.status}>
       {activity.stepName ? <div className="agent-activity-head">{activity.stepName}</div> : null}
       <div className="agent-activity-steps">
         {doneSteps.map((step) => (
-          <StepRow key={step.id} step={step} done />
+          <StepRow key={step.id} step={step} state="done" />
         ))}
-        {activeStep ? <StepRow key={activeStep.id} step={activeStep} done={false} /> : null}
+        {activeStep ? (
+          <StepRow key={activeStep.id} step={activeStep} state={finished ? "interrupted" : "running"} />
+        ) : null}
         {showInitialPulse ? (
           <div className="agent-activity-step" data-testid="agent-activity-active">
             <Pulse />
@@ -30,14 +35,19 @@ export function AgentActivity({ activity }: { activity: Activity }) {
   );
 }
 
-function StepRow({ step, done }: { step: ActivityStep; done: boolean }) {
+type StepRowState = "done" | "running" | "interrupted";
+
+function StepRow({ step, state }: { step: ActivityStep; state: StepRowState }) {
+  const testid =
+    state === "done"
+      ? "agent-activity-done"
+      : state === "interrupted"
+        ? "agent-activity-interrupted"
+        : "agent-activity-active";
   return (
-    <div
-      className="agent-activity-step"
-      data-testid={done ? "agent-activity-done" : "agent-activity-active"}
-    >
-      {done ? <Check /> : <Pulse />}
-      <span className={`agent-activity-step-text${done ? " is-done" : ""}`}>{step.text}</span>
+    <div className="agent-activity-step" data-testid={testid}>
+      {state === "done" ? <Check /> : state === "interrupted" ? <PauseGlyph /> : <Pulse />}
+      <span className={`agent-activity-step-text${state === "done" ? " is-done" : ""}`}>{step.text}</span>
     </div>
   );
 }
@@ -77,6 +87,16 @@ function Check() {
     <svg className="agent-activity-check" width="13" height="13" viewBox="0 0 24 24"
       fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M20 6L9 17l-5-5" />
+    </svg>
+  );
+}
+
+function PauseGlyph() {
+  return (
+    <svg className="agent-activity-paused" width="13" height="13" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <line x1="9" y1="5" x2="9" y2="19" />
+      <line x1="15" y1="5" x2="15" y2="19" />
     </svg>
   );
 }

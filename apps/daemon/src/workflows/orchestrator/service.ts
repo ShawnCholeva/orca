@@ -93,7 +93,7 @@ import {
 } from "./recover-step-scoring.js";
 import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
 import { getSupervisionMode } from "../../settings/store.js";
-import { expireConfirmation, openOrUpdateLive, pauseForConfirmation, pauseForGateDecision, pauseForProviderRecovery, resolveGateDecisionActivity, resumeFromConfirmation, resumeFromProviderRecovery } from "../../activities/store.js";
+import { interruptLive, expireConfirmation, openOrUpdateLive, pauseForConfirmation, pauseForGateDecision, pauseForProviderRecovery, resolveGateDecisionActivity, resumeFromConfirmation, resumeFromProviderRecovery } from "../../activities/store.js";
 import { setSessionStatus } from "../../sessions/projection.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
 import { extractProposal, summarizeScoring } from "./scoring-summary.js";
@@ -3521,8 +3521,9 @@ export class OrchestratorService {
    */
   async interruptStepAgent(
     db: Database.Database,
-    _now: () => string,
-    runId: string
+    now: () => string,
+    runId: string,
+    options: { bus?: EventBus } = {}
   ): Promise<boolean> {
     const run = getWorkflowRunById(db, runId);
     if (!run || !run.currentStepRunId) return false;
@@ -3533,6 +3534,17 @@ export class OrchestratorService {
       .get(run.currentStepRunId) as { id: string } | undefined;
     if (!sessionRow?.id) return false;
     await this.workerInterrupt?.(sessionRow.id);
+    // The ESC keystroke leaves the agent idle but never fires a Stop hook, so the
+    // in-flight turn's activity would pulse "running" forever. Finalize it here so
+    // the timeline card settles and visibly reports the interruption; the user's
+    // correction opens a fresh turn on the same (still active) step.
+    interruptLive(
+      { db, bus: options.bus ?? new EventBus(), now },
+      {
+        stepRunId: run.currentStepRunId,
+        finalSummary: "Interrupted — send a correction to resume.",
+      }
+    );
     return true;
   }
 
