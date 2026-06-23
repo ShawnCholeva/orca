@@ -7,3 +7,5 @@ apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
 .orca-data/
 .superpowers/
+scripts/paper-rag/.venv/
+.orca/paper-index/
