@@ -6,6 +6,8 @@ import {
   OrchestrationRequest,
   ProviderRecoveryCheckpoint,
   ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES,
+  SplitEvaluationProposal,
+  SplitEvaluationRequest,
   StepResultScoringProposal,
   StepSkillProposal,
   validateStepOutput,
@@ -20,6 +22,7 @@ import {
   type WorkflowRun as WorkflowRunT,
   type WorkflowStepResult,
   type WorkflowGraph,
+  type WorkflowGraphNode,
   type WorkflowStepTemplate,
   type WorkflowTemplate as WorkflowTemplateT,
 } from "@orca/contracts";
@@ -41,9 +44,11 @@ import {
   insertStepForRouting,
   nextAttemptForStep,
 } from "../steps/usecases.js";
-import { effectiveGraph, resolveGateNext, resolveStepNext } from "../graph/graph-routing.js";
+import { effectiveGraph, resolveGateNext, resolveSplitterNext, resolveStepNext, type Destination } from "../graph/graph-routing.js";
 import { nextTraversalSeq, recordGateDecision } from "../gates/usecases.js";
 import { listGateDecisionsForRun } from "../gates/projection.js";
+import { recordSplitDecision } from "../splitters/usecases.js";
+import { listSplitDecisionsForRun } from "../splitters/projection.js";
 import { loadRunTemplate } from "../runs/run-template.js";
 import {
   decisionFingerprint,
@@ -3441,6 +3446,249 @@ export class OrchestratorService {
   }
 
   /**
+   * Builds the broker request payload for a splitter evaluation: the splitter's
+   * declared branches/instructions, the goal, the source step output, prior split
+   * decisions, and the committed ledger (capped to the contract's serialized-size
+   * limits). Mirrors the GateEvaluationRequest shape.
+   */
+  private buildSplitEvaluationRequest(
+    db: Database.Database,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      goal: GoalRow;
+      splitterNode: WorkflowGraphNode;
+    }
+  ): SplitEvaluationRequest {
+    const { run, stepRun, goal, splitterNode } = ctx;
+    const priorDecisions = listSplitDecisionsForRun(db, run.id)
+      .map((d) => ({
+        nodeId: d.nodeId,
+        selectedBranch: d.selectedBranch,
+        reason: d.reason.slice(0, 1024),
+      }))
+      .slice(-50);
+    const committedLedger = latestCommittedLedger(db, run.id)
+      .records.slice(-35)
+      .map((r) => ({
+        id: r.id.slice(0, 128),
+        recordType: r.recordType.slice(0, 64),
+        status: r.status.slice(0, 64),
+        note: r.note.slice(0, 500),
+      }));
+    return SplitEvaluationRequest.parse({
+      splitter: {
+        nodeId: splitterNode.id,
+        name: splitterNode.name,
+        instructions: splitterNode.instructions ?? "",
+        branches: splitterNode.branches ?? [],
+      },
+      goal: { id: goal.id, description: goal.description },
+      sourceStepOutput: this.readStepOutputAsRecord(db, run.id, stepRun.id),
+      priorDecisions,
+      committedLedger,
+    });
+  }
+
+  /**
+   * The run cursor is parked at a splitter (current_node_kind='splitter').
+   * Evaluates the branch via the orchestrator broker, validates the selected
+   * branch against the node's declared branches, records the split decision,
+   * then routes — parking for a Continue confirmation in supervised mode or
+   * routing inline in unsupervised mode.
+   */
+  private async evaluateAndParkSplitter(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+      splitterNodeId: string;
+    },
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    const { run, stepRun, stepTpl, template, goal, splitterNodeId } = ctx;
+    const graph = effectiveGraph(template.graph, template.steps);
+    const splitterNode = graph.nodes.find(
+      (n) => n.id === splitterNodeId && n.type === "splitter"
+    );
+    if (!splitterNode) {
+      this.blockRun(
+        db,
+        now,
+        { run, stepRun, stepTpl, goal },
+        `splitter node not found in graph: ${splitterNodeId}`,
+        options
+      );
+      return;
+    }
+    const branches = splitterNode.branches ?? [];
+
+    // The broker requires a concrete orchestrator provider + model; a goal with
+    // neither cannot be evaluated, so block with a clear reason rather than
+    // passing null into the OrchestrationRequest (which would throw on parse).
+    if (!goal.orchestrator_provider || !goal.orchestrator_model) {
+      this.blockRun(
+        db,
+        now,
+        { run, stepRun, stepTpl, goal },
+        `goal has no orchestrator provider/model for splitter ${splitterNode.id}`,
+        options
+      );
+      return;
+    }
+
+    const request = OrchestrationRequest.parse({
+      kind: "evaluate_split",
+      goalId: goal.id,
+      workflowRunId: run.id,
+      stepRunId: stepRun.id,
+      providerId: goal.orchestrator_provider,
+      modelId: goal.orchestrator_model,
+      payload: this.buildSplitEvaluationRequest(db, { run, stepRun, goal, splitterNode }),
+    });
+    const validate = (raw: unknown) => {
+      const parsed = SplitEvaluationProposal.safeParse(raw);
+      if (!parsed.success) {
+        return { accepted: false as const, failureMessage: "invalid split proposal" };
+      }
+      if (!branches.includes(parsed.data.selectedBranch)) {
+        return {
+          accepted: false as const,
+          failureMessage: `selectedBranch '${parsed.data.selectedBranch}' is not a declared branch`,
+        };
+      }
+      return { accepted: true as const, parsed: parsed.data };
+    };
+
+    let result = await this.broker.propose(request, { validateProposal: validate });
+    if (result.status !== "proposed") {
+      result = await this.broker.propose(request, { validateProposal: validate });
+    }
+    if (result.status !== "proposed") {
+      this.blockRun(
+        db,
+        now,
+        { run, stepRun, stepTpl, goal },
+        `splitter ${splitterNode.id} evaluation failed`,
+        options
+      );
+      return;
+    }
+    const proposal = result.parsed as SplitEvaluationProposal;
+
+    let dest: Destination;
+    try {
+      dest = resolveSplitterNext(graph, splitterNode.id, proposal.selectedBranch);
+    } catch (e) {
+      this.blockRun(
+        db,
+        now,
+        { run, stepRun, stepTpl, goal },
+        `splitter ${splitterNode.id} routing failed: ${(e as Error).message}`,
+        options
+      );
+      return;
+    }
+    if (dest.kind !== "step" && dest.kind !== "gate" && dest.kind !== "splitter") {
+      this.blockRun(
+        db,
+        now,
+        { run, stepRun, stepTpl, goal },
+        `splitter ${splitterNode.id} resolved to an unroutable destination`,
+        options
+      );
+      return;
+    }
+
+    const ledger = latestCommittedLedger(db, run.id);
+    const seq = nextTraversalSeq(db, run.id);
+    recordSplitDecision(db, now, {
+      goalId: goal.id,
+      workflowRunId: run.id,
+      nodeId: splitterNode.id,
+      traversalSeq: seq,
+      selectedBranch: proposal.selectedBranch,
+      reason: proposal.reason,
+      selectedEdgeTo: dest.nodeId,
+      inputsConsidered: proposal.inputsConsidered,
+      ledgerVersion: ledger.version,
+    });
+
+    if (getSupervisionMode(db) === "supervised") {
+      const stagedEvents: DomainEvent[] = [];
+      db.transaction(() => {
+        db.prepare("UPDATE workflow_runs SET pending_split_route_json = ? WHERE id = ?").run(
+          JSON.stringify({
+            splitterNodeId: splitterNode.id,
+            selectedBranch: proposal.selectedBranch,
+            destNodeId: dest.nodeId,
+            destKind: dest.kind,
+            sourceStepRunId: stepRun.id,
+          }),
+          run.id
+        );
+        recordDecisionInTx(
+          db,
+          now,
+          {
+            goalId: goal.id,
+            workflowRunId: run.id,
+            stepRunId: stepRun.id,
+            decisionType: "evaluate_split",
+            selectedAction: `splitter:${splitterNode.id}:${proposal.selectedBranch}`,
+            reason: proposal.reason,
+            influencedBy: [
+              { kind: "workflow_step", id: stepTpl.id, label: stepTpl.name, effect: "satisfied" },
+            ],
+            inputFingerprint: decisionFingerprint({
+              runId: run.id,
+              stepRunId: stepRun.id,
+              decisionType: "evaluate_split",
+              payload: `${splitterNode.id}:${proposal.selectedBranch}`,
+            }),
+          },
+          { idFactory: options.idFactory, stagedEvents }
+        );
+      })();
+      this.publish(options.bus, stagedEvents);
+      pauseForConfirmation(
+        { db, bus: options.bus ?? new EventBus() },
+        {
+          stepRunId: stepRun.id,
+          summary: `Routing to "${proposal.selectedBranch}": ${proposal.reason}`,
+        }
+      );
+      return;
+    }
+
+    // Unsupervised: route inline immediately.
+    await this.routeGateDestination(
+      db,
+      now,
+      { run, template, goal, sourceStepRunId: stepRun.id },
+      { kind: dest.kind, nodeId: dest.nodeId },
+      options
+    );
+    const after = getWorkflowRunById(db, run.id);
+    if (after && after.status === "active" && after.currentStepRunId) {
+      const nextStepRun = readStepRun(db, after.currentStepRunId);
+      const nextTpl = template.steps.find((s) => s.id === nextStepRun.step_template_id);
+      if (nextTpl) {
+        await this.spawnStepAgent(
+          db,
+          now,
+          { run: after, stepRun: nextStepRun, stepTpl: nextTpl, template, goal },
+          options
+        );
+      }
+    }
+  }
+
+  /**
    * Resolve a gate parked awaiting a human decision. Records the chosen outcome
    * as the gate decision (deduped by traversal_seq), then performs the route via
    * routeGateDestination. Idempotent: a missing or non-human stash is a no-op so
@@ -3558,11 +3806,36 @@ export class OrchestratorService {
       goal: GoalRow;
       sourceStepRunId: string;
     },
-    dest: { kind: "step" | "gate"; nodeId: string },
+    dest: { kind: "step" | "gate" | "splitter"; nodeId: string },
     options: RequestNextDecisionOptions
   ): Promise<void> {
     const { run, template, goal, sourceStepRunId } = ctx;
     const graph = effectiveGraph(template.graph, template.steps);
+
+    if (dest.kind === "splitter") {
+      db.prepare(
+        "UPDATE workflow_runs SET current_step_run_id = NULL, current_node_id = ?, current_node_kind = 'splitter' WHERE id = ?"
+      ).run(dest.nodeId, run.id);
+      const stepRun = readStepRun(db, sourceStepRunId);
+      const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+      if (!stepTpl) {
+        this.blockRun(
+          db,
+          now,
+          { run, stepRun, stepTpl: template.steps[0]!, goal },
+          `source step template not found: ${stepRun.step_template_id}`,
+          options
+        );
+        return;
+      }
+      await this.evaluateAndParkSplitter(
+        db,
+        now,
+        { run, stepRun, stepTpl, template, goal, splitterNodeId: dest.nodeId },
+        options
+      );
+      return;
+    }
 
     if (dest.kind === "gate") {
       db.prepare(
