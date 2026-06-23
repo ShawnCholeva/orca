@@ -79,3 +79,24 @@ export function GateGlyph({ size = 14 }: { size?: number }) {
     </svg>
   );
 }
+
+/** Fork shape used for splitter nodes. */
+export function SplitterGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6 3v6a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v6" />
+      <path d="M18 3v6" />
+      <path d="M6 21v-6" />
+    </svg>
+  );
+}
