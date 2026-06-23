@@ -298,6 +298,7 @@ export function recordExitCriteriaSatisfaction(
 export type AdvanceResult =
   | { kind: "step"; stepRun: WorkflowStepRunT }
   | { kind: "gate"; nodeId: string }
+  | { kind: "splitter"; nodeId: string }
   | { kind: "completed-terminal"; stepRun: WorkflowStepRunT };
 
 function graphStepTemplateId(graph: WorkflowGraph, nodeId: string): string {
@@ -375,6 +376,13 @@ export function advanceToNextStepOrGate(
         "UPDATE workflow_runs SET current_step_run_id = NULL, current_node_id = ?, current_node_kind = 'gate' WHERE id = ?"
       ).run(dest.nodeId, current.workflowRunId);
       return { kind: "gate", nodeId: dest.nodeId };
+    }
+
+    if (dest.kind === "splitter") {
+      db.prepare(
+        "UPDATE workflow_runs SET current_step_run_id = NULL, current_node_id = ?, current_node_kind = 'splitter' WHERE id = ?"
+      ).run(dest.nodeId, current.workflowRunId);
+      return { kind: "splitter", nodeId: dest.nodeId };
     }
 
     // dest.kind === "step"

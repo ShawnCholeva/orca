@@ -620,4 +620,50 @@ describe("graph-routed step advancement", () => {
     // Next ordinal=1 is 'research'
     expect(next!.stepTemplateId).toBe("research");
   });
+
+  // ---------------------------------------------------------------------------
+  // Splitter node routing
+  // ---------------------------------------------------------------------------
+
+  const SPLITTER_TEMPLATE_ID = "test/splitter-template";
+  const SPLITTER_STEPS = JSON.stringify([
+    { id: "triage", ordinal: 0, name: "Triage", instructions: "triage", outputSchema: STEP_OUTPUT, agentPreference: AGENT_PREF },
+    { id: "a", ordinal: 1, name: "A", instructions: "do a", outputSchema: STEP_OUTPUT, agentPreference: AGENT_PREF },
+    { id: "b", ordinal: 2, name: "B", instructions: "do b", outputSchema: STEP_OUTPUT, agentPreference: AGENT_PREF },
+  ]);
+  const SPLITTER_GRAPH_JSON = JSON.stringify({
+    nodes: [
+      { id: "triage", type: "step", name: "Triage", stepId: "triage" },
+      { id: "route", type: "splitter", name: "Route", instructions: "pick", branches: ["go_a", "go_b"] },
+      { id: "a", type: "step", name: "A", stepId: "a" },
+      { id: "b", type: "step", name: "B", stepId: "b", terminal: true },
+    ],
+    edges: [
+      { from: "triage", to: "route" },
+      { from: "route", to: "a", port: "go_a" },
+      { from: "route", to: "b", port: "go_b" },
+      { from: "a", to: "b" },
+    ],
+    positions: { triage: { x: 0, y: 0 }, route: { x: 0, y: 92 }, a: { x: -100, y: 184 }, b: { x: 100, y: 184 } },
+  });
+
+  function seedRunAtTriageStep(db: Database.Database, runCtx: WorkflowRunUsecaseCtx): ReturnType<typeof startWorkflowRun> {
+    seedGoal(db, "goal-splitter");
+    seedGraphTemplate(db, SPLITTER_TEMPLATE_ID, SPLITTER_STEPS, SPLITTER_GRAPH_JSON);
+    return startWorkflowRun(runCtx, { goalId: "goal-splitter", templateId: SPLITTER_TEMPLATE_ID });
+  }
+
+  it("advances a step into a splitter node, parking the cursor", () => {
+    const { db, runCtx } = setup();
+    // triage -> route (splitter with branches go_a, go_b) -> a, b -> terminal
+    const run = seedRunAtTriageStep(db, runCtx);
+    expect(run.currentStepRunId).toBeTruthy();
+    // Current step is 'triage'; graph routes triage -> route (splitter)
+    const result = advanceToNextStepOrGate(db, () => "2026-06-22T00:00:01.000Z", run.currentStepRunId!);
+    expect(result).toEqual({ kind: "splitter", nodeId: "route" });
+    const row = db
+      .prepare("SELECT current_node_id, current_node_kind, current_step_run_id FROM workflow_runs WHERE id = ?")
+      .get(run.id) as { current_node_id: string | null; current_node_kind: string | null; current_step_run_id: string | null };
+    expect(row).toMatchObject({ current_node_id: "route", current_node_kind: "splitter", current_step_run_id: null });
+  });
 });
