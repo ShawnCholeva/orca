@@ -47,7 +47,7 @@ export function rewriteQuery(prompt) {
       finish(code === 0 && text ? text : null);
     });
 
-    child.stdin.on("error", () => {});
+    child.stdin.on("error", () => {}); // required: swallow EPIPE if claude exits/killed before reading stdin
     child.stdin.write(INSTRUCTION + prompt);
     child.stdin.end();
   });

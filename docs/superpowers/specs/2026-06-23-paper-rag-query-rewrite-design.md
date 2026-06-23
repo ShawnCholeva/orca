@@ -98,7 +98,8 @@ never blocked and retrieval never breaks:
 - `ORCA_PAPER_DEBUG=1` prints a single diagnostic line to **stderr**:
   - `rewrote: "<query>"` when the rewrite succeeded,
   - `rewrite skipped (short prompt)` when gated out,
-  - `rewrite failed (<reason>), using raw prompt` on fallback.
+  - `rewrite failed, using raw prompt` on fallback (all failure modes collapse to
+    `null`, so no per-reason detail is available at the call site).
 - stderr keeps diagnostics out of the injected context (only stdout is added to
   the model's context for `UserPromptSubmit` hooks).
 

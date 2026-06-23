@@ -105,5 +105,13 @@ better approaches. A `SessionStart` hook keeps a warm query server running.
 - Rebuild the index: `pnpm run paper:index`
 - Manual query: `scripts/paper-rag/.venv/bin/python scripts/paper-rag/query.py "<question>"`
 
+For substantive prompts (≥7 words), the hook first reformulates the prompt into a
+sharper agent-harness search query via `claude -p --model haiku` before retrieving;
+short prompts and any rewrite failure fall back to the raw prompt, so retrieval
+never breaks. The nested `claude` runs with `ORCA_PAPER_REWRITING=1` set so it can't
+re-trigger this hook.
+
 Retrieval is silent when nothing is strongly relevant. Tune the distance cutoff
 with `ORCA_PAPER_MAX_DIST` (default 1.3); change the port with `ORCA_PAPER_PORT`.
+Set `ORCA_PAPER_DEBUG=1` to print rewrite diagnostics to stderr; `ORCA_PAPER_REWRITING`
+is an internal recursion sentinel and should not be set manually.
