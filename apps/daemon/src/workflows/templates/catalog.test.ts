@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { WorkflowGraph, WorkflowStepOutputSchema, type WorkflowStepTemplate } from "@orca/contracts";
 import { validateGraph, validateSchemaReferences } from "../graph/validate-graph.js";
+import { resolveSplitterNext, resolveStepNext } from "../graph/graph-routing.js";
 import { validateTemplatePipeline } from "./validate-pipeline.js";
 import { BUILTIN_TEMPLATE_CATALOG, BUILTIN_TEMPLATE_IDS, builtInCatalogSummaries } from "./catalog.js";
 
@@ -155,5 +156,27 @@ describe("Bug Triage & Fix systematic debugging (Four Phases)", () => {
     expect(field?.type).toBe("array");
     expect(step("done").instructions).toMatch(/self-review/i);
     expect(step("done").instructions).toMatch(/do not finish silently/i);
+  });
+});
+
+describe("Adaptive Delivery splitter wiring", () => {
+  const def = BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === "orca/adaptive-delivery")!;
+  const g = def.graph!;
+
+  it("routes each entry tier to the intended step", () => {
+    expect(resolveSplitterNext(g, "route", "clarify_first")).toEqual({ kind: "step", nodeId: "clarify" });
+    expect(resolveSplitterNext(g, "route", "ground_and_design")).toEqual({ kind: "step", nodeId: "research" });
+    expect(resolveSplitterNext(g, "route", "approach_only")).toEqual({ kind: "step", nodeId: "proposal" });
+  });
+
+  it("Triage flows into the splitter", () => {
+    expect(resolveStepNext(g, "triage")).toEqual({ kind: "splitter", nodeId: "route" });
+  });
+
+  it("the design gate approves to Execution and rejects back to Proposal", () => {
+    const approved = g.edges.find((e) => e.from === "designgate" && e.port === "approved");
+    const rejected = g.edges.find((e) => e.from === "designgate" && e.port === "rejected");
+    expect(approved?.to).toBe("execution");
+    expect(rejected?.to).toBe("proposal");
   });
 });
