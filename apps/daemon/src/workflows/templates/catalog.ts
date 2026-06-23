@@ -158,7 +158,7 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
   {
     id: "execution", ordinal: 6, name: "Execution",
     instructions:
-      "Implement the complete scoped feature from the Analysis plan. Follow existing codebase " +
+      "Implement the complete scoped feature following the chosen approach and its task_plan (from Proposal). Follow existing codebase " +
       "patterns and limit changes to the approved scope. On a repeated attempt, prioritize unresolved " +
       "Validation findings and preserve already-correct work. Add or update appropriate tests, then run " +
       "the relevant tests, type checks, lint checks, and build checks available in the repository. Ask " +
@@ -204,8 +204,8 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
   {
     id: "validate_build", ordinal: 7, name: "Validate Build",
     instructions:
-      "Independently validate the implementation against the goal, Analysis requirements, acceptance " +
-      "criteria, and Execution evidence. Do not modify implementation files. Inspect the actual diff and " +
+      "Independently validate the implementation against the goal, the chosen approach, and the success outcome and acceptance criteria established in Clarify and Verify, " +
+      "and against the Execution evidence. Do not modify implementation files. Inspect the actual diff and " +
       "relevant code, run appropriate tests and checks, and verify both expected behavior and meaningful " +
       "failure cases. Treat skipped checks as unresolved unless they are genuinely inapplicable and " +
       "justified. Report every actionable issue with severity, evidence, affected requirements, and the " +
