@@ -305,3 +305,29 @@ it("toggles a step terminal flag", () => {
   fireEvent.click(screen.getByLabelText(/terminal step/i));
   expect(onChange).toHaveBeenCalledWith({ terminal: true });
 });
+
+function makeSplitterDetail(onChange = vi.fn()): Extract<NodeDetail, { kind: "splitter" }> {
+  return { kind: "splitter", name: "Route", instructions: "Pick the entry tier", branches: ["go_a", "go_b"], onChange };
+}
+
+it("renames a branch label", () => {
+  const onChange = vi.fn();
+  render(<NodeDetailModal detail={makeSplitterDetail(onChange)} index={0} total={3} onPrev={null} onNext={vi.fn()} onClose={vi.fn()} onDelete={vi.fn()} />);
+  const input = screen.getByDisplayValue("go_a");
+  fireEvent.change(input, { target: { value: "clarify_first" } });
+  expect(onChange).toHaveBeenCalledWith({ branches: ["clarify_first", "go_b"] });
+});
+
+it("adds a branch", () => {
+  const onChange = vi.fn();
+  render(<NodeDetailModal detail={makeSplitterDetail(onChange)} index={0} total={3} onPrev={null} onNext={vi.fn()} onClose={vi.fn()} onDelete={vi.fn()} />);
+  fireEvent.click(screen.getByText(/add branch/i));
+  expect(onChange).toHaveBeenCalledWith({ branches: ["go_a", "go_b", expect.any(String)] });
+});
+
+it("edits splitter instructions", () => {
+  const onChange = vi.fn();
+  render(<NodeDetailModal detail={makeSplitterDetail(onChange)} index={0} total={3} onPrev={null} onNext={vi.fn()} onClose={vi.fn()} onDelete={vi.fn()} />);
+  fireEvent.change(screen.getByPlaceholderText(/route to/i), { target: { value: "If vague, go clarify" } });
+  expect(onChange).toHaveBeenCalledWith({ instructions: "If vague, go clarify" });
+});

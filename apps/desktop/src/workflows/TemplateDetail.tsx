@@ -337,6 +337,23 @@ export function TemplateDetail({
     const node = allNodes.find((n) => n.id === openNodeId);
     if (!node) return null;
 
+    if (node.type === "splitter") {
+      return {
+        kind: "splitter",
+        name: node.name,
+        instructions: node.instructions ?? "",
+        branches: node.branches ?? [],
+        onChange: (patch) => {
+          setDraft((current) => ({
+            ...current,
+            graph: {
+              ...current.graph,
+              nodes: current.graph.nodes.map((n) => (n.id === openNodeId ? { ...n, ...patch } : n)),
+            },
+          }));
+        },
+      };
+    }
     if (node.type === "step") {
       const step = draft.steps.find((s) => s.id === node.id);
       if (!step) return null;

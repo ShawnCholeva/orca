@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { WorkflowStepOutputSchema } from "@orca/contracts";
-import { GateGlyph, CloseIcon, ChevronLeftIcon, ChevronRightIcon } from "./icons";
+import { GateGlyph, SplitterGlyph, CloseIcon, ChevronLeftIcon, ChevronRightIcon } from "./icons";
 import { OutputSchemaEditor } from "./OutputSchemaEditor";
 
 export type NodeDetail =
@@ -22,6 +22,13 @@ export type NodeDetail =
       name: string;
       instructions: string;
       onChange: (patch: { name?: string; instructions?: string }) => void;
+    }
+  | {
+      kind: "splitter";
+      name: string;
+      instructions: string;
+      branches: string[];
+      onChange: (patch: { name?: string; instructions?: string; branches?: string[] }) => void;
     };
 
 export interface NodeDetailModalProps {
@@ -48,6 +55,7 @@ export function NodeDetailModal({
   onOutputSchemaValidityChange,
 }: NodeDetailModalProps) {
   const isGate = detail.kind === "gate";
+  const isSplitter = detail.kind === "splitter";
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -101,7 +109,7 @@ export function NodeDetailModal({
             style={{
               width: 30,
               height: 30,
-              borderRadius: isGate ? 15 : 7,
+              borderRadius: isGate || isSplitter ? 15 : 7,
               background: "var(--accent-soft)",
               color: "var(--accent)",
               border: "1px solid var(--accent-line)",
@@ -113,7 +121,7 @@ export function NodeDetailModal({
               fontWeight: 700,
             }}
           >
-            {isGate ? <GateGlyph size={14} /> : String(index + 1).padStart(2, "0")}
+            {isGate ? <GateGlyph size={14} /> : isSplitter ? <SplitterGlyph size={14} /> : String(index + 1).padStart(2, "0")}
           </div>
 
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -126,13 +134,13 @@ export function NodeDetailModal({
                 letterSpacing: 1.2,
               }}
             >
-              {isGate ? "Gate" : "Workflow step"} · {index + 1} of {total}
+              {isGate ? "Gate" : isSplitter ? "Splitter" : "Workflow step"} · {index + 1} of {total}
             </div>
             <input
               value={detail.name ?? ""}
               onChange={(e) => !readOnly && detail.onChange({ name: e.target.value })}
               readOnly={readOnly}
-              placeholder={isGate ? "Gate name" : "Step name"}
+              placeholder={isGate ? "Gate name" : isSplitter ? "Splitter name" : "Step name"}
               style={{
                 width: "100%",
                 background: "transparent",
@@ -179,6 +187,8 @@ export function NodeDetailModal({
         >
           {isGate ? (
             <GateBody detail={detail as Extract<NodeDetail, { kind: "gate" }>} readOnly={readOnly} />
+          ) : isSplitter ? (
+            <SplitterBody detail={detail as Extract<NodeDetail, { kind: "splitter" }>} readOnly={readOnly} />
           ) : (
             <StepBody
               detail={detail as Extract<NodeDetail, { kind: "step" }>}
@@ -257,6 +267,135 @@ function GateBody({ detail, readOnly }: { detail: Extract<NodeDetail, { kind: "g
       <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 8, lineHeight: 1.5 }}>
         The gate routes work through fixed <strong>approved</strong> or <strong>rejected</strong> ports.
         Provide routing criteria; the orchestrator records a decision with justification before advancing.
+      </div>
+    </div>
+  );
+}
+
+function SplitterBody({ detail, readOnly }: { detail: Extract<NodeDetail, { kind: "splitter" }>; readOnly?: boolean }) {
+  const branches = detail.branches ?? [];
+  const rename = (i: number, value: string) =>
+    detail.onChange({ branches: branches.map((b, j) => (j === i ? value : b)) });
+  const add = () => detail.onChange({ branches: [...branches, `Branch ${String.fromCharCode(65 + branches.length)}`] });
+  const remove = (i: number) => detail.onChange({ branches: branches.filter((_, j) => j !== i) });
+  return (
+    <div>
+      <div
+        className="mono"
+        style={{
+          fontSize: 10,
+          color: "var(--text-3)",
+          textTransform: "uppercase",
+          letterSpacing: 1.2,
+          marginBottom: 6,
+        }}
+      >
+        Instructions
+      </div>
+      <textarea
+        value={detail.instructions ?? ""}
+        onChange={(e) => !readOnly && detail.onChange({ instructions: e.target.value })}
+        readOnly={readOnly}
+        placeholder="Route to the branch that best fits the goal; e.g. if vague, go clarify."
+        rows={5}
+        style={{
+          width: "100%",
+          resize: "vertical",
+          minHeight: 96,
+          background: "var(--bg)",
+          color: "var(--text)",
+          border: "1px solid var(--hairline)",
+          borderRadius: 7,
+          padding: "10px 12px",
+          fontFamily: "JetBrains Mono, monospace",
+          fontSize: 12.5,
+          lineHeight: 1.5,
+          outline: "none",
+          boxSizing: "border-box",
+        }}
+      />
+      <div
+        className="mono"
+        style={{
+          fontSize: 10,
+          color: "var(--text-3)",
+          textTransform: "uppercase",
+          letterSpacing: 1.2,
+          marginTop: 16,
+          marginBottom: 6,
+        }}
+      >
+        Branches
+      </div>
+      {branches.map((b, i) => (
+        <div key={i} style={{ display: "flex", gap: 6, marginTop: 4 }}>
+          <input
+            value={b}
+            maxLength={60}
+            readOnly={readOnly}
+            onChange={(e) => !readOnly && rename(i, e.target.value)}
+            style={{
+              flex: 1,
+              background: "var(--bg)",
+              color: "var(--text)",
+              border: "1px solid var(--hairline)",
+              borderRadius: 7,
+              padding: "6px 10px",
+              fontFamily: "inherit",
+              fontSize: 13,
+              outline: "none",
+            }}
+          />
+          {!readOnly && branches.length > 2 && (
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              title="Remove branch"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 26,
+                height: 26,
+                borderRadius: 7,
+                background: "transparent",
+                border: "1px solid transparent",
+                color: "var(--text-2)",
+                cursor: "pointer",
+                fontSize: 14,
+              }}
+            >
+              ×
+            </button>
+          )}
+        </div>
+      ))}
+      {!readOnly && branches.length < 8 && (
+        <button
+          type="button"
+          onClick={add}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            height: 26,
+            padding: "0 10px",
+            borderRadius: 7,
+            background: "transparent",
+            border: "1px solid transparent",
+            color: "var(--text-2)",
+            fontFamily: "inherit",
+            fontSize: 12,
+            fontWeight: 500,
+            cursor: "pointer",
+            marginTop: 6,
+          }}
+        >
+          Add branch
+        </button>
+      )}
+      <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 8, lineHeight: 1.5 }}>
+        The splitter reasons over context and routes to exactly one branch. Wire one outgoing edge per branch on the canvas.
       </div>
     </div>
   );
