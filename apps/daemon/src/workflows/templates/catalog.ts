@@ -338,12 +338,16 @@ const ADAPTIVE_GRAPH: WorkflowGraph = {
     { from: "review", to: "done", port: "approved" },
     { from: "review", to: "execution", port: "rejected" },
   ],
+  // Spine runs straight down the right column (x: 300); the two early-design
+  // steps used only by some tiers (Clarify, Research) sit in a left lane (x: 0)
+  // so the approach_only branch drops straight down the spine and the backward
+  // "rejected" loops bow into the free right side.
   positions: {
-    triage: { x: 110, y: 20 }, route: { x: 110, y: 112 },
-    clarify: { x: 20, y: 204 }, research: { x: 110, y: 296 }, proposal: { x: 200, y: 388 },
-    critique: { x: 110, y: 480 }, verify: { x: 110, y: 572 }, designgate: { x: 110, y: 664 },
-    execution: { x: 110, y: 756 }, validate_build: { x: 110, y: 848 },
-    review: { x: 110, y: 940 }, done: { x: 110, y: 1032 },
+    triage: { x: 300, y: 20 }, route: { x: 300, y: 130 },
+    clarify: { x: 0, y: 250 }, research: { x: 0, y: 370 }, proposal: { x: 300, y: 490 },
+    critique: { x: 300, y: 600 }, verify: { x: 300, y: 710 }, designgate: { x: 300, y: 820 },
+    execution: { x: 300, y: 930 }, validate_build: { x: 300, y: 1040 },
+    review: { x: 300, y: 1150 }, done: { x: 300, y: 1260 },
   },
 };
 
@@ -697,7 +701,7 @@ export const BUILTIN_TEMPLATE_CATALOG: BuiltInTemplateDefinition[] = [
     id: "orca/adaptive-delivery", name: "Adaptive Delivery",
     description: "Triage routes the goal to the right entry depth — full clarify, ground-and-design, or straight to proposing — then runs design → build → release with backward routing for rework.",
     bestFor: "Most engineering goals: it adapts how much up-front design happens to how clear the goal already is.",
-    version: 1, category: CATEGORY, recommended: true,
+    version: 2, category: CATEGORY, recommended: true,
     steps: ADAPTIVE_STEPS, guardrails: [APPROVAL_MARK_DONE, validationRule(["execution"]), CONTEXT_RULE], graph: ADAPTIVE_GRAPH,
   },
   {
