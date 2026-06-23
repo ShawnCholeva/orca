@@ -5,6 +5,7 @@ import {
   findInitialStepNode,
   resolveGateNext,
   resolveStepNext,
+  resolveSplitterNext,
 } from "./graph-routing.js";
 
 const steps: WorkflowStepTemplate[] = [
@@ -28,6 +29,22 @@ const featureGraph: WorkflowGraph = {
     { from: "validation", to: "gate" },
     { from: "gate", to: "done", port: "approved" },
     { from: "gate", to: "execution", port: "rejected" },
+  ],
+  positions: {},
+};
+
+const splitterGraph: WorkflowGraph = {
+  nodes: [
+    { id: "triage", type: "step", name: "Triage", stepId: "triage" },
+    { id: "route", type: "splitter", name: "Route", instructions: "pick", branches: ["go_a", "go_b"] },
+    { id: "a", type: "step", name: "A", stepId: "a" },
+    { id: "b", type: "step", name: "B", stepId: "b", terminal: true },
+  ],
+  edges: [
+    { from: "triage", to: "route" },
+    { from: "route", to: "a", port: "go_a" },
+    { from: "route", to: "b", port: "go_b" },
+    { from: "a", to: "b" },
   ],
   positions: {},
 };
@@ -72,5 +89,22 @@ describe("effectiveGraph (legacy materialization)", () => {
     ]);
     const done = g.nodes.find((n) => n.id === "done");
     expect(done?.terminal).toBe(true);
+  });
+});
+
+describe("resolveSplitterNext", () => {
+  it("routes a selected branch to its destination step", () => {
+    expect(resolveSplitterNext(splitterGraph, "route", "go_a")).toEqual({ kind: "step", nodeId: "a" });
+  });
+
+  it("classifies a step that follows a step into a splitter destination", () => {
+    const dest = resolveStepNext(splitterGraph, "triage");
+    expect(dest).toEqual({ kind: "splitter", nodeId: "route" });
+  });
+
+  it("throws when the branch has no edge", () => {
+    expect(() => resolveSplitterNext(splitterGraph, "route", "go_c")).toThrow(
+      "splitter route must have exactly one 'go_c' edge, found 0"
+    );
   });
 });

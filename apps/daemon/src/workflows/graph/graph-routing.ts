@@ -7,6 +7,7 @@ import type {
 export type Destination =
   | { kind: "step"; nodeId: string }
   | { kind: "gate"; nodeId: string }
+  | { kind: "splitter"; nodeId: string }
   | { kind: "terminal" };
 
 export type GateOutcome = "approved" | "rejected";
@@ -60,7 +61,9 @@ export function findInitialStepNode(
 function classify(graph: WorkflowGraph, toId: string): Destination {
   const node = nodeById(graph, toId);
   if (!node) throw new GraphRoutingError(`edge points to unknown node: ${toId}`);
-  return node.type === "gate" ? { kind: "gate", nodeId: toId } : { kind: "step", nodeId: toId };
+  if (node.type === "gate") return { kind: "gate", nodeId: toId };
+  if (node.type === "splitter") return { kind: "splitter", nodeId: toId };
+  return { kind: "step", nodeId: toId };
 }
 
 /**
@@ -92,6 +95,21 @@ export function resolveGateNext(
   if (out.length !== 1) {
     throw new GraphRoutingError(
       `gate ${gateNodeId} must have exactly one '${outcome}' edge, found ${out.length}`
+    );
+  }
+  return classify(graph, out[0].to);
+}
+
+/** Resolves the destination for a splitter branch via the branch-labeled edge. */
+export function resolveSplitterNext(
+  graph: WorkflowGraph,
+  splitterNodeId: string,
+  branch: string
+): Destination {
+  const out = graph.edges.filter((e) => e.from === splitterNodeId && e.port === branch);
+  if (out.length !== 1) {
+    throw new GraphRoutingError(
+      `splitter ${splitterNodeId} must have exactly one '${branch}' edge, found ${out.length}`
     );
   }
   return classify(graph, out[0].to);
