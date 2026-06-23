@@ -3,5 +3,13 @@
     "type": "command",
     "command": "node /home/shawn/projects/orca/.claude/statusline.js",
     "refreshInterval": 60
+  },
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/scripts/paper-rag/ensure-server.mjs\"" } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/scripts/paper-rag/query-hook.mjs\"" } ] }
+    ]
   }
 }

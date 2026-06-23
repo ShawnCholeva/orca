@@ -92,3 +92,17 @@ Context injected into agent sessions is assembled selectively:
 - **Always included:** objective, current task, role, hard constraints, confirmed decisions, success criteria
 - **Conditionally included:** sibling session summaries, architecture notes, risks, open questions
 - **Always excluded:** stale logs, irrelevant discussion, raw transcripts
+
+## Paper Auto-RAG ("Code as Agent Harness")
+
+The paper `agent-harness.pdf` is indexed in a local ChromaDB store
+(`.orca/paper-index/`). A `UserPromptSubmit` hook auto-injects the most relevant
+passages into context each turn, so Claude can cross-reference the paper for
+better approaches. A `SessionStart` hook keeps a warm query server running.
+
+- First-time setup: `pnpm run paper:setup` then `pnpm run paper:index`
+- Rebuild the index: `pnpm run paper:index`
+- Manual query: `scripts/paper-rag/.venv/bin/python scripts/paper-rag/query.py "<question>"`
+
+Retrieval is silent when nothing is strongly relevant. Tune the distance cutoff
+with `ORCA_PAPER_MAX_DIST` (default 1.3); change the port with `ORCA_PAPER_PORT`.
