@@ -13,7 +13,7 @@
 - Python interpreter: system `python3` (3.9.6) via a `.venv`; no Docker, no `pipx`.
 - Embeddings: ChromaDB's local **default** embedding function only — **no API key, no network embedding calls**.
 - Chroma store path: `.orca/paper-index/` (repo root). Collection name: `code-as-agent-harness`.
-- PDF source path: `AUV9Vf-2605.18747v1.pdf` (repo root).
+- PDF source path: `agent-harness.pdf` (repo root).
 - Server bind: `127.0.0.1`, port from `ORCA_PAPER_PORT` (default `8787`).
 - The `UserPromptSubmit` hook MUST never block or fail the prompt: any error/timeout → exit 0, empty stdout.
 - All hooks/scripts use repo-relative or `$CLAUDE_PROJECT_DIR`-anchored paths — never absolute machine paths.
@@ -119,7 +119,7 @@ from pypdf import PdfReader
 import chromadb
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PDF = os.path.join(ROOT, "AUV9Vf-2605.18747v1.pdf")
+PDF = os.path.join(ROOT, "agent-harness.pdf")
 STORE = os.path.join(ROOT, ".orca", "paper-index")
 COLLECTION = "code-as-agent-harness"
 WINDOW = 600   # ~800 tokens
@@ -592,7 +592,7 @@ Append this section to `CLAUDE.md`:
 ```markdown
 ## Paper Auto-RAG ("Code as Agent Harness")
 
-The paper `AUV9Vf-2605.18747v1.pdf` is indexed in a local ChromaDB store
+The paper `agent-harness.pdf` is indexed in a local ChromaDB store
 (`.orca/paper-index/`). A `UserPromptSubmit` hook auto-injects the most relevant
 passages into context each turn, so Claude can cross-reference the paper for
 better approaches. A `SessionStart` hook keeps a warm query server running.
