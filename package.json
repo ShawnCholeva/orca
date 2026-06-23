@@ -10,7 +10,10 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "lint": "node -e \"process.exit(0)\"",
-    "knip": "knip"
+    "knip": "knip",
+    "paper:setup": "bash scripts/paper-rag/setup",
+    "paper:index": "scripts/paper-rag/.venv/bin/python scripts/paper-rag/ingest.py",
+    "paper:serve": "scripts/paper-rag/.venv/bin/python scripts/paper-rag/server.py"
   },
   "devDependencies": {
     "knip": "^6.15.0"

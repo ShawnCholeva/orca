@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+python3 -m venv "$DIR/.venv"
+"$DIR/.venv/bin/pip" install --upgrade pip
+"$DIR/.venv/bin/pip" install -r "$DIR/requirements.txt"
+"$DIR/.venv/bin/python" -c "import chromadb, pypdf; print('deps ok')"

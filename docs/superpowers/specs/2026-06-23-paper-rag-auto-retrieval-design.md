@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-23
 **Status:** Approved (pending spec review)
-**Topic:** Store `AUV9Vf-2605.18747v1.pdf` ("Code as Agent Harness") in a local ChromaDB vector store and automatically surface relevant passages into Claude Code's context while working on Orca.
+**Topic:** Store `agent-harness.pdf` ("Code as Agent Harness") in a local ChromaDB vector store and automatically surface relevant passages into Claude Code's context while working on Orca.
 
 ## Goal
 
@@ -29,7 +29,7 @@ to do things better.
 ## Architecture
 
 ```
-AUV9Vf-2605.18747v1.pdf ──ingest──► Chroma store (.orca/paper-index/)
+agent-harness.pdf ──ingest──► Chroma store (.orca/paper-index/)
                                             ▲ loaded once
               warm query server (127.0.0.1:8787) ◄── SessionStart hook starts it
                                             ▲
