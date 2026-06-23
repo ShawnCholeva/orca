@@ -43,6 +43,9 @@ export const WORKFLOW_GRAPH_MAX_NODES = 64;
 export const WORKFLOW_GRAPH_MAX_EDGES = 128;
 export const WORKFLOW_GATE_MAX_CONDITION_CHARS = 2048;
 export const WORKFLOW_GATE_MAX_INSTRUCTIONS_CHARS = 8192;
+export const WORKFLOW_SPLITTER_MIN_BRANCHES = 2;
+export const WORKFLOW_SPLITTER_MAX_BRANCHES = 8;
+export const WORKFLOW_SPLITTER_MAX_BRANCH_LABEL_CHARS = 60;
 export const ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES = 65536;
 export const ORCHESTRATION_DIAGNOSTICS_MAX_BYTES = 4096;
 export const ORCHESTRATION_HUMAN_REVIEW_MAX_SUMMARY_BYTES = 4096;
@@ -293,13 +296,19 @@ export type WorkflowScope = z.infer<typeof WorkflowScope>;
 export const WorkflowGraphNode = z
   .object({
     id: Id100,
-    type: z.enum(["step", "gate"]),
+    type: z.enum(["step", "gate", "splitter"]),
     name: z.string().max(100).default(""),
     stepId: Id100.optional(),
     // Legacy gate field, retained read-only so pre-migration graphs still parse.
     condition: z.string().max(WORKFLOW_GATE_MAX_CONDITION_CHARS).optional(),
-    // Gate nodes: the orchestrator routing instructions (replaces `condition`).
+    // Gate + splitter nodes: orchestrator routing instructions.
     instructions: z.string().max(WORKFLOW_GATE_MAX_INSTRUCTIONS_CHARS).optional(),
+    // Splitter nodes: author-named branch labels (one per outgoing port).
+    branches: z
+      .array(z.string().min(1).max(WORKFLOW_SPLITTER_MAX_BRANCH_LABEL_CHARS))
+      .min(WORKFLOW_SPLITTER_MIN_BRANCHES)
+      .max(WORKFLOW_SPLITTER_MAX_BRANCHES)
+      .optional(),
     // Step nodes: explicit terminal designation. Exactly one per valid template.
     terminal: z.boolean().optional(),
   })
@@ -315,7 +324,7 @@ export const WorkflowGraphEdge = z.preprocess(
     .object({
       from: Id100,
       to: Id100,
-      port: z.enum(["approved", "rejected"]).optional(),
+      port: z.string().min(1).max(WORKFLOW_SPLITTER_MAX_BRANCH_LABEL_CHARS).optional(),
     })
     .strict()
 );

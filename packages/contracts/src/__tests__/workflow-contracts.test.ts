@@ -1228,7 +1228,7 @@ describe("WorkflowScope + WorkflowGraph schemas", () => {
     expect(() => WorkflowGraphEdge.parse(["a"])).toThrow();
     expect(() => WorkflowGraphEdge.parse(["a", "b", "c"])).toThrow();
     expect(() => WorkflowGraphEdge.parse(["", "b"])).toThrow();
-    expect(() => WorkflowGraphEdge.parse({ from: "g", to: "x", port: "invalid" })).toThrow();
+    expect(() => WorkflowGraphEdge.parse({ from: "g", to: "x", port: "" })).toThrow();
   });
 
   it("CreateWorkflowTemplateRequest applies defaults when scope/scopeName/graph are omitted", () => {

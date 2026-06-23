@@ -17,8 +17,13 @@ describe("WorkflowGraphEdge", () => {
     expect(edge).toEqual({ from: "a", to: "b" });
   });
 
-  it("rejects an unknown port", () => {
-    expect(() => WorkflowGraphEdge.parse({ from: "g", to: "x", port: "maybe" })).toThrow();
+  it("accepts an arbitrary string port value", () => {
+    const edge = WorkflowGraphEdge.parse({ from: "g", to: "x", port: "maybe" });
+    expect(edge.port).toBe("maybe");
+  });
+
+  it("rejects a port exceeding max length", () => {
+    expect(() => WorkflowGraphEdge.parse({ from: "g", to: "x", port: "x".repeat(61) })).toThrow();
   });
 
   it("parses a whole graph whose edges mix legacy and labeled forms", () => {
@@ -64,6 +69,31 @@ describe("WorkflowGraphNode", () => {
       condition: "x === true",
     });
     expect(node.condition).toBe("x === true");
+  });
+});
+
+describe("WorkflowGraphNode splitter", () => {
+  it("parses a splitter node with branches", () => {
+    const node = WorkflowGraphNode.parse({
+      id: "route",
+      type: "splitter",
+      name: "Route",
+      instructions: "pick a tier",
+      branches: ["clarify_first", "ground_and_design", "approach_only"],
+    });
+    expect(node.type).toBe("splitter");
+    expect(node.branches).toEqual(["clarify_first", "ground_and_design", "approach_only"]);
+  });
+
+  it("rejects a splitter declaring fewer than 2 branches", () => {
+    expect(() =>
+      WorkflowGraphNode.parse({ id: "r", type: "splitter", name: "R", branches: ["only"] })
+    ).toThrow();
+  });
+
+  it("accepts an arbitrary string edge port (splitter branch label)", () => {
+    const edge = WorkflowGraphEdge.parse({ from: "route", to: "clarify", port: "clarify_first" });
+    expect(edge.port).toBe("clarify_first");
   });
 });
 
