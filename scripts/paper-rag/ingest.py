@@ -1,4 +1,5 @@
 import os
+import sys
 from pypdf import PdfReader
 import chromadb
 
@@ -35,6 +36,9 @@ def make_chunks(words, pages):
 
 
 def main():
+    if not os.path.exists(PDF):
+        print(f"error: source PDF not found at {PDF}\nPlace 'agent-harness.pdf' (arXiv 2605.18747) at the repo root, then re-run: pnpm run paper:index", file=sys.stderr)
+        sys.exit(1)
     words, pages = load_words_with_pages(PDF)
     chunks = make_chunks(words, pages)
     assert len(chunks) > 0, "no chunks produced from PDF"

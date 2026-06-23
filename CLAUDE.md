@@ -100,6 +100,7 @@ The paper `agent-harness.pdf` is indexed in a local ChromaDB store
 passages into context each turn, so Claude can cross-reference the paper for
 better approaches. A `SessionStart` hook keeps a warm query server running.
 
+- Prerequisite: place `agent-harness.pdf` (arXiv 2605.18747) at the repo root before indexing — it is not committed to the repo.
 - First-time setup: `pnpm run paper:setup` then `pnpm run paper:index`
 - Rebuild the index: `pnpm run paper:index`
 - Manual query: `scripts/paper-rag/.venv/bin/python scripts/paper-rag/query.py "<question>"`
