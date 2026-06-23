@@ -86,6 +86,12 @@ All Python lives under `scripts/paper-rag/`, isolated in a sibling `.venv`.
 - **Silent on:** server down, timeout, or no result above threshold → exits 0
   with no output. Never blocks or errors the user's prompt.
 
+### 5b. `scripts/paper-rag/query.py` (manual escape hatch + smoke test)
+- CLI: `python query.py "<question>"` → prints the top-k passages with page and
+  score. Shares the same search logic as the server (a thin local query against
+  the `PersistentClient`; does not require the server to be running).
+- Used by the manual escape hatch documented in CLAUDE.md and by the smoke test.
+
 ### 6. SessionStart hook (`scripts/paper-rag/ensure-server.mjs`)
 - Idempotently starts `server.py` in the background.
 - Skips if `.orca/paper-index/server.json` names a live PID answering `/health`.
@@ -105,8 +111,10 @@ how to rebuild the index (`pnpm run paper:index`); and a manual escape hatch
 
 ## Retrieval behavior (tunable defaults)
 
-- `k = 3`; distance threshold tuned so only **strong** matches inject (irrelevant
-  prompts inject nothing).
+- `k = 3`. Chroma returns an L2 **distance** per result (lower = closer). The hook
+  keeps only results whose distance is **below** a tuned cutoff, so only strong
+  matches inject and irrelevant prompts inject nothing. ("Similarity threshold"
+  elsewhere in this doc means this distance cutoff.)
 - Each excerpt ~150 words with a `(p.NN)` page citation.
 - Total injection capped at ~500 tokens/turn to avoid context bloat.
 
