@@ -35,8 +35,15 @@ exits**. The splitter supplies exactly that and nothing more.
 - A `splitter` node type with 2–8 author-named branches.
 - Branch selection by LLM reasoning over the source step's output + goal +
   ledger (a new `evaluate_split` decision), always automated.
-- Reuse of the gate's park → evaluate → route machinery; **no change to gate
-  behavior** or to existing built-in templates.
+- Reuse of the gate's **routing/park machinery** plus the broker-call pattern
+  used by skill steps; **no change to gate behavior** or to existing built-in
+  templates. (Correction discovered during Plan 2: gates have no LLM
+  auto-evaluation today — they only park for a human approve/reject. The
+  supervised *auto-evaluate → stash destination → Continue → route* path is
+  scaffolded in `confirmGate` but dormant; the splitter is its first real user.
+  So the splitter combines the gate's routing/park machinery with the broker
+  evaluation pattern from `run_step_skill`, rather than copying a gate
+  auto-eval that does not exist.)
 - One combined *Adaptive Delivery* template that exercises the splitter
   end-to-end and replaces three overlapping templates with one.
 
