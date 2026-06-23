@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GateEvaluationProposal, GateEvaluationRequest, OrchestrationDecisionKind, WorkflowGraph, WorkflowGraphEdge, WorkflowGraphNode } from "./index.js";
+import { GateEvaluationProposal, GateEvaluationRequest, OrchestrationDecisionKind, SplitEvaluationProposal, SplitEvaluationRequest, WorkflowGraph, WorkflowGraphEdge, WorkflowGraphNode } from "./index.js";
 
 describe("WorkflowGraphEdge", () => {
   it("parses a labeled object edge", () => {
@@ -197,5 +197,31 @@ describe("gate evaluation contract", () => {
         committedLedger: Array.from({ length: 36 }, () => ({ ...record })),
       })
     ).toThrow();
+  });
+});
+
+describe("SplitEvaluation schemas", () => {
+  it("includes evaluate_split in the decision-kind enum", () => {
+    expect(OrchestrationDecisionKind.parse("evaluate_split")).toBe("evaluate_split");
+  });
+
+  it("parses a split proposal", () => {
+    const p = SplitEvaluationProposal.parse({
+      selectedBranch: "ground_and_design",
+      reason: "intent is clear; ground in code before designing",
+      inputsConsidered: ["triage"],
+    });
+    expect(p.selectedBranch).toBe("ground_and_design");
+  });
+
+  it("parses a split request with a null source output", () => {
+    const r = SplitEvaluationRequest.parse({
+      splitter: { nodeId: "route", name: "Route", instructions: "pick", branches: ["a", "b"] },
+      goal: { id: "g", description: "do the thing" },
+      sourceStepOutput: null,
+      priorDecisions: [],
+      committedLedger: [],
+    });
+    expect(r.splitter.branches).toEqual(["a", "b"]);
   });
 });

@@ -153,6 +153,7 @@ export const OrchestrationDecisionKind = z.enum([
   "run_step_skill",
   "synthesize_step_output",
   "evaluate_gate",
+  "evaluate_split",
 ]);
 export type OrchestrationDecisionKind = z.infer<typeof OrchestrationDecisionKind>;
 
@@ -204,6 +205,7 @@ export const WorkflowDecisionType = z.enum([
   "evaluate_exit_criteria",
   "evaluate_guardrail",
   "evaluate_gate",
+  "evaluate_split",
   "mark_run_complete",
   "block_run"
 ]);
@@ -808,6 +810,63 @@ export const GateEvaluationRequest = z
     }
   });
 export type GateEvaluationRequest = z.infer<typeof GateEvaluationRequest>;
+
+export const SplitEvaluationProposal = z
+  .object({
+    selectedBranch: z.string().min(1).max(WORKFLOW_SPLITTER_MAX_BRANCH_LABEL_CHARS),
+    reason: z.string().min(1).max(1024),
+    inputsConsidered: z.array(z.string().min(1).max(128)).max(50),
+  })
+  .strict();
+export type SplitEvaluationProposal = z.infer<typeof SplitEvaluationProposal>;
+
+export const SplitEvaluationRequest = z
+  .object({
+    splitter: z
+      .object({
+        nodeId: Id100,
+        name: z.string().max(100),
+        instructions: z.string().max(WORKFLOW_GATE_MAX_INSTRUCTIONS_CHARS),
+        branches: z
+          .array(z.string().min(1).max(WORKFLOW_SPLITTER_MAX_BRANCH_LABEL_CHARS))
+          .min(WORKFLOW_SPLITTER_MIN_BRANCHES)
+          .max(WORKFLOW_SPLITTER_MAX_BRANCHES),
+      })
+      .strict(),
+    goal: z.object({ id: Id, description: z.string().max(4000) }).strict(),
+    sourceStepOutput: z.record(z.string(), z.unknown()).nullable(),
+    priorDecisions: z
+      .array(
+        z
+          .object({
+            nodeId: Id100,
+            selectedBranch: z.string().min(1).max(WORKFLOW_SPLITTER_MAX_BRANCH_LABEL_CHARS),
+            reason: z.string().max(1024),
+          })
+          .strict()
+      )
+      .max(50),
+    committedLedger: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1).max(128),
+            recordType: z.string().min(1).max(64),
+            status: z.string().min(1).max(64),
+            note: z.string().max(500),
+          })
+          .strict()
+      )
+      .max(35)
+      .default([]),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!hasMaxSerializedBytes(value, ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "SplitEvaluationRequest too large" });
+    }
+  });
+export type SplitEvaluationRequest = z.infer<typeof SplitEvaluationRequest>;
 
 export const StepSkillProposal = z.discriminatedUnion("action", [
   z.object({
