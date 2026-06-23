@@ -1,14 +1,14 @@
 /**
- * End-to-end smoke test for the Feature Development template loop.
+ * End-to-end smoke test for the Adaptive Delivery template loop.
  *
- * Proves that the orca/feature-development graph specifically drives:
- *   - Gate rejection → backward route to a fresh Execution attempt
- *   - Gate approval → forward route to terminal Done
+ * Proves that the orca/adaptive-delivery graph specifically drives:
+ *   - Release Readiness gate rejection → backward route to a fresh Execution attempt
+ *   - Release Readiness gate approval → forward route to terminal Done
  *   - Terminal Done completion → mark_run_complete recommendation (human yield, no auto-complete)
  *
  * The harness is the same as service.gate-routing.test.ts. The only delta is:
- *   - installBuiltInTemplates used to install orca/feature-development
- *   - fakeStepDispatch supports the FD model IDs (sonnet/opus/haiku)
+ *   - installBuiltInTemplates used to install orca/adaptive-delivery
+ *   - fakeStepDispatch supports the AD model IDs (sonnet/opus/haiku)
  */
 
 import type Database from "better-sqlite3";
@@ -36,8 +36,8 @@ import type { StepDispatchCapabilities } from "./service.js";
 import { installBuiltInTemplates } from "../templates/usecases.js";
 import type { EventBus } from "../../events.js";
 
-const FEATURE_DEV_ID = "orca/feature-development";
-// Must track the orca/feature-development version in catalog.ts / usecases.ts.
+const FEATURE_DEV_ID = "orca/adaptive-delivery";
+// Must track the orca/adaptive-delivery version in catalog.ts / usecases.ts.
 const FEATURE_DEV_VERSION = 1;
 
 const AGENT_OPERATOR_ID = "agent:claude-code";
@@ -113,7 +113,7 @@ function fakeGateBroker(outcome: "approved" | "rejected"): Pick<OrchestrationTra
   };
 }
 
-/** Supports all model IDs used by the FD template (sonnet, opus, haiku). */
+/** Supports all model IDs used by the AD template (sonnet, opus, haiku). */
 function fdStepDispatch(): StepDispatchCapabilities {
   return {
     async isAdapterReady(adapterId) {
@@ -155,34 +155,34 @@ function makeService(
 }
 
 /**
- * Seed the FD template and a run positioned at the `validation` step with a
+ * Seed the AD template and a run positioned at the `validate_build` step with a
  * step_output artifact (the gate-routing trigger). A prior execution attempt
  * (attempt 1) exists so a rejection routes to attempt 2.
  */
 function seedFDRunAtValidation(db: Database.Database, bus: EventBus): void {
-  installBuiltInTemplates({ db, bus }, ["orca/feature-development"]);
+  installBuiltInTemplates({ db, bus }, ["orca/adaptive-delivery"]);
 
   db.prepare(
     "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('goal-fd', 'FD Goal', 'Feature goal', 'active', 1, ?, ?, NULL, 'orca/anthropic', 'claude-sonnet-4-6')"
   ).run(NOW, NOW);
 
   db.prepare(
-    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, traversal_seq, blocked_reason, started_at, finished_at) VALUES ('run-fd', 'goal-fd', ?, ?, 'active', 'step-fd-validation', 'validation', 'step', 0, NULL, ?, NULL)"
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, traversal_seq, blocked_reason, started_at, finished_at) VALUES ('run-fd', 'goal-fd', ?, ?, 'active', 'step-fd-validate_build', 'validate_build', 'step', 0, NULL, ?, NULL)"
   ).run(FEATURE_DEV_ID, FEATURE_DEV_VERSION, NOW);
 
-  // Active validation step.
+  // Active validate_build step.
   db.prepare(
-    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-fd-validation', 'goal-fd', 'run-fd', 'validation', 2, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-val', 'agent:claude-code', NULL, 'claude-opus-4-7', ?)"
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-fd-validate_build', 'goal-fd', 'run-fd', 'validate_build', 7, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-val', 'agent:claude-code', NULL, 'claude-opus-4-7', ?)"
   ).run(NOW, NOW);
 
   // Prior execution attempt (attempt 1, passed) so rejection creates attempt 2.
   db.prepare(
-    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-fd-execution', 'goal-fd', 'run-fd', 'execution', 1, 1, 'passed', '[]', '[]', NULL, ?, ?, 'fp-exec')"
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-fd-execution', 'goal-fd', 'run-fd', 'execution', 6, 1, 'passed', '[]', '[]', NULL, ?, ?, 'fp-exec')"
   ).run(NOW, NOW);
 
-  // step_output on the active validation step — triggers gate routing.
+  // step_output on the active validate_build step — triggers gate routing.
   db.prepare(
-    "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-fd-val', 'goal-fd', 'run-fd', 'step-fd-validation', 'step_output', 'Validation', ?, 'orchestrator', NULL, NULL, NULL, ?)"
+    "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-fd-val', 'goal-fd', 'run-fd', 'step-fd-validate_build', 'step_output', 'Validate Build', ?, 'orchestrator', NULL, NULL, NULL, ?)"
   ).run(
     JSON.stringify({
       summary: "Validation complete",
@@ -196,11 +196,11 @@ function seedFDRunAtValidation(db: Database.Database, bus: EventBus): void {
 }
 
 /**
- * Seed the FD template and a run positioned at the terminal `done` step with a
+ * Seed the AD template and a run positioned at the terminal `done` step with a
  * step_output artifact, to test the mark_run_complete path.
  */
 function seedFDRunAtDone(db: Database.Database, bus: EventBus): void {
-  installBuiltInTemplates({ db, bus }, ["orca/feature-development"]);
+  installBuiltInTemplates({ db, bus }, ["orca/adaptive-delivery"]);
 
   db.prepare(
     "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('goal-fd', 'FD Goal', 'Feature goal', 'active', 1, ?, ?, NULL, 'orca/anthropic', 'claude-sonnet-4-6')"
@@ -212,7 +212,7 @@ function seedFDRunAtDone(db: Database.Database, bus: EventBus): void {
 
   // Active terminal done step.
   db.prepare(
-    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-fd-done', 'goal-fd', 'run-fd', 'done', 3, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-done', 'agent:claude-code', NULL, 'claude-haiku-4-5', ?)"
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-fd-done', 'goal-fd', 'run-fd', 'done', 8, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-done', 'agent:claude-code', NULL, 'claude-haiku-4-5', ?)"
   ).run(NOW, NOW);
 
   // step_output on the terminal done step — triggers mark_run_complete.
@@ -236,7 +236,7 @@ afterEach(() => {
   cleanupHarness();
 });
 
-describe("OrchestratorService — feature development loop", () => {
+describe("OrchestratorService — adaptive delivery loop", () => {
   it("rejected Release Readiness gate routes backward to a fresh Execution attempt", async () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
@@ -250,7 +250,7 @@ describe("OrchestratorService — feature development loop", () => {
     // Gate decision recorded with rejected outcome routing to execution.
     const decisions = listGateDecisionsForRun(db, "run-fd");
     expect(decisions.at(-1)).toMatchObject({
-      nodeId: "gate",
+      nodeId: "review",
       outcome: "rejected",
       selectedEdgeTo: "execution",
     });
@@ -276,7 +276,7 @@ describe("OrchestratorService — feature development loop", () => {
 
     const decisions = listGateDecisionsForRun(db, "run-fd");
     expect(decisions.at(-1)).toMatchObject({
-      nodeId: "gate",
+      nodeId: "review",
       outcome: "approved",
       selectedEdgeTo: "done",
     });

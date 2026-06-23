@@ -21,17 +21,17 @@ beforeEach(() => {
 
 describe("installBuiltInTemplates", () => {
   it("installs only the requested catalog ids as built-in/locked rows", () => {
-    const templates = installBuiltInTemplates(ctx(), ["orca/brainstorm", "orca/code-review"]);
-    expect(templates.map((t) => t.id).sort()).toEqual(["orca/brainstorm", "orca/code-review"]);
+    const templates = installBuiltInTemplates(ctx(), ["orca/adaptive-delivery", "orca/code-review"]);
+    expect(templates.map((t) => t.id).sort()).toEqual(["orca/adaptive-delivery", "orca/code-review"].sort());
     expect(templates.every((t) => t.isBuiltIn && t.isLocked)).toBe(true);
     const count = db.prepare("SELECT COUNT(*) c FROM workflow_templates").get() as { c: number };
     expect(count.c).toBe(2);
   });
 
   it("is idempotent — re-installing the same id does not duplicate", () => {
-    installBuiltInTemplates(ctx(), ["orca/brainstorm"]);
-    installBuiltInTemplates(ctx(), ["orca/brainstorm"]);
-    const count = db.prepare("SELECT COUNT(*) c FROM workflow_templates WHERE id = ?").get("orca/brainstorm") as { c: number };
+    installBuiltInTemplates(ctx(), ["orca/adaptive-delivery"]);
+    installBuiltInTemplates(ctx(), ["orca/adaptive-delivery"]);
+    const count = db.prepare("SELECT COUNT(*) c FROM workflow_templates WHERE id = ?").get("orca/adaptive-delivery") as { c: number };
     expect(count.c).toBe(1);
   });
 
@@ -72,9 +72,9 @@ describe("reconcileBuiltInTemplates", () => {
   });
 
   it("never touches catalog templates", () => {
-    installBuiltInTemplates(ctx(), ["orca/brainstorm"]);
+    installBuiltInTemplates(ctx(), ["orca/adaptive-delivery"]);
     reconcileBuiltInTemplates(db);
-    const row = db.prepare("SELECT id FROM workflow_templates WHERE id = ?").get("orca/brainstorm");
+    const row = db.prepare("SELECT id FROM workflow_templates WHERE id = ?").get("orca/adaptive-delivery");
     expect(row).toBeTruthy();
   });
 });

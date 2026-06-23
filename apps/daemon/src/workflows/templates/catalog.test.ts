@@ -5,17 +5,15 @@ import { validateTemplatePipeline } from "./validate-pipeline.js";
 import { BUILTIN_TEMPLATE_CATALOG, BUILTIN_TEMPLATE_IDS, builtInCatalogSummaries } from "./catalog.js";
 
 const EXPECTED_IDS = [
-  "orca/brainstorm",
-  "orca/feature-development",
+  "orca/adaptive-delivery",
   "orca/bug-triage-fix",
   "orca/code-review",
   "orca/refactor",
   "orca/quality-coverage",
-  "orca/initiative-implementation",
 ];
 
 describe("built-in template catalog", () => {
-  it("contains exactly the 7 expected ids, all orca/-prefixed and unique", () => {
+  it("contains exactly the 5 expected ids, all orca/-prefixed and unique", () => {
     const ids = BUILTIN_TEMPLATE_CATALOG.map((d) => d.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.every((id) => id.startsWith("orca/"))).toBe(true);
@@ -23,9 +21,9 @@ describe("built-in template catalog", () => {
     expect([...BUILTIN_TEMPLATE_IDS].sort()).toEqual([...EXPECTED_IDS].sort());
   });
 
-  it("recommends exactly brainstorm, feature-development, bug-triage-fix", () => {
+  it("recommends exactly adaptive-delivery and bug-triage-fix", () => {
     const rec = BUILTIN_TEMPLATE_CATALOG.filter((d) => d.recommended).map((d) => d.id).sort();
-    expect(rec).toEqual(["orca/brainstorm", "orca/bug-triage-fix", "orca/feature-development"]);
+    expect(rec).toEqual(["orca/adaptive-delivery", "orca/bug-triage-fix"]);
   });
 
   it("every definition has non-empty bestFor (<=200 chars) and category Engineering", () => {
@@ -58,12 +56,10 @@ describe("built-in template catalog", () => {
 
   it("summaries derive stepCount from graph node count or step count", () => {
     const summaries = builtInCatalogSummaries();
-    expect(summaries).toHaveLength(7);
-    const byId = Object.fromEntries(summaries.map((s) => [s.id, s]));
-    expect(byId["orca/feature-development"].stepCount).toBe(5); // 4 steps + gate
-    expect(byId["orca/initiative-implementation"].stepCount).toBe(8); // 7 steps + gate
-    expect(byId["orca/brainstorm"].stepCount).toBe(6); // linear
-    expect(byId["orca/code-review"].stepCount).toBe(4);
+    expect(summaries).toHaveLength(5);
+    const byId = (id: string) => summaries.find((s) => s.id === id);
+    expect(byId("orca/adaptive-delivery")?.stepCount).toBe(12); // 9 steps + splitter + 2 gates
+    expect(byId("orca/code-review")?.stepCount).toBe(4);
   });
 
   it("every built-in graph has a terminal reachable from every node", () => {
@@ -76,59 +72,6 @@ describe("built-in template catalog", () => {
   });
 });
 
-describe("Brainstorm participatory revision", () => {
-  const brainstorm = BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === "orca/brainstorm")!;
-  const step = (id: string) => brainstorm.steps.find((s) => s.id === id)!;
-
-  it("bumps the template version to 3", () => {
-    expect(brainstorm.version).toBe(3);
-  });
-
-  it("assigns the expected completion policies", () => {
-    expect(step("frame").completionPolicy).toBe("interview");
-    expect(step("research").completionPolicy).toBe("reasoning");
-    expect(step("proposal").completionPolicy).toBe("reasoning");
-    expect(step("critique").completionPolicy).toBe("reasoning");
-    expect(step("verify").completionPolicy).toBe("reasoning");
-    expect(step("done").completionPolicy).toBe("handoff");
-  });
-
-  it("frames relentlessly and requires confirmation before completing", () => {
-    expect(step("frame").instructions).toMatch(/relentlessly/i);
-    expect(step("frame").instructions).toMatch(/confirm/i);
-    expect(step("frame").instructions).toMatch(/do not analyze the code technically/i);
-  });
-
-  it("tells reasoning steps to pause at a material fork", () => {
-    for (const id of ["research", "proposal", "critique", "verify"]) {
-      expect(step(id).instructions).toMatch(/pause and ask/i);
-    }
-  });
-
-  it("critiques the chosen approach, not the recommendation", () => {
-    expect(step("critique").instructions).toMatch(/approach the user chose/i);
-  });
-
-  it("requires Proposal to capture chosen_approach", () => {
-    const field = step("proposal").outputSchema.find((f) => f.key === "chosen_approach");
-    expect(field).toMatchObject({ key: "chosen_approach", type: "string", required: true });
-  });
-
-  it("gives Done an artifacts field and a save-to-disk instruction", () => {
-    const field = step("done").outputSchema.find((f) => f.key === "artifacts");
-    expect(field?.type).toBe("array");
-    expect(step("done").instructions).toMatch(/\.orca\/specs/);
-    expect(step("done").instructions).toMatch(/do not finish silently/i);
-  });
-
-  it("Frame step no longer instructs the agent to ask the user to confirm", () => {
-    const brainstorm = BUILTIN_TEMPLATE_CATALOG.find((t) => t.id === "orca/brainstorm")!;
-    const frame = brainstorm.steps.find((s) => s.id === "frame")!;
-    expect(frame.completionPolicy).toBe("interview");
-    expect(frame.instructions).not.toMatch(/ask the user to confirm/i);
-    expect(frame.instructions).toMatch(/complete/i);
-  });
-});
 
 describe("Bug Triage & Fix systematic debugging (Four Phases)", () => {
   const bugfix = BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === "orca/bug-triage-fix")!;
