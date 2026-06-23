@@ -3765,7 +3765,7 @@ export class OrchestratorService {
     const stepRun = readStepRun(db, stash.sourceStepRunId);
     const stepTpl =
       template.steps.find((s) => s.id === stepRun.step_template_id) ?? template.steps[0]!;
-    if (dest.kind !== "step" && dest.kind !== "gate") {
+    if (dest.kind !== "step" && dest.kind !== "gate" && dest.kind !== "splitter") {
       this.blockRun(
         db,
         now,

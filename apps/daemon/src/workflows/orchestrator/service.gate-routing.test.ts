@@ -8,6 +8,7 @@ import type { OperatorDescriptor, OperatorSelection, WorkflowGraph } from "@orca
 import type { WorkflowLaunchContext, WorkflowSessionLauncher } from "./session-launcher.js";
 import { OrchestratorService } from "./service.js";
 import { listGateDecisionsForRun } from "../gates/projection.js";
+import { listSplitDecisionsForRun } from "../splitters/projection.js";
 import { setSupervisionMode } from "../../settings/store.js";
 import {
   cleanupHarness,
@@ -66,6 +67,47 @@ function fakeAgentSelector(): Pick<
 }
 
 /**
+ * Broker that scores the active step AND evaluates a splitter if the run reaches
+ * one. Used for the gate→splitter routing test where the gate's approved edge
+ * points at a splitter node.
+ */
+function fakeStepAndSplitBroker(selectedBranch: string): Pick<OrchestrationTransportBroker, "propose"> {
+  return {
+    async propose(request: unknown, options?: BrokerCompatibilityOptions) {
+      const kind = (request as { kind?: string } | undefined)?.kind;
+      const proposal =
+        kind === "evaluate_split"
+          ? { selectedBranch, reason: `Picked ${selectedBranch}.`, inputsConsidered: [] }
+          : {
+              successScore: 0.82,
+              quality: {
+                outputCompleteness: 0.8,
+                outputCorrectness: 0.8,
+                instructionAdherence: 0.85,
+                downstreamReadiness: 0.8,
+                riskLevel: 0.2,
+              },
+              reason: "Ready for next step.",
+              handoffReady: true,
+            };
+      const validated = options?.validateProposal
+        ? await options.validateProposal(proposal)
+        : { accepted: true as const, parsed: proposal };
+      return {
+        status: "proposed" as const,
+        attemptId: "attempt-1",
+        transport: "one_shot" as const,
+        parsed: Object.prototype.hasOwnProperty.call(validated, "parsed")
+          ? (validated as { parsed: unknown }).parsed
+          : proposal,
+        rawTextLength: null,
+        latencyMs: 1,
+      };
+    },
+  };
+}
+
+/**
  * Broker that returns a benign step-scoring proposal so the active step can be
  * scored and the run can advance to the gate. Gates are NOT evaluated by the
  * broker anymore — they park for a human decideGate call — so the evaluate_gate
@@ -119,6 +161,65 @@ function makeService(
     undefined,
     fakeStepDispatch()
   );
+}
+
+/**
+ * Graph: analysis -> validation -> gate
+ *   gate: approved -> splitter 'route' (branches ["go_a","go_b"])
+ *     route --go_a--> branch_a (terminal) ; route --go_b--> branch_b (terminal)
+ *   rejected -> analysis
+ */
+function gateSplitterGraph(): WorkflowGraph {
+  return {
+    nodes: [
+      { id: "analysis", type: "step", name: "Analysis", stepId: "analysis" },
+      { id: "validation", type: "step", name: "Validation", stepId: "validation" },
+      { id: "gate", type: "gate", name: "Review Gate", instructions: "Approve to route." },
+      {
+        id: "route",
+        type: "splitter",
+        name: "Route",
+        instructions: "Pick a branch.",
+        branches: ["go_a", "go_b"],
+      },
+      { id: "branch_a", type: "step", name: "Branch A", stepId: "branch_a", terminal: true },
+      { id: "branch_b", type: "step", name: "Branch B", stepId: "branch_b", terminal: true },
+    ],
+    edges: [
+      { from: "analysis", to: "validation" },
+      { from: "validation", to: "gate" },
+      { from: "gate", to: "route", port: "approved" },
+      { from: "gate", to: "analysis", port: "rejected" },
+      { from: "route", to: "branch_a", port: "go_a" },
+      { from: "route", to: "branch_b", port: "go_b" },
+    ],
+    positions: {},
+  };
+}
+
+/** Seed a run positioned at the active `validation` step with a step_output artifact (gate→splitter graph). */
+function seedRunAtValidationForSplitter(db: Database.Database) {
+  const steps = [
+    step("analysis", 0),
+    step("validation", 1),
+    step("branch_a", 2),
+    step("branch_b", 3),
+  ];
+  db.prepare(
+    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('goal-1', 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, 'orca/anthropic', 'claude-sonnet-4-6')"
+  ).run(NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, graph_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', 'desc', 1, 1, 1, ?, '[]', ?, ?, ?)"
+  ).run(JSON.stringify(steps), JSON.stringify(gateSplitterGraph()), NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, traversal_seq, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-validation', 'validation', 'step', 0, NULL, ?, NULL)"
+  ).run(NOW);
+  db.prepare(
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-validation', 'goal-1', 'run-1', 'validation', 1, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-validation', 'agent:claude-code', NULL, 'claude-haiku-4-5', ?)"
+  ).run(NOW, NOW);
+  db.prepare(
+    "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-val', 'goal-1', 'run-1', 'step-validation', 'step_output', 'Validation', ?, 'orchestrator', NULL, NULL, NULL, ?)"
+  ).run(JSON.stringify({ result: "all good", _completion: {} }), NOW);
 }
 
 /**
@@ -439,5 +540,54 @@ describe("OrchestratorService gate routing", () => {
 
     const decisions = listGateDecisionsForRun(db, "run-1");
     expect(decisions.at(-1)?.ledgerVersion).toBe(committedVersion);
+  });
+
+  it("gate→splitter: decideGate approved routes through the splitter to the chosen branch step", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    // Unsupervised: the splitter evaluates inline (no confirmSplit needed).
+    setSupervisionMode(db, "unsupervised", NOW);
+    seedRunAtValidationForSplitter(db);
+    const service = makeService(fakeStepAndSplitBroker("go_a"));
+
+    // Advance the run to the gate (scores validation step, parks at gate).
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    const parked = db
+      .prepare(
+        "SELECT current_node_id, current_node_kind, pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'"
+      )
+      .get() as { current_node_id: string; current_node_kind: string; pending_gate_route_json: string | null };
+    expect(parked.current_node_id).toBe("gate");
+    expect(parked.current_node_kind).toBe("gate");
+    expect(parked.pending_gate_route_json).not.toBeNull();
+
+    // User approves → gate routes to splitter → splitter evaluates inline → branch_a step inserted.
+    await service.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
+
+    const after = db
+      .prepare("SELECT status, current_node_id, current_node_kind, blocked_reason FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { status: string; current_node_id: string; current_node_kind: string; blocked_reason: string | null };
+    // Run must NOT be blocked.
+    expect(after.status).not.toBe("blocked");
+    expect(after.blocked_reason).toBeNull();
+    // Cursor landed on branch_a.
+    expect(after.current_node_id).toBe("branch_a");
+    expect(after.current_node_kind).toBe("step");
+
+    // A step run for branch_a was created.
+    const branchARuns = db
+      .prepare("SELECT id FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = 'branch_a'")
+      .all() as Array<{ id: string }>;
+    expect(branchARuns).toHaveLength(1);
+
+    // A gate decision was recorded pointing at the splitter node.
+    const gateDecisions = listGateDecisionsForRun(db, "run-1");
+    expect(gateDecisions).toHaveLength(1);
+    expect(gateDecisions[0]).toMatchObject({ nodeId: "gate", outcome: "approved", selectedEdgeTo: "route" });
+
+    // A split decision was recorded for the splitter choosing branch_a.
+    const splitDecisions = listSplitDecisionsForRun(db, "run-1");
+    expect(splitDecisions).toHaveLength(1);
+    expect(splitDecisions[0]).toMatchObject({ nodeId: "route", selectedBranch: "go_a", selectedEdgeTo: "branch_a" });
   });
 });
