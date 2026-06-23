@@ -631,59 +631,62 @@ export function WorkflowFlow({
                     )}
 
                     {/* Splitter nodes: one labeled out-port per branch, evenly spaced */}
-                    {!readOnly && isSplitter && (
-                      <>
-                        {(n.branches ?? []).map((branch, bi) => {
-                          const count = (n.branches ?? []).length;
-                          const frac = (bi + 1) / (count + 1);
-                          const sx = p.x + NODE_W * frac;
-                          const sy = p.y + NODE_H;
-                          return (
-                            <button
-                              key={branch}
-                              type="button"
-                              onMouseDown={(e) => {
-                                e.stopPropagation();
-                                if (e.button !== 0) return;
-                                setLinkDrag({
-                                  fromId: n.id,
-                                  fromPort: branch,
-                                  startX: sx,
-                                  startY: sy,
-                                  x: sx,
-                                  y: sy,
-                                  overId: null,
-                                });
-                              }}
-                              title={`Drag to connect ${branch} branch`}
-                              style={{
-                                position: "absolute",
-                                bottom: -9,
-                                left: `${frac * 100}%`,
-                                transform: "translateX(-50%)",
-                                width: 44,
-                                height: 16,
-                                borderRadius: 8,
-                                background: "var(--panel)",
-                                border: "1px solid var(--hairline-strong)",
-                                color: "var(--text-2)",
-                                cursor: "crosshair",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                padding: 0,
-                                fontFamily: "inherit",
-                                fontSize: 9,
-                                lineHeight: "1",
-                                fontWeight: 500,
-                              }}
-                            >
-                              {branch}
-                            </button>
-                          );
-                        })}
-                      </>
-                    )}
+                    {!readOnly && isSplitter && (() => {
+                      const branches = n.branches ?? [];
+                      const count = branches.length;
+                      return (
+                        <>
+                          {branches.map((branch, bi) => {
+                            const frac = (bi + 1) / (count + 1);
+                            const sx = p.x + NODE_W * frac;
+                            const sy = p.y + NODE_H;
+                            return (
+                              <button
+                                key={`${bi}-${branch}`}
+                                type="button"
+                                onMouseDown={(e) => {
+                                  e.stopPropagation();
+                                  if (e.button !== 0) return;
+                                  setLinkDrag({
+                                    fromId: n.id,
+                                    fromPort: branch,
+                                    startX: sx,
+                                    startY: sy,
+                                    x: sx,
+                                    y: sy,
+                                    overId: null,
+                                  });
+                                }}
+                                title={`Drag to connect ${branch} branch`}
+                                style={{
+                                  position: "absolute",
+                                  bottom: -9,
+                                  left: `${frac * 100}%`,
+                                  transform: "translateX(-50%)",
+                                  width: 44,
+                                  height: 16,
+                                  borderRadius: 8,
+                                  background: "var(--panel)",
+                                  border: "1px solid var(--hairline-strong)",
+                                  color: "var(--text-2)",
+                                  cursor: "crosshair",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  padding: 0,
+                                  fontFamily: "inherit",
+                                  fontSize: 9,
+                                  lineHeight: "1",
+                                  fontWeight: 500,
+                                }}
+                              >
+                                {branch}
+                              </button>
+                            );
+                          })}
+                        </>
+                      );
+                    })()}
 
                     {/* delete button — hidden in readOnly */}
                     {!readOnly && <NodeDeleteButton onDelete={() => onRemoveNode(n.id)} />}

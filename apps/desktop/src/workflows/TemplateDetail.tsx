@@ -288,7 +288,10 @@ export function TemplateDetail({
         const maxY = ys.length ? Math.max(...ys) : 0;
         const pos = { x: 110, y: maxY + 92 };
         const splitterNode: WorkflowGraphNode = {
-          id, type: "splitter", name: "New splitter", branches: ["Branch A", "Branch B"],
+          id,
+          type: "splitter",
+          name: "New splitter",
+          branches: ["Branch A", "Branch B"],
         };
         const nextGraph: WorkflowGraph = {
           ...current.graph,

@@ -6,9 +6,9 @@
  *   - Release Readiness gate approval → forward route to terminal Done
  *   - Terminal Done completion → mark_run_complete recommendation (human yield, no auto-complete)
  *
- * The harness is the same as service.gate-routing.test.ts. The only delta is:
- *   - installBuiltInTemplates used to install orca/adaptive-delivery
- *   - fakeStepDispatch supports the AD model IDs (sonnet/opus/haiku)
+ * This file drives orca/adaptive-delivery end-to-end. It seeds runs at
+ * key positions (validate_build, done) and asserts the gate routing and
+ * run-complete recommendation behaviour specific to that template.
  */
 
 import type Database from "better-sqlite3";
@@ -36,15 +36,15 @@ import type { StepDispatchCapabilities } from "./service.js";
 import { installBuiltInTemplates } from "../templates/usecases.js";
 import type { EventBus } from "../../events.js";
 
-const FEATURE_DEV_ID = "orca/adaptive-delivery";
+const ADAPTIVE_ID = "orca/adaptive-delivery";
 // Must track the orca/adaptive-delivery version in catalog.ts / usecases.ts.
-const FEATURE_DEV_VERSION = 1;
+const ADAPTIVE_VERSION = 1;
 
 const AGENT_OPERATOR_ID = "agent:claude-code";
 
-// Adapter IDs used by the FD template steps (claude-code with various models).
-const FD_ADAPTER = "claude-code";
-const FD_MODELS = new Set(["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]);
+// Adapter IDs used by the AD template steps (claude-code with various models).
+const AD_ADAPTER = "claude-code";
+const AD_MODELS = new Set(["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]);
 
 function fakeAgentSelector(): Pick<
   {
@@ -114,13 +114,13 @@ function fakeGateBroker(outcome: "approved" | "rejected"): Pick<OrchestrationTra
 }
 
 /** Supports all model IDs used by the AD template (sonnet, opus, haiku). */
-function fdStepDispatch(): StepDispatchCapabilities {
+function adStepDispatch(): StepDispatchCapabilities {
   return {
     async isAdapterReady(adapterId) {
-      return adapterId === FD_ADAPTER;
+      return adapterId === AD_ADAPTER;
     },
     supportsModel(adapterId, modelId) {
-      return adapterId === FD_ADAPTER && FD_MODELS.has(modelId);
+      return adapterId === AD_ADAPTER && AD_MODELS.has(modelId);
     },
     resolveMode(adapterId) {
       return { adapterId, mode: "one_shot", fallbacks: ["shadow_session"] };
@@ -150,7 +150,7 @@ function makeService(
     { async list() { return [agentDescriptor]; } },
     makeLauncher(),
     undefined,
-    fdStepDispatch()
+    adStepDispatch()
   );
 }
 
@@ -159,7 +159,7 @@ function makeService(
  * step_output artifact (the gate-routing trigger). A prior execution attempt
  * (attempt 1) exists so a rejection routes to attempt 2.
  */
-function seedFDRunAtValidation(db: Database.Database, bus: EventBus): void {
+function seedAdaptiveRunAtValidation(db: Database.Database, bus: EventBus): void {
   installBuiltInTemplates({ db, bus }, ["orca/adaptive-delivery"]);
 
   db.prepare(
@@ -168,7 +168,7 @@ function seedFDRunAtValidation(db: Database.Database, bus: EventBus): void {
 
   db.prepare(
     "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, traversal_seq, blocked_reason, started_at, finished_at) VALUES ('run-fd', 'goal-fd', ?, ?, 'active', 'step-fd-validate_build', 'validate_build', 'step', 0, NULL, ?, NULL)"
-  ).run(FEATURE_DEV_ID, FEATURE_DEV_VERSION, NOW);
+  ).run(ADAPTIVE_ID, ADAPTIVE_VERSION, NOW);
 
   // Active validate_build step.
   db.prepare(
@@ -199,7 +199,7 @@ function seedFDRunAtValidation(db: Database.Database, bus: EventBus): void {
  * Seed the AD template and a run positioned at the terminal `done` step with a
  * step_output artifact, to test the mark_run_complete path.
  */
-function seedFDRunAtDone(db: Database.Database, bus: EventBus): void {
+function seedAdaptiveRunAtDone(db: Database.Database, bus: EventBus): void {
   installBuiltInTemplates({ db, bus }, ["orca/adaptive-delivery"]);
 
   db.prepare(
@@ -208,7 +208,7 @@ function seedFDRunAtDone(db: Database.Database, bus: EventBus): void {
 
   db.prepare(
     "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, traversal_seq, blocked_reason, started_at, finished_at) VALUES ('run-fd', 'goal-fd', ?, ?, 'active', 'step-fd-done', 'done', 'step', 0, NULL, ?, NULL)"
-  ).run(FEATURE_DEV_ID, FEATURE_DEV_VERSION, NOW);
+  ).run(ADAPTIVE_ID, ADAPTIVE_VERSION, NOW);
 
   // Active terminal done step.
   db.prepare(
@@ -240,7 +240,7 @@ describe("OrchestratorService — adaptive delivery loop", () => {
   it("rejected Release Readiness gate routes backward to a fresh Execution attempt", async () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
-    seedFDRunAtValidation(db, bus);
+    seedAdaptiveRunAtValidation(db, bus);
     const service = makeService(fakeGateBroker("rejected"));
 
     // Reaching the gate parks for a human decision; the user rejects.
@@ -267,7 +267,7 @@ describe("OrchestratorService — adaptive delivery loop", () => {
   it("approved Release Readiness gate routes to the terminal Done step", async () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
-    seedFDRunAtValidation(db, bus);
+    seedAdaptiveRunAtValidation(db, bus);
     const service = makeService(fakeGateBroker("approved"));
 
     // Reaching the gate parks for a human decision; the user approves.
@@ -291,7 +291,7 @@ describe("OrchestratorService — adaptive delivery loop", () => {
   it("completing terminal Done yields mark_run_complete (human yield) without auto-completing the run", async () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
-    seedFDRunAtDone(db, bus);
+    seedAdaptiveRunAtDone(db, bus);
     const service = makeService(fakeGateBroker("approved")); // broker irrelevant; no gate here
 
     await service.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });
