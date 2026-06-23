@@ -461,14 +461,14 @@ git commit -m "feat(paper-rag): SessionStart hook to ensure search server"
 
 **Interfaces:**
 - Consumes: the `/search` endpoint from Task 4.
-- Produces: reads the hook event JSON (`{prompt, ...}`) from stdin; on strong matches prints a formatted block to stdout (injected into context); otherwise prints nothing. Always exits 0. Threshold via `ORCA_PAPER_MAX_DIST` (default `1.0`).
+- Produces: reads the hook event JSON (`{prompt, ...}`) from stdin; on strong matches prints a formatted block to stdout (injected into context); otherwise prints nothing. Always exits 0. Threshold via `ORCA_PAPER_MAX_DIST` (default `1.3`).
 
 - [ ] **Step 1: Write `query-hook.mjs`**
 
 ```javascript
 #!/usr/bin/env node
 const port = process.env.ORCA_PAPER_PORT || "8787";
-const MAX_DIST = Number(process.env.ORCA_PAPER_MAX_DIST || "1.0");
+const MAX_DIST = Number(process.env.ORCA_PAPER_MAX_DIST || "1.3");
 const WORD_CAP = 150;
 
 function readStdin() {
@@ -602,7 +602,7 @@ better approaches. A `SessionStart` hook keeps a warm query server running.
 - Manual query: `scripts/paper-rag/.venv/bin/python scripts/paper-rag/query.py "<question>"`
 
 Retrieval is silent when nothing is strongly relevant. Tune the distance cutoff
-with `ORCA_PAPER_MAX_DIST` (default 1.0); change the port with `ORCA_PAPER_PORT`.
+with `ORCA_PAPER_MAX_DIST` (default 1.3); change the port with `ORCA_PAPER_PORT`.
 ```
 
 - [ ] **Step 4: End-to-end verification**
