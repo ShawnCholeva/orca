@@ -105,13 +105,15 @@ better approaches. A `SessionStart` hook keeps a warm query server running.
 - Rebuild the index: `pnpm run paper:index`
 - Manual query: `scripts/paper-rag/.venv/bin/python scripts/paper-rag/query.py "<question>"`
 
-For substantive prompts (≥7 words), the hook first reformulates the prompt into a
-sharper agent-harness search query via `claude -p --model haiku` before retrieving;
-short prompts and any rewrite failure fall back to the raw prompt, so retrieval
-never breaks. The nested `claude` runs with `ORCA_PAPER_REWRITING=1` set so it can't
-re-trigger this hook.
+Retrieval sharpens each query with local pseudo-relevance feedback (`search.py`):
+it searches once with the raw prompt, mines the most frequent contentful terms
+from the top hits, appends them, and re-searches. This pulls a vague request
+toward the right harness sub-area with no LLM call. The bibliography is excluded
+at index time (`ingest.py` stops at the "References" page) so citation noise never
+pollutes retrieval or expansion.
 
 Retrieval is silent when nothing is strongly relevant. Tune the distance cutoff
-with `ORCA_PAPER_MAX_DIST` (default 1.3); change the port with `ORCA_PAPER_PORT`.
-Set `ORCA_PAPER_DEBUG=1` to print rewrite diagnostics to stderr; `ORCA_PAPER_REWRITING`
-is an internal recursion sentinel and should not be set manually.
+with `ORCA_PAPER_MAX_DIST` (default 1.2); change the port with `ORCA_PAPER_PORT`.
+Set `ORCA_PAPER_DEBUG=1` to print the expanded query to stderr — on the
+`query.py` CLI it prints directly; for the hook, set it when launching the server
+(`pnpm run paper:serve`) and the line lands in `.orca/paper-index/server.log`.

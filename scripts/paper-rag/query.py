@@ -8,7 +8,7 @@ def main():
         sys.exit(1)
     for r in search(" ".join(sys.argv[1:]), k=3):
         print(f"(p.{r['page']}) dist={r['distance']:.3f}")
-        print(r["text"][:400])
+        print(r["text"])
         print()
 
 

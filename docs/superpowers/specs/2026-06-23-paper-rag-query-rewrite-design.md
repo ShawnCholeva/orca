@@ -1,7 +1,11 @@
 # Design: LLM query rewrite for paper auto-RAG
 
 **Date:** 2026-06-23
-**Status:** Approved (pending implementation)
+**Status:** SUPERSEDED by `2026-06-23-paper-rag-prf-design.md`. Shipped, then replaced:
+a dry run showed `claude -p` rewrite produces good queries but takes ~3–22s (vs the
+4s timeout), so it almost always timed out and fell back to the raw prompt. Replaced
+with local pseudo-relevance feedback, which is instant and (empirically) retrieves
+better. The sections below describe the original, now-removed approach.
 **Component:** `scripts/paper-rag/`
 
 ## Problem
