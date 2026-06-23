@@ -49,6 +49,7 @@ export const migrationFiles = [
   "0035_orchestrator_message_pending_revision.sql",
   WORKSPACES_FIRST_CLASS_MIGRATION,
   "0037_step_run_pending_judge.sql",
+  "0038_workflow_split_decisions.sql",
 ] as const;
 
 export function runMigrations(
