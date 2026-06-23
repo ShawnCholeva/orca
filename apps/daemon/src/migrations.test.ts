@@ -164,6 +164,7 @@ describe("runMigrations", () => {
       "0036_workspaces_first_class.sql",
       "0037_step_run_pending_judge.sql",
       "0038_workflow_split_decisions.sql",
+      "0039_workflow_run_pending_split_route.sql",
     ]);
   });
 
@@ -294,6 +295,7 @@ describe("runMigrations", () => {
       "0036_workspaces_first_class.sql",
       "0037_step_run_pending_judge.sql",
       "0038_workflow_split_decisions.sql",
+      "0039_workflow_run_pending_split_route.sql",
     ]);
 
     const goalCount = (
@@ -577,6 +579,7 @@ describe("session tables migration", () => {
       "0036_workspaces_first_class.sql",
       "0037_step_run_pending_judge.sql",
       "0038_workflow_split_decisions.sql",
+      "0039_workflow_run_pending_split_route.sql",
     ]);
 
     const tables = (
@@ -1093,6 +1096,7 @@ describe("migration 0010 workflows", () => {
       "0036_workspaces_first_class.sql",
       "0037_step_run_pending_judge.sql",
       "0038_workflow_split_decisions.sql",
+      "0039_workflow_run_pending_split_route.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1686,6 +1690,7 @@ describe("migration 0012 orchestration transport", () => {
       "0036_workspaces_first_class.sql",
       "0037_step_run_pending_judge.sql",
       "0038_workflow_split_decisions.sql",
+      "0039_workflow_run_pending_split_route.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

@@ -50,6 +50,7 @@ export const migrationFiles = [
   WORKSPACES_FIRST_CLASS_MIGRATION,
   "0037_step_run_pending_judge.sql",
   "0038_workflow_split_decisions.sql",
+  "0039_workflow_run_pending_split_route.sql",
 ] as const;
 
 export function runMigrations(
