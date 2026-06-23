@@ -15,6 +15,7 @@ import type {
 import type { ConnectionStatus } from "../api";
 import {
   acceptRecommendation,
+  confirmSplit,
   confirmStep,
   createOrchestratorMessage,
   decideGate,
@@ -712,7 +713,11 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
 
   async function handleContinue(runId: string) {
     try {
-      await confirmStep(runId);
+      if (workflowState.run?.currentNodeKind === "splitter") {
+        await confirmSplit(runId);
+      } else {
+        await confirmStep(runId);
+      }
     } finally {
       setRefreshNonce((current) => current + 1);
     }

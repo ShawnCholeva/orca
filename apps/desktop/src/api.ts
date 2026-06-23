@@ -1766,6 +1766,15 @@ export async function confirmStep(runId: string): Promise<void> {
   );
 }
 
+export async function confirmSplit(runId: string): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  await requestVoid(
+    `${baseUrl}/v1/workflows/runs/${runId}/confirm-split`,
+    { method: "POST", headers: authHeaders(token) },
+    "Failed to confirm split",
+  );
+}
+
 export async function interruptStep(runId: string): Promise<void> {
   const { baseUrl, token } = await loadConfig();
   await requestVoid(

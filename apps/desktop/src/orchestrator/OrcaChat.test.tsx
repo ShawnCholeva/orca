@@ -12,6 +12,7 @@ vi.mock("../theme/ThemeProvider", () => ({
   useTheme: () => ({ theme: { mode: "dark" } }),
 }));
 
+const confirmSplitMock = vi.fn();
 const confirmStepMock = vi.fn();
 const createOrchestratorMessageMock = vi.fn();
 const getGoalDetailMock = vi.fn();
@@ -41,6 +42,7 @@ const listRecommendationsMock = vi.fn();
 const acceptRecommendationMock = vi.fn();
 
 vi.mock("../api", () => ({
+  confirmSplit: (...args: unknown[]) => confirmSplitMock(...args),
   confirmStep: (...args: unknown[]) => confirmStepMock(...args),
   createOrchestratorMessage: (...args: unknown[]) => createOrchestratorMessageMock(...args),
   getGoalDetail: (...args: unknown[]) => getGoalDetailMock(...args),
@@ -199,6 +201,8 @@ function setupRunLoad() {
 
 describe("OrcaChat", () => {
   beforeEach(() => {
+    confirmSplitMock.mockReset();
+    confirmSplitMock.mockResolvedValue(undefined);
     confirmStepMock.mockReset();
     confirmStepMock.mockResolvedValue(undefined);
     createOrchestratorMessageMock.mockReset();
@@ -1281,6 +1285,65 @@ describe("OrcaChat", () => {
     const btn = await screen.findByTestId("step-confirm-continue");
     fireEvent.click(btn);
     await waitFor(() => expect(confirmStepMock).toHaveBeenCalledWith("run-1"));
+  });
+
+  it("clicking Continue at a splitter park calls confirmSplit, not confirmStep", async () => {
+    const ts = new Date().toISOString();
+    listActivitiesMock.mockResolvedValue([
+      {
+        id: "a-confirm-split",
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepRunId: "step-1",
+        agentSessionId: "sess-1",
+        turnOrdinal: 1,
+        status: "paused_for_input",
+        currentText: "Completeness 90% · Ready for handoff — Continue or send revisions.",
+        finalSummary: null,
+        sourceKind: "step_confirmation_pending",
+        workCategory: null,
+        confidence: null,
+        createdAt: ts,
+        updatedAt: ts,
+        completedAt: null,
+      },
+    ]);
+    getGoalDetailMock.mockResolvedValue({
+      goal: { ...goal, activeWorkflowRunId: "run-1" },
+      refinement: null,
+      workspaces: [],
+    });
+    getWorkflowRunMock.mockResolvedValue({
+      run: {
+        id: "run-1",
+        goalId: "goal-1",
+        templateId: "orca/engineering",
+        templateVersion: 1,
+        status: "active",
+        currentStepRunId: null,
+        currentNodeKind: "splitter",
+        currentNodeId: "splitter-1",
+        startedAt: ts,
+        finishedAt: null,
+        blockedReason: null,
+      },
+    });
+    listWorkflowDecisionsMock.mockResolvedValue({ decisions: [] });
+    listWorkflowRunArtifactsMock.mockResolvedValue({ artifacts: [] });
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(
+      <OrcaChat
+        goals={[{ ...goal, activeWorkflowRunId: "run-1" }]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+
+    const btn = await screen.findByTestId("step-confirm-continue");
+    fireEvent.click(btn);
+    await waitFor(() => expect(confirmSplitMock).toHaveBeenCalledWith("run-1"));
+    expect(confirmStepMock).not.toHaveBeenCalled();
   });
 
   it("does not flash a loading indicator or blank content on SSE-driven refresh once loaded", async () => {
