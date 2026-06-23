@@ -3005,6 +3005,101 @@ async function service_expectThrow(service: OrchestratorService, db: Database.Da
   ).rejects.toThrow();
 }
 
+describe("OrchestratorService.onAgentResponseDone judge failure", () => {
+  function throwingMediator(message: string): Pick<OrchestratorMediator, "invoke"> {
+    return {
+      async invoke() {
+        throw new Error(message);
+      },
+    };
+  }
+
+  it("does not throw on a shadow timeout; stashes the response and posts a retry message", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    const service = makeJudgeService(
+      throwingMediator("shadow orchestrator timeout for goal goal-1"),
+      vi.fn(async () => "delivered" as const)
+    );
+
+    await expect(
+      service.onAgentResponseDone(
+        db,
+        () => NOW,
+        { sessionId: "sess-judge", adapterId: "claude-code", responseText: "Finished investigating. Verdict: needs_work." },
+        { bus, idFactory }
+      )
+    ).resolves.toBeUndefined();
+
+    // The step stays active (not advanced, not blocked) with the response stashed.
+    const row = db
+      .prepare("SELECT status, pending_judge_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { status: string; pending_judge_json: string | null };
+    expect(row.status).toBe("active");
+    expect(row.pending_judge_json).toBeTruthy();
+    expect(JSON.parse(row.pending_judge_json!).responseText).toContain("Finished investigating");
+
+    // A chat message surfaces the failure and how to retry.
+    const msg = db
+      .prepare("SELECT body FROM orchestrator_messages WHERE goal_id = 'goal-1' ORDER BY created_at DESC, rowid DESC LIMIT 1")
+      .get() as { body: string };
+    expect(msg.body.toLowerCase()).toContain("retry");
+  });
+
+  it("replays a stashed judge on the next user message and clears the stash on success", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    db.prepare("UPDATE workflow_step_runs SET pending_judge_json = ? WHERE id = 'step-1'").run(
+      JSON.stringify({ responseText: "STASHED AGENT RESPONSE", at: NOW })
+    );
+    const rec = recordingMediator({ kind: "escalate_to_user", body: "Re-evaluated: still needs work." });
+    const service = makeJudgeService(rec, vi.fn(async () => "delivered" as const));
+
+    await service.onUserMessage(db, () => NOW, { goalId: "goal-1", body: "retry" }, { bus, idFactory });
+
+    // Replayed as an agent_response judgement with the stored text, not a user_message.
+    expect((rec.inputs[0] as { triggerKind: string }).triggerKind).toBe("agent_response");
+    expect((rec.inputs[0] as { triggerPayload: { agentResponseText: string } }).triggerPayload.agentResponseText).toBe(
+      "STASHED AGENT RESPONSE"
+    );
+    // Stash cleared on success.
+    const row = db
+      .prepare("SELECT pending_judge_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { pending_judge_json: string | null };
+    expect(row.pending_judge_json).toBeNull();
+    // The re-evaluation's action was applied (escalation message posted).
+    const msg = db
+      .prepare("SELECT body FROM orchestrator_messages WHERE goal_id = 'goal-1' ORDER BY created_at DESC, rowid DESC LIMIT 1")
+      .get() as { body: string };
+    expect(msg.body).toContain("Re-evaluated");
+  });
+
+  it("re-stashes when the replay fails again, leaving retry available", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    db.prepare("UPDATE workflow_step_runs SET pending_judge_json = ? WHERE id = 'step-1'").run(
+      JSON.stringify({ responseText: "STASHED AGENT RESPONSE", at: NOW })
+    );
+    const service = makeJudgeService(
+      throwingMediator("shadow orchestrator timeout for goal goal-1"),
+      vi.fn(async () => "delivered" as const)
+    );
+
+    await service.onUserMessage(db, () => NOW, { goalId: "goal-1", body: "retry" }, { bus, idFactory });
+
+    const row = db
+      .prepare("SELECT pending_judge_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { pending_judge_json: string | null };
+    expect(row.pending_judge_json).toBeTruthy();
+  });
+});
+
 describe("OrchestratorService.interruptStepAgent", () => {
   function makeInterruptService(
     workerInterrupt: (sessionId: string) => Promise<void>

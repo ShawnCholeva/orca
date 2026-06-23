@@ -211,6 +211,7 @@ interface StepRunRow {
   crash_retries: number;
   step_result_json: string | null;
   pending_provider_recovery_json: string | null;
+  pending_judge_json: string | null;
 }
 
 export interface RequestNextDecisionOptions {
@@ -1319,19 +1320,33 @@ export class OrchestratorService {
     const adapterId = adapterIdForProvider(goal.orchestrator_provider);
     const modelId = goal.orchestrator_model;
 
-    const action = await judgeAgentResponse({
-      mediator: this.orchestratorMediator as OrchestratorMediator,
-      schemaValidate: (output) => {
-        const v = validateStepOutput(stepTpl.outputSchema, output);
-        return v.ok ? { ok: true } : { ok: false, errors: v.errors };
-      },
-      goalId: run.goalId,
-      runId: run.id,
-      stepRunId: stepRun.id,
-      adapterId,
-      modelId,
-      responseText: payload.responseText,
-    });
+    let action: OrchestratorAction;
+    try {
+      action = await judgeAgentResponse({
+        mediator: this.orchestratorMediator as OrchestratorMediator,
+        schemaValidate: (output) => {
+          const v = validateStepOutput(stepTpl.outputSchema, output);
+          return v.ok ? { ok: true } : { ok: false, errors: v.errors };
+        },
+        goalId: run.goalId,
+        runId: run.id,
+        stepRunId: stepRun.id,
+        adapterId,
+        modelId,
+        responseText: payload.responseText,
+      });
+    } catch (err) {
+      // The orchestrator-LLM evaluation failed (e.g. a shadow timeout). Don't
+      // let the run silently park with no result: stash the agent's response so
+      // it can be replayed, and tell the user how to retry.
+      this.stashJudgeFailure(
+        db,
+        now,
+        { goalId: run.goalId, stepRunId: stepRun.id, responseText: payload.responseText, err },
+        options
+      );
+      return;
+    }
 
     const ctx = { run, stepRun, stepTpl, template, goal };
     await this.applyOrchestratorAction(
@@ -1343,6 +1358,80 @@ export class OrchestratorService {
       action,
       options
     );
+  }
+
+  /**
+   * The orchestrator-LLM evaluation of an agent response failed (timeout / error).
+   * Stash the response on the step run so it can be replayed, and post a chat
+   * message so the run doesn't silently park — any user message retries it.
+   */
+  private stashJudgeFailure(
+    db: Database.Database,
+    now: () => string,
+    args: { goalId: string; stepRunId: string; responseText: string; err: unknown },
+    options: RequestNextDecisionOptions
+  ): void {
+    const message = args.err instanceof Error ? args.err.message : String(args.err);
+    db.prepare("UPDATE workflow_step_runs SET pending_judge_json = ? WHERE id = ?").run(
+      JSON.stringify({ responseText: args.responseText, error: message, at: now() }),
+      args.stepRunId
+    );
+    this.postOrchestratorMessage(
+      db,
+      now,
+      args.goalId,
+      `I couldn't evaluate this step — the orchestrator did not respond (${message}). The agent's work is saved; send any message to retry the evaluation.`,
+      options
+    );
+  }
+
+  /**
+   * Replay a stashed agent-response judgement (see stashJudgeFailure). Called from
+   * onUserMessage when a judge is pending: re-runs the evaluation with the stored
+   * response, clears the stash on success, or re-stashes if it fails again.
+   */
+  private async runStashedJudgeRetry(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+    },
+    sessionId: string | null,
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    const stash = JSON.parse(ctx.stepRun.pending_judge_json!) as { responseText: string };
+    const adapterId = adapterIdForProvider(ctx.goal.orchestrator_provider!);
+    const modelId = ctx.goal.orchestrator_model!;
+    let action: OrchestratorAction;
+    try {
+      action = await judgeAgentResponse({
+        mediator: this.orchestratorMediator as OrchestratorMediator,
+        schemaValidate: (output) => {
+          const v = validateStepOutput(ctx.stepTpl.outputSchema, output);
+          return v.ok ? { ok: true } : { ok: false, errors: v.errors };
+        },
+        goalId: ctx.run.goalId,
+        runId: ctx.run.id,
+        stepRunId: ctx.stepRun.id,
+        adapterId,
+        modelId,
+        responseText: stash.responseText,
+      });
+    } catch (err) {
+      this.stashJudgeFailure(
+        db,
+        now,
+        { goalId: ctx.run.goalId, stepRunId: ctx.stepRun.id, responseText: stash.responseText, err },
+        options
+      );
+      return;
+    }
+    db.prepare("UPDATE workflow_step_runs SET pending_judge_json = NULL WHERE id = ?").run(ctx.stepRun.id);
+    await this.applyOrchestratorAction(db, now, ctx, sessionId, stash.responseText, action, options);
   }
 
   /**
@@ -1678,6 +1767,22 @@ export class OrchestratorService {
         "Saved this guidance. It will be sent when the current provider is retried or included in the replacement provider handoff.",
         options
       );
+      return;
+    }
+
+    // A previous step evaluation failed (stashJudgeFailure). Treat this message
+    // as a retry: replay the stored agent response through the judge rather than
+    // routing the text as fresh guidance.
+    if (stepRun.pending_judge_json) {
+      const sessionId =
+        (
+          db
+            .prepare(
+              "SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('created','starting','running') ORDER BY created_at DESC LIMIT 1"
+            )
+            .get(stepRun.id) as { id: string } | undefined
+        )?.id ?? null;
+      await this.runStashedJudgeRetry(db, now, { run, stepRun, stepTpl, template, goal }, sessionId, options);
       return;
     }
 

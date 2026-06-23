@@ -162,6 +162,7 @@ describe("runMigrations", () => {
       "0034_activity_steps.sql",
       "0035_orchestrator_message_pending_revision.sql",
       "0036_workspaces_first_class.sql",
+      "0037_step_run_pending_judge.sql",
     ]);
   });
 
@@ -290,6 +291,7 @@ describe("runMigrations", () => {
       "0034_activity_steps.sql",
       "0035_orchestrator_message_pending_revision.sql",
       "0036_workspaces_first_class.sql",
+      "0037_step_run_pending_judge.sql",
     ]);
 
     const goalCount = (
@@ -571,6 +573,7 @@ describe("session tables migration", () => {
       "0034_activity_steps.sql",
       "0035_orchestrator_message_pending_revision.sql",
       "0036_workspaces_first_class.sql",
+      "0037_step_run_pending_judge.sql",
     ]);
 
     const tables = (
@@ -1085,6 +1088,7 @@ describe("migration 0010 workflows", () => {
       "0034_activity_steps.sql",
       "0035_orchestrator_message_pending_revision.sql",
       "0036_workspaces_first_class.sql",
+      "0037_step_run_pending_judge.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1676,6 +1680,7 @@ describe("migration 0012 orchestration transport", () => {
       "0034_activity_steps.sql",
       "0035_orchestrator_message_pending_revision.sql",
       "0036_workspaces_first_class.sql",
+      "0037_step_run_pending_judge.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
