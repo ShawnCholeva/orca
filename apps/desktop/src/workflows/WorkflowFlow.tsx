@@ -15,6 +15,35 @@ export interface WorkflowFlowProps {
 const NODE_W = 240;
 const NODE_H = 64;
 const VIEWPORT_H_MIN = 320;
+
+/**
+ * Pure function: given two node top-left positions, return the SVG `d` string
+ * for the edge path connecting source-center-bottom to target-center-top.
+ *
+ * Forward edges (target at or below source): symmetric cubic with no bow.
+ * Backward edges (target above source): cubic bowed to the right to avoid
+ * cutting through the node column.
+ */
+export function edgePath(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): string {
+  const ax = a.x + NODE_W / 2;
+  const ay = a.y + NODE_H;
+  const bx = b.x + NODE_W / 2;
+  const by = b.y;
+
+  if (by >= ay) {
+    // Forward edge: target is at or below source — existing cubic, unchanged.
+    const dy = Math.max(28, (by - ay) / 2);
+    return `M ${ax} ${ay} C ${ax} ${ay + dy}, ${bx} ${by - dy}, ${bx} ${by}`;
+  }
+
+  // Backward edge: target is above source — bow to the right.
+  const bow = 90 + Math.min(170, (ay - by) / 4);
+  const out = 24;
+  return `M ${ax} ${ay} C ${ax + bow} ${ay + out}, ${bx + bow} ${by - out}, ${bx} ${by}`;
+}
 const MIN_SCALE = 0.4;
 const MAX_SCALE = 2;
 
@@ -182,12 +211,7 @@ export function WorkflowFlow({
     const a = positions[fromId];
     const b = positions[toId];
     if (!a || !b) return "";
-    const ax = a.x + NODE_W / 2;
-    const ay = a.y + NODE_H;
-    const bx = b.x + NODE_W / 2;
-    const by = b.y;
-    const dy = Math.max(28, (by - ay) / 2);
-    return `M ${ax} ${ay} C ${ax} ${ay + dy}, ${bx} ${by - dy}, ${bx} ${by}`;
+    return edgePath(a, b);
   }
 
   function removeEdge(i: number) {
