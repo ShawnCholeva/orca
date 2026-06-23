@@ -223,6 +223,7 @@ describe("OrchestratorService splitter routing", () => {
       pending_split_route_json: string | null;
     };
     expect(parked.current_node_kind).toBe("splitter");
+    expect(parked.current_node_id).toBe("route");
     expect(parked.current_step_run_id).toBeNull();
     expect(JSON.parse(parked.pending_split_route_json!)).toMatchObject({
       splitterNodeId: "route",
@@ -245,10 +246,11 @@ describe("OrchestratorService splitter routing", () => {
     // (proves the supervised-card guarantee).
     const pausedActivity = db
       .prepare(
-        "SELECT id, status FROM activities WHERE step_run_id = 'step-s0' AND status = 'paused_for_input' LIMIT 1"
+        "SELECT id, status, source_kind FROM activities WHERE step_run_id = 'step-s0' AND status = 'paused_for_input' LIMIT 1"
       )
-      .get() as { id: string; status: string } | undefined;
+      .get() as { id: string; status: string; source_kind: string } | undefined;
     expect(pausedActivity?.status).toBe("paused_for_input");
+    expect(pausedActivity?.source_kind).toBe("step_confirmation_pending");
 
     // Continue: confirmSplit clears the stash and routes to step 'a'.
     await service.confirmSplit(db, () => NOW, "run-1", { bus, idFactory });
