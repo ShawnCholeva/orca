@@ -3,6 +3,8 @@ const port = process.env.ORCA_PAPER_PORT || "8787";
 const MAX_DIST = Number(process.env.ORCA_PAPER_MAX_DIST || "1.3");
 const WORD_CAP = 150;
 
+import { isSubstantive, rewriteQuery } from "./rewrite.mjs";
+
 function readStdin() {
   return new Promise((resolve) => {
     let data = "";
@@ -19,6 +21,10 @@ function clampWords(text, n) {
 }
 
 async function main() {
+  // Recursion guard: the nested `claude -p` rewrite runs this hook again in its
+  // own session; bail immediately so it can't trigger itself.
+  if (process.env.ORCA_PAPER_REWRITING) return;
+
   let prompt = "";
   try {
     prompt = (JSON.parse(await readStdin()).prompt || "").trim();
@@ -27,12 +33,26 @@ async function main() {
   }
   if (!prompt) return;
 
+  const debug = !!process.env.ORCA_PAPER_DEBUG;
+  let query = prompt;
+  if (isSubstantive(prompt)) {
+    const rewritten = await rewriteQuery(prompt);
+    if (rewritten) {
+      query = rewritten;
+      if (debug) process.stderr.write(`rewrote: ${JSON.stringify(query)}\n`);
+    } else if (debug) {
+      process.stderr.write("rewrite failed, using raw prompt\n");
+    }
+  } else if (debug) {
+    process.stderr.write("rewrite skipped (short prompt)\n");
+  }
+
   let results = [];
   try {
     const res = await fetch(`http://127.0.0.1:${port}/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: prompt, k: 3 }),
+      body: JSON.stringify({ query, k: 3 }),
       signal: AbortSignal.timeout(800),
     });
     if (!res.ok) return;
