@@ -682,30 +682,21 @@ export function WorkflowFlow({
                                   });
                                 }}
                                 title={`Drag to connect ${branch} branch`}
+                                aria-label={`Connect ${branch} branch`}
                                 style={{
                                   position: "absolute",
-                                  bottom: -9,
+                                  bottom: -7,
                                   left: `${frac * 100}%`,
                                   transform: "translateX(-50%)",
-                                  width: 44,
-                                  height: 16,
-                                  borderRadius: 8,
+                                  width: 13,
+                                  height: 13,
+                                  borderRadius: 7,
                                   background: "var(--panel)",
-                                  border: "1px solid var(--hairline-strong)",
-                                  color: "var(--text-2)",
+                                  border: "1.5px solid var(--accent)",
                                   cursor: "crosshair",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
                                   padding: 0,
-                                  fontFamily: "inherit",
-                                  fontSize: 9,
-                                  lineHeight: "1",
-                                  fontWeight: 500,
                                 }}
-                              >
-                                {branch}
-                              </button>
+                              />
                             );
                           })}
                         </>
