@@ -1758,6 +1758,16 @@ export function createServer(
     return reply.code(202).send({ ok: true });
   });
 
+  server.post<{ Params: { id: string } }>("/v1/workflows/runs/:id/confirm-split", async (request, reply) => {
+    await orchestratorService.confirmSplit(
+      getDatabase(),
+      daemonContext.now,
+      request.params.id,
+      { bus: eventBus, idFactory: daemonContext.idFactory }
+    );
+    return reply.code(202).send({ ok: true });
+  });
+
   server.post<{ Params: { id: string } }>("/v1/workflows/runs/:id/interrupt", async (request, reply) => {
     const interrupted = await orchestratorService.interruptStepAgent(
       getDatabase(),
