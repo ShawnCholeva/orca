@@ -191,6 +191,24 @@ describe("reconcileGraph", () => {
     expect(s2!.terminal).toBe(true);
   });
 
+  it("preserves existing splitter nodes (and branches) when adding a step", () => {
+    const steps = [makeStep("s1"), makeStep("s2")];
+    const base = buildInitialGraph(steps);
+    const graphWithSplitter = {
+      ...base,
+      nodes: [
+        ...base.nodes,
+        { id: "split-1", type: "splitter" as const, name: "Route", branches: ["go_a", "go_b"] },
+      ],
+      positions: { ...base.positions, "split-1": { x: 200, y: 300 } },
+    };
+    const result = reconcileGraph([...steps, makeStep("s3")], graphWithSplitter);
+    const splitter = result.nodes.find((n) => n.id === "split-1");
+    expect(splitter).toBeTruthy();
+    expect(splitter?.branches).toEqual(["go_a", "go_b"]);
+    expect(result.positions["split-1"]).toEqual({ x: 200, y: 300 });
+  });
+
   it("preserves an existing terminal flag instead of overriding it", () => {
     const steps = [makeStep("s1"), makeStep("s2")];
     const graph = {

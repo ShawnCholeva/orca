@@ -238,11 +238,11 @@ export function TemplateDetail({
         const existing = next.nodes.find((n) => n.id === s.id);
         return existing ?? { id: s.id, type: "step" as const, name: s.name, stepId: s.id };
       });
-      const gateNodes = next.nodes.filter((n) => n.type === "gate");
+      const nonStepNodes = next.nodes.filter((n) => n.type === "gate" || n.type === "splitter");
       return {
         ...current,
         graph: {
-          nodes: [...stepNodes, ...gateNodes],
+          nodes: [...stepNodes, ...nonStepNodes],
           edges: next.edges,
           positions: next.positions,
         },
@@ -250,7 +250,7 @@ export function TemplateDetail({
     });
   }
 
-  function handleAddNode(type: "step" | "gate") {
+  function handleAddNode(type: "step" | "gate" | "splitter") {
     if (locked) return;
     if (type === "step") {
       setDraft((current) => {
@@ -261,8 +261,7 @@ export function TemplateDetail({
         setTimeout(() => setOpenNodeId(newStep.id), 0);
         return { ...current, steps: nextSteps, graph: nextGraph };
       });
-    } else {
-      // gate
+    } else if (type === "gate") {
       setDraft((current) => {
         const id = `gate-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000)}`;
         const ys = Object.values(current.graph.positions).map((p) => p.y);
@@ -277,6 +276,23 @@ export function TemplateDetail({
         const nextGraph: WorkflowGraph = {
           ...current.graph,
           nodes: [...current.graph.nodes, gateNode],
+          positions: { ...current.graph.positions, [id]: pos },
+        };
+        setTimeout(() => setOpenNodeId(id), 0);
+        return { ...current, graph: nextGraph };
+      });
+    } else if (type === "splitter") {
+      setDraft((current) => {
+        const id = `splitter-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000)}`;
+        const ys = Object.values(current.graph.positions).map((p) => p.y);
+        const maxY = ys.length ? Math.max(...ys) : 0;
+        const pos = { x: 110, y: maxY + 92 };
+        const splitterNode: WorkflowGraphNode = {
+          id, type: "splitter", name: "New splitter", branches: ["Branch A", "Branch B"],
+        };
+        const nextGraph: WorkflowGraph = {
+          ...current.graph,
+          nodes: [...current.graph.nodes, splitterNode],
           positions: { ...current.graph.positions, [id]: pos },
         };
         setTimeout(() => setOpenNodeId(id), 0);

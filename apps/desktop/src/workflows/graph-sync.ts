@@ -42,7 +42,7 @@ export function reconcileGraph(
   graph: WorkflowGraph,
 ): WorkflowGraph {
   const stepById = new Map(steps.map((s) => [s.id, s]));
-  const existingGates = graph.nodes.filter((n) => n.type === "gate");
+  const existingNonStep = graph.nodes.filter((n) => n.type === "gate" || n.type === "splitter");
   const existingStepNodes = graph.nodes.filter((n) => n.type === "step");
   const existingStepNodeById = new Map(existingStepNodes.map((n) => [n.stepId ?? n.id, n]));
 
@@ -76,10 +76,10 @@ export function reconcileGraph(
     delete nextPositions[id];
   }
 
-  // All surviving nodes = current step nodes + all gate nodes
+  // All surviving nodes = current step nodes + all non-step nodes (gates, splitters)
   const validNodeIds = new Set([
     ...nextStepNodes.map((n) => n.id),
-    ...existingGates.map((n) => n.id),
+    ...existingNonStep.map((n) => n.id),
   ]);
 
   // Drop edges where either endpoint no longer exists, self-loops, and
@@ -94,12 +94,12 @@ export function reconcileGraph(
     return true;
   });
 
-  // Ensure all gates have positions (gate nodes are never auto-created here,
+  // Ensure all non-step nodes have positions (they are never auto-created here,
   // but we guard in case something slipped through)
-  for (const gate of existingGates) {
-    if (!nextPositions[gate.id]) {
+  for (const node of existingNonStep) {
+    if (!nextPositions[node.id]) {
       const y = maxY + 92;
-      nextPositions[gate.id] = { x: 110, y };
+      nextPositions[node.id] = { x: 110, y };
     }
   }
 
@@ -111,7 +111,7 @@ export function reconcileGraph(
   }
 
   return {
-    nodes: [...nextStepNodes, ...existingGates],
+    nodes: [...nextStepNodes, ...existingNonStep],
     edges: nextEdges,
     positions: nextPositions,
   };
