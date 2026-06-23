@@ -50,8 +50,7 @@ export function validateGraph(
       for (const e of out) {
         if (e.port) errors.push(`step edge must not carry a port: ${e.from} -> ${e.to}`);
       }
-    } else {
-      // gate
+    } else if (node.type === "gate") {
       for (const outcome of ["approved", "rejected"] as const) {
         const matching = out.filter((e) => e.port === outcome);
         if (matching.length !== 1) {
@@ -63,6 +62,29 @@ export function validateGraph(
       for (const e of out) {
         if (e.port !== "approved" && e.port !== "rejected") {
           errors.push(`gate edge must carry a valid port: ${e.from} -> ${e.to}`);
+        }
+      }
+    } else {
+      // splitter
+      const branches = node.branches ?? [];
+      if (branches.length < 2 || branches.length > 8) {
+        errors.push(`splitter '${node.id}' must declare 2-8 branches (found ${branches.length})`);
+      }
+      const uniqueBranches = new Set(branches);
+      if (uniqueBranches.size !== branches.length) {
+        errors.push(`splitter '${node.id}' has duplicate branch labels`);
+      }
+      for (const label of uniqueBranches) {
+        const matching = out.filter((e) => e.port === label);
+        if (matching.length !== 1) {
+          errors.push(
+            `splitter '${node.id}' must have exactly one '${label}' edge (found ${matching.length})`
+          );
+        }
+      }
+      for (const e of out) {
+        if (!e.port || !uniqueBranches.has(e.port)) {
+          errors.push(`splitter edge must carry a declared branch port: ${e.from} -> ${e.to}`);
         }
       }
     }

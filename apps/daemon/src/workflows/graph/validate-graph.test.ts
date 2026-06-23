@@ -135,6 +135,56 @@ describe("validateGraph", () => {
   });
 });
 
+describe("validateGraph splitter", () => {
+  const splitterSteps = [step("triage", 0), step("a", 1), step("b", 2), step("done", 3)];
+
+  const splitterValid: WorkflowGraph = {
+    nodes: [
+      { id: "triage", type: "step", name: "Triage", stepId: "triage" },
+      { id: "route", type: "splitter", name: "Route", instructions: "pick", branches: ["go_a", "go_b"] },
+      { id: "a", type: "step", name: "A", stepId: "a" },
+      { id: "b", type: "step", name: "B", stepId: "b" },
+      { id: "done", type: "step", name: "Done", stepId: "done", terminal: true },
+    ],
+    edges: [
+      { from: "triage", to: "route" },
+      { from: "route", to: "a", port: "go_a" },
+      { from: "route", to: "b", port: "go_b" },
+      { from: "a", to: "done" },
+      { from: "b", to: "done" },
+    ],
+    positions: {},
+  };
+
+  it("accepts a well-formed splitter graph", () => {
+    expect(validateGraph(splitterValid, splitterSteps)).toEqual([]);
+  });
+
+  it("rejects a splitter with a missing branch edge", () => {
+    const g = { ...splitterValid, edges: splitterValid.edges.filter((e) => e.port !== "go_b") };
+    expect(validateGraph(g, splitterSteps)).toContain(
+      "splitter 'route' must have exactly one 'go_b' edge (found 0)"
+    );
+  });
+
+  it("rejects a splitter outgoing edge with an undeclared port", () => {
+    const g = {
+      ...splitterValid,
+      nodes: splitterValid.nodes.map((n) => (n.id === "route" ? { ...n, branches: ["go_a", "go_b"] } : n)),
+      edges: [...splitterValid.edges, { from: "route", to: "done", port: "go_c" }],
+    };
+    expect(validateGraph(g, splitterSteps)).toContain("splitter edge must carry a declared branch port: route -> done");
+  });
+
+  it("rejects a splitter with duplicate branch labels", () => {
+    const g = {
+      ...splitterValid,
+      nodes: splitterValid.nodes.map((n) => (n.id === "route" ? { ...n, branches: ["go_a", "go_a"] } : n)),
+    };
+    expect(validateGraph(g, splitterSteps)).toContain("splitter 'route' has duplicate branch labels");
+  });
+});
+
 describe("validateSchemaReferences", () => {
   function refStep(id: string, ordinal: number, instructions: string, produces: string[]): WorkflowStepTemplate {
     return {
