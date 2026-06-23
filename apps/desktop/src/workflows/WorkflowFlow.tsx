@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { WorkflowGraph } from "@orca/contracts";
-import { GateGlyph, PlusIcon, CloseIcon, ArrowRightIcon } from "./icons";
+import { GateGlyph, SplitterGlyph, PlusIcon, CloseIcon, ArrowRightIcon } from "./icons";
 
 export interface WorkflowFlowProps {
   graph: WorkflowGraph;
   onGraphChange: (next: WorkflowGraph) => void;
   onOpenNode: (id: string) => void;
-  onAddNode: (type: "step" | "gate") => void;
+  onAddNode: (type: "step" | "gate" | "splitter") => void;
   onRemoveNode: (id: string) => void;
   onResetLayout: () => void;
   readOnly?: boolean;
@@ -38,7 +38,7 @@ export function WorkflowFlow({
   } | null>(null);
   const [linkDrag, setLinkDrag] = useState<{
     fromId: string;
-    fromPort?: "approved" | "rejected";
+    fromPort?: string;
     startX: number;
     startY: number;
     x: number;
@@ -266,6 +266,21 @@ export function WorkflowFlow({
             <GateGlyph size={12} />
             Add gate
           </button>
+          <button
+            type="button"
+            onClick={() => onAddNode("splitter")}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              height: 22, padding: "0 8px", borderRadius: 7,
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid var(--hairline)",
+              color: "var(--text)", fontFamily: "inherit",
+              fontSize: 11.5, fontWeight: 500, cursor: "pointer",
+            }}
+          >
+            <SplitterGlyph size={12} />
+            Add splitter
+          </button>
           <div style={{ flex: 1 }} />
           <button
             type="button"
@@ -420,8 +435,9 @@ export function WorkflowFlow({
                 const isDragging = drag?.id === n.id;
                 const isLinkTarget = linkDrag != null && linkDrag.overId === n.id;
                 const isGate = n.type === "gate";
-                const baseBg = isGate ? "rgba(255, 160, 100, 0.06)" : "var(--panel-2)";
-                const baseBorder = isGate ? "var(--accent-line)" : "var(--hairline)";
+                const isSplitter = n.type === "splitter";
+                const baseBg = isGate ? "rgba(255, 160, 100, 0.06)" : isSplitter ? "rgba(100, 160, 255, 0.06)" : "var(--panel-2)";
+                const baseBorder = isGate ? "var(--accent-line)" : isSplitter ? "var(--hairline-strong)" : "var(--hairline)";
 
                 return (
                   <div
@@ -441,7 +457,7 @@ export function WorkflowFlow({
                           : isDragging
                             ? "var(--hairline-strong)"
                             : baseBorder),
-                      borderRadius: isGate ? 28 : 8,
+                      borderRadius: isGate ? 28 : isSplitter ? 14 : 8,
                       padding: "0 12px",
                       display: "flex",
                       alignItems: "center",
@@ -479,6 +495,10 @@ export function WorkflowFlow({
                       <span style={{ display: "inline-flex", flexShrink: 0, color: "var(--accent)" }}>
                         <GateGlyph size={13} />
                       </span>
+                    ) : isSplitter ? (
+                      <span style={{ display: "inline-flex", flexShrink: 0, color: "var(--text-2)" }}>
+                        <SplitterGlyph size={13} />
+                      </span>
                     ) : (
                       <span
                         className="mono"
@@ -501,22 +521,22 @@ export function WorkflowFlow({
                         style={{
                           fontSize: 12.5,
                           fontWeight: 500,
-                          color: isGate ? "var(--accent)" : "var(--text)",
+                          color: isGate ? "var(--accent)" : isSplitter ? "var(--text-2)" : "var(--text)",
                           minWidth: 0,
                           overflow: "hidden",
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
-                          letterSpacing: isGate ? 0.2 : 0,
+                          letterSpacing: isGate ? 0.2 : isSplitter ? 0.1 : 0,
                         }}
                       >
-                        {n.name || (isGate ? "Gate" : "Step")}
+                        {n.name || (isGate ? "Gate" : isSplitter ? "Splitter" : "Step")}
                       </span>
                     </div>
 
-                    {!isGate && <ArrowRightIcon size={11} color="var(--text-4)" />}
+                    {!isGate && !isSplitter && <ArrowRightIcon size={11} color="var(--text-4)" />}
 
                     {/* link-out port(s) — hidden in readOnly */}
-                    {!readOnly && !isGate && (
+                    {!readOnly && !isGate && !isSplitter && (
                       <button
                         type="button"
                         onMouseDown={(e) => {
@@ -607,6 +627,61 @@ export function WorkflowFlow({
                             {portName}
                           </button>
                         ))}
+                      </>
+                    )}
+
+                    {/* Splitter nodes: one labeled out-port per branch, evenly spaced */}
+                    {!readOnly && isSplitter && (
+                      <>
+                        {(n.branches ?? []).map((branch, bi) => {
+                          const count = (n.branches ?? []).length;
+                          const frac = (bi + 1) / (count + 1);
+                          const sx = p.x + NODE_W * frac;
+                          const sy = p.y + NODE_H;
+                          return (
+                            <button
+                              key={branch}
+                              type="button"
+                              onMouseDown={(e) => {
+                                e.stopPropagation();
+                                if (e.button !== 0) return;
+                                setLinkDrag({
+                                  fromId: n.id,
+                                  fromPort: branch,
+                                  startX: sx,
+                                  startY: sy,
+                                  x: sx,
+                                  y: sy,
+                                  overId: null,
+                                });
+                              }}
+                              title={`Drag to connect ${branch} branch`}
+                              style={{
+                                position: "absolute",
+                                bottom: -9,
+                                left: `${frac * 100}%`,
+                                transform: "translateX(-50%)",
+                                width: 44,
+                                height: 16,
+                                borderRadius: 8,
+                                background: "var(--panel)",
+                                border: "1px solid var(--hairline-strong)",
+                                color: "var(--text-2)",
+                                cursor: "crosshair",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                padding: 0,
+                                fontFamily: "inherit",
+                                fontSize: 9,
+                                lineHeight: "1",
+                                fontWeight: 500,
+                              }}
+                            >
+                              {branch}
+                            </button>
+                          );
+                        })}
                       </>
                     )}
 

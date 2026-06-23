@@ -224,4 +224,43 @@ describe("WorkflowFlow", () => {
     // editing affordances stay hidden
     expect(screen.queryByRole("button", { name: /add step/i })).toBeNull();
   });
+
+  it("adds a splitter via the toolbar", () => {
+    const onAddNode = vi.fn();
+    render(
+      <WorkflowFlow
+        graph={makeGraph()}
+        onGraphChange={vi.fn()}
+        onOpenNode={vi.fn()}
+        onAddNode={onAddNode}
+        onRemoveNode={vi.fn()}
+        onResetLayout={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /add splitter/i }));
+    expect(onAddNode).toHaveBeenCalledWith("splitter");
+  });
+
+  it("renders one output port per splitter branch", () => {
+    const graph: WorkflowGraph = {
+      nodes: [
+        { id: "s0", type: "step" as const, name: "Triage" },
+        { id: "route", type: "splitter" as const, name: "Route", branches: ["go_a", "go_b"] },
+      ],
+      edges: [{ from: "s0", to: "route" }],
+      positions: { s0: { x: 110, y: 20 }, route: { x: 110, y: 112 } },
+    };
+    render(
+      <WorkflowFlow
+        graph={graph}
+        onGraphChange={vi.fn()}
+        onOpenNode={vi.fn()}
+        onAddNode={vi.fn()}
+        onRemoveNode={vi.fn()}
+        onResetLayout={vi.fn()}
+      />,
+    );
+    expect(screen.getByTitle(/connect go_a branch/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/connect go_b branch/i)).toBeInTheDocument();
+  });
 });
