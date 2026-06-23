@@ -2143,6 +2143,14 @@ export class OrchestratorService {
     for (const p of pausedGates) {
       await this.confirmGate(db, now, p.run_id, options);
     }
+
+    // Runs parked at a splitter confirmation checkpoint also resume.
+    const pausedSplits = db
+      .prepare("SELECT id AS run_id FROM workflow_runs WHERE pending_split_route_json IS NOT NULL")
+      .all() as { run_id: string }[];
+    for (const p of pausedSplits) {
+      await this.confirmSplit(db, now, p.run_id, options);
+    }
   }
 
   /**
@@ -3234,6 +3242,22 @@ export class OrchestratorService {
         }
       }
 
+      if (result.kind === "splitter") {
+        await this.evaluateAndParkSplitter(
+          db,
+          now,
+          { run, stepRun, stepTpl, template, goal, splitterNodeId: result.nodeId },
+          options
+        );
+        // A supervised park leaves current_step_run_id = NULL (awaiting Continue);
+        // do not recurse. An unsupervised inline route either advanced to a step
+        // with a spawned agent or parked at a downstream splitter/gate.
+        const after = getWorkflowRunById(db, run.id);
+        if (!after || after.status !== "active" || !after.currentStepRunId) {
+          return this.commitNoopLatestDecision(db, run.id, stepRun.id);
+        }
+      }
+
       // recursion depth is bounded by the number of consecutive auto-completing intermediate steps (template step count).
       return this.requestNextDecision(db, now, run.id, options);
     }
@@ -3997,6 +4021,68 @@ export class OrchestratorService {
     // If the destination is a step, deterministically select/spawn its agent
     // (mirrors the requestNextDecision recursion the unsupervised inline path
     // relies on). A gate destination re-pauses inside routeGateDestination.
+    const after = getWorkflowRunById(db, runId);
+    if (after && after.status === "active" && after.currentStepRunId) {
+      await this.requestNextDecision(db, now, runId, options);
+    }
+  }
+
+  /**
+   * User "Continue" for a supervised splitter decision held at a confirmation
+   * checkpoint. Reads + clears pending_split_route_json, expires the confirmation
+   * activity, then performs the deferred route. Idempotent: a null/consumed stash
+   * is a no-op. The splitter is NOT re-evaluated — the decision is already recorded
+   * and deduped by traversal_seq.
+   */
+  async confirmSplit(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run) return;
+    const stashRow = db
+      .prepare("SELECT pending_split_route_json FROM workflow_runs WHERE id = ?")
+      .get(runId) as { pending_split_route_json: string | null } | undefined;
+    if (!stashRow?.pending_split_route_json) return; // idempotent no-op
+
+    let stash: {
+      splitterNodeId: string;
+      selectedBranch: string;
+      destNodeId: string;
+      destKind: "step" | "gate" | "splitter";
+      sourceStepRunId: string;
+    };
+    try {
+      stash = JSON.parse(stashRow.pending_split_route_json);
+    } catch {
+      db.prepare("UPDATE workflow_runs SET pending_split_route_json = NULL WHERE id = ?").run(runId);
+      return;
+    }
+
+    const template = loadRunTemplate(db, run);
+    if (!template) return;
+    const goal = readGoal(db, run.goalId);
+
+    // Clear the stash first so a racing Continue cannot double-route.
+    db.prepare("UPDATE workflow_runs SET pending_split_route_json = NULL WHERE id = ?").run(runId);
+    expireConfirmation(
+      { db, bus: options.bus ?? new EventBus() },
+      { stepRunId: stash.sourceStepRunId }
+    );
+
+    await this.routeGateDestination(
+      db,
+      now,
+      { run, template, goal, sourceStepRunId: stash.sourceStepRunId },
+      { kind: stash.destKind, nodeId: stash.destNodeId },
+      options
+    );
+
+    // If the destination is a step, deterministically select/spawn its agent
+    // (mirrors the requestNextDecision recursion). A splitter/gate destination
+    // re-parks inside routeGateDestination.
     const after = getWorkflowRunById(db, runId);
     if (after && after.status === "active" && after.currentStepRunId) {
       await this.requestNextDecision(db, now, runId, options);
