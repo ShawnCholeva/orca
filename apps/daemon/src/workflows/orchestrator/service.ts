@@ -3655,13 +3655,23 @@ export class OrchestratorService {
         );
       })();
       this.publish(options.bus, stagedEvents);
-      pauseForConfirmation(
-        { db, bus: options.bus ?? new EventBus() },
-        {
-          stepRunId: stepRun.id,
-          summary: `Routing to "${proposal.selectedBranch}": ${proposal.reason}`,
-        }
-      );
+      const summary = `Routing to "${proposal.selectedBranch}": ${proposal.reason}`;
+      const activityCtx = { db, bus: options.bus ?? new EventBus() };
+      // The source step has already completed, so its live activity is likely
+      // finalized — pauseForConfirmation alone would no-op and strand the run.
+      // Mirror the supervised step-completion path: guarantee a live activity
+      // for the source step run exists before pausing, so a confirmation card
+      // is always created (no agent → agentSessionId null).
+      openOrUpdateLive(activityCtx, {
+        goalId: goal.id,
+        workflowRunId: run.id,
+        stepRunId: stepRun.id,
+        agentSessionId: null,
+        sourceKind: "step_started",
+        currentText: summary,
+        workCategory: null,
+      });
+      pauseForConfirmation(activityCtx, { stepRunId: stepRun.id, summary });
       return;
     }
 
