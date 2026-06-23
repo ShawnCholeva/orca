@@ -16,12 +16,11 @@ OVERLAP = 100
 def find_references_page(reader):
     """1-based page where the bibliography starts, or None if not found.
 
-    The References heading only appears once, late in the document; restricting
-    the search to the second half avoids matching inline mentions in the body.
+    Anchor on a line that is *only* the "References" heading, so inline mentions
+    of the word in the body (cross-references, captions) can't truncate the index.
     """
-    n = len(reader.pages)
     for i, page in enumerate(reader.pages, start=1):
-        if i > n // 2 and re.search(r"\bReferences\b", page.extract_text() or ""):
+        if re.search(r"(?m)^\s*References\s*$", page.extract_text() or ""):
             return i
     return None
 
@@ -78,7 +77,7 @@ def main():
         documents=[c[0] for c in chunks],
         metadatas=[{"page": c[1]} for c in chunks],
     )
-    excluded = f" (excluded references from p.{ref_start})" if ref_start else ""
+    excluded = f" (excluded references from p.{ref_start})" if ref_start is not None else ""
     print(f"indexed {len(chunks)} chunks across {pages[-1]} pages{excluded} -> {STORE}")
 
 

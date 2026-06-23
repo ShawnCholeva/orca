@@ -46,10 +46,10 @@ always timed out and fell back to the raw prompt — shipping effectively disabl
 ## Components
 
 ### `ingest.py` — exclude the bibliography
-- `find_references_page(reader)`: returns the 1-based page of the "References"
-  heading, searched only in the second half of the document (the heading appears
-  once, late; this avoids matching inline mentions in the body). Returns `None`
-  if not found.
+- `find_references_page(reader)`: returns the 1-based page whose text contains a
+  line that is *only* the "References" heading (`^\s*References\s*$`, multiline),
+  so inline mentions of the word in the body (cross-references, captions) can't
+  truncate the index. Returns `None` if not found.
 - `load_words_with_pages` stops collecting words at that page. Returns
   `(words, pages, ref_start)`.
 - `main` prints `… (excluded references from p.N)` when a references page was found.
