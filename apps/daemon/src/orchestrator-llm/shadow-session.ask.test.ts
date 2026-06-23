@@ -64,6 +64,31 @@ describe("ShadowSessionManager.ask (hook-resolved)", () => {
     expect((await p).text).toBe('{"kind":"answer_user_directly","body":"hi"}');
   });
 
+  it("re-sends Enter when the first submit doesn't start a turn", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    let enters = 0;
+    const calls: Array<{ args: string[]; input?: string }> = [];
+    const tmux = {
+      calls,
+      run: async (args: string[], input?: string) => {
+        calls.push({ args, input });
+        if (args[0] === "capture-pane") {
+          // Turn only "starts" (esc to interrupt) once a second Enter lands.
+          return { stdout: enters >= 2 ? "esc to interrupt" : "❯ \n auto mode on", stderr: "", code: 0 };
+        }
+        if (args[0] === "send-keys" && args.includes("Enter")) enters++;
+        return { stdout: "", stderr: "", code: 0 };
+      },
+    };
+    const m = new ShadowSessionManager({ ...deps(root, tmux), submitSettleMs: 1, submitConfirmMs: 30 });
+    await m.spawn("G1");
+    const p = m.ask("G1", { systemPrompt: "S", userPrompt: "q", timeoutMs: 2000 });
+    // The fix re-sends Enter because the first submit never started the turn.
+    await vi.waitFor(() => expect(enters).toBeGreaterThanOrEqual(2));
+    m.resolvePending("G1", { text: '```orca:action\n{"kind":"answer_user_directly","body":"ok"}\n```' });
+    expect((await p).text).toBe('{"kind":"answer_user_directly","body":"ok"}');
+  });
+
   it("FIFO serializes: second ask waits for first to settle", async () => {
     const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
     const tmux = fakeTmux();

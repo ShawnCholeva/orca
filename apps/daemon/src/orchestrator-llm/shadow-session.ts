@@ -39,6 +39,8 @@ export interface ShadowSessionDeps {
   pollMs?: number;                    // capture-pane poll interval (default 300)
   startupTimeoutMs?: number;          // max wait for trust+ready (default 20000)
   readyQuietMs?: number;              // settle delay after trust before "ready" (default 1500)
+  submitSettleMs?: number;            // delay after paste before Enter, so a bracketed paste is ingested (default 200)
+  submitConfirmMs?: number;           // max wait for the turn to start before re-sending Enter (default 2000)
 }
 
 interface Pending {
@@ -174,27 +176,19 @@ export class ShadowSessionManager {
     ].join("\n");
     session.systemSent = true;
     const buf = `orca-${goalId}`;
-    if (session.provider.beforeSubmit) {
-      await session.provider.beforeSubmit({
-        tmux: this.tmux,
-        sessionName: session.name,
-        dbg: (msg) => dbg(goalId, msg),
-      });
-    }
-    // Inject as a bracketed paste so multi-line content is treated as input (not submitted early),
-    // then a single Enter submits.
-    await paste(this.tmux, session.name, buf, text);
-    await sendEnter(this.tmux, session.name);
-    return new Promise<{ text: string }>((resolve, reject) => {
+    const capture = session.provider.captureMode();
+    const parser = session.provider.turnParser();
+
+    // Register `pending` before submitting so a fast Stop hook / pane poll always
+    // has somewhere to land, then submit out-of-band (see submitPrompt).
+    const result = new Promise<{ text: string }>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (session.pending?.pollTimer) clearInterval(session.pending.pollTimer);
         session.pending = null;
         reject(new Error(`shadow orchestrator timeout for goal ${goalId}`));
       }, input.timeoutMs);
       const pending: Pending = { resolve, reject, timer };
-      const capture = session.provider.captureMode();
       if (capture.kind === "pane-poll") {
-        const parser = session.provider.turnParser();
         let polling = false;
         pending.pollTimer = setInterval(() => {
           if (polling) return;
@@ -219,6 +213,54 @@ export class ShadowSessionManager {
       }
       session.pending = pending;
     });
+
+    void this.submitPrompt(session, goalId, buf, text).catch((err) =>
+      dbg(goalId, `submit failed: ${err instanceof Error ? err.message : String(err)}`)
+    );
+
+    return result;
+  }
+
+  /**
+   * Paste the prompt and submit it, confirming the turn actually started. A
+   * bracketed paste plus a single Enter can fail to submit on a freshly-spawned
+   * CLI — the welcome/release-notes interstitial swallows the Enter, or the Enter
+   * races the paste ingest — which strands the turn until it times out (the
+   * symptom after a daemon restart spawns a fresh shadow session). So re-send
+   * Enter until the provider reports the turn started (detectTurnStarted), or the
+   * pending ask is already settled/timed out.
+   */
+  private async submitPrompt(session: Session, goalId: string, buf: string, text: string): Promise<void> {
+    if (session.provider.beforeSubmit) {
+      await session.provider.beforeSubmit({
+        tmux: this.tmux,
+        sessionName: session.name,
+        dbg: (msg) => dbg(goalId, msg),
+      });
+    }
+    await paste(this.tmux, session.name, buf, text);
+    const parser = session.provider.turnParser();
+    const detectStarted = parser.detectTurnStarted?.bind(parser);
+    const settle = this.deps.submitSettleMs ?? 200;
+    const confirmMs = this.deps.submitConfirmMs ?? 2000;
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (session.pending === null) return; // already settled / timed out
+      await sleep(settle);
+      await sendEnter(this.tmux, session.name);
+      if (!detectStarted) return; // provider can't confirm — best-effort single submit
+      const deadline = Date.now() + confirmMs;
+      while (Date.now() < deadline) {
+        if (session.pending === null) return;
+        await sleep(150);
+        const pane = await capturePane(this.tmux, session.name);
+        if (detectStarted(pane)) {
+          dbg(goalId, `submit confirmed (attempt ${attempt})`);
+          return;
+        }
+      }
+      dbg(goalId, `submit not confirmed after ${confirmMs}ms (attempt ${attempt}); re-sending Enter`);
+    }
   }
 
   /** Called by the hook endpoint when the goal's shadow session emits Stop/StopFailure. */
