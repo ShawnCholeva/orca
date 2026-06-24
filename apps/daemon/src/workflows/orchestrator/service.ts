@@ -67,6 +67,8 @@ import { detectPendingAgentQuestion } from "./agent-interview.js";
 import { assembleWorkspaceContext } from "./workspace-context.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
 import { recordHarnessTransition } from "../../harness-transitions/usecases.js";
+import { runSensors } from "../../harness-sensors/runner.js";
+import { stepRequiresExecution } from "./requires-execution.js";
 import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.js";
 import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
 import { judgeAgentResponse } from "./judgement.js";
@@ -1559,6 +1561,81 @@ export class OrchestratorService {
           }
         }
 
+        // Deterministic evidence gate: for steps that require execution, run the
+        // sensor ladder in the workspace and veto the LLM's approval if the
+        // verdict is not "passed". Runs before the supervision branch so it
+        // applies to both supervised and unsupervised completions.
+        const execReq = stepRequiresExecution(ctx.template.guardrails, ctx.stepTpl.id);
+        if (execReq) {
+          const workspacePath = listWorkspacesByGoal(db, ctx.run.goalId)[0]?.path ?? null;
+          const evidence = workspacePath
+            ? await runSensors({ workspacePath, required: execReq.required })
+            : null;
+
+          const evStaged: DomainEvent[] = [];
+          evStaged.push(
+            appendWorkflowEvent(
+              db,
+              "workflow.validation.run",
+              { goalId: ctx.run.goalId, workflowRunId: ctx.run.id, stepRunId: ctx.stepRun.id },
+              now(),
+              options.idFactory
+            )
+          );
+
+          // Record the evidence facet on the step_complete transition regardless
+          // of outcome (inspectability), then decide advance vs veto.
+          recordHarnessTransition(
+            { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
+            {
+              goalId: ctx.run.goalId,
+              workflowRunId: ctx.run.id,
+              workflowStepRunId: ctx.stepRun.id,
+              boundary: "step_complete",
+              evidence: evidence ?? undefined,
+            }
+          );
+
+          if (evidence && evidence.verdict !== "passed") {
+            evStaged.push(
+              appendWorkflowEvent(
+                db,
+                "workflow.validation.failed",
+                { goalId: ctx.run.goalId, workflowRunId: ctx.run.id, stepRunId: ctx.stepRun.id },
+                now(),
+                options.idFactory
+              )
+            );
+            this.publish(options.bus, evStaged);
+            const failingSummary = evidence.sensorsRun
+              .filter((s) => s.result === "failed")
+              .map((s) => `- ${s.kind} (\`${s.command}\`): ${s.summary.slice(0, 600)}`)
+              .join("\n");
+            const gapSummary =
+              evidence.oracleAdequacy.gaps.length > 0
+                ? `\nMissing required checks: ${evidence.oracleAdequacy.gaps.join(", ")}`
+                : "";
+            return this.reviseStep(
+              db,
+              now,
+              ctx,
+              sessionId,
+              `Required verification did not pass. Fix these and re-run, then re-emit completion:\n${failingSummary}${gapSummary}`,
+              options
+            );
+          }
+          evStaged.push(
+            appendWorkflowEvent(
+              db,
+              "workflow.validation.passed",
+              { goalId: ctx.run.goalId, workflowRunId: ctx.run.id, stepRunId: ctx.stepRun.id },
+              now(),
+              options.idFactory
+            )
+          );
+          this.publish(options.bus, evStaged);
+        }
+
         const finishedAt = now();
 
         if (getSupervisionMode(db) === "supervised" || ctx.stepTpl.completionPolicy === "handoff") {
@@ -2185,18 +2262,23 @@ export class OrchestratorService {
 
     await this.commitAdvanceOrComplete(db, now, { run, stepRun, stepTpl, template, goal }, options);
 
-    try {
-      recordHarnessTransition(
-        { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
-        {
-          goalId: run.goalId,
-          workflowRunId: run.id,
-          workflowStepRunId: stepRun.id,
-          boundary: "step_complete",
-        }
-      );
-    } catch (err) {
-      console.error("recordHarnessTransition failed", err);
+    // Steps WITH an evidence gate emit their step_complete transition (with the
+    // evidence facet) in the approve_step_complete veto block; emitting again
+    // here would duplicate it. Only emit here for steps without a gate.
+    if (!stepRequiresExecution(template.guardrails, stepRun.step_template_id)) {
+      try {
+        recordHarnessTransition(
+          { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
+          {
+            goalId: run.goalId,
+            workflowRunId: run.id,
+            workflowStepRunId: stepRun.id,
+            boundary: "step_complete",
+          }
+        );
+      } catch (err) {
+        console.error("recordHarnessTransition failed", err);
+      }
     }
 
     // If a NEW intermediate step is now active, spawn its agent (exactly once).

@@ -445,12 +445,37 @@ function recommendationCount(db: Database.Database, type?: string): number {
   return (db.prepare("SELECT COUNT(*) AS c FROM recommendations").get() as { c: number }).c;
 }
 
+const tempDirs: string[] = [];
+
+/** Like seedWorkspace but points 'ws-1' at a real temp dir with a package.json
+ *  whose `typecheck` script exits with `exitCode`, so runSensors executes it. */
+function seedWorkspaceWithTypecheck(db: Database.Database, exitCode: 0 | 1): string {
+  const dir = join(tmpdir(), `orca-evidence-veto-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "package.json"),
+    JSON.stringify({ name: "evidence-veto-fixture", scripts: { typecheck: `node -e "process.exit(${exitCode})"` } })
+  );
+  tempDirs.push(dir);
+  db.prepare(
+    `INSERT OR IGNORE INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run("ws-1", dir, "main", "", NOW, NOW);
+  db.prepare(
+    `INSERT OR IGNORE INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run("goal-1", "ws-1", NOW);
+  return dir;
+}
+
 afterEach(() => {
   closeDatabase();
   resetWorkflowEventPreparedStatements();
   resetWorkflowStepProjectionPreparedStatements();
   resetHarnessTransitionStmts();
   cleanupHarness();
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop()!;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 describe("OrchestratorService agent step", () => {
@@ -3229,5 +3254,108 @@ describe("OrchestratorService.interruptStepAgent", () => {
 
     expect(ok).toBe(false);
     expect(interrupted).toEqual([]);
+  });
+});
+
+describe("OrchestratorService evidence veto (deterministic)", () => {
+  const guardrailsJson = JSON.stringify([
+    {
+      id: "validation_required",
+      kind: "validation_rule",
+      label: "x",
+      configJson: { appliesToSteps: ["implement"], required: ["typecheck"] },
+    },
+  ]);
+
+  const approveScoring = {
+    successScore: 0.8,
+    quality: {
+      outputCompleteness: 0.8,
+      outputCorrectness: 0.8,
+      instructionAdherence: 0.8,
+      downstreamReadiness: 0.8,
+      riskLevel: 0.2,
+    },
+    reason: "ok",
+    handoffReady: true,
+  };
+
+  it("vetoes completion when a required sensor fails", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson });
+    seedWorkspaceWithTypecheck(db, 1); // typecheck exits 1 → sensor failed
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const before = db
+      .prepare("SELECT current_step_run_id FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { current_step_run_id: string };
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete", scoring: approveScoring }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // (a) step did NOT complete/advance.
+    expect(stepOutputCount(db)).toBe(0);
+    const after = db
+      .prepare("SELECT current_step_run_id FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { current_step_run_id: string };
+    expect(after.current_step_run_id).toBe(before.current_step_run_id);
+
+    // (b) a revise occurred (feedback delivered to the agent session).
+    expect(deliver).toHaveBeenCalled();
+
+    // (c) a step_complete transition recorded the failed evidence verdict.
+    const transitions = listTransitionsByGoal(db, "goal-1");
+    const stepComplete = transitions.filter((t) => t.boundary === "step_complete");
+    expect(stepComplete.some((t) => t.evidence?.verdict === "failed")).toBe(true);
+  });
+
+  it("allows completion when required sensors pass and de-dups the transition", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson });
+    seedWorkspaceWithTypecheck(db, 0); // typecheck exits 0 → sensor passed
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete", scoring: approveScoring }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // (a) completion proceeded.
+    expect(stepOutputCount(db)).toBe(1);
+
+    // (b) a step_complete transition recorded the passed evidence verdict.
+    const transitions = listTransitionsByGoal(db, "goal-1");
+    const stepComplete = transitions.filter(
+      (t) => t.boundary === "step_complete" && t.workflowStepRunId === "step-1"
+    );
+    expect(stepComplete.some((t) => t.evidence?.verdict === "passed")).toBe(true);
+
+    // (c) de-dup: the advance emission is suppressed for this gated step, so the
+    // step_complete transition for step-1 is recorded exactly once.
+    expect(stepComplete).toHaveLength(1);
   });
 });
