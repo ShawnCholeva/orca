@@ -178,6 +178,7 @@ describe('context migration 0006_context.sql', () => {
       '0038_workflow_split_decisions.sql',
       '0039_workflow_run_pending_split_route.sql',
       '0040_harness_transitions.sql',
+      '0041_goal_operating_mode.sql',
     ]);
 
     const tables = (
@@ -282,6 +283,7 @@ describe('context migration 0006_context.sql', () => {
       '0038_workflow_split_decisions.sql',
       '0039_workflow_run_pending_split_route.sql',
       '0040_harness_transitions.sql',
+      '0041_goal_operating_mode.sql',
     ]);
 
     const counts = {

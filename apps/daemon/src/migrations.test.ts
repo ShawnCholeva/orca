@@ -166,6 +166,7 @@ describe("runMigrations", () => {
       "0038_workflow_split_decisions.sql",
       "0039_workflow_run_pending_split_route.sql",
       "0040_harness_transitions.sql",
+      "0041_goal_operating_mode.sql",
     ]);
   });
 
@@ -298,6 +299,7 @@ describe("runMigrations", () => {
       "0038_workflow_split_decisions.sql",
       "0039_workflow_run_pending_split_route.sql",
       "0040_harness_transitions.sql",
+      "0041_goal_operating_mode.sql",
     ]);
 
     const goalCount = (
@@ -583,6 +585,7 @@ describe("session tables migration", () => {
       "0038_workflow_split_decisions.sql",
       "0039_workflow_run_pending_split_route.sql",
       "0040_harness_transitions.sql",
+      "0041_goal_operating_mode.sql",
     ]);
 
     const tables = (
@@ -1101,6 +1104,7 @@ describe("migration 0010 workflows", () => {
       "0038_workflow_split_decisions.sql",
       "0039_workflow_run_pending_split_route.sql",
       "0040_harness_transitions.sql",
+      "0041_goal_operating_mode.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1696,6 +1700,7 @@ describe("migration 0012 orchestration transport", () => {
       "0038_workflow_split_decisions.sql",
       "0039_workflow_run_pending_split_route.sql",
       "0040_harness_transitions.sql",
+      "0041_goal_operating_mode.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

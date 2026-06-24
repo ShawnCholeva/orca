@@ -63,6 +63,7 @@ import {
   CheckSystemReadinessResponse,
   SubmitPermissionDecisionRequest,
   UpdateWorkerPermissionModeRequest,
+  UpdateOperatingModeRequest,
   PutSettingsRequest,
   ProviderRecoveryActionRequest,
   ProviderRecoverySwitchRequest,
@@ -1686,6 +1687,29 @@ export function createServer(
     if (!goalExists) { reply.status(404); return { error: { code: "goal_not_found" } }; }
     eventBus.publish({ seq, id: eventId, type: "goal.worker_permission_mode_changed", goalId, payload: { workerPermissionMode: parsed.data.workerPermissionMode }, createdAt: now });
     return { ok: true, workerPermissionMode: parsed.data.workerPermissionMode };
+  });
+
+  // ---- Operating mode toggle route ----
+
+  server.put("/v1/goals/:goalId/operating-mode", async (request, reply) => {
+    const { goalId } = request.params as { goalId: string };
+    const parsed = UpdateOperatingModeRequest.safeParse(request.body);
+    if (!parsed.success) { reply.status(400); return { error: "validation_failed", issues: parsed.error.issues }; }
+    const now = daemonContext.now();
+    const eventId = daemonContext.idFactory();
+    let seq = 0; let goalExists = false;
+    db.transaction(() => {
+      const existing = db.prepare("SELECT id FROM goals WHERE id = ? AND archived_at IS NULL").get(goalId);
+      if (!existing) return;
+      goalExists = true;
+      const result = db.prepare("INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(eventId, "goal.operating_mode_changed", goalId, JSON.stringify({ operatingMode: parsed.data.operatingMode }), now);
+      seq = Number(result.lastInsertRowid);
+      db.prepare("UPDATE goals SET operating_mode = ?, updated_at = ? WHERE id = ?").run(parsed.data.operatingMode, now, goalId);
+    })();
+    if (!goalExists) { reply.status(404); return { error: { code: "goal_not_found" } }; }
+    eventBus.publish({ seq, id: eventId, type: "goal.operating_mode_changed", goalId, payload: { operatingMode: parsed.data.operatingMode }, createdAt: now });
+    return { ok: true, operatingMode: parsed.data.operatingMode };
   });
 
   // ---- Settings routes ----

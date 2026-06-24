@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OperatingMode } from "./harness/index.js";
 import {
   ModelProviderId,
   OperatorKind,
@@ -29,6 +30,9 @@ export type GoalStatus = z.infer<typeof GoalStatus>;
 export const WorkerPermissionMode = z.enum(["ask", "auto"]);
 export type WorkerPermissionMode = z.infer<typeof WorkerPermissionMode>;
 
+export const UpdateOperatingModeRequest = z.object({ operatingMode: OperatingMode }).strict();
+export type UpdateOperatingModeRequest = z.infer<typeof UpdateOperatingModeRequest>;
+
 export const Goal = z.object({
   id: z.string(),
   title: z.string(),
@@ -36,6 +40,7 @@ export const Goal = z.object({
   status: GoalStatus,
   autonomyLevel: z.number().int().default(1),
   workerPermissionMode: WorkerPermissionMode.default("ask"),
+  operatingMode: OperatingMode.default("human_review"),
   orchestratorProvider: ModelProviderId.nullable().optional(),
   orchestratorModel: z.string().nullable().optional(),
   activeWorkflowRunId: z.string().nullable().optional(),
@@ -241,6 +246,7 @@ export const DomainEventType = z.enum([
   "workflow.human_review.requested",
   "adapter.execution_modes.changed",
   "goal.worker_permission_mode_changed",
+  "goal.operating_mode_changed",
   "activity.changed",
   "harness.transition.recorded"
 ]);
