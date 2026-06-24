@@ -166,7 +166,7 @@ export function evaluateGuardrail(
           message:
             ctx.candidateAction.kind === "skip_validation"
               ? "validation skip requires explicit reason"
-              : `advancing with failing/again required checks (${cfg.required.join(", ")}) requires approval`,
+              : `advancing with failing or missing required checks (${cfg.required.join(", ")}) requires approval`,
         };
       }
       return { guardrailId: guardrail.id, kind: guardrail.kind, result: "allow" };

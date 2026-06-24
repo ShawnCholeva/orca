@@ -11,7 +11,7 @@ export type DetectedSensor = {
 
 // Maps a guardrail `required` label to (sensor kind, package.json script name).
 // Ordered cheapest-first so the runner can fail fast.
-const LABEL_TO_SCRIPT: Array<{ label: string; kind: WorkflowSensorKind; script: string }> = [
+export const LABEL_TO_SCRIPT: Array<{ label: string; kind: WorkflowSensorKind; script: string }> = [
   { label: "typecheck", kind: "typecheck", script: "typecheck" },
   { label: "lint", kind: "lint", script: "lint" },
   { label: "unit_tests", kind: "unit", script: "test" },

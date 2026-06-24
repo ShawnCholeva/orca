@@ -2,7 +2,7 @@
 import type { EvidenceFacet, SensorResult } from "@orca/contracts";
 import { runCheckCommand } from "../readiness/exec.js";
 import { inheritCredEnv } from "../readiness/exec.js";
-import { detectSensors } from "./detect.js";
+import { detectSensors, LABEL_TO_SCRIPT } from "./detect.js";
 
 const SENSOR_TIMEOUT_MS = 180_000; // tests/typecheck need far longer than the 5s readiness default
 const SUMMARY_MAX = 4000;
@@ -49,16 +49,10 @@ export async function runSensors(opts: {
   }
 
   // A required label maps to a sensor kind via detect.ts's LABEL_TO_SCRIPT.
-  const requiredKinds: Array<{ label: string; kind: SensorResult["kind"] }> = [
-    { label: "typecheck", kind: "typecheck" },
-    { label: "lint", kind: "lint" },
-    { label: "unit_tests", kind: "unit" },
-    { label: "build", kind: "build" },
-  ];
   const gaps: string[] = [];
-  for (const rk of requiredKinds) {
-    if (!opts.required.includes(rk.label)) continue;
-    if (!detectedLabels.has(rk.kind)) gaps.push(`${rk.label}: no matching script`);
+  for (const entry of LABEL_TO_SCRIPT) {
+    if (!opts.required.includes(entry.label)) continue;
+    if (!detectedLabels.has(entry.kind)) gaps.push(`${entry.label}: no matching script`);
   }
 
   const missingRequired = gaps.length > 0;

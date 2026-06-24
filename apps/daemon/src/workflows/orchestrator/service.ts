@@ -1568,9 +1568,15 @@ export class OrchestratorService {
         const execReq = stepRequiresExecution(ctx.template.guardrails, ctx.stepTpl.id);
         if (execReq) {
           const workspacePath = listWorkspacesByGoal(db, ctx.run.goalId)[0]?.path ?? null;
-          const evidence = workspacePath
-            ? await runSensors({ workspacePath, required: execReq.required })
-            : null;
+          let evidence: Awaited<ReturnType<typeof runSensors>> | null = null;
+          if (workspacePath) {
+            try {
+              evidence = await runSensors({ workspacePath, required: execReq.required });
+            } catch (err) {
+              console.error("runSensors failed", err);
+              evidence = null;
+            }
+          }
 
           const evStaged: DomainEvent[] = [];
           evStaged.push(
