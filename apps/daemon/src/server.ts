@@ -585,6 +585,9 @@ export function createServer(
   const workerSessions = new WorkerSessionManager({
     privateRoot: path.join(config.dataDir, "workers"),
     authToken: config.getAuthToken(),
+    // Loopback OTLP receiver base; threaded into each worker so Claude/Codex emit
+    // token/cost telemetry to the daemon's /v1/otlp routes (Inspectable Task 6).
+    otlpBaseUrl: `http://127.0.0.1:${config.port}/v1/otlp`,
     hookResolverCommand: config.hookResolverCommand,
     claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
     resolveProvider: (adapterId) => resolveShadowProvider(adapterId as ShadowAdapterId),

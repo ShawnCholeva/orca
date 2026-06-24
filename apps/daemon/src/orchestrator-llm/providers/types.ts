@@ -66,6 +66,10 @@ export interface ShadowProvider {
     sessionId: string;
     resolverCommand: string[];
     configDir: string;
+    /** Daemon loopback OTLP base URL (`http://127.0.0.1:${port}/v1/otlp`); enables worker telemetry emission when present. */
+    otlpBaseUrl?: string;
+    /** Daemon auth token, sent as the OTLP `Authorization: Bearer` header. */
+    authToken?: string;
   }): {
     files: { relPath: string; contents: string }[];
     /** Existing files to copy into the worker's config dir (e.g. provider credentials). Skipped if the source is missing. */

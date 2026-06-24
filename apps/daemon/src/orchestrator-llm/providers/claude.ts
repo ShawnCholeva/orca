@@ -134,13 +134,33 @@ export class ClaudeShadowProvider implements ShadowProvider {
     };
   }
 
-  workerHookConfig(args: { goalId: string; sessionId: string; resolverCommand: string[]; configDir: string }) {
-    // goalId is part of the shared seam signature; Claude's worker hooks key off
-    // sessionId only (the daemon resolves goal from session), so it's unused here.
+  workerHookConfig(args: { goalId: string; sessionId: string; resolverCommand: string[]; configDir: string; otlpBaseUrl?: string; authToken?: string }) {
+    // goalId is used only for OTEL resource attribution below; Claude's worker hooks
+    // key off sessionId only (the daemon resolves goal from session).
     const settings = buildAgentHookSettings({ sessionId: args.sessionId, resolverCommand: args.resolverCommand });
+    // When the daemon threads its loopback OTLP base + token, enable Claude's OTEL
+    // telemetry so token/cost usage POSTs to the daemon receiver. Claude appends the
+    // standard /v1/metrics + /v1/logs sub-paths to the base endpoint itself. Orca's
+    // ids are injected as resource attributes so the parser can key cost back to the
+    // session (verified: Task 3 OTEL spike).
+    const env =
+      args.otlpBaseUrl && args.authToken
+        ? {
+            CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+            OTEL_METRICS_EXPORTER: "otlp",
+            OTEL_LOGS_EXPORTER: "otlp",
+            OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
+            OTEL_EXPORTER_OTLP_ENDPOINT: args.otlpBaseUrl,
+            OTEL_EXPORTER_OTLP_HEADERS: `Authorization=Bearer ${args.authToken}`,
+            OTEL_METRICS_INCLUDE_SESSION_ID: "true",
+            OTEL_METRIC_EXPORT_INTERVAL: "5000",
+            OTEL_RESOURCE_ATTRIBUTES: `orca.session.id=${args.sessionId},orca.goal.id=${args.goalId}`,
+          }
+        : undefined;
     return {
       files: [{ relPath: "settings.json", contents: JSON.stringify(settings, null, 2) }],
       spawnArgs: ["--settings", join(args.configDir, "settings.json")],
+      ...(env ? { env } : {}),
     };
   }
 
