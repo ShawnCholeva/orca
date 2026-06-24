@@ -36,6 +36,7 @@ import {
   resetPreparedStatements as resetHarnessTransitionStmts,
 } from "../../harness-transitions/usecases.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
+import { SessionCostAccumulator } from "../../harness-telemetry/accumulator.js";
 import type { ProviderRecoveryCheckpoint } from "@orca/contracts";
 import { listOrchestratorMessagesByGoal } from "../../orchestrator-chat/projection.js";
 import { listActivitiesByGoal } from "../../activities/projection.js";
@@ -171,7 +172,8 @@ function recordingMediator(action: OrchestratorAction): Pick<OrchestratorMediato
 
 function makeJudgeService(
   mediator: Pick<OrchestratorMediator, "invoke">,
-  workerDeliver: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">
+  workerDeliver: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">,
+  opts: { accumulator?: SessionCostAccumulator } = {}
 ): OrchestratorService {
   return new OrchestratorService(
     fakeAgentSelector(),
@@ -182,7 +184,13 @@ function makeJudgeService(
     fakeStepDispatch(),
     mediator,
     undefined, // workerSpawn
-    workerDeliver
+    workerDeliver,
+    undefined, // workerTerminate
+    undefined, // shadowAsk
+    undefined, // recoveryPromptComposer
+    undefined, // workerWait
+    undefined, // workerInterrupt
+    opts.accumulator // otlpAccumulator
   );
 }
 
@@ -3471,5 +3479,44 @@ describe("OrchestratorService evidence veto (deterministic)", () => {
     // (c) de-dup: the advance emission is suppressed for this gated step, so the
     // step_complete transition for step-1 is recorded exactly once.
     expect(stepComplete).toHaveLength(1);
+  });
+});
+
+describe("OrchestratorService step_complete telemetry facet", () => {
+  it("attaches a TelemetryFacet with worker cost to the step_complete transition", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+
+    const accumulator = new SessionCostAccumulator();
+    // Worker tokens accrued under the agent session id linked to step-1.
+    accumulator.ingest([
+      { sessionId: "sess-judge", tokensIn: 1000, tokensOut: 200, model: "claude-opus-4-8" },
+    ]);
+
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete" }),
+      vi.fn(async () => "delivered" as const),
+      { accumulator }
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    const t = listTransitionsByGoal(db, "goal-1").find((x) => x.boundary === "step_complete");
+    expect(t?.telemetry?.cost?.tokens_in).toBe(1000);
+    expect(t?.telemetry?.cost?.tokens_out).toBe(200);
+    expect(t?.telemetry?.model).toBe("claude-opus-4-8");
+    expect(t?.telemetry?.outcome.status).toBe("succeeded");
+    expect(t?.telemetry?.outcome.failure_code).toBeNull();
   });
 });

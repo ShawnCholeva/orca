@@ -25,7 +25,11 @@ import {
   type WorkflowGraphNode,
   type WorkflowStepTemplate,
   type WorkflowTemplate as WorkflowTemplateT,
+  type TelemetryFacet,
+  type TransitionStatus,
+  type FailureCode,
 } from "@orca/contracts";
+import { computeCost } from "../../harness-telemetry/cost.js";
 
 import { EventBus } from "../../events.js";
 import type { ResolvedMode } from "../../adapters/dispatcher.js";
@@ -379,6 +383,44 @@ const NULL_OUTPUT_STORE: SessionOutputStore = {
   }),
 };
 
+// Drain-only view of the OTLP SessionCostAccumulator (Task 5). Drains and clears
+// a session's accrued worker tokens; returns null when nothing accrued.
+interface TokenAccumulator {
+  drain(sessionId: string): { tokensIn: number; tokensOut: number; model?: string } | null;
+}
+
+const NULL_ACCUMULATOR: TokenAccumulator = { drain: () => null };
+
+/**
+ * Builds the TelemetryFacet for a step_complete transition: drains the session's
+ * accrued worker tokens into a CostEntry (null when nothing accrued or model is
+ * unpriced/unknown) and records the categorical outcome.
+ */
+function buildTelemetry(
+  acc: TokenAccumulator | undefined,
+  sessionId: string | null | undefined,
+  status: TransitionStatus,
+  failureCode: FailureCode | null,
+  latencyMs: number | null
+): TelemetryFacet {
+  const drained = acc && sessionId ? acc.drain(sessionId) : null;
+  const cost = drained && drained.model
+    ? computeCost(drained.model, drained.tokensIn, drained.tokensOut)
+    : null;
+  return {
+    cost,
+    latency_ms: latencyMs,
+    model: drained?.model ?? null,
+    provider_id: null,
+    provider_version: null,
+    prompt_ref: null,
+    raw_output_ref: null,
+    rejected_alternatives: [],
+    human_interventions: [],
+    outcome: { status, failure_code: failureCode },
+  };
+}
+
 export class OrchestratorService {
   private readonly sessionOutputStore: SessionOutputStore;
 
@@ -405,7 +447,11 @@ export class OrchestratorService {
     // worker's live tmux session (preserved-session Wait/Retry).
     private readonly workerWait?: (sessionId: string, adapterId: string) => Promise<void>,
     // Interrupts the worker's current turn (sends Escape) so the user can course-correct.
-    private readonly workerInterrupt?: (sessionId: string) => Promise<void>
+    private readonly workerInterrupt?: (sessionId: string) => Promise<void>,
+    // Drains accrued OTEL worker tokens for a session when a step_complete
+    // transition is recorded, so the TelemetryFacet carries real cost. Defaults
+    // to a no-op (drain → null) so transitions get `cost: null`.
+    private readonly otlpAccumulator: TokenAccumulator = NULL_ACCUMULATOR
   ) {
     this.sessionOutputStore = sessionOutputStore ?? NULL_OUTPUT_STORE;
   }
@@ -1595,7 +1641,15 @@ export class OrchestratorService {
           );
 
           // Record the evidence facet on the step_complete transition regardless
-          // of outcome (inspectability), then decide advance vs veto.
+          // of outcome (inspectability), then decide advance vs veto. A non-passed
+          // verdict vetoes completion, so the outcome is a categorical failure
+          // (failure_code: "evidence_veto"); "partial" escalates, "failed" fails.
+          const vetoed = !!evidence && evidence.verdict !== "passed";
+          const evidenceStatus: TransitionStatus = vetoed
+            ? evidence!.verdict === "partial"
+              ? "escalated"
+              : "failed"
+            : "succeeded";
           recordHarnessTransition(
             { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
             {
@@ -1604,6 +1658,13 @@ export class OrchestratorService {
               workflowStepRunId: ctx.stepRun.id,
               boundary: "step_complete",
               evidence: evidence ?? undefined,
+              telemetry: buildTelemetry(
+                this.otlpAccumulator,
+                sessionId,
+                evidenceStatus,
+                vetoed ? "evidence_veto" : null,
+                null
+              ),
             }
           );
 
@@ -2290,6 +2351,13 @@ export class OrchestratorService {
     // here would duplicate it. Only emit here for steps without a gate.
     if (!stepRequiresExecution(template.guardrails, stepRun.step_template_id)) {
       try {
+        // No agent session id is in scope here; map the worker session that
+        // accrued tokens for this step via sessions.workflow_step_run_id.
+        const sessionRow = db
+          .prepare(
+            "SELECT id FROM sessions WHERE workflow_step_run_id = ? ORDER BY created_at DESC LIMIT 1"
+          )
+          .get(stepRun.id) as { id: string } | undefined;
         recordHarnessTransition(
           { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
           {
@@ -2297,6 +2365,13 @@ export class OrchestratorService {
             workflowRunId: run.id,
             workflowStepRunId: stepRun.id,
             boundary: "step_complete",
+            telemetry: buildTelemetry(
+              this.otlpAccumulator,
+              sessionRow?.id,
+              "succeeded",
+              null,
+              null
+            ),
           }
         );
       } catch (err) {

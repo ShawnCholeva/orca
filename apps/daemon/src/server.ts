@@ -725,7 +725,9 @@ export function createServer(
     // against the worker's live tmux session (preserved-session Wait/Retry).
     (sessionId, adapterId) => workerSessions.waitForProviderReset(sessionId, adapterId),
     // workerInterrupt: sends Escape to the worker so the user can course-correct.
-    (sessionId) => workerSessions.interrupt(sessionId)
+    (sessionId) => workerSessions.interrupt(sessionId),
+    // otlpAccumulator: drains accrued worker tokens at step_complete for the cost facet.
+    otlpAccumulator
   );
   // Wire the late-binding ref so the onChunkAppended callback is live.
   _orchestratorServiceRef.current = orchestratorService;
