@@ -3671,7 +3671,10 @@ describe("OrchestratorService step_complete telemetry facet", () => {
 
 describe("OrchestratorService step_complete state-conflict detection", () => {
   /** Seed a prior concurrent transition on goal-1 owned by a still-running
-   *  session on a DIFFERENT step run, whose write_set writes `memoryRef`. */
+   *  session on a DIFFERENT step run, whose write_set writes `memoryRef`.
+   *  Uses boundary: "step_complete" — the only boundary that carries a real
+   *  (non-empty) write_set in production (step_launch write_set is always []),
+   *  so the prior mirrors what gatherConcurrentPriors actually surfaces. */
   function seedConcurrentPrior(db: Database.Database, memoryRef: string): string {
     db.prepare(
       "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-prior', 'goal-1', 'run-1', 'prior-tpl', 5, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-prior', NULL, NULL, NULL, NULL)"
@@ -3684,7 +3687,7 @@ describe("OrchestratorService step_complete state-conflict detection", () => {
       goalId: "goal-1",
       workflowRunId: "run-1",
       workflowStepRunId: "step-prior",
-      boundary: "step_launch",
+      boundary: "step_complete",
       risk: null,
       evidence: null,
       stateDeps: {
@@ -3777,6 +3780,58 @@ describe("OrchestratorService step_complete state-conflict detection", () => {
       .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'")
       .get() as { pending_completion_json: string | null };
     expect(row.pending_completion_json).toBeNull();
+  });
+
+  it("Test D (C1 regression): a gated step completing on the proceed path records its step_complete transition WITH a non-null stateDeps facet (derived write_set)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    // Gated step: a validation_rule guardrail makes stepRequiresExecution truthy,
+    // so the step_complete transition is recorded at the evidence gate. Pre-C1
+    // that gate read options.stateDepsByStepRunId BEFORE the facet was built, so
+    // stateDeps was undefined — this test asserts it is now non-null.
+    const guardrailsJson = JSON.stringify([
+      {
+        id: "validation_required",
+        kind: "validation_rule",
+        label: "x",
+        configJson: { appliesToSteps: ["implement"], required: ["typecheck"] },
+      },
+    ]);
+    setupAgentStepRun(db, { guardrailsJson });
+    seedWorkspaceWithTypecheck(db, 0); // typecheck exits 0 → sensor passes → proceed
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    // The completing session created a memory row → a non-empty derived write_set.
+    seedSelfCreatedMemory(db, "mem-self");
+
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete" }),
+      vi.fn(async () => "delivered" as const)
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // Completion proceeded (no pause): step-1 produced output.
+    expect(stepOutputCount(db)).toBe(1);
+
+    // Exactly one step_complete transition for step-1, and it carries the facet.
+    const stepComplete = listTransitionsByGoal(db, "goal-1").filter(
+      (t) => t.boundary === "step_complete" && t.workflowStepRunId === "step-1"
+    );
+    expect(stepComplete).toHaveLength(1);
+    const t = stepComplete[0];
+    expect(t.stateDeps).not.toBeNull();
+    expect(t.stateDeps!.write_set).toContainEqual({
+      kind: "memory_item",
+      ref: "mem-self",
+      change_kind: "created",
+    });
   });
 
   it("Test B: decideConflictResponse warns (no pause) under auto policy", () => {

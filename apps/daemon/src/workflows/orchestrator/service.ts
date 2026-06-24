@@ -1670,6 +1670,62 @@ export class OrchestratorService {
           }
         }
 
+        // Stateful axis: derive write_set + assumptions, detect concurrent state
+        // conflicts, and escalate (pause) or warn per policy. Built and threaded
+        // BEFORE the evidence-gate transition below so the step_complete
+        // transition carries evidence+telemetry+stateDeps in ONE record:
+        //  - gated steps record at the evidence gate (~1711), reading the
+        //    threaded facet from options.stateDepsByStepRunId;
+        //  - non-gated steps record at the downstream advance-site (~2493);
+        //  - the conflict-pause early-return records inline (non-gated only;
+        //    gated steps already recorded at the evidence gate).
+        // Guarded so it can NEVER break completion.
+        let conflictPause: { summary: string } | null = null;
+        let stateFacet: StateDepsFacet | null = null;
+        try {
+          const assumptions = extractStepCompleteAssumptions(block);
+          const facet = buildStepCompleteStateFacet(db, {
+            goalId: ctx.run.goalId,
+            sessionId: sessionId ?? "",
+            thisStepRunId: ctx.stepRun.id,
+            assumptions,
+            conflictPolicy: "escalate",
+          });
+          stateFacet = facet;
+          if (decideConflictResponse(facet.conflict_policy, facet.conflicts.length).pause) {
+            const c = facet.conflicts[0];
+            conflictPause = { summary: `state conflict: ${c.kind} on ${c.refs.join(", ")}` };
+          } else if (facet.conflicts.length > 0) {
+            // auto policy → warn-and-proceed: the conflict is recorded on the
+            // facet (carried to the step_complete transition); emit a distinct
+            // event for surfacing.
+            try {
+              db.prepare(
+                "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)"
+              ).run(
+                options.idFactory ? options.idFactory() : crypto.randomUUID(),
+                "state.conflict.detected",
+                ctx.run.goalId,
+                JSON.stringify({ goalId: ctx.run.goalId, stepRunId: ctx.stepRun.id, conflicts: facet.conflicts }),
+                now()
+              );
+            } catch (err) {
+              console.error("state.conflict.detected emit failed", err);
+            }
+          }
+        } catch (err) {
+          console.error("step_complete state-conflict detection failed", err);
+        }
+        // Thread the facet onto the eventual step_complete transition (evidence
+        // gate for gated steps, advance-site for non-gated). One transition
+        // carries it.
+        if (stateFacet) {
+          options = {
+            ...options,
+            stateDepsByStepRunId: { ...options.stateDepsByStepRunId, [ctx.stepRun.id]: stateFacet },
+          };
+        }
+
         // Deterministic evidence gate: for steps that require execution, run the
         // sensor ladder in the workspace and veto the LLM's approval if the
         // verdict is not "passed". Runs before the supervision branch so it
@@ -1770,50 +1826,6 @@ export class OrchestratorService {
 
         const finishedAt = now();
 
-        // Stateful axis: derive write_set + assumptions, detect concurrent state
-        // conflicts, and escalate (pause) or warn per policy. The facet is
-        // threaded onto the step's eventual step_complete transition (so one
-        // transition carries evidence+telemetry+stateDeps) via
-        // options.stateDepsByStepRunId — EXCEPT on escalate-pause, where we
-        // return early and so record the facet-bearing transition here.
-        // Guarded so it can NEVER break completion.
-        let conflictPause: { summary: string } | null = null;
-        let stateFacet: StateDepsFacet | null = null;
-        try {
-          const assumptions = extractStepCompleteAssumptions(block);
-          const facet = buildStepCompleteStateFacet(db, {
-            goalId: ctx.run.goalId,
-            sessionId: sessionId ?? "",
-            thisStepRunId: ctx.stepRun.id,
-            assumptions,
-            conflictPolicy: "escalate",
-          });
-          stateFacet = facet;
-          if (decideConflictResponse(facet.conflict_policy, facet.conflicts.length).pause) {
-            const c = facet.conflicts[0];
-            conflictPause = { summary: `state conflict: ${c.kind} on ${c.refs.join(", ")}` };
-          } else if (facet.conflicts.length > 0) {
-            // auto policy → warn-and-proceed: the conflict is recorded on the
-            // facet (carried to the step_complete transition); emit a distinct
-            // event for surfacing.
-            try {
-              db.prepare(
-                "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)"
-              ).run(
-                options.idFactory ? options.idFactory() : crypto.randomUUID(),
-                "state.conflict.detected",
-                ctx.run.goalId,
-                JSON.stringify({ goalId: ctx.run.goalId, stepRunId: ctx.stepRun.id, conflicts: facet.conflicts }),
-                now()
-              );
-            } catch (err) {
-              console.error("state.conflict.detected emit failed", err);
-            }
-          }
-        } catch (err) {
-          console.error("step_complete state-conflict detection failed", err);
-        }
-
         if (conflictPause || goalRequiresHumanReview(db, ctx.run.goalId) || ctx.stepTpl.completionPolicy === "handoff") {
           const scoringParse = StepResultScoringProposal.safeParse(action.scoring);
           const scoring = scoringParse.success ? scoringParse.data : undefined;
@@ -1824,10 +1836,12 @@ export class OrchestratorService {
             JSON.stringify({ block: block ?? {}, scoring: scoring ?? null, finishedAt, proposal }),
             ctx.stepRun.id
           );
-          // This is an early-return pause: the downstream step_complete
-          // transition is never recorded, so emit the facet-bearing transition
-          // here (one transition carries the stateDeps for this completion).
-          if (stateFacet) {
+          // This is an early-return pause: for non-gated steps the downstream
+          // step_complete transition is never recorded, so emit the
+          // facet-bearing transition here. Gated steps already recorded their
+          // facet-bearing transition at the evidence gate above, so emitting
+          // here would duplicate it — skip them to keep exactly one.
+          if (stateFacet && !execReq) {
             try {
               recordHarnessTransition(
                 { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
@@ -1856,15 +1870,6 @@ export class OrchestratorService {
           });
           pauseForConfirmation(activityCtx, { stepRunId: ctx.stepRun.id, summary });
           return { postedChatReply: false };
-        }
-
-        // Proceed path: thread the facet onto the eventual step_complete
-        // transition recorded downstream (advance/evidence sites).
-        if (stateFacet) {
-          options = {
-            ...options,
-            stateDepsByStepRunId: { ...options.stateDepsByStepRunId, [ctx.stepRun.id]: stateFacet },
-          };
         }
 
         const stagedEvents: DomainEvent[] = [];

@@ -111,7 +111,7 @@ function gatherConcurrentPriors(
   const active = db.prepare(
     "SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('created','starting','running') LIMIT 1"
   );
-  return listTransitionsByGoal(db, goalId)
+  return listTransitionsByGoal(db, goalId, 10_000)
     .filter(
       (t) =>
         t.stateDeps !== null &&
