@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import { buildProvenance } from "./provenance.js";
+import { replayControlPlane } from "./replay.js";
 import { computeHarnessMetrics } from "./usecases.js";
 
 export interface HarnessMetricsRouteDeps {
@@ -26,6 +27,16 @@ export function registerHarnessMetricsRoutes(
       return { error: { code: "goal_not_found", message: `Goal not found: ${goalId}` } };
     }
     return { metrics: computeHarnessMetrics(db, goalId) };
+  });
+
+  server.get("/v1/goals/:goalId/harness-replay", async (request, reply) => {
+    const { goalId } = request.params as { goalId: string };
+    const goalRow = stmtGetGoal.get(goalId);
+    if (!goalRow) {
+      reply.status(404);
+      return { error: { code: "goal_not_found", message: `Goal not found: ${goalId}` } };
+    }
+    return replayControlPlane(db, goalId);
   });
 
   server.get(
