@@ -26,6 +26,7 @@ export type GuardrailContext = {
     | { kind: "advance_step" }
     | { kind: "mark_run_complete" }
     | { kind: "skip_validation" }
+    | { kind: "advance_with_failing_checks" }
     | { kind: "select_operator"; operatorId: string }
     | { kind: "use_raw_terminal_output" };
 };
@@ -156,12 +157,16 @@ export function evaluateGuardrail(
       const appliesToStep =
         ctx.stepTemplateId !== undefined &&
         (cfg.appliesToSteps ?? []).includes(ctx.stepTemplateId);
-      if (ctx.candidateAction.kind === "skip_validation" && appliesToStep) {
+      const gatedKinds = new Set(["skip_validation", "advance_with_failing_checks"]);
+      if (gatedKinds.has(ctx.candidateAction.kind) && appliesToStep) {
         return {
           guardrailId: guardrail.id,
           kind: guardrail.kind,
           result: "require_approval",
-          message: "validation skip requires explicit reason",
+          message:
+            ctx.candidateAction.kind === "skip_validation"
+              ? "validation skip requires explicit reason"
+              : `advancing with failing/again required checks (${cfg.required.join(", ")}) requires approval`,
         };
       }
       return { guardrailId: guardrail.id, kind: guardrail.kind, result: "allow" };

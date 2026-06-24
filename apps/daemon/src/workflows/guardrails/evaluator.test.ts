@@ -15,6 +15,7 @@ import {
   evaluateAllGuardrails,
   evaluateAllGuardrailsInTx,
   evaluateGuardrail,
+  evaluateGuardrailRequiresApproval,
   type GuardrailContext,
 } from "./evaluator.js";
 
@@ -389,5 +390,30 @@ describe("workflow guardrail evaluator", () => {
     );
 
     expect(publishObservations).toEqual([1]);
+  });
+});
+
+const validationGuardrail: WorkflowGuardrailConfig = {
+  id: "validation_required",
+  kind: "validation_rule",
+  label: "Require tests/typecheck",
+  configJson: { appliesToSteps: ["execution"], required: ["unit_tests", "typecheck"] },
+};
+
+describe("validation_rule advance_with_failing_checks", () => {
+  it("requires approval to advance a covered step with failing checks", () => {
+    const result = evaluateGuardrailRequiresApproval([validationGuardrail], {
+      goalId: "g", workflowRunId: "r", stepRunId: "s", stepTemplateId: "execution",
+      candidateAction: { kind: "advance_with_failing_checks" },
+    });
+    expect(result).toBe("require_approval");
+  });
+
+  it("allows advancing an uncovered step", () => {
+    const result = evaluateGuardrailRequiresApproval([validationGuardrail], {
+      goalId: "g", workflowRunId: "r", stepRunId: "s", stepTemplateId: "research",
+      candidateAction: { kind: "advance_with_failing_checks" },
+    });
+    expect(result).toBe("allow");
   });
 });
