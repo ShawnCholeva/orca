@@ -154,6 +154,69 @@ describe("GET /v1/goals/:goalId/harness-replay", () => {
   });
 });
 
+describe("GET /v1/goals/:goalId/harness-attribution", () => {
+  it("returns 200 with failure clusters for a seeded goal", async () => {
+    const db = openTestDb();
+    seedGoal(db, "g");
+    const telemetry = JSON.stringify({
+      cost: null,
+      latency_ms: null,
+      model: null,
+      provider_id: null,
+      provider_version: null,
+      prompt_ref: null,
+      raw_output_ref: null,
+      rejected_alternatives: [],
+      human_interventions: [],
+      outcome: { status: "failed", failure_code: "timeout" },
+    });
+    db.prepare(
+      `INSERT INTO harness_transitions
+         (id, goal_id, workflow_run_id, workflow_step_run_id, boundary, telemetry_json, created_at)
+       VALUES (?, 'g', NULL, NULL, 'step_launch', ?, '2026-01-01T00:00:00.000Z')`
+    ).run("t-1", telemetry);
+
+    const f = Fastify();
+    registerHarnessMetricsRoutes(f, { db });
+
+    const res = await f.inject({ method: "GET", url: "/v1/goals/g/harness-attribution" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      clusters: Array<{ failure_code: string; boundary: string; count: number }>;
+    };
+    expect(body.clusters).toEqual([
+      {
+        failure_code: "timeout",
+        boundary: "step_launch",
+        count: 1,
+        sample_transition_ids: ["t-1"],
+      },
+    ]);
+  });
+
+  it("returns 200 with an empty array for a goal with no failures", async () => {
+    const db = openTestDb();
+    seedGoal(db, "g");
+    const f = Fastify();
+    registerHarnessMetricsRoutes(f, { db });
+
+    const res = await f.inject({ method: "GET", url: "/v1/goals/g/harness-attribution" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ clusters: [] });
+  });
+
+  it("returns 404 for an unknown goal", async () => {
+    const db = openTestDb();
+    const f = Fastify();
+    registerHarnessMetricsRoutes(f, { db });
+
+    const res = await f.inject({ method: "GET", url: "/v1/goals/missing/harness-attribution" });
+    expect(res.statusCode).toBe(404);
+    const body = res.json() as { error: { code: string } };
+    expect(body.error.code).toBe("goal_not_found");
+  });
+});
+
 describe("GET /v1/goals/:goalId/harness-transitions/:transitionId/provenance", () => {
   it("returns 200 with a provenance body for a seeded transition", async () => {
     const db = openTestDb();
