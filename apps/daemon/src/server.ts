@@ -180,6 +180,7 @@ import { createDaemonContext, type DaemonContext } from './daemon-context.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
+import { registerHarnessTransitionRoutes } from './harness-transitions/routes.js';
 import { registerGoalBootstrapRoute } from './goals/bootstrap-route.js';
 import { startWorkflowRun } from './workflows/runs/usecases.js';
 import {
@@ -2006,6 +2007,8 @@ export function createServer(
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
   });
+
+  registerHarnessTransitionRoutes(server, { db });
 
   server.get('/v1/adapters', async (): Promise<ListAdaptersResponse> => {
     const adapters = await adapterRegistry.list();
