@@ -51,6 +51,7 @@ export const migrationFiles = [
   "0037_step_run_pending_judge.sql",
   "0038_workflow_split_decisions.sql",
   "0039_workflow_run_pending_split_route.sql",
+  "0040_harness_transitions.sql",
 ] as const;
 
 export function runMigrations(

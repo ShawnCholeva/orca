@@ -167,7 +167,8 @@ describe("suggested orchestration migration schema", () => {
       "0036_workspaces_first_class.sql",
       "0037_step_run_pending_judge.sql",
       "0038_workflow_split_decisions.sql",
-      "0039_workflow_run_pending_split_route.sql"
+      "0039_workflow_run_pending_split_route.sql",
+      "0040_harness_transitions.sql"
     ]);
 
     const postCounts = {
