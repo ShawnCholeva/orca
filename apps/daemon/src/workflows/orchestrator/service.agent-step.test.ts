@@ -31,6 +31,10 @@ import type { OrchestratorAction } from "@orca/contracts";
 import type { SessionOutputStore } from "../../sessions/output-store.js";
 import type { ShadowAsk } from "./recover-step-scoring.js";
 import { setSupervisionMode } from "../../settings/store.js";
+import {
+  listTransitionsByGoal,
+  resetPreparedStatements as resetHarnessTransitionStmts,
+} from "../../harness-transitions/usecases.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import type { ProviderRecoveryCheckpoint } from "@orca/contracts";
 import { listOrchestratorMessagesByGoal } from "../../orchestrator-chat/projection.js";
@@ -445,6 +449,7 @@ afterEach(() => {
   closeDatabase();
   resetWorkflowEventPreparedStatements();
   resetWorkflowStepProjectionPreparedStatements();
+  resetHarnessTransitionStmts();
   cleanupHarness();
 });
 
@@ -1872,6 +1877,20 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
         workflowStepRunId: run.current_step_run_id,
       })
     );
+  });
+
+  it("advanceToNextStep records a step_complete harness transition for the finished step", async () => {
+    const { db } = setupHarness();
+    setupTwoStepRunWithOutput(db);
+
+    const service = makeAgentService(makeLauncher());
+
+    await service.advanceToNextStep(db, () => NOW, "run-1");
+
+    const txns = listTransitionsByGoal(db, "goal-1");
+    expect(
+      txns.some((t) => t.boundary === "step_complete" && t.workflowStepRunId === "step-1")
+    ).toBe(true);
   });
 
   it("respawnStepAgent re-launches the active step's agent", async () => {

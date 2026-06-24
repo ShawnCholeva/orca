@@ -66,6 +66,7 @@ import { synthesizeStepOutput } from "./synthesize.js";
 import { detectPendingAgentQuestion } from "./agent-interview.js";
 import { assembleWorkspaceContext } from "./workspace-context.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
+import { recordHarnessTransition } from "../../harness-transitions/usecases.js";
 import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.js";
 import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
 import { judgeAgentResponse } from "./judgement.js";
@@ -2183,6 +2184,20 @@ export class OrchestratorService {
     const goal = readGoal(db, run.goalId);
 
     await this.commitAdvanceOrComplete(db, now, { run, stepRun, stepTpl, template, goal }, options);
+
+    try {
+      recordHarnessTransition(
+        { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
+        {
+          goalId: run.goalId,
+          workflowRunId: run.id,
+          workflowStepRunId: stepRun.id,
+          boundary: "step_complete",
+        }
+      );
+    } catch (err) {
+      console.error("recordHarnessTransition failed", err);
+    }
 
     // If a NEW intermediate step is now active, spawn its agent (exactly once).
     const after = getWorkflowRunById(db, runId);
