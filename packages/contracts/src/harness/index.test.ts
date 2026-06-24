@@ -92,3 +92,58 @@ describe("RiskFacet", () => {
     expect(OperatingMode.safeParse("yolo").success).toBe(false);
   });
 });
+
+import { TelemetryFacet, FailureCode, CostEntry } from "./index.js";
+
+describe("CostEntry", () => {
+  it("defaults cache fields to null when omitted (existing serialized facets still parse)", () => {
+    const c = CostEntry.parse({ tokens_in: 1200, tokens_out: 340, usd: 0.0123 });
+    expect(c.cache_read_tokens).toBeNull();
+    expect(c.cache_creation_tokens).toBeNull();
+  });
+  it("accepts populated cache fields", () => {
+    const c = CostEntry.parse({
+      tokens_in: 1200, tokens_out: 340, usd: 0.0123,
+      cache_read_tokens: 50, cache_creation_tokens: 10,
+    });
+    expect(c.cache_read_tokens).toBe(50);
+    expect(c.cache_creation_tokens).toBe(10);
+  });
+});
+
+describe("TelemetryFacet", () => {
+  it("accepts a cost+outcome facet", () => {
+    const t = TelemetryFacet.parse({
+      cost: { tokens_in: 1200, tokens_out: 340, usd: 0.0123 },
+      latency_ms: 880, model: "claude-opus-4-8", provider_id: "anthropic", provider_version: null,
+      prompt_ref: null, raw_output_ref: null,
+      rejected_alternatives: [{ option: "codex", reason: "lower fit score" }],
+      human_interventions: [{ kind: "approval", ref: "appr-1" }],
+      outcome: { status: "succeeded", failure_code: null },
+    });
+    expect(t.cost?.usd).toBeCloseTo(0.0123);
+    expect(t.outcome.status).toBe("succeeded");
+  });
+  it("allows null cost (no usage source)", () => {
+    const t = TelemetryFacet.parse({
+      cost: null, latency_ms: null, model: null, provider_id: null, provider_version: null,
+      prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [],
+      outcome: { status: "failed", failure_code: "timeout" },
+    });
+    expect(t.cost).toBeNull();
+  });
+  it("rejects an unknown failure_code", () => {
+    expect(FailureCode.safeParse("kaboom").success).toBe(false);
+  });
+  it("is accepted as the telemetry facet on a transition", () => {
+    const tr = HarnessTransition.parse({
+      id: "t", goalId: "g", workflowRunId: null, workflowStepRunId: null, boundary: "step_complete",
+      risk: null, evidence: null, stateDeps: null,
+      telemetry: { cost: null, latency_ms: 5, model: null, provider_id: null, provider_version: null,
+        prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [],
+        outcome: { status: "succeeded", failure_code: null } },
+      createdAt: "2026-06-24T00:00:00.000Z",
+    });
+    expect(tr.telemetry?.outcome.status).toBe("succeeded");
+  });
+});

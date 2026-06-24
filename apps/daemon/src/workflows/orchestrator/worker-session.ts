@@ -39,11 +39,15 @@ export interface WorkerSpawnInput {
 export interface WorkerSessionDeps {
   privateRoot: string;        // daemon-private dir, e.g. <dataDir>/workers
   authToken: string;
+  // Daemon loopback OTLP base URL (`http://127.0.0.1:${port}/v1/otlp`); threaded into
+  // each worker's hook config so the provider emits token/cost telemetry to the receiver.
+  // Optional: when absent (e.g. in tests) providers skip telemetry emission.
+  otlpBaseUrl?: string;
   hookResolverCommand: string[];
   claudeBin: string;
   resolveProvider: (adapterId: string) => {
     displayName?: string;
-    workerHookConfig: (args: { goalId: string; sessionId: string; resolverCommand: string[]; configDir: string }) =>
+    workerHookConfig: (args: { goalId: string; sessionId: string; resolverCommand: string[]; configDir: string; otlpBaseUrl?: string; authToken?: string }) =>
       {
         files: { relPath: string; contents: string }[];
         copyFiles?: { relPath: string; sourcePath: string }[];
@@ -96,6 +100,8 @@ export class WorkerSessionManager {
       sessionId: input.sessionId,
       resolverCommand: this.deps.hookResolverCommand,
       configDir: cfgDir,
+      otlpBaseUrl: this.deps.otlpBaseUrl,
+      authToken: this.deps.authToken,
     });
     for (const file of hookCfg.files) {
       const target = join(cfgDir, file.relPath);

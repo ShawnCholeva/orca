@@ -87,8 +87,55 @@ export const RiskFacet = z
   .strict();
 export type RiskFacet = z.infer<typeof RiskFacet>;
 
-// `risk` (RiskFacet) and `evidence` (EvidenceFacet) are now strict schemas;
-// `stateDeps` and `telemetry` remain opaque `z.record` pending future tightening.
+export const TransitionStatus = z.enum(["succeeded", "failed", "escalated", "denied"]);
+export type TransitionStatus = z.infer<typeof TransitionStatus>;
+
+// Categorical, clusterable failure codes (mirrors the extraction enum, migrations/0005).
+export const FailureCode = z.enum([
+  "invalid_output", "timeout", "session_not_terminal", "output_unavailable",
+  "source_truncated", "goal_archived", "session_archived", "daemon_restart",
+  "guardrail_denied", "evidence_veto", "provider_error", "internal_error",
+]);
+export type FailureCode = z.infer<typeof FailureCode>;
+
+export const CostEntry = z
+  .object({
+    tokens_in: z.number().int().nonnegative(),
+    tokens_out: z.number().int().nonnegative(),
+    // Additive (Task 15): default null so existing serialized facets still parse.
+    cache_read_tokens: z.number().int().nonnegative().nullable().default(null),
+    cache_creation_tokens: z.number().int().nonnegative().nullable().default(null),
+    usd: z.number().nonnegative(),
+  })
+  .strict();
+export type CostEntry = z.infer<typeof CostEntry>;
+
+export const TelemetryFacet = z
+  .object({
+    cost: CostEntry.nullable(),
+    latency_ms: z.number().int().nonnegative().nullable(),
+    model: z.string().max(128).nullable(),
+    provider_id: z.string().max(64).nullable(),
+    provider_version: z.string().max(128).nullable(),
+    prompt_ref: z.string().max(512).nullable(),
+    raw_output_ref: z.string().max(512).nullable(),
+    rejected_alternatives: z
+      .array(z.object({ option: z.string().max(256), reason: z.string().max(512) }).strict())
+      .max(64)
+      .default([]),
+    human_interventions: z
+      .array(z.object({ kind: z.string().max(64), ref: z.string().max(128) }).strict())
+      .max(64)
+      .default([]),
+    outcome: z
+      .object({ status: TransitionStatus, failure_code: FailureCode.nullable() })
+      .strict(),
+  })
+  .strict();
+export type TelemetryFacet = z.infer<typeof TelemetryFacet>;
+
+// `risk` (RiskFacet), `evidence` (EvidenceFacet), and `telemetry` (TelemetryFacet)
+// are now strict schemas; `stateDeps` remains opaque `z.record` pending future tightening.
 export const HarnessTransition = z
   .object({
     id: z.string().min(1).max(128),
@@ -99,7 +146,7 @@ export const HarnessTransition = z
     risk: RiskFacet.nullable(),
     evidence: EvidenceFacet.nullable(),
     stateDeps: z.record(z.unknown()).nullable(),
-    telemetry: z.record(z.unknown()).nullable(),
+    telemetry: TelemetryFacet.nullable(),
     createdAt: z.string().datetime(),
   })
   .strict();

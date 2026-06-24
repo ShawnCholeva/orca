@@ -47,13 +47,24 @@ export class CodexShadowProvider implements ShadowProvider {
     };
   }
 
-  workerHookConfig(args: { goalId: string; sessionId: string; resolverCommand: string[]; configDir: string }) {
+  workerHookConfig(args: { goalId: string; sessionId: string; resolverCommand: string[]; configDir: string; otlpBaseUrl?: string; authToken?: string }) {
     // CODEX_HOME points Codex at this private dir; config.toml + hooks.json live at
     // its root (CODEX_HOME *is* the codex home, so no `.codex/` prefix here).
     const codexHome = process.env["CODEX_HOME"] ?? join(homedir(), ".codex");
+    // When the daemon threads its loopback OTLP base + token, append the OTEL exporter
+    // block so Codex POSTs token-usage logs to the daemon receiver. codex 0.139.0
+    // REJECTS the flat `exporter = "otlp-http"` form — the working schema is the
+    // struct/table `[otel.exporter."otlp-http"]`. Codex posts to the endpoint VERBATIM
+    // (it does NOT append /v1/logs), so give it the full /v1/logs path. Orca's ids are
+    // injected via OTEL_RESOURCE_ATTRIBUTES env (Codex honors the standard OTEL SDK env)
+    // so the parser can key cost back to the session (verified: Task 3 OTEL spike).
+    const otelEnabled = Boolean(args.otlpBaseUrl && args.authToken);
+    const configToml = otelEnabled
+      ? `[features]\nhooks = true\n\n[otel]\nlog_user_prompt = false\n\n[otel.exporter."otlp-http"]\nendpoint = "${args.otlpBaseUrl}/v1/logs"\nprotocol = "json"\n`
+      : "[features]\nhooks = true\n";
     return {
       files: [
-        { relPath: "config.toml", contents: "[features]\nhooks = true\n" },
+        { relPath: "config.toml", contents: configToml },
         {
           relPath: "hooks.json",
           contents: JSON.stringify(buildCodexWorkerHookSettings(args), null, 2),
@@ -68,7 +79,12 @@ export class CodexShadowProvider implements ShadowProvider {
       // this the Stop/PermissionRequest hooks never fire. (Folder trust is auto-answered
       // by the worker startup pane handler.)
       spawnArgs: ["--dangerously-bypass-hook-trust"],
-      env: { CODEX_HOME: args.configDir },
+      env: {
+        CODEX_HOME: args.configDir,
+        ...(otelEnabled
+          ? { OTEL_RESOURCE_ATTRIBUTES: `orca.session.id=${args.sessionId},orca.goal.id=${args.goalId}` }
+          : {}),
+      },
     };
   }
 
