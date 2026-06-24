@@ -25,4 +25,11 @@ describe("decideGate", () => {
     expect(decideGate("automated", c({ permissionTier: "full_access", riskClass: "high" }))).toBe("allow");
     expect(decideGate("automated", c({ permissionTier: "sandbox_edit", riskClass: "medium" }))).toBe("allow");
   });
+  it("deny beats allow: a hard-constraint violation denies even with a NON-critical risk (automated)", () => {
+    // Isolates that the deny branch precedes everything: low risk + read_only would
+    // otherwise allow in automated mode, but the hard-constraint violation still denies.
+    expect(
+      decideGate("automated", c({ riskClass: "low", permissionTier: "read_only", hardConstraintViolations: ["x"] }))
+    ).toBe("deny");
+  });
 });

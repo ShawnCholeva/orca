@@ -57,4 +57,20 @@ describe("resolvePermissionDecision", () => {
   it("denies an unknown session (fail-closed)", () => {
     expect(resolvePermissionDecision(ctx(), "nope", { toolName: "Read", toolInput: {}, toolUseId: "u4" })).toBe("deny");
   });
+  it("a require_approval decision records EXACTLY ONE tool_gate transition", () => {
+    seed(db, "human_review");
+    const d = resolvePermissionDecision(ctx(), "s", { toolName: "Edit", toolInput: { file_path: "/tmp/r/a" }, toolUseId: "u5" });
+    expect(d).toBe("require_approval");
+    const gates = listTransitionsByGoal(db, "g").filter((x) => x.boundary === "tool_gate");
+    expect(gates).toHaveLength(1);
+    expect(gates[0]?.risk?.gate_decision).toBe("require_approval");
+  });
+  it("a deny decision records its tool_gate transition and the helper returns deny", () => {
+    seed(db, "automated");
+    const d = resolvePermissionDecision(ctx(), "s", { toolName: "Bash", toolInput: { command: "rm -rf /" }, toolUseId: "u6" });
+    expect(d).toBe("deny");
+    const gates = listTransitionsByGoal(db, "g").filter((x) => x.boundary === "tool_gate");
+    expect(gates).toHaveLength(1);
+    expect(gates[0]?.risk?.gate_decision).toBe("deny");
+  });
 });

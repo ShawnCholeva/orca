@@ -71,6 +71,8 @@ describe("M8 HTTP surface", () => {
     }
   });
 
+  // Bumped per-test timeout (15s): this mounts the full M8 route surface and runs
+  // right at the 5s vitest ceiling, flaking under parallel load (passes in isolation ~4.9s).
   it("mounts all M8 routes with expected 200/400/404 patterns", async () => {
     const goalResp = await server.inject({
       method: "POST",
@@ -441,5 +443,5 @@ describe("M8 HTTP surface", () => {
       headers: AUTH_HEADERS,
     });
     expect(workerMissingResp.statusCode).toBe(404);
-  });
+  }, 15000);
 });

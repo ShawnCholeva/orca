@@ -172,6 +172,9 @@ describe("M9 human review orchestration flow", () => {
     );
   });
 
+  // Bumped per-test timeout (15s): this drives the full propose→human-review→route
+  // persist path and runs right at the 5s vitest ceiling, flaking under parallel load
+  // (passes in isolation ~4.9s). Mirrors the http-surface stabilization.
   it("submits a human review proposal through the route and persists decision handoff", async () => {
     const fallback = await broker.propose(request("orca/openai"), {
       runOneShot: async () => ({
@@ -246,7 +249,7 @@ describe("M9 human review orchestration flow", () => {
         .get() as { c: number }
     ).c;
     expect(recommendationCount).toBe(1);
-  });
+  }, 15000);
 
   it("returns 404 when goal ownership does not match on submission", async () => {
     const fallback = await broker.propose(request("orca/openai"), {
