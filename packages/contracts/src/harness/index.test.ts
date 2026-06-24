@@ -32,3 +32,35 @@ describe("HarnessTransition", () => {
     expect(r.success).toBe(false);
   });
 });
+
+import { EvidenceFacet, HarnessTransition as HT } from "./index.js";
+
+describe("EvidenceFacet", () => {
+  it("accepts a failed verdict with one sensor", () => {
+    const f = EvidenceFacet.parse({
+      sensorsRun: [
+        { kind: "unit", command: "pnpm test", exitCode: 1, durationMs: 1200,
+          result: "failed", summary: "1 failing", artifactRef: null },
+      ],
+      verdict: "failed",
+      untestedRegions: [],
+      residualRisk: [],
+      oracleAdequacy: { sufficient: false, gaps: ["typecheck did not run"] },
+    });
+    expect(f.verdict).toBe("failed");
+  });
+
+  it("is accepted as the evidence facet on a transition", () => {
+    const t = HT.parse({
+      id: "t", goalId: "g", workflowRunId: null, workflowStepRunId: "s",
+      boundary: "step_complete",
+      risk: null,
+      evidence: {
+        sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [],
+        oracleAdequacy: { sufficient: true, gaps: [] },
+      },
+      stateDeps: null, telemetry: null, createdAt: "2026-06-23T00:00:00.000Z",
+    });
+    expect(t.evidence?.verdict).toBe("passed");
+  });
+});
