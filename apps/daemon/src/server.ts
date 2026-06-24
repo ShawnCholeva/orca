@@ -183,6 +183,7 @@ import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
 import { registerHarnessTransitionRoutes } from './harness-transitions/routes.js';
+import { registerHarnessMetricsRoutes } from './harness-metrics/routes.js';
 import { SessionCostAccumulator } from './harness-telemetry/accumulator.js';
 import { parseOtlpTokens } from './harness-telemetry/otlp-receiver.js';
 
@@ -2095,6 +2096,7 @@ export function createServer(
   });
 
   registerHarnessTransitionRoutes(server, { db });
+  registerHarnessMetricsRoutes(server, { db });
 
   // OTLP/JSON ingest (loopback worker telemetry). Auth via the global Bearer hook
   // (the OTEL exporter sends OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>).
