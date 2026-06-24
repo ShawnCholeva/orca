@@ -111,6 +111,7 @@ import { pluginRegistry } from './registry/plugin-registry.js';
 import { skillRegistry } from './registry/skill-registry.js';
 import { AgentNotFoundError, listAgents, setAgentConnected } from './agents.js';
 import { adapterRegistry } from './adapters/registry.js';
+import { noopSandbox } from './adapters/sandbox.js';
 import {
   AdapterNotFoundError,
   ArchivedTargetError,
@@ -694,7 +695,9 @@ export function createServer(
       const adapter = adapterRegistry.get(adapterId);
       if (!adapter) { console.warn(`[orchestrator] workerSpawn: no adapter ${adapterId}`); return; }
       const spawn = await adapter.resolveSpawn({ goalId, sessionId, workspacePath: wsRow.path });
-      await workerSessions.spawn({ sessionId, goalId, adapterId, workspacePath: wsRow.path, command: spawn.command, env: spawn.env });
+      // Containment seam (identity today): see adapters/sandbox.ts.
+      const sandboxed = noopSandbox.wrap(spawn);
+      await workerSessions.spawn({ sessionId, goalId, adapterId, workspacePath: wsRow.path, command: sandboxed.command, env: sandboxed.env });
     },
     // workerDeliver
     (sessionId, text) => workerSessions.deliver(sessionId, text),
