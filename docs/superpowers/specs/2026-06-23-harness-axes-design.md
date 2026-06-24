@@ -241,12 +241,15 @@ TelemetryFacet {
 - Full event-sourcing of all Orca state (only the control-plane transition log is replayable).
 - Pessimistic locking / single-writer concurrency (optimistic detect-and-escalate chosen).
 
-## 7. Open questions
+## 7. Resolved decisions
 
-- **Sensor declaration:** how workspaces declare their sensor commands (auto-detect `package.json` scripts vs explicit per-workspace config). Default to auto-detect in P1; formalize config in P2.
-- **Price map maintenance:** where the token→USD model price map lives and how it's updated (static table vs config).
-- **Mode default:** should new goals default to Human Review or Automated? (Recommend Human Review.)
-- **`policy_delta` promotion threshold:** how many repeated approvals before a gate auto-relaxes (and whether that itself requires confirmation).
+- **Mode default:** new goals default to **Human Review**.
+- **Sensor declaration:** **auto-detect from `package.json` scripts** in P1 (`typecheck`/`lint`/`test`/`build` → sensor kinds); a missing script is skipped and recorded as an `oracle_adequacy` gap, not a failure. An optional **explicit per-workspace override** field is available for non-standard/non-JS repos. The detector is a **pluggable resolver** so other ecosystems (Makefile, `cargo`, `pytest`, …) are additive (P2+).
+- **`policy_delta` auto-relax:** the safety floor (critical/irreversible) is **never** auto-relaxable. For non-floor actions, the system *proposes* relaxing a gate only after **3 consecutive approvals of the same action class with zero rejections**, and the relaxation **requires explicit human confirmation** (never silent). A single rejection resets the counter and may tighten. Relaxations are **per-goal**, recorded as a `GoalDecision` (auditable, reversible). Threshold of 3 mirrors the existing revise/retry caps.
+- **Price map:** the token→USD model price map lives as a **static table in code** (P1), updated by edit; revisit a config source only if it churns.
+
+### Still open
+- None blocking Phase 1–2. Per-ecosystem sensor resolvers and any config source for the price map are deferred, additive concerns.
 
 ---
 
