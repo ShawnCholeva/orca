@@ -29,6 +29,7 @@ import {
   type CostEntry,
   type TransitionStatus,
   type FailureCode,
+  type StateDepsFacet,
 } from "@orca/contracts";
 import { computeCost } from "../../harness-telemetry/cost.js";
 
@@ -76,6 +77,7 @@ import { listMemoryByGoal } from "../../memory/projection.js";
 import { listDecisionsByGoal } from "../../decisions/projection.js";
 import { getGoalRefinement } from "../../goal-refinements.js";
 import { deriveReadSet } from "../../harness-state/read-set.js";
+import { buildStepCompleteStateFacet, decideConflictResponse } from "../../harness-state/step-complete.js";
 import { recordHarnessTransition } from "../../harness-transitions/usecases.js";
 import { runSensors } from "../../harness-sensors/runner.js";
 import { stepRequiresExecution } from "./requires-execution.js";
@@ -236,6 +238,8 @@ export interface RequestNextDecisionOptions {
   idFactory?: () => string;
   stepResultByStepRunId?: Record<string, WorkflowStepResult>;
   terminalFinishedAtByStepRunId?: Record<string, string>;
+  /** StateDepsFacet to attach to the step's eventual step_complete transition. */
+  stateDepsByStepRunId?: Record<string, StateDepsFacet>;
 }
 
 export class OrchestratorRunNotFoundError extends Error {
@@ -331,6 +335,13 @@ function readGoal(db: Database.Database, goalId: string): GoalRow {
     .get(goalId) as GoalRow | undefined;
   if (!row) throw new OrchestratorGoalNotFoundError(goalId);
   return row;
+}
+
+/** Pull the step's free-text `assumptions[]` out of its completion block, if present. */
+function extractStepCompleteAssumptions(block: unknown): string[] {
+  const raw = (block as { assumptions?: unknown } | null)?.assumptions;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((a): a is string => typeof a === "string" && a.length > 0);
 }
 
 function goalRequiresHumanReview(db: Database.Database, goalId: string): boolean {
@@ -1705,6 +1716,7 @@ export class OrchestratorService {
               workflowStepRunId: ctx.stepRun.id,
               boundary: "step_complete",
               evidence: evidence ?? undefined,
+              stateDeps: options.stateDepsByStepRunId?.[ctx.stepRun.id] ?? undefined,
               telemetry: buildTelemetry(
                 this.otlpAccumulator,
                 sessionId,
@@ -1758,7 +1770,51 @@ export class OrchestratorService {
 
         const finishedAt = now();
 
-        if (goalRequiresHumanReview(db, ctx.run.goalId) || ctx.stepTpl.completionPolicy === "handoff") {
+        // Stateful axis: derive write_set + assumptions, detect concurrent state
+        // conflicts, and escalate (pause) or warn per policy. The facet is
+        // threaded onto the step's eventual step_complete transition (so one
+        // transition carries evidence+telemetry+stateDeps) via
+        // options.stateDepsByStepRunId — EXCEPT on escalate-pause, where we
+        // return early and so record the facet-bearing transition here.
+        // Guarded so it can NEVER break completion.
+        let conflictPause: { summary: string } | null = null;
+        let stateFacet: StateDepsFacet | null = null;
+        try {
+          const assumptions = extractStepCompleteAssumptions(block);
+          const facet = buildStepCompleteStateFacet(db, {
+            goalId: ctx.run.goalId,
+            sessionId: sessionId ?? "",
+            thisStepRunId: ctx.stepRun.id,
+            assumptions,
+            conflictPolicy: "escalate",
+          });
+          stateFacet = facet;
+          if (decideConflictResponse(facet.conflict_policy, facet.conflicts.length).pause) {
+            const c = facet.conflicts[0];
+            conflictPause = { summary: `state conflict: ${c.kind} on ${c.refs.join(", ")}` };
+          } else if (facet.conflicts.length > 0) {
+            // auto policy → warn-and-proceed: the conflict is recorded on the
+            // facet (carried to the step_complete transition); emit a distinct
+            // event for surfacing.
+            try {
+              db.prepare(
+                "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)"
+              ).run(
+                options.idFactory ? options.idFactory() : crypto.randomUUID(),
+                "state.conflict.detected",
+                ctx.run.goalId,
+                JSON.stringify({ goalId: ctx.run.goalId, stepRunId: ctx.stepRun.id, conflicts: facet.conflicts }),
+                now()
+              );
+            } catch (err) {
+              console.error("state.conflict.detected emit failed", err);
+            }
+          }
+        } catch (err) {
+          console.error("step_complete state-conflict detection failed", err);
+        }
+
+        if (conflictPause || goalRequiresHumanReview(db, ctx.run.goalId) || ctx.stepTpl.completionPolicy === "handoff") {
           const scoringParse = StepResultScoringProposal.safeParse(action.scoring);
           const scoring = scoringParse.success ? scoringParse.data : undefined;
           const proposal = extractProposal(responseText);
@@ -1768,7 +1824,26 @@ export class OrchestratorService {
             JSON.stringify({ block: block ?? {}, scoring: scoring ?? null, finishedAt, proposal }),
             ctx.stepRun.id
           );
-          const summary = summarizeScoring(scoring, proposal);
+          // This is an early-return pause: the downstream step_complete
+          // transition is never recorded, so emit the facet-bearing transition
+          // here (one transition carries the stateDeps for this completion).
+          if (stateFacet) {
+            try {
+              recordHarnessTransition(
+                { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
+                {
+                  goalId: ctx.run.goalId,
+                  workflowRunId: ctx.run.id,
+                  workflowStepRunId: ctx.stepRun.id,
+                  boundary: "step_complete",
+                  stateDeps: stateFacet,
+                }
+              );
+            } catch (err) {
+              console.error("recordHarnessTransition (state pause) failed", err);
+            }
+          }
+          const summary = conflictPause?.summary ?? summarizeScoring(scoring, proposal);
           const activityCtx = { db, bus: options.bus ?? new EventBus() };
           openOrUpdateLive(activityCtx, {
             goalId: ctx.run.goalId,
@@ -1781,6 +1856,15 @@ export class OrchestratorService {
           });
           pauseForConfirmation(activityCtx, { stepRunId: ctx.stepRun.id, summary });
           return { postedChatReply: false };
+        }
+
+        // Proceed path: thread the facet onto the eventual step_complete
+        // transition recorded downstream (advance/evidence sites).
+        if (stateFacet) {
+          options = {
+            ...options,
+            stateDepsByStepRunId: { ...options.stateDepsByStepRunId, [ctx.stepRun.id]: stateFacet },
+          };
         }
 
         const stagedEvents: DomainEvent[] = [];
@@ -2413,6 +2497,7 @@ export class OrchestratorService {
             workflowRunId: run.id,
             workflowStepRunId: stepRun.id,
             boundary: "step_complete",
+            stateDeps: options.stateDepsByStepRunId?.[stepRun.id] ?? undefined,
             telemetry: buildTelemetry(
               this.otlpAccumulator,
               sessionRow?.id,
