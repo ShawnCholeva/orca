@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What Is Orca
 
-Orca is a **local-first desktop application for multi-agent AI orchestration**. It coordinates multiple AI agent sessions (Claude Code, opencode, Codex, shell) around long-running engineering Goals by preserving operational reasoning, managing shared context, and enabling supervised progression through five autonomy levels.
+Orca is a **local-first desktop application for multi-agent AI orchestration**. It coordinates multiple AI agent sessions (Claude Code, opencode, Codex, shell) around long-running engineering Goals by preserving operational reasoning, managing shared context, and enabling progression from supervised to autonomous execution (Levels 4 and 5).
 
 ## 1. Think Before Coding
 

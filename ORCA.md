@@ -8,23 +8,22 @@ The single durable guide to this project. It explains **what Orca is, why it is 
 
 ## 1. What Orca is
 
-Orca is a **local-first desktop application for multi-agent AI orchestration**. It coordinates multiple AI agent sessions (Claude Code, Codex) around long-running engineering **Goals** by preserving operational reasoning, managing shared context, and progressing through five autonomy levels under human supervision.
+Orca is a **local-first desktop application for multi-agent AI orchestration**. It coordinates multiple AI agent sessions (Claude Code, Codex) around long-running engineering **Goals** by preserving operational reasoning, managing shared context, and progressing from supervised to autonomous execution under human oversight.
 
 The problem it solves: AI coding agents are individually powerful but operationally disconnected. Across many sessions, reasoning fragments, decisions are lost, context drifts, and humans become the coordination bottleneck. Orca is a shared operational reasoning layer *above* the agents — it coordinates native execution environments instead of replacing them. Claude Code still feels like Claude Code.
 
 **What it is not:** a chatbot UI, an IDE clone, a prompt manager, a Jira replacement, or an autonomous-demo agent.
 
-The current implementation target is **Level 3 autonomy** (suggested orchestration with human supervision), built so reaching Level 4 does not require an architectural rewrite.
+The current implementation target is **Level 4 — Supervised execution** (the orchestrator runs flows and pauses at human approval gates), built so reaching **Level 5 — Autonomous execution** does not require an architectural rewrite.
 
-### Autonomy levels (the product's spine)
+### Autonomy levels (what we build against)
 
-1. **Manual** — user coordinates sessions and context by hand.
-2. **Shared context** — sessions become aware through shared Goal memory.
-3. **Suggested orchestration** — orchestrator recommends tasks/sessions/workflows, synthesizes reasoning, detects conflicts, escalates ambiguity. Human supervises and teaches. **← current target.**
-4. **Supervised execution** — orchestrator runs flows and pauses at approval gates.
-5. **Autonomous execution** — exception-based human oversight.
+Orca builds against **two** levels. The earlier ladder (manual → shared context → suggested orchestration) is no longer how the product is framed; everything now builds toward these two:
 
-The goal is not maximum autonomy. It is **operational coherence** built safely, level by level.
+4. **Supervised execution** — the orchestrator runs flows and pauses at human approval gates. **← current target.**
+5. **Autonomous execution** — the orchestrator runs to completion under exception-based human oversight.
+
+These are not an aspirational ladder — they are the live **`operating_mode`** of every Goal: `human_review` *is* Level 4, `automated` *is* Level 5, driven by the Governed harness axis (a deterministic risk classifier + permission tiers + a non-disableable critical-action safety floor; see §14). The dormant per-goal `autonomyLevel` integer the old ladder mapped to has been superseded and is left inert. The goal is not maximum autonomy for its own sake; it is **operational coherence** — earning the move from Supervised to Autonomous safely, Goal by Goal.
 
 ---
 
@@ -147,13 +146,11 @@ Key consequences encoded in the code:
 - **Agent selection is template-declarative,** not LLM-selected. Each step carries an ordered `agentPreference[]` of `{adapterId, modelId}`; the resolver picks the first ready adapter that supports the model, with fallback. Template authors match model weight to workload (cheap conversational models for interview/QA; heavier reasoning for synthesis/decomposition/review).
 - **Run progression is event-driven** after creation — the engine reacts to user messages, agent hooks, crashes, and idle timeouts. There is no central polling loop.
 
-### The `orca/engineering` workflow
+### Workflow templates (catalog + graph-routed)
 
-The default template runs 8 steps, each with its own output schema validated at completion:
+Templates are no longer all seeded at boot. A curated **catalog** (`workflows/templates/catalog.ts`) holds the built-in definitions with display metadata; the user **installs on selection** (`GET /catalog`, `POST /install`), and boot only runs `reconcileBuiltInTemplates` to drop stale built-ins that have no runs. The recommended default is **`orca/adaptive-delivery`** — a single graph that uses a *splitter* node to reason over the goal and route to one of three entry depths (it subsumed the older Brainstorm / Feature-Development / Initiative templates). Other built-ins: `orca/bug-triage-fix` (mapped onto the systematic-debugging four phases), `orca/code-review`, `orca/refactor`, `orca/quality-coverage`. The legacy linear `orca/engineering` template still exists as fallback content but is no longer the seeded default.
 
-`intake → research → prd → issue_breakdown → execution → qa → review → done`
-
-`execution` carries a `validation_required` guardrail (the schema requires `validation.ran && validation.passed`); a red validation becomes revise feedback to the agent. `done` captures memory items. The only enforced user yield is `approval_mark_done` at the end.
+Runtime routing is **graph-authoritative**: a workflow graph of labeled edges, orchestrator-judged **gates** (`approved`/`rejected` ports, backward edges allowed), N-way **splitters**, and an explicit `terminal` step drives advancement through a run-level node cursor — not `ordinal + 1`. Each step still carries its own output schema validated at completion, `execution`-style steps carry a `validation_required` guardrail (now backed by the Executable axis's deterministic sensor veto, §14), and the only enforced user yield is the terminal mark-done confirm. Runs are pinned to a `template_snapshot` captured at start, so mid-run template edits don't leak in.
 
 ---
 
@@ -176,7 +173,7 @@ Mode resolution: the dispatcher uses the adapter's preferred enabled mode, falls
 
 ## 7. Adapters and providers
 
-There are exactly **two agent adapters: `claude-code` and `codex`** (`packages/contracts/src/adapters/ids.ts` is canonical). Earlier docs mention opencode and a shell/manual adapter — those have been removed/are historical; trust the contract enum.
+There are **three agent adapters: `claude-code`, `codex`, and `antigravity`** (Google's `agy` CLI) — `packages/contracts/src/adapters/ids.ts` is canonical. Earlier docs mention opencode and a shell/manual adapter (removed/historical) or "exactly two" adapters (predates the antigravity addition); trust the contract enum. Note: antigravity reached adapter/model parity but its worker **permission gate is not yet wired** (it spawns ungated — see §14 and `FUTURE_WORK.md`), so claude-code/codex are the fully-governed paths today.
 
 Adapters are daemon-internal spawn factories returning `command`, `args`, `env`, `cwd`. Both the goal-scoped orchestrator-LLM and per-step agents route through the same adapter layer, so billing and mode semantics are unified.
 
@@ -212,7 +209,7 @@ Context injected into a session is assembled selectively, not dumped:
 - **Conditionally included:** sibling session summaries, architecture notes, known risks, recent changes, open questions.
 - **Always excluded:** stale logs, irrelevant prior discussion, raw transcripts.
 
-The orchestrator context envelope is bounded (~64 KiB); when over budget it truncates oldest agent turns first, then earliest prior-step artifacts, and **never** truncates current-step or goal metadata. Right-sized context is a first-class cost and quality concern.
+The orchestrator context envelope is bounded (~32 KiB rendered; per-section cap ~8 KiB); when over budget it truncates oldest agent turns first, then earliest prior-step artifacts, and **never** truncates current-step or goal metadata. Right-sized context is a first-class cost and quality concern.
 
 ---
 
@@ -267,12 +264,48 @@ A live daemon runs in a tmux session named **`daemon-terminal`** — attach to r
 - **PTY stability** across OSes → PTY manager is isolated; sessions are not resumed after restart (boot reconciliation marks `starting`/`running` sessions as failed).
 - **Token cost** → event/hook-first architecture, structured summaries, selective reasoning jobs, bounded context. The whole "deterministic core, selective AI" stance exists for this.
 - **Memory quality** (auto-promotion can get noisy) → typed memory, confidence/importance scores, canonical status, promotion rules.
-- **Workflow over-rigidity** → recommendations over enforcement at Level 3; the engine adapts, the human teaches.
+- **Workflow over-rigidity** → recommendations over enforcement under Supervised execution (Level 4); the engine adapts, the human teaches.
 - **Plugin complexity** → internal-only, frozen registry; no marketplace, no dynamic loading until scoped.
 
 ---
 
 ## 13. Explicit non-goals (today)
 
-Not built, deliberately: cloud sync, team collaboration, external plugin marketplace / dynamic loading, full cross-goal memory, Level 4/5 autonomy, custom model hosting, a generic chatbot interface, or a VS Code replacement. Several of these have reserved hooks (a `memoryItems` slot in the orchestrator context envelope, the storage-provider seam, the plugin interface shape) so adding them later is additive, not a rewrite.
+Not built, deliberately: cloud sync, team collaboration, external plugin marketplace / dynamic loading, full cross-goal memory, custom model hosting, a generic chatbot interface, or a VS Code replacement. Several of these have reserved hooks (a `memoryItems` slot in the orchestrator context envelope, the storage-provider seam, the plugin interface shape) so adding them later is additive, not a rewrite.
+
+---
+
+## 14. How we got here — architectural evolution
+
+This section records the **durable shape of the journey**, not a changelog. The detailed plan/spec documents that drove these arcs have been retired; what mattered architecturally is preserved here, and outstanding items pulled from those documents live in `FUTURE_WORK.md`. Arcs are grouped by concern, roughly in the order they landed.
+
+### Adapters and worker permission modes
+Orca started with two adapters and grew a third — **`antigravity`** (Google's `agy` CLI) — at model/readiness parity, with completed-turn capture deliberately sourced from Stop hooks + transcript JSONL rather than pane-scraping. Running worker CLIs unattended in background tmux panes surfaced a deadlock: native permission prompts nobody could answer wedged a goal forever. The fix was a per-goal **worker permission mode** (Auto-run vs Ask-in-chat) driven by each CLI's residual-permission hook through a single provider seam (`workerHookConfig()`), so workers stopped being a Claude-hardcoded path. It shipped daemon-core → desktop toggle → "Always allow" native rule writer (Claude) → Codex parity (its `PermissionRequest` hook, plus a `supportsPermissionPersistence` capability gate that hides "Always allow" where the provider can't persist a rule). A live Codex-hooks spike pinned down the durable mechanics (hooks fire only in the interactive TUI, never `codex exec`; `CODEX_HOME` relocation; the exact `PermissionRequest` envelope).
+
+### Workflow step results and supervised completion
+A long arc hardened *what a finished step is*. Output schemas became authorable as typed shorthand that round-trips losslessly to the structured `WorkflowStepOutputSchema`. A strict hidden **`WorkflowStepResult`** (lifecycle status separate from evaluation status, with measured quality/performance facts) is persisted per terminal step — measurement only, never gating advancement. Model scoring was pivoted *off* the API-key path onto the existing shadow `approve_step_complete` turn (billing reality, same as the orchestrator itself). Supervision then became the first real autonomy control: a global flag holds each approved+scored step at a `paused_for_input` checkpoint the user can Continue or Revise, and every post-approval refinement persists a `step_revision_signals` divergence row. The user-facing surface consolidated into one **unified, persisted step-confirmation card** (a daemon-built structured summary with collapsible scores), rebuilt durably from the persisted artifact on reload. Two structural guarantees shipped alongside: terminal-reachability graph validation, and **run version pinning** (a `template_snapshot` captured at start so mid-run edits/re-seeds can't leak in).
+
+### The OrcaChat conversational surface
+Chat evolved from a single idle stream into a supervision narration layer. A first-class **`activities` table** became the single source of paced, provider-neutral narration (coalesced, throttled, one live bubble per step), with worker questions mediated in Orca's own voice via the held-hook round-trip. The flickering live bubble was then replaced by a **persisted per-turn agent-activity card** that accumulates a hook-derived step checklist with reconstructed diffs and a closing summary. Worker questions became first-class chat messages: users can answer a pending `AskUserQuestion` with arbitrary free text, and answered questions persist into the transcript rather than living transiently in the activity layer.
+
+### Graph-authoritative routing, recovery, ledger, and daemon addressing
+Step advancement moved from `ordinal + 1` to a pure **graph traversal engine**: labeled edges, orchestrator-judged gates (`approved`/`rejected` ports, backward edges), an explicit `terminal` flag, a run-level node cursor, and an immutable gate-decision log — with gate-parked cursors treated as resumable on restart, not drift. Provider rate/quota limits became *recoverable*: a typed `ProviderRecoveryCheckpoint` drives a wait/retry/switch state machine that preserves the live session instead of failing the run. The `orca:step-complete` block grew into an envelope (`{ output, ledger_updates }`) so agents *propose* updates that the engine reviews, assigns canonical IDs, and commits as an immutable **versioned ledger** downstream steps read instead of re-parsing transcripts. The daemon became a **discoverable singleton** (`~/.orca/daemon.json` + lock, adopt-or-spawn) reached through a fire-time hook resolver that spools non-interactive hooks to disk and drains them on startup — fixing silent stuck goals (`ECONNREFUSED` on Stop hooks) and orphan-daemon accumulation by removing baked port/token from worker artifacts (the auth token now rotates freely).
+
+### Templates: catalog, onboarding, and the splitter
+Templates moved from "seed everything at boot" to a curated **catalog + install-on-selection** model (`GET /catalog` / `POST /install`, boot only reconciles stale built-ins), surfaced through a data-driven onboarding step. Built-ins were reworked to map onto real methods — e.g. **Bug Triage & Fix** onto the systematic-debugging four phases. The capstone was the **splitter node**: a third graph primitive (alongside steps and gates) that reasons over a goal and routes to one of N author-named branches. It powers **`orca/adaptive-delivery`**, a single graph that picks an entry depth and subsumed the separate Brainstorm / Feature-Development / Initiative templates. A deliberate companion was the **honest, participatory brainstorm** rework — a per-step `completionPolicy` (`interview`/`reasoning`/`handoff`) that forbids an interview step from completing while open questions remain, forces a confirmation pause on handoff, and writes a real spec to `.orca/specs/` instead of finishing silently on a metrics card.
+
+### Workspaces as first-class entities
+"Workspace" was promoted from a per-goal repo attachment into a canonical entity — one workspace == one repo == one canonical path (UNIQUE) — with goal↔workspace made many-to-many via a `goal_workspaces` junction and a real workspace registry (`/v1/workspaces`). Persisted git state was deliberately stripped off the entity; git probing stays transient on inspect. (The goal-creation *workspace picker* that builds on this — pick from registered workspaces instead of browsing the filesystem at goal creation — was specified but is tracked in `FUTURE_WORK.md` as not-yet-implemented.)
+
+### The harness axes (the unifying recent frame)
+The most recent and most structural arc operationalizes the four reliability properties from the *Code as Agent Harness* paper — **Executable, Governed, Stateful, Inspectable** — on one durable spine: an engine-owned, append-only **`HarnessTransition`** record emitted at four boundaries (`step_launch`, `step_complete`, `tool_gate`, `mark_done`), each carrying four independently-shippable facets (`RiskFacet`, `EvidenceFacet`, `StateDepsFacet`, `TelemetryFacet`) that *are* the four axes. It is written only by deterministic code — a scoped control-plane slice consistent with "deterministic core, selective AI."
+- **Executable** — a daemon-side sensor runner executes typecheck/unit commands and applies a **deterministic veto** overriding the LLM judge on a failing verdict (activating the formerly-dead `validation_rule` guardrail).
+- **Governed** — retired the dormant per-goal `autonomyLevel` integer for the live `operating_mode` (Supervised ⟷ Autonomous), with a deterministic argument-aware risk classifier, permission tiers, a non-disableable critical-action **safety floor**, and approval-streak accountability that can relax a gate via an audited `GoalDecision`. (Antigravity's gate is the one open coverage hole — it spawns ungated; see `FUTURE_WORK.md`.)
+- **Inspectable** — worker-token/cost capture pivoted from hooks to an embedded OTLP/JSON receiver (research proved hooks never carry usage), plus a static price map, categorical failure codes, and a `/harness-metrics` projection with replay and failure attribution.
+- **Stateful** — tightened the last opaque facet into derived read/write-sets, structured assumptions, version deps, and **optimistic, deterministic conflict + belief-divergence detection** behind a no-op `ConflictJudge` seam reserved for a future LLM judge (detect-and-surface, never auto-merge; no locks).
+
+OS sandbox containment (a `SpawnSandbox` no-op seam), the LLM conflict-judge, experiential memory, and a self-modifying Evolution Agent remain explicit non-goals.
+
+### Paper Auto-RAG
+To keep the harness paper's ideas in front of the agent without a manual step, the paper is indexed in a local ChromaDB store (`.orca/paper-index/`, local embeddings, no API key) with a warm query server and `SessionStart`/`UserPromptSubmit` hooks that inject only strong matches and stay silent otherwise. Retrieval is sharpened by local **pseudo-relevance feedback** (two-pass corpus term expansion, no LLM); the bibliography is excluded at index time to keep citation noise out. An earlier `claude -p` query-rewrite was tried and removed (latency) — PRF superseded it.
 </content>

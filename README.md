@@ -1,6 +1,6 @@
 # Orca
 
-Local-first desktop application for multi-agent AI orchestration. Orca coordinates multiple AI agent sessions (Claude Code, Codex) around long-running engineering **Goals** — preserving operational reasoning, managing shared context, and progressing through five autonomy levels under human supervision.
+Local-first desktop application for multi-agent AI orchestration. Orca coordinates multiple AI agent sessions (Claude Code, Codex) around long-running engineering **Goals** — preserving operational reasoning, managing shared context, and progressing from supervised to autonomous execution (Levels 4 and 5) under human oversight.
 
 **→ Read [`ORCA.md`](ORCA.md) for the full system guide:** what Orca is, why it's shaped the way it is, where everything lives, and how the orchestrator-mediated workflow model works. This README only covers getting it running.
 
