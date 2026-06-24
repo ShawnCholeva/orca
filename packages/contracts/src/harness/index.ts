@@ -134,8 +134,57 @@ export const TelemetryFacet = z
   .strict();
 export type TelemetryFacet = z.infer<typeof TelemetryFacet>;
 
-// `risk` (RiskFacet), `evidence` (EvidenceFacet), and `telemetry` (TelemetryFacet)
-// are now strict schemas; `stateDeps` remains opaque `z.record` pending future tightening.
+export const StateRefKind = z.enum(["file", "memory_item", "decision", "task", "workspace_version"]);
+export type StateRefKind = z.infer<typeof StateRefKind>;
+
+export const StateChangeKind = z.enum(["created", "modified", "deleted"]);
+export type StateChangeKind = z.infer<typeof StateChangeKind>;
+
+export const ConflictPolicy = z.enum(["auto", "escalate"]);
+export type ConflictPolicy = z.infer<typeof ConflictPolicy>;
+
+export const StateConflictKind = z.enum(["write_write", "read_stale", "belief_divergence"]);
+export type StateConflictKind = z.infer<typeof StateConflictKind>;
+
+export const StateDepReadEntry = z.object({
+  kind: StateRefKind, ref: z.string().max(512), version: z.string().max(256).nullable(),
+}).strict();
+export type StateDepReadEntry = z.infer<typeof StateDepReadEntry>;
+
+export const StateDepWriteEntry = z.object({
+  kind: StateRefKind, ref: z.string().max(512), change_kind: StateChangeKind,
+}).strict();
+export type StateDepWriteEntry = z.infer<typeof StateDepWriteEntry>;
+
+export const StateAssumption = z.object({
+  statement: z.string().max(1024), source_ref: z.string().max(512).nullable(), verified: z.boolean(),
+}).strict();
+export type StateAssumption = z.infer<typeof StateAssumption>;
+
+export const StateVersionDep = z.object({
+  ref: z.string().max(512), observed_version: z.string().max(256),
+}).strict();
+export type StateVersionDep = z.infer<typeof StateVersionDep>;
+
+export const StateConflict = z.object({
+  kind: StateConflictKind,
+  with_transition_id: z.string().max(128).nullable(),
+  refs: z.array(z.string().max(512)).max(64).default([]),
+}).strict();
+export type StateConflict = z.infer<typeof StateConflict>;
+
+export const StateDepsFacet = z.object({
+  read_set: z.array(StateDepReadEntry).max(256).default([]),
+  write_set: z.array(StateDepWriteEntry).max(256).default([]),
+  assumptions: z.array(StateAssumption).max(64).default([]),
+  version_deps: z.array(StateVersionDep).max(64).default([]),
+  conflict_policy: ConflictPolicy,
+  conflicts: z.array(StateConflict).max(64).default([]),
+}).strict();
+export type StateDepsFacet = z.infer<typeof StateDepsFacet>;
+
+// `risk` (RiskFacet), `evidence` (EvidenceFacet), `telemetry` (TelemetryFacet), and
+// `stateDeps` (StateDepsFacet) are all strict schemas — the facet model is complete.
 export const HarnessTransition = z
   .object({
     id: z.string().min(1).max(128),
@@ -145,7 +194,7 @@ export const HarnessTransition = z
     boundary: HarnessTransitionBoundary,
     risk: RiskFacet.nullable(),
     evidence: EvidenceFacet.nullable(),
-    stateDeps: z.record(z.unknown()).nullable(),
+    stateDeps: StateDepsFacet.nullable(),
     telemetry: TelemetryFacet.nullable(),
     createdAt: z.string().datetime(),
   })

@@ -48,16 +48,15 @@ export function computeHarnessMetrics(db: Database.Database, goalId: string): Ha
       ? { value: null, reason: "no failures recorded" }
       : { value: ts.some((t) => t.telemetry?.outcome.status === "succeeded") ? 1 : 0 };
 
-  // State consistency (StateDepsFacet): sourced from the Stateful axis, not yet
-  // emitted — `stateDeps` is always null today, so this always degrades to null.
+  // State consistency (StateDepsFacet): sourced from the Stateful axis; a transition
+  // is consistent when it recorded no conflicts.
   const state_consistency: Metric =
     withStateDeps.length === 0
-      ? { value: null, reason: "StateDepsFacet not yet emitted (Stateful axis pending)" }
+      ? { value: null, reason: "no transitions carry a StateDepsFacet" }
       : {
           value:
-            withStateDeps.filter(
-              (t) => (t.stateDeps as { conflict?: boolean }).conflict !== true
-            ).length / withStateDeps.length,
+            withStateDeps.filter((t) => t.stateDeps!.conflicts.length === 0).length /
+            withStateDeps.length,
         };
 
   // Safety compliance (RiskFacet): fraction of gated actions not denied.
