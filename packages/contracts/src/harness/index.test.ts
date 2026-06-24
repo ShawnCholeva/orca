@@ -147,3 +147,37 @@ describe("TelemetryFacet", () => {
     expect(tr.telemetry?.outcome.status).toBe("succeeded");
   });
 });
+
+import { StateDepsFacet, ConflictPolicy } from "./index.js";
+
+describe("StateDepsFacet", () => {
+  it("accepts a populated facet", () => {
+    const f = StateDepsFacet.parse({
+      read_set: [{ kind: "memory_item", ref: "m1", version: "2026-06-24T00:00:00.000Z" }],
+      write_set: [{ kind: "file", ref: "src/x.ts", change_kind: "modified" }],
+      assumptions: [{ statement: "config is valid", source_ref: null, verified: false }],
+      version_deps: [{ ref: "ws1", observed_version: "main@abc" }],
+      conflict_policy: "escalate",
+      conflicts: [],
+    });
+    expect(f.write_set[0].change_kind).toBe("modified");
+    expect(f.conflicts).toEqual([]);
+  });
+  it("defaults conflicts/assumptions/etc. to empty arrays", () => {
+    const f = StateDepsFacet.parse({ conflict_policy: "auto" });
+    expect(f.read_set).toEqual([]);
+    expect(f.conflicts).toEqual([]);
+  });
+  it("rejects an unknown conflict_policy", () => {
+    expect(ConflictPolicy.safeParse("yolo").success).toBe(false);
+  });
+  it("is accepted as the stateDeps facet on a transition", () => {
+    const t = HarnessTransition.parse({
+      id: "t", goalId: "g", workflowRunId: null, workflowStepRunId: null, boundary: "step_launch",
+      risk: null, evidence: null, telemetry: null,
+      stateDeps: { conflict_policy: "escalate" },
+      createdAt: "2026-06-24T00:00:00.000Z",
+    });
+    expect(t.stateDeps?.conflict_policy).toBe("escalate");
+  });
+});

@@ -5,6 +5,7 @@ import type {
   HarnessTransition,
   HarnessTransitionBoundary,
   RiskFacet,
+  StateDepsFacet,
   TelemetryFacet,
 } from "@orca/contracts";
 import type { EventBus } from "../events.js";
@@ -27,7 +28,7 @@ export type RecordTransitionInput = {
   boundary: HarnessTransitionBoundary;
   risk?: RiskFacet | null;
   evidence?: EvidenceFacet | null;
-  stateDeps?: Record<string, unknown> | null;
+  stateDeps?: StateDepsFacet | null;
   telemetry?: TelemetryFacet | null;
 };
 

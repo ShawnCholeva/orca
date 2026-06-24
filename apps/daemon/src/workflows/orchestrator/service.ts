@@ -29,6 +29,7 @@ import {
   type CostEntry,
   type TransitionStatus,
   type FailureCode,
+  type StateDepsFacet,
 } from "@orca/contracts";
 import { computeCost } from "../../harness-telemetry/cost.js";
 
@@ -72,6 +73,11 @@ import { synthesizeStepOutput } from "./synthesize.js";
 import { detectPendingAgentQuestion } from "./agent-interview.js";
 import { assembleWorkspaceContext } from "./workspace-context.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
+import { listMemoryByGoal } from "../../memory/projection.js";
+import { listDecisionsByGoal } from "../../decisions/projection.js";
+import { getGoalRefinement } from "../../goal-refinements.js";
+import { deriveReadSet } from "../../harness-state/read-set.js";
+import { buildStepCompleteStateFacet, decideConflictResponse } from "../../harness-state/step-complete.js";
 import { recordHarnessTransition } from "../../harness-transitions/usecases.js";
 import { runSensors } from "../../harness-sensors/runner.js";
 import { stepRequiresExecution } from "./requires-execution.js";
@@ -232,6 +238,8 @@ export interface RequestNextDecisionOptions {
   idFactory?: () => string;
   stepResultByStepRunId?: Record<string, WorkflowStepResult>;
   terminalFinishedAtByStepRunId?: Record<string, string>;
+  /** StateDepsFacet to attach to the step's eventual step_complete transition. */
+  stateDepsByStepRunId?: Record<string, StateDepsFacet>;
 }
 
 export class OrchestratorRunNotFoundError extends Error {
@@ -327,6 +335,13 @@ function readGoal(db: Database.Database, goalId: string): GoalRow {
     .get(goalId) as GoalRow | undefined;
   if (!row) throw new OrchestratorGoalNotFoundError(goalId);
   return row;
+}
+
+/** Pull the step's free-text `assumptions[]` out of its completion block, if present. */
+function extractStepCompleteAssumptions(block: unknown): string[] {
+  const raw = (block as { assumptions?: unknown } | null)?.assumptions;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((a): a is string => typeof a === "string" && a.length > 0);
 }
 
 function goalRequiresHumanReview(db: Database.Database, goalId: string): boolean {
@@ -1655,6 +1670,62 @@ export class OrchestratorService {
           }
         }
 
+        // Stateful axis: derive write_set + assumptions, detect concurrent state
+        // conflicts, and escalate (pause) or warn per policy. Built and threaded
+        // BEFORE the evidence-gate transition below so the step_complete
+        // transition carries evidence+telemetry+stateDeps in ONE record:
+        //  - gated steps record at the evidence gate (~1711), reading the
+        //    threaded facet from options.stateDepsByStepRunId;
+        //  - non-gated steps record at the downstream advance-site (~2493);
+        //  - the conflict-pause early-return records inline (non-gated only;
+        //    gated steps already recorded at the evidence gate).
+        // Guarded so it can NEVER break completion.
+        let conflictPause: { summary: string } | null = null;
+        let stateFacet: StateDepsFacet | null = null;
+        try {
+          const assumptions = extractStepCompleteAssumptions(block);
+          const facet = buildStepCompleteStateFacet(db, {
+            goalId: ctx.run.goalId,
+            sessionId: sessionId ?? "",
+            thisStepRunId: ctx.stepRun.id,
+            assumptions,
+            conflictPolicy: "escalate",
+          });
+          stateFacet = facet;
+          if (decideConflictResponse(facet.conflict_policy, facet.conflicts.length).pause) {
+            const c = facet.conflicts[0];
+            conflictPause = { summary: `state conflict: ${c.kind} on ${c.refs.join(", ")}` };
+          } else if (facet.conflicts.length > 0) {
+            // auto policy → warn-and-proceed: the conflict is recorded on the
+            // facet (carried to the step_complete transition); emit a distinct
+            // event for surfacing.
+            try {
+              db.prepare(
+                "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)"
+              ).run(
+                options.idFactory ? options.idFactory() : crypto.randomUUID(),
+                "state.conflict.detected",
+                ctx.run.goalId,
+                JSON.stringify({ goalId: ctx.run.goalId, stepRunId: ctx.stepRun.id, conflicts: facet.conflicts }),
+                now()
+              );
+            } catch (err) {
+              console.error("state.conflict.detected emit failed", err);
+            }
+          }
+        } catch (err) {
+          console.error("step_complete state-conflict detection failed", err);
+        }
+        // Thread the facet onto the eventual step_complete transition (evidence
+        // gate for gated steps, advance-site for non-gated). One transition
+        // carries it.
+        if (stateFacet) {
+          options = {
+            ...options,
+            stateDepsByStepRunId: { ...options.stateDepsByStepRunId, [ctx.stepRun.id]: stateFacet },
+          };
+        }
+
         // Deterministic evidence gate: for steps that require execution, run the
         // sensor ladder in the workspace and veto the LLM's approval if the
         // verdict is not "passed". Runs before the supervision branch so it
@@ -1701,6 +1772,7 @@ export class OrchestratorService {
               workflowStepRunId: ctx.stepRun.id,
               boundary: "step_complete",
               evidence: evidence ?? undefined,
+              stateDeps: options.stateDepsByStepRunId?.[ctx.stepRun.id] ?? undefined,
               telemetry: buildTelemetry(
                 this.otlpAccumulator,
                 sessionId,
@@ -1754,7 +1826,7 @@ export class OrchestratorService {
 
         const finishedAt = now();
 
-        if (goalRequiresHumanReview(db, ctx.run.goalId) || ctx.stepTpl.completionPolicy === "handoff") {
+        if (conflictPause || goalRequiresHumanReview(db, ctx.run.goalId) || ctx.stepTpl.completionPolicy === "handoff") {
           const scoringParse = StepResultScoringProposal.safeParse(action.scoring);
           const scoring = scoringParse.success ? scoringParse.data : undefined;
           const proposal = extractProposal(responseText);
@@ -1764,7 +1836,28 @@ export class OrchestratorService {
             JSON.stringify({ block: block ?? {}, scoring: scoring ?? null, finishedAt, proposal }),
             ctx.stepRun.id
           );
-          const summary = summarizeScoring(scoring, proposal);
+          // This is an early-return pause: for non-gated steps the downstream
+          // step_complete transition is never recorded, so emit the
+          // facet-bearing transition here. Gated steps already recorded their
+          // facet-bearing transition at the evidence gate above, so emitting
+          // here would duplicate it — skip them to keep exactly one.
+          if (stateFacet && !execReq) {
+            try {
+              recordHarnessTransition(
+                { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
+                {
+                  goalId: ctx.run.goalId,
+                  workflowRunId: ctx.run.id,
+                  workflowStepRunId: ctx.stepRun.id,
+                  boundary: "step_complete",
+                  stateDeps: stateFacet,
+                }
+              );
+            } catch (err) {
+              console.error("recordHarnessTransition (state pause) failed", err);
+            }
+          }
+          const summary = conflictPause?.summary ?? summarizeScoring(scoring, proposal);
           const activityCtx = { db, bus: options.bus ?? new EventBus() };
           openOrUpdateLive(activityCtx, {
             goalId: ctx.run.goalId,
@@ -2409,6 +2502,7 @@ export class OrchestratorService {
             workflowRunId: run.id,
             workflowStepRunId: stepRun.id,
             boundary: "step_complete",
+            stateDeps: options.stateDepsByStepRunId?.[stepRun.id] ?? undefined,
             telemetry: buildTelemetry(
               this.otlpAccumulator,
               sessionRow?.id,
@@ -3206,9 +3300,74 @@ export class OrchestratorService {
     // On failure, fall back to a recommendation so the user can resolve the issue.
     try {
       await this.launcher.launch(launchCtx);
+      this.recordStepLaunchTransition(db, now, goal, run, stepRun, options);
       return this.commitNoopLatestDecision(db, run.id, stepRun.id);
     } catch {
       return this.commitLaunchRecommendation(db, now, ctx, chosen, objective, options);
+    }
+  }
+
+  /**
+   * Record the step_launch HarnessTransition carrying the read_set derived from the
+   * goal's current context inputs (memory/decisions/refinement/workspace) — the
+   * "state version as of launch" that belief-divergence later compares against.
+   * The context-assembly rows are not in scope here, so re-derive via the same
+   * readers buildContextAssemblyInput uses. Sibling summaries are intentionally
+   * omitted (context, not conflict-relevant state). A state-record failure must
+   * never break step launch, so the whole block is guarded.
+   */
+  private recordStepLaunchTransition(
+    db: Database.Database,
+    now: () => string,
+    goal: GoalRow,
+    run: WorkflowRunT,
+    stepRun: StepRunRow,
+    options: RequestNextDecisionOptions
+  ): void {
+    try {
+      const memory = listMemoryByGoal(db, goal.id, { includeArchived: false }).map((m) => ({
+        id: m.id,
+        updatedAt: m.updatedAt,
+      }));
+      const decisions = listDecisionsByGoal(db, goal.id, { includeArchived: false }).map((d) => ({
+        id: d.id,
+        updatedAt: d.updatedAt,
+      }));
+      const ref = getGoalRefinement(db, goal.id);
+      const refinement = ref ? { goalId: ref.goalId, refinedAt: ref.refinedAt } : null;
+      // Goal's first-attached workspace is its working workspace (same convention
+      // as the sensor-ladder lookup). branch/dirty are not persisted metadata, so
+      // mirror buildContextAssemblyInput and leave them null.
+      const ws = listWorkspacesByGoal(db, goal.id)[0];
+      const workspace = ws ? { id: ws.id, branch: null, dirty: null } : null;
+
+      const { read_set, version_deps } = deriveReadSet({
+        memory,
+        decisions,
+        summaries: [],
+        refinement,
+        workspace,
+      });
+
+      recordHarnessTransition(
+        { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          workflowStepRunId: stepRun.id,
+          boundary: "step_launch",
+          stateDeps: {
+            read_set,
+            write_set: [],
+            assumptions: [],
+            version_deps,
+            conflict_policy: "escalate",
+            conflicts: [],
+          },
+        }
+      );
+    } catch (err) {
+      console.error("recordHarnessTransition failed", err);
     }
   }
 

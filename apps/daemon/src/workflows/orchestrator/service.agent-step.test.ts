@@ -35,6 +35,8 @@ import {
   listTransitionsByGoal,
   resetPreparedStatements as resetHarnessTransitionStmts,
 } from "../../harness-transitions/usecases.js";
+import { insertTransition } from "../../harness-transitions/projection.js";
+import { decideConflictResponse } from "../../harness-state/step-complete.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import { SessionCostAccumulator } from "../../harness-telemetry/accumulator.js";
 import type { ProviderRecoveryCheckpoint } from "@orca/contracts";
@@ -801,6 +803,55 @@ describe("OrchestratorService agent step", () => {
       })
     );
     expect(recommendationCount(db, "launch_workflow_session")).toBe(0);
+  });
+
+  it("direct-launch path: records a step_launch HarnessTransition carrying the derived read_set", async () => {
+    const { db, bus, idFactory } = setupHarness();
+
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+
+    // Seed goal state the launch read_set should capture: ≥1 memory item + ≥1 decision.
+    db.prepare(
+      `INSERT INTO goal_memory_items (
+        id, goal_id, type, status, content, content_hash, confidence, source_type, source_id, source_session_id,
+        source_extraction_id, source_offset_first, source_offset_last, created_at, updated_at, promoted_at, archived_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "mem-1", "goal-1", "note", "candidate", "remember this", "hash-1", null, "manual",
+      null, null, null, null, null, NOW, NOW, null, null
+    );
+    db.prepare(
+      `INSERT INTO goal_decisions (
+        id, goal_id, title, decision_text, rationale, status, confirmation_required,
+        confidence, source_type, source_id, source_session_id, source_extraction_id,
+        source_offset_first, source_offset_last, created_at, updated_at, confirmed_at, archived_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "dec-1", "goal-1", "Use SQLite", "We use SQLite", null, "confirmed", 0,
+      null, "manual", null, null, null, null, null, NOW, NOW, NOW, null
+    );
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
+    const launcher = makeLauncher(launchFn);
+    const service = makeAgentService(launcher);
+
+    // First call: selects operator
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    // Second call: direct launch
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    expect(launchFn).toHaveBeenCalledOnce();
+
+    const launch = listTransitionsByGoal(db, "goal-1").find((t) => t.boundary === "step_launch");
+    expect(launch).toBeTruthy();
+    expect(launch!.workflowStepRunId).toBe("step-1");
+    const stateDeps = launch!.stateDeps;
+    expect(stateDeps).toBeTruthy();
+    expect(stateDeps!.conflict_policy).toBe("escalate");
+    expect(stateDeps!.read_set.length).toBeGreaterThan(0);
+    expect(stateDeps!.read_set.some((e) => e.kind === "memory_item" && e.ref === "mem-1")).toBe(true);
+    expect(stateDeps!.read_set.some((e) => e.kind === "decision" && e.ref === "dec-1")).toBe(true);
+    expect(stateDeps!.write_set).toEqual([]);
   });
 
   it("does not re-launch while a session linked to the step is still running", async () => {
@@ -3615,5 +3666,178 @@ describe("OrchestratorService step_complete telemetry facet", () => {
     expect(t?.telemetry?.cost?.usd).toBeCloseTo(0.00325);
     expect(t?.telemetry?.latency_ms).toBeNull();
     expect(t?.telemetry?.cost?.cache_read_tokens).toBe(0);
+  });
+});
+
+describe("OrchestratorService step_complete state-conflict detection", () => {
+  /** Seed a prior concurrent transition on goal-1 owned by a still-running
+   *  session on a DIFFERENT step run, whose write_set writes `memoryRef`.
+   *  Uses boundary: "step_complete" — the only boundary that carries a real
+   *  (non-empty) write_set in production (step_launch write_set is always []),
+   *  so the prior mirrors what gatherConcurrentPriors actually surfaces. */
+  function seedConcurrentPrior(db: Database.Database, memoryRef: string): string {
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-prior', 'goal-1', 'run-1', 'prior-tpl', 5, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-prior', NULL, NULL, NULL, NULL)"
+    ).run(NOW);
+    db.prepare(
+      "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES ('sess-prior', 'goal-1', 'ws-1', 'claude-code', 'Prior', 'running', ?, 'step-prior')"
+    ).run(NOW);
+    insertTransition(db, {
+      id: "transition-prior",
+      goalId: "goal-1",
+      workflowRunId: "run-1",
+      workflowStepRunId: "step-prior",
+      boundary: "step_complete",
+      risk: null,
+      evidence: null,
+      stateDeps: {
+        read_set: [],
+        write_set: [{ kind: "memory_item", ref: memoryRef, change_kind: "created" }],
+        assumptions: [],
+        version_deps: [],
+        conflict_policy: "escalate",
+        conflicts: [],
+      },
+      telemetry: null,
+      createdAt: NOW,
+    });
+    return "transition-prior";
+  }
+
+  /** Make the completing session (sess-judge) have created `memoryRef`, so its
+   *  derived write_set overlaps the prior — a deterministic write_write. */
+  function seedSelfCreatedMemory(db: Database.Database, memoryRef: string) {
+    db.prepare(
+      "INSERT INTO goal_memory_items (id, goal_id, type, status, content, content_hash, source_type, source_session_id, created_at, updated_at) VALUES (?, 'goal-1', 'note', 'candidate', 'c', 'h', 'session', 'sess-judge', ?, ?)"
+    ).run(memoryRef, NOW, NOW);
+  }
+
+  it("Test A: write_write conflict under escalate policy pauses the step", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    seedWorkspace(db);
+    seedAgentSession(db);
+    seedConcurrentPrior(db, "mem-shared");
+    seedSelfCreatedMemory(db, "mem-shared");
+
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete" }),
+      vi.fn(async () => "delivered" as const)
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    const t = listTransitionsByGoal(db, "goal-1").find(
+      (x) => x.boundary === "step_complete" && x.stateDeps !== null
+    );
+    expect(t?.stateDeps?.conflicts).toContainEqual({
+      kind: "write_write",
+      with_transition_id: "transition-prior",
+      refs: ["mem-shared"],
+    });
+
+    const row = db
+      .prepare("SELECT step_result_json, pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { step_result_json: string | null; pending_completion_json: string | null };
+    expect(row.step_result_json).toBeNull();
+    expect(row.pending_completion_json).not.toBeNull();
+  });
+
+  it("Test C: no overlap -> empty conflicts, no pause, normal completion", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupTwoStepAgentRun(db);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    seedWorkspace(db);
+    seedAgentSession(db);
+    // Prior writes a DIFFERENT ref; self creates none -> no overlap.
+    seedConcurrentPrior(db, "mem-other");
+
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete" }),
+      vi.fn(async () => "delivered" as const)
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    const t = listTransitionsByGoal(db, "goal-1").find(
+      (x) => x.boundary === "step_complete" && x.stateDeps !== null
+    );
+    expect(t?.stateDeps?.conflicts).toEqual([]);
+    const row = db
+      .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { pending_completion_json: string | null };
+    expect(row.pending_completion_json).toBeNull();
+  });
+
+  it("Test D (C1 regression): a gated step completing on the proceed path records its step_complete transition WITH a non-null stateDeps facet (derived write_set)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    // Gated step: a validation_rule guardrail makes stepRequiresExecution truthy,
+    // so the step_complete transition is recorded at the evidence gate. Pre-C1
+    // that gate read options.stateDepsByStepRunId BEFORE the facet was built, so
+    // stateDeps was undefined — this test asserts it is now non-null.
+    const guardrailsJson = JSON.stringify([
+      {
+        id: "validation_required",
+        kind: "validation_rule",
+        label: "x",
+        configJson: { appliesToSteps: ["implement"], required: ["typecheck"] },
+      },
+    ]);
+    setupAgentStepRun(db, { guardrailsJson });
+    seedWorkspaceWithTypecheck(db, 0); // typecheck exits 0 → sensor passes → proceed
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    // The completing session created a memory row → a non-empty derived write_set.
+    seedSelfCreatedMemory(db, "mem-self");
+
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete" }),
+      vi.fn(async () => "delivered" as const)
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // Completion proceeded (no pause): step-1 produced output.
+    expect(stepOutputCount(db)).toBe(1);
+
+    // Exactly one step_complete transition for step-1, and it carries the facet.
+    const stepComplete = listTransitionsByGoal(db, "goal-1").filter(
+      (t) => t.boundary === "step_complete" && t.workflowStepRunId === "step-1"
+    );
+    expect(stepComplete).toHaveLength(1);
+    const t = stepComplete[0];
+    expect(t.stateDeps).not.toBeNull();
+    expect(t.stateDeps!.write_set).toContainEqual({
+      kind: "memory_item",
+      ref: "mem-self",
+      change_kind: "created",
+    });
+  });
+
+  it("Test B: decideConflictResponse warns (no pause) under auto policy", () => {
+    expect(decideConflictResponse("auto", 3)).toEqual({ pause: false });
+    expect(decideConflictResponse("escalate", 3)).toEqual({ pause: true });
+    expect(decideConflictResponse("escalate", 0)).toEqual({ pause: false });
+    expect(decideConflictResponse("auto", 0)).toEqual({ pause: false });
   });
 });
