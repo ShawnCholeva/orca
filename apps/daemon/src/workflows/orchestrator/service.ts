@@ -100,7 +100,6 @@ import {
   type ShadowAsk,
 } from "./recover-step-scoring.js";
 import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
-import { getSupervisionMode } from "../../settings/store.js";
 import { interruptLive, expireConfirmation, openOrUpdateLive, pauseForConfirmation, pauseForGateDecision, pauseForProviderRecovery, resolveGateDecisionActivity, resumeFromConfirmation, resumeFromProviderRecovery } from "../../activities/store.js";
 import { setSessionStatus } from "../../sessions/projection.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
@@ -322,6 +321,12 @@ function readGoal(db: Database.Database, goalId: string): GoalRow {
     .get(goalId) as GoalRow | undefined;
   if (!row) throw new OrchestratorGoalNotFoundError(goalId);
   return row;
+}
+
+function goalRequiresHumanReview(db: Database.Database, goalId: string): boolean {
+  const row = db.prepare("SELECT operating_mode FROM goals WHERE id = ?").get(goalId) as { operating_mode: string } | undefined;
+  // Fail-safe: unknown goal → require human review.
+  return (row?.operating_mode ?? "human_review") === "human_review";
 }
 
 function requestEventPayload(args: {
@@ -1644,7 +1649,7 @@ export class OrchestratorService {
 
         const finishedAt = now();
 
-        if (getSupervisionMode(db) === "supervised" || ctx.stepTpl.completionPolicy === "handoff") {
+        if (goalRequiresHumanReview(db, ctx.run.goalId) || ctx.stepTpl.completionPolicy === "handoff") {
           const scoringParse = StepResultScoringProposal.safeParse(action.scoring);
           const scoring = scoringParse.success ? scoringParse.data : undefined;
           const proposal = extractProposal(responseText);
@@ -2206,32 +2211,40 @@ export class OrchestratorService {
   async continueAllPausedSteps(
     db: Database.Database,
     now: () => string,
-    options: RequestNextDecisionOptions = {}
+    options: RequestNextDecisionOptions = {},
+    goalId?: string
   ): Promise<void> {
+    // When goalId is provided, drain ONLY that goal's parked runs; otherwise global.
+    const goalParams = goalId ? [goalId] : [];
+
     const paused = db
       .prepare(
         `SELECT wr.id AS run_id
          FROM workflow_runs wr
          JOIN workflow_step_runs sr ON sr.id = wr.current_step_run_id
-         WHERE sr.pending_completion_json IS NOT NULL`
+         WHERE sr.pending_completion_json IS NOT NULL${goalId ? " AND wr.goal_id = ?" : ""}`
       )
-      .all() as { run_id: string }[];
+      .all(...goalParams) as { run_id: string }[];
     for (const p of paused) {
       await this.confirmStep(db, now, p.run_id, options);
     }
 
     // Runs parked at a gate confirmation checkpoint also resume.
     const pausedGates = db
-      .prepare("SELECT id AS run_id FROM workflow_runs WHERE pending_gate_route_json IS NOT NULL")
-      .all() as { run_id: string }[];
+      .prepare(
+        `SELECT id AS run_id FROM workflow_runs WHERE pending_gate_route_json IS NOT NULL${goalId ? " AND goal_id = ?" : ""}`
+      )
+      .all(...goalParams) as { run_id: string }[];
     for (const p of pausedGates) {
       await this.confirmGate(db, now, p.run_id, options);
     }
 
     // Runs parked at a splitter confirmation checkpoint also resume.
     const pausedSplits = db
-      .prepare("SELECT id AS run_id FROM workflow_runs WHERE pending_split_route_json IS NOT NULL")
-      .all() as { run_id: string }[];
+      .prepare(
+        `SELECT id AS run_id FROM workflow_runs WHERE pending_split_route_json IS NOT NULL${goalId ? " AND goal_id = ?" : ""}`
+      )
+      .all(...goalParams) as { run_id: string }[];
     for (const p of pausedSplits) {
       await this.confirmSplit(db, now, p.run_id, options);
     }
@@ -3745,7 +3758,7 @@ export class OrchestratorService {
       ledgerVersion: ledger.version,
     });
 
-    if (getSupervisionMode(db) === "supervised") {
+    if (goalRequiresHumanReview(db, run.goalId)) {
       const stagedEvents: DomainEvent[] = [];
       db.transaction(() => {
         db.prepare("UPDATE workflow_runs SET pending_split_route_json = ? WHERE id = ?").run(

@@ -1714,6 +1714,14 @@ export function createServer(
     })();
     if (!goalExists) { reply.status(404); return { error: { code: "goal_not_found" } }; }
     eventBus.publish({ seq, id: eventId, type: "goal.operating_mode_changed", goalId, payload: { operatingMode: parsed.data.operatingMode }, createdAt: now });
+    if (parsed.data.operatingMode === "automated") {
+      await orchestratorService.continueAllPausedSteps(
+        getDatabase(),
+        daemonContext.now,
+        { bus: eventBus, idFactory: daemonContext.idFactory },
+        goalId
+      );
+    }
     return { ok: true, operatingMode: parsed.data.operatingMode };
   });
 

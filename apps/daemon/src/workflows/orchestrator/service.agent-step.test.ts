@@ -798,6 +798,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(
@@ -855,6 +856,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(
@@ -955,6 +957,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(
@@ -998,6 +1001,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), deliver);
@@ -1034,6 +1038,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const service = makeJudgeService(
       fakeMediator({ kind: "approve_step_complete" }),
@@ -1086,6 +1091,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const deliver = vi.fn(async (_sid: string, _text: string) => "delivered" as const);
     const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), deliver);
@@ -1132,6 +1138,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const service = makeJudgeService(
       fakeMediator({ kind: "approve_step_complete" }),
@@ -1230,6 +1237,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const deliver = vi.fn(async (_sid: string, _text: string) => "delivered" as const);
     // The mediator approves (called once via judgeAgentResponse); the backstop
@@ -1275,6 +1283,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedAgentSession(db);
     // Explicitly unsupervised — the handoff policy must override this and still pause.
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(
@@ -1337,6 +1346,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(
@@ -1382,6 +1392,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), deliver);
@@ -1418,6 +1429,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(
@@ -1468,6 +1480,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     // A summary longer than WorkflowStepResult.resultSummary's 2000-char cap.
     const longSummary = "A".repeat(2500);
@@ -1525,6 +1538,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     seedWorkspace(db);
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     // A stale earlier step_output (e.g. from a prior completion attempt).
     db.prepare(
@@ -1564,6 +1578,36 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
 
     const result = readPersistedStepResult(db, "step-1");
     expect(result.resultSummary).toBe("FRESH SUMMARY");
+  });
+
+  it("auto-advances a completed step when the goal is automated (not global supervision)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    // Global supervision is left at its default ('supervised') to prove per-goal wins:
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), deliver);
+    const responseText = "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(db, () => NOW, { sessionId: "sess-judge", adapterId: "claude-code", responseText }, { bus, idFactory });
+    // automated → no pending_completion_json parked
+    const row = db.prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'").get() as { pending_completion_json: string | null };
+    expect(row.pending_completion_json).toBeNull();
+  });
+
+  it("parks a completed step for confirmation when the goal is human_review", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    db.prepare("UPDATE goals SET operating_mode = 'human_review' WHERE id = 'goal-1'").run();
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), deliver);
+    const responseText = "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(db, () => NOW, { sessionId: "sess-judge", adapterId: "claude-code", responseText }, { bus, idFactory });
+    const row = db.prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'").get() as { pending_completion_json: string | null };
+    expect(row.pending_completion_json).not.toBeNull();
   });
 });
 
@@ -2193,6 +2237,43 @@ describe("OrchestratorService.continueAllPausedSteps", () => {
     await service.continueAllPausedSteps(db, () => NOW, { bus, idFactory });
     const row = db.prepare("SELECT step_result_json FROM workflow_step_runs WHERE id = 'step-1'").get() as { step_result_json: string | null };
     expect(row.step_result_json).toBeNull();
+  });
+
+  it("continueAllPausedSteps with a goalId drains only that goal's parked steps (leaves other goals parked)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    // Goal-1: drive a real step to a confirmation pause (pending_completion_json set).
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    db.prepare("UPDATE goals SET operating_mode = 'human_review' WHERE id = 'goal-1'").run();
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete", scoring: { successScore: 0.82, quality: { outputCompleteness: 0.8, outputCorrectness: 0.85, instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2 }, reason: "ok", handoffReady: true } }),
+      vi.fn(async () => "delivered" as const)
+    );
+    const responseText = "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(db, () => NOW, { sessionId: "sess-judge", adapterId: "claude-code", responseText }, { bus, idFactory });
+
+    // Goal-2: a SECOND goal/run/step parked at a confirmation checkpoint (still human_review).
+    db.prepare(
+      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model, operating_mode) VALUES ('goal-2', 'Goal 2', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL, 'human_review')"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-2', 'goal-2', 'orca/engineering', 1, 'active', 'step-2', NULL, ?, NULL)"
+    ).run(NOW);
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at, pending_completion_json) VALUES ('step-2', 'goal-2', 'run-2', 'implement', 0, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-2', NULL, NULL, NULL, NULL, ?)"
+    ).run(NOW, JSON.stringify({ block: {}, scoring: null, finishedAt: NOW, proposal: null }));
+
+    // Sanity: both parked before the drain.
+    expect((db.prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'").get() as { pending_completion_json: string | null }).pending_completion_json).not.toBeNull();
+    expect((db.prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-2'").get() as { pending_completion_json: string | null }).pending_completion_json).not.toBeNull();
+
+    // Drain ONLY goal-1.
+    await service.continueAllPausedSteps(db, () => NOW, { bus, idFactory }, "goal-1");
+
+    // goal-1's step is confirmed (stash cleared); goal-2's step stays parked.
+    expect((db.prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'").get() as { pending_completion_json: string | null }).pending_completion_json).toBeNull();
+    expect((db.prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-2'").get() as { pending_completion_json: string | null }).pending_completion_json).not.toBeNull();
   });
 });
 
@@ -3286,6 +3367,7 @@ describe("OrchestratorService evidence veto (deterministic)", () => {
     seedWorkspaceWithTypecheck(db, 1); // typecheck exits 1 → sensor failed
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const before = db
       .prepare("SELECT current_step_run_id FROM workflow_runs WHERE id = 'run-1'")
@@ -3328,6 +3410,7 @@ describe("OrchestratorService evidence veto (deterministic)", () => {
     seedWorkspaceWithTypecheck(db, 0); // typecheck exits 0 → sensor passed
     seedAgentSession(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     const deliver = vi.fn(async () => "delivered" as const);
     const service = makeJudgeService(
