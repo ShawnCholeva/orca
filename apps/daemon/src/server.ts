@@ -183,6 +183,14 @@ import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
 import { registerHarnessTransitionRoutes } from './harness-transitions/routes.js';
+import { SessionCostAccumulator } from './harness-telemetry/accumulator.js';
+import { parseOtlpTokens } from './harness-telemetry/otlp-receiver.js';
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    otlpAccumulator: SessionCostAccumulator;
+  }
+}
 import { resolvePermissionDecision } from './permission-gate.js';
 import { classifyToolAction } from './harness-risk/classify.js';
 import {
@@ -321,6 +329,10 @@ export function createServer(
     new SessionRuntime(new NodePtyManager(), config.sessionStopGraceMs, config.sessionWsBufferLimitBytes);
   const extractionRunner = deps?.extractionRunner;
   const assembler = deps?.assembler ?? daemonContext.contextAssembler;
+
+  // Single shared per-session token accumulator fed by the OTLP ingest routes
+  // below. Decorated onto the server so Task 7 (transition attach) can drain it.
+  const otlpAccumulator = new SessionCostAccumulator();
 
   // Note: the workflow session launcher is now used only to create the session
   // DB row. Step agents are started as tmux workers via WorkerSessionManager,
@@ -2078,6 +2090,23 @@ export function createServer(
   });
 
   registerHarnessTransitionRoutes(server, { db });
+
+  // OTLP/JSON ingest (loopback worker telemetry). Auth via the global Bearer hook
+  // (the OTEL exporter sends OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>).
+  // Both providers land here: Claude appends /v1/metrics + /v1/logs to its base;
+  // Codex is pointed directly at the full /v1/logs. Ingest is best-effort.
+  server.decorate('otlpAccumulator', otlpAccumulator);
+  for (const path of ['/v1/otlp/v1/metrics', '/v1/otlp/v1/logs']) {
+    server.post(path, async (request, reply) => {
+      try {
+        otlpAccumulator.ingest(parseOtlpTokens(request.body));
+      } catch (e) {
+        console.error('otlp ingest', e);
+      }
+      reply.status(200);
+      return {};
+    });
+  }
 
   server.get('/v1/adapters', async (): Promise<ListAdaptersResponse> => {
     const adapters = await adapterRegistry.list();
