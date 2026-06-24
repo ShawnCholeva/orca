@@ -102,6 +102,9 @@ export const CostEntry = z
   .object({
     tokens_in: z.number().int().nonnegative(),
     tokens_out: z.number().int().nonnegative(),
+    // Additive (Task 15): default null so existing serialized facets still parse.
+    cache_read_tokens: z.number().int().nonnegative().nullable().default(null),
+    cache_creation_tokens: z.number().int().nonnegative().nullable().default(null),
     usd: z.number().nonnegative(),
   })
   .strict();

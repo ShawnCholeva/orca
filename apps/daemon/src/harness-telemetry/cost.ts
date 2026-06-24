@@ -22,5 +22,12 @@ export function isPricedModel(model: string): boolean {
 export function computeCost(model: string, tokensIn: number, tokensOut: number): CostEntry {
   const p = priceFor(model);
   const usd = p ? (tokensIn / 1000) * p.in + (tokensOut / 1000) * p.out : 0;
-  return { tokens_in: tokensIn, tokens_out: tokensOut, usd };
+  // Price-map estimate does not price cache; leave the additive cache fields null.
+  return {
+    tokens_in: tokensIn,
+    tokens_out: tokensOut,
+    cache_read_tokens: null,
+    cache_creation_tokens: null,
+    usd,
+  };
 }

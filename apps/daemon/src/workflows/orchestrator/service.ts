@@ -26,6 +26,7 @@ import {
   type WorkflowStepTemplate,
   type WorkflowTemplate as WorkflowTemplateT,
   type TelemetryFacet,
+  type CostEntry,
   type TransitionStatus,
   type FailureCode,
 } from "@orca/contracts";
@@ -387,7 +388,15 @@ const NULL_OUTPUT_STORE: SessionOutputStore = {
 // Drain-only view of the OTLP SessionCostAccumulator (Task 5). Drains and clears
 // a session's accrued worker tokens; returns null when nothing accrued.
 interface TokenAccumulator {
-  drain(sessionId: string): { tokensIn: number; tokensOut: number; model?: string } | null;
+  drain(sessionId: string): {
+    tokensIn: number;
+    tokensOut: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    usd: number | null; // authoritative provider cost (Claude); null when none carried (Codex)
+    durationMs: number | null; // provider-reported model time; null when none carried (Codex)
+    model?: string;
+  } | null;
 }
 
 const NULL_ACCUMULATOR: TokenAccumulator = { drain: () => null };
@@ -406,12 +415,28 @@ function buildTelemetry(
   humanInterventions: TelemetryFacet["human_interventions"] = []
 ): TelemetryFacet {
   const drained = acc && sessionId ? acc.drain(sessionId) : null;
-  const cost = drained && drained.model
-    ? computeCost(drained.model, drained.tokensIn, drained.tokensOut)
-    : null;
+  // Prefer the authoritative provider cost (Claude emits it; it already prices
+  // cache). When absent (Codex) fall back to the price-map estimate over
+  // input+output tokens — that estimate does NOT yet price Codex's cache.
+  // cost null only when nothing drained, or when there's no model to price AND
+  // no authoritative usd was emitted.
+  let cost: CostEntry | null = null;
+  if (drained && (drained.model || drained.usd != null)) {
+    const usd =
+      drained.usd != null
+        ? drained.usd
+        : computeCost(drained.model!, drained.tokensIn, drained.tokensOut).usd;
+    cost = {
+      tokens_in: drained.tokensIn,
+      tokens_out: drained.tokensOut,
+      cache_read_tokens: drained.cacheReadTokens,
+      cache_creation_tokens: drained.cacheCreationTokens,
+      usd,
+    };
+  }
   return {
     cost,
-    latency_ms: latencyMs,
+    latency_ms: drained?.durationMs ?? latencyMs,
     model: drained?.model ?? null,
     provider_id: null,
     provider_version: null,

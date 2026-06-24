@@ -110,7 +110,13 @@ describe("computeHarnessMetrics", () => {
         oracleAdequacy: { sufficient: true, gaps: [] },
       },
       telemetry: {
-        cost: { tokens_in: 100, tokens_out: 50, usd: 0.01 },
+        cost: {
+          tokens_in: 100,
+          tokens_out: 50,
+          cache_read_tokens: null,
+          cache_creation_tokens: null,
+          usd: 0.01,
+        },
         latency_ms: 1200,
         model: "claude",
         provider_id: "anthropic",

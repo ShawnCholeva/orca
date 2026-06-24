@@ -93,7 +93,23 @@ describe("RiskFacet", () => {
   });
 });
 
-import { TelemetryFacet, FailureCode } from "./index.js";
+import { TelemetryFacet, FailureCode, CostEntry } from "./index.js";
+
+describe("CostEntry", () => {
+  it("defaults cache fields to null when omitted (existing serialized facets still parse)", () => {
+    const c = CostEntry.parse({ tokens_in: 1200, tokens_out: 340, usd: 0.0123 });
+    expect(c.cache_read_tokens).toBeNull();
+    expect(c.cache_creation_tokens).toBeNull();
+  });
+  it("accepts populated cache fields", () => {
+    const c = CostEntry.parse({
+      tokens_in: 1200, tokens_out: 340, usd: 0.0123,
+      cache_read_tokens: 50, cache_creation_tokens: 10,
+    });
+    expect(c.cache_read_tokens).toBe(50);
+    expect(c.cache_creation_tokens).toBe(10);
+  });
+});
 
 describe("TelemetryFacet", () => {
   it("accepts a cost+outcome facet", () => {
