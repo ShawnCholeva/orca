@@ -6,75 +6,19 @@ import { parseOtlpTokens } from "./otlp-receiver.js";
 // `orca.session.id` is the attribution key (NOT the CLI-native session.id /
 // conversation.id). Token numbers are the verbatim captured values.
 
-// Claude metrics envelope: `claude_code.token.usage` datapoints discriminated by
-// the `type` attribute; numeric value in `asDouble`. tokens_in=5799, tokens_out=54.
-const claudeMetrics = {
-  resourceMetrics: [
-    {
-      resource: {
-        attributes: [
-          { key: "orca.session.id", value: { stringValue: "ORCA-CLAUDE-1" } },
-          { key: "orca.goal.id", value: { stringValue: "GOAL-9" } },
-          { key: "host.arch", value: { stringValue: "arm64" } },
-          { key: "service.name", value: { stringValue: "claude-code" } },
-        ],
-      },
-      scopeMetrics: [
-        {
-          scope: { name: "com.anthropic.claude_code" },
-          metrics: [
-            {
-              name: "claude_code.token.usage",
-              unit: "tokens",
-              sum: {
-                dataPoints: [
-                  {
-                    attributes: [
-                      // PII that MUST be ignored.
-                      { key: "user.email", value: { stringValue: "leak@example.com" } },
-                      { key: "model", value: { stringValue: "claude-opus-4-8" } },
-                      { key: "type", value: { stringValue: "input" } },
-                    ],
-                    asDouble: 5799,
-                  },
-                  {
-                    attributes: [{ key: "type", value: { stringValue: "output" } }],
-                    asDouble: 54,
-                  },
-                  // cacheRead / cacheCreation must NOT be summed.
-                  {
-                    attributes: [{ key: "type", value: { stringValue: "cacheRead" } }],
-                    asDouble: 14157,
-                  },
-                  {
-                    attributes: [{ key: "type", value: { stringValue: "cacheCreation" } }],
-                    asDouble: 2225,
-                  },
-                ],
-              },
-            },
-            // cost metric (no `type`) must be ignored by the token parser.
-            {
-              name: "claude_code.cost.usage",
-              sum: {
-                dataPoints: [{ attributes: [], asDouble: 0.0596735 }],
-              },
-            },
-          ],
-        },
-      ],
-    },
-  ],
-};
-
-// Claude LOGS envelope carrying the `api_request` event. This DUPLICATES the
-// metric and MUST be ignored to avoid double-counting.
+// Claude LOGS envelope carrying the `api_request` event — now the SOLE Claude
+// token source. One record carries tokens + cache + cost + duration + model in
+// named numeric fields. (Spike: scope com.anthropic.claude_code.events,
+// event.name=="api_request"; orca.session.id on the same resourceLogs envelope.)
 const claudeApiRequestLog = {
   resourceLogs: [
     {
       resource: {
         attributes: [
           { key: "orca.session.id", value: { stringValue: "ORCA-CLAUDE-1" } },
+          { key: "orca.goal.id", value: { stringValue: "GOAL-9" } },
+          // PII that MUST be ignored.
+          { key: "user.email", value: { stringValue: "leak@example.com" } },
           { key: "service.name", value: { stringValue: "claude-code" } },
         ],
       },
@@ -88,8 +32,53 @@ const claudeApiRequestLog = {
                 { key: "model", value: { stringValue: "claude-opus-4-8" } },
                 { key: "input_tokens", value: { intValue: 5799 } },
                 { key: "output_tokens", value: { intValue: 54 } },
+                { key: "cache_read_tokens", value: { intValue: 14157 } },
+                { key: "cache_creation_tokens", value: { intValue: 2225 } },
+                { key: "cost_usd", value: { doubleValue: 0.0596735 } },
+                { key: "cost_usd_micros", value: { intValue: 59674 } },
+                { key: "duration_ms", value: { intValue: 3819 } },
+                // PII / CLI-native id that MUST be ignored.
+                { key: "user.email", value: { stringValue: "leak@example.com" } },
                 { key: "session.id", value: { stringValue: "f040b04f-cli-native" } },
               ],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+// The OLD Claude METRIC `claude_code.token.usage` — now deliberately NOT counted
+// (Claude reads only the api_request log; this avoids a metric-vs-log double-count).
+const claudeMetricsOnly = {
+  resourceMetrics: [
+    {
+      resource: {
+        attributes: [
+          { key: "orca.session.id", value: { stringValue: "ORCA-CLAUDE-1" } },
+          { key: "service.name", value: { stringValue: "claude-code" } },
+        ],
+      },
+      scopeMetrics: [
+        {
+          scope: { name: "com.anthropic.claude_code" },
+          metrics: [
+            {
+              name: "claude_code.token.usage",
+              unit: "tokens",
+              sum: {
+                dataPoints: [
+                  {
+                    attributes: [{ key: "type", value: { stringValue: "input" } }],
+                    asDouble: 5799,
+                  },
+                  {
+                    attributes: [{ key: "type", value: { stringValue: "output" } }],
+                    asDouble: 54,
+                  },
+                ],
+              },
             },
           ],
         },
@@ -121,6 +110,7 @@ const codexLogs = {
                 { key: "event.kind", value: { stringValue: "response.completed" } },
                 { key: "input_token_count", value: { stringValue: "12426" } },
                 { key: "output_token_count", value: { stringValue: "0" } },
+                { key: "cached_token_count", value: { stringValue: "10624" } },
                 { key: "model", value: { stringValue: "gpt-5.5" } },
                 { key: "user.email", value: { stringValue: "leak@example.com" } },
                 { key: "conversation.id", value: { stringValue: "019ef825-cli-native" } },
@@ -139,6 +129,7 @@ const codexLogs = {
                 { key: "event.kind", value: { stringValue: "response.completed" } },
                 { key: "input_token_count", value: { stringValue: "12426" } },
                 { key: "output_token_count", value: { stringValue: "6" } },
+                { key: "cached_token_count", value: { stringValue: "10624" } },
                 { key: "model", value: { stringValue: "gpt-5.5" } },
               ],
             },
@@ -150,41 +141,55 @@ const codexLogs = {
 };
 
 describe("parseOtlpTokens", () => {
-  it("extracts Claude token.usage keyed by orca.session.id (input/output only)", () => {
-    const rows = parseOtlpTokens(claudeMetrics);
+  it("extracts Claude api_request log keyed by orca.session.id (tokens+cache+cost+duration)", () => {
+    const rows = parseOtlpTokens(claudeApiRequestLog);
     const r = rows.find((x) => x.sessionId === "ORCA-CLAUDE-1");
     expect(r).toBeDefined();
     expect(r?.tokensIn).toBe(5799);
     expect(r?.tokensOut).toBe(54);
+    expect(r?.cacheReadTokens).toBe(14157);
+    expect(r?.cacheCreationTokens).toBe(2225);
+    expect(r?.usd).toBe(0.0596735);
+    expect(r?.durationMs).toBe(3819);
     expect(r?.model).toBe("claude-opus-4-8");
   });
 
-  it("does NOT count cacheRead/cacheCreation or the cost metric", () => {
-    const rows = parseOtlpTokens(claudeMetrics);
-    const r = rows.find((x) => x.sessionId === "ORCA-CLAUDE-1");
-    // 5799 + 54, NOT 5799 + 14157 + 2225 etc.
-    expect((r?.tokensIn ?? 0) + (r?.tokensOut ?? 0)).toBe(5853);
+  it("does NOT count the Claude token.usage METRIC anymore (no double path)", () => {
+    // Claude tokens now come ONLY from the api_request log; the metric alone
+    // yields no rows, so the metric+log can never double-count.
+    expect(parseOtlpTokens(claudeMetricsOnly)).toEqual([]);
   });
 
-  it("IGNORES the Claude api_request LOG (avoids double-count)", () => {
-    const rows = parseOtlpTokens(claudeApiRequestLog);
-    expect(rows).toEqual([]);
-  });
-
-  it("coerces Codex string token counts and keys by orca.session.id", () => {
+  it("coerces Codex string token counts (incl. cached) and keys by orca.session.id", () => {
     const rows = parseOtlpTokens(codexLogs);
     const r = rows.find((x) => x.sessionId === "ORCA-CODEX-1");
     expect(r).toBeDefined();
-    // sums both response.completed turns: in 12426+12426, out 0+6
+    // sums both response.completed turns: in 12426+12426, out 0+6, cache 10624+10624
     expect(r?.tokensIn).toBe(24852);
     expect(r?.tokensOut).toBe(6);
+    expect(r?.cacheReadTokens).toBe(21248);
+    expect(r?.cacheCreationTokens).toBe(0);
+    expect(r?.usd).toBeNull(); // Codex emits no cost
+    expect(r?.durationMs).toBeNull(); // sse_event carries no duration
     expect(r?.model).toBe("gpt-5.5");
   });
 
-  it("never reads PII (only sessionId/tokens/model on each row)", () => {
-    const rows = [...parseOtlpTokens(claudeMetrics), ...parseOtlpTokens(codexLogs)];
+  it("never reads PII (only the named fields on each row)", () => {
+    const rows = [
+      ...parseOtlpTokens(claudeApiRequestLog),
+      ...parseOtlpTokens(codexLogs),
+    ];
     for (const r of rows) {
-      expect(Object.keys(r).sort()).toEqual(["model", "sessionId", "tokensIn", "tokensOut"]);
+      expect(Object.keys(r).sort()).toEqual([
+        "cacheCreationTokens",
+        "cacheReadTokens",
+        "durationMs",
+        "model",
+        "sessionId",
+        "tokensIn",
+        "tokensOut",
+        "usd",
+      ]);
     }
   });
 
@@ -197,17 +202,55 @@ describe("parseOtlpTokens", () => {
     expect(parseOtlpTokens([])).toEqual([]);
   });
 
+  it("missing fields contribute nothing (cache→0, usd/durationMs→null)", () => {
+    const sparse = {
+      resourceLogs: [
+        {
+          resource: {
+            attributes: [{ key: "orca.session.id", value: { stringValue: "SPARSE" } }],
+          },
+          scopeLogs: [
+            {
+              scope: { name: "com.anthropic.claude_code.events" },
+              logRecords: [
+                {
+                  attributes: [
+                    { key: "event.name", value: { stringValue: "api_request" } },
+                    { key: "input_tokens", value: { intValue: 10 } },
+                    { key: "output_tokens", value: { intValue: 2 } },
+                    // no cache, no cost, no duration, no model
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const r = parseOtlpTokens(sparse).find((x) => x.sessionId === "SPARSE");
+    expect(r?.tokensIn).toBe(10);
+    expect(r?.tokensOut).toBe(2);
+    expect(r?.cacheReadTokens).toBe(0);
+    expect(r?.cacheCreationTokens).toBe(0);
+    expect(r?.usd).toBeNull();
+    expect(r?.durationMs).toBeNull();
+    expect(r?.model).toBeUndefined();
+  });
+
   it("skips a resource with no orca.session.id, contributing nothing", () => {
     const noSession = {
-      resourceMetrics: [
+      resourceLogs: [
         {
           resource: { attributes: [{ key: "service.name", value: { stringValue: "claude-code" } }] },
-          scopeMetrics: [
+          scopeLogs: [
             {
-              metrics: [
+              scope: { name: "com.anthropic.claude_code.events" },
+              logRecords: [
                 {
-                  name: "claude_code.token.usage",
-                  sum: { dataPoints: [{ attributes: [{ key: "type", value: { stringValue: "input" } }], asDouble: 100 }] },
+                  attributes: [
+                    { key: "event.name", value: { stringValue: "api_request" } },
+                    { key: "input_tokens", value: { intValue: 100 } },
+                  ],
                 },
               ],
             },
@@ -218,7 +261,7 @@ describe("parseOtlpTokens", () => {
     expect(parseOtlpTokens(noSession)).toEqual([]);
   });
 
-  it("drops NaN token coercions without throwing", () => {
+  it("drops NaN token coercions without throwing (Codex)", () => {
     const badCodex = {
       resourceLogs: [
         {
@@ -244,5 +287,7 @@ describe("parseOtlpTokens", () => {
     const r = rows.find((x) => x.sessionId === "S");
     expect(r?.tokensIn).toBe(0); // NaN dropped → 0
     expect(r?.tokensOut).toBe(5);
+    expect(r?.usd).toBeNull();
+    expect(r?.durationMs).toBeNull();
   });
 });
