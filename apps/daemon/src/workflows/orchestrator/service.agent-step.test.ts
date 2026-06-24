@@ -704,6 +704,37 @@ describe("OrchestratorService agent step", () => {
     expect(launchFn).not.toHaveBeenCalled();
   });
 
+  it("risk_rule guardrail matching the operator's riskLabels routes to a recommendation, does NOT call launcher", async () => {
+    const { db, bus, idFactory } = setupHarness();
+
+    // risk_rule escalates when riskLabels intersects escalateOn.
+    // The launch chokepoint populates riskLabels = ["operator:" + chosen.id],
+    // and chosen.id resolves to AGENT_OPERATOR_ID ("agent:claude-code").
+    const guardrails = JSON.stringify([
+      {
+        id: "g-risk",
+        kind: "risk_rule",
+        label: "Escalate risky operators",
+        configJson: { escalateOn: ["operator:agent:claude-code"] },
+      },
+    ]);
+    setupAgentStepRun(db, { guardrailsJson: guardrails });
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
+    const launcher = makeLauncher(launchFn);
+    const service = makeAgentService(launcher);
+
+    // First call: selects operator
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    // Second call: agent decision → risk_rule require_approval → recommendation, no launch
+    const second = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    expect(second.recommendationIds).toHaveLength(1);
+    expect(recommendationCount(db, "launch_workflow_session")).toBe(1);
+
+    expect(launchFn).not.toHaveBeenCalled();
+  });
+
   it("is idempotent: subsequent calls with existing unaccepted launch recommendation return noop, no new recommendations", async () => {
     const { db, bus, idFactory } = setupHarness();
 

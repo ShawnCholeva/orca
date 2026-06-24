@@ -587,6 +587,7 @@ export async function submitHumanReviewDecision(
       kind: "launch_workflow_session",
       operatorId: normalizedSelection.operatorId,
     },
+    riskLabels: ["operator:" + normalizedSelection.operatorId],
   };
   const guardResults = template.guardrails.map((guardrail) =>
     evaluateGuardrail(guardrail, guardCtx)

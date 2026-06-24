@@ -3057,6 +3057,7 @@ export class OrchestratorService {
       stepRunId: stepRun.id,
       stepTemplateId: stepTpl.id,
       candidateAction: { kind: "launch_workflow_session", operatorId: chosen.id },
+      riskLabels: ["operator:" + chosen.id],
     });
     if (guardrailCheck === "deny") {
       return this.blockRun(db, now, ctx, "launch denied by guardrail", options);
