@@ -72,6 +72,10 @@ import { synthesizeStepOutput } from "./synthesize.js";
 import { detectPendingAgentQuestion } from "./agent-interview.js";
 import { assembleWorkspaceContext } from "./workspace-context.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
+import { listMemoryByGoal } from "../../memory/projection.js";
+import { listDecisionsByGoal } from "../../decisions/projection.js";
+import { getGoalRefinement } from "../../goal-refinements.js";
+import { deriveReadSet } from "../../harness-state/read-set.js";
 import { recordHarnessTransition } from "../../harness-transitions/usecases.js";
 import { runSensors } from "../../harness-sensors/runner.js";
 import { stepRequiresExecution } from "./requires-execution.js";
@@ -3206,9 +3210,74 @@ export class OrchestratorService {
     // On failure, fall back to a recommendation so the user can resolve the issue.
     try {
       await this.launcher.launch(launchCtx);
+      this.recordStepLaunchTransition(db, now, goal, run, stepRun, options);
       return this.commitNoopLatestDecision(db, run.id, stepRun.id);
     } catch {
       return this.commitLaunchRecommendation(db, now, ctx, chosen, objective, options);
+    }
+  }
+
+  /**
+   * Record the step_launch HarnessTransition carrying the read_set derived from the
+   * goal's current context inputs (memory/decisions/refinement/workspace) — the
+   * "state version as of launch" that belief-divergence later compares against.
+   * The context-assembly rows are not in scope here, so re-derive via the same
+   * readers buildContextAssemblyInput uses. Sibling summaries are intentionally
+   * omitted (context, not conflict-relevant state). A state-record failure must
+   * never break step launch, so the whole block is guarded.
+   */
+  private recordStepLaunchTransition(
+    db: Database.Database,
+    now: () => string,
+    goal: GoalRow,
+    run: WorkflowRunT,
+    stepRun: StepRunRow,
+    options: RequestNextDecisionOptions
+  ): void {
+    try {
+      const memory = listMemoryByGoal(db, goal.id, { includeArchived: false }).map((m) => ({
+        id: m.id,
+        updatedAt: m.updatedAt,
+      }));
+      const decisions = listDecisionsByGoal(db, goal.id, { includeArchived: false }).map((d) => ({
+        id: d.id,
+        updatedAt: d.updatedAt,
+      }));
+      const ref = getGoalRefinement(db, goal.id);
+      const refinement = ref ? { goalId: ref.goalId, refinedAt: ref.refinedAt } : null;
+      // Goal's first-attached workspace is its working workspace (same convention
+      // as the sensor-ladder lookup). branch/dirty are not persisted metadata, so
+      // mirror buildContextAssemblyInput and leave them null.
+      const ws = listWorkspacesByGoal(db, goal.id)[0];
+      const workspace = ws ? { id: ws.id, branch: null, dirty: null } : null;
+
+      const { read_set, version_deps } = deriveReadSet({
+        memory,
+        decisions,
+        summaries: [],
+        refinement,
+        workspace,
+      });
+
+      recordHarnessTransition(
+        { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          workflowStepRunId: stepRun.id,
+          boundary: "step_launch",
+          stateDeps: {
+            read_set,
+            write_set: [],
+            assumptions: [],
+            version_deps,
+            conflict_policy: "escalate",
+            conflicts: [],
+          },
+        }
+      );
+    } catch (err) {
+      console.error("recordHarnessTransition failed", err);
     }
   }
 

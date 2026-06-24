@@ -803,6 +803,55 @@ describe("OrchestratorService agent step", () => {
     expect(recommendationCount(db, "launch_workflow_session")).toBe(0);
   });
 
+  it("direct-launch path: records a step_launch HarnessTransition carrying the derived read_set", async () => {
+    const { db, bus, idFactory } = setupHarness();
+
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+
+    // Seed goal state the launch read_set should capture: ≥1 memory item + ≥1 decision.
+    db.prepare(
+      `INSERT INTO goal_memory_items (
+        id, goal_id, type, status, content, content_hash, confidence, source_type, source_id, source_session_id,
+        source_extraction_id, source_offset_first, source_offset_last, created_at, updated_at, promoted_at, archived_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "mem-1", "goal-1", "note", "candidate", "remember this", "hash-1", null, "manual",
+      null, null, null, null, null, NOW, NOW, null, null
+    );
+    db.prepare(
+      `INSERT INTO goal_decisions (
+        id, goal_id, title, decision_text, rationale, status, confirmation_required,
+        confidence, source_type, source_id, source_session_id, source_extraction_id,
+        source_offset_first, source_offset_last, created_at, updated_at, confirmed_at, archived_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "dec-1", "goal-1", "Use SQLite", "We use SQLite", null, "confirmed", 0,
+      null, "manual", null, null, null, null, null, NOW, NOW, NOW, null
+    );
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
+    const launcher = makeLauncher(launchFn);
+    const service = makeAgentService(launcher);
+
+    // First call: selects operator
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    // Second call: direct launch
+    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    expect(launchFn).toHaveBeenCalledOnce();
+
+    const launch = listTransitionsByGoal(db, "goal-1").find((t) => t.boundary === "step_launch");
+    expect(launch).toBeTruthy();
+    expect(launch!.workflowStepRunId).toBe("step-1");
+    const stateDeps = launch!.stateDeps;
+    expect(stateDeps).toBeTruthy();
+    expect(stateDeps!.conflict_policy).toBe("escalate");
+    expect(stateDeps!.read_set.length).toBeGreaterThan(0);
+    expect(stateDeps!.read_set.some((e) => e.kind === "memory_item" && e.ref === "mem-1")).toBe(true);
+    expect(stateDeps!.read_set.some((e) => e.kind === "decision" && e.ref === "dec-1")).toBe(true);
+    expect(stateDeps!.write_set).toEqual([]);
+  });
+
   it("does not re-launch while a session linked to the step is still running", async () => {
     const { db, bus, idFactory } = setupHarness();
 
