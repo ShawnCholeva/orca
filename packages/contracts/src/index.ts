@@ -10,6 +10,7 @@ import {
 import { AdapterId } from "./adapters/ids.js";
 
 export * from "./workflows/index.js";
+export * from "./harness/index.js";
 export * from "./adapters/ids.js";
 
 const UTF8_ENCODER = new TextEncoder();
@@ -240,7 +241,8 @@ export const DomainEventType = z.enum([
   "workflow.human_review.requested",
   "adapter.execution_modes.changed",
   "goal.worker_permission_mode_changed",
-  "activity.changed"
+  "activity.changed",
+  "harness.transition.recorded"
 ]);
 export type DomainEventType = z.infer<typeof DomainEventType>;
 
