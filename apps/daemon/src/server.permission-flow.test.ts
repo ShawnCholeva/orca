@@ -11,6 +11,8 @@ import { defaultMigrationsDir, runMigrations } from './migrations.js';
 import { eventBus } from './events.js';
 import { createDaemonContext } from './daemon-context.js';
 import { seedAgents } from './agents.js';
+import { actionClassOf } from './harness-risk/accountability.js';
+import { classifyToolAction } from './harness-risk/classify.js';
 import type { Config } from './config.js';
 
 beforeAll(() => {
@@ -207,6 +209,20 @@ describe('permission decision flow', () => {
     insertWorkspace(db, 'ws-canremember', goalId, '/tmp/ws-canremember');
     insertSessionWithWorkspace(db, 'session-claude-cr', goalId, 'ws-canremember', 'claude-code');
     insertSessionWithWorkspace(db, 'session-codex-cr', goalId, 'ws-canremember', 'codex');
+
+    // canRemember is streak-gated (Task 7): it only advertises once the action
+    // class has reached the consecutive-approval threshold. Pre-seed a built streak
+    // for the exact action class the pending approval keys on ('ls' is a plain bash
+    // command → Bash:sandbox_edit), so the assertion isolates the provider's
+    // supportsPermissionPersistence capability (claude-code=true, codex=false).
+    const actionClass = actionClassOf(
+      'Bash',
+      classifyToolAction({ toolName: 'Bash', toolInput: { command: 'ls' } })
+    );
+    db.prepare(
+      `INSERT INTO gate_approval_counts (goal_id, action_class, consecutive_approvals, last_decision, updated_at)
+       VALUES (?, ?, 3, 'allow', ?)`
+    ).run(goalId, actionClass, new Date().toISOString());
 
     const readCanRemember = async (sessionId: string, toolUseId: string): Promise<boolean | undefined> => {
       const hookPromise = server.inject({

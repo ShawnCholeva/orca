@@ -15,7 +15,7 @@ const CRITICAL_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   { re: /\brm\s+-[a-z]*r[a-z]*f|\brm\s+-[a-z]*f[a-z]*r/, reason: "destructive recursive delete (rm -rf)" },
   { re: /\b(mkfs|dd\s+if=|:\(\)\s*\{)/, reason: "destructive disk/forkbomb operation" },
   { re: /(^|\s)(>|>>)\s*\/(etc|dev|sys|proc)\b/, reason: "write to a protected system path" },
-  { re: /\b(~\/\.ssh|\/\.aws\/credentials|\.env\b|id_rsa)\b/, reason: "access to a secret/credential file" },
+  { re: /(?:^|\s)~\/\.ssh\b|\/\.aws\/credentials\b|\.env\b|\bid_rsa\b/, reason: "access to a secret/credential file" },
 ];
 const FULL_ACCESS_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   { re: /\b(curl|wget|nc|ncat|ssh|scp|rsync)\b/, reason: "network access" },
