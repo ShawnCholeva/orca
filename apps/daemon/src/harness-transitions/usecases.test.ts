@@ -113,10 +113,22 @@ describe("recordHarnessTransition", () => {
     const t = recordHarnessTransition(ctx, {
       goalId: "goal-1",
       boundary: "tool_gate",
-      risk: { permission_tier: "sandbox_edit" },
+      risk: {
+        risk_class: "medium",
+        permission_tier: "sandbox_edit",
+        classification_reasons: [],
+        gate_decision: "allow",
+        hard_constraint_violations: [],
+      },
     });
     const listed = listTransitionsByGoal(db, "goal-1");
-    expect(listed[0]!.risk).toEqual({ permission_tier: "sandbox_edit" });
+    expect(listed[0]!.risk).toEqual({
+      risk_class: "medium",
+      permission_tier: "sandbox_edit",
+      classification_reasons: [],
+      gate_decision: "allow",
+      hard_constraint_violations: [],
+    });
     expect(t.workflowRunId).toBeNull();
   });
 });

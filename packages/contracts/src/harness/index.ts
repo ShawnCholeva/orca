@@ -47,6 +47,46 @@ export const EvidenceFacet = z
   .strict();
 export type EvidenceFacet = z.infer<typeof EvidenceFacet>;
 
+export const RiskClass = z.enum(["low", "medium", "high", "critical"]);
+export type RiskClass = z.infer<typeof RiskClass>;
+
+export const PermissionTier = z.enum(["read_only", "sandbox_edit", "full_access"]);
+export type PermissionTier = z.infer<typeof PermissionTier>;
+
+export const GateDecision = z.enum(["allow", "require_approval", "deny"]);
+export type GateDecision = z.infer<typeof GateDecision>;
+
+export const OperatingMode = z.enum(["human_review", "automated"]);
+export type OperatingMode = z.infer<typeof OperatingMode>;
+
+export const RiskFacet = z
+  .object({
+    risk_class: RiskClass,
+    permission_tier: PermissionTier,
+    classification_reasons: z.array(z.string().max(512)).max(64),
+    gate_decision: GateDecision,
+    hard_constraint_violations: z.array(z.string().max(512)).max(64),
+    mode: OperatingMode.optional(),
+    approval: z
+      .object({
+        approval_id: z.string().max(128),
+        approved_by: z.string().max(128),
+        decided_at: z.string().datetime(),
+        policy_delta: z
+          .object({
+            action_class: z.string().max(256),
+            relaxed: z.boolean(),
+            decision_id: z.string().max(128),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type RiskFacet = z.infer<typeof RiskFacet>;
+
 // Facets are opaque in Phase 1; later phases replace each `z.record` with a
 // strict schema (Phase 2 tightens `evidence`).
 export const HarnessTransition = z
@@ -56,7 +96,7 @@ export const HarnessTransition = z
     workflowRunId: z.string().min(1).max(128).nullable(),
     workflowStepRunId: z.string().min(1).max(128).nullable(),
     boundary: HarnessTransitionBoundary,
-    risk: z.record(z.unknown()).nullable(),
+    risk: RiskFacet.nullable(),
     evidence: EvidenceFacet.nullable(),
     stateDeps: z.record(z.unknown()).nullable(),
     telemetry: z.record(z.unknown()).nullable(),
