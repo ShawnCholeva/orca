@@ -1672,12 +1672,20 @@ export function createServer(
       pending.toolName,
       classifyToolAction({ toolName: pending.toolName, toolInput: pending.toolInput })
     );
-    recordApprovalOutcome(
-      { db, bus: eventBus, now: daemonContext.now },
-      { goalId, actionClass, decision: parsed.data.decision }
-    );
+    // Accountability writes are best-effort audit: the gate is already unblocked by
+    // resolveDecision above, so a DB error here must not 500 the resolve route. Log, don't swallow silently.
+    try {
+      recordApprovalOutcome(
+        { db, bus: eventBus, now: daemonContext.now },
+        { goalId, actionClass, decision: parsed.data.decision }
+      );
+      if (parsed.data.decision === "allow" && parsed.data.remember) {
+        recordRelaxationDecision({ db, bus: eventBus, now: daemonContext.now }, { goalId, actionClass });
+      }
+    } catch (err) {
+      console.error("[permission] accountability write failed", err);
+    }
     if (parsed.data.decision === "allow" && parsed.data.remember) {
-      recordRelaxationDecision({ db, bus: eventBus, now: daemonContext.now }, { goalId, actionClass });
       try {
         const adapterId = (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(pending.sessionId) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code";
         const provider = resolveShadowProvider(adapterId as ShadowAdapterId);

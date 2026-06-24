@@ -11,7 +11,7 @@ import { defaultMigrationsDir, runMigrations } from './migrations.js';
 import { eventBus } from './events.js';
 import { createDaemonContext } from './daemon-context.js';
 import { seedAgents } from './agents.js';
-import { actionClassOf } from './harness-risk/accountability.js';
+import { actionClassOf, resetPreparedStatements as resetAccountabilityStatements } from './harness-risk/accountability.js';
 import { classifyToolAction } from './harness-risk/classify.js';
 import type { Config } from './config.js';
 
@@ -546,5 +546,60 @@ describe('permission decision flow', () => {
       .prepare("SELECT COUNT(*) AS cnt FROM orchestrator_messages WHERE goal_id = ?")
       .get(goalId) as { cnt: number };
     expect(messages.cnt).toBe(0);
+  });
+
+  // (1a) Accountability writes are best-effort audit. A DB error in
+  // recordApprovalOutcome/recordRelaxationDecision must NOT 500 the resolve route
+  // (the gate is already unblocked by resolveDecision before the audit writes run).
+  // We force the throw deterministically by dropping the gate_approval_counts table
+  // so the recordApprovalOutcome upsert can't prepare/execute against it.
+  it('resolve route still succeeds (200) when an accountability write throws', async () => {
+    const goalId = 'goal-acct-throw';
+    const sessionId = 'session-acct-throw';
+    insertGoal(db, goalId, 'ask');
+    insertSession(db, sessionId, goalId);
+
+    const permissionPromise = server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Bash', tool_input: { command: 'echo hi' }, tool_use_id: 'tu-acct-throw' },
+    });
+
+    const approvalId = await vi.waitFor(
+      () => {
+        const row = db
+          .prepare("SELECT pending_approval FROM orchestrator_messages WHERE goal_id = ? AND pending_approval IS NOT NULL")
+          .get(goalId) as { pending_approval: string } | undefined;
+        if (!row) throw new Error('pending approval message not yet posted');
+        return (JSON.parse(row.pending_approval) as { approvalId: string }).approvalId;
+      },
+      { timeout: 2000, interval: 50 }
+    );
+
+    // Force recordApprovalOutcome to throw: the upsert targets gate_approval_counts.
+    // resetPreparedStatements() clears the cached statements so ensure() re-prepares
+    // against the now-missing table (raising "no such table") inside the wrapped call.
+    db.exec('DROP TABLE gate_approval_counts');
+    resetAccountabilityStatements();
+
+    const answerRes = await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/permission-approvals/${approvalId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { decision: 'allow' },
+    });
+
+    // The audit write threw, but the route swallowed (logged) it and still succeeded.
+    expect(answerRes.statusCode).toBe(200);
+    expect(answerRes.json()).toMatchObject({ ok: true });
+
+    // And the gate decision was still applied: the held hook resolves to allow.
+    const permissionRes = await permissionPromise;
+    expect(permissionRes.statusCode).toBe(200);
+    const body = permissionRes.json() as { hookSpecificOutput: { decision: { behavior: string } } };
+    expect(body.hookSpecificOutput.decision.behavior).toBe('allow');
+
+    resetAccountabilityStatements();
   });
 });
