@@ -183,6 +183,13 @@ import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
 import { registerHarnessTransitionRoutes } from './harness-transitions/routes.js';
 import { resolvePermissionDecision } from './permission-gate.js';
+import { classifyToolAction } from './harness-risk/classify.js';
+import {
+  actionClassOf,
+  recordApprovalOutcome,
+  recordRelaxationDecision,
+  shouldSuggestRemember,
+} from './harness-risk/accountability.js';
 import { registerGoalBootstrapRoute } from './goals/bootstrap-route.js';
 import { startWorkflowRun } from './workflows/runs/usecases.js';
 import {
@@ -1510,7 +1517,12 @@ export function createServer(
       });
       if (isNew) {
         const adapterId = (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(sessionId) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code";
-        const canRemember = resolveShadowProvider(adapterId as ShadowAdapterId).supportsPermissionPersistence;
+        const supportsPermissionPersistence = resolveShadowProvider(adapterId as ShadowAdapterId).supportsPermissionPersistence;
+        const actionClass = actionClassOf(
+          payload.toolName,
+          classifyToolAction({ toolName: payload.toolName, toolInput: payload.toolInput })
+        );
+        const canRemember = supportsPermissionPersistence && shouldSuggestRemember(db, goalId, actionClass);
         insertMessageWithEvent(
           { db, bus: eventBus, idFactory: daemonContext.idFactory },
           {
@@ -1653,7 +1665,16 @@ export function createServer(
     if (!pending || pending.goalId !== goalId) { reply.status(404); return { error: { code: "approval_not_found" } }; }
     const ok = permissionApprovals.resolveDecision(approvalId, parsed.data.decision);
     if (!ok) { reply.status(409); return { error: { code: "already_answered" } }; }
+    const actionClass = actionClassOf(
+      pending.toolName,
+      classifyToolAction({ toolName: pending.toolName, toolInput: pending.toolInput })
+    );
+    recordApprovalOutcome(
+      { db, bus: eventBus, now: daemonContext.now },
+      { goalId, actionClass, decision: parsed.data.decision }
+    );
     if (parsed.data.decision === "allow" && parsed.data.remember) {
+      recordRelaxationDecision({ db, bus: eventBus, now: daemonContext.now }, { goalId, actionClass });
       try {
         const adapterId = (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(pending.sessionId) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code";
         const provider = resolveShadowProvider(adapterId as ShadowAdapterId);
