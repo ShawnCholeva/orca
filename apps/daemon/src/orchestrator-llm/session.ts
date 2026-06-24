@@ -1,4 +1,5 @@
 import type { AgentAdapter } from "../adapters/types.js";
+import { noopSandbox } from "../adapters/sandbox.js";
 
 interface OrchestratorSessionSpawnInput {
   goalId: string;
@@ -59,11 +60,13 @@ export class OrchestratorSessionManager {
       sessionId: `orchsess-${input.goalId}`,
       workspacePath: ".",
     });
+    // Containment seam (identity today): see adapters/sandbox.ts.
+    const sandboxed = noopSandbox.wrap(spawn);
     const handle = await this.deps.runtime.spawnPty({
-      command: spawn.command,
-      args: spawn.args,
-      env: spawn.env,
-      cwd: spawn.cwd,
+      command: sandboxed.command,
+      args: sandboxed.args,
+      env: sandboxed.env,
+      cwd: sandboxed.cwd,
     });
     this.active[input.goalId] = handle.sessionId;
     return handle.sessionId;

@@ -4,6 +4,7 @@ import type {
   EvidenceFacet,
   HarnessTransition,
   HarnessTransitionBoundary,
+  RiskFacet,
 } from "@orca/contracts";
 import type { EventBus } from "../events.js";
 import { insertTransition, listTransitionsByGoal } from "./projection.js";
@@ -23,7 +24,7 @@ export type RecordTransitionInput = {
   workflowRunId?: string | null;
   workflowStepRunId?: string | null;
   boundary: HarnessTransitionBoundary;
-  risk?: Record<string, unknown> | null;
+  risk?: RiskFacet | null;
   evidence?: EvidenceFacet | null;
   stateDeps?: Record<string, unknown> | null;
   telemetry?: Record<string, unknown> | null;

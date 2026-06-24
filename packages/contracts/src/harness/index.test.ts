@@ -64,3 +64,31 @@ describe("EvidenceFacet", () => {
     expect(t.evidence?.verdict).toBe("passed");
   });
 });
+
+import { RiskFacet, OperatingMode } from "./index.js";
+
+describe("RiskFacet", () => {
+  it("accepts a require_approval facet", () => {
+    const f = RiskFacet.parse({
+      risk_class: "high",
+      permission_tier: "full_access",
+      classification_reasons: ["bash: network access (curl)"],
+      gate_decision: "require_approval",
+      hard_constraint_violations: [],
+    });
+    expect(f.gate_decision).toBe("require_approval");
+  });
+  it("is accepted as the risk facet on a transition", () => {
+    const t = HarnessTransition.parse({
+      id: "t", goalId: "g", workflowRunId: null, workflowStepRunId: null,
+      boundary: "tool_gate",
+      risk: { risk_class: "low", permission_tier: "read_only",
+              classification_reasons: [], gate_decision: "allow", hard_constraint_violations: [] },
+      evidence: null, stateDeps: null, telemetry: null, createdAt: "2026-06-23T00:00:00.000Z",
+    });
+    expect(t.risk?.gate_decision).toBe("allow");
+  });
+  it("rejects an unknown operating mode", () => {
+    expect(OperatingMode.safeParse("yolo").success).toBe(false);
+  });
+});

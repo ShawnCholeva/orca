@@ -63,6 +63,7 @@ interface GoalRow {
   updated_at: string;
   archived_at: string | null;
   worker_permission_mode: string;
+  operating_mode: string;
 }
 
 function rowToGoal(row: GoalRow): Goal {
@@ -79,6 +80,7 @@ function rowToGoal(row: GoalRow): Goal {
     updatedAt: row.updated_at,
     archivedAt: row.archived_at,
     workerPermissionMode: row.worker_permission_mode,
+    operatingMode: row.operating_mode,
   });
 }
 
@@ -311,6 +313,7 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
     updatedAt: now,
     archivedAt: null,
     workerPermissionMode: "ask",
+    operatingMode: "human_review",
   };
 }
 

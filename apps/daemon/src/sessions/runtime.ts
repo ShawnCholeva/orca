@@ -5,6 +5,7 @@ import type { DomainEvent, DomainEventType } from '@orca/contracts';
 import type { EventBus } from '../events.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import type { AdapterContextDelivery } from '../adapters/types.js';
+import { noopSandbox } from '../adapters/sandbox.js';
 import type { PtyEvents, PtyHandle, PtyManager } from '../pty/types.js';
 import { getSessionDetail, setSessionStatus } from './projection.js';
 import type { SessionOutputStore } from './output-store.js';
@@ -281,11 +282,13 @@ export class SessionRuntime {
     let handle: PtyHandle;
     let ptyEvents: PtyEvents;
     try {
+      // Containment seam (identity today): see adapters/sandbox.ts.
+      const sandboxed = noopSandbox.wrap(spawnResult);
       const result = this.ptyManager.start({
-        command: spawnResult.command,
-        args: spawnResult.args,
-        cwd: spawnResult.cwd,
-        env: spawnResult.env,
+        command: sandboxed.command,
+        args: sandboxed.args,
+        cwd: sandboxed.cwd,
+        env: sandboxed.env,
         cols: terminalCols,
         rows: terminalRows,
       });

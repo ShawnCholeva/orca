@@ -11,6 +11,8 @@ import { defaultMigrationsDir, runMigrations } from './migrations.js';
 import { eventBus } from './events.js';
 import { createDaemonContext } from './daemon-context.js';
 import { seedAgents } from './agents.js';
+import { actionClassOf } from './harness-risk/accountability.js';
+import { classifyToolAction } from './harness-risk/classify.js';
 import type { Config } from './config.js';
 
 beforeAll(() => {
@@ -55,10 +57,14 @@ async function startServer(): Promise<{
  */
 function insertGoal(db: ReturnType<typeof openDatabase>, goalId: string, permissionMode: 'ask' | 'auto'): void {
   const now = new Date().toISOString();
+  // The governed gate reads goals.operating_mode (not worker_permission_mode). A
+  // direct INSERT bypasses the backfill migration, so set it explicitly here:
+  // 'auto' → automated (unattended except the safety floor); 'ask' → human_review.
+  const operatingMode = permissionMode === 'auto' ? 'automated' : 'human_review';
   db.prepare(
-    `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, worker_permission_mode)
-     VALUES (?, ?, '', 'active', 1, ?, ?, ?)`
-  ).run(goalId, 'test-goal', now, now, permissionMode);
+    `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, worker_permission_mode, operating_mode)
+     VALUES (?, ?, '', 'active', 1, ?, ?, ?, ?)`
+  ).run(goalId, 'test-goal', now, now, permissionMode, operatingMode);
 }
 
 /**
@@ -154,12 +160,13 @@ describe('permission decision flow', () => {
     insertGoal(db, goalId, 'ask');
     insertSession(db, sessionId, goalId);
 
-    // Fire the permission hook but don't await it — it should hold open
+    // Fire the permission hook but don't await it — a plain bash command is held
+    // (require_approval) under human_review, so it should hold open.
     const permissionPromise = server.inject({
       method: 'POST',
       url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { tool_name: 'Bash', tool_input: { command: 'rm -rf /' }, tool_use_id: 'tu-ask-1' },
+      payload: { tool_name: 'Bash', tool_input: { command: 'echo hi' }, tool_use_id: 'tu-ask-1' },
     });
 
     // Wait for the chat message to appear (the hook posts it before blocking)
@@ -202,6 +209,20 @@ describe('permission decision flow', () => {
     insertWorkspace(db, 'ws-canremember', goalId, '/tmp/ws-canremember');
     insertSessionWithWorkspace(db, 'session-claude-cr', goalId, 'ws-canremember', 'claude-code');
     insertSessionWithWorkspace(db, 'session-codex-cr', goalId, 'ws-canremember', 'codex');
+
+    // canRemember is streak-gated (Task 7): it only advertises once the action
+    // class has reached the consecutive-approval threshold. Pre-seed a built streak
+    // for the exact action class the pending approval keys on ('ls' is a plain bash
+    // command → Bash:sandbox_edit), so the assertion isolates the provider's
+    // supportsPermissionPersistence capability (claude-code=true, codex=false).
+    const actionClass = actionClassOf(
+      'Bash',
+      classifyToolAction({ toolName: 'Bash', toolInput: { command: 'ls' } })
+    );
+    db.prepare(
+      `INSERT INTO gate_approval_counts (goal_id, action_class, consecutive_approvals, last_decision, updated_at)
+       VALUES (?, ?, 3, 'allow', ?)`
+    ).run(goalId, actionClass, new Date().toISOString());
 
     const readCanRemember = async (sessionId: string, toolUseId: string): Promise<boolean | undefined> => {
       const hookPromise = server.inject({
@@ -370,7 +391,7 @@ describe('permission decision flow', () => {
       method: 'POST',
       url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { tool_name: 'Bash', tool_input: { command: 'rm -rf build' }, tool_use_id: 'tu-remember-1' },
+      payload: { tool_name: 'Bash', tool_input: { command: 'rm build' }, tool_use_id: 'tu-remember-1' },
     });
 
     const approvalId = await vi.waitFor(
@@ -409,7 +430,7 @@ describe('permission decision flow', () => {
       method: 'POST',
       url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { tool_name: 'Bash', tool_input: { command: 'rm -rf build' }, tool_use_id: 'tu-remember-2' },
+      payload: { tool_name: 'Bash', tool_input: { command: 'rm build' }, tool_use_id: 'tu-remember-2' },
     });
 
     const approvalId = await vi.waitFor(
@@ -447,7 +468,10 @@ describe('permission decision flow', () => {
       method: 'POST',
       url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { tool_name: 'Glob', tool_input: { pattern: '**' }, tool_use_id: 'tu-remember-3' },
+      // MultiEdit is held under human_review (an edit tool → require_approval) but
+      // has no native-rule mapping in the provider's permissionRule (returns null),
+      // so remember+allow must succeed and write nothing.
+      payload: { tool_name: 'MultiEdit', tool_input: { file_path: '/tmp/x', edits: [] }, tool_use_id: 'tu-remember-3' },
     });
 
     const approvalId = await vi.waitFor(
@@ -472,5 +496,55 @@ describe('permission decision flow', () => {
     expect(res.statusCode).toBe(200);
     expect(existsSync(join(ws, '.claude', 'settings.local.json'))).toBe(false);
     rmSync(ws, { recursive: true, force: true });
+  });
+
+  // ---- Governed-gate floor + read-only locks ----
+
+  // Hard-constraint action (rm -rf) → deny in human_review, never held, no message.
+  it('human_review goal: rm -rf is denied immediately without a chat message (safety floor)', async () => {
+    const goalId = 'goal-floor-1';
+    const sessionId = 'session-floor-1';
+    insertGoal(db, goalId, 'ask');
+    insertSession(db, sessionId, goalId);
+
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Bash', tool_input: { command: 'rm -rf /' }, tool_use_id: 'tu-floor-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { hookSpecificOutput: { decision: { behavior: string } } };
+    expect(body.hookSpecificOutput.decision.behavior).toBe('deny');
+
+    const messages = db
+      .prepare("SELECT COUNT(*) AS cnt FROM orchestrator_messages WHERE goal_id = ?")
+      .get(goalId) as { cnt: number };
+    expect(messages.cnt).toBe(0);
+  });
+
+  // Read-only tool → allow immediately in human_review, never held, no message.
+  it('human_review goal: a read-only tool is allowed immediately without a chat message', async () => {
+    const goalId = 'goal-readonly-1';
+    const sessionId = 'session-readonly-1';
+    insertGoal(db, goalId, 'ask');
+    insertSession(db, sessionId, goalId);
+
+    const res = await server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Glob', tool_input: { pattern: '**' }, tool_use_id: 'tu-readonly-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { hookSpecificOutput: { decision: { behavior: string } } };
+    expect(body.hookSpecificOutput.decision.behavior).toBe('allow');
+
+    const messages = db
+      .prepare("SELECT COUNT(*) AS cnt FROM orchestrator_messages WHERE goal_id = ?")
+      .get(goalId) as { cnt: number };
+    expect(messages.cnt).toBe(0);
   });
 });

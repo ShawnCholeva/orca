@@ -281,6 +281,7 @@ describe("OrchestratorService splitter routing", () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtSource(db);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
     const service = makeService(fakeSplitBroker("go_b"));
 
     await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });

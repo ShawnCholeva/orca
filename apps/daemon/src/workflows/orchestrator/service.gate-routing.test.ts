@@ -547,6 +547,7 @@ describe("OrchestratorService gate routing", () => {
     // Unsupervised: the splitter evaluates inline (no confirmSplit needed).
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtValidationForSplitter(db);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
     const service = makeService(fakeStepAndSplitBroker("go_a"));
 
     // Advance the run to the gate (scores validation step, parks at gate).

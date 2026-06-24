@@ -129,6 +129,7 @@ describe("orchestrator-mediated workflow e2e (service-level happy path)", () => 
     ).run();
     seedWorkspace(db);
     setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
     // ---- Boundary fakes: spy launcher (PTY) + fake mediator (LLM). ----
     const launches: any[] = [];

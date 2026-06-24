@@ -63,6 +63,7 @@ import {
   CheckSystemReadinessResponse,
   SubmitPermissionDecisionRequest,
   UpdateWorkerPermissionModeRequest,
+  UpdateOperatingModeRequest,
   PutSettingsRequest,
   ProviderRecoveryActionRequest,
   ProviderRecoverySwitchRequest,
@@ -110,6 +111,7 @@ import { pluginRegistry } from './registry/plugin-registry.js';
 import { skillRegistry } from './registry/skill-registry.js';
 import { AgentNotFoundError, listAgents, setAgentConnected } from './agents.js';
 import { adapterRegistry } from './adapters/registry.js';
+import { noopSandbox } from './adapters/sandbox.js';
 import {
   AdapterNotFoundError,
   ArchivedTargetError,
@@ -181,6 +183,14 @@ import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
 import { registerHarnessTransitionRoutes } from './harness-transitions/routes.js';
+import { resolvePermissionDecision } from './permission-gate.js';
+import { classifyToolAction } from './harness-risk/classify.js';
+import {
+  actionClassOf,
+  recordApprovalOutcome,
+  recordRelaxationDecision,
+  shouldSuggestRemember,
+} from './harness-risk/accountability.js';
 import { registerGoalBootstrapRoute } from './goals/bootstrap-route.js';
 import { startWorkflowRun } from './workflows/runs/usecases.js';
 import {
@@ -685,7 +695,9 @@ export function createServer(
       const adapter = adapterRegistry.get(adapterId);
       if (!adapter) { console.warn(`[orchestrator] workerSpawn: no adapter ${adapterId}`); return; }
       const spawn = await adapter.resolveSpawn({ goalId, sessionId, workspacePath: wsRow.path });
-      await workerSessions.spawn({ sessionId, goalId, adapterId, workspacePath: wsRow.path, command: spawn.command, env: spawn.env });
+      // Containment seam (identity today): see adapters/sandbox.ts.
+      const sandboxed = noopSandbox.wrap(spawn);
+      await workerSessions.spawn({ sessionId, goalId, adapterId, workspacePath: wsRow.path, command: sandboxed.command, env: sandboxed.env });
     },
     // workerDeliver
     (sessionId, text) => workerSessions.deliver(sessionId, text),
@@ -1490,13 +1502,17 @@ export function createServer(
       });
     },
     onPermissionRequest: async (sessionId, payload) => {
+      const decision = resolvePermissionDecision(
+        { db, bus: eventBus, now: daemonContext.now, idFactory: daemonContext.idFactory },
+        sessionId,
+        payload
+      );
+      if (decision === "allow") return "allow";
+      if (decision === "deny") return "deny";
+      // require_approval → the existing record-and-wait flow (unchanged below):
       const sessionRow = db.prepare("SELECT goal_id FROM sessions WHERE id = ?").get(sessionId) as { goal_id: string } | undefined;
-      if (!sessionRow) return "deny"; // safe default: unknown session
+      if (!sessionRow) return "deny";
       const goalId = sessionRow.goal_id;
-      const goalRow = db.prepare("SELECT worker_permission_mode FROM goals WHERE id = ?").get(goalId) as { worker_permission_mode: string } | undefined;
-      if (!goalRow) return "deny";
-      if (goalRow.worker_permission_mode === "auto") return "allow";
-
       const summary = summarizePermission(payload.toolName, payload.toolInput);
       const { approvalId, answered, isNew } = permissionApprovals.record({
         toolUseId: payload.toolUseId, sessionId, goalId,
@@ -1504,7 +1520,12 @@ export function createServer(
       });
       if (isNew) {
         const adapterId = (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(sessionId) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code";
-        const canRemember = resolveShadowProvider(adapterId as ShadowAdapterId).supportsPermissionPersistence;
+        const supportsPermissionPersistence = resolveShadowProvider(adapterId as ShadowAdapterId).supportsPermissionPersistence;
+        const actionClass = actionClassOf(
+          payload.toolName,
+          classifyToolAction({ toolName: payload.toolName, toolInput: payload.toolInput })
+        );
+        const canRemember = supportsPermissionPersistence && shouldSuggestRemember(db, goalId, actionClass);
         insertMessageWithEvent(
           { db, bus: eventBus, idFactory: daemonContext.idFactory },
           {
@@ -1528,10 +1549,10 @@ export function createServer(
       }
       let timerId: ReturnType<typeof setTimeout>;
       const timed = new Promise<"deny">((res) => { timerId = setTimeout(() => res("deny"), PERMISSION_DECISION_TIMEOUT_MS); });
-      const decision = await Promise.race([answered, timed]);
+      const result = await Promise.race([answered, timed]);
       clearTimeout(timerId!);
-      permissionApprovals.resolveDecision(approvalId, decision); // no-op if answer route already resolved
-      return decision;
+      permissionApprovals.resolveDecision(approvalId, result); // no-op if answer route already resolved
+      return result;
     },
     onWorkerQuestion: async (sessionId, payload) => {
       const goalRow = db.prepare("SELECT goal_id FROM sessions WHERE id = ?").get(sessionId) as { goal_id: string } | undefined;
@@ -1647,7 +1668,16 @@ export function createServer(
     if (!pending || pending.goalId !== goalId) { reply.status(404); return { error: { code: "approval_not_found" } }; }
     const ok = permissionApprovals.resolveDecision(approvalId, parsed.data.decision);
     if (!ok) { reply.status(409); return { error: { code: "already_answered" } }; }
+    const actionClass = actionClassOf(
+      pending.toolName,
+      classifyToolAction({ toolName: pending.toolName, toolInput: pending.toolInput })
+    );
+    recordApprovalOutcome(
+      { db, bus: eventBus, now: daemonContext.now },
+      { goalId, actionClass, decision: parsed.data.decision }
+    );
     if (parsed.data.decision === "allow" && parsed.data.remember) {
+      recordRelaxationDecision({ db, bus: eventBus, now: daemonContext.now }, { goalId, actionClass });
       try {
         const adapterId = (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(pending.sessionId) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code";
         const provider = resolveShadowProvider(adapterId as ShadowAdapterId);
@@ -1686,6 +1716,37 @@ export function createServer(
     if (!goalExists) { reply.status(404); return { error: { code: "goal_not_found" } }; }
     eventBus.publish({ seq, id: eventId, type: "goal.worker_permission_mode_changed", goalId, payload: { workerPermissionMode: parsed.data.workerPermissionMode }, createdAt: now });
     return { ok: true, workerPermissionMode: parsed.data.workerPermissionMode };
+  });
+
+  // ---- Operating mode toggle route ----
+
+  server.put("/v1/goals/:goalId/operating-mode", async (request, reply) => {
+    const { goalId } = request.params as { goalId: string };
+    const parsed = UpdateOperatingModeRequest.safeParse(request.body);
+    if (!parsed.success) { reply.status(400); return { error: "validation_failed", issues: parsed.error.issues }; }
+    const now = daemonContext.now();
+    const eventId = daemonContext.idFactory();
+    let seq = 0; let goalExists = false;
+    db.transaction(() => {
+      const existing = db.prepare("SELECT id FROM goals WHERE id = ? AND archived_at IS NULL").get(goalId);
+      if (!existing) return;
+      goalExists = true;
+      const result = db.prepare("INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(eventId, "goal.operating_mode_changed", goalId, JSON.stringify({ operatingMode: parsed.data.operatingMode }), now);
+      seq = Number(result.lastInsertRowid);
+      db.prepare("UPDATE goals SET operating_mode = ?, updated_at = ? WHERE id = ?").run(parsed.data.operatingMode, now, goalId);
+    })();
+    if (!goalExists) { reply.status(404); return { error: { code: "goal_not_found" } }; }
+    eventBus.publish({ seq, id: eventId, type: "goal.operating_mode_changed", goalId, payload: { operatingMode: parsed.data.operatingMode }, createdAt: now });
+    if (parsed.data.operatingMode === "automated") {
+      await orchestratorService.continueAllPausedSteps(
+        getDatabase(),
+        daemonContext.now,
+        { bus: eventBus, idFactory: daemonContext.idFactory },
+        goalId
+      );
+    }
+    return { ok: true, operatingMode: parsed.data.operatingMode };
   });
 
   // ---- Settings routes ----
