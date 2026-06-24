@@ -2207,6 +2207,10 @@ export class OrchestratorService {
    * checkpoint. Called when supervision mode switches to "unsupervised" so that
    * any held steps are immediately advanced without waiting for user confirmation.
    * Delegates to confirmStep for each paused run.
+   *
+   * When `goalId` is provided, the drain is scoped to that goal's parked runs
+   * (used by the operating-mode flip); when omitted, it drains globally (the
+   * settings route).
    */
   async continueAllPausedSteps(
     db: Database.Database,

@@ -87,8 +87,8 @@ export const RiskFacet = z
   .strict();
 export type RiskFacet = z.infer<typeof RiskFacet>;
 
-// Facets are opaque in Phase 1; later phases replace each `z.record` with a
-// strict schema (Phase 2 tightens `evidence`).
+// `risk` (RiskFacet) and `evidence` (EvidenceFacet) are now strict schemas;
+// `stateDeps` and `telemetry` remain opaque `z.record` pending future tightening.
 export const HarnessTransition = z
   .object({
     id: z.string().min(1).max(128),
