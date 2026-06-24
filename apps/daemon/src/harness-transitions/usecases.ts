@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type {
   DomainEvent,
+  EvidenceFacet,
   HarnessTransition,
   HarnessTransitionBoundary,
 } from "@orca/contracts";
@@ -23,7 +24,7 @@ export type RecordTransitionInput = {
   workflowStepRunId?: string | null;
   boundary: HarnessTransitionBoundary;
   risk?: Record<string, unknown> | null;
-  evidence?: Record<string, unknown> | null;
+  evidence?: EvidenceFacet | null;
   stateDeps?: Record<string, unknown> | null;
   telemetry?: Record<string, unknown> | null;
 };
