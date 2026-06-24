@@ -182,6 +182,7 @@ import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
 import { registerHarnessTransitionRoutes } from './harness-transitions/routes.js';
+import { resolvePermissionDecision } from './permission-gate.js';
 import { registerGoalBootstrapRoute } from './goals/bootstrap-route.js';
 import { startWorkflowRun } from './workflows/runs/usecases.js';
 import {
@@ -1491,13 +1492,17 @@ export function createServer(
       });
     },
     onPermissionRequest: async (sessionId, payload) => {
+      const decision = resolvePermissionDecision(
+        { db, bus: eventBus, now: daemonContext.now, idFactory: daemonContext.idFactory },
+        sessionId,
+        payload
+      );
+      if (decision === "allow") return "allow";
+      if (decision === "deny") return "deny";
+      // require_approval → the existing record-and-wait flow (unchanged below):
       const sessionRow = db.prepare("SELECT goal_id FROM sessions WHERE id = ?").get(sessionId) as { goal_id: string } | undefined;
-      if (!sessionRow) return "deny"; // safe default: unknown session
+      if (!sessionRow) return "deny";
       const goalId = sessionRow.goal_id;
-      const goalRow = db.prepare("SELECT worker_permission_mode FROM goals WHERE id = ?").get(goalId) as { worker_permission_mode: string } | undefined;
-      if (!goalRow) return "deny";
-      if (goalRow.worker_permission_mode === "auto") return "allow";
-
       const summary = summarizePermission(payload.toolName, payload.toolInput);
       const { approvalId, answered, isNew } = permissionApprovals.record({
         toolUseId: payload.toolUseId, sessionId, goalId,
@@ -1529,10 +1534,10 @@ export function createServer(
       }
       let timerId: ReturnType<typeof setTimeout>;
       const timed = new Promise<"deny">((res) => { timerId = setTimeout(() => res("deny"), PERMISSION_DECISION_TIMEOUT_MS); });
-      const decision = await Promise.race([answered, timed]);
+      const result = await Promise.race([answered, timed]);
       clearTimeout(timerId!);
-      permissionApprovals.resolveDecision(approvalId, decision); // no-op if answer route already resolved
-      return decision;
+      permissionApprovals.resolveDecision(approvalId, result); // no-op if answer route already resolved
+      return result;
     },
     onWorkerQuestion: async (sessionId, payload) => {
       const goalRow = db.prepare("SELECT goal_id FROM sessions WHERE id = ?").get(sessionId) as { goal_id: string } | undefined;
