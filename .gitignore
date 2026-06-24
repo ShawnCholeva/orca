@@ -9,3 +9,4 @@ apps/desktop/src-tauri/gen/
 .superpowers/
 scripts/paper-rag/.venv/
 .orca/paper-index/
+agent-harness.pdf
