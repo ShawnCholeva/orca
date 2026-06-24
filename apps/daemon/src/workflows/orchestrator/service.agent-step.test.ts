@@ -3482,6 +3482,51 @@ describe("OrchestratorService evidence veto (deterministic)", () => {
   });
 });
 
+/** Seed a recommendation + a feedback row for goal-1 so listRecentFeedbackByGoal
+ *  returns it. Returns the feedback id. */
+function seedRecommendationFeedback(db: Database.Database): string {
+  db.prepare(
+    "INSERT INTO recommendations (id, goal_id, generation_id, type, status, source, title, rationale, proposed_action_json, confidence, fingerprint, created_at, updated_at) VALUES ('rec-1', 'goal-1', NULL, 'ask_user', 'proposed', 'deterministic_provider', 'Title', 'Why', '{}', 0.5, 'fp-rec-1', ?, ?)"
+  ).run(NOW, NOW);
+  const feedbackId = "fb-1";
+  db.prepare(
+    "INSERT INTO recommendation_feedback (id, recommendation_id, goal_id, action, note, modified_payload_json, created_at) VALUES (?, 'rec-1', 'goal-1', 'modify', NULL, NULL, ?)"
+  ).run(feedbackId, NOW);
+  return feedbackId;
+}
+
+describe("OrchestratorService step_complete recommendation-feedback revive", () => {
+  it("surfaces recent goal feedback as human_interventions on the step_complete transition", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    const feedbackId = seedRecommendationFeedback(db);
+
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete" }),
+      vi.fn(async () => "delivered" as const)
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    const t = listTransitionsByGoal(db, "goal-1").find((x) => x.boundary === "step_complete");
+    expect(t?.telemetry?.human_interventions).toContainEqual({
+      kind: "recommendation_feedback",
+      ref: feedbackId,
+    });
+  });
+});
+
 describe("OrchestratorService step_complete telemetry facet", () => {
   it("attaches a TelemetryFacet with worker cost to the step_complete transition", async () => {
     const { db, bus, idFactory } = setupHarness();

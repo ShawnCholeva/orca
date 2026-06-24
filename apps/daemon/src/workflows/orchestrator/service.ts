@@ -65,6 +65,7 @@ import { buildAgentObjective } from "./agent-objective.js";
 import { buildStepExecutionInput } from "./step-input.js";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.js";
+import { listRecentFeedbackByGoal } from "../../recommendations/feedback.js";
 import { decodeSessionTail, decodeSessionTailFromSeq } from "./session-tail.js";
 import { synthesizeStepOutput } from "./synthesize.js";
 import { detectPendingAgentQuestion } from "./agent-interview.js";
@@ -401,7 +402,8 @@ function buildTelemetry(
   sessionId: string | null | undefined,
   status: TransitionStatus,
   failureCode: FailureCode | null,
-  latencyMs: number | null
+  latencyMs: number | null,
+  humanInterventions: TelemetryFacet["human_interventions"] = []
 ): TelemetryFacet {
   const drained = acc && sessionId ? acc.drain(sessionId) : null;
   const cost = drained && drained.model
@@ -416,9 +418,25 @@ function buildTelemetry(
     prompt_ref: null,
     raw_output_ref: null,
     rejected_alternatives: [],
-    human_interventions: [],
+    human_interventions: humanInterventions,
     outcome: { status, failure_code: failureCode },
   };
+}
+
+/**
+ * Reads a goal's recent recommendation feedback (bounded to the existing MAX 10)
+ * and maps each row to a `recommendation_feedback` human-intervention entry. This
+ * revives the previously-dead feedback by surfacing it on the inspectable
+ * step_complete transition.
+ */
+function recommendationFeedbackInterventions(
+  db: Database.Database,
+  goalId: string
+): TelemetryFacet["human_interventions"] {
+  return listRecentFeedbackByGoal(db, goalId).map((f) => ({
+    kind: "recommendation_feedback",
+    ref: f.id,
+  }));
 }
 
 export class OrchestratorService {
@@ -1663,7 +1681,8 @@ export class OrchestratorService {
                 sessionId,
                 evidenceStatus,
                 vetoed ? "evidence_veto" : null,
-                null
+                null,
+                recommendationFeedbackInterventions(db, ctx.run.goalId)
               ),
             }
           );
@@ -2370,7 +2389,8 @@ export class OrchestratorService {
               sessionRow?.id,
               "succeeded",
               null,
-              null
+              null,
+              recommendationFeedbackInterventions(db, run.goalId)
             ),
           }
         );
