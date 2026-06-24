@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
+import { buildProvenance } from "./provenance.js";
 import { computeHarnessMetrics } from "./usecases.js";
 
 export interface HarnessMetricsRouteDeps {
@@ -26,4 +27,30 @@ export function registerHarnessMetricsRoutes(
     }
     return { metrics: computeHarnessMetrics(db, goalId) };
   });
+
+  server.get(
+    "/v1/goals/:goalId/harness-transitions/:transitionId/provenance",
+    async (request, reply) => {
+      const { goalId, transitionId } = request.params as {
+        goalId: string;
+        transitionId: string;
+      };
+      const goalRow = stmtGetGoal.get(goalId);
+      if (!goalRow) {
+        reply.status(404);
+        return { error: { code: "goal_not_found", message: `Goal not found: ${goalId}` } };
+      }
+      const provenance = buildProvenance(db, transitionId);
+      if (!provenance) {
+        reply.status(404);
+        return {
+          error: {
+            code: "transition_not_found",
+            message: `Transition not found: ${transitionId}`,
+          },
+        };
+      }
+      return { provenance };
+    }
+  );
 }

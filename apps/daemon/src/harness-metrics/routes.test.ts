@@ -82,3 +82,53 @@ describe("GET /v1/goals/:goalId/harness-metrics", () => {
     expect(body.error.code).toBe("goal_not_found");
   });
 });
+
+describe("GET /v1/goals/:goalId/harness-transitions/:transitionId/provenance", () => {
+  it("returns 200 with a provenance body for a seeded transition", async () => {
+    const db = openTestDb();
+    seedGoal(db, "g");
+    db.prepare(
+      `INSERT INTO harness_transitions (id, goal_id, workflow_run_id, workflow_step_run_id, boundary, created_at)
+       VALUES (?, 'g', NULL, NULL, 'tool_gate', '2026-01-01T00:00:00.000Z')`
+    ).run("trans-1");
+    const f = Fastify();
+    registerHarnessMetricsRoutes(f, { db });
+
+    const res = await f.inject({
+      method: "GET",
+      url: "/v1/goals/g/harness-transitions/trans-1/provenance",
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { provenance: { transition: { id: string } } };
+    expect(body.provenance.transition.id).toBe("trans-1");
+  });
+
+  it("returns 404 for an unknown transition", async () => {
+    const db = openTestDb();
+    seedGoal(db, "g");
+    const f = Fastify();
+    registerHarnessMetricsRoutes(f, { db });
+
+    const res = await f.inject({
+      method: "GET",
+      url: "/v1/goals/g/harness-transitions/missing/provenance",
+    });
+    expect(res.statusCode).toBe(404);
+    const body = res.json() as { error: { code: string } };
+    expect(body.error.code).toBe("transition_not_found");
+  });
+
+  it("returns 404 for an unknown goal", async () => {
+    const db = openTestDb();
+    const f = Fastify();
+    registerHarnessMetricsRoutes(f, { db });
+
+    const res = await f.inject({
+      method: "GET",
+      url: "/v1/goals/missing/harness-transitions/whatever/provenance",
+    });
+    expect(res.statusCode).toBe(404);
+    const body = res.json() as { error: { code: string } };
+    expect(body.error.code).toBe("goal_not_found");
+  });
+});
