@@ -1852,7 +1852,7 @@ export class OrchestratorService {
                 }
               );
             } catch (err) {
-              console.error("recordHarnessTransition (state pause) failed", err);
+              console.error("emitStepComplete (state pause) failed", err);
             }
           }
           const summary = conflictPause?.summary ?? summarizeScoring(scoring, proposal);
@@ -2511,7 +2511,7 @@ export class OrchestratorService {
           }
         );
       } catch (err) {
-        console.error("recordHarnessTransition failed", err);
+        console.error("emitStepComplete failed", err);
       }
     }
 
@@ -3363,7 +3363,7 @@ export class OrchestratorService {
         }
       );
     } catch (err) {
-      console.error("recordHarnessTransition failed", err);
+      console.error("emitStepLaunch failed", err);
     }
   }
 

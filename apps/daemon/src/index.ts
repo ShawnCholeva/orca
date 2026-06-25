@@ -81,7 +81,12 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
     process.exit(1);
   }
 
-  assertHarnessRegistryConformance(db);
+  try {
+    assertHarnessRegistryConformance(db);
+  } catch (err) {
+    console.error('[orca-daemon] Harness registry conformance failed — aborting startup:', err);
+    process.exit(1);
+  }
 
   try {
     seedAgents(db);

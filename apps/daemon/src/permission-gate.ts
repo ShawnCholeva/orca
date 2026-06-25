@@ -46,7 +46,7 @@ export function resolvePermissionDecision(
       }
     );
   } catch (err) {
-    console.error("recordHarnessTransition (tool_gate) failed", err);
+    console.error("emitToolGate (tool_gate) failed", err);
   }
   return gateDecision;
 }
