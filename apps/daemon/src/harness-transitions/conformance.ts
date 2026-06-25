@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { HarnessTransition, HarnessTransitionBoundary, HARNESS_FACETS } from "@orca/contracts";
 import { HARNESS_BOUNDARIES } from "./emit.js";
+import { assertSensorConformance } from "../harness-sensors/conformance.js";
 
 const ENVELOPE_KEYS = new Set([
   "id", "goalId", "workflowRunId", "workflowStepRunId", "boundary", "createdAt",
@@ -45,4 +46,5 @@ export function assertBoundaryConformance(): void {
 export function assertHarnessRegistryConformance(db: Database.Database): void {
   assertFacetConformance(db);
   assertBoundaryConformance();
+  assertSensorConformance();
 }

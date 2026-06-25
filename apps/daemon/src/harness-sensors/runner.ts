@@ -2,7 +2,7 @@
 import type { EvidenceFacet, SensorResult } from "@orca/contracts";
 import { runCheckCommand } from "../readiness/exec.js";
 import { inheritCredEnv } from "../readiness/exec.js";
-import { detectSensors, LABEL_TO_SCRIPT } from "./detect.js";
+import { detectSensors, HARNESS_SENSORS } from "./detect.js";
 
 const SENSOR_TIMEOUT_MS = 180_000; // tests/typecheck need far longer than the 5s readiness default
 const SUMMARY_MAX = 4000;
@@ -48,9 +48,8 @@ export async function runSensors(opts: {
     }
   }
 
-  // A required label maps to a sensor kind via detect.ts's LABEL_TO_SCRIPT.
   const gaps: string[] = [];
-  for (const entry of LABEL_TO_SCRIPT) {
+  for (const entry of HARNESS_SENSORS) {
     if (!opts.required.includes(entry.label)) continue;
     if (!detectedLabels.has(entry.kind)) gaps.push(`${entry.label}: no matching script`);
   }
