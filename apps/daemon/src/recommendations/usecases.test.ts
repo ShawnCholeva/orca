@@ -29,6 +29,7 @@ import {
 import { getFeedbackByRecommendationId } from './feedback.js';
 import { recommendationFingerprint } from './fingerprint.js';
 import { FakeRecommendationProvider } from './provider.js';
+import { listTransitionsByGoal } from '../harness-transitions/usecases.js';
 
 const tempDirs: string[] = [];
 const NOW = '2026-01-01T00:00:00.000Z';
@@ -328,6 +329,32 @@ describe('acceptRecommendation', () => {
       .prepare("SELECT status FROM workflow_step_runs WHERE id='step-1'")
       .get() as { status: string };
     expect(step.status).toBe('passed');
+  });
+
+  it('fires a mark_done harness transition carrying telemetry on accept', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedWorkflow(db, 'g1', { finalStep: true, outstanding: [] });
+    seedRec(db, {
+      goalId: 'g1',
+      type: 'complete_workflow_run',
+      workflowStepRunId: 'step-1',
+      proposedActionJson: JSON.stringify({
+        kind: 'complete_workflow_run',
+        workflowRunId: 'run-1',
+        workflowStepRunId: 'step-1',
+      }),
+    });
+
+    acceptRecommendation(makeCtx(db), 'rec-1');
+
+    const markDone = listTransitionsByGoal(db, 'g1').find((t) => t.boundary === 'mark_done');
+    expect(markDone).toBeDefined();
+    expect(markDone!.workflowRunId).toBe('run-1');
+    expect(markDone!.telemetry?.outcome.status).toBe('succeeded');
+    expect(markDone!.telemetry?.human_interventions).toEqual([
+      { kind: 'mark_done_approval', ref: 'rec-1' },
+    ]);
   });
 
   // DELETED: 'accepting mark_artifact_satisfied records matching exit criteria'.
