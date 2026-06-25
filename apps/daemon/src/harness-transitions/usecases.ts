@@ -1,12 +1,13 @@
 import type Database from "better-sqlite3";
-import type {
-  DomainEvent,
-  EvidenceFacet,
+import {
+  HARNESS_FACETS,
   HarnessTransition,
-  HarnessTransitionBoundary,
-  RiskFacet,
-  StateDepsFacet,
-  TelemetryFacet,
+  type DomainEvent,
+  type EvidenceFacet,
+  type HarnessTransitionBoundary,
+  type RiskFacet,
+  type StateDepsFacet,
+  type TelemetryFacet,
 } from "@orca/contracts";
 import type { EventBus } from "../events.js";
 import { insertTransition, listTransitionsByGoal } from "./projection.js";
@@ -53,18 +54,23 @@ export function recordHarnessTransition(
   const idFactory = ctx.idFactory ?? (() => crypto.randomUUID());
   const insertEvent = ensureEventStmt(ctx.db);
 
-  const row: HarnessTransition = {
+  const facetFields: Record<string, unknown> = {};
+  for (const f of HARNESS_FACETS) {
+    facetFields[f.key] = (input as Record<string, unknown>)[f.key] ?? null;
+  }
+  // Validate-on-write: the choke point all emitters funnel through. Parsing here
+  // (not in each emitter) means every write is validated and throws on invalid,
+  // and the persisted form equals the validated form. Closes the prior gap where
+  // the write path returned an unvalidated in-memory row.
+  const row: HarnessTransition = HarnessTransition.parse({
     id: idFactory(),
     goalId: input.goalId,
     workflowRunId: input.workflowRunId ?? null,
     workflowStepRunId: input.workflowStepRunId ?? null,
     boundary: input.boundary,
-    risk: input.risk ?? null,
-    evidence: input.evidence ?? null,
-    stateDeps: input.stateDeps ?? null,
-    telemetry: input.telemetry ?? null,
+    ...facetFields,
     createdAt: now,
-  };
+  });
 
   const toPublish: DomainEvent[] = [];
   ctx.db.transaction(() => {

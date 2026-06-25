@@ -78,7 +78,7 @@ import { listDecisionsByGoal } from "../../decisions/projection.js";
 import { getGoalRefinement } from "../../goal-refinements.js";
 import { deriveReadSet } from "../../harness-state/read-set.js";
 import { buildStepCompleteStateFacet, decideConflictResponse } from "../../harness-state/step-complete.js";
-import { recordHarnessTransition } from "../../harness-transitions/usecases.js";
+import { emitStepComplete, emitStepLaunch } from "../../harness-transitions/emit.js";
 import { runSensors } from "../../harness-sensors/runner.js";
 import { stepRequiresExecution } from "./requires-execution.js";
 import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.js";
@@ -1764,13 +1764,12 @@ export class OrchestratorService {
               ? "escalated"
               : "failed"
             : "succeeded";
-          recordHarnessTransition(
+          emitStepComplete(
             { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
             {
               goalId: ctx.run.goalId,
               workflowRunId: ctx.run.id,
               workflowStepRunId: ctx.stepRun.id,
-              boundary: "step_complete",
               evidence: evidence ?? undefined,
               stateDeps: options.stateDepsByStepRunId?.[ctx.stepRun.id] ?? undefined,
               telemetry: buildTelemetry(
@@ -1843,18 +1842,17 @@ export class OrchestratorService {
           // here would duplicate it — skip them to keep exactly one.
           if (stateFacet && !execReq) {
             try {
-              recordHarnessTransition(
+              emitStepComplete(
                 { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
                 {
                   goalId: ctx.run.goalId,
                   workflowRunId: ctx.run.id,
                   workflowStepRunId: ctx.stepRun.id,
-                  boundary: "step_complete",
                   stateDeps: stateFacet,
                 }
               );
             } catch (err) {
-              console.error("recordHarnessTransition (state pause) failed", err);
+              console.error("emitStepComplete (state pause) failed", err);
             }
           }
           const summary = conflictPause?.summary ?? summarizeScoring(scoring, proposal);
@@ -2495,13 +2493,12 @@ export class OrchestratorService {
             "SELECT id FROM sessions WHERE workflow_step_run_id = ? ORDER BY created_at DESC LIMIT 1"
           )
           .get(stepRun.id) as { id: string } | undefined;
-        recordHarnessTransition(
+        emitStepComplete(
           { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
           {
             goalId: run.goalId,
             workflowRunId: run.id,
             workflowStepRunId: stepRun.id,
-            boundary: "step_complete",
             stateDeps: options.stateDepsByStepRunId?.[stepRun.id] ?? undefined,
             telemetry: buildTelemetry(
               this.otlpAccumulator,
@@ -2514,7 +2511,7 @@ export class OrchestratorService {
           }
         );
       } catch (err) {
-        console.error("recordHarnessTransition failed", err);
+        console.error("emitStepComplete failed", err);
       }
     }
 
@@ -3349,13 +3346,12 @@ export class OrchestratorService {
         workspace,
       });
 
-      recordHarnessTransition(
+      emitStepLaunch(
         { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
         {
           goalId: goal.id,
           workflowRunId: run.id,
           workflowStepRunId: stepRun.id,
-          boundary: "step_launch",
           stateDeps: {
             read_set,
             write_set: [],
@@ -3367,7 +3363,7 @@ export class OrchestratorService {
         }
       );
     } catch (err) {
-      console.error("recordHarnessTransition failed", err);
+      console.error("emitStepLaunch failed", err);
     }
   }
 

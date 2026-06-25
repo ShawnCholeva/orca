@@ -23,6 +23,7 @@ import { subscribeOrchestrationTriggers } from './generation/triggers.js';
 import { reconcileInFlightGenerations } from './generation/reconcile.js';
 import { reconcileBuiltInTemplates, upgradeInstalledBuiltInTemplates } from './workflows/templates/usecases.js';
 import { reconcileWorkflowsOnBoot } from './workflows/reconcile.js';
+import { assertHarnessRegistryConformance } from './harness-transitions/conformance.js';
 
 export interface DaemonStartHandles {
   close: () => Promise<void>;
@@ -77,6 +78,13 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
     runMigrations(db, migrationsDir);
   } catch (err) {
     console.error('[orca-daemon] Migration failed — aborting startup:', err);
+    process.exit(1);
+  }
+
+  try {
+    assertHarnessRegistryConformance(db);
+  } catch (err) {
+    console.error('[orca-daemon] Harness registry conformance failed — aborting startup:', err);
     process.exit(1);
   }
 

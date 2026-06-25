@@ -63,6 +63,8 @@ import {
   recommendationGenerationRequestFingerprint,
   canonicalizeProposedActionJson,
 } from './fingerprint.js';
+import { emitMarkDone } from "../harness-transitions/emit.js";
+import type { TelemetryFacet } from "@orca/contracts";
 
 export {
   getRecommendationById,
@@ -542,6 +544,31 @@ function recordTerminalFeedback(
   }
 
   for (const ev of toPublish) bus.publish(ev);
+
+  // Human-authoritative completion crossed the harness ledger's terminal boundary.
+  // Emitted post-commit because recordHarnessTransition opens its own transaction
+  // and better-sqlite3 forbids nesting. Swallow-and-log: a transition failure must
+  // never break completion. Deferred enrichments (cumulative write-set, Goal-total
+  // cost roll-up) are tracked in FUTURE_WORK.md 2.7.
+  if (action === "accept" && rec.proposedAction.kind === "complete_workflow_run") {
+    try {
+      const telemetry: TelemetryFacet = {
+        cost: null, latency_ms: null, model: null,
+        provider_id: null, provider_version: null,
+        prompt_ref: null, raw_output_ref: null,
+        rejected_alternatives: [],
+        human_interventions: [{ kind: "mark_done_approval", ref: rec.id }],
+        outcome: { status: "succeeded", failure_code: null },
+      };
+      emitMarkDone(
+        { db, bus, now: () => now, idFactory: idFn },
+        { goalId: rec.goalId, workflowRunId: rec.proposedAction.workflowRunId, telemetry }
+      );
+    } catch (err) {
+      console.error("emitMarkDone failed", err);
+    }
+  }
+
   return {
     recommendation: getRecommendationById(db, rec.id)!,
     feedback: getFeedbackById(db, feedbackId)!,

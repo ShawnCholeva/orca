@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import type { EventBus } from "./events.js";
 import { classifyToolAction } from "./harness-risk/classify.js";
 import { decideGate } from "./harness-risk/gate-decision.js";
-import { recordHarnessTransition } from "./harness-transitions/usecases.js";
+import { emitToolGate } from "./harness-transitions/emit.js";
 import type { GateDecision, OperatingMode } from "@orca/contracts";
 
 export interface PermissionGateCtx {
@@ -31,11 +31,10 @@ export function resolvePermissionDecision(
   const gateDecision = decideGate(mode, classification);
 
   try {
-    recordHarnessTransition(
+    emitToolGate(
       { db: ctx.db, bus: ctx.bus, now: ctx.now, idFactory: ctx.idFactory },
       {
         goalId: sessionRow.goal_id,
-        boundary: "tool_gate",
         risk: {
           risk_class: classification.riskClass,
           permission_tier: classification.permissionTier,
@@ -47,7 +46,7 @@ export function resolvePermissionDecision(
       }
     );
   } catch (err) {
-    console.error("recordHarnessTransition (tool_gate) failed", err);
+    console.error("emitToolGate (tool_gate) failed", err);
   }
   return gateDecision;
 }

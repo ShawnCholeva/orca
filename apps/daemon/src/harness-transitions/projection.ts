@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { HarnessTransition } from "@orca/contracts";
+import { HarnessTransition, HARNESS_FACETS } from "@orca/contracts";
 
 interface TransitionRow {
   id: string;
@@ -14,8 +14,11 @@ interface TransitionRow {
   created_at: string;
 }
 
-const COLS = `id, goal_id, workflow_run_id, workflow_step_run_id, boundary,
-  risk_json, evidence_json, state_deps_json, telemetry_json, created_at`;
+const ENVELOPE_COLS = ["id", "goal_id", "workflow_run_id", "workflow_step_run_id", "boundary"];
+const FACET_COLS = HARNESS_FACETS.map((f) => f.column);
+const ALL_COLS = [...ENVELOPE_COLS, ...FACET_COLS, "created_at"];
+const COLS = ALL_COLS.join(", ");
+const PLACEHOLDERS = ALL_COLS.map(() => "?").join(", ");
 
 let _db: Database.Database | null = null;
 let _stmts: {
@@ -28,10 +31,7 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
     _db = db;
     _stmts = {
       insert: db.prepare(
-        `INSERT INTO harness_transitions (
-          id, goal_id, workflow_run_id, workflow_step_run_id, boundary,
-          risk_json, evidence_json, state_deps_json, telemetry_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO harness_transitions (${COLS}) VALUES (${PLACEHOLDERS})`
       ),
       listByGoal: db.prepare(
         `SELECT ${COLS} FROM harness_transitions
@@ -53,32 +53,34 @@ function parseFacet(value: string | null): Record<string, unknown> | null {
 }
 
 function rowToTransition(row: TransitionRow): HarnessTransition {
+  const facets: Record<string, unknown> = {};
+  for (const f of HARNESS_FACETS) {
+    facets[f.key] = parseFacet(row[f.column as keyof TransitionRow] as string | null);
+  }
   return HarnessTransition.parse({
     id: row.id,
     goalId: row.goal_id,
     workflowRunId: row.workflow_run_id,
     workflowStepRunId: row.workflow_step_run_id,
     boundary: row.boundary,
-    risk: parseFacet(row.risk_json),
-    evidence: parseFacet(row.evidence_json),
-    stateDeps: parseFacet(row.state_deps_json),
-    telemetry: parseFacet(row.telemetry_json),
+    ...facets,
     createdAt: row.created_at,
   });
 }
 
 export function insertTransition(db: Database.Database, row: HarnessTransition): void {
   const stmts = ensureStmts(db);
+  const facetArgs = HARNESS_FACETS.map((f) => {
+    const v = (row as Record<string, unknown>)[f.key];
+    return v == null ? null : JSON.stringify(v);
+  });
   stmts.insert.run(
     row.id,
     row.goalId,
     row.workflowRunId,
     row.workflowStepRunId,
     row.boundary,
-    row.risk === null ? null : JSON.stringify(row.risk),
-    row.evidence === null ? null : JSON.stringify(row.evidence),
-    row.stateDeps === null ? null : JSON.stringify(row.stateDeps),
-    row.telemetry === null ? null : JSON.stringify(row.telemetry),
+    ...facetArgs,
     row.createdAt
   );
 }
