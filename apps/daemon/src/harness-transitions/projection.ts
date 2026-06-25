@@ -1,16 +1,17 @@
 import type Database from "better-sqlite3";
 import { HarnessTransition, HARNESS_FACETS } from "@orca/contracts";
 
+// Raw SQLite row. Envelope columns are explicit; the facet `*_json` columns are
+// addressed dynamically via HARNESS_FACETS[].column and so are covered by the
+// index signature rather than hand-listed — the registry stays the single source
+// for the facet set (no parallel facet column list to keep in sync here).
 interface TransitionRow {
+  [facetColumn: string]: string | null;
   id: string;
   goal_id: string;
   workflow_run_id: string | null;
   workflow_step_run_id: string | null;
   boundary: string;
-  risk_json: string | null;
-  evidence_json: string | null;
-  state_deps_json: string | null;
-  telemetry_json: string | null;
   created_at: string;
 }
 
@@ -55,7 +56,7 @@ function parseFacet(value: string | null): Record<string, unknown> | null {
 function rowToTransition(row: TransitionRow): HarnessTransition {
   const facets: Record<string, unknown> = {};
   for (const f of HARNESS_FACETS) {
-    facets[f.key] = parseFacet(row[f.column as keyof TransitionRow] as string | null);
+    facets[f.key] = parseFacet(row[f.column]);
   }
   return HarnessTransition.parse({
     id: row.id,
