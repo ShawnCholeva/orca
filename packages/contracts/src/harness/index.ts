@@ -183,6 +183,30 @@ export const StateDepsFacet = z.object({
 }).strict();
 export type StateDepsFacet = z.infer<typeof StateDepsFacet>;
 
+// ── Facet registry ────────────────────────────────────────────────────────────
+// Single source for the closed facet vocabulary. Projection + usecases loop over
+// this instead of hand-listing each facet. `HarnessTransition` below stays
+// hand-written (no codegen); a conformance guard (daemon) asserts they agree.
+export type FacetSpec = {
+  key: "risk" | "evidence" | "stateDeps" | "telemetry";
+  column: string;
+  schema: z.ZodTypeAny;
+};
+export type FacetKey = FacetSpec["key"];
+
+const FACET_REGISTRY: FacetSpec[] = [];
+function defineFacet(spec: FacetSpec): FacetSpec {
+  FACET_REGISTRY.push(spec);
+  return spec;
+}
+
+defineFacet({ key: "risk", column: "risk_json", schema: RiskFacet });
+defineFacet({ key: "evidence", column: "evidence_json", schema: EvidenceFacet });
+defineFacet({ key: "stateDeps", column: "state_deps_json", schema: StateDepsFacet });
+defineFacet({ key: "telemetry", column: "telemetry_json", schema: TelemetryFacet });
+
+export const HARNESS_FACETS: readonly FacetSpec[] = FACET_REGISTRY;
+
 // `risk` (RiskFacet), `evidence` (EvidenceFacet), `telemetry` (TelemetryFacet), and
 // `stateDeps` (StateDepsFacet) are all strict schemas — the facet model is complete.
 export const HarnessTransition = z

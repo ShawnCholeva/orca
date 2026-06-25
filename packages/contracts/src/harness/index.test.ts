@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { HarnessTransition, HarnessTransitionBoundary } from "./index.js";
+import { HarnessTransition, HarnessTransitionBoundary, HARNESS_FACETS } from "./index.js";
+
+describe("HARNESS_FACETS registry", () => {
+  const ENVELOPE_KEYS = ["boundary", "createdAt", "goalId", "id", "workflowRunId", "workflowStepRunId"];
+
+  it("registers exactly the facet fields of HarnessTransition", () => {
+    const shapeKeys = Object.keys(HarnessTransition.shape).sort();
+    const facetKeys = shapeKeys.filter((k) => !ENVELOPE_KEYS.includes(k));
+    expect(HARNESS_FACETS.map((f) => f.key).sort()).toEqual(facetKeys);
+  });
+
+  it("maps each facet key to its snake_case _json column", () => {
+    expect(HARNESS_FACETS.map((f) => [f.key, f.column])).toEqual([
+      ["risk", "risk_json"],
+      ["evidence", "evidence_json"],
+      ["stateDeps", "state_deps_json"],
+      ["telemetry", "telemetry_json"],
+    ]);
+  });
+});
 
 describe("HarnessTransition", () => {
   it("accepts a spine record with null facets", () => {
