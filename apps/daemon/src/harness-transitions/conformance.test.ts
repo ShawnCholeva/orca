@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import type { Config } from "../config.js";
 import { closeDatabase, openDatabase } from "../db.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
-import { assertFacetConformance } from "./conformance.js";
+import { assertFacetConformance, assertBoundaryConformance } from "./conformance.js";
 
 const dirs: string[] = [];
 function config(dataDir: string): Config {
@@ -37,5 +37,11 @@ describe("assertFacetConformance", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE harness_transitions (id TEXT, goal_id TEXT)");
     expect(() => assertFacetConformance(db)).toThrow(/risk_json/);
+  });
+});
+
+describe("assertBoundaryConformance", () => {
+  it("passes — every boundary enum value has a registered emitter", () => {
+    expect(() => assertBoundaryConformance()).not.toThrow();
   });
 });

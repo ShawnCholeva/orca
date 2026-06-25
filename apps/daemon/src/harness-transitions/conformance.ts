@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
-import { HarnessTransition, HARNESS_FACETS } from "@orca/contracts";
+import { HarnessTransition, HarnessTransitionBoundary, HARNESS_FACETS } from "@orca/contracts";
+import { HARNESS_BOUNDARIES } from "./emit.js";
 
 const ENVELOPE_KEYS = new Set([
   "id", "goalId", "workflowRunId", "workflowStepRunId", "boundary", "createdAt",
@@ -31,7 +32,17 @@ export function assertFacetConformance(db: Database.Database): void {
   }
 }
 
+/** registry boundary keys === the HarnessTransitionBoundary enum (no dormant gaps). */
+export function assertBoundaryConformance(): void {
+  const enumValues = [...HarnessTransitionBoundary.options].sort();
+  const registered = HARNESS_BOUNDARIES.map((b) => b.key).slice().sort();
+  if (JSON.stringify(enumValues) !== JSON.stringify(registered)) {
+    throw new Error(`Harness boundary drift: registry [${registered}] != enum [${enumValues}]`);
+  }
+}
+
 /** Aggregator invoked once at daemon startup. Extended by later tasks. */
 export function assertHarnessRegistryConformance(db: Database.Database): void {
   assertFacetConformance(db);
+  assertBoundaryConformance();
 }
