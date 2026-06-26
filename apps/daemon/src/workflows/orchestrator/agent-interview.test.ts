@@ -9,7 +9,6 @@ import {
   cleanupHarness,
   setupHarness,
   makeStep,
-  fakeSelector,
   fakeRegistry,
   NOW,
 } from "./skill-step-test-helpers.js";
@@ -76,7 +75,6 @@ function makeServiceWithStore(
   workerTerminate?: (sessionId: string) => Promise<void>,
 ): OrchestratorService {
   return new OrchestratorService(
-    fakeSelector(),
     { async propose() { return { status: "proposed" as const, attemptId: "a", transport: "one_shot" as const, parsed: {}, rawTextLength: null, latencyMs: 1 }; } },
     fakeRegistry(),
     undefined,
@@ -280,7 +278,6 @@ describe("OrchestratorService.onSessionOutputChunk", () => {
     ).run(NOW);
     const spawn = vi.fn(async () => {});
     const service = new OrchestratorService(
-      fakeSelector(),
       { async propose() { return { status: "proposed" as const, attemptId: "a", transport: "one_shot" as const, parsed: {}, rawTextLength: null, latencyMs: 1 }; } },
       fakeRegistry(),
       undefined,

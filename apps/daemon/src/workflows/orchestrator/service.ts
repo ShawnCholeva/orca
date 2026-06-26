@@ -38,7 +38,6 @@ import { listArtifactsForRun } from "../artifacts/projection.js";
 import { createArtifact } from "../artifacts/usecases.js";
 import { appendWorkflowEvent } from "../events.js";
 import type { OperatorRegistry } from "../operators/registry.js";
-import type { OperatorSelector } from "../operators/selector.js";
 import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import { markWorkflowRunBlocked } from "../runs/usecases.js";
@@ -414,7 +413,6 @@ export class OrchestratorService {
   private readonly sessionOutputStore: SessionOutputStore;
 
   constructor(
-    private readonly operatorSelector: Pick<OperatorSelector, "select">,
     private readonly broker: Pick<OrchestrationTransportBroker, "propose">,
     private readonly operators: Pick<OperatorRegistry, "list">,
     private readonly launcher: WorkflowSessionLauncher = {

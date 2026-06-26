@@ -37,7 +37,6 @@ import {
   setupHarness,
   makeStep,
   fakeStepDispatch,
-  fakeSelector,
   fakeRegistry,
 } from "../workflows/orchestrator/skill-step-test-helpers.js";
 import type { OrchestratorMediator } from "../orchestrator-llm/mediator.js";
@@ -155,7 +154,6 @@ describe("orchestrator-mediated workflow e2e (service-level happy path)", () => 
     const workerDeliver = vi.fn(async () => "delivered" as const);
 
     const service = new OrchestratorService(
-      fakeSelector(),
       fakeBrokerNoop(),
       fakeRegistry(),
       launcher as any,

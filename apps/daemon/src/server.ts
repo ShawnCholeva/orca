@@ -712,7 +712,6 @@ export function createServer(
   // Shared orchestrator service instance — receives sessionOutputStore so that
   // onWorkflowSessionCompleted can synthesize step output from session tails.
   const orchestratorService = new OrchestratorService(
-    daemonContext.operatorSelector,
     daemonContext.orchestrationTransportBroker,
     daemonContext.operatorRegistry,
     daemonContext.workflowSessionLauncher,

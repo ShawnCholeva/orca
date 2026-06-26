@@ -12,7 +12,6 @@ import {
   NOW,
   setupHarness,
   makeStep,
-  fakeSelector,
   fakeRegistry,
   fakeStepDispatch,
 } from "./skill-step-test-helpers.js";
@@ -159,7 +158,6 @@ function makeService(
   extra: { launcher?: WorkflowSessionLauncher } = {}
 ): OrchestratorService {
   return new OrchestratorService(
-    fakeSelector(),
     broker as never,
     fakeRegistry(),
     extra.launcher,

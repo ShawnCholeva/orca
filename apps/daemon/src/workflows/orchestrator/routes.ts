@@ -44,7 +44,6 @@ export function registerOrchestratorRoutes(
   deps: OrchestratorRouteDeps
 ): void {
   const service = new OrchestratorService(
-    deps.operatorSelector,
     deps.orchestrationTransportBroker,
     deps.operatorRegistry,
     deps.workflowSessionLauncher,

@@ -45,7 +45,6 @@ export function registerWorkflowStepRoutes(
   const orchestratorService =
     deps.operatorSelector && deps.orchestrationTransportBroker && deps.operatorRegistry
       ? new OrchestratorService(
-          deps.operatorSelector,
           deps.orchestrationTransportBroker,
           deps.operatorRegistry,
           deps.workflowSessionLauncher,

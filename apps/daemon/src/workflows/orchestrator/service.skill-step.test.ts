@@ -5,13 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { closeDatabase } from "../../db.js";
 import { resetWorkflowStepProjectionPreparedStatements } from "../steps/projection.js";
-import type { SelectorInput } from "../operators/selector.js";
 import { OrchestratorService } from "./service.js";
 import {
   cleanupHarness,
   fakeBroker,
   fakeRegistry,
-  fakeSelector,
   fakeStepDispatch,
   makeStep,
   NOW,
@@ -19,9 +17,8 @@ import {
   setupHarness,
 } from "./skill-step-test-helpers.js";
 
-function makeService(raw: StepSkillProposal, seen: SelectorInput[] = []): OrchestratorService {
+function makeService(raw: StepSkillProposal): OrchestratorService {
   return new OrchestratorService(
-    fakeSelector(seen),
     fakeBroker(raw),
     fakeRegistry(),
     undefined,
@@ -132,7 +129,6 @@ describe("OrchestratorService skill step", () => {
     };
     // Research step asks (so we don't recurse into another completion).
     const service = new OrchestratorService(
-      fakeSelector(),
       {
         async propose(req: { stepRunId: string | null }, opts) {
           const isFirst = req.stepRunId === "step-1";
@@ -268,7 +264,6 @@ describe("OrchestratorService skill step", () => {
     };
 
     const service = new OrchestratorService(
-      fakeSelector(),
       spyBroker,
       fakeRegistry(),
       undefined,
