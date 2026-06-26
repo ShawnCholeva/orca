@@ -3,6 +3,37 @@ import type { TmuxRunner } from "../../tmux/runner.js";
 
 export type ShadowAdapterId = "claude-code" | "codex" | "antigravity";
 
+export type HookSurface = "orchestrator" | "worker";
+
+/**
+ * A single declared assumption about a third-party CLI hook surface this
+ * provider depends on. Plain data, co-located with the provider so it cannot
+ * silently drift from the code that emits the hook. Checked at boot
+ * (self-conformance) and surfaced on-demand (version-pin / unverified).
+ */
+export interface HookAssumption {
+  /** Adapter this assumption belongs to. */
+  provider: ShadowAdapterId;
+  /** Which emitter surface produces it: hookConfig ("orchestrator") vs workerHookConfig ("worker"). */
+  surface: HookSurface;
+  /** Hook event name we depend on (e.g. "Stop", "PermissionRequest"); null = unknown. */
+  event: string | null;
+  /** relPath the hook is wired into (asserted present in emitted config); null = unknown. */
+  file: string | null;
+  /** Payload fields the emitted config textually references (asserted present). */
+  payloadFields: string[];
+  /** Spawn arg asserted present in spawnArgs (worker surface only); null = none. */
+  assertSpawnArg: string | null;
+  /** Documentation only: "interactive-tui-only" | "unattended" | "unknown" | … */
+  firingContext: string;
+  /** CLI version this surface was last human-verified against; drives version-pin. null = none pinned. */
+  verifiedAgainstVersion: string | null;
+  /** false = honest unknown (skipped by self-conformance, surfaced as "unverified", never green). */
+  verified: boolean;
+  /** Provenance note (verification source, or the open unknowns). */
+  note: string;
+}
+
 export interface ProviderTerminalFailure {
   code: ProviderTerminalFailureCode;
   message: string;
@@ -77,6 +108,8 @@ export interface ShadowProvider {
     spawnArgs: string[];
     env?: Record<string, string>;
   };
+  /** Declared hook-surface assumptions for this provider (see HookAssumption). */
+  hookContract(): HookAssumption[];
   captureMode(): ShadowCaptureMode;
   turnParser(): ShadowTurnParse;
   /** Native permission rule string for an "always allow" of this tool call, or null if not persistable. */

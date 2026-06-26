@@ -4,6 +4,7 @@ import { extractActionBlock } from "../sentinel.js";
 import { buildShadowHookSettings } from "../shadow-hook-settings.js";
 import { buildAgentHookSettings } from "../../agent-hooks/hook-settings.js";
 import type {
+  HookAssumption,
   ProviderTerminalFailure,
   ShadowCaptureMode,
   ShadowHookConfig,
@@ -162,6 +163,29 @@ export class ClaudeShadowProvider implements ShadowProvider {
       spawnArgs: ["--settings", join(args.configDir, "settings.json")],
       ...(env ? { env } : {}),
     };
+  }
+
+  hookContract(): HookAssumption[] {
+    return [
+      {
+        provider: "claude-code", surface: "orchestrator", event: "Stop",
+        file: ".claude/settings.local.json", payloadFields: [], assertSpawnArg: null,
+        firingContext: "interactive-tui-only", verifiedAgainstVersion: null, verified: true,
+        note: "Orchestrator shadow Stop hook (buildShadowHookSettings). No pinned version.",
+      },
+      {
+        provider: "claude-code", surface: "worker", event: "Stop",
+        file: "settings.json", payloadFields: [], assertSpawnArg: "--settings",
+        firingContext: "interactive-tui-only", verifiedAgainstVersion: null, verified: true,
+        note: "Worker Stop hook (buildAgentHookSettings), wired via --settings. No pinned version.",
+      },
+      {
+        provider: "claude-code", surface: "worker", event: "PermissionRequest",
+        file: "settings.json", payloadFields: [], assertSpawnArg: "--settings",
+        firingContext: "interactive-tui-only", verifiedAgainstVersion: null, verified: true,
+        note: "Worker PermissionRequest hook (timeout 1800). No pinned version.",
+      },
+    ];
   }
 
   permissionRule(toolName: string, toolInput: unknown): string | null {

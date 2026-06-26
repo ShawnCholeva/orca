@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { extractActionBlock } from "../sentinel.js";
 import type {
+  HookAssumption,
   ProviderTerminalFailure,
   ShadowCaptureMode,
   ShadowHookConfig,
@@ -86,6 +87,31 @@ export class CodexShadowProvider implements ShadowProvider {
           : {}),
       },
     };
+  }
+
+  hookContract(): HookAssumption[] {
+    return [
+      {
+        provider: "codex", surface: "orchestrator", event: "Stop",
+        file: ".codex/hooks.json", payloadFields: [], assertSpawnArg: null,
+        firingContext: "interactive-tui-only", verifiedAgainstVersion: "0.136.0", verified: true,
+        note: "Orchestrator Stop hook; Codex hooks fire only in the interactive TUI, never `codex exec`. Verified codex-cli 0.136.0.",
+      },
+      {
+        provider: "codex", surface: "worker", event: "Stop",
+        file: "hooks.json", payloadFields: [], assertSpawnArg: "--dangerously-bypass-hook-trust",
+        firingContext: "interactive-tui-only", verifiedAgainstVersion: "0.136.0", verified: true,
+        note: "Worker Stop hook at CODEX_HOME root. Verified codex-cli 0.136.0.",
+      },
+      {
+        provider: "codex", surface: "worker", event: "PermissionRequest",
+        file: "hooks.json",
+        payloadFields: ["tool_name", "tool_input", "session_id", "turn_id"],
+        assertSpawnArg: "--dangerously-bypass-hook-trust",
+        firingContext: "interactive-tui-only", verifiedAgainstVersion: "0.136.0", verified: true,
+        note: "Worker PermissionRequest; Codex omits tool_use_id so the relay synthesizes a correlation id from session_id+turn_id+sha1(tool_name,tool_input). Verified codex-cli 0.136.0.",
+      },
+    ];
   }
 
   permissionRule(_toolName: string, _toolInput: unknown): string | null {

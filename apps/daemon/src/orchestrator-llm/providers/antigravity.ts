@@ -1,5 +1,6 @@
 import { extractActionBlock } from "../sentinel.js";
 import type {
+  HookAssumption,
   ProviderTerminalFailure,
   ShadowCaptureMode,
   ShadowHookConfig,
@@ -39,6 +40,23 @@ export class AntigravityShadowProvider implements ShadowProvider {
 
   workerHookConfig(_args: { goalId: string; sessionId: string; resolverCommand: string[]; configDir: string }) {
     return { files: [], spawnArgs: [] };
+  }
+
+  hookContract(): HookAssumption[] {
+    return [
+      {
+        provider: "antigravity", surface: "orchestrator", event: "Stop",
+        file: ".agents/hooks.json", payloadFields: [], assertSpawnArg: null,
+        firingContext: "unattended", verifiedAgainstVersion: null, verified: true,
+        note: "Orchestrator Stop hook (.agents/hooks.json → orca-stop-hook.cjs); turn capture works. No pinned version.",
+      },
+      {
+        provider: "antigravity", surface: "worker", event: null,
+        file: null, payloadFields: [], assertSpawnArg: null,
+        firingContext: "unknown", verifiedAgainstVersion: null, verified: false,
+        note: "Worker permission flow UNVERIFIED — 4 unknowns: event name, hook-file JSON shape + on-disk path, discovery mechanism, stdout decision schema. See FUTURE_WORK Phase 1.",
+      },
+    ];
   }
 
   permissionRule(_toolName: string, _toolInput: unknown): string | null {
