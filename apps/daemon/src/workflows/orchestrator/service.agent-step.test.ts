@@ -14,6 +14,8 @@ import type {
 } from "@orca/contracts";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import { OrchestratorService, type StepDispatchCapabilities } from "./service.js";
+import { ProviderRecoveryController } from "./provider-recovery-controller.js";
+import type { RunnerPort } from "./runner-port.js";
 import {
   cleanupHarness,
   NOW,
@@ -190,7 +192,6 @@ function makeJudgeService(
     undefined, // workerTerminate
     undefined, // shadowAsk
     undefined, // recoveryPromptComposer
-    undefined, // workerWait
     undefined, // workerInterrupt
     opts.accumulator // otlpAccumulator
   );
@@ -2548,6 +2549,7 @@ interface RecoveryServiceParts {
   spawn: ReturnType<typeof vi.fn>;
   launch: ReturnType<typeof vi.fn>;
   service: OrchestratorService;
+  recoveryController: ProviderRecoveryController;
 }
 
 function makeRecoveryService(opts: {
@@ -2587,22 +2589,35 @@ function makeRecoveryService(opts: {
       return { adapterId: id, mode: "one_shot", fallbacks: ["shadow_session"] };
     },
   };
+  const outputStore = opts.outputStore ?? multiOutputStore({});
   const service = new OrchestratorService(
     fakeAgentSelector(),
     fakeBrokerNoop(),
     { async list() { return operators; } },
     { launch },
-    opts.outputStore ?? multiOutputStore({}),
+    outputStore,
     dispatch,
     undefined,
     spawn,
     deliver,
     terminate
   );
-  return { deliver, wait, terminate, spawn, launch, service };
+  const runnerPort: RunnerPort = {
+    launch,
+    workerSpawn: spawn,
+    workerDeliver: deliver,
+    workerWait: wait,
+    readTail: outputStore.readTail.bind(outputStore),
+  };
+  const recoveryController = new ProviderRecoveryController({
+    runner: runnerPort,
+    operators: { async list() { return operators; } },
+    stepDispatch: dispatch,
+  });
+  return { deliver, wait, terminate, spawn, launch, service, recoveryController };
 }
 
-/** Build a recovery service whose workerWait is wired (last constructor arg). */
+/** Build a recovery service whose workerWait is wired (used via the controller). */
 function makeRecoveryServiceWithWait(opts: {
   outputStore?: SessionOutputStore;
   launchSessionId?: string;
@@ -2612,6 +2627,18 @@ function makeRecoveryServiceWithWait(opts: {
   const terminate = vi.fn(async () => {});
   const spawn = vi.fn(async () => {});
   const launch = vi.fn(async () => ({ sessionId: opts.launchSessionId ?? "sess-replacement" }));
+  const operatorsList = [
+    agentOperatorDescriptor(),
+    {
+      id: "agent:codex",
+      kind: "agent" as const,
+      displayName: "Codex",
+      capabilities: [],
+      ready: true,
+      supportsRepoEditing: true,
+      supportsTerminal: true,
+    },
+  ];
   const dispatch: StepDispatchCapabilities = {
     async isAdapterReady(id) {
       return id === "claude-code" || id === "codex";
@@ -2625,37 +2652,32 @@ function makeRecoveryServiceWithWait(opts: {
       return { adapterId: id, mode: "one_shot", fallbacks: ["shadow_session"] };
     },
   };
+  const outputStore = opts.outputStore ?? multiOutputStore({});
   const service = new OrchestratorService(
     fakeAgentSelector(),
     fakeBrokerNoop(),
-    {
-      async list() {
-        return [
-          agentOperatorDescriptor(),
-          {
-            id: "agent:codex",
-            kind: "agent" as const,
-            displayName: "Codex",
-            capabilities: [],
-            ready: true,
-            supportsRepoEditing: true,
-            supportsTerminal: true,
-          },
-        ];
-      },
-    },
+    { async list() { return operatorsList; } },
     { launch },
-    opts.outputStore ?? multiOutputStore({}),
+    outputStore,
     dispatch,
     undefined,
     spawn,
     deliver,
-    terminate,
-    undefined,
-    undefined,
-    wait
+    terminate
   );
-  return { deliver, wait, terminate, spawn, launch, service };
+  const runnerPort: RunnerPort = {
+    launch,
+    workerSpawn: spawn,
+    workerDeliver: deliver,
+    workerWait: wait,
+    readTail: outputStore.readTail.bind(outputStore),
+  };
+  const recoveryController = new ProviderRecoveryController({
+    runner: runnerPort,
+    operators: { async list() { return operatorsList; } },
+    stepDispatch: dispatch,
+  });
+  return { deliver, wait, terminate, spawn, launch, service, recoveryController };
 }
 
 /** Seed an agent step + linked session + a recovery checkpoint row. */
@@ -2730,9 +2752,9 @@ describe("OrchestratorService provider recovery actions", () => {
   it("waitForProvider: choose→waiting, preserves session, calls worker wait", async () => {
     const { db } = setupHarness();
     seedRecoveryCheckpoint(db);
-    const { service, wait } = makeRecoveryServiceWithWait();
+    const { recoveryController, wait } = makeRecoveryServiceWithWait();
 
-    await service.waitForProvider(db, () => NOW, "run-1", "ckpt-1");
+    await recoveryController.waitForProvider(db, () => NOW, "run-1", "ckpt-1");
 
     expect(readCheckpoint(db)?.mode).toBe("waiting");
     expect(
@@ -2744,21 +2766,21 @@ describe("OrchestratorService provider recovery actions", () => {
   it("waitForProvider rejected outside choose (waiting) with invalid-transition", async () => {
     const { db } = setupHarness();
     seedRecoveryCheckpoint(db, { mode: "waiting" });
-    const { service } = makeRecoveryServiceWithWait();
+    const { recoveryController } = makeRecoveryServiceWithWait();
 
     await expect(
-      service.waitForProvider(db, () => NOW, "run-1", "ckpt-1")
+      recoveryController.waitForProvider(db, () => NOW, "run-1", "ckpt-1")
     ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
   });
 
   it("retryProvider (preserved): stores output_seq, waiting→retrying, delivers Continue to same session", async () => {
     const { db } = setupHarness();
     seedRecoveryCheckpoint(db, { mode: "waiting" });
-    const { service, deliver } = makeRecoveryService({
+    const { recoveryController, deliver } = makeRecoveryService({
       outputStore: multiOutputStore({ "sess-cur": { tail: "", nextSeq: 7 } }),
     });
 
-    await service.retryProvider(db, () => NOW, "run-1", "ckpt-1");
+    await recoveryController.retryProvider(db, () => NOW, "run-1", "ckpt-1");
 
     const ck = readCheckpoint(db)!;
     expect(ck.mode).toBe("retrying");
@@ -2769,10 +2791,10 @@ describe("OrchestratorService provider recovery actions", () => {
   it("retryProvider rejected outside waiting (choose) with invalid-transition", async () => {
     const { db } = setupHarness();
     seedRecoveryCheckpoint(db, { mode: "choose" });
-    const { service, deliver } = makeRecoveryService();
+    const { recoveryController, deliver } = makeRecoveryService();
 
     await expect(
-      service.retryProvider(db, () => NOW, "run-1", "ckpt-1")
+      recoveryController.retryProvider(db, () => NOW, "run-1", "ckpt-1")
     ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
     expect(deliver).not.toHaveBeenCalled();
   });
@@ -2780,7 +2802,7 @@ describe("OrchestratorService provider recovery actions", () => {
   it("retryProvider (fresh_session): launches replacement with handoff instead of claiming preserved", async () => {
     const { db } = setupHarness();
     seedRecoveryCheckpoint(db, { mode: "waiting", retryKind: "fresh_session" });
-    const { service, deliver, launch, spawn } = makeRecoveryService({
+    const { recoveryController, deliver, launch, spawn } = makeRecoveryService({
       outputStore: multiOutputStore({
         "sess-cur": { tail: "", nextSeq: 1 },
         "sess-replacement": { tail: "", nextSeq: 3 },
@@ -2788,7 +2810,7 @@ describe("OrchestratorService provider recovery actions", () => {
       launchSessionId: "sess-replacement",
     });
 
-    await service.retryProvider(db, () => NOW, "run-1", "ckpt-1");
+    await recoveryController.retryProvider(db, () => NOW, "run-1", "ckpt-1");
 
     const ck = readCheckpoint(db)!;
     expect(ck.mode).toBe("retrying");
@@ -2807,12 +2829,12 @@ describe("OrchestratorService provider recovery actions", () => {
     const { db } = setupHarness();
     const future = "2999-01-01T00:00:00.000Z";
     seedRecoveryCheckpoint(db, { mode: "waiting", resetAt: future });
-    const { service, deliver } = makeRecoveryService({
+    const { recoveryController, deliver } = makeRecoveryService({
       outputStore: multiOutputStore({ "sess-cur": { tail: "", nextSeq: 1 } }),
     });
 
     await expect(
-      service.retryProvider(db, () => NOW, "run-1", "ckpt-1")
+      recoveryController.retryProvider(db, () => NOW, "run-1", "ckpt-1")
     ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
     expect(deliver).not.toHaveBeenCalled();
     expect(readCheckpoint(db)?.mode).toBe("waiting");
@@ -2821,11 +2843,11 @@ describe("OrchestratorService provider recovery actions", () => {
   it("unknown reset time stays manually retryable", async () => {
     const { db } = setupHarness();
     seedRecoveryCheckpoint(db, { mode: "waiting", resetAt: null });
-    const { service, deliver } = makeRecoveryService({
+    const { recoveryController, deliver } = makeRecoveryService({
       outputStore: multiOutputStore({ "sess-cur": { tail: "", nextSeq: 2 } }),
     });
 
-    await service.retryProvider(db, () => NOW, "run-1", "ckpt-1");
+    await recoveryController.retryProvider(db, () => NOW, "run-1", "ckpt-1");
 
     expect(readCheckpoint(db)?.mode).toBe("retrying");
     expect(deliver).toHaveBeenCalledWith("sess-cur", "Continue the previous step request.");
@@ -3012,9 +3034,9 @@ describe("OrchestratorService provider recovery actions", () => {
   it("refreshProviderRecovery rebuilds choices preserving id+mode", async () => {
     const { db } = setupHarness();
     seedRecoveryCheckpoint(db, { mode: "waiting", choices: [] });
-    const { service } = makeRecoveryService();
+    const { recoveryController } = makeRecoveryService();
 
-    await service.refreshProviderRecovery(db, () => NOW, "run-1", "ckpt-1");
+    await recoveryController.refreshProviderRecovery(db, () => NOW, "run-1", "ckpt-1");
 
     const ck = readCheckpoint(db)!;
     expect(ck.id).toBe("ckpt-1");
@@ -3025,10 +3047,10 @@ describe("OrchestratorService provider recovery actions", () => {
   it("switchProvider rejects a stale (unknown) checkpoint id", async () => {
     const { db } = setupHarness();
     seedRecoveryCheckpoint(db);
-    const { service, launch } = makeRecoveryService();
+    const { recoveryController, launch } = makeRecoveryService();
 
     await expect(
-      service.switchProvider(db, () => NOW, "run-1", "ckpt-WRONG", "codex")
+      recoveryController.switchProvider(db, () => NOW, "run-1", "ckpt-WRONG", "codex")
     ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryNotFoundError);
     expect(launch).not.toHaveBeenCalled();
   });
@@ -3036,10 +3058,10 @@ describe("OrchestratorService provider recovery actions", () => {
   it("switchProvider rejects the current adapter", async () => {
     const { db } = setupHarness();
     seedRecoveryCheckpoint(db);
-    const { service, launch } = makeRecoveryService();
+    const { recoveryController, launch } = makeRecoveryService();
 
     await expect(
-      service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "claude-code")
+      recoveryController.switchProvider(db, () => NOW, "run-1", "ckpt-1", "claude-code")
     ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
     expect(launch).not.toHaveBeenCalled();
   });
@@ -3051,10 +3073,10 @@ describe("OrchestratorService provider recovery actions", () => {
         { adapterId: "codex", displayName: "Codex", modelId: "gpt-5-codex", enabled: false, reason: "provider unavailable" },
       ],
     });
-    const { service, launch } = makeRecoveryService();
+    const { recoveryController, launch } = makeRecoveryService();
 
     await expect(
-      service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex")
+      recoveryController.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex")
     ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
     expect(launch).not.toHaveBeenCalled();
   });
@@ -3062,10 +3084,10 @@ describe("OrchestratorService provider recovery actions", () => {
   it("switchProvider rejects an id not present in choices", async () => {
     const { db } = setupHarness();
     seedRecoveryCheckpoint(db);
-    const { service, launch } = makeRecoveryService();
+    const { recoveryController, launch } = makeRecoveryService();
 
     await expect(
-      service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "opencode")
+      recoveryController.switchProvider(db, () => NOW, "run-1", "ckpt-1", "opencode")
     ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
     expect(launch).not.toHaveBeenCalled();
   });
@@ -3073,12 +3095,12 @@ describe("OrchestratorService provider recovery actions", () => {
   it("switchProvider rejects when the chosen adapter is no longer ready at switch time", async () => {
     const { db } = setupHarness();
     seedRecoveryCheckpoint(db);
-    const { service, launch, spawn } = makeRecoveryService({
+    const { recoveryController, launch, spawn } = makeRecoveryService({
       adapterReady: (id) => id === "claude-code",
     });
 
     await expect(
-      service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex")
+      recoveryController.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex")
     ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryInvalidTransitionError);
     expect(launch).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();
@@ -3094,10 +3116,10 @@ describe("OrchestratorService provider recovery actions", () => {
     db.prepare(
       "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = 'step-1'"
     ).run('{"not":"a valid checkpoint"}');
-    const { service, launch } = makeRecoveryService();
+    const { recoveryController, launch } = makeRecoveryService();
 
     await expect(
-      service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex")
+      recoveryController.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex")
     ).rejects.toBeInstanceOf(OrchestratorProviderRecoveryNotFoundError);
     expect(launch).not.toHaveBeenCalled();
   });
@@ -3105,7 +3127,7 @@ describe("OrchestratorService provider recovery actions", () => {
   it("successful switch: launches replacement w/ handoff incl. guidance, sets switching + replacementOutputSeq, keeps old session", async () => {
     const { db } = setupHarness();
     seedRecoveryCheckpoint(db, { pendingGuidance: ["prefer pnpm"] });
-    const { service, launch, spawn, deliver, terminate } = makeRecoveryService({
+    const { recoveryController, launch, spawn, deliver, terminate } = makeRecoveryService({
       outputStore: multiOutputStore({
         "sess-cur": { tail: "prior work", nextSeq: 1 },
         "sess-replacement": { tail: "", nextSeq: 4 },
@@ -3113,7 +3135,7 @@ describe("OrchestratorService provider recovery actions", () => {
       launchSessionId: "sess-replacement",
     });
 
-    await service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex");
+    await recoveryController.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex");
 
     const ck = readCheckpoint(db)!;
     expect(ck.mode).toBe("switching");
@@ -3203,7 +3225,7 @@ describe("OrchestratorService provider recovery actions", () => {
     const parts = makeRecoveryService();
     parts.launch.mockRejectedValueOnce(new Error("spawn boom"));
 
-    await service_expectThrow(parts.service, db);
+    await service_expectThrow(parts.recoveryController, db);
 
     const ck = readCheckpoint(db)!;
     expect(ck.mode).toBe("choose");
@@ -3214,9 +3236,9 @@ describe("OrchestratorService provider recovery actions", () => {
   });
 });
 
-async function service_expectThrow(service: OrchestratorService, db: Database.Database): Promise<void> {
+async function service_expectThrow(controller: ProviderRecoveryController, db: Database.Database): Promise<void> {
   await expect(
-    service.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex")
+    controller.switchProvider(db, () => NOW, "run-1", "ckpt-1", "codex")
   ).rejects.toThrow();
 }
 
@@ -3332,7 +3354,6 @@ describe("OrchestratorService.interruptStepAgent", () => {
       undefined, // workerTerminate
       undefined, // shadowAsk
       undefined, // recoveryPromptComposer
-      undefined, // workerWait
       workerInterrupt
     );
   }

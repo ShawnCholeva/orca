@@ -207,6 +207,8 @@ import {
   OrchestratorProviderRecoveryNotFoundError,
   OrchestratorProviderRecoveryInvalidTransitionError,
 } from './workflows/orchestrator/service.js';
+import { ProviderRecoveryController } from './workflows/orchestrator/provider-recovery-controller.js';
+import type { RunnerPort } from './workflows/orchestrator/runner-port.js';
 import {
   openOrUpdateLive as openOrUpdateLiveActivity,
   pauseForProviderRecovery as pauseForProviderRecoveryActivity,
@@ -694,6 +696,19 @@ export function createServer(
     composePrompt: composeOrchestratorPrompt,
   });
 
+  const workerSpawnFn = async ({ sessionId, goalId, adapterId }: { sessionId: string; goalId: string; adapterId: string }) => {
+    const wsRow = db.prepare("SELECT w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC LIMIT 1").get(goalId) as { path: string } | undefined;
+    if (!wsRow) { console.warn(`[orchestrator] workerSpawn: no workspace for goal ${goalId}`); return; }
+    const adapter = adapterRegistry.get(adapterId);
+    if (!adapter) { console.warn(`[orchestrator] workerSpawn: no adapter ${adapterId}`); return; }
+    const spawn = await adapter.resolveSpawn({ goalId, sessionId, workspacePath: wsRow.path });
+    // Containment seam (identity today): see adapters/sandbox.ts.
+    const sandboxed = noopSandbox.wrap(spawn);
+    await workerSessions.spawn({ sessionId, goalId, adapterId, workspacePath: wsRow.path, command: sandboxed.command, env: sandboxed.env });
+  };
+  const workerDeliverFn = (sessionId: string, text: string) => workerSessions.deliver(sessionId, text);
+  const workerWaitFn = (sessionId: string, adapterId: string) => workerSessions.waitForProviderReset(sessionId, adapterId);
+
   // Shared orchestrator service instance — receives sessionOutputStore so that
   // onWorkflowSessionCompleted can synthesize step output from session tails.
   const orchestratorService = new OrchestratorService(
@@ -704,27 +719,13 @@ export function createServer(
     sessionOutputStore,
     daemonContext.stepDispatchCapabilities,
     orchestratorMediator,
-    // workerSpawn: resolve workspace + adapter spawn, then start the tmux worker.
-    async ({ sessionId, goalId, adapterId }) => {
-      const wsRow = db.prepare("SELECT w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC LIMIT 1").get(goalId) as { path: string } | undefined;
-      if (!wsRow) { console.warn(`[orchestrator] workerSpawn: no workspace for goal ${goalId}`); return; }
-      const adapter = adapterRegistry.get(adapterId);
-      if (!adapter) { console.warn(`[orchestrator] workerSpawn: no adapter ${adapterId}`); return; }
-      const spawn = await adapter.resolveSpawn({ goalId, sessionId, workspacePath: wsRow.path });
-      // Containment seam (identity today): see adapters/sandbox.ts.
-      const sandboxed = noopSandbox.wrap(spawn);
-      await workerSessions.spawn({ sessionId, goalId, adapterId, workspacePath: wsRow.path, command: sandboxed.command, env: sandboxed.env });
-    },
-    // workerDeliver
-    (sessionId, text) => workerSessions.deliver(sessionId, text),
+    workerSpawnFn,
+    workerDeliverFn,
     // workerTerminate
     (sessionId) => workerSessions.terminate(sessionId),
     shadowSessions,
     // recoveryPromptComposer: keep the constructor default.
     undefined,
-    // workerWait: drives a provider's terminal "wait for limit reset" interaction
-    // against the worker's live tmux session (preserved-session Wait/Retry).
-    (sessionId, adapterId) => workerSessions.waitForProviderReset(sessionId, adapterId),
     // workerInterrupt: sends Escape to the worker so the user can course-correct.
     (sessionId) => workerSessions.interrupt(sessionId),
     // otlpAccumulator: drains accrued worker tokens at step_complete for the cost facet.
@@ -732,6 +733,19 @@ export function createServer(
   );
   // Wire the late-binding ref so the onChunkAppended callback is live.
   _orchestratorServiceRef.current = orchestratorService;
+
+  const runnerPort: RunnerPort = {
+    launch: daemonContext.workflowSessionLauncher.launch.bind(daemonContext.workflowSessionLauncher),
+    workerSpawn: workerSpawnFn,
+    workerDeliver: workerDeliverFn,
+    workerWait: workerWaitFn,
+    readTail: sessionOutputStore.readTail.bind(sessionOutputStore),
+  };
+  const recoveryController = new ProviderRecoveryController({
+    runner: runnerPort,
+    operators: daemonContext.operatorRegistry,
+    stepDispatch: daemonContext.stepDispatchCapabilities,
+  });
 
   // Boot-time resume (production only — gated so createServer in tests is inert).
   // reconcileSessionsOnBoot skips workflow-step sessions (tmux workers may survive
@@ -1917,7 +1931,7 @@ export function createServer(
         return apiError("validation_failed", "invalid provider recovery request");
       }
       try {
-        await orchestratorService.waitForProvider(
+        await recoveryController.waitForProvider(
           getDatabase(),
           daemonContext.now,
           request.params.id,
@@ -1940,7 +1954,7 @@ export function createServer(
         return apiError("validation_failed", "invalid provider recovery request");
       }
       try {
-        await orchestratorService.retryProvider(
+        await recoveryController.retryProvider(
           getDatabase(),
           daemonContext.now,
           request.params.id,
@@ -1963,7 +1977,7 @@ export function createServer(
         return apiError("validation_failed", "invalid provider recovery request");
       }
       try {
-        await orchestratorService.refreshProviderRecovery(
+        await recoveryController.refreshProviderRecovery(
           getDatabase(),
           daemonContext.now,
           request.params.id,
@@ -1986,7 +2000,7 @@ export function createServer(
         return apiError("validation_failed", "invalid provider recovery switch request");
       }
       try {
-        await orchestratorService.switchProvider(
+        await recoveryController.switchProvider(
           getDatabase(),
           daemonContext.now,
           request.params.id,
