@@ -24,6 +24,7 @@ import { reconcileInFlightGenerations } from './generation/reconcile.js';
 import { reconcileBuiltInTemplates, upgradeInstalledBuiltInTemplates } from './workflows/templates/usecases.js';
 import { reconcileWorkflowsOnBoot } from './workflows/reconcile.js';
 import { assertHarnessRegistryConformance } from './harness-transitions/conformance.js';
+import { assertHookContractConformance } from './orchestrator-llm/providers/hook-contract.js';
 
 export interface DaemonStartHandles {
   close: () => Promise<void>;
@@ -85,6 +86,13 @@ export async function startDaemon(): Promise<DaemonStartHandles> {
     assertHarnessRegistryConformance(db);
   } catch (err) {
     console.error('[orca-daemon] Harness registry conformance failed — aborting startup:', err);
+    process.exit(1);
+  }
+
+  try {
+    assertHookContractConformance();
+  } catch (err) {
+    console.error('[orca-daemon] Hook contract conformance failed — aborting startup:', err);
     process.exit(1);
   }
 
