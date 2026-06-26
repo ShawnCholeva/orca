@@ -16,15 +16,17 @@ import type { RunnerPort } from "./runner-port.js";
 import type {
   StepDispatchCapabilities,
   RequestNextDecisionOptions,
-  GoalRow,
-  StepRunRow,
 } from "./service.js";
 import {
   OrchestratorProviderRecoveryNotFoundError,
   OrchestratorProviderRecoveryInvalidTransitionError,
+} from "./service.js";
+import {
+  type GoalRow,
+  type StepRunRow,
   readGoal,
   preferencesForGoal,
-} from "./service.js";
+} from "./db-rows.js";
 
 export class ProviderRecoveryController {
   constructor(

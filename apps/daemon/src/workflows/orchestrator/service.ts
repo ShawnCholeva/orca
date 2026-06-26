@@ -113,19 +113,20 @@ import { setSessionStatus } from "../../sessions/projection.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
 import { extractProposal, summarizeScoring } from "./scoring-summary.js";
 import { type StepResultBuilderDeps, scoringFacts, buildApprovalStepResult, withResultSummary, replayEvaluationFailedResult, scoreCompletedStepResult } from "./step-result-builder.js";
+import {
+  type GoalRow,
+  type StepRunRow,
+  readGoal,
+  readStepRun,
+  preferencesForGoal,
+  OrchestratorGoalNotFoundError,
+  OrchestratorStepNotFoundError,
+} from "./db-rows.js";
 
 export interface StepDispatchCapabilities {
   isAdapterReady(adapterId: string): Promise<boolean>;
   supportsModel(adapterId: string, modelId: string): boolean;
   resolveMode(adapterId: string): ResolvedMode;
-}
-
-export interface GoalRow {
-  id: string;
-  title: string;
-  description: string;
-  orchestrator_provider: ModelProviderId | null;
-  orchestrator_model: string | null;
 }
 
 interface RecoveryScoringPromptInput {
@@ -199,37 +200,6 @@ function stepDispatchEnablesOneShot(
   }
 }
 
-export function preferencesForGoal(
-  preferences: StepAgentChoice[],
-  orchestratorProvider: GoalRow["orchestrator_provider"]
-): StepAgentChoice[] {
-  if (!orchestratorProvider) return preferences;
-  const preferredAdapterId = adapterIdForProvider(orchestratorProvider);
-  if (!preferences.some((pref) => pref.adapterId === preferredAdapterId)) return preferences;
-  return [
-    ...preferences.filter((pref) => pref.adapterId === preferredAdapterId),
-    ...preferences.filter((pref) => pref.adapterId !== preferredAdapterId),
-  ];
-}
-
-export interface StepRunRow {
-  id: string;
-  goal_id: string;
-  workflow_run_id: string;
-  step_template_id: string;
-  ordinal: number;
-  attempt: number;
-  status: string;
-  started_at: string | null;
-  selected_operator_id: string | null;
-  selected_model_id: string | null;
-  revise_attempts: number;
-  crash_retries: number;
-  step_result_json: string | null;
-  pending_provider_recovery_json: string | null;
-  pending_judge_json: string | null;
-}
-
 export interface RequestNextDecisionOptions {
   bus?: EventBus;
   idFactory?: () => string;
@@ -257,30 +227,12 @@ export class OrchestratorRunNotActiveError extends Error {
   }
 }
 
-export class OrchestratorStepNotFoundError extends Error {
-  readonly code = "workflow_step_run_not_found" as const;
-
-  constructor(stepRunId: string | null) {
-    super(`Workflow step run not found: ${stepRunId ?? "null"}`);
-    this.name = "OrchestratorStepNotFoundError";
-  }
-}
-
 export class OrchestratorTemplateNotFoundError extends Error {
   readonly code = "workflow_template_not_found" as const;
 
   constructor(templateId: string) {
     super(`Workflow template not found: ${templateId}`);
     this.name = "OrchestratorTemplateNotFoundError";
-  }
-}
-
-export class OrchestratorGoalNotFoundError extends Error {
-  readonly code = "goal_not_found" as const;
-
-  constructor(goalId: string) {
-    super(`Goal not found: ${goalId}`);
-    this.name = "OrchestratorGoalNotFoundError";
   }
 }
 
@@ -313,25 +265,6 @@ export class OrchestratorProviderRecoveryInvalidTransitionError extends Error {
     super(message);
     this.name = "OrchestratorProviderRecoveryInvalidTransitionError";
   }
-}
-
-function readStepRun(db: Database.Database, stepRunId: string | null): StepRunRow {
-  if (!stepRunId) throw new OrchestratorStepNotFoundError(stepRunId);
-  const row = db
-    .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
-    .get(stepRunId) as StepRunRow | undefined;
-  if (!row) throw new OrchestratorStepNotFoundError(stepRunId);
-  return row;
-}
-
-export function readGoal(db: Database.Database, goalId: string): GoalRow {
-  const row = db
-    .prepare(
-      "SELECT id, title, description, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?",
-    )
-    .get(goalId) as GoalRow | undefined;
-  if (!row) throw new OrchestratorGoalNotFoundError(goalId);
-  return row;
 }
 
 /** Pull the step's free-text `assumptions[]` out of its completion block, if present. */
