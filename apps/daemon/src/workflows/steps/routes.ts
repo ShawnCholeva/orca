@@ -12,7 +12,8 @@ import { createArtifact } from "../artifacts/usecases.js";
 import { appendWorkflowEvent, publishStagedWorkflowEvents } from "../events.js";
 import type { OperatorRegistry } from "../operators/registry.js";
 import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
-import { OrchestratorService, type StepDispatchCapabilities } from "../orchestrator/service.js";
+import type { StepDispatchCapabilities } from "../orchestrator/service.js";
+import { DispatchEngine } from "../orchestrator/dispatch-engine.js";
 import type { WorkflowSessionLauncher } from "../orchestrator/session-launcher.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
 import { getDecisionById } from "../decisions/usecases.js";
@@ -42,12 +43,14 @@ export function registerWorkflowStepRoutes(
   const now = deps.now ?? (() => new Date().toISOString());
   const orchestratorService =
     deps.orchestrationTransportBroker && deps.operatorRegistry
-      ? new OrchestratorService(
+      ? new DispatchEngine(
           deps.orchestrationTransportBroker,
           deps.operatorRegistry,
-          deps.workflowSessionLauncher,
+          deps.workflowSessionLauncher ?? { launch: async () => { throw new Error("direct_launch_unsupported"); } },
+          deps.stepDispatch,
           undefined,
-          deps.stepDispatch
+          undefined,
+          undefined
         )
       : null;
 

@@ -5,7 +5,7 @@ import { closeDatabase } from "../../db.js";
 import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { resetWorkflowStepProjectionPreparedStatements } from "../steps/projection.js";
 import type { OperatorDescriptor, WorkflowGraph } from "@orca/contracts";
-import { OrchestratorService } from "./service.js";
+import { DispatchEngine } from "./dispatch-engine.js";
 import { listSplitDecisionsForRun } from "../splitters/projection.js";
 import { setSupervisionMode } from "../../settings/store.js";
 import {
@@ -95,13 +95,15 @@ function makeLauncher(launch = vi.fn(async () => ({ sessionId: "sess-1" }))): Wo
 function makeService(
   broker: Pick<OrchestrationTransportBroker, "propose">,
   launcher: WorkflowSessionLauncher = makeLauncher()
-): OrchestratorService {
-  return new OrchestratorService(
+): DispatchEngine {
+  return new DispatchEngine(
     broker,
     { async list() { return [agentOperatorDescriptor()]; } },
     launcher,
+    fakeStepDispatch(),
     undefined,
-    fakeStepDispatch()
+    undefined,
+    undefined
   );
 }
 

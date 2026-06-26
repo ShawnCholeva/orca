@@ -13,6 +13,7 @@ import type {
 } from "@orca/contracts";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import { OrchestratorService, type StepDispatchCapabilities } from "./service.js";
+import { DispatchEngine } from "./dispatch-engine.js";
 import { ProviderRecoveryController } from "./provider-recovery-controller.js";
 import type { RunnerPort } from "./runner-port.js";
 import {
@@ -110,17 +111,28 @@ function makeLauncher(launchFn = vi.fn(async () => ({ sessionId: "sess-1" }))): 
 function makeAgentService(
   launcher: WorkflowSessionLauncher,
   workerDeliver?: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">
-): OrchestratorService {
-  return new OrchestratorService(
-    fakeBrokerNoop(),
-    { async list() { return [agentOperatorDescriptor()]; } },
+): { engine: DispatchEngine; service: OrchestratorService } {
+  const broker = fakeBrokerNoop();
+  const operators = { async list() { return [agentOperatorDescriptor()]; } };
+  const engine = new DispatchEngine(
+    broker,
+    operators,
     launcher,
+    fakeStepDispatch(),
+    undefined,
+    workerDeliver,
+    undefined
+  );
+  const service = new OrchestratorService(
+    engine,
+    broker,
+    operators,
     undefined,
     fakeStepDispatch(),
     undefined,
-    undefined, // workerSpawn
     workerDeliver
   );
+  return { engine, service };
 }
 
 function fakeMediator(action: OrchestratorAction): Pick<OrchestratorMediator, "invoke"> {
@@ -158,20 +170,25 @@ function makeJudgeService(
   workerDeliver: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">,
   opts: { accumulator?: SessionCostAccumulator } = {}
 ): OrchestratorService {
-  return new OrchestratorService(
-    fakeBrokerNoop(),
-    { async list() { return [agentOperatorDescriptor()]; } },
+  const broker = fakeBrokerNoop();
+  const operators = { async list() { return [agentOperatorDescriptor()]; } };
+  const engine = new DispatchEngine(
+    broker,
+    operators,
     makeLauncher(),
+    fakeStepDispatch(),
+    undefined,
+    undefined,
+    opts.accumulator
+  );
+  return new OrchestratorService(
+    engine,
+    broker,
+    operators,
     undefined,
     fakeStepDispatch(),
     mediator,
-    undefined, // workerSpawn
-    workerDeliver,
-    undefined, // workerTerminate
-    undefined, // shadowAsk
-    undefined, // recoveryPromptComposer
-    undefined, // workerInterrupt
-    opts.accumulator // otlpAccumulator
+    workerDeliver
   );
 }
 
@@ -249,13 +266,23 @@ function makeWorkerExitRecoveryService(
     ...fakeStepDispatch(),
     resolveMode: (adapterId) => ({ adapterId, mode: "shadow_session", fallbacks: [] }),
   };
-  return new OrchestratorService(
-    fakeBrokerNoop(),
-    { async list() { return [agentOperatorDescriptor()]; } },
+  const broker = fakeBrokerNoop();
+  const operators = { async list() { return [agentOperatorDescriptor()]; } };
+  const engine = new DispatchEngine(
+    broker,
+    operators,
     makeLauncher(),
-    workerExitOutputStore(sessionId),
     shadowOnlyDispatch,
     undefined,
+    undefined,
+    undefined
+  );
+  return new OrchestratorService(
+    engine,
+    broker,
+    operators,
+    workerExitOutputStore(sessionId),
+    shadowOnlyDispatch,
     undefined,
     undefined,
     undefined,
@@ -545,15 +572,17 @@ describe("OrchestratorService agent step", () => {
       ...fakeStepDispatch(),
       resolveMode: (adapterId) => ({ adapterId, mode: "shadow_session", fallbacks: [] }),
     };
-    const service = new OrchestratorService(
+    const engine = new DispatchEngine(
       { propose },
       fakeRegistry(),
       makeLauncher(),
+      shadowOnlyDispatch,
       undefined,
-      shadowOnlyDispatch
+      undefined,
+      undefined
     );
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     expect(propose).not.toHaveBeenCalled();
     expect(
@@ -637,13 +666,17 @@ describe("OrchestratorService agent step", () => {
         latencyMs: 1,
       };
     });
-    const service = new OrchestratorService(
+    const engine = new DispatchEngine(
       { propose },
       fakeRegistry(),
-      makeLauncher()
+      makeLauncher(),
+      undefined,
+      undefined,
+      undefined,
+      undefined
     );
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     expect(readPersistedStepResult(db, "step-1")).toMatchObject({
       stepId: "step-1",
@@ -668,15 +701,15 @@ describe("OrchestratorService agent step", () => {
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
     const launcher = makeLauncher(launchFn);
-    const service = makeAgentService(launcher);
+    const { engine, service } = makeAgentService(launcher);
 
     // First call: selects operator
-    const first = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const first = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(first.decision.decisionType).toBe("select_operator");
     expect(first.recommendationIds).toHaveLength(0);
 
     // Second call: agent decision → recommendation emitted, launcher NOT called
-    const second = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const second = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(second.recommendationIds).toHaveLength(1);
 
     const rec = db
@@ -708,13 +741,13 @@ describe("OrchestratorService agent step", () => {
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
     const launcher = makeLauncher(launchFn);
-    const service = makeAgentService(launcher);
+    const { engine, service } = makeAgentService(launcher);
 
     // First call: selects operator
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     // Second call: agent decision → risk_rule require_approval → recommendation, no launch
-    const second = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const second = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(second.recommendationIds).toHaveLength(1);
     expect(recommendationCount(db, "launch_workflow_session")).toBe(1);
 
@@ -735,18 +768,18 @@ describe("OrchestratorService agent step", () => {
     setupAgentStepRun(db, { guardrailsJson: guardrails });
 
     const launcher = makeLauncher();
-    const service = makeAgentService(launcher);
+    const { engine, service } = makeAgentService(launcher);
 
     // Advance past operator selection
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     // First agent decision call: creates the recommendation
-    const first = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const first = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(first.recommendationIds).toHaveLength(1);
     expect(recommendationCount(db, "launch_workflow_session")).toBe(1);
 
     // Second agent decision call: recommendation already exists → noop, no new ones
-    const second = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const second = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(second.recommendationIds).toHaveLength(0);
     // Still only one recommendation total
     expect(recommendationCount(db, "launch_workflow_session")).toBe(1);
@@ -760,13 +793,13 @@ describe("OrchestratorService agent step", () => {
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
     const launcher = makeLauncher(launchFn);
-    const service = makeAgentService(launcher);
+    const { engine, service } = makeAgentService(launcher);
 
     // First call: selects operator
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     // Second call: direct launch
-    const result = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const result = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(result.recommendationIds).toHaveLength(0);
     expect(launchFn).toHaveBeenCalledOnce();
     expect(launchFn).toHaveBeenCalledWith(
@@ -810,12 +843,12 @@ describe("OrchestratorService agent step", () => {
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
     const launcher = makeLauncher(launchFn);
-    const service = makeAgentService(launcher);
+    const { engine, service } = makeAgentService(launcher);
 
     // First call: selects operator
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     // Second call: direct launch
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(launchFn).toHaveBeenCalledOnce();
 
     const launch = listTransitionsByGoal(db, "goal-1").find((t) => t.boundary === "step_launch");
@@ -838,10 +871,10 @@ describe("OrchestratorService agent step", () => {
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
     const launcher = makeLauncher(launchFn);
-    const service = makeAgentService(launcher);
+    const { engine, service } = makeAgentService(launcher);
 
     // First call: selects operator
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     // Simulate a session linked to step-1 being in running state (before the agent decision fires)
     db.prepare(
@@ -849,7 +882,7 @@ describe("OrchestratorService agent step", () => {
     ).run(NOW);
 
     // Call again — should noop, NOT call launcher
-    const result = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const result = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(result.recommendationIds).toHaveLength(0);
     expect(launchFn).not.toHaveBeenCalled();
   });
@@ -1877,7 +1910,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-x" }));
     const launcher = makeLauncher(launchFn);
-    const service = makeAgentService(launcher);
+    const { engine, service } = makeAgentService(launcher);
 
     await service.startWorkflowFirstStep(db, () => NOW, "run-1");
 
@@ -1908,7 +1941,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-x" }));
     const deliver = vi.fn(async (_sid: string, _text: string) => "delivered" as const);
-    const service = makeAgentService(makeLauncher(launchFn), deliver);
+    const { engine, service } = makeAgentService(makeLauncher(launchFn), deliver);
 
     await service.startWorkflowFirstStep(db, () => NOW, "run-1");
 
@@ -1927,7 +1960,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
       throw new Error("PTY spawn failed: spawn_failed");
     });
     const launcher = makeLauncher(launchFn);
-    const service = makeAgentService(launcher);
+    const { engine, service } = makeAgentService(launcher);
 
     await expect(
       service.startWorkflowFirstStep(db, () => NOW, "run-1", { bus, idFactory })
@@ -1963,10 +1996,21 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
         (adapterId === "codex" && modelId === "gpt-5.4-mini"),
       resolveMode: (adapterId) => ({ adapterId, mode: "shadow_session", fallbacks: [] }),
     };
-    const service = new OrchestratorService(
-      fakeBrokerNoop(),
-      { async list() { return [agentOperatorDescriptor()]; } },
+    const broker1966 = fakeBrokerNoop();
+    const operators1966 = { async list() { return [agentOperatorDescriptor()]; } };
+    const engine1966 = new DispatchEngine(
+      broker1966,
+      operators1966,
       makeLauncher(launchFn),
+      stepDispatch,
+      undefined,
+      undefined,
+      undefined
+    );
+    const service = new OrchestratorService(
+      engine1966,
+      broker1966,
+      operators1966,
       undefined,
       stepDispatch
     );
@@ -1989,9 +2033,9 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-x" }));
     const launcher = makeLauncher(launchFn);
-    const service = makeAgentService(launcher);
+    const { engine, service } = makeAgentService(launcher);
 
-    await service.advanceToNextStep(db, () => NOW, "run-1");
+    await engine.advanceToNextStep(db, () => NOW, "run-1");
 
     const run = db
       .prepare("SELECT current_step_run_id FROM workflow_runs WHERE id = 'run-1'")
@@ -2017,9 +2061,9 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     const { db } = setupHarness();
     setupTwoStepRunWithOutput(db);
 
-    const service = makeAgentService(makeLauncher());
+    const { engine, service } = makeAgentService(makeLauncher());
 
-    await service.advanceToNextStep(db, () => NOW, "run-1");
+    await engine.advanceToNextStep(db, () => NOW, "run-1");
 
     const txns = listTransitionsByGoal(db, "goal-1");
     expect(
@@ -2038,7 +2082,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-respawn" }));
     const launcher = makeLauncher(launchFn);
-    const service = makeAgentService(launcher);
+    const { engine, service } = makeAgentService(launcher);
 
     await service.respawnStepAgent(db, () => NOW, "run-1", "step-1");
 
@@ -2063,9 +2107,9 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-x" }));
     const launcher = makeLauncher(launchFn);
-    const service = makeAgentService(launcher);
+    const { engine, service } = makeAgentService(launcher);
 
-    await service.advanceToNextStep(db, () => NOW, "run-1");
+    await engine.advanceToNextStep(db, () => NOW, "run-1");
 
     expect(recommendationCount(db, "complete_workflow_run")).toBe(1);
     expect(launchFn).not.toHaveBeenCalled();
@@ -2089,7 +2133,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     ).run('goal-1', 'ws-b', NOW);
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-ws" }));
-    const service = makeAgentService(makeLauncher(launchFn));
+    const { engine, service } = makeAgentService(makeLauncher(launchFn));
 
     await service.startWorkflowFirstStep(db, () => NOW, "run-1");
 
@@ -2564,14 +2608,24 @@ function makeRecoveryService(opts: {
     },
   };
   const outputStore = opts.outputStore ?? multiOutputStore({});
-  const service = new OrchestratorService(
-    fakeBrokerNoop(),
-    { async list() { return operators; } },
+  const brokerRec = fakeBrokerNoop();
+  const operatorsRec = { async list() { return operators; } };
+  const engineRec = new DispatchEngine(
+    brokerRec,
+    operatorsRec,
     { launch },
+    dispatch,
+    spawn,
+    deliver,
+    undefined
+  );
+  const service = new OrchestratorService(
+    engineRec,
+    brokerRec,
+    operatorsRec,
     outputStore,
     dispatch,
     undefined,
-    spawn,
     deliver,
     terminate
   );
@@ -2626,14 +2680,24 @@ function makeRecoveryServiceWithWait(opts: {
     },
   };
   const outputStore = opts.outputStore ?? multiOutputStore({});
-  const service = new OrchestratorService(
-    fakeBrokerNoop(),
-    { async list() { return operatorsList; } },
+  const brokerRecW = fakeBrokerNoop();
+  const operatorsRecW = { async list() { return operatorsList; } };
+  const engineRecW = new DispatchEngine(
+    brokerRecW,
+    operatorsRecW,
     { launch },
+    dispatch,
+    spawn,
+    deliver,
+    undefined
+  );
+  const service = new OrchestratorService(
+    engineRecW,
+    brokerRecW,
+    operatorsRecW,
     outputStore,
     dispatch,
     undefined,
-    spawn,
     deliver,
     terminate
   );
@@ -2834,14 +2898,16 @@ describe("OrchestratorService provider recovery actions", () => {
     db.prepare(
       "UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-haiku-4-5' WHERE id = 'goal-1'"
     ).run();
+    const brokerPG = fakeBrokerNoop();
+    const operatorsPG = { async list() { return [agentOperatorDescriptor()]; } };
+    const enginePG = new DispatchEngine(brokerPG, operatorsPG, makeLauncher(), fakeStepDispatch(), undefined, undefined, undefined);
     const service = new OrchestratorService(
-      fakeBrokerNoop(),
-      { async list() { return [agentOperatorDescriptor()]; } },
-      makeLauncher(),
+      enginePG,
+      brokerPG,
+      operatorsPG,
       multiOutputStore({}),
       fakeStepDispatch(),
       mediator,
-      undefined,
       deliver
     );
 
@@ -2861,14 +2927,16 @@ describe("OrchestratorService provider recovery actions", () => {
       "UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-haiku-4-5' WHERE id = 'goal-1'"
     ).run();
     const mediator = spyMediator({ kind: "forward_to_agent", translated: "x" });
+    const brokerPGL = fakeBrokerNoop();
+    const operatorsPGL = { async list() { return [agentOperatorDescriptor()]; } };
+    const enginePGL = new DispatchEngine(brokerPGL, operatorsPGL, makeLauncher(), fakeStepDispatch(), undefined, undefined, undefined);
     const service = new OrchestratorService(
-      fakeBrokerNoop(),
-      { async list() { return [agentOperatorDescriptor()]; } },
-      makeLauncher(),
+      enginePGL,
+      brokerPGL,
+      operatorsPGL,
       multiOutputStore({}),
       fakeStepDispatch(),
       mediator,
-      undefined,
       vi.fn(async () => "delivered" as const)
     );
 
@@ -2893,13 +2961,15 @@ describe("OrchestratorService provider recovery actions", () => {
       `INSERT INTO activities (id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal, status, current_text, final_summary, source_kind, work_category, confidence, pending_question, created_at, updated_at, completed_at) VALUES ('act-r', 'goal-1', 'run-1', 'step-1', 'sess-cur', 0, 'paused_for_input', 'Paused', NULL, 'provider_recovery_pending', NULL, NULL, NULL, ?, ?, NULL)`
     ).run(NOW, NOW);
     const deliver = vi.fn(async () => "delivered" as const);
+    const brokerTS = fakeBrokerNoop();
+    const operatorsTS = { async list() { return [agentOperatorDescriptor()]; } };
+    const engineTS = new DispatchEngine(brokerTS, operatorsTS, makeLauncher(), fakeStepDispatch(), undefined, undefined, undefined);
     const service = new OrchestratorService(
-      fakeBrokerNoop(),
-      { async list() { return [agentOperatorDescriptor()]; } },
-      makeLauncher(),
+      engineTS,
+      brokerTS,
+      operatorsTS,
       multiOutputStore({ "sess-cur": { tail: TURN_STARTED_TAIL, nextSeq: 8 } }),
       fakeStepDispatch(),
-      undefined,
       undefined,
       deliver
     );
@@ -2925,13 +2995,15 @@ describe("OrchestratorService provider recovery actions", () => {
       `INSERT INTO activities (id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal, status, current_text, final_summary, source_kind, work_category, confidence, pending_question, created_at, updated_at, completed_at) VALUES ('act-r', 'goal-1', 'run-1', 'step-1', 'sess-cur', 0, 'paused_for_input', 'Paused', NULL, 'provider_recovery_pending', NULL, NULL, NULL, ?, ?, NULL)`
     ).run(NOW, NOW);
     const deliver = vi.fn(async () => "no_session" as const);
+    const brokerNS = fakeBrokerNoop();
+    const operatorsNS = { async list() { return [agentOperatorDescriptor()]; } };
+    const engineNS = new DispatchEngine(brokerNS, operatorsNS, makeLauncher(), fakeStepDispatch(), undefined, undefined, undefined);
     const service = new OrchestratorService(
-      fakeBrokerNoop(),
-      { async list() { return [agentOperatorDescriptor()]; } },
-      makeLauncher(),
+      engineNS,
+      brokerNS,
+      operatorsNS,
       multiOutputStore({ "sess-cur": { tail: TURN_STARTED_TAIL, nextSeq: 8 } }),
       fakeStepDispatch(),
-      undefined,
       undefined,
       deliver
     );
@@ -2954,13 +3026,15 @@ describe("OrchestratorService provider recovery actions", () => {
       retryOutputSeq: 2,
       resetAt: null,
     });
+    const brokerRL = fakeBrokerNoop();
+    const operatorsRL = { async list() { return [agentOperatorDescriptor()]; } };
+    const engineRL = new DispatchEngine(brokerRL, operatorsRL, makeLauncher(), fakeStepDispatch(), undefined, undefined, undefined);
     const service = new OrchestratorService(
-      fakeBrokerNoop(),
-      { async list() { return [agentOperatorDescriptor()]; } },
-      makeLauncher(),
+      engineRL,
+      brokerRL,
+      operatorsRL,
       multiOutputStore({ "sess-cur": { tail: RECOVERY_LIMIT_TAIL, nextSeq: 5 } }),
       fakeStepDispatch(),
-      undefined,
       undefined,
       vi.fn(async () => "delivered" as const)
     );
@@ -2980,14 +3054,16 @@ describe("OrchestratorService provider recovery actions", () => {
       retryKind: "preserved_session",
       retryOutputSeq: 10,
     });
+    const brokerST = fakeBrokerNoop();
+    const operatorsST = { async list() { return [agentOperatorDescriptor()]; } };
+    const engineST = new DispatchEngine(brokerST, operatorsST, makeLauncher(), fakeStepDispatch(), undefined, undefined, undefined);
     const service = new OrchestratorService(
-      fakeBrokerNoop(),
-      { async list() { return [agentOperatorDescriptor()]; } },
-      makeLauncher(),
+      engineST,
+      brokerST,
+      operatorsST,
       // nextSeq (8) <= retryOutputSeq (10): stale output, must be ignored.
       multiOutputStore({ "sess-cur": { tail: TURN_STARTED_TAIL, nextSeq: 8 } }),
       fakeStepDispatch(),
-      undefined,
       undefined,
       vi.fn(async () => "delivered" as const)
     );
@@ -3307,14 +3383,18 @@ describe("OrchestratorService.interruptStepAgent", () => {
   function makeInterruptService(
     workerInterrupt: (sessionId: string) => Promise<void>
   ): OrchestratorService {
+    const broker = fakeBrokerNoop();
+    const operators = { async list() { return [agentOperatorDescriptor()]; } };
+    const engine = new DispatchEngine(
+      broker, operators, makeLauncher(), fakeStepDispatch(), undefined, undefined, undefined
+    );
     return new OrchestratorService(
-      fakeBrokerNoop(),
-      { async list() { return [agentOperatorDescriptor()]; } },
-      makeLauncher(),
+      engine,
+      broker,
+      operators,
       undefined, // sessionOutputStore
       fakeStepDispatch(),
       undefined, // orchestratorMediator
-      undefined, // workerSpawn
       undefined, // workerDeliver
       undefined, // workerTerminate
       undefined, // shadowAsk

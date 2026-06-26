@@ -29,6 +29,7 @@ import { closeDatabase } from "../db.js";
 import { resetWorkflowEventPreparedStatements } from "../workflows/events.js";
 import { resetWorkflowStepProjectionPreparedStatements } from "../workflows/steps/projection.js";
 import { OrchestratorService } from "../workflows/orchestrator/service.js";
+import { DispatchEngine } from "../workflows/orchestrator/dispatch-engine.js";
 import { setSupervisionMode } from "../settings/store.js";
 import {
   cleanupHarness,
@@ -153,14 +154,23 @@ describe("orchestrator-mediated workflow e2e (service-level happy path)", () => 
 
     const workerDeliver = vi.fn(async () => "delivered" as const);
 
-    const service = new OrchestratorService(
-      fakeBrokerNoop(),
+    const broker = fakeBrokerNoop();
+    const engine = new DispatchEngine(
+      broker,
       fakeRegistry(),
       launcher as any,
+      fakeStepDispatch(),
+      undefined,
+      undefined,
+      undefined
+    );
+    const service = new OrchestratorService(
+      engine,
+      broker,
+      fakeRegistry(),
       undefined,
       fakeStepDispatch(),
       mediator as unknown as Pick<OrchestratorMediator, "invoke">,
-      undefined,
       workerDeliver
     );
 

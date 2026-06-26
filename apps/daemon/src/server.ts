@@ -207,6 +207,7 @@ import {
   OrchestratorProviderRecoveryNotFoundError,
   OrchestratorProviderRecoveryInvalidTransitionError,
 } from './workflows/orchestrator/service.js';
+import { DispatchEngine } from './workflows/orchestrator/dispatch-engine.js';
 import { ProviderRecoveryController } from './workflows/orchestrator/provider-recovery-controller.js';
 import type { RunnerPort } from './workflows/orchestrator/runner-port.js';
 import {
@@ -709,16 +710,25 @@ export function createServer(
   const workerDeliverFn = (sessionId: string, text: string) => workerSessions.deliver(sessionId, text);
   const workerWaitFn = (sessionId: string, adapterId: string) => workerSessions.waitForProviderReset(sessionId, adapterId);
 
-  // Shared orchestrator service instance — receives sessionOutputStore so that
-  // onWorkflowSessionCompleted can synthesize step output from session tails.
-  const orchestratorService = new OrchestratorService(
+  const dispatchEngine = new DispatchEngine(
     daemonContext.orchestrationTransportBroker,
     daemonContext.operatorRegistry,
     daemonContext.workflowSessionLauncher,
+    daemonContext.stepDispatchCapabilities,
+    workerSpawnFn,
+    workerDeliverFn,
+    otlpAccumulator
+  );
+
+  // Shared orchestrator service instance — receives sessionOutputStore so that
+  // onWorkflowSessionCompleted can synthesize step output from session tails.
+  const orchestratorService = new OrchestratorService(
+    dispatchEngine,
+    daemonContext.orchestrationTransportBroker,
+    daemonContext.operatorRegistry,
     sessionOutputStore,
     daemonContext.stepDispatchCapabilities,
     orchestratorMediator,
-    workerSpawnFn,
     workerDeliverFn,
     // workerTerminate
     (sessionId) => workerSessions.terminate(sessionId),
@@ -1849,7 +1859,7 @@ export function createServer(
   });
 
   server.post<{ Params: { id: string } }>("/v1/workflows/runs/:id/confirm-gate", async (request, reply) => {
-    await orchestratorService.confirmGate(
+    await dispatchEngine.confirmGate(
       getDatabase(),
       daemonContext.now,
       request.params.id,
@@ -1859,7 +1869,7 @@ export function createServer(
   });
 
   server.post<{ Params: { id: string } }>("/v1/workflows/runs/:id/confirm-split", async (request, reply) => {
-    await orchestratorService.confirmSplit(
+    await dispatchEngine.confirmSplit(
       getDatabase(),
       daemonContext.now,
       request.params.id,
@@ -1886,7 +1896,7 @@ export function createServer(
         reply.status(400);
         return { error: "validation_failed", message: "outcome must be 'approved' or 'rejected'" };
       }
-      await orchestratorService.decideGate(
+      await dispatchEngine.decideGate(
         getDatabase(),
         daemonContext.now,
         request.params.id,

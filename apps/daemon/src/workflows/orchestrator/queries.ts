@@ -5,6 +5,8 @@ import type { StepRunRow } from "./db-rows.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
 import type { EventBus } from "../../events.js";
 import { publishStagedWorkflowEvents } from "../events.js";
+import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
+import type { StepResultBuilderDeps } from "./step-result-builder.js";
 
 export function stepRunIdsByTemplateId(
   db: Database.Database,
@@ -87,4 +89,10 @@ export function readStepOutputAsRecord(
 /** Flush staged workflow events if a bus is present (the orchestrator's publish guard). */
 export function publishStaged(bus: EventBus | undefined, events: DomainEvent[]): void {
   if (bus) publishStagedWorkflowEvents(bus, events);
+}
+
+export function buildStepResultBuilderDeps(
+  broker: Pick<OrchestrationTransportBroker, "propose">,
+): StepResultBuilderDeps {
+  return { broker, readStepOutputAsRecord, retryCount, artifactCountForStep };
 }

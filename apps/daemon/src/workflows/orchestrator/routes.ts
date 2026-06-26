@@ -12,7 +12,6 @@ import { getWorkflowRunById } from "../runs/projection.js";
 import {
   OrchestratorRunNotActiveError,
   OrchestratorRunNotFoundError,
-  OrchestratorService,
   OrchestratorTemplateNotFoundError,
   type StepDispatchCapabilities,
 } from "./service.js";
@@ -21,6 +20,7 @@ import {
   OrchestratorStepNotFoundError,
 } from "./db-rows.js";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
+import { DispatchEngine } from "./dispatch-engine.js";
 
 export interface OrchestratorRouteDeps {
   db: Database.Database;
@@ -41,12 +41,14 @@ export function registerOrchestratorRoutes(
   server: FastifyInstance,
   deps: OrchestratorRouteDeps
 ): void {
-  const service = new OrchestratorService(
+  const dispatchEngine = new DispatchEngine(
     deps.orchestrationTransportBroker,
     deps.operatorRegistry,
-    deps.workflowSessionLauncher,
+    deps.workflowSessionLauncher ?? { launch: async () => { throw new Error("direct_launch_unsupported"); } },
+    deps.stepDispatch,
     undefined,
-    deps.stepDispatch
+    undefined,
+    undefined
   );
 
   server.post("/v1/goals/:goalId/workflow-runs/:id/next-decision", async (request, reply) => {
@@ -71,7 +73,7 @@ export function registerOrchestratorRoutes(
     }
 
     try {
-      const result = await service.requestNextDecision(
+      const result = await dispatchEngine.requestNextDecision(
         deps.db,
         deps.now ?? (() => new Date().toISOString()),
         id,
