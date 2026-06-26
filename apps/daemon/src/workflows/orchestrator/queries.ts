@@ -1,7 +1,10 @@
 import type Database from "better-sqlite3";
 import { InterviewTurn } from "@orca/contracts";
+import type { DomainEvent } from "@orca/contracts";
 import type { StepRunRow } from "./db-rows.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
+import type { EventBus } from "../../events.js";
+import { publishStagedWorkflowEvents } from "../events.js";
 
 export function stepRunIdsByTemplateId(
   db: Database.Database,
@@ -79,4 +82,9 @@ export function readStepOutputAsRecord(
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
   const { _completion: _omit, ...rest } = parsed as Record<string, unknown>;
   return rest;
+}
+
+/** Flush staged workflow events if a bus is present (the orchestrator's publish guard). */
+export function publishStaged(bus: EventBus | undefined, events: DomainEvent[]): void {
+  if (bus) publishStagedWorkflowEvents(bus, events);
 }
