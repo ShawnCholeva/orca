@@ -2,7 +2,6 @@ import type Database from "better-sqlite3";
 import {
   AdapterId,
   InterviewTurn,
-  LedgerUpdate,
   OrchestrationRequest,
   ProviderRecoveryCheckpoint,
   ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES,
@@ -83,10 +82,9 @@ import { stepRequiresExecution } from "./requires-execution.js";
 import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.js";
 import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
 import { judgeAgentResponse } from "./judgement.js";
-import { extractOrcaStepCompleteBlock, parseStepCompletionEnvelope } from "./orca-output.js";
-import { commitLedgerVersion } from "../ledger/usecases.js";
+import { extractOrcaStepCompleteBlock } from "./orca-output.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
-import { reviewAndNormalizeLedgerUpdates } from "../ledger/review.js";
+import { completeStepWithLedger, createStepOutputArtifact } from "./ledger-commit.js";
 import { incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
 import { incrementCrashRetry, CRASH_RETRY_CAP } from "./crash-retry.js";
 import {
@@ -113,19 +111,20 @@ import { setSessionStatus } from "../../sessions/projection.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
 import { extractProposal, summarizeScoring } from "./scoring-summary.js";
 import { type StepResultBuilderDeps, scoringFacts, buildApprovalStepResult, withResultSummary, replayEvaluationFailedResult, scoreCompletedStepResult } from "./step-result-builder.js";
+import {
+  type GoalRow,
+  type StepRunRow,
+  readGoal,
+  readStepRun,
+  preferencesForGoal,
+  OrchestratorGoalNotFoundError,
+  OrchestratorStepNotFoundError,
+} from "./db-rows.js";
 
 export interface StepDispatchCapabilities {
   isAdapterReady(adapterId: string): Promise<boolean>;
   supportsModel(adapterId: string, modelId: string): boolean;
   resolveMode(adapterId: string): ResolvedMode;
-}
-
-export interface GoalRow {
-  id: string;
-  title: string;
-  description: string;
-  orchestrator_provider: ModelProviderId | null;
-  orchestrator_model: string | null;
 }
 
 interface RecoveryScoringPromptInput {
@@ -199,37 +198,6 @@ function stepDispatchEnablesOneShot(
   }
 }
 
-export function preferencesForGoal(
-  preferences: StepAgentChoice[],
-  orchestratorProvider: GoalRow["orchestrator_provider"]
-): StepAgentChoice[] {
-  if (!orchestratorProvider) return preferences;
-  const preferredAdapterId = adapterIdForProvider(orchestratorProvider);
-  if (!preferences.some((pref) => pref.adapterId === preferredAdapterId)) return preferences;
-  return [
-    ...preferences.filter((pref) => pref.adapterId === preferredAdapterId),
-    ...preferences.filter((pref) => pref.adapterId !== preferredAdapterId),
-  ];
-}
-
-export interface StepRunRow {
-  id: string;
-  goal_id: string;
-  workflow_run_id: string;
-  step_template_id: string;
-  ordinal: number;
-  attempt: number;
-  status: string;
-  started_at: string | null;
-  selected_operator_id: string | null;
-  selected_model_id: string | null;
-  revise_attempts: number;
-  crash_retries: number;
-  step_result_json: string | null;
-  pending_provider_recovery_json: string | null;
-  pending_judge_json: string | null;
-}
-
 export interface RequestNextDecisionOptions {
   bus?: EventBus;
   idFactory?: () => string;
@@ -257,30 +225,12 @@ export class OrchestratorRunNotActiveError extends Error {
   }
 }
 
-export class OrchestratorStepNotFoundError extends Error {
-  readonly code = "workflow_step_run_not_found" as const;
-
-  constructor(stepRunId: string | null) {
-    super(`Workflow step run not found: ${stepRunId ?? "null"}`);
-    this.name = "OrchestratorStepNotFoundError";
-  }
-}
-
 export class OrchestratorTemplateNotFoundError extends Error {
   readonly code = "workflow_template_not_found" as const;
 
   constructor(templateId: string) {
     super(`Workflow template not found: ${templateId}`);
     this.name = "OrchestratorTemplateNotFoundError";
-  }
-}
-
-export class OrchestratorGoalNotFoundError extends Error {
-  readonly code = "goal_not_found" as const;
-
-  constructor(goalId: string) {
-    super(`Goal not found: ${goalId}`);
-    this.name = "OrchestratorGoalNotFoundError";
   }
 }
 
@@ -313,25 +263,6 @@ export class OrchestratorProviderRecoveryInvalidTransitionError extends Error {
     super(message);
     this.name = "OrchestratorProviderRecoveryInvalidTransitionError";
   }
-}
-
-function readStepRun(db: Database.Database, stepRunId: string | null): StepRunRow {
-  if (!stepRunId) throw new OrchestratorStepNotFoundError(stepRunId);
-  const row = db
-    .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
-    .get(stepRunId) as StepRunRow | undefined;
-  if (!row) throw new OrchestratorStepNotFoundError(stepRunId);
-  return row;
-}
-
-export function readGoal(db: Database.Database, goalId: string): GoalRow {
-  const row = db
-    .prepare(
-      "SELECT id, title, description, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?",
-    )
-    .get(goalId) as GoalRow | undefined;
-  if (!row) throw new OrchestratorGoalNotFoundError(goalId);
-  return row;
 }
 
 /** Pull the step's free-text `assumptions[]` out of its completion block, if present. */
@@ -1523,7 +1454,7 @@ export class OrchestratorService {
         }
 
         const stagedEvents: DomainEvent[] = [];
-        const rejected = await this.completeStepWithLedger(db, now, ctx, block, options, stagedEvents);
+        const rejected = await completeStepWithLedger(db, now, ctx, block, options, stagedEvents);
         if (rejected) {
           return this.reviseStep(
             db,
@@ -1937,7 +1868,7 @@ export class OrchestratorService {
     const stagedEvents: DomainEvent[] = [];
     // The user already approved this completion; never block the confirmation on
     // ledger review — drop rejected proposals and commit the accepted ones.
-    await this.completeStepWithLedger(db, now, ctx, stash.block, options, stagedEvents, "drop");
+    await completeStepWithLedger(db, now, ctx, stash.block, options, stagedEvents, "drop");
     this.publish(options.bus, stagedEvents);
 
     const sessionRow = db
@@ -2436,7 +2367,7 @@ export class OrchestratorService {
     // Artifact write and the advance/complete decision are separate transactions but recoverable:
     // a crash between them re-routes via the existing step_output idempotency branch on retry.
     const artifactEvents: DomainEvent[] = [];
-    this.createStepOutputArtifact(db, now, ctx, body, options, artifactEvents);
+    createStepOutputArtifact(db, now, ctx, body, options, artifactEvents);
     this.publish(options.bus, artifactEvents);
     const finishedAt = now();
     const stepResult = await scoreCompletedStepResult(this.stepResultBuilderDeps, db, ctx, proposal.output, finishedAt);
@@ -2866,124 +2797,17 @@ export class OrchestratorService {
   }
 
   /**
-   * Completes a step from its agent-emitted completion envelope: splits the
-   * envelope into business `output` + proposed `ledger_updates`, reviews the
-   * proposals against the latest committed ledger, then ATOMICALLY writes the
-   * `step_output` artifact (storing only the validated business output, so
-   * downstream readers are unaffected) and commits one ledger version.
-   *
-   * The async review runs OUTSIDE the synchronous better-sqlite3 transaction
-   * (transactions are synchronous). On rejection, NO ledger version is committed
-   * and no step_output is written — the caller revises the step.
-   *
-   * Decision: a ledger version is committed on EVERY successful executable step
-   * even when there are no updates, so `ledger_version` advances monotonically
-   * and gates can reference a stable version. An empty version is cheap.
-   *
-   * Returns the rejection reasons when review fails (caller revises), or `null`
-   * on success.
+   * The advance/route engine — intentionally NOT extracted. This method plus the
+   * gate/splitter routing (parkForGateApproval, evaluateAndParkSplitter,
+   * routeGateDestination, decideGate, confirm*) form the orchestrator's irreducible
+   * dispatch core: it recurses into requestNextDecision and calls spawnStepAgent,
+   * with a routeGateDestination ⇄ evaluateAndParkSplitter cycle. Extracting it would
+   * require injecting ~7 host callbacks (incl. requestNextDecision/spawnStepAgent it
+   * recurses into) — a pass-through, not a seam. FUTURE_ARCHITECTURE: "deterministic
+   * code owns lifecycle, routing, gates" (one core). The principled larger move is the
+   * DispatchEngine split (FUTURE_WORK 0.2) — its own deliberate effort, not a piecemeal
+   * extraction.
    */
-  private async completeStepWithLedger(
-    db: Database.Database,
-    now: () => string,
-    ctx: {
-      run: WorkflowRunT;
-      stepRun: StepRunRow;
-      stepTpl: WorkflowStepTemplate;
-      goal: GoalRow;
-    },
-    block: unknown,
-    options: RequestNextDecisionOptions,
-    stagedEvents: DomainEvent[],
-    onReject: "revise" | "drop" = "revise"
-  ): Promise<{ rejections: string[] } | null> {
-    const { output, ledgerUpdates } = parseStepCompletionEnvelope(block);
-
-    // Guard the proposed updates even though parseStepCompletionEnvelope already
-    // returns typed updates (defensive: bare-output back-compat returns []).
-    const guard = LedgerUpdate.array().safeParse(ledgerUpdates);
-    if (!guard.success) {
-      if (onReject === "revise") return { rejections: ["ledger_updates failed schema validation"] };
-      // drop: complete with an empty ledger version (the user already approved).
-      this.commitStepOutputAndLedger(db, now, ctx, output, [], options, stagedEvents);
-      return null;
-    }
-
-    // Async review/normalize MUST happen before opening the synchronous tx.
-    const committed = latestCommittedLedger(db, ctx.run.id);
-    const review = await reviewAndNormalizeLedgerUpdates(
-      {},
-      { committed, proposals: guard.data }
-    );
-    if (review.rejected.length > 0 && onReject === "revise") {
-      return { rejections: review.rejected.map((r) => r.reason) };
-    }
-    if (review.rejected.length > 0 && onReject === "drop") {
-      console.warn("[ledger] dropping rejected proposals on confirm (user already approved)", { stepRunId: ctx.stepRun.id, count: review.rejected.length, reasons: review.rejected.map((r) => r.reason) });
-    }
-
-    this.commitStepOutputAndLedger(db, now, ctx, output, review.accepted, options, stagedEvents);
-    return null;
-  }
-
-  /** Atomic: step_output write + ledger version commit roll back together. */
-  private commitStepOutputAndLedger(
-    db: Database.Database,
-    now: () => string,
-    ctx: { run: WorkflowRunT; stepRun: StepRunRow; stepTpl: WorkflowStepTemplate; goal: GoalRow },
-    output: unknown,
-    updates: LedgerUpdate[],
-    options: RequestNextDecisionOptions,
-    stagedEvents: DomainEvent[]
-  ): void {
-    // Atomic: step_output write + ledger version commit roll back together.
-    // (createArtifact and commitLedgerVersion each open their own tx; nested
-    // here they become SAVEPOINTs under this single outer transaction.)
-    db.transaction(() => {
-      this.createStepOutputArtifact(db, now, ctx, JSON.stringify(output ?? {}), options, stagedEvents);
-      commitLedgerVersion(db, now, {
-        goalId: ctx.run.goalId,
-        workflowRunId: ctx.run.id,
-        sourceStepRunId: ctx.stepRun.id,
-        traversalSeq: ctx.run.traversalSeq,
-        updates,
-      });
-    })();
-  }
-
-  private createStepOutputArtifact(
-    db: Database.Database,
-    now: () => string,
-    ctx: {
-      run: WorkflowRunT;
-      stepRun: StepRunRow;
-      stepTpl: WorkflowStepTemplate;
-      goal: GoalRow;
-    },
-    body: string,
-    options: RequestNextDecisionOptions,
-    stagedEvents: DomainEvent[]
-  ): void {
-    createArtifact(
-      db,
-      now,
-      {
-        goalId: ctx.goal.id,
-        workflowRunId: ctx.run.id,
-        stepRunId: ctx.stepRun.id,
-        type: "step_output",
-        title: ctx.stepTpl.name.slice(0, 256),
-        body,
-        source: "orchestrator",
-        linkedSessionId: null,
-        linkedTaskId: null,
-        linkedContextPackageId: null,
-      },
-      options.idFactory,
-      stagedEvents
-    );
-  }
-
   private async commitAdvanceOrComplete(
     db: Database.Database,
     now: () => string,

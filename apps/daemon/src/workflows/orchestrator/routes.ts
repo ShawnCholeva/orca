@@ -11,14 +11,16 @@ import type { OperatorSelector } from "../operators/selector.js";
 import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import {
-  OrchestratorGoalNotFoundError,
   OrchestratorRunNotActiveError,
   OrchestratorRunNotFoundError,
   OrchestratorService,
-  OrchestratorStepNotFoundError,
   OrchestratorTemplateNotFoundError,
   type StepDispatchCapabilities,
 } from "./service.js";
+import {
+  OrchestratorGoalNotFoundError,
+  OrchestratorStepNotFoundError,
+} from "./db-rows.js";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
 
 export interface OrchestratorRouteDeps {

@@ -1,7 +1,6 @@
 import type Database from "better-sqlite3";
 import {
   StepResultScoringProposal,
-  type ModelProviderId,
   type StepResultScoringFacts,
   type WorkflowRun as WorkflowRunT,
   type WorkflowStepResult,
@@ -15,32 +14,7 @@ import {
   mapStepRunStatusToResultStatus,
 } from "../steps/step-result.js";
 import { scoreStepResult } from "./step-result-scoring.js";
-
-interface StepRunRow {
-  id: string;
-  goal_id: string;
-  workflow_run_id: string;
-  step_template_id: string;
-  ordinal: number;
-  attempt: number;
-  status: string;
-  started_at: string | null;
-  selected_operator_id: string | null;
-  selected_model_id: string | null;
-  revise_attempts: number;
-  crash_retries: number;
-  step_result_json: string | null;
-  pending_provider_recovery_json: string | null;
-  pending_judge_json: string | null;
-}
-
-interface GoalRow {
-  id: string;
-  title: string;
-  description: string;
-  orchestrator_provider: ModelProviderId | null;
-  orchestrator_model: string | null;
-}
+import type { GoalRow, StepRunRow } from "./db-rows.js";
 
 export interface StepResultBuilderDeps {
   broker: Pick<OrchestrationTransportBroker, "propose">;
