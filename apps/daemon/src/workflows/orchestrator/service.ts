@@ -31,7 +31,6 @@ import { getWorkflowRunById } from "../runs/projection.js";
 import { loadRunTemplate } from "../runs/run-template.js";
 import { reconstructTranscript } from "./interview.js";
 import { buildStepExecutionInput } from "./step-input.js";
-import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import { decodeSessionTail, decodeSessionTailFromSeq } from "./session-tail.js";
 import { synthesizeStepOutput } from "./synthesize.js";
 import { detectPendingAgentQuestion } from "./agent-interview.js";
