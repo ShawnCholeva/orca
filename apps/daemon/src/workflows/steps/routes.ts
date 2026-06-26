@@ -11,7 +11,6 @@ import { redactSecrets } from "../../memory/normalize.js";
 import { createArtifact } from "../artifacts/usecases.js";
 import { appendWorkflowEvent, publishStagedWorkflowEvents } from "../events.js";
 import type { OperatorRegistry } from "../operators/registry.js";
-import type { OperatorSelector } from "../operators/selector.js";
 import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { OrchestratorService, type StepDispatchCapabilities } from "../orchestrator/service.js";
 import type { WorkflowSessionLauncher } from "../orchestrator/session-launcher.js";
@@ -23,7 +22,6 @@ import { injectAnswerToSession } from "../orchestrator/agent-interview.js";
 export interface WorkflowStepRouteDeps {
   db: Database.Database;
   bus?: EventBus;
-  operatorSelector?: Pick<OperatorSelector, "select">;
   orchestrationTransportBroker?: Pick<OrchestrationTransportBroker, "propose">;
   operatorRegistry?: Pick<OperatorRegistry, "list">;
   workflowSessionLauncher?: WorkflowSessionLauncher;
@@ -43,7 +41,7 @@ export function registerWorkflowStepRoutes(
 ): void {
   const now = deps.now ?? (() => new Date().toISOString());
   const orchestratorService =
-    deps.operatorSelector && deps.orchestrationTransportBroker && deps.operatorRegistry
+    deps.orchestrationTransportBroker && deps.operatorRegistry
       ? new OrchestratorService(
           deps.orchestrationTransportBroker,
           deps.operatorRegistry,

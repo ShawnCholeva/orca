@@ -1468,7 +1468,6 @@ export function createServer(
   registerWorkflowStepRoutes(server, {
     db,
     bus: eventBus,
-    operatorSelector: daemonContext.operatorSelector,
     orchestrationTransportBroker: daemonContext.orchestrationTransportBroker,
     operatorRegistry: daemonContext.operatorRegistry,
     workflowSessionLauncher: daemonContext.workflowSessionLauncher,
@@ -2019,7 +2018,6 @@ export function createServer(
   registerOrchestratorRoutes(server, {
     db,
     bus: eventBus,
-    operatorSelector: daemonContext.operatorSelector,
     orchestrationTransportBroker: daemonContext.orchestrationTransportBroker,
     operatorRegistry: daemonContext.operatorRegistry,
     workflowSessionLauncher: daemonContext.workflowSessionLauncher,
