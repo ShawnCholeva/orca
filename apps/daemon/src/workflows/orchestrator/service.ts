@@ -102,6 +102,7 @@ import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
 import { resolveShadowProvider } from "../../orchestrator-llm/providers/registry.js";
 import { listAgents } from "../../agents.js";
 import { buildProviderRecoveryChoices, composeProviderSwitchPrompt } from "./provider-recovery.js";
+import { collectPriorStepArtifacts, latestRejectingGate } from "./repair-context.js";
 import {
   recoverStepScoring,
   type ShadowAsk,
@@ -119,7 +120,7 @@ export interface StepDispatchCapabilities {
   resolveMode(adapterId: string): ResolvedMode;
 }
 
-interface GoalRow {
+export interface GoalRow {
   id: string;
   title: string;
   description: string;
@@ -198,7 +199,7 @@ function stepDispatchEnablesOneShot(
   }
 }
 
-function preferencesForGoal(
+export function preferencesForGoal(
   preferences: StepAgentChoice[],
   orchestratorProvider: GoalRow["orchestrator_provider"]
 ): StepAgentChoice[] {
@@ -211,7 +212,7 @@ function preferencesForGoal(
   ];
 }
 
-interface StepRunRow {
+export interface StepRunRow {
   id: string;
   goal_id: string;
   workflow_run_id: string;
@@ -323,7 +324,7 @@ function readStepRun(db: Database.Database, stepRunId: string | null): StepRunRo
   return row;
 }
 
-function readGoal(db: Database.Database, goalId: string): GoalRow {
+export function readGoal(db: Database.Database, goalId: string): GoalRow {
   const row = db
     .prepare(
       "SELECT id, title, description, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?",
@@ -491,9 +492,6 @@ export class OrchestratorService {
     private readonly shadowAsk?: ShadowAsk,
     private readonly recoveryPromptComposer: RecoveryScoringPromptComposer =
       composeRecoveryScoringPrompt,
-    // Drives a provider's terminal "wait for limit reset" interaction against the
-    // worker's live tmux session (preserved-session Wait/Retry).
-    private readonly workerWait?: (sessionId: string, adapterId: string) => Promise<void>,
     // Interrupts the worker's current turn (sends Escape) so the user can course-correct.
     private readonly workerInterrupt?: (sessionId: string) => Promise<void>,
     // Drains accrued OTEL worker tokens for a session when a step_complete
@@ -1051,342 +1049,6 @@ export class OrchestratorService {
       question,
       options
     );
-  }
-
-  // -------------------------------------------------------------------------
-  // Provider recovery actions (wait / retry / refresh / switch).
-  // These set exactly the checkpoint mode + fields the committed
-  // onSessionOutputChunk recovery branches observe to drive startup progress.
-  // -------------------------------------------------------------------------
-
-  /**
-   * Validates that a recovery action targets a live, matching checkpoint:
-   * run/step active, current step matches the checkpoint step, checkpoint
-   * parses, the requested id matches, and the current session still belongs to
-   * the step. Throws NotFound for missing/mismatched targets and the
-   * invalid-transition error type elsewhere.
-   */
-  private loadProviderRecoveryContext(
-    db: Database.Database,
-    runId: string,
-    checkpointId: string
-  ): {
-    run: WorkflowRunT;
-    stepRun: StepRunRow;
-    stepTpl: WorkflowStepTemplate;
-    template: WorkflowTemplateT;
-    goal: GoalRow;
-    checkpoint: ProviderRecoveryCheckpoint;
-  } {
-    const run = getWorkflowRunById(db, runId);
-    if (!run) throw new OrchestratorProviderRecoveryNotFoundError(`workflow run not found: ${runId}`);
-    if (run.status !== "active" || !run.currentStepRunId) {
-      throw new OrchestratorProviderRecoveryNotFoundError(`workflow run not active: ${runId}`);
-    }
-    const stepRun = db
-      .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
-      .get(run.currentStepRunId) as StepRunRow | undefined;
-    if (!stepRun || stepRun.status !== "active") {
-      throw new OrchestratorProviderRecoveryNotFoundError(`active step run not found for run: ${runId}`);
-    }
-    if (!stepRun.pending_provider_recovery_json) {
-      throw new OrchestratorProviderRecoveryNotFoundError(`no pending provider recovery for run: ${runId}`);
-    }
-    let checkpoint: ProviderRecoveryCheckpoint;
-    try {
-      checkpoint = ProviderRecoveryCheckpoint.parse(
-        JSON.parse(stepRun.pending_provider_recovery_json)
-      );
-    } catch {
-      throw new OrchestratorProviderRecoveryNotFoundError(
-        `malformed provider recovery checkpoint for run: ${runId}`
-      );
-    }
-    if (checkpoint.id !== checkpointId) {
-      throw new OrchestratorProviderRecoveryNotFoundError(
-        `provider recovery checkpoint mismatch: ${checkpointId}`
-      );
-    }
-    const template = loadRunTemplate(db, run);
-    if (!template) throw new OrchestratorProviderRecoveryNotFoundError(`template not found: ${run.templateId}`);
-    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
-    if (!stepTpl) throw new OrchestratorProviderRecoveryNotFoundError(`step template not found: ${stepRun.step_template_id}`);
-    const goal = readGoal(db, run.goalId);
-
-    const sessRow = db
-      .prepare("SELECT workflow_step_run_id FROM sessions WHERE id = ?")
-      .get(checkpoint.currentSessionId) as { workflow_step_run_id: string | null } | undefined;
-    if (!sessRow || sessRow.workflow_step_run_id !== stepRun.id) {
-      throw new OrchestratorProviderRecoveryNotFoundError(
-        `recovery session no longer belongs to the step: ${checkpoint.currentSessionId}`
-      );
-    }
-
-    return { run, stepRun, stepTpl, template, goal, checkpoint };
-  }
-
-  private persistCheckpoint(
-    db: Database.Database,
-    stepRunId: string,
-    next: ProviderRecoveryCheckpoint
-  ): void {
-    db.prepare(
-      "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = ?"
-    ).run(JSON.stringify(ProviderRecoveryCheckpoint.parse(next)), stepRunId);
-  }
-
-  /** choose → waiting; preserves the session and drives the provider wait interaction. */
-  async waitForProvider(
-    db: Database.Database,
-    now: () => string,
-    runId: string,
-    checkpointId: string,
-    options: RequestNextDecisionOptions = {}
-  ): Promise<void> {
-    void options;
-    const { stepRun, checkpoint } = this.loadProviderRecoveryContext(db, runId, checkpointId);
-    if (checkpoint.mode !== "choose") {
-      throw new OrchestratorProviderRecoveryInvalidTransitionError(
-        `Wait is only allowed while choosing (mode: ${checkpoint.mode}).`
-      );
-    }
-    this.persistCheckpoint(db, stepRun.id, { ...checkpoint, mode: "waiting", lastError: null });
-    try {
-      await this.workerWait?.(checkpoint.currentSessionId, checkpoint.currentAdapterId);
-    } catch (err) {
-      this.persistCheckpoint(db, stepRun.id, {
-        ...checkpoint,
-        mode: "choose",
-        lastError: (err instanceof Error ? err.message : "wait failed").slice(0, 512),
-      });
-      throw err;
-    }
-  }
-
-  /**
-   * waiting → retrying. Preserved-session: stores the current output_seq and
-   * delivers a continue prompt to the same worker. Fresh-session: launches a
-   * replacement of the same adapter with bounded handoff context.
-   */
-  async retryProvider(
-    db: Database.Database,
-    now: () => string,
-    runId: string,
-    checkpointId: string,
-    options: RequestNextDecisionOptions = {}
-  ): Promise<void> {
-    const ctx = this.loadProviderRecoveryContext(db, runId, checkpointId);
-    const { stepRun, checkpoint } = ctx;
-    if (checkpoint.mode !== "waiting") {
-      throw new OrchestratorProviderRecoveryInvalidTransitionError(
-        `Retry is only allowed while waiting (mode: ${checkpoint.mode}).`
-      );
-    }
-    if (
-      checkpoint.retryKind === "preserved_session" &&
-      checkpoint.resetAt !== null &&
-      Date.parse(checkpoint.resetAt) > Date.parse(now())
-    ) {
-      throw new OrchestratorProviderRecoveryInvalidTransitionError(
-        `Retry is not yet available; the provider resets at ${checkpoint.resetTimeText ?? checkpoint.resetAt}.`
-      );
-    }
-
-    if (checkpoint.retryKind === "fresh_session") {
-      await this.startRecoveryReplacementSession(
-        db,
-        now,
-        ctx,
-        checkpoint.currentAdapterId,
-        "retrying",
-        options
-      );
-      return;
-    }
-
-    const outputSeq = this.sessionOutputStore.readTail(checkpoint.currentSessionId).nextSeq;
-    this.persistCheckpoint(db, stepRun.id, {
-      ...checkpoint,
-      mode: "retrying",
-      retryOutputSeq: outputSeq,
-      lastError: null,
-    });
-    try {
-      await this.workerDeliver?.(checkpoint.currentSessionId, "Continue the previous step request.");
-    } catch (err) {
-      this.persistCheckpoint(db, stepRun.id, {
-        ...checkpoint,
-        mode: "waiting",
-        retryOutputSeq: null,
-        lastError: (err instanceof Error ? err.message : "retry failed").slice(0, 512),
-      });
-      throw err;
-    }
-  }
-
-  /** Rebuilds the switch choices from current readiness, preserving id + mode. */
-  async refreshProviderRecovery(
-    db: Database.Database,
-    now: () => string,
-    runId: string,
-    checkpointId: string,
-    options: RequestNextDecisionOptions = {}
-  ): Promise<void> {
-    void options;
-    void now;
-    const { run, stepRun, stepTpl, goal, checkpoint } = this.loadProviderRecoveryContext(
-      db,
-      runId,
-      checkpointId
-    );
-    if (checkpoint.mode !== "choose" && checkpoint.mode !== "waiting") {
-      throw new OrchestratorProviderRecoveryInvalidTransitionError(
-        `Refresh is only allowed while choosing or waiting (mode: ${checkpoint.mode}).`
-      );
-    }
-    const connectedAdapterIds = listAgents(db)
-      .filter((agent) => agent.connected)
-      .map((agent) => agent.id);
-    const operatorDescriptors = await this.operators.list(run.goalId, {
-      agentIds: connectedAdapterIds,
-      includeNonAgents: false,
-    });
-    const choices = buildProviderRecoveryChoices({
-      currentAdapterId: checkpoint.currentAdapterId,
-      connectedAdapterIds,
-      stepPreferences: preferencesForGoal(stepTpl.agentPreference, goal.orchestrator_provider),
-      operators: operatorDescriptors,
-      supportsModel: (id, mid) => this.stepDispatch?.supportsModel(id, mid) ?? false,
-    });
-    this.persistCheckpoint(db, stepRun.id, { ...checkpoint, choices });
-  }
-
-  /**
-   * choose|waiting → switching. Validates the target against the live choice
-   * set, then launches a replacement session for that adapter. The committed
-   * switching output branch commits selection + retires the old session once the
-   * replacement produces started output.
-   */
-  async switchProvider(
-    db: Database.Database,
-    now: () => string,
-    runId: string,
-    checkpointId: string,
-    adapterId: string,
-    options: RequestNextDecisionOptions = {}
-  ): Promise<void> {
-    const ctx = this.loadProviderRecoveryContext(db, runId, checkpointId);
-    const { checkpoint } = ctx;
-    if (checkpoint.mode !== "choose" && checkpoint.mode !== "waiting") {
-      throw new OrchestratorProviderRecoveryInvalidTransitionError(
-        `Switch is only allowed while choosing or waiting (mode: ${checkpoint.mode}).`
-      );
-    }
-    if (adapterId === checkpoint.currentAdapterId) {
-      throw new OrchestratorProviderRecoveryInvalidTransitionError(
-        `Cannot switch to the limited provider (${adapterId}).`
-      );
-    }
-    const choice = checkpoint.choices.find((c) => c.adapterId === adapterId);
-    if (!choice) {
-      throw new OrchestratorProviderRecoveryInvalidTransitionError(
-        `${adapterId} is not an available recovery choice.`
-      );
-    }
-    if (!choice.enabled || !choice.modelId) {
-      throw new OrchestratorProviderRecoveryInvalidTransitionError(
-        `${choice.displayName} is not available: ${choice.reason ?? "provider unavailable"}.`
-      );
-    }
-    const ready = await (this.stepDispatch?.isAdapterReady(adapterId) ?? Promise.resolve(false));
-    if (!ready) {
-      throw new OrchestratorProviderRecoveryInvalidTransitionError(
-        `${choice.displayName} became unavailable.`
-      );
-    }
-    await this.startRecoveryReplacementSession(db, now, ctx, adapterId, "switching", options);
-  }
-
-  /**
-   * Launches a replacement worker for the given adapter using a bounded
-   * interrupted-session handoff (with any pending guidance), records the
-   * replacement session id + its pre-delivery output_seq, and moves the
-   * checkpoint to the supplied terminal-progress mode (retrying for a fresh
-   * retry, switching for a provider switch). The old session is retained; it is
-   * retired only by the committed output branch once the replacement starts.
-   * On launch failure the old session is preserved and the checkpoint is
-   * restored to choose with a bounded lastError.
-   */
-  private async startRecoveryReplacementSession(
-    db: Database.Database,
-    now: () => string,
-    ctx: {
-      run: WorkflowRunT;
-      stepRun: StepRunRow;
-      stepTpl: WorkflowStepTemplate;
-      template: WorkflowTemplateT;
-      goal: GoalRow;
-      checkpoint: ProviderRecoveryCheckpoint;
-    },
-    adapterId: string,
-    mode: "retrying" | "switching",
-    options: RequestNextDecisionOptions
-  ): Promise<void> {
-    void now;
-    const { run, stepRun, stepTpl, goal, checkpoint } = ctx;
-    const interruptedTail = decodeSessionTail(
-      this.sessionOutputStore.readTail(checkpoint.currentSessionId)
-    );
-    const guidanceBlock =
-      checkpoint.pendingGuidance.length > 0
-        ? `\n\n# Operator guidance\n${checkpoint.pendingGuidance.join("\n\n")}`
-        : "";
-    const handoffPrompt =
-      composeProviderSwitchPrompt({
-        agentPromptInput: {
-          goalTitle: goal.title,
-          goalDescription: goal.description,
-          stepInstructions: stepTpl.instructions,
-          outputSchema: stepTpl.outputSchema,
-          priorStepArtifacts: this.collectPriorStepArtifacts(db, run.id, stepRun.id),
-          repairContext: this.latestRejectingGate(db, run.id),
-        },
-        interruptedTail,
-      }) + guidanceBlock;
-
-    let sessionId: string;
-    try {
-      const launched = await this.launcher.launch({
-        goalId: goal.id,
-        workflowRunId: run.id,
-        workflowStepRunId: stepRun.id,
-        operatorId: "agent:" + adapterId,
-        operatorKind: "agent",
-        objective: handoffPrompt,
-      });
-      sessionId = launched.sessionId;
-      await this.workerSpawn?.({ sessionId, goalId: goal.id, adapterId });
-    } catch (err) {
-      this.persistCheckpoint(db, stepRun.id, {
-        ...checkpoint,
-        mode: "choose",
-        replacementSessionId: null,
-        replacementOutputSeq: null,
-        lastError: (err instanceof Error ? err.message : "replacement launch failed").slice(0, 512),
-      });
-      throw err;
-    }
-
-    // Pre-delivery output sequence: started-output detection compares against this.
-    const replacementOutputSeq = this.sessionOutputStore.readTail(sessionId).nextSeq;
-    this.persistCheckpoint(db, stepRun.id, {
-      ...checkpoint,
-      mode,
-      replacementSessionId: sessionId,
-      replacementOutputSeq,
-      lastError: null,
-    });
-    await this.workerDeliver?.(sessionId, handoffPrompt);
   }
 
   /**
@@ -2566,8 +2228,8 @@ export class OrchestratorService {
       goalDescription: ctx.goal.description,
       stepInstructions: ctx.stepTpl.instructions,
       outputSchema: ctx.stepTpl.outputSchema,
-      priorStepArtifacts: this.collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.id),
-      repairContext: this.latestRejectingGate(db, ctx.run.id),
+      priorStepArtifacts: collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.id),
+      repairContext: latestRejectingGate(db, ctx.run.id),
       workspaces: workspaceRows.map((w) => ({ name: w.name, root: w.path })),
     });
 
@@ -2604,58 +2266,6 @@ export class OrchestratorService {
         options
       );
     }
-  }
-
-  /**
-   * Collects the most recent step_output artifact per step template (excluding
-   * the current step run's own output), returning each as { stepId, outputJson }.
-   * Selection is by recency (artifact created_at), NOT ordinal, so a step
-   * revisited via a backward gate route still sees the latest DOWNSTREAM step
-   * outputs (e.g. Validation, which has a higher ordinal) needed to repair.
-   * stepId is the step_template_id of the artifact's step run; outputJson is the
-   * parsed artifact body.
-   */
-  private collectPriorStepArtifacts(
-    db: Database.Database,
-    runId: string,
-    currentStepRunId: string
-  ): Array<{ stepId: string; outputJson: unknown }> {
-    const stepRuns = db
-      .prepare("SELECT id, step_template_id FROM workflow_step_runs WHERE workflow_run_id = ?")
-      .all(runId) as Array<{ id: string; step_template_id: string }>;
-    const byId = new Map(stepRuns.map((s) => [s.id, s]));
-    // listArtifactsForRun is ordered by created_at ASC; keeping the last seen
-    // artifact per template yields the most recent output per step.
-    const latestByTemplate = new Map<string, unknown>();
-    for (const artifact of listArtifactsForRun(db, runId)) {
-      if (artifact.type !== "step_output" || !artifact.stepRunId) continue;
-      if (artifact.stepRunId === currentStepRunId) continue;
-      const owner = byId.get(artifact.stepRunId);
-      if (!owner) continue;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(artifact.body);
-      } catch {
-        parsed = artifact.body;
-      }
-      latestByTemplate.set(owner.step_template_id, parsed);
-    }
-    return [...latestByTemplate].map(([stepId, outputJson]) => ({ stepId, outputJson }));
-  }
-
-  /**
-   * Returns the most recent rejecting gate decision for the run, used as repair
-   * context when a backward gate route re-runs an earlier step. Null when no
-   * gate has rejected.
-   */
-  private latestRejectingGate(
-    db: Database.Database,
-    runId: string
-  ): { reason: string; issueRefs: string[] } | null {
-    const last = listGateDecisionsForRun(db, runId)
-      .filter((d) => d.outcome === "rejected")
-      .at(-1);
-    return last ? { reason: last.reason, issueRefs: last.issueRefs } : null;
   }
 
   async requestNextDecision(
