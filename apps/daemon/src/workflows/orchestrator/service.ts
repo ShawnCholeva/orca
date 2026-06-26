@@ -36,9 +36,8 @@ import type { ResolvedMode } from "../../adapters/dispatcher.js";
 import type { SessionOutputStore } from "../../sessions/output-store.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
 import { createArtifact } from "../artifacts/usecases.js";
-import { appendWorkflowEvent, publishStagedWorkflowEvents } from "../events.js";
+import { appendWorkflowEvent } from "../events.js";
 import type { OperatorRegistry } from "../operators/registry.js";
-import type { OperatorSelector } from "../operators/selector.js";
 import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import { markWorkflowRunBlocked } from "../runs/usecases.js";
@@ -120,6 +119,15 @@ import {
   OrchestratorGoalNotFoundError,
   OrchestratorStepNotFoundError,
 } from "./db-rows.js";
+import {
+  stepRunIdsByTemplateId,
+  artifactCountForStep,
+  retryCount,
+  hasActiveUnansweredQuestion,
+  readStepOutputAsRecord,
+  publishStaged,
+} from "./queries.js";
+import { postOrchestratorMessage } from "./orchestrator-message.js";
 
 export interface StepDispatchCapabilities {
   isAdapterReady(adapterId: string): Promise<boolean>;
@@ -405,7 +413,6 @@ export class OrchestratorService {
   private readonly sessionOutputStore: SessionOutputStore;
 
   constructor(
-    private readonly operatorSelector: Pick<OperatorSelector, "select">,
     private readonly broker: Pick<OrchestrationTransportBroker, "propose">,
     private readonly operators: Pick<OperatorRegistry, "list">,
     private readonly launcher: WorkflowSessionLauncher = {
@@ -524,7 +531,7 @@ export class OrchestratorService {
         stepRun.id
       );
       if (counter.capReached) {
-        this.postOrchestratorMessage(
+        postOrchestratorMessage(
           db,
           now,
           run.goalId,
@@ -546,7 +553,7 @@ export class OrchestratorService {
     const tail = decodeSessionTail(this.sessionOutputStore.readTail(args.sessionId));
     const artifacts = listArtifactsForRun(db, run.id);
     const transcript = reconstructTranscript(artifacts.filter((a) => a.stepRunId === stepRun.id));
-    const stepRunByStepId = this.stepRunIdsByTemplateId(db, run.id);
+    const stepRunByStepId = stepRunIdsByTemplateId(db, run.id);
     const stepInput = buildStepExecutionInput({
       goal: { id: goal.id, description: goal.description },
       steps: template.steps,
@@ -628,7 +635,7 @@ export class OrchestratorService {
       options.idFactory,
       stagedEvents
     );
-    this.publish(options.bus, stagedEvents);
+    publishStaged(options.bus, stagedEvents);
 
     // (10) Drive advancement to the next step / completion.
     const finishedAt = now();
@@ -959,7 +966,7 @@ export class OrchestratorService {
     const stepArtifacts = listArtifactsForRun(db, stepRun.workflow_run_id).filter(
       (a) => a.stepRunId === stepRun.id
     );
-    if (this.hasActiveUnansweredQuestion(db, stepArtifacts, stepRun.id)) return;
+    if (hasActiveUnansweredQuestion(db, stepArtifacts, stepRun.id)) return;
 
     // (6) Load run, template, step template to call commitUserInputDecision.
     const run = getWorkflowRunById(db, stepRun.workflow_run_id);
@@ -1076,7 +1083,7 @@ export class OrchestratorService {
       JSON.stringify({ responseText: args.responseText, error: message, at: now() }),
       args.stepRunId
     );
-    this.postOrchestratorMessage(
+    postOrchestratorMessage(
       db,
       now,
       args.goalId,
@@ -1164,7 +1171,7 @@ export class OrchestratorService {
       case "paraphrase_agent_message":
       case "answer_user_directly":
       case "escalate_to_user": {
-        this.postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options);
+        postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options);
         return { postedChatReply: true };
       }
       case "ask_user": {
@@ -1177,7 +1184,7 @@ export class OrchestratorService {
           toolUseId: idFactory(),
           questions: action.questions,
         };
-        this.postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options, "orchestrator", pendingQuestion);
+        postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options, "orchestrator", pendingQuestion);
         return { postedChatReply: true };
       }
       case "forward_to_agent": {
@@ -1212,7 +1219,7 @@ export class OrchestratorService {
         if (sessionId && this.workerDeliver) {
           const r = await this.workerDeliver(sessionId, action.translated);
           if (r !== "delivered") {
-            this.postOrchestratorMessage(
+            postOrchestratorMessage(
               db,
               now,
               ctx.run.goalId,
@@ -1224,7 +1231,7 @@ export class OrchestratorService {
             return { postedChatReply: true };
           }
         } else {
-          this.postOrchestratorMessage(
+          postOrchestratorMessage(
             db,
             now,
             ctx.run.goalId,
@@ -1376,7 +1383,7 @@ export class OrchestratorService {
                 options.idFactory
               )
             );
-            this.publish(options.bus, evStaged);
+            publishStaged(options.bus, evStaged);
             const failingSummary = evidence.sensorsRun
               .filter((s) => s.result === "failed")
               .map((s) => `- ${s.kind} (\`${s.command}\`): ${s.summary.slice(0, 600)}`)
@@ -1403,7 +1410,7 @@ export class OrchestratorService {
               options.idFactory
             )
           );
-          this.publish(options.bus, evStaged);
+          publishStaged(options.bus, evStaged);
         }
 
         const finishedAt = now();
@@ -1465,7 +1472,7 @@ export class OrchestratorService {
             options
           );
         }
-        this.publish(options.bus, stagedEvents);
+        publishStaged(options.bus, stagedEvents);
         // Best-effort: terminate the tmux worker for the completed step session.
         if (sessionId) {
           void this.workerTerminate?.(sessionId);
@@ -1510,7 +1517,7 @@ export class OrchestratorService {
       ctx.stepRun.id
     );
     if (counter.capReached) {
-      this.postOrchestratorMessage(
+      postOrchestratorMessage(
         db,
         now,
         ctx.run.goalId,
@@ -1522,7 +1529,7 @@ export class OrchestratorService {
     if (sessionId && this.workerDeliver) {
       const r = await this.workerDeliver(sessionId, feedback);
       if (r !== "delivered") {
-        this.postOrchestratorMessage(
+        postOrchestratorMessage(
           db,
           now,
           ctx.run.goalId,
@@ -1534,7 +1541,7 @@ export class OrchestratorService {
         return { postedChatReply: true };
       }
     } else {
-      this.postOrchestratorMessage(
+      postOrchestratorMessage(
         db,
         now,
         ctx.run.goalId,
@@ -1633,7 +1640,7 @@ export class OrchestratorService {
         JSON.stringify(ProviderRecoveryCheckpoint.parse({ ...checkpoint, pendingGuidance })),
         stepRun.id
       );
-      this.postOrchestratorMessage(
+      postOrchestratorMessage(
         db,
         now,
         run.goalId,
@@ -1673,7 +1680,7 @@ export class OrchestratorService {
         triggerPayload: { userMessage: args.body },
       });
     } catch (err) {
-      this.postOrchestratorMessage(
+      postOrchestratorMessage(
         db, now, run.goalId,
         `Orchestrator-LLM unavailable after retries; pausing — last error: ${err instanceof Error ? err.message : "unknown"}`,
         options
@@ -1699,71 +1706,11 @@ export class OrchestratorService {
     if (!postedChatReply) {
       const acknowledgment = this.acknowledgeUserMessageAction(action, sessionId);
       if (acknowledgment) {
-        this.postOrchestratorMessage(
+        postOrchestratorMessage(
           db, now, run.goalId, acknowledgment, options
         );
       }
     }
-  }
-
-  /**
-   * Inserts a single orchestrator_messages row (role "orchestrator", kind
-   * "message") and emits the orchestrator.message.created event, mirroring the
-   * orchestrator-chat use case shape. Used for escalations and forwarded /
-   * paraphrased agent messages.
-   */
-  private postOrchestratorMessage(
-    db: Database.Database,
-    now: () => string,
-    goalId: string,
-    body: string,
-    options: RequestNextDecisionOptions,
-    role: "orchestrator" | "user" = "orchestrator",
-    pendingQuestion?: PendingQuestionT,
-    pendingRevision?: { workflowRunId: string }
-  ): void {
-    const idFactory = options.idFactory ?? randomUUID;
-    const messageId = idFactory();
-    const correlationId = idFactory();
-    const createdAt = now();
-    const event = db.transaction(() => {
-      db.prepare(
-        `INSERT INTO orchestrator_messages
-          (id, goal_id, role, kind, body, correlation_id, created_at, pending_question, pending_revision)
-         VALUES (?, ?, ?, 'message', ?, ?, ?, ?, ?)`
-      ).run(
-        messageId,
-        goalId,
-        role,
-        body,
-        correlationId,
-        createdAt,
-        pendingQuestion ? JSON.stringify(pendingQuestion) : null,
-        pendingRevision ? JSON.stringify(pendingRevision) : null
-      );
-      const payload = { messageId, role };
-      const eventId = idFactory();
-      const result = db
-        .prepare(
-          "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)"
-        )
-        .run(
-          eventId,
-          "orchestrator.message.created",
-          goalId,
-          JSON.stringify(payload),
-          createdAt
-        );
-      return {
-        seq: Number(result.lastInsertRowid),
-        id: eventId,
-        type: "orchestrator.message.created",
-        goalId,
-        payload,
-        createdAt,
-      } satisfies DomainEvent;
-    })();
-    options.bus?.publish(event);
   }
 
   /**
@@ -1869,7 +1816,7 @@ export class OrchestratorService {
     // The user already approved this completion; never block the confirmation on
     // ledger review — drop rejected proposals and commit the accepted ones.
     await completeStepWithLedger(db, now, ctx, stash.block, options, stagedEvents, "drop");
-    this.publish(options.bus, stagedEvents);
+    publishStaged(options.bus, stagedEvents);
 
     const sessionRow = db
       .prepare("SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('running','starting') ORDER BY started_at DESC LIMIT 1")
@@ -1902,7 +1849,7 @@ export class OrchestratorService {
       .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = ?")
       .get(run.currentStepRunId) as { pending_completion_json: string | null } | undefined;
     if (!stash?.pending_completion_json) return;
-    this.postOrchestratorMessage(
+    postOrchestratorMessage(
       db, now, run.goalId, "What would you like to revise?", options,
       "orchestrator", undefined, { workflowRunId: runId }
     );
@@ -1927,7 +1874,7 @@ export class OrchestratorService {
     if (!stashRow?.pending_completion_json) return; // idempotent no-op
 
     // Persist the user's revision as a chat bubble (no mediator trigger).
-    this.postOrchestratorMessage(db, now, run.goalId, feedback, options, "user");
+    postOrchestratorMessage(db, now, run.goalId, feedback, options, "user");
 
     db.prepare(
       "UPDATE orchestrator_messages SET pending_revision = NULL WHERE goal_id = ? AND json_extract(pending_revision, '$.workflowRunId') = ?"
@@ -1978,7 +1925,7 @@ export class OrchestratorService {
     if (missing.length > 0) lines.push(`Could not verify spec file(s): ${missing.join(", ")}`);
     if (specRefs.length === 0) lines.push("No spec artifact was reported by the Done step.");
 
-    this.postOrchestratorMessage(db, now, ctx.run.goalId, lines.join("\n"), options);
+    postOrchestratorMessage(db, now, ctx.run.goalId, lines.join("\n"), options);
   }
 
   /**
@@ -2178,7 +2125,7 @@ export class OrchestratorService {
       await this.workerSpawn?.({ sessionId, goalId: ctx.goal.id, adapterId: dispatch.adapterId });
       const delivered = await this.workerDeliver?.(sessionId, objective);
       if (delivered && delivered !== "delivered") {
-        this.postOrchestratorMessage(
+        postOrchestratorMessage(
           db,
           now,
           ctx.goal.id,
@@ -2189,7 +2136,7 @@ export class OrchestratorService {
         );
       }
     } catch (err) {
-      this.postOrchestratorMessage(
+      postOrchestratorMessage(
         db,
         now,
         ctx.goal.id,
@@ -2247,7 +2194,7 @@ export class OrchestratorService {
     }
 
     // (2) idempotency: an unanswered question is outstanding -> wait, create nothing new.
-    if (this.hasActiveUnansweredQuestion(db, stepArtifacts, stepRun.id)) {
+    if (hasActiveUnansweredQuestion(db, stepArtifacts, stepRun.id)) {
       return this.commitNoop(db, run.id, stepRun.id);
     }
 
@@ -2298,7 +2245,7 @@ export class OrchestratorService {
 
     // (4) run the skill turn.
     const transcript = reconstructTranscript(stepArtifacts);
-    const stepRunByStepId = this.stepRunIdsByTemplateId(db, run.id);
+    const stepRunByStepId = stepRunIdsByTemplateId(db, run.id);
     const rawWorkspaces = listWorkspacesByGoal(db, goal.id);
     const workspaceContext = assembleWorkspaceContext({
       workspaces: rawWorkspaces.map((w) => ({ id: w.id, name: w.name, root: w.path })),
@@ -2368,7 +2315,7 @@ export class OrchestratorService {
     // a crash between them re-routes via the existing step_output idempotency branch on retry.
     const artifactEvents: DomainEvent[] = [];
     createStepOutputArtifact(db, now, ctx, body, options, artifactEvents);
-    this.publish(options.bus, artifactEvents);
+    publishStaged(options.bus, artifactEvents);
     const finishedAt = now();
     const stepResult = await scoreCompletedStepResult(this.stepResultBuilderDeps, db, ctx, proposal.output, finishedAt);
     return this.commitAdvanceOrComplete(
@@ -2389,63 +2336,13 @@ export class OrchestratorService {
     );
   }
 
-  private stepRunIdsByTemplateId(
-    db: Database.Database,
-    workflowRunId: string
-  ): Record<string, string> {
-    const rows = db
-      .prepare(
-        "SELECT step_template_id, id FROM workflow_step_runs WHERE workflow_run_id = ?"
-      )
-      .all(workflowRunId) as Array<{ step_template_id: string; id: string }>;
-    const out: Record<string, string> = {};
-    for (const row of rows) out[row.step_template_id] = row.id;
-    return out;
-  }
-
-  private artifactCountForStep(db: Database.Database, stepRunId: string): number {
-    return (
-      db
-        .prepare("SELECT COUNT(*) AS count FROM workflow_artifacts WHERE step_run_id = ?")
-        .get(stepRunId) as { count: number }
-    ).count;
-  }
-
-  private retryCount(stepRun: StepRunRow): number {
-    return (
-      Math.max(stepRun.attempt - 1, 0) +
-      (stepRun.revise_attempts ?? 0) +
-      (stepRun.crash_retries ?? 0)
-    );
-  }
-
   private get stepResultBuilderDeps(): StepResultBuilderDeps {
     return {
       broker: this.broker,
-      readStepOutputAsRecord: this.readStepOutputAsRecord.bind(this),
-      retryCount: this.retryCount.bind(this),
-      artifactCountForStep: this.artifactCountForStep.bind(this),
+      readStepOutputAsRecord,
+      retryCount,
+      artifactCountForStep,
     };
-  }
-
-  private hasActiveUnansweredQuestion(
-    db: Database.Database,
-    stepArtifacts: ReturnType<typeof listArtifactsForRun>,
-    stepRunId: string
-  ): boolean {
-    const questionDecisions = db
-      .prepare(
-        "SELECT id FROM workflow_decisions WHERE step_run_id = ? AND decision_type = 'request_user_input'"
-      )
-      .all(stepRunId) as Array<{ id: string }>;
-    if (questionDecisions.length === 0) return false;
-    const answeredDecisionIds = new Set<string>();
-    for (const artifact of stepArtifacts) {
-      if (artifact.type !== "interview_turn") continue;
-      const parsed = InterviewTurn.safeParse(JSON.parse(artifact.body));
-      if (parsed.success) answeredDecisionIds.add(parsed.data.questionDecisionId);
-    }
-    return questionDecisions.some((d) => !answeredDecisionIds.has(d.id));
   }
 
   private commitNoop(
@@ -2565,7 +2462,7 @@ export class OrchestratorService {
       );
       return { decision, recommendationIds: [recommendationId] };
     })();
-    this.publish(options.bus, stagedEvents);
+    publishStaged(options.bus, stagedEvents);
     return output;
   }
 
@@ -2792,7 +2689,7 @@ export class OrchestratorService {
       );
       return recorded;
     })();
-    this.publish(options.bus, stagedEvents);
+    publishStaged(options.bus, stagedEvents);
     return { decision, recommendationIds: [] };
   }
 
@@ -2850,7 +2747,7 @@ export class OrchestratorService {
         },
         options.stepResultByStepRunId?.[stepRun.id]
       );
-      this.publish(options.bus, stagedEvents);
+      publishStaged(options.bus, stagedEvents);
 
       if (result.kind === "gate") {
         this.parkForGateApproval(
@@ -2955,7 +2852,7 @@ export class OrchestratorService {
       );
       return { decision, recommendationIds: [recommendationId] };
     })();
-    this.publish(options.bus, stagedEvents);
+    publishStaged(options.bus, stagedEvents);
     if (options.bus && options.stepResultByStepRunId?.[stepRun.id]) {
       try {
         materializeStepResultActivity(
@@ -2979,34 +2876,6 @@ export class OrchestratorService {
       }
     }
     return output;
-  }
-
-  /**
-   * Reads the step_output artifact body for a step run and parses it as an
-   * object, stripping the reserved `_completion` envelope. Returns null when no
-   * step_output exists or it is not a JSON object — that's the contract the gate
-   * evaluation request expects for `sourceStepOutput`.
-   */
-  private readStepOutputAsRecord(
-    db: Database.Database,
-    runId: string,
-    stepRunId: string
-  ): Record<string, unknown> | null {
-    const row = db
-      .prepare(
-        "SELECT body FROM workflow_artifacts WHERE workflow_run_id = ? AND step_run_id = ? AND type = 'step_output' ORDER BY created_at DESC, rowid DESC LIMIT 1"
-      )
-      .get(runId, stepRunId) as { body: string } | undefined;
-    if (!row) return null;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(row.body);
-    } catch {
-      return null;
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-    const { _completion: _omit, ...rest } = parsed as Record<string, unknown>;
-    return rest;
   }
 
   /**
@@ -3085,7 +2954,7 @@ export class OrchestratorService {
         { idFactory: options.idFactory, stagedEvents }
       );
     })();
-    this.publish(options.bus, stagedEvents);
+    publishStaged(options.bus, stagedEvents);
     const activityCtx = { db, bus: options.bus ?? new EventBus() };
     pauseForGateDecision(activityCtx, {
       goalId: goal.id,
@@ -3134,7 +3003,7 @@ export class OrchestratorService {
         branches: splitterNode.branches ?? [],
       },
       goal: { id: goal.id, description: goal.description },
-      sourceStepOutput: this.readStepOutputAsRecord(db, run.id, stepRun.id),
+      sourceStepOutput: readStepOutputAsRecord(db, run.id, stepRun.id),
       priorDecisions,
       committedLedger,
     });
@@ -3304,7 +3173,7 @@ export class OrchestratorService {
           { idFactory: options.idFactory, stagedEvents }
         );
       })();
-      this.publish(options.bus, stagedEvents);
+      publishStaged(options.bus, stagedEvents);
       const summary = `Routing to "${proposal.selectedBranch}": ${proposal.reason}`;
       const activityCtx = { db, bus: options.bus ?? new EventBus() };
       // The source step has already completed, so its live activity is likely
@@ -3548,7 +3417,7 @@ export class OrchestratorService {
           : {}),
       }
     );
-    this.publish(options.bus, stagedEvents);
+    publishStaged(options.bus, stagedEvents);
   }
 
   /**
@@ -3768,7 +3637,7 @@ export class OrchestratorService {
         { idFactory: options.idFactory, stagedEvents }
       );
     })();
-    this.publish(options.bus, stagedEvents);
+    publishStaged(options.bus, stagedEvents);
     markWorkflowRunBlocked(
       { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
       run.id,
@@ -3838,7 +3707,7 @@ export class OrchestratorService {
       );
       return { decision, recommendationIds: [recommendationId] };
     })();
-    this.publish(options.bus, stagedEvents);
+    publishStaged(options.bus, stagedEvents);
     return output;
   }
 
@@ -3863,9 +3732,4 @@ export class OrchestratorService {
     );
   }
 
-  private publish(bus: EventBus | undefined, stagedEvents: DomainEvent[]): void {
-    if (bus) {
-      publishStagedWorkflowEvents(bus, stagedEvents);
-    }
-  }
 }

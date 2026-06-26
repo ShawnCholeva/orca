@@ -90,7 +90,7 @@ function setup(): TestContext {
 
   let nextId = 0;
   const app = fastify({ logger: false });
-  // Deliberately omit operatorSelector/orchestrationTransportBroker/operatorRegistry
+  // Deliberately omit orchestrationTransportBroker/operatorRegistry
   // so orchestratorService is null and requestNextDecision is skipped.
   // No auth middleware registered — bare Fastify, no auth header needed.
   registerWorkflowStepRoutes(app, {

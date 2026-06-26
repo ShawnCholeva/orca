@@ -29,8 +29,7 @@ import type {
   OrchestrationTransportBroker,
 } from "../orchestration-transport/broker.js";
 import { OrchestratorService } from "./service.js";
-import type { OperatorDescriptor, OperatorSelection } from "@orca/contracts";
-import type { SelectorInput } from "../operators/selector.js";
+import type { OperatorDescriptor } from "@orca/contracts";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import type { StepDispatchCapabilities } from "./service.js";
 import { installBuiltInTemplates } from "../templates/usecases.js";
@@ -45,32 +44,6 @@ const AGENT_OPERATOR_ID = "agent:claude-code";
 // Adapter IDs used by the AD template steps (claude-code with various models).
 const AD_ADAPTER = "claude-code";
 const AD_MODELS = new Set(["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]);
-
-function fakeAgentSelector(): Pick<
-  {
-    select: (
-      db: Database.Database,
-      now: () => string,
-      input: SelectorInput
-    ) => Promise<{ selection: OperatorSelection; source: "fallback" | "llm" }>;
-  },
-  "select"
-> {
-  const result: OperatorSelection = {
-    operatorId: AGENT_OPERATOR_ID,
-    operatorKind: "agent",
-    reason: "agent selected",
-    requiredCapabilities: [],
-    alternativesConsidered: [],
-    confidence: 1,
-    requiresUserApproval: false,
-  };
-  return {
-    async select() {
-      return { selection: result, source: "fallback" };
-    },
-  };
-}
 
 function fakeGateBroker(outcome: "approved" | "rejected"): Pick<OrchestrationTransportBroker, "propose"> {
   return {
@@ -145,7 +118,6 @@ function makeService(
     supportsTerminal: true,
   };
   return new OrchestratorService(
-    fakeAgentSelector(),
     broker,
     { async list() { return [agentDescriptor]; } },
     makeLauncher(),

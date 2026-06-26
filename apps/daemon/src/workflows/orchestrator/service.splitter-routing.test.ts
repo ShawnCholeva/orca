@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase } from "../../db.js";
 import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { resetWorkflowStepProjectionPreparedStatements } from "../steps/projection.js";
-import type { OperatorDescriptor, OperatorSelection, WorkflowGraph } from "@orca/contracts";
+import type { OperatorDescriptor, WorkflowGraph } from "@orca/contracts";
 import { OrchestratorService } from "./service.js";
 import { listSplitDecisionsForRun } from "../splitters/projection.js";
 import { setSupervisionMode } from "../../settings/store.js";
@@ -16,7 +16,6 @@ import {
   fakeStepDispatch,
   type SkillStep,
 } from "./skill-step-test-helpers.js";
-import type { SelectorInput } from "../operators/selector.js";
 import type {
   BrokerCompatibilityOptions,
   OrchestrationTransportBroker,
@@ -37,31 +36,6 @@ function agentOperatorDescriptor(): OperatorDescriptor {
   };
 }
 
-function fakeAgentSelector(): Pick<
-  {
-    select: (
-      db: Database.Database,
-      now: () => string,
-      input: SelectorInput
-    ) => Promise<{ selection: OperatorSelection; source: "fallback" | "llm" }>;
-  },
-  "select"
-> {
-  const result: OperatorSelection = {
-    operatorId: AGENT_OPERATOR_ID,
-    operatorKind: "agent",
-    reason: "agent selected for this step",
-    requiredCapabilities: [],
-    alternativesConsidered: [],
-    confidence: 1,
-    requiresUserApproval: false,
-  };
-  return {
-    async select() {
-      return { selection: result, source: "fallback" };
-    },
-  };
-}
 
 /**
  * Broker that scores the active step (so the run advances to the splitter) and,
@@ -123,7 +97,6 @@ function makeService(
   launcher: WorkflowSessionLauncher = makeLauncher()
 ): OrchestratorService {
   return new OrchestratorService(
-    fakeAgentSelector(),
     broker,
     { async list() { return [agentOperatorDescriptor()]; } },
     launcher,

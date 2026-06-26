@@ -7,7 +7,6 @@ import {
 
 import type { EventBus } from "../../events.js";
 import type { OperatorRegistry } from "../operators/registry.js";
-import type { OperatorSelector } from "../operators/selector.js";
 import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import {
@@ -26,7 +25,6 @@ import type { WorkflowSessionLauncher } from "./session-launcher.js";
 export interface OrchestratorRouteDeps {
   db: Database.Database;
   bus: EventBus;
-  operatorSelector: Pick<OperatorSelector, "select">;
   orchestrationTransportBroker: Pick<OrchestrationTransportBroker, "propose">;
   operatorRegistry: Pick<OperatorRegistry, "list">;
   workflowSessionLauncher?: WorkflowSessionLauncher;
@@ -44,7 +42,6 @@ export function registerOrchestratorRoutes(
   deps: OrchestratorRouteDeps
 ): void {
   const service = new OrchestratorService(
-    deps.operatorSelector,
     deps.orchestrationTransportBroker,
     deps.operatorRegistry,
     deps.workflowSessionLauncher,

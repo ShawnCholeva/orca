@@ -9,7 +9,6 @@ import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { resetWorkflowStepProjectionPreparedStatements } from "../steps/projection.js";
 import type {
   OperatorDescriptor,
-  OperatorSelection,
   SessionOutputSnapshot,
 } from "@orca/contracts";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
@@ -23,11 +22,9 @@ import {
   setupHarness,
   makeStep,
   fakeStepDispatch,
-  fakeSelector,
   fakeRegistry,
   MODEL_OPERATOR_ID,
 } from "./skill-step-test-helpers.js";
-import type { SelectorInput } from "../operators/selector.js";
 import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
 import type { OrchestratorAction } from "@orca/contracts";
 import type { SessionOutputStore } from "../../sessions/output-store.js";
@@ -61,23 +58,6 @@ function agentOperatorDescriptor(): OperatorDescriptor {
     ready: true,
     supportsRepoEditing: true,
     supportsTerminal: true,
-  };
-}
-
-function fakeAgentSelector(): Pick<{ select: (db: Database.Database, now: () => string, input: SelectorInput) => Promise<{ selection: OperatorSelection; source: "fallback" | "llm" }> }, "select"> {
-  const result: OperatorSelection = {
-    operatorId: AGENT_OPERATOR_ID,
-    operatorKind: "agent",
-    reason: "agent selected for this step",
-    requiredCapabilities: [],
-    alternativesConsidered: [],
-    confidence: 1,
-    requiresUserApproval: false,
-  };
-  return {
-    async select() {
-      return { selection: result, source: "fallback" };
-    },
   };
 }
 
@@ -132,7 +112,6 @@ function makeAgentService(
   workerDeliver?: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">
 ): OrchestratorService {
   return new OrchestratorService(
-    fakeAgentSelector(),
     fakeBrokerNoop(),
     { async list() { return [agentOperatorDescriptor()]; } },
     launcher,
@@ -180,7 +159,6 @@ function makeJudgeService(
   opts: { accumulator?: SessionCostAccumulator } = {}
 ): OrchestratorService {
   return new OrchestratorService(
-    fakeAgentSelector(),
     fakeBrokerNoop(),
     { async list() { return [agentOperatorDescriptor()]; } },
     makeLauncher(),
@@ -272,7 +250,6 @@ function makeWorkerExitRecoveryService(
     resolveMode: (adapterId) => ({ adapterId, mode: "shadow_session", fallbacks: [] }),
   };
   return new OrchestratorService(
-    fakeAgentSelector(),
     fakeBrokerNoop(),
     { async list() { return [agentOperatorDescriptor()]; } },
     makeLauncher(),
@@ -569,7 +546,6 @@ describe("OrchestratorService agent step", () => {
       resolveMode: (adapterId) => ({ adapterId, mode: "shadow_session", fallbacks: [] }),
     };
     const service = new OrchestratorService(
-      fakeSelector(),
       { propose },
       fakeRegistry(),
       makeLauncher(),
@@ -662,7 +638,6 @@ describe("OrchestratorService agent step", () => {
       };
     });
     const service = new OrchestratorService(
-      fakeSelector(),
       { propose },
       fakeRegistry(),
       makeLauncher()
@@ -1989,7 +1964,6 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
       resolveMode: (adapterId) => ({ adapterId, mode: "shadow_session", fallbacks: [] }),
     };
     const service = new OrchestratorService(
-      fakeAgentSelector(),
       fakeBrokerNoop(),
       { async list() { return [agentOperatorDescriptor()]; } },
       makeLauncher(launchFn),
@@ -2591,7 +2565,6 @@ function makeRecoveryService(opts: {
   };
   const outputStore = opts.outputStore ?? multiOutputStore({});
   const service = new OrchestratorService(
-    fakeAgentSelector(),
     fakeBrokerNoop(),
     { async list() { return operators; } },
     { launch },
@@ -2654,7 +2627,6 @@ function makeRecoveryServiceWithWait(opts: {
   };
   const outputStore = opts.outputStore ?? multiOutputStore({});
   const service = new OrchestratorService(
-    fakeAgentSelector(),
     fakeBrokerNoop(),
     { async list() { return operatorsList; } },
     { launch },
@@ -2863,7 +2835,6 @@ describe("OrchestratorService provider recovery actions", () => {
       "UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-haiku-4-5' WHERE id = 'goal-1'"
     ).run();
     const service = new OrchestratorService(
-      fakeAgentSelector(),
       fakeBrokerNoop(),
       { async list() { return [agentOperatorDescriptor()]; } },
       makeLauncher(),
@@ -2891,7 +2862,6 @@ describe("OrchestratorService provider recovery actions", () => {
     ).run();
     const mediator = spyMediator({ kind: "forward_to_agent", translated: "x" });
     const service = new OrchestratorService(
-      fakeAgentSelector(),
       fakeBrokerNoop(),
       { async list() { return [agentOperatorDescriptor()]; } },
       makeLauncher(),
@@ -2924,7 +2894,6 @@ describe("OrchestratorService provider recovery actions", () => {
     ).run(NOW, NOW);
     const deliver = vi.fn(async () => "delivered" as const);
     const service = new OrchestratorService(
-      fakeAgentSelector(),
       fakeBrokerNoop(),
       { async list() { return [agentOperatorDescriptor()]; } },
       makeLauncher(),
@@ -2957,7 +2926,6 @@ describe("OrchestratorService provider recovery actions", () => {
     ).run(NOW, NOW);
     const deliver = vi.fn(async () => "no_session" as const);
     const service = new OrchestratorService(
-      fakeAgentSelector(),
       fakeBrokerNoop(),
       { async list() { return [agentOperatorDescriptor()]; } },
       makeLauncher(),
@@ -2987,7 +2955,6 @@ describe("OrchestratorService provider recovery actions", () => {
       resetAt: null,
     });
     const service = new OrchestratorService(
-      fakeAgentSelector(),
       fakeBrokerNoop(),
       { async list() { return [agentOperatorDescriptor()]; } },
       makeLauncher(),
@@ -3014,7 +2981,6 @@ describe("OrchestratorService provider recovery actions", () => {
       retryOutputSeq: 10,
     });
     const service = new OrchestratorService(
-      fakeAgentSelector(),
       fakeBrokerNoop(),
       { async list() { return [agentOperatorDescriptor()]; } },
       makeLauncher(),
@@ -3342,7 +3308,6 @@ describe("OrchestratorService.interruptStepAgent", () => {
     workerInterrupt: (sessionId: string) => Promise<void>
   ): OrchestratorService {
     return new OrchestratorService(
-      fakeAgentSelector(),
       fakeBrokerNoop(),
       { async list() { return [agentOperatorDescriptor()]; } },
       makeLauncher(),

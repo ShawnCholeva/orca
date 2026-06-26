@@ -5,7 +5,6 @@ import path from "node:path";
 import type Database from "better-sqlite3";
 import type {
   OperatorDescriptor,
-  OperatorSelection,
   StepSkillProposal,
 } from "@orca/contracts";
 
@@ -19,7 +18,6 @@ import type {
   BrokerResult,
   OrchestrationTransportBroker,
 } from "../orchestration-transport/broker.js";
-import type { OperatorSelector, SelectorInput } from "../operators/selector.js";
 import type { StepDispatchCapabilities } from "./service.js";
 
 export const NOW = "2026-01-01T00:00:00.000Z";
@@ -154,24 +152,6 @@ export function modelOperatorDescriptor(): OperatorDescriptor {
     supportsTerminal: false,
     providerId: "orca/anthropic",
     modelId: "claude-sonnet-4-6",
-  };
-}
-
-export function fakeSelector(seen: SelectorInput[] = []): Pick<OperatorSelector, "select"> {
-  const result: OperatorSelection = {
-    operatorId: MODEL_OPERATOR_ID,
-    operatorKind: "model",
-    reason: "best model match",
-    requiredCapabilities: [],
-    alternativesConsidered: [],
-    confidence: 1,
-    requiresUserApproval: false,
-  };
-  return {
-    async select(_db, _now, input) {
-      seen.push(input);
-      return { selection: result, source: "fallback" };
-    },
   };
 }
 
