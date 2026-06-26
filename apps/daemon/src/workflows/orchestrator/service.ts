@@ -2,7 +2,6 @@ import type Database from "better-sqlite3";
 import {
   AdapterId,
   InterviewTurn,
-  LedgerUpdate,
   OrchestrationRequest,
   ProviderRecoveryCheckpoint,
   ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES,

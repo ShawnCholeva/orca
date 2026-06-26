@@ -239,3 +239,7 @@ The harness-axes spec called for correcting materially-stale ORCA.md claims; the
 ### Known test flakes (acknowledged, not root-caused)
 
 - `http-surface.test.ts` and `human-review.test.ts` (15s timeout) — time out under parallel load, pass in isolation.
+
+### Typecheck gate blind spot (hygiene)
+
+- The daemon tsconfig chain does **not** enable `noUnusedLocals`/`noUnusedParameters`, so `tsc` does not flag orphaned imports/locals. The 0.2 decomposition leans on "delete method → repoint → remove orphaned imports" with green typecheck as the safety net — but orphaned *imports* are invisible to that gate (one slipped through in the C/D ledger extraction and was caught only in review). Consider enabling `noUnusedLocals` (+ `noUnusedParameters`) to close the blind spot; do it as a focused pass (it will surface pre-existing unused symbols across the daemon).
