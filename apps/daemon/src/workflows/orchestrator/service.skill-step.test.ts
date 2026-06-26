@@ -17,7 +17,7 @@ import {
   setupHarness,
 } from "./skill-step-test-helpers.js";
 
-function makeService(raw: StepSkillProposal): DispatchEngine {
+function makeEngine(raw: StepSkillProposal): DispatchEngine {
   return new DispatchEngine(
     fakeBroker(raw),
     fakeRegistry(),
@@ -55,10 +55,10 @@ describe("OrchestratorService skill step", () => {
   it("deterministically selects the per-step agent then recommends launching it", async () => {
     const { db, bus, idFactory } = setupHarness();
     seedSkillWorkflow(db);
-    const service = makeService(ASK);
+    const engine = makeEngine(ASK);
 
     // (1) First decision: deterministic operator selection from agentPreference.
-    const first = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const first = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(first.decision.decisionType).toBe("select_operator");
     expect(first.decision.selectedAction).toBe("select:claude-code:claude-haiku-4-5");
     expect(first.recommendationIds).toEqual([]);
@@ -73,7 +73,7 @@ describe("OrchestratorService skill step", () => {
     // (2) Second decision: routes into the agent branch. With the default launcher
     // (throws direct_launch_unsupported) and no linked session, it falls back to a
     // launch recommendation.
-    const second = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const second = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(second.decision.decisionType).toBe("select_operator");
     expect(second.decision.selectedAction).toBe("launch:agent:claude-code");
     expect(second.recommendationIds).toHaveLength(1);
@@ -91,15 +91,15 @@ describe("OrchestratorService skill step", () => {
       selectedModelId: "claude-sonnet-4-6",
       operatorSelectedAt: NOW,
     });
-    const service = makeService(ASK);
+    const engine = makeEngine(ASK);
 
     // First call asks a question.
-    const first = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const first = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(first.decision.decisionType).toBe("request_user_input");
     expect(decisionCount(db, "request_user_input")).toBe(1);
 
     // Second call: the question is still unanswered (no interview_turn) -> noop.
-    const second = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const second = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(second.decision.decisionType).toBe("request_user_input");
     expect(second.decision.decisionId).toBe(first.decision.decisionId);
     expect(second.recommendationIds).toEqual([]);
@@ -130,7 +130,7 @@ describe("OrchestratorService skill step", () => {
       completion: { confidence: "high", assumptions: [], openQuestions: [], whyComplete: "ok" },
     };
     // Research step asks (so we don't recurse into another completion).
-    const service = new DispatchEngine(
+    const engine = new DispatchEngine(
       {
         async propose(req: { stepRunId: string | null }, opts) {
           const isFirst = req.stepRunId === "step-1";
@@ -159,7 +159,7 @@ describe("OrchestratorService skill step", () => {
       undefined
     );
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     const stepOutputs = db
       .prepare("SELECT COUNT(*) AS c FROM workflow_artifacts WHERE type = 'step_output'")
@@ -196,9 +196,9 @@ describe("OrchestratorService skill step", () => {
       output: { problem: "final" },
       completion: { confidence: "high", assumptions: [], openQuestions: [], whyComplete: "done" },
     };
-    const service = makeService(complete);
+    const engine = makeEngine(complete);
 
-    const result = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const result = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     expect(result.decision.decisionType).toBe("mark_run_complete");
     expect(result.recommendationIds).toHaveLength(1);
@@ -226,9 +226,9 @@ describe("OrchestratorService skill step", () => {
       output: { notProblem: "x" },
       completion: { confidence: "low", assumptions: [], openQuestions: [], whyComplete: "guess" },
     };
-    const service = makeService(invalid);
+    const engine = makeEngine(invalid);
 
-    const result = await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const result = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     expect(result.decision.decisionType).toBe("block_run");
     expect(result.decision.reason).toMatch(/schema/i);
@@ -267,7 +267,7 @@ describe("OrchestratorService skill step", () => {
       },
     };
 
-    const service = new DispatchEngine(
+    const engine = new DispatchEngine(
       spyBroker,
       fakeRegistry(),
       { launch: async () => { throw new Error("direct_launch_unsupported"); } },
@@ -276,7 +276,7 @@ describe("OrchestratorService skill step", () => {
       undefined,
       undefined
     );
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     const payload = capturedPayload as Record<string, unknown> | undefined;
     expect(payload?.workspaceContext).toBeDefined();

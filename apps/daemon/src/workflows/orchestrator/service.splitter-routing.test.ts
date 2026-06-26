@@ -92,7 +92,7 @@ function makeLauncher(launch = vi.fn(async () => ({ sessionId: "sess-1" }))): Wo
   return { launch };
 }
 
-function makeService(
+function makeEngine(
   broker: Pick<OrchestrationTransportBroker, "propose">,
   launcher: WorkflowSessionLauncher = makeLauncher()
 ): DispatchEngine {
@@ -181,9 +181,9 @@ describe("OrchestratorService splitter routing", () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "supervised", NOW);
     seedRunAtSource(db);
-    const service = makeService(fakeSplitBroker("go_a"));
+    const engine = makeEngine(fakeSplitBroker("go_a"));
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     // The run parks at the splitter awaiting a human Continue: cursor on the
     // splitter, no active step run, the deferred route stashed.
@@ -228,7 +228,7 @@ describe("OrchestratorService splitter routing", () => {
     expect(pausedActivity?.source_kind).toBe("step_confirmation_pending");
 
     // Continue: confirmSplit clears the stash and routes to step 'a'.
-    await service.confirmSplit(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.confirmSplit(db, () => NOW, "run-1", { bus, idFactory });
 
     const after = db
       .prepare("SELECT current_node_id, current_node_kind, pending_split_route_json FROM workflow_runs WHERE id = 'run-1'")
@@ -257,9 +257,9 @@ describe("OrchestratorService splitter routing", () => {
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtSource(db);
     db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
-    const service = makeService(fakeSplitBroker("go_b"));
+    const engine = makeEngine(fakeSplitBroker("go_b"));
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     const run = db
       .prepare("SELECT current_node_id, current_node_kind, pending_split_route_json FROM workflow_runs WHERE id = 'run-1'")
@@ -284,9 +284,9 @@ describe("OrchestratorService splitter routing", () => {
     seedRunAtSource(db);
     // Broker keeps proposing an undeclared branch; validateProposal rejects it on
     // both attempts, so the run blocks.
-    const service = makeService(fakeSplitBroker("go_nowhere"));
+    const engine = makeEngine(fakeSplitBroker("go_nowhere"));
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     const run = db
       .prepare("SELECT status, blocked_reason, current_node_kind FROM workflow_runs WHERE id = 'run-1'")
@@ -308,12 +308,12 @@ describe("OrchestratorService splitter routing", () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "supervised", NOW);
     seedRunAtSource(db);
-    const service = makeService(fakeSplitBroker("go_a"));
+    const engine = makeEngine(fakeSplitBroker("go_a"));
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
-    await service.confirmSplit(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.confirmSplit(db, () => NOW, "run-1", { bus, idFactory });
     // Second confirm is a no-op (stash already cleared).
-    await service.confirmSplit(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.confirmSplit(db, () => NOW, "run-1", { bus, idFactory });
 
     const aRuns = db
       .prepare("SELECT id FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = 'a'")

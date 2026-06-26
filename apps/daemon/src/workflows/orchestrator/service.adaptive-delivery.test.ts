@@ -105,7 +105,7 @@ function makeLauncher(): WorkflowSessionLauncher {
   return { launch: async () => ({ sessionId: "sess-fd" }) };
 }
 
-function makeService(
+function makeEngine(
   broker: Pick<OrchestrationTransportBroker, "propose">
 ): DispatchEngine {
   const agentDescriptor: OperatorDescriptor = {
@@ -215,11 +215,11 @@ describe("OrchestratorService — adaptive delivery loop", () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
     seedAdaptiveRunAtValidation(db, bus);
-    const service = makeService(fakeGateBroker("rejected"));
+    const engine = makeEngine(fakeGateBroker("rejected"));
 
     // Reaching the gate parks for a human decision; the user rejects.
-    await service.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });
-    await service.decideGate(db, () => NOW, "run-fd", "rejected", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });
+    await engine.decideGate(db, () => NOW, "run-fd", "rejected", { bus, idFactory });
 
     // Gate decision recorded with rejected outcome routing to execution.
     const decisions = listGateDecisionsForRun(db, "run-fd");
@@ -242,11 +242,11 @@ describe("OrchestratorService — adaptive delivery loop", () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
     seedAdaptiveRunAtValidation(db, bus);
-    const service = makeService(fakeGateBroker("approved"));
+    const engine = makeEngine(fakeGateBroker("approved"));
 
     // Reaching the gate parks for a human decision; the user approves.
-    await service.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });
-    await service.decideGate(db, () => NOW, "run-fd", "approved", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });
+    await engine.decideGate(db, () => NOW, "run-fd", "approved", { bus, idFactory });
 
     const decisions = listGateDecisionsForRun(db, "run-fd");
     expect(decisions.at(-1)).toMatchObject({
@@ -266,9 +266,9 @@ describe("OrchestratorService — adaptive delivery loop", () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
     seedAdaptiveRunAtDone(db, bus);
-    const service = makeService(fakeGateBroker("approved")); // broker irrelevant; no gate here
+    const engine = makeEngine(fakeGateBroker("approved")); // broker irrelevant; no gate here
 
-    await service.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });
 
     // A complete_workflow_run recommendation exists.
     const rec = db

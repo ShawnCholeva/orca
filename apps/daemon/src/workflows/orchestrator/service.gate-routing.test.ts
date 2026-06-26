@@ -123,7 +123,7 @@ function makeLauncher(launch = vi.fn(async () => ({ sessionId: "sess-1" }))): Wo
   return { launch };
 }
 
-function makeService(
+function makeEngine(
   broker: Pick<OrchestrationTransportBroker, "propose">,
   launcher: WorkflowSessionLauncher = makeLauncher()
 ): DispatchEngine {
@@ -290,9 +290,9 @@ describe("OrchestratorService gate routing", () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtValidation(db);
-    const service = makeService(fakeStepBroker());
+    const engine = makeEngine(fakeStepBroker());
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     // Reaching the gate parks the run for a human decision — no LLM was called,
     // no gate decision recorded yet, cursor parked on the gate.
@@ -326,7 +326,7 @@ describe("OrchestratorService gate routing", () => {
     expect(activity?.source_kind).toBe("gate_decision_pending");
 
     // User approves → decision recorded, cursor routed to the terminal step.
-    await service.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
+    await engine.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
 
     const decisions = listGateDecisionsForRun(db, "run-1");
     expect(decisions.at(-1)).toMatchObject({
@@ -357,12 +357,12 @@ describe("OrchestratorService gate routing", () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtValidation(db);
-    const service = makeService(fakeStepBroker());
+    const engine = makeEngine(fakeStepBroker());
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
-    await service.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
     // Second submit is a no-op (stash already cleared).
-    await service.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
+    await engine.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
 
     const doneRuns = db
       .prepare("SELECT attempt FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = 'done'")
@@ -375,11 +375,11 @@ describe("OrchestratorService gate routing", () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "supervised", NOW);
     seedRunAtValidation(db);
-    const service = makeService(fakeStepBroker());
+    const engine = makeEngine(fakeStepBroker());
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     // Continue must NOT resolve a human gate — only decideGate can.
-    await service.confirmGate(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.confirmGate(db, () => NOW, "run-1", { bus, idFactory });
 
     const run = db
       .prepare("SELECT current_node_kind, pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'")
@@ -393,9 +393,9 @@ describe("OrchestratorService gate routing", () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtTerminalDoneStep(db);
-    const service = makeService(fakeStepBroker());
+    const engine = makeEngine(fakeStepBroker());
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     const rec = db
       .prepare(
@@ -417,10 +417,10 @@ describe("OrchestratorService gate routing", () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtValidation(db);
-    const service = makeService(fakeStepBroker());
+    const engine = makeEngine(fakeStepBroker());
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
-    await service.decideGate(db, () => NOW, "run-1", "rejected", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.decideGate(db, () => NOW, "run-1", "rejected", { bus, idFactory });
 
     const execRuns = db
       .prepare(
@@ -441,10 +441,10 @@ describe("OrchestratorService gate routing", () => {
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtValidation(db);
     const launch = vi.fn(async (_ctx: WorkflowLaunchContext) => ({ sessionId: "sess-1" }));
-    const service = makeService(fakeStepBroker(), makeLauncher(launch));
+    const engine = makeEngine(fakeStepBroker(), makeLauncher(launch));
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
-    await service.decideGate(db, () => NOW, "run-1", "rejected", {
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.decideGate(db, () => NOW, "run-1", "rejected", {
       bus,
       idFactory,
       reason: "bug in parser",
@@ -508,10 +508,10 @@ describe("OrchestratorService gate routing", () => {
     const committedVersion = latestCommittedLedger(db, "run-1").version;
     expect(committedVersion).toBe(2);
 
-    const service = makeService(fakeStepBroker());
+    const engine = makeEngine(fakeStepBroker());
 
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
-    await service.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
 
     const decisions = listGateDecisionsForRun(db, "run-1");
     expect(decisions.at(-1)?.ledgerVersion).toBe(committedVersion);
@@ -523,10 +523,10 @@ describe("OrchestratorService gate routing", () => {
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtValidationForSplitter(db);
     db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
-    const service = makeService(fakeStepAndSplitBroker("go_a"));
+    const engine = makeEngine(fakeStepAndSplitBroker("go_a"));
 
     // Advance the run to the gate (scores validation step, parks at gate).
-    await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     const parked = db
       .prepare(
@@ -538,7 +538,7 @@ describe("OrchestratorService gate routing", () => {
     expect(parked.pending_gate_route_json).not.toBeNull();
 
     // User approves → gate routes to splitter → splitter evaluates inline → branch_a step inserted.
-    await service.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
+    await engine.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
 
     const after = db
       .prepare("SELECT status, current_node_id, current_node_kind, blocked_reason FROM workflow_runs WHERE id = 'run-1'")
