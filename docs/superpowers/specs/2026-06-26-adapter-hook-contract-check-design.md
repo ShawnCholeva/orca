@@ -26,6 +26,7 @@ This is the item that lets **Phase 0 exit**: 0.1 made facets/boundaries/sensors 
 
 - **Code as Agent Harness paper:** a boot-time self-conformance guard is a *deterministic sensor* firing at a boundary (daemon startup), the same shape as 0.1's load-time conformance guards; the route is the "inspectable" surface. Verification through deterministic sensors, not live exercise.
 - **FUTURE_ARCHITECTURE:** the declared hook contract is an execution-plane capability surface — the in-process precursor to a Runner advertising "here is the hook contract I depend on" across the network boundary. The introspection route makes it runtime-enumerable, which is the literal Phase 0 exit criterion.
+- **At the control/execution split, the contract travels with the runner.** The declaration lives *on each provider* — execution-plane code — so when the `sessions/ pty/ tmux/ adapters/ shadow-hooks/` boundary is extracted into the Runner Protocol, `hookContract()` and its boot guard go to the runner side (they describe execution-plane hooks) and the server enumerates them via the protocol. On-provider placement (vs a central daemon table) is the more architecture-aligned choice precisely because it keeps the contract as plain data attached to the code that will move. This is a point in favor of the placement, not a constraint added by it.
 
 ---
 
@@ -185,3 +186,4 @@ No `packages/contracts` change. No migration. No DB schema change.
 - Any `packages/contracts` schema or desktop UI rendering (Phase 4 surface work).
 - Wiring antigravity's worker permission gate (Phase 1, blocked on the 4 unknowns) — 0.3 only *declares the gap honestly*, it does not close it.
 - Persisting contract-check results to the DB — the report is computed on-demand from declared entries + persisted readiness versions; stateless.
+  - **Deliberate divergence from the paper's AHE replay ideal.** The *Code as Agent Harness* AHE loop (§3.5) wants telemetry "replayed and compared across harness versions." A stateless, on-demand report has no history of contract status over time, so it cannot feed that comparison. This is the right call for a thin Phase 0 item, but it is a conscious tradeoff: revisit only if the Phase 5.2 learning loop ever wants contract-drift history as a signal.
