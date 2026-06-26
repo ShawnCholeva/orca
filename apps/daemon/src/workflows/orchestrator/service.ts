@@ -2797,6 +2797,18 @@ export class OrchestratorService {
     return { decision, recommendationIds: [] };
   }
 
+  /**
+   * The advance/route engine — intentionally NOT extracted. This method plus the
+   * gate/splitter routing (parkForGateApproval, evaluateAndParkSplitter,
+   * routeGateDestination, decideGate, confirm*) form the orchestrator's irreducible
+   * dispatch core: it recurses into requestNextDecision and calls spawnStepAgent,
+   * with a routeGateDestination ⇄ evaluateAndParkSplitter cycle. Extracting it would
+   * require injecting ~7 host callbacks (incl. requestNextDecision/spawnStepAgent it
+   * recurses into) — a pass-through, not a seam. FUTURE_ARCHITECTURE: "deterministic
+   * code owns lifecycle, routing, gates" (one core). The principled larger move is the
+   * DispatchEngine split (FUTURE_WORK 0.2) — its own deliberate effort, not a piecemeal
+   * extraction.
+   */
   private async commitAdvanceOrComplete(
     db: Database.Database,
     now: () => string,
