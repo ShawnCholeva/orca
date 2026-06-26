@@ -102,7 +102,6 @@ function makeCtx(
     operatorRegistry: null as unknown as DaemonContext['operatorRegistry'],
     adapterDispatcher: null as unknown as DaemonContext['adapterDispatcher'],
     orchestrationTransportBroker: null as unknown as DaemonContext['orchestrationTransportBroker'],
-    operatorSelector: null as unknown as DaemonContext['operatorSelector'],
     stepDispatchCapabilities: null as unknown as DaemonContext['stepDispatchCapabilities'],
     workflowSessionLauncher: { launch: async () => { throw new Error("direct_launch_unsupported"); } },
     now: nextNow,

@@ -15,7 +15,6 @@ import { ModelProviderRegistry } from './llm/registry.js';
 import { createAnthropicProvider } from './llm/anthropic.js';
 import { createOpenAIProvider } from './llm/openai.js';
 import { OperatorRegistry } from './workflows/operators/registry.js';
-import { OperatorSelector } from './workflows/operators/selector.js';
 import { OrchestrationTransportBroker, execModeToTransport } from './workflows/orchestration-transport/broker.js';
 import { AdapterDispatcher } from './adapters/dispatcher.js';
 import type { StepDispatchCapabilities } from './workflows/orchestrator/dispatch-types.js';
@@ -40,7 +39,6 @@ export interface DaemonContext {
   operatorRegistry: OperatorRegistry;
   adapterDispatcher: AdapterDispatcher;
   orchestrationTransportBroker: OrchestrationTransportBroker;
-  operatorSelector: OperatorSelector;
   stepDispatchCapabilities: StepDispatchCapabilities;
   workflowSessionLauncher: WorkflowSessionLauncher;
   now: () => string;
@@ -121,12 +119,6 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
     operatorRegistry,
     adapterDispatcher,
     orchestrationTransportBroker,
-    operatorSelector: new OperatorSelector(
-      modelProviderRegistry,
-      operatorRegistry,
-      orchestrationTransportBroker,
-      (adapterId) => adapterDispatcher.resolveMode(adapterId)
-    ),
     stepDispatchCapabilities,
     workflowSessionLauncher,
     now,
