@@ -16,7 +16,6 @@ import {
   type OperatorDescriptor,
   type OrchestratorAction,
   type PendingQuestion as PendingQuestionT,
-  type StepResultScoringFacts,
   type StepAgentChoice,
   type WorkflowDecisionTrace,
   type WorkflowRun as WorkflowRunT,
@@ -90,12 +89,8 @@ import { latestCommittedLedger } from "../ledger/projection.js";
 import { reviewAndNormalizeLedgerUpdates } from "../ledger/review.js";
 import { incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
 import { incrementCrashRetry, CRASH_RETRY_CAP } from "./crash-retry.js";
-import { scoreStepResult } from "./step-result-scoring.js";
 import {
   buildEvaluationFailedStepResult,
-  buildScoredStepResult,
-  durationSeconds,
-  mapStepRunStatusToResultStatus,
 } from "../steps/step-result.js";
 import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
 import { adapterIdForProvider } from "../../orchestrator-llm/model-provider-llm-client.js";
@@ -116,6 +111,7 @@ import { interruptLive, expireConfirmation, openOrUpdateLive, pauseForConfirmati
 import { setSessionStatus } from "../../sessions/projection.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
 import { extractProposal, summarizeScoring } from "./scoring-summary.js";
+import { type StepResultBuilderDeps, scoringFacts, buildApprovalStepResult, withResultSummary, replayEvaluationFailedResult, scoreCompletedStepResult } from "./step-result-builder.js";
 
 export interface StepDispatchCapabilities {
   isAdapterReady(adapterId: string): Promise<boolean>;
@@ -375,12 +371,6 @@ function nowWithFirstTimestamp(now: () => string, fixed: string): () => string {
   };
 }
 
-/** Clamps a display string to a schema char limit, marking truncation with an
- *  ellipsis so the cutoff is visible. Returns the input unchanged when it fits. */
-function clampToLimit(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
-}
-
 /** The template step id backing a graph step node (defaults to the node id). */
 function gateDestinationStepTemplateId(graph: WorkflowGraph, nodeId: string): string {
   const node = graph.nodes.find((n) => n.id === nodeId);
@@ -556,7 +546,7 @@ export class OrchestratorService {
       const run = getWorkflowRunById(db, stepRun.workflow_run_id);
       if (!run || run.status !== "active") return;
       const finishedAt = now();
-      const stepResult = this.replayEvaluationFailedResult(db, stepRun, finishedAt);
+      const stepResult = replayEvaluationFailedResult(this.stepResultBuilderDeps, db, stepRun, finishedAt);
       await this.requestNextDecision(
         db,
         nowWithFirstTimestamp(now, finishedAt),
@@ -713,7 +703,7 @@ export class OrchestratorService {
 
     // (10) Drive advancement to the next step / completion.
     const finishedAt = now();
-    const facts = this.scoringFacts(db, stepRun, "passed", finishedAt);
+    const facts = scoringFacts(this.stepResultBuilderDeps, db, stepRun, "passed", finishedAt);
     const adapterId = resolveShadowAdapterId(goal);
     let shadowOnly = false;
     try {
@@ -1887,7 +1877,7 @@ export class OrchestratorService {
         if (sessionId) {
           void this.workerTerminate?.(sessionId);
         }
-        const stepResult = this.buildApprovalStepResult(db, ctx, action.scoring, finishedAt);
+        const stepResult = buildApprovalStepResult(this.stepResultBuilderDeps, db, ctx, action.scoring, finishedAt);
         await this.advanceToNextStep(db, nowWithFirstTimestamp(now, finishedAt), ctx.run.id, {
           ...options,
           stepResultByStepRunId: {
@@ -2293,7 +2283,7 @@ export class OrchestratorService {
       .get(stepRun.id) as { id: string } | undefined;
     if (sessionRow?.id) void this.workerTerminate?.(sessionRow.id);
 
-    const stepResult = this.buildApprovalStepResult(db, ctx, stash.scoring ?? undefined, stash.finishedAt);
+    const stepResult = buildApprovalStepResult(this.stepResultBuilderDeps, db, ctx, stash.scoring ?? undefined, stash.finishedAt);
     await this.advanceToNextStep(db, nowWithFirstTimestamp(now, stash.finishedAt), run.id, {
       ...options,
       stepResultByStepRunId: { ...options.stepResultByStepRunId, [stepRun.id]: stepResult },
@@ -2839,12 +2829,7 @@ export class OrchestratorService {
     this.createStepOutputArtifact(db, now, ctx, body, options, artifactEvents);
     this.publish(options.bus, artifactEvents);
     const finishedAt = now();
-    const stepResult = await this.scoreCompletedStepResult(
-      db,
-      ctx,
-      proposal.output,
-      finishedAt
-    );
+    const stepResult = await scoreCompletedStepResult(this.stepResultBuilderDeps, db, ctx, proposal.output, finishedAt);
     return this.commitAdvanceOrComplete(
       db,
       nowWithFirstTimestamp(now, finishedAt),
@@ -2893,202 +2878,13 @@ export class OrchestratorService {
     );
   }
 
-  private scoringFacts(
-    db: Database.Database,
-    stepRun: StepRunRow,
-    terminalStatus: "passed" | "blocked" | "failed" | "skipped",
-    finishedAt: string
-  ): StepResultScoringFacts {
+  private get stepResultBuilderDeps(): StepResultBuilderDeps {
     return {
-      stepId: stepRun.id,
-      stepStatus: mapStepRunStatusToResultStatus(terminalStatus),
-      performance: {
-        durationSeconds: durationSeconds(stepRun.started_at, finishedAt),
-        retries: this.retryCount(stepRun),
-      },
-      outcome: {
-        producedArtifactsCount: this.artifactCountForStep(db, stepRun.id),
-        blockingIssuesCount: terminalStatus === "blocked" || terminalStatus === "failed" ? 1 : 0,
-        warningsCount: 0,
-      },
+      broker: this.broker,
+      readStepOutputAsRecord: this.readStepOutputAsRecord.bind(this),
+      retryCount: this.retryCount.bind(this),
+      artifactCountForStep: this.artifactCountForStep.bind(this),
     };
-  }
-
-  /**
-   * Builds the terminal step result for a normal approval. Scoring is owned by
-   * the shadow orchestrator and arrives on the approve_step_complete action;
-   * the daemon owns the measured facts. Missing or invalid scoring yields a
-   * non-blocking evaluation-failure result.
-   */
-  private buildApprovalStepResult(
-    db: Database.Database,
-    ctx: { stepRun: StepRunRow },
-    scoring: unknown,
-    finishedAt: string
-  ): WorkflowStepResult {
-    const facts = this.scoringFacts(db, ctx.stepRun, "passed", finishedAt);
-    const proposal = StepResultScoringProposal.safeParse(scoring);
-    if (proposal.success) {
-      const result = buildScoredStepResult(facts, proposal.data);
-      return this.withResultSummary(db, ctx.stepRun, result);
-    }
-    if (scoring !== undefined) {
-      // Field paths + codes only (never values) so a rejected score is debuggable
-      // without leaking model-authored content into the logs.
-      console.warn("[scoring] approval scoring rejected", {
-        stepRunId: ctx.stepRun.id,
-        issues: proposal.error.issues.map((i) => `${i.path.join(".")}:${i.code}`),
-      });
-    }
-    return buildEvaluationFailedStepResult({
-      stepId: ctx.stepRun.id,
-      stepStatus: facts.stepStatus,
-      startedAt: ctx.stepRun.started_at,
-      finishedAt,
-      retries: facts.performance.retries,
-      producedArtifactsCount: facts.outcome.producedArtifactsCount,
-      blockingIssuesCount: facts.outcome.blockingIssuesCount,
-      warningsCount: facts.outcome.warningsCount,
-      reason: scoring === undefined ? "approval omitted scoring proposal" : "invalid step result scoring proposal",
-    });
-  }
-
-  /** Attaches the step's own output summary + primary artifact to a built result,
-   *  so the result card can lead with the result rather than the scoring reason. */
-  private withResultSummary(
-    db: Database.Database,
-    stepRun: StepRunRow,
-    result: WorkflowStepResult,
-  ): WorkflowStepResult {
-    const output = this.readStepOutputAsRecord(db, stepRun.workflow_run_id, stepRun.id);
-    if (!output) return result;
-    // These are denormalized display fields; the full text lives in the
-    // step_output artifact. Clamp to the WorkflowStepResult schema's own limits
-    // so an over-length agent summary can't fail validation and strand the step.
-    const summary =
-      typeof output.summary === "string" ? clampToLimit(output.summary, 2000) : undefined;
-    const artifacts = Array.isArray(output.artifacts) ? output.artifacts : [];
-    const chosen =
-      artifacts.find((a) => a && typeof a === "object" && (a as { type?: unknown }).type === "spec") ??
-      artifacts[0];
-    let primaryArtifact: { reference: string; description: string } | undefined;
-    if (chosen && typeof chosen === "object") {
-      const ref = (chosen as { reference?: unknown }).reference;
-      const desc = (chosen as { description?: unknown }).description;
-      if (typeof ref === "string") {
-        primaryArtifact = {
-          reference: clampToLimit(ref, 1024),
-          description: clampToLimit(typeof desc === "string" ? desc : "", 512),
-        };
-      }
-    }
-    return {
-      ...result,
-      ...(summary ? { resultSummary: summary } : {}),
-      ...(primaryArtifact ? { primaryArtifact } : {}),
-    };
-  }
-
-  /**
-   * Replay/reconciliation: step_output already exists but step_result_json is
-   * null (crash between artifact write and result persistence). There is no
-   * live approval turn or worker session to score against, so we write a
-   * deterministic evaluation-failure result from measured facts — no model call.
-   */
-  private replayEvaluationFailedResult(
-    db: Database.Database,
-    stepRun: StepRunRow,
-    finishedAt: string
-  ): WorkflowStepResult {
-    const facts = this.scoringFacts(db, stepRun, "passed", finishedAt);
-    return buildEvaluationFailedStepResult({
-      stepId: stepRun.id,
-      stepStatus: facts.stepStatus,
-      startedAt: stepRun.started_at,
-      finishedAt,
-      retries: facts.performance.retries,
-      producedArtifactsCount: facts.outcome.producedArtifactsCount,
-      blockingIssuesCount: facts.outcome.blockingIssuesCount,
-      warningsCount: facts.outcome.warningsCount,
-      reason: "result recovered on replay without live scoring",
-    });
-  }
-
-  private async scoreCompletedStepResult(
-    db: Database.Database,
-    ctx: {
-      run: WorkflowRunT;
-      stepRun: StepRunRow;
-      stepTpl: WorkflowStepTemplate;
-      goal: GoalRow;
-    },
-    output: Record<string, unknown> | null,
-    finishedAt: string
-  ): Promise<WorkflowStepResult> {
-    const facts = this.scoringFacts(db, ctx.stepRun, "passed", finishedAt);
-    if (!ctx.goal.orchestrator_provider || !ctx.goal.orchestrator_model) {
-      return buildEvaluationFailedStepResult({
-        stepId: ctx.stepRun.id,
-        stepStatus: facts.stepStatus,
-        startedAt: ctx.stepRun.started_at,
-        finishedAt,
-        retries: facts.performance.retries,
-        producedArtifactsCount: facts.outcome.producedArtifactsCount,
-        blockingIssuesCount: facts.outcome.blockingIssuesCount,
-        warningsCount: facts.outcome.warningsCount,
-        reason: "orchestrator model not configured",
-      });
-    }
-
-    let result;
-    try {
-      result = await scoreStepResult(
-        { broker: this.broker },
-        {
-          goalId: ctx.goal.id,
-          workflowRunId: ctx.run.id,
-          stepRunId: ctx.stepRun.id,
-          providerId: ctx.goal.orchestrator_provider,
-          modelId: ctx.goal.orchestrator_model,
-          goal: { id: ctx.goal.id, description: ctx.goal.description },
-          step: {
-            id: ctx.stepRun.id,
-            templateId: ctx.stepTpl.id,
-            name: ctx.stepTpl.name,
-            instructions: ctx.stepTpl.instructions,
-            status: "passed",
-          },
-          output,
-          facts,
-        }
-      );
-    } catch (err) {
-      return buildEvaluationFailedStepResult({
-        stepId: ctx.stepRun.id,
-        stepStatus: facts.stepStatus,
-        startedAt: ctx.stepRun.started_at,
-        finishedAt,
-        retries: facts.performance.retries,
-        producedArtifactsCount: facts.outcome.producedArtifactsCount,
-        blockingIssuesCount: facts.outcome.blockingIssuesCount,
-        warningsCount: facts.outcome.warningsCount,
-        reason: err instanceof Error ? err.message : "step result scoring threw",
-      });
-    }
-
-    if (result.ok) return result.stepResult;
-
-    return buildEvaluationFailedStepResult({
-      stepId: ctx.stepRun.id,
-      stepStatus: facts.stepStatus,
-      startedAt: ctx.stepRun.started_at,
-      finishedAt,
-      retries: facts.performance.retries,
-      producedArtifactsCount: facts.outcome.producedArtifactsCount,
-      blockingIssuesCount: facts.outcome.blockingIssuesCount,
-      warningsCount: facts.outcome.warningsCount,
-      reason: result.reason,
-    });
   }
 
   private hasActiveUnansweredQuestion(
