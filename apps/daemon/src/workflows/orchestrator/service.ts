@@ -1,17 +1,12 @@
 import type Database from "better-sqlite3";
 import {
   AdapterId,
-  InterviewTurn,
   ProviderRecoveryCheckpoint,
   StepResultScoringProposal,
   validateStepOutput,
   type DomainEvent,
-  type ModelProviderId,
-  type OperatorDescriptor,
   type OrchestratorAction,
   type PendingQuestion as PendingQuestionT,
-  type StepAgentChoice,
-
   type WorkflowRun as WorkflowRunT,
   type WorkflowStepTemplate,
   type WorkflowTemplate as WorkflowTemplateT,
@@ -20,7 +15,6 @@ import {
 } from "@orca/contracts";
 
 import { EventBus } from "../../events.js";
-import type { ResolvedMode } from "../../adapters/dispatcher.js";
 import type { SessionOutputStore } from "../../sessions/output-store.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
 import { createArtifact } from "../artifacts/usecases.js";
@@ -56,25 +50,22 @@ import { SHADOW_LLM_TIMEOUT_MS } from "../../orchestrator-llm/shadow-llm-client.
 import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
 import { resolveShadowProvider } from "../../orchestrator-llm/providers/registry.js";
 import { listAgents } from "../../agents.js";
-import { buildProviderRecoveryChoices, composeProviderSwitchPrompt } from "./provider-recovery.js";
+import { buildProviderRecoveryChoices } from "./provider-recovery.js";
 import {
   recoverStepScoring,
   type ShadowAsk,
 } from "./recover-step-scoring.js";
-import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
 import { interruptLive, expireConfirmation, openOrUpdateLive, pauseForConfirmation, pauseForProviderRecovery, resumeFromConfirmation, resumeFromProviderRecovery } from "../../activities/store.js";
 import { setSessionStatus } from "../../sessions/projection.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
 import { extractProposal, summarizeScoring } from "./scoring-summary.js";
-import { scoringFacts, buildApprovalStepResult, withResultSummary, replayEvaluationFailedResult } from "./step-result-builder.js";
+import { scoringFacts, buildApprovalStepResult, replayEvaluationFailedResult } from "./step-result-builder.js";
 import {
   type GoalRow,
   type StepRunRow,
   readGoal,
   readStepRun,
   preferencesForGoal,
-  OrchestratorGoalNotFoundError,
-  OrchestratorStepNotFoundError,
 } from "./db-rows.js";
 import {
   stepRunIdsByTemplateId,

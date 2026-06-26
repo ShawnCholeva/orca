@@ -11,8 +11,6 @@ import { defaultMigrationsDir, runMigrations } from '../migrations.js';
 import { insertSession, setSessionStatus } from '../sessions/projection.js';
 import type { SessionOutputStore } from '../sessions/output-store.js';
 import {
-  getExtractionById,
-  getLatestExtractionForSession,
   listPendingExtractions,
   resetPreparedStatements as resetProjectionStmts,
 } from './projection.js';

@@ -5,7 +5,8 @@
     "outDir": "dist",
     "composite": true,
     "declaration": true,
-    "declarationMap": true
+    "declarationMap": true,
+    "noUnusedLocals": true
   },
   "include": ["src"],
   "references": [{ "path": "../../packages/contracts" }]

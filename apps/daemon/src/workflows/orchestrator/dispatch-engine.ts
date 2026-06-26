@@ -18,8 +18,6 @@ import {
   type CostEntry,
   type TransitionStatus,
   type FailureCode,
-  type StateDepsFacet,
-  type WorkflowStepResult,
 } from "@orca/contracts";
 import { computeCost } from "../../harness-telemetry/cost.js";
 import { EventBus } from "../../events.js";
@@ -60,7 +58,7 @@ import { resolveGateDecisionActivity, pauseForGateDecision, pauseForConfirmation
 import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import { createStepOutputArtifact } from "./ledger-commit.js";
-import { scoreCompletedStepResult, scoringFacts, buildApprovalStepResult, replayEvaluationFailedResult } from "./step-result-builder.js";
+import { scoreCompletedStepResult } from "./step-result-builder.js";
 import { type GoalRow, type StepRunRow, readGoal, readStepRun, preferencesForGoal, OrchestratorStepNotFoundError } from "./db-rows.js";
 import {
   stepRunIdsByTemplateId,

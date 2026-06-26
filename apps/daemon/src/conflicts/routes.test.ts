@@ -11,7 +11,6 @@ import {
 } from '@orca/contracts';
 import type { Config } from '../config.js';
 import { closeDatabase, openDatabase } from '../db.js';
-import { eventBus } from '../events.js';
 import { defaultMigrationsDir, runMigrations } from '../migrations.js';
 import { bootstrapRegistries } from '../registry/bootstrap.js';
 import { createServer } from '../server.js';

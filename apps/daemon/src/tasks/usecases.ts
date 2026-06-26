@@ -41,7 +41,6 @@ import {
   getSessionGoalId,
   getContextPackageGoalId,
   getTasksByIds,
-  type InsertTaskGenerationInput,
   type ListTasksOptions,
   resetPreparedStatements as resetProjectionStmts,
 } from './projection.js';

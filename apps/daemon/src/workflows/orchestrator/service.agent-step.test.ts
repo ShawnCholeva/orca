@@ -702,7 +702,7 @@ describe("OrchestratorService agent step", () => {
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
     const launcher = makeLauncher(launchFn);
-    const { engine, service } = makeAgentService(launcher);
+    const { engine } = makeAgentService(launcher);
 
     // First call: selects operator
     const first = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
@@ -742,7 +742,7 @@ describe("OrchestratorService agent step", () => {
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
     const launcher = makeLauncher(launchFn);
-    const { engine, service } = makeAgentService(launcher);
+    const { engine } = makeAgentService(launcher);
 
     // First call: selects operator
     await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
@@ -769,7 +769,7 @@ describe("OrchestratorService agent step", () => {
     setupAgentStepRun(db, { guardrailsJson: guardrails });
 
     const launcher = makeLauncher();
-    const { engine, service } = makeAgentService(launcher);
+    const { engine } = makeAgentService(launcher);
 
     // Advance past operator selection
     await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
@@ -794,7 +794,7 @@ describe("OrchestratorService agent step", () => {
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
     const launcher = makeLauncher(launchFn);
-    const { engine, service } = makeAgentService(launcher);
+    const { engine } = makeAgentService(launcher);
 
     // First call: selects operator
     await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
@@ -844,7 +844,7 @@ describe("OrchestratorService agent step", () => {
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
     const launcher = makeLauncher(launchFn);
-    const { engine, service } = makeAgentService(launcher);
+    const { engine } = makeAgentService(launcher);
 
     // First call: selects operator
     await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
@@ -872,7 +872,7 @@ describe("OrchestratorService agent step", () => {
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
     const launcher = makeLauncher(launchFn);
-    const { engine, service } = makeAgentService(launcher);
+    const { engine } = makeAgentService(launcher);
 
     // First call: selects operator
     await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
@@ -1911,7 +1911,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-x" }));
     const launcher = makeLauncher(launchFn);
-    const { engine, service } = makeAgentService(launcher);
+    const { service } = makeAgentService(launcher);
 
     await service.startWorkflowFirstStep(db, () => NOW, "run-1");
 
@@ -1942,7 +1942,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-x" }));
     const deliver = vi.fn(async (_sid: string, _text: string) => "delivered" as const);
-    const { engine, service } = makeAgentService(makeLauncher(launchFn), deliver);
+    const { service } = makeAgentService(makeLauncher(launchFn), deliver);
 
     await service.startWorkflowFirstStep(db, () => NOW, "run-1");
 
@@ -1961,7 +1961,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
       throw new Error("PTY spawn failed: spawn_failed");
     });
     const launcher = makeLauncher(launchFn);
-    const { engine, service } = makeAgentService(launcher);
+    const { service } = makeAgentService(launcher);
 
     await expect(
       service.startWorkflowFirstStep(db, () => NOW, "run-1", { bus, idFactory })
@@ -2034,7 +2034,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-x" }));
     const launcher = makeLauncher(launchFn);
-    const { engine, service } = makeAgentService(launcher);
+    const { engine } = makeAgentService(launcher);
 
     await engine.advanceToNextStep(db, () => NOW, "run-1");
 
@@ -2062,7 +2062,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     const { db } = setupHarness();
     setupTwoStepRunWithOutput(db);
 
-    const { engine, service } = makeAgentService(makeLauncher());
+    const { engine } = makeAgentService(makeLauncher());
 
     await engine.advanceToNextStep(db, () => NOW, "run-1");
 
@@ -2083,7 +2083,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-respawn" }));
     const launcher = makeLauncher(launchFn);
-    const { engine, service } = makeAgentService(launcher);
+    const { service } = makeAgentService(launcher);
 
     await service.respawnStepAgent(db, () => NOW, "run-1", "step-1");
 
@@ -2108,7 +2108,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-x" }));
     const launcher = makeLauncher(launchFn);
-    const { engine, service } = makeAgentService(launcher);
+    const { engine } = makeAgentService(launcher);
 
     await engine.advanceToNextStep(db, () => NOW, "run-1");
 
@@ -2134,7 +2134,7 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     ).run('goal-1', 'ws-b', NOW);
 
     const launchFn = vi.fn(async () => ({ sessionId: "sess-ws" }));
-    const { engine, service } = makeAgentService(makeLauncher(launchFn));
+    const { service } = makeAgentService(makeLauncher(launchFn));
 
     await service.startWorkflowFirstStep(db, () => NOW, "run-1");
 

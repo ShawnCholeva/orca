@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
 
 import type { DomainEvent } from '@orca/contracts';
@@ -10,7 +10,7 @@ import { closeDatabase, openDatabase } from '../db.js';
 import { EventBus } from '../events.js';
 import { defaultMigrationsDir, runMigrations } from '../migrations.js';
 import { insertSession } from '../sessions/projection.js';
-import { insertExtraction, resetPreparedStatements as resetProjectionStmts } from './projection.js';
+import { resetPreparedStatements as resetProjectionStmts } from './projection.js';
 import {
   enqueueExtraction,
   markExtractionStarted,

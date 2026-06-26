@@ -13,8 +13,6 @@ import type {
   TaskInput,
   SessionInput,
   SessionSummaryInput,
-  DecisionInput,
-  MemoryItemInput,
   ActiveRecommendationInput,
   ActiveConflictInput,
 } from './input.js';
@@ -84,15 +82,9 @@ function capProposedActionJson(json: string): boolean {
 // ── Completion keywords for continue_session / mark_complete ───────────────────
 
 const COMPLETION_KEYWORDS = /\b(complete[d]?|done|finish[ed]?|implement[ed]?)\b/i;
-const IMPLEMENTATION_KEYWORDS =
-  /\b(test[s]?|build|lint|diff|commit[s]?|implement[ed]?|refactor[ed]?|fix[ed]?)\b/i;
 
 function summaryIndicatesCompletion(summaryText: string): boolean {
   return COMPLETION_KEYWORDS.test(summaryText);
-}
-
-function summaryHasImplementationEvidence(summaryText: string): boolean {
-  return IMPLEMENTATION_KEYWORDS.test(summaryText);
 }
 
 // ── refine_goal ────────────────────────────────────────────────────────────────

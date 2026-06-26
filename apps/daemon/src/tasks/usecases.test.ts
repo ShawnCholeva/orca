@@ -514,7 +514,7 @@ describe('splitTask', () => {
     const published: DomainEvent[] = [];
     bus.subscribe((ev) => published.push(ev));
 
-    const { parent: p, children } = splitTask(makeCtx(db), {
+    const { children } = splitTask(makeCtx(db), {
       parentTaskId: parent.id,
       children: [
         { role: 'engineer', title: 'Child A', description: 'a' },

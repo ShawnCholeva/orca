@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { DomainEvent } from '@orca/contracts';
 import type { Config } from '../config.js';
@@ -12,8 +12,6 @@ import {
   insertOpenConflict,
   resolveConflict,
   dismissConflict,
-  autoDismissResolveConflictRecommendation,
-  getConflictById,
   ConflictNotFoundError,
   InvalidConflictStatusError,
   EmptyConflictSourcesError,
@@ -27,7 +25,6 @@ import { getFeedbackByRecommendationId } from '../recommendations/feedback.js';
 
 const tempDirs: string[] = [];
 const NOW = '2026-01-01T00:00:00.000Z';
-const LATER = '2026-01-02T00:00:00.000Z';
 
 function createConfig(dataDir: string): Config {
   return {
@@ -592,8 +589,6 @@ describe('broadcast after commit', () => {
       origPublish(ev);
     });
 
-    // Use a raw transaction wrapper to track when TX is active
-    const origTx = db.transaction.bind(db);
     // We can't easily intercept db.transaction, so instead verify that
     // the event appears in the events table before bus.publish is called.
     // Verify by subscribing and checking DB state at publish time.

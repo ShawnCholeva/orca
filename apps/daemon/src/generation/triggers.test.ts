@@ -62,25 +62,6 @@ function seedGoal(db: Database.Database, id: string): void {
   ).run(id, NOW, NOW);
 }
 
-function seedWorkspace(db: Database.Database, id: string, goalId: string): void {
-  db.prepare(
-    `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(id, `/tmp/${id}`, id, '', NOW, NOW);
-  db.prepare(
-    `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
-  ).run(goalId, id, NOW);
-}
-
-function seedSession(
-  db: Database.Database,
-  input: { id: string; goalId: string; workspaceId: string; status: string }
-): void {
-  db.prepare(
-    `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, role, title, status, created_at)
-     VALUES (?, ?, ?, 'claude-code', NULL, ?, ?, ?)`
-  ).run(input.id, input.goalId, input.workspaceId, input.id, input.status, NOW);
-}
-
 function makeCtx(
   db: Database.Database,
   bus: EventBus,

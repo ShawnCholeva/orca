@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectStateConflicts, noopConflictJudge } from "./detect.js";
+import { detectStateConflicts } from "./detect.js";
 
 const entry = (kind: string, ref: string) => ({ kind, ref } as any);
 

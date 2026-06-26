@@ -950,7 +950,6 @@ export async function runRecommendationGeneration(
   input: RunRecommendationGenerationInput
 ): Promise<RecommendationGeneration> {
   const { db, bus } = ctx;
-  const now = ctx.now?.() ?? new Date().toISOString();
   const idFn = ctx.idFactory ?? randomUUID;
 
   const providerInput = buildRecommendationInput({ db, goalId: input.goalId, trigger: input.trigger });

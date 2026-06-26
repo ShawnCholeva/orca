@@ -7,7 +7,6 @@ import { afterEach, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { closeDatabase, openDatabase } from "../db.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
-import { eventBus } from "../events.js";
 import { DuplicateWorkspaceError, listWorkspacesByGoal, findWorkspaceById, resetPreparedStatements as resetProjectionStmts } from "./projection.js";
 import {
   createWorkspace,

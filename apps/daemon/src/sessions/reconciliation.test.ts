@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { DomainEvent } from '@orca/contracts';
 import type { Config } from '../config.js';

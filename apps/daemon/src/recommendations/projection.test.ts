@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { Config } from '../config.js';
 import { closeDatabase, openDatabase } from '../db.js';

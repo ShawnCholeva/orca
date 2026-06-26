@@ -21,8 +21,6 @@ export interface RunnerDeps {
   };
 }
 
-const IDLE_BACKOFF_MS = 100;
-
 export class ExtractionRunner {
   private readonly deps: RunnerDeps;
   private shouldStop = false;

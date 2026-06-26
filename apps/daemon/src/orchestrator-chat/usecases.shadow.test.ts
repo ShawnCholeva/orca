@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import Database from "better-sqlite3";
-import { createOrchestratorMessage, OrchestratorChatProviderUnavailableError } from "./usecases.js";
+import { createOrchestratorMessage } from "./usecases.js";
 
 function setup() {
   const db = new Database(":memory:");

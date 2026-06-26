@@ -195,7 +195,6 @@ describe('reconcileStaleExtractions', () => {
 
   it('does not touch succeeded or failed extractions', () => {
     const db = openTestDb();
-    const bus = new EventBus();
 
     seedGoal(db, 'goal-1');
     seedWorkspace(db, 'ws-1', 'goal-1');

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { resolveBinary } from "./resolve.js";
-import type { ResolveBinaryOpts } from "./resolve.js";
 
 function makeAccessFn(executablePaths: Set<string>) {
   return async (p: string, _mode: number): Promise<void> => {

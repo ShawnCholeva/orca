@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PendingQuestionItem, WorkerAnswer } from "@orca/contracts";
+import type { PendingQuestionItem } from "@orca/contracts";
 import { validateAnswers, assembleAnswerReason, assembleFreeTextReason } from "./worker-answer-format.js";
 
 const single: PendingQuestionItem = {
