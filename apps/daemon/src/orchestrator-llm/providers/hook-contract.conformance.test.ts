@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { conformanceError, assertHookContractConformance } from "./hook-contract.js";
 import { resolveShadowProvider } from "./registry.js";
-import type { HookAssumption } from "./types.js";
+import type { HookAssumption, ShadowProvider } from "./types.js";
 
 describe("hook contract self-conformance", () => {
   it("all three providers' declared contracts conform to their emitted config", () => {
@@ -38,5 +38,31 @@ describe("hook contract self-conformance", () => {
       verifiedAgainstVersion: null, verified: false, note: "fixture",
     };
     expect(conformanceError(provider, unverified)).toBeNull();
+  });
+
+  it("does not accept StopFailure as conformance for a declared Stop event", () => {
+    function stubOrchestratorProvider(contents: string): ShadowProvider {
+      return { hookConfig: () => ({ files: [{ relPath: "hooks.json", contents }] }) } as unknown as ShadowProvider;
+    }
+
+    const entry: HookAssumption = {
+      provider: "codex", surface: "orchestrator", event: "Stop", file: "hooks.json",
+      payloadFields: [], assertSpawnArg: null, firingContext: "x",
+      verifiedAgainstVersion: null, verified: true, note: "fixture",
+    };
+    // Only StopFailure present → a declared Stop must be flagged as drift.
+    expect(conformanceError(stubOrchestratorProvider('{ "StopFailure": [] }'), entry)).toMatch(/Stop/);
+    // A real Stop key present → conforms.
+    expect(conformanceError(stubOrchestratorProvider('{ "Stop": [] }'), entry)).toBeNull();
+  });
+
+  it("flags a missing declared spawn arg", () => {
+    const provider = resolveShadowProvider("codex");
+    const entry: HookAssumption = {
+      provider: "codex", surface: "worker", event: "PermissionRequest", file: "hooks.json",
+      payloadFields: [], assertSpawnArg: "--no-such-flag", firingContext: "x",
+      verifiedAgainstVersion: "0.136.0", verified: true, note: "fixture",
+    };
+    expect(conformanceError(provider, entry)).toMatch(/--no-such-flag/);
   });
 });

@@ -40,8 +40,8 @@ export function conformanceError(provider: ShadowProvider, a: HookAssumption): s
   const file = a.file ? emitted.files.find((f) => f.relPath === a.file) : undefined;
   if (a.file && !file) return `hook contract drift: ${where} — declared file '${a.file}' not emitted`;
   const contents = file ? file.contents : "";
-  if (a.event && !contents.includes(a.event)) {
-    return `hook contract drift: ${where} — event '${a.event}' not found in ${a.file}`;
+  if (a.event && !contents.includes(`"${a.event}"`)) {
+    return `hook contract drift: ${where} — event key "${a.event}" not found in ${a.file}`;
   }
   for (const field of a.payloadFields) {
     if (!contents.includes(field)) {
