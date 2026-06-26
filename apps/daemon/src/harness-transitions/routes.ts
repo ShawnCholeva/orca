@@ -4,6 +4,9 @@ import { HARNESS_FACETS } from "@orca/contracts";
 import { HARNESS_BOUNDARIES } from "./emit.js";
 import { HARNESS_SENSORS, UNIMPLEMENTED_SENSOR_KINDS } from "../harness-sensors/detect.js";
 import { listTransitionsByGoal } from "./usecases.js";
+import { checkHookContracts } from "../orchestrator-llm/providers/hook-contract.js";
+import { listAgents } from "../agents.js";
+import type { ShadowAdapterId } from "../orchestrator-llm/providers/types.js";
 
 export interface HarnessTransitionRouteDeps {
   db: Database.Database;
@@ -40,5 +43,13 @@ export function registerHarnessTransitionRoutes(
         ...UNIMPLEMENTED_SENSOR_KINDS.map((kind) => ({ kind, label: null, script: null, status: "unimplemented" as const })),
       ],
     };
+  });
+
+  server.get("/v1/harness/hook-contracts", async () => {
+    const versions: Partial<Record<ShadowAdapterId, string | null>> = {};
+    for (const agent of listAgents(db)) {
+      versions[agent.id as ShadowAdapterId] = agent.readiness?.version ?? null;
+    }
+    return checkHookContracts({ versions });
   });
 }
