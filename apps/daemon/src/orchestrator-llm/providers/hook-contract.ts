@@ -68,3 +68,71 @@ export function assertHookContractConformance(): void {
     throw new Error(`hook contract conformance failed:\n  ${errors.join("\n  ")}`);
   }
 }
+
+export type HookContractStatus = "ok" | "degraded" | "unverified" | "unknown" | "nonconformant";
+
+export interface HookContractReportEntry {
+  provider: ShadowAdapterId;
+  surface: HookSurface;
+  event: string | null;
+  file: string | null;
+  firingContext: string;
+  verified: boolean;
+  verifiedAgainstVersion: string | null;
+  installedVersion: string | null;
+  status: HookContractStatus;
+  detail?: string;
+}
+
+/** Extract "major.minor" from a clean version string, or null if unparseable. */
+function majorMinor(version: string): string | null {
+  const m = /^v?(\d+)\.(\d+)/.exec(version.trim());
+  return m ? `${m[1]}.${m[2]}` : null;
+}
+
+function statusFor(
+  provider: ShadowProvider,
+  a: HookAssumption,
+  installedVersion: string | null,
+): HookContractReportEntry {
+  const base = {
+    provider: a.provider, surface: a.surface, event: a.event, file: a.file,
+    firingContext: a.firingContext, verified: a.verified,
+    verifiedAgainstVersion: a.verifiedAgainstVersion, installedVersion,
+  };
+  if (!a.verified) {
+    return { ...base, status: "unverified", detail: a.note };
+  }
+  const conformErr = conformanceError(provider, a);
+  if (conformErr) {
+    return { ...base, status: "nonconformant", detail: conformErr };
+  }
+  // Version-pin: only assess drift when BOTH a pinned version and an installed
+  // version are known and parseable; otherwise we cannot judge drift.
+  if (a.verifiedAgainstVersion === null) return { ...base, status: "ok" };
+  if (installedVersion === null) return { ...base, status: "unknown" };
+  const want = majorMinor(a.verifiedAgainstVersion);
+  const have = majorMinor(installedVersion);
+  if (want === null || have === null) return { ...base, status: "unknown" };
+  if (want !== have) {
+    return {
+      ...base, status: "degraded",
+      detail: `verified against ${a.verifiedAgainstVersion}, running ${installedVersion} — re-verify`,
+    };
+  }
+  return { ...base, status: "ok" };
+}
+
+export function checkHookContracts(args: {
+  versions: Partial<Record<ShadowAdapterId, string | null>>;
+}): { contracts: HookContractReportEntry[] } {
+  const contracts: HookContractReportEntry[] = [];
+  for (const id of PROVIDER_IDS) {
+    const provider = resolveShadowProvider(id);
+    const installed = args.versions[id] ?? null;
+    for (const entry of provider.hookContract()) {
+      contracts.push(statusFor(provider, entry, installed));
+    }
+  }
+  return { contracts };
+}
