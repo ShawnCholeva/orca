@@ -12,7 +12,8 @@ import type {
   SessionOutputSnapshot,
 } from "@orca/contracts";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
-import { OrchestratorService, type StepDispatchCapabilities } from "./service.js";
+import { OrchestratorService } from "./service.js";
+import type { StepDispatchCapabilities } from "./dispatch-types.js";
 import { DispatchEngine } from "./dispatch-engine.js";
 import { ProviderRecoveryController } from "./provider-recovery-controller.js";
 import type { RunnerPort } from "./runner-port.js";

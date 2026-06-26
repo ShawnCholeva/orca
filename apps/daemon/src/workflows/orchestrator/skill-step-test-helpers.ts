@@ -18,7 +18,7 @@ import type {
   BrokerResult,
   OrchestrationTransportBroker,
 } from "../orchestration-transport/broker.js";
-import type { StepDispatchCapabilities } from "./service.js";
+import type { StepDispatchCapabilities } from "./dispatch-types.js";
 
 export const NOW = "2026-01-01T00:00:00.000Z";
 export const MODEL_OPERATOR_ID = "orca/anthropic:claude-sonnet-4-6";

@@ -16,7 +16,7 @@ import type { RunnerPort } from "./runner-port.js";
 import type {
   StepDispatchCapabilities,
   RequestNextDecisionOptions,
-} from "./service.js";
+} from "./dispatch-types.js";
 import {
   OrchestratorProviderRecoveryNotFoundError,
   OrchestratorProviderRecoveryInvalidTransitionError,

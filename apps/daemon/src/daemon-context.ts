@@ -18,7 +18,7 @@ import { OperatorRegistry } from './workflows/operators/registry.js';
 import { OperatorSelector } from './workflows/operators/selector.js';
 import { OrchestrationTransportBroker, execModeToTransport } from './workflows/orchestration-transport/broker.js';
 import { AdapterDispatcher } from './adapters/dispatcher.js';
-import type { StepDispatchCapabilities } from './workflows/orchestrator/service.js';
+import type { StepDispatchCapabilities } from './workflows/orchestrator/dispatch-types.js';
 import { createSession as createSessionUseCase } from './sessions/usecases.js';
 import { listWorkspacesByGoal } from './workspaces/projection.js';
 import { ProductionWorkflowSessionLauncher } from './workflows/orchestrator/session-launcher-impl.js';

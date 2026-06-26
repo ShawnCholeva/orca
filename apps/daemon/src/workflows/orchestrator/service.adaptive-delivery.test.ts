@@ -31,7 +31,7 @@ import type {
 import { DispatchEngine } from "./dispatch-engine.js";
 import type { OperatorDescriptor } from "@orca/contracts";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
-import type { StepDispatchCapabilities } from "./service.js";
+import type { StepDispatchCapabilities } from "./dispatch-types.js";
 import { installBuiltInTemplates } from "../templates/usecases.js";
 import type { EventBus } from "../../events.js";
 

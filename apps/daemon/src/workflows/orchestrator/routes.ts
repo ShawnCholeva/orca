@@ -14,7 +14,7 @@ import {
   OrchestratorRunNotFoundError,
   OrchestratorTemplateNotFoundError,
   type StepDispatchCapabilities,
-} from "./service.js";
+} from "./dispatch-types.js";
 import {
   OrchestratorGoalNotFoundError,
   OrchestratorStepNotFoundError,

@@ -85,29 +85,23 @@ import {
 import { postOrchestratorMessage } from "./orchestrator-message.js";
 
 import {
-  DispatchEngine,
-  NULL_ACCUMULATOR,
+  type StepDispatchCapabilities,
+  type RequestNextDecisionOptions,
+  type TokenAccumulator,
   OrchestratorRunNotFoundError,
   OrchestratorTemplateNotFoundError,
+} from "./dispatch-types.js";
+import {
+  DispatchEngine,
+  NULL_ACCUMULATOR,
   nowWithFirstTimestamp,
   buildTelemetry,
   recommendationFeedbackInterventions,
   goalRequiresHumanReview,
   resolveShadowAdapterId,
   stepDispatchEnablesOneShot,
-  type StepDispatchCapabilities,
-  type RequestNextDecisionOptions,
-  type TokenAccumulator,
-} from "./dispatch-engine.js";
-export type {
-  StepDispatchCapabilities,
-  RequestNextDecisionOptions,
-  TokenAccumulator,
 } from "./dispatch-engine.js";
 export {
-  OrchestratorRunNotFoundError,
-  OrchestratorRunNotActiveError,
-  OrchestratorTemplateNotFoundError,
   NULL_ACCUMULATOR,
   buildTelemetry,
   nowWithFirstTimestamp,

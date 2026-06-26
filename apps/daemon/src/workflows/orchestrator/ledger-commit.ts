@@ -11,7 +11,7 @@ import { latestCommittedLedger } from "../ledger/projection.js";
 import { parseStepCompletionEnvelope } from "./orca-output.js";
 import { reviewAndNormalizeLedgerUpdates } from "../ledger/review.js";
 import type { GoalRow, StepRunRow } from "./db-rows.js";
-import type { RequestNextDecisionOptions } from "./service.js";
+import type { RequestNextDecisionOptions } from "./dispatch-types.js";
 
 export async function completeStepWithLedger(
   db: Database.Database,

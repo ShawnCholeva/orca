@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import type { DomainEvent, PendingQuestion as PendingQuestionT } from "@orca/contracts";
-import type { RequestNextDecisionOptions } from "./service.js";
+import type { RequestNextDecisionOptions } from "./dispatch-types.js";
 
 /**
  * Inserts a single orchestrator_messages row (role "orchestrator", kind
