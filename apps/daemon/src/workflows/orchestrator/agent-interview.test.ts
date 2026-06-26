@@ -13,6 +13,7 @@ import {
   NOW,
 } from "./skill-step-test-helpers.js";
 import { OrchestratorService } from "./service.js";
+import { DispatchEngine } from "./dispatch-engine.js";
 import {
   formatAnswerForAgentStdin,
   injectAnswerToSession,
@@ -74,12 +75,21 @@ function makeServiceWithStore(
   outputStore: SessionOutputStore,
   workerTerminate?: (sessionId: string) => Promise<void>,
 ): OrchestratorService {
-  return new OrchestratorService(
-    { async propose() { return { status: "proposed" as const, attemptId: "a", transport: "one_shot" as const, parsed: {}, rawTextLength: null, latencyMs: 1 }; } },
+  const fakeBroker = { async propose() { return { status: "proposed" as const, attemptId: "a", transport: "one_shot" as const, parsed: {}, rawTextLength: null, latencyMs: 1 }; } };
+  const engine = new DispatchEngine(
+    fakeBroker,
     fakeRegistry(),
+    { launch: async () => { throw new Error("direct_launch_unsupported"); } },
     undefined,
+    undefined,
+    undefined,
+    undefined
+  );
+  return new OrchestratorService(
+    engine,
+    fakeBroker,
+    fakeRegistry(),
     outputStore,
-    undefined,
     undefined,
     undefined,
     undefined,
@@ -277,14 +287,21 @@ describe("OrchestratorService.onSessionOutputChunk", () => {
       "INSERT INTO app_settings (key, value, updated_at) VALUES ('supervision_mode', 'unsupervised', ?)"
     ).run(NOW);
     const spawn = vi.fn(async () => {});
-    const service = new OrchestratorService(
-      { async propose() { return { status: "proposed" as const, attemptId: "a", transport: "one_shot" as const, parsed: {}, rawTextLength: null, latencyMs: 1 }; } },
+    const fakeBroker2 = { async propose() { return { status: "proposed" as const, attemptId: "a", transport: "one_shot" as const, parsed: {}, rawTextLength: null, latencyMs: 1 }; } };
+    const engine2 = new DispatchEngine(
+      fakeBroker2,
       fakeRegistry(),
-      undefined,
-      fakeOutputStore(LIMIT_TAIL),
-      undefined,
+      { launch: async () => { throw new Error("direct_launch_unsupported"); } },
       undefined,
       spawn,
+      undefined,
+      undefined
+    );
+    const service = new OrchestratorService(
+      engine2,
+      fakeBroker2,
+      fakeRegistry(),
+      fakeOutputStore(LIMIT_TAIL),
     );
 
     await service.onSessionOutputChunk(db, () => NOW, { sessionId, goalId }, { bus, idFactory });

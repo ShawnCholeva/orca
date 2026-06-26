@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { closeDatabase } from "../../db.js";
 import { resetWorkflowStepProjectionPreparedStatements } from "../steps/projection.js";
-import { OrchestratorService } from "./service.js";
+import { DispatchEngine } from "./dispatch-engine.js";
 import {
   cleanupHarness,
   fakeBroker,
@@ -17,13 +17,15 @@ import {
   setupHarness,
 } from "./skill-step-test-helpers.js";
 
-function makeService(raw: StepSkillProposal): OrchestratorService {
-  return new OrchestratorService(
+function makeService(raw: StepSkillProposal): DispatchEngine {
+  return new DispatchEngine(
     fakeBroker(raw),
     fakeRegistry(),
+    { launch: async () => { throw new Error("direct_launch_unsupported"); } },
+    fakeStepDispatch(),
     undefined,
     undefined,
-    fakeStepDispatch()
+    undefined
   );
 }
 
@@ -128,7 +130,7 @@ describe("OrchestratorService skill step", () => {
       completion: { confidence: "high", assumptions: [], openQuestions: [], whyComplete: "ok" },
     };
     // Research step asks (so we don't recurse into another completion).
-    const service = new OrchestratorService(
+    const service = new DispatchEngine(
       {
         async propose(req: { stepRunId: string | null }, opts) {
           const isFirst = req.stepRunId === "step-1";
@@ -150,9 +152,11 @@ describe("OrchestratorService skill step", () => {
         },
       },
       fakeRegistry(),
+      { launch: async () => { throw new Error("direct_launch_unsupported"); } },
+      fakeStepDispatch(),
       undefined,
       undefined,
-      fakeStepDispatch()
+      undefined
     );
 
     await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
@@ -263,12 +267,14 @@ describe("OrchestratorService skill step", () => {
       },
     };
 
-    const service = new OrchestratorService(
+    const service = new DispatchEngine(
       spyBroker,
       fakeRegistry(),
+      { launch: async () => { throw new Error("direct_launch_unsupported"); } },
+      fakeStepDispatch(),
       undefined,
       undefined,
-      fakeStepDispatch()
+      undefined
     );
     await service.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 

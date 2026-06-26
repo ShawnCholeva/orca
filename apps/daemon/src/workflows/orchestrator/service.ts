@@ -11,7 +11,7 @@ import {
   type OrchestratorAction,
   type PendingQuestion as PendingQuestionT,
   type StepAgentChoice,
-  type WorkflowDecisionTrace,
+
   type WorkflowRun as WorkflowRunT,
   type WorkflowStepTemplate,
   type WorkflowTemplate as WorkflowTemplateT,
@@ -84,7 +84,7 @@ import {
   buildStepResultBuilderDeps,
 } from "./queries.js";
 import { postOrchestratorMessage } from "./orchestrator-message.js";
-import { type ResolvedStepDispatch } from "./step-dispatch.js";
+
 import {
   DispatchEngine,
   NULL_ACCUMULATOR,
@@ -211,16 +211,12 @@ export class OrchestratorService {
   private readonly engine: DispatchEngine;
 
   constructor(
+    engine: DispatchEngine,
     private readonly broker: Pick<OrchestrationTransportBroker, "propose">,
     private readonly operators: Pick<OperatorRegistry, "list">,
-    private readonly launcher: WorkflowSessionLauncher = {
-      launch: async () => { throw new Error("direct_launch_unsupported"); },
-    },
     sessionOutputStore?: SessionOutputStore,
     private readonly stepDispatch?: StepDispatchCapabilities,
     private readonly orchestratorMediator?: Pick<OrchestratorMediator, "invoke"> & Partial<Pick<OrchestratorMediator, "invokeWithBackoff">>,
-    // Spawns the tmux worker for a freshly-created step session (resolves workspace + adapter spawn in the wiring).
-    private readonly workerSpawn?: (input: { sessionId: string; goalId: string; adapterId: string }) => Promise<void>,
     // Reliable idle-gated submit to the worker's stdin (initial objective, forwards, revise feedback).
     private readonly workerDeliver?: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">,
     // Best-effort worker termination when a step's session ends.
@@ -235,16 +231,8 @@ export class OrchestratorService {
     // to a no-op (drain → null) so transitions get `cost: null`.
     private readonly otlpAccumulator: TokenAccumulator = NULL_ACCUMULATOR
   ) {
+    this.engine = engine;
     this.sessionOutputStore = sessionOutputStore ?? NULL_OUTPUT_STORE;
-    this.engine = new DispatchEngine(
-      broker,
-      operators,
-      launcher,
-      stepDispatch,
-      workerSpawn,
-      workerDeliver,
-      otlpAccumulator
-    );
   }
 
   /**
@@ -283,14 +271,14 @@ export class OrchestratorService {
       .get(stepRun.id) as { body: string } | undefined;
     if (existing) {
       if (stepRun.step_result_json) {
-        await this.requestNextDecision(db, now, stepRun.workflow_run_id, options).catch(() => {});
+        await this.engine.requestNextDecision(db, now, stepRun.workflow_run_id, options).catch(() => {});
         return;
       }
       const run = getWorkflowRunById(db, stepRun.workflow_run_id);
       if (!run || run.status !== "active") return;
       const finishedAt = now();
       const stepResult = replayEvaluationFailedResult(buildStepResultBuilderDeps(this.broker), db, stepRun, finishedAt);
-      await this.requestNextDecision(
+      await this.engine.requestNextDecision(
         db,
         nowWithFirstTimestamp(now, finishedAt),
         stepRun.workflow_run_id,
@@ -321,7 +309,7 @@ export class OrchestratorService {
     // (5) Non-exited terminal states.
     // User-requested stop is not a crash → block immediately.
     if (sess.status === "stopped") {
-      this.blockRun(
+      this.engine.blockRun(
         db,
         now,
         { run, stepRun, stepTpl, goal },
@@ -346,7 +334,7 @@ export class OrchestratorService {
           options
         );
       } else {
-        await this.spawnStepAgent(
+        await this.engine.spawnStepAgent(
           db,
           now,
           { run, stepRun, stepTpl, template, goal },
@@ -374,7 +362,7 @@ export class OrchestratorService {
     const provider = goal.orchestrator_provider;
     const model = goal.orchestrator_model;
     if (!provider || !model) {
-      this.blockRun(
+      this.engine.blockRun(
         db,
         now,
         { run, stepRun, stepTpl, goal },
@@ -409,7 +397,7 @@ export class OrchestratorService {
     );
 
     if (!result.ok) {
-      this.blockRun(db, now, { run, stepRun, stepTpl, goal }, result.reason, options);
+      this.engine.blockRun(db, now, { run, stepRun, stepTpl, goal }, result.reason, options);
       return;
     }
 
@@ -480,7 +468,7 @@ export class OrchestratorService {
           warningsCount: facts.outcome.warningsCount,
           reason: "no shadow session available for recovery scoring",
         });
-    await this.requestNextDecision(db, nowWithFirstTimestamp(now, finishedAt), run.id, {
+    await this.engine.requestNextDecision(db, nowWithFirstTimestamp(now, finishedAt), run.id, {
       ...options,
       stepResultByStepRunId: {
         ...options.stepResultByStepRunId,
@@ -652,7 +640,7 @@ export class OrchestratorService {
         if (!stepTpl) return;
         const goal = readGoal(db, run.goalId);
         const mode = this.stepDispatch!.resolveMode(choice.adapterId);
-        this.commitDeterministicStepSelection(
+        this.engine.commitDeterministicStepSelection(
           db,
           now,
           { run, stepRun, stepTpl, template, goal },
@@ -784,7 +772,7 @@ export class OrchestratorService {
     if (!stepTpl) return;
 
     // (7) Record the decision.
-    this.commitUserInputDecision(
+    this.engine.commitUserInputDecision(
       db,
       now,
       run.goalId,
@@ -1285,7 +1273,7 @@ export class OrchestratorService {
           void this.workerTerminate?.(sessionId);
         }
         const stepResult = buildApprovalStepResult(buildStepResultBuilderDeps(this.broker), db, ctx, action.scoring, finishedAt);
-        await this.advanceToNextStep(db, nowWithFirstTimestamp(now, finishedAt), ctx.run.id, {
+        await this.engine.advanceToNextStep(db, nowWithFirstTimestamp(now, finishedAt), ctx.run.id, {
           ...options,
           stepResultByStepRunId: {
             ...options.stepResultByStepRunId,
@@ -1539,7 +1527,7 @@ export class OrchestratorService {
     if (!firstStep) throw new Error(`template has no first step: ${run.templateId}`);
     const stepRun = readStepRun(db, run.currentStepRunId);
     const goal = readGoal(db, run.goalId);
-    await this.spawnStepAgent(
+    await this.engine.spawnStepAgent(
       db,
       now,
       { run, stepRun, stepTpl: firstStep, template, goal },
@@ -1577,7 +1565,7 @@ export class OrchestratorService {
       )
       .get(run.goalId) as GoalRow | undefined;
     if (!goal) return;
-    await this.spawnStepAgent(db, now, { run, stepRun, stepTpl, template, goal }, options);
+    await this.engine.spawnStepAgent(db, now, { run, stepRun, stepTpl, template, goal }, options);
   }
 
   /**
@@ -1631,7 +1619,7 @@ export class OrchestratorService {
     if (sessionRow?.id) void this.workerTerminate?.(sessionRow.id);
 
     const stepResult = buildApprovalStepResult(buildStepResultBuilderDeps(this.broker), db, ctx, stash.scoring ?? undefined, stash.finishedAt);
-    await this.advanceToNextStep(db, nowWithFirstTimestamp(now, stash.finishedAt), run.id, {
+    await this.engine.advanceToNextStep(db, nowWithFirstTimestamp(now, stash.finishedAt), run.id, {
       ...options,
       stepResultByStepRunId: { ...options.stepResultByStepRunId, [stepRun.id]: stepResult },
       terminalFinishedAtByStepRunId: { ...options.terminalFinishedAtByStepRunId, [stepRun.id]: stash.finishedAt },
@@ -1773,7 +1761,7 @@ export class OrchestratorService {
       )
       .all(...goalParams) as { run_id: string }[];
     for (const p of pausedGates) {
-      await this.confirmGate(db, now, p.run_id, options);
+      await this.engine.confirmGate(db, now, p.run_id, options);
     }
 
     // Runs parked at a splitter confirmation checkpoint also resume.
@@ -1783,7 +1771,7 @@ export class OrchestratorService {
       )
       .all(...goalParams) as { run_id: string }[];
     for (const p of pausedSplits) {
-      await this.confirmSplit(db, now, p.run_id, options);
+      await this.engine.confirmSplit(db, now, p.run_id, options);
     }
   }
 
@@ -1814,111 +1802,6 @@ export class OrchestratorService {
       }
     );
     return true;
-  }
-
-  async advanceToNextStep(
-    db: Database.Database,
-    now: () => string,
-    runId: string,
-    options: RequestNextDecisionOptions = {}
-  ): Promise<void> {
-    return this.engine.advanceToNextStep(db, now, runId, options);
-  }
-
-  async requestNextDecision(
-    db: Database.Database,
-    now: () => string,
-    workflowRunId: string,
-    options: RequestNextDecisionOptions = {}
-  ): Promise<{ decision: WorkflowDecisionTrace; recommendationIds: string[] }> {
-    return this.engine.requestNextDecision(db, now, workflowRunId, options);
-  }
-
-  private commitDeterministicStepSelection(
-    db: Database.Database,
-    now: () => string,
-    ctx: {
-      run: WorkflowRunT;
-      stepRun: StepRunRow;
-      stepTpl: WorkflowStepTemplate;
-      template: WorkflowTemplateT;
-      goal: GoalRow;
-    },
-    dispatch: ResolvedStepDispatch,
-    options: RequestNextDecisionOptions
-  ): { decision: WorkflowDecisionTrace; recommendationIds: string[] } {
-    return this.engine.commitDeterministicStepSelection(db, now, ctx, dispatch, options);
-  }
-
-  async decideGate(
-    db: Database.Database,
-    now: () => string,
-    runId: string,
-    outcome: "approved" | "rejected",
-    options: RequestNextDecisionOptions & { reason?: string } = {}
-  ): Promise<void> {
-    return this.engine.decideGate(db, now, runId, outcome, options);
-  }
-
-  async confirmGate(
-    db: Database.Database,
-    now: () => string,
-    runId: string,
-    options: RequestNextDecisionOptions = {}
-  ): Promise<void> {
-    return this.engine.confirmGate(db, now, runId, options);
-  }
-
-  async confirmSplit(
-    db: Database.Database,
-    now: () => string,
-    runId: string,
-    options: RequestNextDecisionOptions = {}
-  ): Promise<void> {
-    return this.engine.confirmSplit(db, now, runId, options);
-  }
-
-  private blockRun(
-    db: Database.Database,
-    now: () => string,
-    ctx: {
-      run: WorkflowRunT;
-      stepRun: StepRunRow;
-      stepTpl: WorkflowStepTemplate;
-      goal: GoalRow;
-    },
-    reason: string,
-    options: RequestNextDecisionOptions
-  ): { decision: WorkflowDecisionTrace; recommendationIds: string[] } {
-    return this.engine.blockRun(db, now, ctx, reason, options);
-  }
-
-  private commitUserInputDecision(
-    db: Database.Database,
-    now: () => string,
-    goalId: string,
-    workflowRunId: string,
-    stepRun: StepRunRow,
-    stepTpl: WorkflowStepTemplate,
-    rawQuestion: string,
-    options: RequestNextDecisionOptions
-  ): { decision: WorkflowDecisionTrace; recommendationIds: string[] } {
-    return this.engine.commitUserInputDecision(db, now, goalId, workflowRunId, stepRun, stepTpl, rawQuestion, options);
-  }
-
-  private async spawnStepAgent(
-    db: Database.Database,
-    now: () => string,
-    ctx: {
-      run: WorkflowRunT;
-      stepRun: StepRunRow;
-      stepTpl: WorkflowStepTemplate;
-      template: WorkflowTemplateT;
-      goal: GoalRow;
-    },
-    options: RequestNextDecisionOptions
-  ): Promise<void> {
-    return this.engine.spawnStepAgent(db, now, ctx, options);
   }
 
 }

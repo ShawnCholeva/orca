@@ -7,6 +7,7 @@ import { resetWorkflowStepProjectionPreparedStatements } from "../steps/projecti
 import type { SessionOutputSnapshot } from "@orca/contracts";
 import type { SessionOutputStore } from "../../sessions/output-store.js";
 import { OrchestratorService } from "./service.js";
+import { DispatchEngine } from "./dispatch-engine.js";
 import {
   cleanupHarness,
   NOW,
@@ -157,10 +158,19 @@ function makeService(
   outputStore: SessionOutputStore,
   extra: { launcher?: WorkflowSessionLauncher } = {}
 ): OrchestratorService {
-  return new OrchestratorService(
+  const engine = new DispatchEngine(
     broker as never,
     fakeRegistry(),
-    extra.launcher,
+    extra.launcher ?? { launch: async () => { throw new Error("direct_launch_unsupported"); } },
+    extra.launcher ? fakeStepDispatch() : undefined,
+    undefined,
+    undefined,
+    undefined
+  );
+  return new OrchestratorService(
+    engine,
+    broker as never,
+    fakeRegistry(),
     outputStore,
     extra.launcher ? fakeStepDispatch() : undefined
   );

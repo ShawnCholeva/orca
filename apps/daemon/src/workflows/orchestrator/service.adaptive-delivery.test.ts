@@ -28,7 +28,7 @@ import type {
   BrokerCompatibilityOptions,
   OrchestrationTransportBroker,
 } from "../orchestration-transport/broker.js";
-import { OrchestratorService } from "./service.js";
+import { DispatchEngine } from "./dispatch-engine.js";
 import type { OperatorDescriptor } from "@orca/contracts";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import type { StepDispatchCapabilities } from "./service.js";
@@ -107,7 +107,7 @@ function makeLauncher(): WorkflowSessionLauncher {
 
 function makeService(
   broker: Pick<OrchestrationTransportBroker, "propose">
-): OrchestratorService {
+): DispatchEngine {
   const agentDescriptor: OperatorDescriptor = {
     id: AGENT_OPERATOR_ID,
     kind: "agent",
@@ -117,12 +117,14 @@ function makeService(
     supportsRepoEditing: true,
     supportsTerminal: true,
   };
-  return new OrchestratorService(
+  return new DispatchEngine(
     broker,
     { async list() { return [agentDescriptor]; } },
     makeLauncher(),
+    adStepDispatch(),
     undefined,
-    adStepDispatch()
+    undefined,
+    undefined
   );
 }
 
