@@ -1668,22 +1668,20 @@ describe("OrcaChat", () => {
     });
     listWorkflowDecisionsMock.mockResolvedValue({ decisions: [] });
     listWorkflowRunArtifactsMock.mockResolvedValue({ artifacts: [] });
-    listRecommendationsMock.mockResolvedValue({
-      recommendations: [
-        {
-          id: "rec-complete-1",
-          goalId: "goal-1",
-          type: "complete_workflow_run",
-          status: "proposed",
-          proposedAction: {
-            kind: "complete_workflow_run",
-            workflowRunId: "run-1",
-            workflowStepRunId: "step-verify",
-          },
-        },
-      ],
-      generations: [],
-    });
+    // The daemon persists a mark_done_pending activity carrying the rec id —
+    // the component derives awaitingApproval + completionRecId from it directly.
+    listActivitiesMock.mockResolvedValue([{
+      ...activeActivity,
+      id: "a-mark-done-1",
+      workflowRunId: "run-1",
+      stepRunId: "step-verify",
+      status: "paused_for_input",
+      currentText: "Approve to complete the run.",
+      sourceKind: "mark_done_pending",
+      workCategory: null,
+      confidence: null,
+      recommendationId: "rec-complete-1",
+    }]);
 
     const { OrcaChat } = await import("./OrcaChat");
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
@@ -1692,7 +1690,7 @@ describe("OrcaChat", () => {
     // The parked terminal step must not read as running.
     expect(screen.queryByText("running")).toBeNull();
 
-    // The approve-to-complete affordance appears once the recommendation loads.
+    // The approve-to-complete affordance appears once the activity loads.
     const approve = await screen.findByRole("button", { name: /approve to complete/i });
     fireEvent.click(approve);
 
@@ -1871,6 +1869,32 @@ describe("OrcaChat", () => {
 
     expect(await screen.findByText("Wiring up the hook...")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId("answer-thinking")).toBeNull());
+  });
+
+  it("derives the approve-to-complete affordance from the mark_done_pending activity", async () => {
+    setupRunLoad();
+    listActivitiesMock.mockResolvedValue([{
+      ...activeActivity,
+      id: "a-mark-done",
+      status: "paused_for_input",
+      currentText: "Approve to complete the run.",
+      sourceKind: "mark_done_pending",
+      workCategory: null,
+      confidence: null,
+      recommendationId: "rec-42",
+    }]);
+    const { OrcaChat } = await import("./OrcaChat");
+    render(
+      <OrcaChat
+        goals={[goal]}
+        selectedGoalId="goal-1"
+        connectionStatus="open"
+      />,
+    );
+    const approve = await screen.findByRole("button", { name: /approve/i });
+    fireEvent.click(approve);
+    await waitFor(() => expect(acceptRecommendationMock).toHaveBeenCalledWith("rec-42", {}));
+    expect(listRecommendationsMock).not.toHaveBeenCalled();
   });
 });
 

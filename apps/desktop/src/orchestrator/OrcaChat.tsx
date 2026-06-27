@@ -26,7 +26,6 @@ import {
   interruptStep,
   listActivities,
   listOrchestratorMessages,
-  listRecommendations,
   listWorkflowDecisions,
   listWorkflowRunArtifacts,
   listWorkflowTemplates,
@@ -121,9 +120,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const [sendingMessage, setSendingMessage] = useState(false);
   const [answerPendingSince, setAnswerPendingSince] = useState<number | null>(null);
   const [awaitingReply, setAwaitingReply] = useState(false);
-  // The proposed complete_workflow_run recommendation id for the parked terminal
-  // step, fetched only while awaiting approval, plus the in-flight accept flag.
-  const [completionRecId, setCompletionRecId] = useState<string | null>(null);
+  // In-flight flag while accepting the complete_workflow_run recommendation.
   const [approvingCompletion, setApprovingCompletion] = useState(false);
   // In-flight flag while submitting a human gate approve/reject decision.
   const [decidingGate, setDecidingGate] = useState(false);
@@ -580,49 +577,16 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const workflowFinished =
     workflowState.stepRun?.status === "passed" &&
     trackerActiveIndex === sortedSteps.length - 1;
-  // The terminal step parks the run "active" with finished_at set while awaiting
-  // completion approval (the complete_workflow_run recommendation). In that state
-  // the work is done but the goal is not complete, so the tracker must show
-  // "awaiting approval" rather than a finished check (which read as "done").
-  const awaitingApproval =
-    workflowState.stepRun?.status === "active" &&
-    workflowState.stepRun?.finishedAt != null &&
-    trackerActiveIndex === sortedSteps.length - 1;
+  // Derive the approve-to-complete affordance from the persisted activity stream.
+  // The daemon emits a mark_done_pending activity (status paused_for_input) that
+  // carries the complete_workflow_run recommendation id; no side fetch needed.
+  const markDonePending = activities.find(
+    (a) => a.sourceKind === "mark_done_pending" && a.status === "paused_for_input",
+  );
+  const awaitingApproval = markDonePending != null;
+  const completionRecId = markDonePending?.recommendationId ?? null;
   const showTracker = workflowState.run !== null && trackerSteps.length > 0;
-
-  // Load the proposed complete_workflow_run recommendation for the parked run so
-  // the tracker can surface an "Approve to complete" affordance. Only fetched
-  // while awaiting approval; cleared otherwise.
   const runId = workflowState.run?.id ?? null;
-  useEffect(() => {
-    if (!awaitingApproval || !selectedGoalId || !runId) {
-      setCompletionRecId(null);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const body = await listRecommendations(selectedGoalId, {
-          status: "proposed",
-          type: "complete_workflow_run",
-          limit: 50,
-          includeGenerations: false,
-        });
-        if (cancelled) return;
-        const match = body.recommendations.find(
-          (rec) =>
-            rec.proposedAction.kind === "complete_workflow_run" &&
-            rec.proposedAction.workflowRunId === runId,
-        );
-        setCompletionRecId(match?.id ?? null);
-      } catch {
-        if (!cancelled) setCompletionRecId(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [awaitingApproval, selectedGoalId, runId, refreshNonce]);
 
   // Escape interrupts the running step agent so the user can course-correct:
   // it aborts the agent's current turn and focuses the composer. The correction
