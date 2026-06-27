@@ -5,27 +5,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
-import { AntigravityShadowProvider } from "./antigravity.js";
+import { AntigravityAgentProvider } from "./antigravity.js";
 
 type HookRequest = {
   url: string;
   body: { last_assistant_message?: string };
 };
 
-describe("AntigravityShadowProvider", () => {
+describe("AntigravityAgentProvider", () => {
   it("launches agy or override", () => {
-    const provider = new AntigravityShadowProvider();
+    const provider = new AntigravityAgentProvider();
     expect(provider.launch({}).bin).toBe("agy");
     expect(provider.launch({ binOverride: "/bin/agy" }).bin).toBe("/bin/agy");
   });
 
   it("uses hook capture", () => {
-    const provider = new AntigravityShadowProvider();
+    const provider = new AntigravityAgentProvider();
     expect(provider.captureMode()).toEqual({ kind: "hook" });
   });
 
   it("writes hooks.json and relay script under .agents", () => {
-    const provider = new AntigravityShadowProvider();
+    const provider = new AntigravityAgentProvider();
     const cfg = provider.hookConfig({ goalId: "g1", resolverCommand: [process.execPath, "test-daemon.js"] });
     expect(cfg.files.map((f) => f.relPath).sort()).toEqual([
       ".agents/hooks.json",
@@ -37,7 +37,7 @@ describe("AntigravityShadowProvider", () => {
   });
 
   it("parses orca action blocks", () => {
-    const provider = new AntigravityShadowProvider();
+    const provider = new AntigravityAgentProvider();
     const parsed = provider.turnParser().parseAction('done\n<orca:action>{"kind":"wait"}</orca:action>');
     expect(parsed).toBe('{"kind":"wait"}');
   });
@@ -145,7 +145,7 @@ async function writeRelay(args: { port: number }) {
   const cwd = await mkdtemp(join(tmpdir(), "orca-antigravity-relay-"));
   const agentsDir = join(cwd, ".agents");
   await mkdir(agentsDir);
-  const provider = new AntigravityShadowProvider();
+  const provider = new AntigravityAgentProvider();
   const cfg = provider.hookConfig({ goalId: "g1", resolverCommand: makeTestResolverCommand(args.port) });
   const relay = cfg.files.find((f) => f.relPath === ".agents/orca-stop-hook.cjs");
   if (!relay) throw new Error("missing relay script");

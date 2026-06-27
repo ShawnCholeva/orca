@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ClaudeShadowProvider } from "./claude.js";
-import { CodexShadowProvider } from "./codex.js";
+import { ClaudeAgentProvider } from "./claude.js";
+import { CodexAgentProvider } from "./codex.js";
 
 const args = {
   goalId: "g",
@@ -13,7 +13,7 @@ const args = {
 
 describe("worker OTEL telemetry wiring", () => {
   it("Claude worker env enables telemetry pointed at the daemon receiver", () => {
-    const cfg = new ClaudeShadowProvider().workerHookConfig(args);
+    const cfg = new ClaudeAgentProvider().workerHookConfig(args);
     expect(cfg.env?.CLAUDE_CODE_ENABLE_TELEMETRY).toBe("1");
     expect(cfg.env?.OTEL_METRICS_EXPORTER).toBe("otlp");
     expect(cfg.env?.OTEL_LOGS_EXPORTER).toBe("otlp");
@@ -28,7 +28,7 @@ describe("worker OTEL telemetry wiring", () => {
   });
 
   it("Codex config.toml includes a struct-form [otel.exporter.\"otlp-http\"] block + resource attrs", () => {
-    const cfg = new CodexShadowProvider().workerHookConfig(args);
+    const cfg = new CodexAgentProvider().workerHookConfig(args);
     const toml = cfg.files.find((f) => f.relPath === "config.toml")?.contents ?? "";
     expect(toml).toContain("[otel]");
     expect(toml).toContain("log_user_prompt = false");

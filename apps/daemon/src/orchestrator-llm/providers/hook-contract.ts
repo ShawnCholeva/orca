@@ -1,5 +1,5 @@
-import { resolveShadowProvider } from "./registry.js";
-import type { HookAssumption, HookSurface, ShadowAdapterId, ShadowProvider } from "./types.js";
+import { resolveAgentProvider } from "./registry.js";
+import type { HookAssumption, HookSurface, ShadowAdapterId, AgentProvider } from "./types.js";
 
 export const PROVIDER_IDS: ShadowAdapterId[] = ["claude-code", "codex", "antigravity"];
 
@@ -18,7 +18,7 @@ export interface EmittedConfig {
   spawnArgs: string[];
 }
 
-export function emittedFor(provider: ShadowProvider, surface: HookSurface): EmittedConfig {
+export function emittedFor(provider: AgentProvider, surface: HookSurface): EmittedConfig {
   if (surface === "orchestrator") {
     const cfg = provider.hookConfig({ goalId: SYNTHETIC.goalId, resolverCommand: SYNTHETIC.resolverCommand });
     return { files: cfg.files, spawnArgs: [] };
@@ -33,7 +33,7 @@ export function emittedFor(provider: ShadowProvider, surface: HookSurface): Emit
 }
 
 /** Returns a precise drift message, or null if the entry conforms. Unverified entries are skipped. */
-export function conformanceError(provider: ShadowProvider, a: HookAssumption): string | null {
+export function conformanceError(provider: AgentProvider, a: HookAssumption): string | null {
   if (!a.verified) return null;
   const where = `${a.provider}/${a.surface}/${a.event ?? "?"}`;
   const emitted = emittedFor(provider, a.surface);
@@ -58,7 +58,7 @@ export function conformanceError(provider: ShadowProvider, a: HookAssumption): s
 export function assertHookContractConformance(): void {
   const errors: string[] = [];
   for (const id of PROVIDER_IDS) {
-    const provider = resolveShadowProvider(id);
+    const provider = resolveAgentProvider(id);
     for (const entry of provider.hookContract()) {
       const err = conformanceError(provider, entry);
       if (err) errors.push(err);
@@ -91,7 +91,7 @@ function majorMinor(version: string): string | null {
 }
 
 function statusFor(
-  provider: ShadowProvider,
+  provider: AgentProvider,
   a: HookAssumption,
   installedVersion: string | null,
 ): HookContractReportEntry {
@@ -128,7 +128,7 @@ export function checkHookContracts(args: {
 }): { contracts: HookContractReportEntry[] } {
   const contracts: HookContractReportEntry[] = [];
   for (const id of PROVIDER_IDS) {
-    const provider = resolveShadowProvider(id);
+    const provider = resolveAgentProvider(id);
     const installed = args.versions[id] ?? null;
     for (const entry of provider.hookContract()) {
       contracts.push(statusFor(provider, entry, installed));

@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { resolveShadowProvider } from "./registry.js";
+import { resolveAgentProvider } from "./registry.js";
 
-describe("resolveShadowProvider", () => {
+describe("resolveAgentProvider", () => {
   it("returns the claude-code provider exposing the interface members", () => {
-    const provider = resolveShadowProvider("claude-code");
+    const provider = resolveAgentProvider("claude-code");
     expect(provider.id).toBe("claude-code");
     expect(typeof provider.displayName).toBe("string");
     expect(typeof provider.modelProviderId).toBe("string");
@@ -14,7 +14,7 @@ describe("resolveShadowProvider", () => {
   });
 
   it("returns the codex provider exposing the interface members", () => {
-    const provider = resolveShadowProvider("codex");
+    const provider = resolveAgentProvider("codex");
     expect(provider.id).toBe("codex");
     expect(typeof provider.displayName).toBe("string");
     expect(typeof provider.modelProviderId).toBe("string");
@@ -25,18 +25,18 @@ describe("resolveShadowProvider", () => {
   });
 
   it("returns the antigravity provider exposing the interface members", () => {
-    const provider = resolveShadowProvider("antigravity");
+    const provider = resolveAgentProvider("antigravity");
     expect(provider.id).toBe("antigravity");
     expect(provider.modelProviderId).toBe("orca/google");
     expect(provider.captureMode()).toEqual({ kind: "hook" });
   });
 
   it("captures codex turns via hook (not pane-poll)", () => {
-    expect(resolveShadowProvider("codex").captureMode()).toEqual({ kind: "hook" });
+    expect(resolveAgentProvider("codex").captureMode()).toEqual({ kind: "hook" });
   });
 
   it("detects Claude Code session-limit screens as terminal errors", () => {
-    const failure = resolveShadowProvider("claude-code")
+    const failure = resolveAgentProvider("claude-code")
       .turnParser()
       .detectError?.("You've hit your session limit · resets 1:20am");
 
@@ -44,7 +44,7 @@ describe("resolveShadowProvider", () => {
   });
 
   it("parses Claude session-limit reset time with timezone", () => {
-    const failure = resolveShadowProvider("claude-code")
+    const failure = resolveAgentProvider("claude-code")
       .turnParser()
       .detectError?.(
         "You've hit your session limit · resets 4:20am (America/New_York)\n/upgrade to increase your usage limit.",
@@ -64,7 +64,7 @@ describe("resolveShadowProvider", () => {
     // 2026-11-01. A 4:20am reset lands after the transition, so EST applies:
     // 4:20 + 5h = 09:20Z. A naive single-pass offset reads -4 and yields the
     // wrong 08:20Z (1h early).
-    const failure = resolveShadowProvider("claude-code")
+    const failure = resolveAgentProvider("claude-code")
       .turnParser()
       .detectError?.(
         "You've hit your session limit · resets 4:20am (America/New_York)\n/upgrade to increase your usage limit.",
@@ -78,7 +78,7 @@ describe("resolveShadowProvider", () => {
   });
 
   it("preserves resetTimeText but leaves resetAt/timezone null when no timezone in Claude reset", () => {
-    const failure = resolveShadowProvider("claude-code")
+    const failure = resolveAgentProvider("claude-code")
       .turnParser()
       .detectError?.(
         "You've hit your session limit · resets 4:20am",
@@ -93,7 +93,7 @@ describe("resolveShadowProvider", () => {
   });
 
   it("returns null reset fields when Claude session limit has no reset text", () => {
-    const failure = resolveShadowProvider("claude-code")
+    const failure = resolveAgentProvider("claude-code")
       .turnParser()
       .detectError?.(
         "You've hit your session limit",
@@ -108,7 +108,7 @@ describe("resolveShadowProvider", () => {
   });
 
   it("detects Codex usage-limit as a structured terminal failure", () => {
-    const failure = resolveShadowProvider("codex")
+    const failure = resolveAgentProvider("codex")
       .turnParser()
       .detectError?.("You've hit your usage limit. Please try again later.");
     expect(failure).toMatchObject({
@@ -121,7 +121,7 @@ describe("resolveShadowProvider", () => {
   });
 
   it("detects Codex auth-lost as a structured terminal failure", () => {
-    const failure = resolveShadowProvider("codex")
+    const failure = resolveAgentProvider("codex")
       .turnParser()
       .detectError?.("You are not signed in. Login required.");
     expect(failure).toMatchObject({
@@ -134,7 +134,7 @@ describe("resolveShadowProvider", () => {
   });
 
   it("detects Antigravity auth/quota as a structured terminal failure", () => {
-    const failure = resolveShadowProvider("antigravity")
+    const failure = resolveAgentProvider("antigravity")
       .turnParser()
       .detectError?.("You are not signed in.");
     expect(failure).toMatchObject({
@@ -156,7 +156,7 @@ describe("resolveShadowProvider", () => {
       '{ "kind": "advance", "note": "ready" }',
       "```",
     ].join("\n");
-    const action = resolveShadowProvider("codex").turnParser().parseAction(lastAssistantMessage);
+    const action = resolveAgentProvider("codex").turnParser().parseAction(lastAssistantMessage);
     expect(action).toBe('{ "kind": "advance", "note": "ready" }');
   });
 
@@ -165,29 +165,29 @@ describe("resolveShadowProvider", () => {
     // falls through to the retained TUI-pane parser (extractCodexPaneAction). This keeps
     // the dormant fallback covered now that capture is hook-based.
     const paneText = ["  some preamble", '  • { "kind": "advance", "note": "ok" }', "  › "].join("\n");
-    const action = resolveShadowProvider("codex").turnParser().parseAction(paneText);
+    const action = resolveAgentProvider("codex").turnParser().parseAction(paneText);
     expect(action).toBe('{ "kind": "advance", "note": "ok" }');
   });
 
   it("compacts a multiline-wrapped codex pane bullet into valid JSON", () => {
     const paneText = ["  • { \"kind\": \"advance\",", '      "note": "ok" }', "  › "].join("\n");
-    const action = resolveShadowProvider("codex").turnParser().parseAction(paneText);
+    const action = resolveAgentProvider("codex").turnParser().parseAction(paneText);
     expect(action).toBe('{ "kind": "advance", "note": "ok" }');
   });
 
   it("codex launch bypasses hook-trust so its hooks fire unattended; claude does not", () => {
-    expect(resolveShadowProvider("codex").launch({}).args).toContain("--dangerously-bypass-hook-trust");
-    expect(resolveShadowProvider("claude-code").launch({}).args ?? []).not.toContain("--dangerously-bypass-hook-trust");
+    expect(resolveAgentProvider("codex").launch({}).args).toContain("--dangerously-bypass-hook-trust");
+    expect(resolveAgentProvider("claude-code").launch({}).args ?? []).not.toContain("--dangerously-bypass-hook-trust");
   });
 
   it("surfaces permission-persistence support per provider", () => {
-    expect(resolveShadowProvider("claude-code").supportsPermissionPersistence).toBe(true);
-    expect(resolveShadowProvider("codex").supportsPermissionPersistence).toBe(false);
-    expect(resolveShadowProvider("antigravity").supportsPermissionPersistence).toBe(false);
+    expect(resolveAgentProvider("claude-code").supportsPermissionPersistence).toBe(true);
+    expect(resolveAgentProvider("codex").supportsPermissionPersistence).toBe(false);
+    expect(resolveAgentProvider("antigravity").supportsPermissionPersistence).toBe(false);
   });
 
   it("throws on an unknown adapter id", () => {
     // @ts-expect-error exercising the runtime guard with an invalid id
-    expect(() => resolveShadowProvider("nope")).toThrow();
+    expect(() => resolveAgentProvider("nope")).toThrow();
   });
 });

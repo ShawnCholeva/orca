@@ -5,7 +5,7 @@ import type {
   ShadowCaptureMode,
   ShadowHookConfig,
   ShadowLaunch,
-  ShadowProvider,
+  AgentProvider,
   ShadowTurnParse,
 } from "./types.js";
 import type { TmuxRunner } from "../../tmux/runner.js";
@@ -13,7 +13,7 @@ import type { TmuxRunner } from "../../tmux/runner.js";
 const AUTH_OR_QUOTA =
   /\bnot\s+(?:signed|logged)\s+in\b|\bauth(?:entication)?\s+(?:required|expired|failed)\b|\brate limit\b|\bquota\b|\busage limit\b/i;
 
-export class AntigravityShadowProvider implements ShadowProvider {
+export class AntigravityAgentProvider implements AgentProvider {
   readonly id = "antigravity" as const;
   readonly displayName = "Antigravity";
   readonly modelProviderId = "orca/google";

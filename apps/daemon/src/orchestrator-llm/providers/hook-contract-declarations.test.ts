@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { resolveShadowProvider } from "./registry.js";
+import { resolveAgentProvider } from "./registry.js";
 
 describe("hookContract declarations", () => {
   it("Codex declares a verified worker PermissionRequest with payload fields and the bypass spawn arg", () => {
-    const entries = resolveShadowProvider("codex").hookContract();
+    const entries = resolveAgentProvider("codex").hookContract();
     const perm = entries.find((e) => e.surface === "worker" && e.event === "PermissionRequest");
     expect(perm).toBeDefined();
     expect(perm!.verified).toBe(true);
@@ -16,7 +16,7 @@ describe("hookContract declarations", () => {
   });
 
   it("Antigravity declares Stop verified but the worker permission surface unverified", () => {
-    const entries = resolveShadowProvider("antigravity").hookContract();
+    const entries = resolveAgentProvider("antigravity").hookContract();
     const stop = entries.find((e) => e.surface === "orchestrator" && e.event === "Stop");
     const worker = entries.find((e) => e.surface === "worker");
     expect(stop!.verified).toBe(true);
@@ -26,7 +26,7 @@ describe("hookContract declarations", () => {
   });
 
   it("Claude declares verified orchestrator + worker Stop and PermissionRequest entries", () => {
-    const entries = resolveShadowProvider("claude-code").hookContract();
+    const entries = resolveAgentProvider("claude-code").hookContract();
     expect(entries.some((e) => e.surface === "orchestrator" && e.event === "Stop")).toBe(true);
     expect(entries.some((e) => e.surface === "worker" && e.event === "PermissionRequest")).toBe(true);
     expect(entries.every((e) => e.provider === "claude-code")).toBe(true);

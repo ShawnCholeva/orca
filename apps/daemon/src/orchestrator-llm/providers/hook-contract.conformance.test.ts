@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { conformanceError, assertHookContractConformance } from "./hook-contract.js";
-import { resolveShadowProvider } from "./registry.js";
-import type { HookAssumption, ShadowProvider } from "./types.js";
+import { resolveAgentProvider } from "./registry.js";
+import type { HookAssumption, AgentProvider } from "./types.js";
 
 describe("hook contract self-conformance", () => {
   it("all three providers' declared contracts conform to their emitted config", () => {
@@ -9,7 +9,7 @@ describe("hook contract self-conformance", () => {
   });
 
   it("flags a declared event that is not in the emitted config", () => {
-    const provider = resolveShadowProvider("codex");
+    const provider = resolveAgentProvider("codex");
     const bogus: HookAssumption = {
       provider: "codex", surface: "worker", event: "TotallyMadeUpEvent",
       file: "hooks.json", payloadFields: [], assertSpawnArg: null,
@@ -20,7 +20,7 @@ describe("hook contract self-conformance", () => {
   });
 
   it("flags a declared payload field absent from the emitted config", () => {
-    const provider = resolveShadowProvider("codex");
+    const provider = resolveAgentProvider("codex");
     const bogus: HookAssumption = {
       provider: "codex", surface: "worker", event: "PermissionRequest",
       file: "hooks.json", payloadFields: ["no_such_field"], assertSpawnArg: null,
@@ -31,7 +31,7 @@ describe("hook contract self-conformance", () => {
   });
 
   it("skips unverified entries (no emitted config to check)", () => {
-    const provider = resolveShadowProvider("antigravity");
+    const provider = resolveAgentProvider("antigravity");
     const unverified: HookAssumption = {
       provider: "antigravity", surface: "worker", event: null, file: null,
       payloadFields: [], assertSpawnArg: null, firingContext: "unknown",
@@ -41,8 +41,8 @@ describe("hook contract self-conformance", () => {
   });
 
   it("does not accept StopFailure as conformance for a declared Stop event", () => {
-    function stubOrchestratorProvider(contents: string): ShadowProvider {
-      return { hookConfig: () => ({ files: [{ relPath: "hooks.json", contents }] }) } as unknown as ShadowProvider;
+    function stubOrchestratorProvider(contents: string): AgentProvider {
+      return { hookConfig: () => ({ files: [{ relPath: "hooks.json", contents }] }) } as unknown as AgentProvider;
     }
 
     const entry: HookAssumption = {
@@ -57,7 +57,7 @@ describe("hook contract self-conformance", () => {
   });
 
   it("flags a missing declared spawn arg", () => {
-    const provider = resolveShadowProvider("codex");
+    const provider = resolveAgentProvider("codex");
     const entry: HookAssumption = {
       provider: "codex", surface: "worker", event: "PermissionRequest", file: "hooks.json",
       payloadFields: [], assertSpawnArg: "--no-such-flag", firingContext: "x",

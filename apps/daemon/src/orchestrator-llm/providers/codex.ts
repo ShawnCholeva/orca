@@ -7,7 +7,7 @@ import type {
   ShadowCaptureMode,
   ShadowHookConfig,
   ShadowLaunch,
-  ShadowProvider,
+  AgentProvider,
   ShadowTurnParse,
 } from "./types.js";
 import type { TmuxRunner } from "../../tmux/runner.js";
@@ -20,7 +20,7 @@ const CODEX_AUTH_LOST =
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export class CodexShadowProvider implements ShadowProvider {
+export class CodexAgentProvider implements AgentProvider {
   readonly id = "codex" as const;
   readonly displayName = "Codex";
   readonly modelProviderId = "orca/openai";

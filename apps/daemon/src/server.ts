@@ -246,7 +246,7 @@ import { buildContextFromDb } from './orchestrator-llm/build-context.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
 import { registerAgentHookRoutes } from './agent-hooks/routes.js';
 import { WorkerSessionManager } from './workflows/orchestrator/worker-session.js';
-import { resolveShadowProvider } from './orchestrator-llm/providers/registry.js';
+import { resolveAgentProvider } from './orchestrator-llm/providers/registry.js';
 import { WorkerQuestionStore } from './workflows/orchestrator/worker-questions.js';
 import { PermissionApprovalStore } from './workflows/orchestrator/permission-approvals.js';
 import { validateAnswers, assembleAnswerReason, assembleFreeTextReason } from './workflows/orchestrator/worker-answer-format.js';
@@ -592,7 +592,7 @@ export function createServer(
     otlpBaseUrl: `http://127.0.0.1:${config.port}/v1/otlp`,
     hookResolverCommand: config.hookResolverCommand,
     claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
-    resolveProvider: (adapterId) => resolveShadowProvider(adapterId as ShadowAdapterId),
+    resolveProvider: (adapterId) => resolveAgentProvider(adapterId as ShadowAdapterId),
     captureSink: (sessionId, chunk) => sessionOutputStore.appendChunk(sessionId, chunk),
     markRunning: (sessionId) => {
       db.prepare(
@@ -1558,7 +1558,7 @@ export function createServer(
       });
       if (isNew) {
         const adapterId = (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(sessionId) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code";
-        const supportsPermissionPersistence = resolveShadowProvider(adapterId as ShadowAdapterId).supportsPermissionPersistence;
+        const supportsPermissionPersistence = resolveAgentProvider(adapterId as ShadowAdapterId).supportsPermissionPersistence;
         const actionClass = actionClassOf(
           payload.toolName,
           classifyToolAction({ toolName: payload.toolName, toolInput: payload.toolInput })
@@ -1726,7 +1726,7 @@ export function createServer(
     if (parsed.data.decision === "allow" && parsed.data.remember) {
       try {
         const adapterId = (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(pending.sessionId) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code";
-        const provider = resolveShadowProvider(adapterId as ShadowAdapterId);
+        const provider = resolveAgentProvider(adapterId as ShadowAdapterId);
         const rule = provider.permissionRule(pending.toolName, pending.toolInput);
         if (rule) {
           const wsRow = db.prepare("SELECT w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC LIMIT 1").get(goalId) as { path: string } | undefined;

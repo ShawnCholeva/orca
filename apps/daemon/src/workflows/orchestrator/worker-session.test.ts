@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkerSessionManager } from "./worker-session.js";
 import type { TmuxRunner } from "../../tmux/runner.js";
-import { resolveShadowProvider } from "../../orchestrator-llm/providers/registry.js";
+import { resolveAgentProvider } from "../../orchestrator-llm/providers/registry.js";
 import type { ShadowAdapterId } from "../../orchestrator-llm/providers/types.js";
 
-// Wrap resolveShadowProvider to widen the parameter type from ShadowAdapterId to string,
+// Wrap resolveAgentProvider to widen the parameter type from ShadowAdapterId to string,
 // satisfying the WorkerSessionDeps.resolveProvider signature.
-const resolveProvider = (adapterId: string) => resolveShadowProvider(adapterId as ShadowAdapterId);
+const resolveProvider = (adapterId: string) => resolveAgentProvider(adapterId as ShadowAdapterId);
 
 function fakeTmux(paneByCall: string[] = []): TmuxRunner & { calls: string[][] } {
   const calls: string[][] = [];

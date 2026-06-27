@@ -2,9 +2,9 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveShadowProvider } from "./registry.js";
+import { resolveAgentProvider } from "./registry.js";
 
-const claude = resolveShadowProvider("claude-code");
+const claude = resolveAgentProvider("claude-code");
 
 describe("permissionRule (claude)", () => {
   it("Bash → program prefix from the first token", () => {
@@ -33,7 +33,7 @@ describe("permissionRule (claude)", () => {
   });
   it("codex and antigravity return null (no writer yet)", () => {
     for (const id of ["codex", "antigravity"] as const) {
-      expect(resolveShadowProvider(id).permissionRule("Bash", { command: "ls" })).toBeNull();
+      expect(resolveAgentProvider(id).permissionRule("Bash", { command: "ls" })).toBeNull();
     }
   });
 });

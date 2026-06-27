@@ -49,7 +49,7 @@ import { existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { SHADOW_LLM_TIMEOUT_MS } from "../../orchestrator-llm/shadow-llm-client.js";
 import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
-import { resolveShadowProvider } from "../../orchestrator-llm/providers/registry.js";
+import { resolveAgentProvider } from "../../orchestrator-llm/providers/registry.js";
 import { listAgents } from "../../agents.js";
 import { buildProviderRecoveryChoices } from "./provider-recovery.js";
 import {
@@ -495,7 +495,7 @@ export class OrchestratorService {
 
     // (3) Decode the full tail; provider terminal/turn parsing happens below.
     const tail = decodeSessionTail(this.sessionOutputStore.readTail(args.sessionId));
-    const provider = resolveShadowProvider(sess.adapter_id as ShadowAdapterId);
+    const provider = resolveAgentProvider(sess.adapter_id as ShadowAdapterId);
     const bus = options.bus ?? new EventBus();
     const activityCtx = { db, bus, now, idFactory: options.idFactory };
 

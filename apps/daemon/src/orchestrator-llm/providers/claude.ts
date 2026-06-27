@@ -9,7 +9,7 @@ import type {
   ShadowCaptureMode,
   ShadowHookConfig,
   ShadowLaunch,
-  ShadowProvider,
+  AgentProvider,
   ShadowTurnParse,
 } from "./types.js";
 import type { TmuxRunner } from "../../tmux/runner.js";
@@ -114,7 +114,7 @@ function parseClaudeSessionLimit(text: string, detectedAt = new Date()): Provide
   };
 }
 
-export class ClaudeShadowProvider implements ShadowProvider {
+export class ClaudeAgentProvider implements AgentProvider {
   readonly id = "claude-code" as const;
   readonly displayName = "Claude Code";
   readonly modelProviderId = "orca/anthropic";

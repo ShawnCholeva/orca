@@ -78,7 +78,7 @@ export interface ShadowTurnParse {
   detectTurnStarted?(turnText: string): boolean;
 }
 
-export interface ShadowProvider {
+export interface AgentProvider {
   readonly id: ShadowAdapterId;
   readonly displayName: string;
   /** Model-provider registry id used by the non-shadow LLM client. */
@@ -90,7 +90,7 @@ export interface ShadowProvider {
   /**
    * Hook config for a workflow-step worker session of this provider. Returns files
    * to write under the worker's private config dir plus spawn args/env to append.
-   * (Generalizes the provider seam to workers; future: rename to AgentProvider.)
+   * (Generalizes the AgentProvider seam to workers — part of the agent-provider contract.)
    */
   workerHookConfig(args: {
     goalId: string;

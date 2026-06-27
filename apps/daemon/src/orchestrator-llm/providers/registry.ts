@@ -1,15 +1,15 @@
-import { ClaudeShadowProvider } from "./claude.js";
-import { CodexShadowProvider } from "./codex.js";
-import { AntigravityShadowProvider } from "./antigravity.js";
-import type { ShadowAdapterId, ShadowProvider } from "./types.js";
+import { ClaudeAgentProvider } from "./claude.js";
+import { CodexAgentProvider } from "./codex.js";
+import { AntigravityAgentProvider } from "./antigravity.js";
+import type { ShadowAdapterId, AgentProvider } from "./types.js";
 
-const PROVIDERS: Record<ShadowAdapterId, ShadowProvider> = {
-  "claude-code": new ClaudeShadowProvider(),
-  codex: new CodexShadowProvider(),
-  antigravity: new AntigravityShadowProvider(),
+const PROVIDERS: Record<ShadowAdapterId, AgentProvider> = {
+  "claude-code": new ClaudeAgentProvider(),
+  codex: new CodexAgentProvider(),
+  antigravity: new AntigravityAgentProvider(),
 };
 
-export function resolveShadowProvider(id: ShadowAdapterId): ShadowProvider {
+export function resolveAgentProvider(id: ShadowAdapterId): AgentProvider {
   const provider = PROVIDERS[id];
   if (!provider) throw new Error(`unknown shadow provider: ${id}`);
   return provider;

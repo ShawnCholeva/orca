@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { resolveShadowProvider } from "./registry.js";
+import { resolveAgentProvider } from "./registry.js";
 
 const RESOLVER = ["node", "test-daemon.js"];
 
 describe("workerHookConfig", () => {
   it("Claude returns a settings.json file (with PermissionRequest) and a --settings spawn arg", () => {
-    const provider = resolveShadowProvider("claude-code");
+    const provider = resolveAgentProvider("claude-code");
     const cfg = provider.workerHookConfig({ goalId: "g1", sessionId: "s1", resolverCommand: RESOLVER, configDir: "/tmp/cfg" });
     const settings = cfg.files.find((f) => f.relPath === "settings.json");
     expect(settings).toBeDefined();
@@ -14,7 +14,7 @@ describe("workerHookConfig", () => {
   });
 
   it("Codex returns config.toml + hooks.json (Stop/StopFailure + PermissionRequest) and CODEX_HOME env", () => {
-    const provider = resolveShadowProvider("codex");
+    const provider = resolveAgentProvider("codex");
     const cfg = provider.workerHookConfig({ goalId: "g1", sessionId: "s1", resolverCommand: RESOLVER, configDir: "/tmp/cfg" });
 
     // CODEX_HOME discovery: files live at the root of the config dir (CODEX_HOME).
@@ -67,7 +67,7 @@ describe("workerHookConfig", () => {
   });
 
   it("Antigravity returns an empty worker config (no permission flow yet)", () => {
-    const cfg = resolveShadowProvider("antigravity").workerHookConfig({ goalId: "g", sessionId: "s", resolverCommand: RESOLVER, configDir: "/tmp" });
+    const cfg = resolveAgentProvider("antigravity").workerHookConfig({ goalId: "g", sessionId: "s", resolverCommand: RESOLVER, configDir: "/tmp" });
     expect(cfg.files).toEqual([]);
     expect(cfg.spawnArgs).toEqual([]);
   });

@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { resolveShadowProvider } from "./providers/registry.js";
-import type { ShadowProvider } from "./providers/types.js";
+import { resolveAgentProvider } from "./providers/registry.js";
+import type { AgentProvider } from "./providers/types.js";
 import {
   type TmuxRunner,
   defaultTmuxRunner,
@@ -52,7 +52,7 @@ interface Pending {
 
 interface Session {
   adapterId: ShadowAdapterId;
-  provider: ShadowProvider;
+  provider: AgentProvider;
   name: string;            // tmux session name
   ready: Promise<void>;
   queue: Promise<unknown>;
@@ -84,7 +84,7 @@ export class ShadowSessionManager {
     const existing = this.sessions.get(goalId);
     if (existing?.adapterId === adapterId) return shadowSessionId(goalId);
     if (existing) await this.terminate(goalId);
-    const provider = resolveShadowProvider(adapterId);
+    const provider = resolveAgentProvider(adapterId);
     if (!(await this.deps.isReady(adapterId))) {
       throw new Error(`orchestrator shadow not ready: sign in to ${provider.displayName}`);
     }
@@ -106,7 +106,7 @@ export class ShadowSessionManager {
   }
 
   /** Polls capture-pane: answer the trust prompt, then settle into the input box. */
-  private async startup(goalId: string, name: string, provider: ShadowProvider): Promise<void> {
+  private async startup(goalId: string, name: string, provider: AgentProvider): Promise<void> {
     const pattern = this.deps.trustPattern ?? TRUST_DEFAULT;
     const poll = this.deps.pollMs ?? 300;
     const timeoutMs = this.deps.startupTimeoutMs ?? 20_000;
@@ -326,7 +326,7 @@ export class ShadowSessionManager {
     return overrides[adapterId];
   }
 
-  private writeHookConfig(provider: ShadowProvider, goalId: string, dir: string): void {
+  private writeHookConfig(provider: AgentProvider, goalId: string, dir: string): void {
     const { files } = provider.hookConfig({ goalId, resolverCommand: this.deps.hookResolverCommand });
     for (const file of files) {
       const target = join(dir, file.relPath);
