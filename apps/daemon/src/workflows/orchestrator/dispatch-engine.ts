@@ -73,6 +73,7 @@ import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.
 import { stepRequiresExecution } from "./requires-execution.js";
 import { deriveReadSet } from "../../harness-state/read-set.js";
 import { probeWorkspaceVersion } from "../../harness-state/workspace-version.js";
+import { conflictPolicyForGoal } from "../../harness-state/conflict-policy.js";
 import { emitStepComplete, emitStepLaunch } from "../../harness-transitions/emit.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
 import { listMemoryByGoal } from "../../memory/projection.js";
@@ -831,7 +832,7 @@ export class DispatchEngine {
             write_set: [],
             assumptions: [],
             version_deps,
-            conflict_policy: "escalate",
+            conflict_policy: conflictPolicyForGoal(db, goal.id),
             conflicts: [],
           },
         }

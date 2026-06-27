@@ -30,6 +30,7 @@ import { synthesizeStepOutput } from "./synthesize.js";
 import { detectPendingAgentQuestion } from "./agent-interview.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
 import { buildStepCompleteStateFacet, decideConflictResponse } from "../../harness-state/step-complete.js";
+import { conflictPolicyForGoal } from "../../harness-state/conflict-policy.js";
 import { emitStepComplete } from "../../harness-transitions/emit.js";
 import { runSensors } from "../../harness-sensors/runner.js";
 import { stepRequiresExecution } from "./requires-execution.js";
@@ -1058,7 +1059,7 @@ export class OrchestratorService {
             sessionId: sessionId ?? "",
             thisStepRunId: ctx.stepRun.id,
             assumptions,
-            conflictPolicy: "escalate",
+            conflictPolicy: conflictPolicyForGoal(db, ctx.run.goalId),
           });
           stateFacet = facet;
           if (decideConflictResponse(facet.conflict_policy, facet.conflicts.length).pause) {

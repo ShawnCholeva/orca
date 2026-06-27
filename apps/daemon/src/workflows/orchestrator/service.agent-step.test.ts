@@ -3814,10 +3814,11 @@ describe("OrchestratorService step_complete state-conflict detection", () => {
     ).run(memoryRef, NOW, NOW);
   }
 
-  it("Test A: write_write conflict under escalate policy pauses the step", async () => {
+  it("Test A: write_write conflict under human_review (escalate) pauses the step without a warn event", async () => {
     const { db, bus, idFactory } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" });
-    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    // human_review → escalate (the only mode that pauses on conflict, per 2.2).
+    db.prepare("UPDATE goals SET operating_mode = 'human_review' WHERE id = 'goal-1'").run();
     seedWorkspace(db);
     seedAgentSession(db);
     seedConcurrentPrior(db, "mem-shared");
@@ -3839,17 +3840,73 @@ describe("OrchestratorService step_complete state-conflict detection", () => {
     const t = listTransitionsByGoal(db, "goal-1").find(
       (x) => x.boundary === "step_complete" && x.stateDeps !== null
     );
+    expect(t?.stateDeps?.conflict_policy).toBe("escalate");
     expect(t?.stateDeps?.conflicts).toContainEqual({
       kind: "write_write",
       with_transition_id: "transition-prior",
       refs: ["mem-shared"],
     });
 
+    // escalate pauses; it does NOT emit the auto-path warn event (contrast Test E).
+    const warnCount = (
+      db
+        .prepare("SELECT COUNT(*) AS c FROM events WHERE type = 'state.conflict.detected' AND goal_id = 'goal-1'")
+        .get() as { c: number }
+    ).c;
+    expect(warnCount).toBe(0);
+
     const row = db
       .prepare("SELECT step_result_json, pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'")
       .get() as { step_result_json: string | null; pending_completion_json: string | null };
     expect(row.step_result_json).toBeNull();
     expect(row.pending_completion_json).not.toBeNull();
+  });
+
+  it("Test E (2.2): write_write conflict under automated (auto) warns and proceeds end-to-end without pausing", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    seedWorkspace(db);
+    seedAgentSession(db);
+    seedConcurrentPrior(db, "mem-shared");
+    seedSelfCreatedMemory(db, "mem-shared");
+
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete" }),
+      vi.fn(async () => "delivered" as const)
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // The policy on the recorded transition is auto, derived from operating_mode.
+    const t = listTransitionsByGoal(db, "goal-1").find(
+      (x) => x.boundary === "step_complete" && x.stateDeps !== null
+    );
+    expect(t?.stateDeps?.conflict_policy).toBe("auto");
+    // The conflict was still detected and recorded...
+    expect(t?.stateDeps?.conflicts).toContainEqual({
+      kind: "write_write",
+      with_transition_id: "transition-prior",
+      refs: ["mem-shared"],
+    });
+    // ...surfaced as a warn event...
+    const warnCount = (
+      db
+        .prepare("SELECT COUNT(*) AS c FROM events WHERE type = 'state.conflict.detected' AND goal_id = 'goal-1'")
+        .get() as { c: number }
+    ).c;
+    expect(warnCount).toBe(1);
+    // ...and the step did NOT pause: it proceeded to completion.
+    const row = db
+      .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { pending_completion_json: string | null };
+    expect(row.pending_completion_json).toBeNull();
   });
 
   it("Test C: no overlap -> empty conflicts, no pause, normal completion", async () => {
