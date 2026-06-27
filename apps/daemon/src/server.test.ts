@@ -2651,6 +2651,39 @@ describe('GET/PUT /v1/settings', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
+  it('PUT /v1/settings unsupervised does not force-confirm an existing human_review goal\'s parked step', async () => {
+    const { server, token, db, dataDir } = await startServer();
+    const now = new Date().toISOString();
+    seedEngineeringTemplate(db, () => now);
+    // Seed a human_review goal with a run parked at a confirmation checkpoint.
+    db.prepare(
+      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model, operating_mode) VALUES ('goal-hr', 'HR Goal', 'desc', 'active', 1, ?, ?, NULL, NULL, NULL, 'human_review')"
+    ).run(now, now);
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-hr', 'goal-hr', 'orca/engineering', 1, 'active', 'step-hr', NULL, ?, NULL)"
+    ).run(now);
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at, pending_completion_json) VALUES ('step-hr', 'goal-hr', 'run-hr', 'done', 7, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-hr', NULL, NULL, NULL, NULL, ?)"
+    ).run(now, JSON.stringify({ block: {}, scoring: null, finishedAt: now, proposal: null }));
+
+    const put = await server.inject({
+      method: 'PUT',
+      url: '/v1/settings',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { supervisionMode: 'unsupervised' },
+    });
+
+    // The global flip is default-only: it must not drain existing goals.
+    expect(put.statusCode).toBe(200);
+    const after = db
+      .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-hr'")
+      .get() as { pending_completion_json: string | null };
+    expect(after.pending_completion_json).not.toBeNull();
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
   it('PUT /v1/settings rejects an invalid mode', async () => {
     const { server, token, dataDir } = await startServer();
     const res = await server.inject({

@@ -8,6 +8,7 @@ import type { Config } from "./config.js";
 import { closeDatabase, openDatabase } from "./db.js";
 import { defaultMigrationsDir, runMigrations } from "./migrations.js";
 import { eventBus } from "./events.js";
+import { setSupervisionMode } from "./settings/store.js";
 import { quickGoalSkill } from "./skills/quick-goal.js";
 import { guidedGoalRefinementSkill } from "./skills/guided-goal-refinement.js";
 import { SkillRegistry } from "./registry/skill-registry.js";
@@ -111,6 +112,30 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe("createGoal operating_mode default", () => {
+  it("defaults a new goal to human_review when the global supervision setting is supervised", async () => {
+    const { db, ctx } = setup();
+    setSupervisionMode(db, "supervised", new Date().toISOString());
+
+    const goal = await createGoal({ title: "X" }, ctx);
+
+    expect(goal.operatingMode).toBe("human_review");
+  });
+
+  it("inherits automated from the global supervision setting when it is unsupervised", async () => {
+    const { db, ctx } = setup();
+    setSupervisionMode(db, "unsupervised", new Date().toISOString());
+
+    const goal = await createGoal({ title: "X" }, ctx);
+
+    expect(goal.operatingMode).toBe("automated");
+    const row = db
+      .prepare("SELECT operating_mode FROM goals WHERE id = ?")
+      .get(goal.id) as { operating_mode: string };
+    expect(row.operating_mode).toBe("automated");
+  });
 });
 
 describe("createGoal", () => {

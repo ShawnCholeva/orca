@@ -1808,13 +1808,11 @@ export function createServer(
     }
     const now = daemonContext.now();
     setSupervisionMode(db, parsed.data.supervisionMode, now);
-    if (parsed.data.supervisionMode === "unsupervised") {
-      await orchestratorService.continueAllPausedSteps(
-        getDatabase(),
-        daemonContext.now,
-        { bus: eventBus, idFactory: daemonContext.idFactory }
-      );
-    }
+    // Default-only: the global supervision setting is the default for *future* goals
+    // (inherited at creation), not a force-confirm of existing ones. Each goal's
+    // per-goal operating_mode is the source of truth, flipped via
+    // PUT /v1/goals/:goalId/operating-mode (which scopes the drain to that goal).
+    // Draining globally here would force-confirm parked steps in human_review goals.
     return { supervisionMode: parsed.data.supervisionMode };
   });
 

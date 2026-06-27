@@ -14,6 +14,7 @@ import {
 } from "@orca/contracts";
 import { getDatabase } from "./db.js";
 import { eventBus, EventBus } from "./events.js";
+import { getSupervisionMode } from "./settings/store.js";
 import type { SkillRegistry } from "./registry/skill-registry.js";
 import { insertGoalRefinement } from "./goal-refinements.js";
 import { seedRefinementMemory } from "./memory/refinement-seed.js";
@@ -104,7 +105,7 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
         "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)"
       ),
       insertGoal: db.prepare(
-        "INSERT INTO goals (id, title, description, status, autonomy_level, orchestrator_provider, orchestrator_model, worker_permission_mode, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, ?, ?, 'ask', ?, ?)"
+        "INSERT INTO goals (id, title, description, status, autonomy_level, orchestrator_provider, orchestrator_model, worker_permission_mode, operating_mode, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, ?, ?, 'ask', ?, ?, ?)"
       ),
       selectGoals: db.prepare(
         "SELECT * FROM goals WHERE archived_at IS NULL ORDER BY updated_at DESC"
@@ -231,6 +232,11 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
 
   const goalId = randomUUID();
   const now = new Date().toISOString();
+  // New goals inherit the global supervision setting as their per-goal default
+  // (supervised → human_review, unsupervised → automated). The per-goal
+  // operating_mode is the source of truth thereafter (flipped per goal).
+  const operatingMode =
+    getSupervisionMode(ctx.db) === "unsupervised" ? "automated" : "human_review";
   const stmts = ensureStmts(ctx.db);
   const toPublish: DomainEvent[] = [];
 
@@ -249,6 +255,7 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
       description,
       validatedOrchestratorModel?.providerId ?? null,
       validatedOrchestratorModel?.modelId ?? null,
+      operatingMode,
       now,
       now
     );
@@ -313,7 +320,7 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
     updatedAt: now,
     archivedAt: null,
     workerPermissionMode: "ask",
-    operatingMode: "human_review",
+    operatingMode,
   };
 }
 
