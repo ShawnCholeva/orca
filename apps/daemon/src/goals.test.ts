@@ -916,6 +916,25 @@ describe("archiveGoal", () => {
     expect(JSON.parse(eventRow!.payload)).toEqual({});
   });
 
+  it("reaps the goal's gate_approval_counts rows on archive", async () => {
+    const { db, ctx } = setup();
+    const created = await createGoal({ title: "X" }, ctx);
+    const other = await createGoal({ title: "Y" }, ctx);
+    const now = new Date().toISOString();
+    const ins = db.prepare(
+      "INSERT INTO gate_approval_counts (goal_id, action_class, consecutive_approvals, last_decision, updated_at) VALUES (?, ?, ?, 'allow', ?)"
+    );
+    ins.run(created.id, "Bash:full_access", 3, now);
+    ins.run(other.id, "Edit:sandbox_edit", 2, now);
+
+    archiveGoal(created.id);
+
+    const remaining = db
+      .prepare("SELECT goal_id FROM gate_approval_counts")
+      .all() as { goal_id: string }[];
+    expect(remaining.map((r) => r.goal_id)).toEqual([other.id]);
+  });
+
   it("throws NotFoundError for unknown id", () => {
     setup();
     expect(() => archiveGoal("missing-id")).toThrow(NotFoundError);

@@ -25,6 +25,12 @@ function ensure(db: Database.Database) {
 }
 export function resetPreparedStatements(): void { _db = null; _stmts = null; }
 
+// Retention: drop a goal's approval-streak rows when the goal is archived
+// (the table otherwise grows one row per (goal_id, action_class) with no reaper).
+export function deleteApprovalCountsForGoal(db: Database.Database, goalId: string): void {
+  db.prepare("DELETE FROM gate_approval_counts WHERE goal_id = ?").run(goalId);
+}
+
 export function actionClassOf(toolName: string, c: Classification): string {
   return `${toolName}:${c.permissionTier}`;
 }

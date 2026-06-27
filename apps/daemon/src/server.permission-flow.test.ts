@@ -418,6 +418,59 @@ describe('permission decision flow', () => {
     rmSync(ws, { recursive: true, force: true });
   });
 
+  it('remember+allow records an auditable relaxation GoalDecision (but plain allow does not)', async () => {
+    const goalId = 'goal-relax-1';
+    const ws = mkdtempSync(join(os.tmpdir(), 'orca-ws-'));
+    insertGoal(db, goalId, 'ask');
+    insertWorkspace(db, 'ws-relax-1', goalId, ws);
+    insertSessionWithWorkspace(db, 'session-relax-plain', goalId, 'ws-relax-1', 'claude-code');
+    insertSessionWithWorkspace(db, 'session-relax-remember', goalId, 'ws-relax-1', 'claude-code');
+
+    const answer = async (sessionId: string, toolUseId: string, remember: boolean): Promise<void> => {
+      const hookPromise = server.inject({
+        method: 'POST',
+        url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { tool_name: 'Bash', tool_input: { command: 'rm build' }, tool_use_id: toolUseId },
+      });
+      const approvalId = await vi.waitFor(
+        () => {
+          const row = db
+            .prepare("SELECT pending_approval FROM orchestrator_messages WHERE pending_approval LIKE ?")
+            .get(`%${sessionId}%`) as { pending_approval: string } | undefined;
+          if (!row) throw new Error('pending approval message not yet posted');
+          return (JSON.parse(row.pending_approval) as { approvalId: string }).approvalId;
+        },
+        { timeout: 2000, interval: 50 }
+      );
+      await server.inject({
+        method: 'POST',
+        url: `/v1/goals/${goalId}/permission-approvals/${approvalId}`,
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { decision: 'allow', remember },
+      });
+      await hookPromise;
+    };
+
+    // Plain allow (no remember) must NOT record a relaxation decision.
+    await answer('session-relax-plain', 'tu-relax-plain', false);
+    const afterPlain = db
+      .prepare("SELECT COUNT(*) AS cnt FROM goal_decisions WHERE goal_id = ? AND title LIKE 'Gate relaxed:%'")
+      .get(goalId) as { cnt: number };
+    expect(afterPlain.cnt).toBe(0);
+
+    // remember+allow records exactly one auditable, confirmed relaxation decision.
+    await answer('session-relax-remember', 'tu-relax-remember', true);
+    const rows = db
+      .prepare("SELECT title, status, confirmation_required FROM goal_decisions WHERE goal_id = ? AND title LIKE 'Gate relaxed:%'")
+      .all(goalId) as { title: string; status: string; confirmation_required: number }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.title).toContain('Bash:');
+    expect(rows[0]!.status).toBe('confirmed');
+    expect(rows[0]!.confirmation_required).toBe(0);
+    rmSync(ws, { recursive: true, force: true });
+  });
+
   it('remember+deny writes nothing', async () => {
     const goalId = 'goal-remember-2';
     const sessionId = 'session-remember-2';

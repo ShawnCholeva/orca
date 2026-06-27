@@ -15,6 +15,7 @@ import {
 import { getDatabase } from "./db.js";
 import { eventBus, EventBus } from "./events.js";
 import { getSupervisionMode } from "./settings/store.js";
+import { deleteApprovalCountsForGoal } from "./harness-risk/accountability.js";
 import type { SkillRegistry } from "./registry/skill-registry.js";
 import { insertGoalRefinement } from "./goal-refinements.js";
 import { seedRefinementMemory } from "./memory/refinement-seed.js";
@@ -389,6 +390,7 @@ export function archiveGoal(id: string): Goal {
     seq = Number(result.lastInsertRowid);
 
     stmts.archiveGoal.run(now, now, id);
+    deleteApprovalCountsForGoal(db, id);
     updatedRow = stmts.selectGoalById.get(id) as GoalRow;
   })();
 
