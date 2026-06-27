@@ -54,6 +54,7 @@ export const migrationFiles = [
   "0040_harness_transitions.sql",
   "0041_goal_operating_mode.sql",
   "0042_gate_approval_counts.sql",
+  "0043_activity_recommendation_id.sql",
 ] as const;
 
 export function runMigrations(
