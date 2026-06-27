@@ -41,6 +41,15 @@ function seedGoal(db: Database.Database, goalId: string): void {
   ).run(goalId, now, now);
 }
 
+function insertGate(db: Database.Database, id: string, createdAt: string): void {
+  db.prepare(
+    `INSERT INTO harness_transitions
+       (id, goal_id, workflow_run_id, workflow_step_run_id, boundary,
+        risk_json, evidence_json, state_deps_json, telemetry_json, created_at)
+     VALUES (?, 'g', NULL, NULL, 'tool_gate', ?, NULL, NULL, NULL, ?)`
+  ).run(id, JSON.stringify(riskFacet("allow")), createdAt);
+}
+
 // Full, schema-valid facet fixtures (HarnessTransition.parse is strict on read).
 function riskFacet(gate_decision: string): unknown {
   return {
@@ -163,6 +172,60 @@ describe("replayControlPlane", () => {
   it("returns an empty trajectory for a goal with no transitions", () => {
     const db = openTestDb();
     seedGoal(db, "g");
-    expect(replayControlPlane(db, "g")).toEqual({ steps: [] });
+    expect(replayControlPlane(db, "g")).toEqual({
+      steps: [],
+      page: { nextCursor: null, hasMore: false },
+    });
+  });
+
+  it("paginates oldest-first, preserving the oldest transitions across pages", () => {
+    const db = openTestDb();
+    seedGoal(db, "g");
+    // Insert newest-first so insertion order can't masquerade as chronological order.
+    for (let i = 5; i >= 1; i--) {
+      insertGate(db, `t-${i}`, `2026-01-01T00:00:0${i}.000Z`);
+    }
+
+    // Page 1: the OLDEST transitions come first — the bug was dropping these.
+    const p1 = replayControlPlane(db, "g", { limit: 2 });
+    expect(p1.steps.map((s) => s.at)).toEqual([
+      "2026-01-01T00:00:01.000Z",
+      "2026-01-01T00:00:02.000Z",
+    ]);
+    expect(p1.steps.map((s) => s.seq)).toEqual([0, 1]);
+    expect(p1.page.hasMore).toBe(true);
+    expect(typeof p1.page.nextCursor).toBe("string");
+
+    // Page 2: continues forward, seq stays absolute across pages.
+    const p2 = replayControlPlane(db, "g", { limit: 2, cursor: p1.page.nextCursor });
+    expect(p2.steps.map((s) => s.at)).toEqual([
+      "2026-01-01T00:00:03.000Z",
+      "2026-01-01T00:00:04.000Z",
+    ]);
+    expect(p2.steps.map((s) => s.seq)).toEqual([2, 3]);
+    expect(p2.page.hasMore).toBe(true);
+
+    // Page 3: the final, smaller page closes the cursor.
+    const p3 = replayControlPlane(db, "g", { limit: 2, cursor: p2.page.nextCursor });
+    expect(p3.steps.map((s) => s.at)).toEqual(["2026-01-01T00:00:05.000Z"]);
+    expect(p3.steps.map((s) => s.seq)).toEqual([4]);
+    expect(p3.page.hasMore).toBe(false);
+    expect(p3.page.nextCursor).toBeNull();
+  });
+
+  it("breaks created_at ties by id so paging neither skips nor duplicates", () => {
+    const db = openTestDb();
+    seedGoal(db, "g");
+    const tie = "2026-01-01T00:00:09.000Z";
+    insertGate(db, "t-a", tie);
+    insertGate(db, "t-b", tie);
+    insertGate(db, "t-c", tie);
+
+    const p1 = replayControlPlane(db, "g", { limit: 2 });
+    const p2 = replayControlPlane(db, "g", { limit: 2, cursor: p1.page.nextCursor });
+    const seen = [...p1.steps, ...p2.steps].map((s) => s.summary);
+    // All three distinct rows surface exactly once, in id order.
+    expect(p1.steps.map((s) => s.seq).concat(p2.steps.map((s) => s.seq))).toEqual([0, 1, 2]);
+    expect(seen).toHaveLength(3);
   });
 });

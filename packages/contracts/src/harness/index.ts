@@ -224,3 +224,34 @@ export const HarnessTransition = z
   })
   .strict();
 export type HarnessTransition = z.infer<typeof HarnessTransition>;
+
+// ── Control-plane replay projection ─────────────────────────────────────────
+// Client-facing replay wire shape. Each transition is one step; pages are
+// keyset-ordered oldest-first, so a goal exceeding one page reconstructs from
+// genesis forward (the Inspectable invariant) rather than dropping its history.
+export const ReplayStep = z
+  .object({
+    seq: z.number().int().nonnegative(),
+    boundary: HarnessTransitionBoundary,
+    at: z.string().datetime(),
+    summary: z.string(),
+    facets: z
+      .object({
+        risk: RiskFacet.nullable(),
+        evidence: EvidenceFacet.nullable(),
+        telemetry: TelemetryFacet.nullable(),
+      })
+      .strict(),
+  })
+  .strict();
+export type ReplayStep = z.infer<typeof ReplayStep>;
+
+export const ReplayPage = z
+  .object({
+    steps: z.array(ReplayStep),
+    page: z
+      .object({ nextCursor: z.string().nullable(), hasMore: z.boolean() })
+      .strict(),
+  })
+  .strict();
+export type ReplayPage = z.infer<typeof ReplayPage>;

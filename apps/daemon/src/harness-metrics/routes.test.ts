@@ -125,10 +125,56 @@ describe("GET /v1/goals/:goalId/harness-replay", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as {
       steps: Array<{ seq: number; boundary: string; summary: string }>;
+      page: { nextCursor: string | null; hasMore: boolean };
     };
     expect(body.steps.map((s) => s.seq)).toEqual([0, 1]);
     expect(body.steps.map((s) => s.boundary)).toEqual(["step_complete", "tool_gate"]);
     expect(body.steps.map((s) => s.summary)).toEqual(["passed", "deny"]);
+    expect(body.page).toEqual({ nextCursor: null, hasMore: false });
+  });
+
+  it("paginates the replay via ?limit and ?cursor", async () => {
+    const db = openTestDb();
+    seedGoal(db, "g");
+    const insertGate = (id: string, at: string): void => {
+      db.prepare(
+        `INSERT INTO harness_transitions
+           (id, goal_id, workflow_run_id, workflow_step_run_id, boundary,
+            risk_json, evidence_json, state_deps_json, telemetry_json, created_at)
+         VALUES (?, 'g', NULL, NULL, 'tool_gate', ?, NULL, NULL, NULL, ?)`
+      ).run(
+        id,
+        JSON.stringify({
+          risk_class: "low",
+          permission_tier: "read_only",
+          classification_reasons: [],
+          gate_decision: "allow",
+          hard_constraint_violations: [],
+        }),
+        at
+      );
+    };
+    insertGate("t-1", "2026-01-01T00:00:01.000Z");
+    insertGate("t-2", "2026-01-01T00:00:02.000Z");
+    const f = Fastify();
+    registerHarnessMetricsRoutes(f, { db });
+
+    const p1 = (await f.inject({ method: "GET", url: "/v1/goals/g/harness-replay?limit=1" })).json() as {
+      steps: Array<{ seq: number }>;
+      page: { nextCursor: string | null; hasMore: boolean };
+    };
+    expect(p1.steps.map((s) => s.seq)).toEqual([0]);
+    expect(p1.page.hasMore).toBe(true);
+    expect(typeof p1.page.nextCursor).toBe("string");
+
+    const p2 = (
+      await f.inject({
+        method: "GET",
+        url: `/v1/goals/g/harness-replay?limit=1&cursor=${encodeURIComponent(p1.page.nextCursor!)}`,
+      })
+    ).json() as { steps: Array<{ seq: number }>; page: { hasMore: boolean } };
+    expect(p2.steps.map((s) => s.seq)).toEqual([1]);
+    expect(p2.page.hasMore).toBe(false);
   });
 
   it("returns 200 with an empty trajectory for a seeded goal with no transitions", async () => {
@@ -139,7 +185,7 @@ describe("GET /v1/goals/:goalId/harness-replay", () => {
 
     const res = await f.inject({ method: "GET", url: "/v1/goals/g/harness-replay" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ steps: [] });
+    expect(res.json()).toEqual({ steps: [], page: { nextCursor: null, hasMore: false } });
   });
 
   it("returns 404 for an unknown goal", async () => {

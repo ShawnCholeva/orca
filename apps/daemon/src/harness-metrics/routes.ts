@@ -47,7 +47,13 @@ export function registerHarnessMetricsRoutes(
       reply.status(404);
       return { error: { code: "goal_not_found", message: `Goal not found: ${goalId}` } };
     }
-    return replayControlPlane(db, goalId);
+    const query = request.query as { cursor?: string; limit?: string };
+    const limit = query.limit !== undefined ? Number(query.limit) : undefined;
+    if (limit !== undefined && !Number.isFinite(limit)) {
+      reply.status(400);
+      return { error: { code: "invalid_limit", message: `Invalid limit: ${query.limit}` } };
+    }
+    return replayControlPlane(db, goalId, { cursor: query.cursor ?? null, limit });
   });
 
   server.get(

@@ -10,9 +10,9 @@ import {
   type TelemetryFacet,
 } from "@orca/contracts";
 import type { EventBus } from "../events.js";
-import { insertTransition, listTransitionsByGoal } from "./projection.js";
+import { insertTransition, listTransitionsByGoal, listTransitionsByGoalPaged } from "./projection.js";
 
-export { listTransitionsByGoal };
+export { listTransitionsByGoal, listTransitionsByGoalPaged };
 export { resetPreparedStatements } from "./projection.js";
 
 export interface HarnessTransitionCtx {

@@ -25,6 +25,8 @@ let _db: Database.Database | null = null;
 let _stmts: {
   insert: Database.Statement;
   listByGoal: Database.Statement;
+  listByGoalPagedFirst: Database.Statement;
+  listByGoalPagedAfter: Database.Statement;
 } | null = null;
 
 function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
@@ -37,6 +39,18 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
       listByGoal: db.prepare(
         `SELECT ${COLS} FROM harness_transitions
          WHERE goal_id = ? ORDER BY created_at DESC, id ASC LIMIT ?`
+      ),
+      // Chronological (oldest-first) keyset pages for replay. The cursor is the
+      // (created_at, id) of the last row already seen; ordering matches the
+      // tie-break so paging neither skips nor duplicates on equal timestamps.
+      listByGoalPagedFirst: db.prepare(
+        `SELECT ${COLS} FROM harness_transitions
+         WHERE goal_id = ? ORDER BY created_at ASC, id ASC LIMIT ?`
+      ),
+      listByGoalPagedAfter: db.prepare(
+        `SELECT ${COLS} FROM harness_transitions
+         WHERE goal_id = ? AND (created_at > ? OR (created_at = ? AND id > ?))
+         ORDER BY created_at ASC, id ASC LIMIT ?`
       ),
     };
   }
@@ -93,5 +107,31 @@ export function listTransitionsByGoal(
 ): HarnessTransition[] {
   const stmts = ensureStmts(db);
   const rows = stmts.listByGoal.all(goalId, limit) as TransitionRow[];
+  return rows.map(rowToTransition);
+}
+
+/**
+ * Chronological (oldest-first) keyset page of a goal's transitions. `after` is
+ * the (createdAt, id) of the last row already returned; pass `null` for the
+ * first page. Used by the control-plane replay so history reconstructs from
+ * genesis rather than truncating the oldest transitions.
+ */
+export function listTransitionsByGoalPaged(
+  db: Database.Database,
+  goalId: string,
+  opts: { after: { createdAt: string; id: string } | null; limit: number }
+): HarnessTransition[] {
+  const stmts = ensureStmts(db);
+  const rows = (
+    opts.after
+      ? stmts.listByGoalPagedAfter.all(
+          goalId,
+          opts.after.createdAt,
+          opts.after.createdAt,
+          opts.after.id,
+          opts.limit
+        )
+      : stmts.listByGoalPagedFirst.all(goalId, opts.limit)
+  ) as TransitionRow[];
   return rows.map(rowToTransition);
 }
