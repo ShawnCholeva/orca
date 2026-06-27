@@ -34,4 +34,20 @@ describe("detectSensors", () => {
     dirs.push(dir);
     expect(detectSensors(dir, ["typecheck"])).toEqual([]);
   });
+
+  it("detects static and integration sensors, cost-ordered after lint and unit", () => {
+    const ws = workspaceWith({
+      static: "semgrep ci",
+      test: "vitest run",
+      "test:integration": "vitest run integration",
+    });
+    const sensors = detectSensors(ws, ["integration_tests", "unit_tests", "static_analysis"]);
+    // Registry order is cheapest-first: static (analysis) before unit before integration.
+    expect(sensors.map((s) => s.kind)).toEqual(["static", "unit", "integration"]);
+    expect(sensors.map((s) => s.args)).toEqual([
+      ["run", "static"],
+      ["run", "test"],
+      ["run", "test:integration"],
+    ]);
+  });
 });

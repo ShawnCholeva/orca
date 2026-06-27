@@ -13,7 +13,10 @@ describe("sensor registry conformance", () => {
     expect(() => assertSensorConformance()).not.toThrow();
   });
 
-  it("declares integration and static as explicitly unimplemented", () => {
-    expect([...UNIMPLEMENTED_SENSOR_KINDS].sort()).toEqual(["integration", "static"]);
+  it("registers the full sensor ladder, leaving nothing unimplemented", () => {
+    expect([...HARNESS_SENSORS].map((s) => s.kind).sort()).toEqual(
+      [...WorkflowSensorKind.options].sort()
+    );
+    expect(UNIMPLEMENTED_SENSOR_KINDS).toEqual([]);
   });
 });

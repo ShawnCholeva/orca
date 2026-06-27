@@ -20,17 +20,22 @@ function defineSensor(spec: SensorSpec): SensorSpec {
   return spec;
 }
 
+// Ordered cheapest-first for fail-fast: typecheck/lint/static are quick checks,
+// unit is mid, integration and build are the heaviest.
 defineSensor({ kind: "typecheck", label: "typecheck", script: "typecheck" });
 defineSensor({ kind: "lint", label: "lint", script: "lint" });
+defineSensor({ kind: "static", label: "static_analysis", script: "static" });
 defineSensor({ kind: "unit", label: "unit_tests", script: "test" });
+defineSensor({ kind: "integration", label: "integration_tests", script: "test:integration" });
 defineSensor({ kind: "build", label: "build", script: "build" });
 
 export const HARNESS_SENSORS: readonly SensorSpec[] = SENSOR_REGISTRY;
 
 // Declared-but-unimplemented kinds. Listing them here (rather than silently
 // omitting) is what the conformance guard checks — adding a new WorkflowSensorKind
-// forces a register-or-defer decision instead of silent drift.
-export const UNIMPLEMENTED_SENSOR_KINDS: readonly WorkflowSensorKind[] = ["integration", "static"];
+// forces a register-or-defer decision instead of silent drift. The full ladder is
+// now registered; this stays as the seam for any future kind.
+export const UNIMPLEMENTED_SENSOR_KINDS: readonly WorkflowSensorKind[] = [];
 
 function readScripts(workspacePath: string): Record<string, string> {
   try {
