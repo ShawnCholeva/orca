@@ -97,7 +97,7 @@ Sensor ladder + observability. The Executable sensor work folds onto the `defSen
 
 - 🟡 **P2/P3 sensors.** Full sensor ladder + lint/static sensors, oracle-adequacy enforcement, artifact offload of full sensor output (`artifact_ref`), and sensors as per-workspace declarative config with route-by-type feedback. P1 shipped typecheck + unit + veto only. *(Register new kinds via `defSensor`.)*
 - 🟡 **Per-ecosystem sensor resolvers** (Makefile / `cargo` / `pytest`, …). P1 auto-detects only `package.json` scripts. *(Note: `detect.ts` uses `npm run` while Orca workspaces are pnpm — works, a curiosity not a bug; see Appendix A.)*
-- 🟡 **`runCheckCommand` `MAX_BUFFER` raise (256 KiB).** Too small for verbose suites; a sensor tripping `max_buffer` is conservatively treated as failed (P2.5 follow-up).
+- ✅ **`runCheckCommand` `MAX_BUFFER` raise — DONE (2026-06-27).** Raised 256 KiB → **8 MiB** (`readiness/exec.ts`). 256 KiB was small enough that a passing-but-verbose typecheck/test suite overflowed and — since a `max_buffer` result has no exit code, `runner.ts` scores it `failed` — produced a false veto. 8 MiB bounds memory while clearing real suites; full-output **artifact offload** stays the eventual home for unbounded logs (still deferred). Test: `exec.test.ts` (1 MiB now passes; 9 MiB still classifies `max_buffer`).
 
 ## Inspectable axis
 

@@ -20,7 +20,11 @@ export interface RunCheckResult {
 }
 
 const DEFAULT_TIMEOUT_MS = 5000;
-const MAX_BUFFER = 256 * 1024;
+// 8 MiB: verbose typecheck/test suites blow past 256 KiB, and a sensor tripping
+// max_buffer is conservatively scored as FAILED (runner.ts) — too small a ceiling
+// turns a passing-but-chatty suite into a false veto. Full-output offload to an
+// artifact store (P2.5) is the eventual home for unbounded logs; this bounds memory.
+const MAX_BUFFER = 8 * 1024 * 1024;
 const SIGKILL_GRACE_MS = 1000;
 
 // Env vars adapter check probes need to locate per-user credential stores

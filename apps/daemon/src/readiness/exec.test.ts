@@ -30,10 +30,21 @@ describe("runCheckCommand", () => {
     expect(res.spawnError?.code).toBe("ENOENT");
   });
 
-  it("classifies maxBuffer overflows distinctly", async () => {
+  it("does not trip max_buffer for verbose output under the 8 MiB ceiling", async () => {
+    // 1 MiB tripped the old 256 KiB ceiling; a verbose-but-bounded suite must pass.
+    // No explicit process.exit, so the full buffer flushes before the child ends.
     const res = await runCheckCommand("node", [
       "-e",
       "process.stdout.write('x'.repeat(1024*1024))",
+    ]);
+    expect(res.exitCode).toBe(0);
+    expect(res.failureKind).toBeUndefined();
+  });
+
+  it("classifies maxBuffer overflows distinctly", async () => {
+    const res = await runCheckCommand("node", [
+      "-e",
+      "process.stdout.write('x'.repeat(9*1024*1024))",
     ]);
     expect(res.failureKind).toBe("max_buffer");
   });
