@@ -61,7 +61,7 @@ describe("loadRunTemplate", () => {
     seedTemplate(db, "orca/engineering", 1, "Original");
     const snapshot = JSON.stringify({
       id: "orca/engineering", name: "Engineering", description: "desc", version: 1,
-      isBuiltIn: true, isLocked: true,
+      category: "Engineering", isBuiltIn: true, isLocked: true,
       steps: [{ id: "intake", ordinal: 0, name: "Original", instructions: "do", outputSchema: [{ key: "k", type: "string", required: true }], agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] }],
       guardrails: [], createdAt: NOW, updatedAt: NOW, scope: "global", scopeName: "", graph: null,
     });
@@ -80,7 +80,7 @@ describe("loadRunTemplate", () => {
     seedTemplate(db, "orca/engineering", 1, "Snap");
     const snapshot = JSON.stringify({
       id: "orca/engineering", name: "Engineering", description: "desc", version: 1,
-      isBuiltIn: true, isLocked: true,
+      category: "Engineering", isBuiltIn: true, isLocked: true,
       steps: [{ id: "intake", ordinal: 0, name: "Snap", instructions: "do", outputSchema: [{ key: "k", type: "string", required: true }], agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] }],
       guardrails: [], createdAt: NOW, updatedAt: NOW, scope: "global", scopeName: "", graph: null,
     });
