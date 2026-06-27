@@ -525,7 +525,7 @@ export function TemplateDetail({
                 type="button"
                 className="workflow-primary-btn"
                 onClick={handleCreate}
-                disabled={saving || duplicating}
+                disabled={saving || duplicating || schemaInvalid}
               >
                 {saving ? "Creating…" : "Create workflow"}
               </button>

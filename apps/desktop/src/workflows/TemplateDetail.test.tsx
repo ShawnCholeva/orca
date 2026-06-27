@@ -464,6 +464,43 @@ describe("TemplateDetail", () => {
     expect(onCreated).toHaveBeenCalledWith(created);
   });
 
+  it("draft create: Create workflow is disabled while output schema text is invalid", async () => {
+    const draft = makeTemplate({
+      id: "draft/new",
+      name: "Untitled workflow",
+      version: 0,
+    });
+
+    render(
+      <TemplateDetail
+        template={draft}
+        isNew={true}
+        onTemplateSaved={() => {}}
+        onTemplateDuplicated={() => {}}
+        onDiscard={() => {}}
+      />,
+    );
+
+    // Create workflow button should initially be enabled (not saving, not duplicating)
+    expect(screen.getByRole("button", { name: /create workflow/i })).not.toBeDisabled();
+
+    // Expand first step's details to reveal the Output Schema editor
+    fireEvent.click(screen.getAllByRole("button", { name: /details/i })[0]);
+    const schemaField = screen.getByLabelText("Output Schema");
+
+    // Type unparseable schema text → Create workflow should be disabled
+    fireEvent.change(schemaField, { target: { value: "a {" } });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /create workflow/i })).toBeDisabled(),
+    );
+
+    // Fix the text → Create workflow should re-enable
+    fireEvent.change(schemaField, { target: { value: "a" } });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /create workflow/i })).not.toBeDisabled(),
+    );
+  });
+
   it("draft create: Discard calls onDiscard", () => {
     const onDiscard = vi.fn();
     render(
