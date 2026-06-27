@@ -20,12 +20,17 @@ export function isPricedModel(model: string): boolean {
 }
 
 export function computeCost(model: string, tokensIn: number, tokensOut: number): CostEntry {
+  // Clamp: token counts can arrive negative from a bad delta or malformed OTLP
+  // row, and CostEntry requires non-negative — an unclamped value throws at
+  // persistence (HarnessTransition.parse) or yields a nonsensical negative USD.
+  const inTok = Math.max(0, tokensIn);
+  const outTok = Math.max(0, tokensOut);
   const p = priceFor(model);
-  const usd = p ? (tokensIn / 1000) * p.in + (tokensOut / 1000) * p.out : 0;
+  const usd = p ? (inTok / 1000) * p.in + (outTok / 1000) * p.out : 0;
   // Price-map estimate does not price cache; leave the additive cache fields null.
   return {
-    tokens_in: tokensIn,
-    tokens_out: tokensOut,
+    tokens_in: inTok,
+    tokens_out: outTok,
     cache_read_tokens: null,
     cache_creation_tokens: null,
     usd,

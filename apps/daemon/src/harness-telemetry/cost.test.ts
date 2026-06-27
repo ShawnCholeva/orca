@@ -19,4 +19,18 @@ describe("computeCost", () => {
     const b = computeCost("claude-opus-4-8", 200, 0);
     expect(b.usd).toBeCloseTo(a.usd * 2, 9);
   });
+
+  it("clamps negative token counts to zero (CostEntry requires non-negative)", () => {
+    const c = computeCost("claude-opus-4-8", -100, -50);
+    expect(c.tokens_in).toBe(0);
+    expect(c.tokens_out).toBe(0);
+    expect(c.usd).toBe(0);
+  });
+
+  it("prices via the first matching prefix (array order wins on overlap)", () => {
+    // gpt-5-codex has no entry of its own; it must price through the gpt-5 prefix,
+    // not fall through to gpt-4o (which is registered later and is more expensive).
+    const c = computeCost("gpt-5-codex", 1000, 0);
+    expect(c.usd).toBeCloseTo(0.00125, 9);
+  });
 });
