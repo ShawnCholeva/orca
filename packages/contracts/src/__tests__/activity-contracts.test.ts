@@ -67,3 +67,7 @@ it("carries an optional recommendationId for the mark-done card", () => {
   });
   expect(a.recommendationId).toBe("rec-1");
 });
+
+it("accepts the orchestrator_reasoning source kind", () => {
+  expect(ActivitySourceKind.parse("orchestrator_reasoning")).toBe("orchestrator_reasoning");
+});

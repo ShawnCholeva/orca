@@ -1209,6 +1209,9 @@ export const ActivitySourceKind = z.enum([
   // human's approve-to-complete decision (live, persisted so it survives a
   // daemon restart and the chat rebuilds the affordance from activities alone).
   "mark_done_pending",
+  // A point-in-time record of one orchestrator LLM turn (auditable trajectory;
+  // provisional in-process capture, moves to the Runner Protocol at the plane split).
+  "orchestrator_reasoning",
 ]);
 export type ActivitySourceKind = z.infer<typeof ActivitySourceKind>;
 
