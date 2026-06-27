@@ -128,7 +128,7 @@ With the substrate locked and the four axes live, catch the surfaces up. These a
 ## Adapters & worker permission modes
 
 - 🟡 **Antigravity native allow-list writer (Phase 4 of permission modes).** The Phase-1 item wires the *gate* (safety floor); this is the separate follow-on: `PreToolUse`/`request-review` shaping + native allow-list persistence so `writePermissionRule` stops being a no-op.
-- 🟡 **Rename `ShadowProvider` → a shared `AgentProvider`** interface (noted as a future generalization in the `workerHookConfig` doc-comment).
+- ✅ **Rename `ShadowProvider` → a shared `AgentProvider`** interface (noted as a future generalization in the `workerHookConfig` doc-comment). *(Phase-4: mechanical rename across 17 daemon files; `ShadowAdapterId` + adapter-id literals untouched. Commit `566591c`.)*
 - 🟡 **Codex hook-trust persistence** as an alternative to `--dangerously-bypass-hook-trust` ("not explored"); the assumed 600s hook-timeout default remains unverified (only the per-hook `timeout` key was live-verified).
 
 ## Workflow step results & supervised completion
@@ -143,12 +143,12 @@ With the substrate locked and the four axes live, catch the surfaces up. These a
 
 ## OrcaChat conversational surface
 
-- 🟡 **Codex (and other adapters) support for the activity thread** — v1 is Claude-only; validate the provider-neutral contract against the Codex hook adapter. Reasoning-note extraction is likewise Claude-Code-transcript-specific (silent no-op otherwise).
-- 🟡 **Full mark-done card wiring** — `mark_done_ready` maps to a `completed`/`paused_for_input` activity but is stubbed, not fully wired.
-- 🟡 **Wire the orchestrator's own shadow-session hooks into the persisted activity stream** — the routing card stays synthetic/transient.
-- 🟡 **Auto-collapsing completed activity cards** to a summary line — deferred; "revisit if scroll length becomes a problem."
-- 🟡 **Optional `(Recommended)` badge detection** at render time (best-effort heuristic on Claude's label convention).
-- 🟡 **Reasoning-note volume / throttling** — if notes feel noisy in practice, summarize/throttle them (`server.ts onToolUse` / `activities/transcript.ts`). *(Same concern recurs for the Brainstorm surface below — fix once, generally.)*
+- 🟡 **Codex (and other adapters) support for the activity thread** — v1 is Claude-only. *(Phase-4: offline half ✅ — provider-neutral contract pinned by a regression test (`provider-neutral.test.ts`): a no-transcript session yields a coherent thread with zero reasoning notes (silent no-op), confirming the `ActivitySignal`/`ActivityUpdater` contract is provider-agnostic. **Live Codex reasoning-path validation remains 🔴 PARKED** — needs a live Codex run on current daemon code. Reasoning-note extraction stays Claude-Code-transcript-specific.)*
+- ✅ **Full mark-done card wiring** — `mark_done_ready` was a stubbed enum. *(Phase-4: replaced with a persisted `mark_done_pending` activity carrying the `complete_workflow_run` recommendation id; dispatch-engine writes it on terminal completion, accept resolves it, desktop derives the approve-to-complete affordance from the activity stream (dropping the synthetic `awaitingApproval` calc + side `listRecommendations` fetch). Commits `c8b07bd`,`9353867`,`2069456`,`5e5e637`.)*
+- ✅ **Wire the orchestrator's own shadow-session hooks into the persisted activity stream** — the routing card was synthetic/transient. *(Phase-4 "scoped-full": every orchestrator turn now persists as a first-class `orchestrator_reasoning` activity via a deliberately-thin **provisional** in-process tap in `resolvePending` (moves to the Runner Protocol at the plane split); routing card attributed to `orchsess-${goalId}` instead of `agentSessionId:null`. Commits `4c1594c`,`b5612bb`.)*
+- ✅ **Auto-collapsing completed activity cards** to a summary line. *(Phase-4: completed/expired cards collapse to `finalSummary` with an expand toggle; live cards unchanged. Commit `a8484fd`.)*
+- 🟡 **Optional `(Recommended)` badge detection** at render time (best-effort heuristic on Claude's label convention). *(Phase-4: deferred-by-decision at sign-off — lowest-value, convention-sniffing render heuristic; not built this pass.)*
+- ✅ **Reasoning-note volume / throttling** — notes flooded the step list (only `tool_use` was throttled). *(Phase-4 "fix once": `reasoning_note` now throttled per step via `StepState.lastReasoningNoteMs`, mirroring the `tool_use` gate (`activities/updater.ts`). The orchestrator path (O1) writes completed rows directly and is naturally rate-limited per turn, so it does not need this gate. Commit `d92af35`.)*
 
 ## Graph routing, provider recovery, ledger & daemon addressing
 
@@ -168,7 +168,7 @@ With the substrate locked and the four axes live, catch the surfaces up. These a
 ## Honest, participatory brainstorm
 
 - 🟡 **Rewrite the other workflow instructions** (Feature, Bug, Refactor, Initiative, Quality, Code Review) for honest/participatory behavior — only Brainstorm's instructions were rewritten; the rest inherit only the engine/UI changes.
-- 🟡 **Opening the result-card artifact** in the filesystem/editor (renders as text/title only today). *(Reasoning-note throttling here is the same concern as the OrcaChat item above.)*
+- ✅ **Opening the result-card artifact** in the filesystem/editor (was text/title only). *(Phase-4: the `StepResultCard` artifact is now a button that opens the reference via Tauri `openPath` (`@tauri-apps/plugin-opener`), wrapped as `openArtifact` in `api.ts`. Commit `41f01b8`.)* *(Reasoning-note throttling — same concern as the OrcaChat item above — was resolved there.)*
 
 ## Workspaces
 
