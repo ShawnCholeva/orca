@@ -152,7 +152,7 @@ With the substrate locked and the four axes live, catch the surfaces up. These a
 
 ## Graph routing, provider recovery, ledger & daemon addressing
 
-- 🟡 **Desktop ledger rendering** beyond the daemon read route (Inspectable-style UI for the committed ledger).
+- ✅ **Desktop ledger rendering** beyond the daemon read route (Inspectable-style UI for the committed ledger). *(Phase-4: the ledger read shape is typed in contracts (`CommittedLedger`/`LedgerVersionEntry`/`WorkflowRunLedgerResponse`, parsed at the route) and a `<LedgerPanel>` renders the committed records + version count in the workflow run panel, fed by `getWorkflowRunLedger`. Commits `e5389c6`,`8b335b7`.)*
 - 🟡 **Daemon addressing — remote daemon.** Only the discovery-file/resolver seam exists; the remote endpoint + token refresh plug in later with no worker changes.
 - 🟡 **Client-triggered re-adopt/respawn when daemon health is lost mid-use** — described (`lib.rs`) but has no dedicated automated test (manual smoke only).
 - 🟡 **Prod-SEA packaging / Node availability** for the cross-platform resolver script; Windows file-permission handling is best-effort (chmod skipped).
@@ -160,8 +160,8 @@ With the substrate locked and the four axes live, catch the surfaces up. These a
 
 ## Templates, onboarding & splitter
 
-- 🟡 **Phase-2 platform-managed ledger for templates** (the `<orca:step-complete>` envelope, versioning, canonical-ID allocation, orchestrator review) — see the ledger items above; the Feature-Development template runs without it.
-- 🟡 **Future template categories** (Product, Design, …) — grouping is data-driven/additive but only `Engineering` exists today.
+- 🟡 **Phase-2 platform-managed ledger for templates** (the `<orca:step-complete>` envelope, versioning, canonical-ID allocation, orchestrator review) — see the ledger items above; the Feature-Development template runs without it. *(Phase-4: verified the engine machinery is **already complete** at the run level — every step commits a (currently empty) ledger version through `completeStepWithLedger`→`reviewAndNormalizeLedgerUpdates`→`commitLedgerVersion`. What's missing is purely agent-side: templates never **emit** `ledger_updates`. **Deferred to a live-daemon session** — the payoff (templates producing real ledger records) is unverifiable offline. The broker correction pass stays descoped (deterministic normalizer suffices); not reopened.)*
+- ✅ **Future template categories** (Product, Design, …) — grouping is data-driven/additive but only `Engineering` exists today. *(Phase-4 "Depth B": `category` is now a strictly-required **persisted** field on the `WorkflowTemplate` contract + `workflow_templates` DB column (migration `0044`), threaded through projection + all write paths. The Workflows-tab category filter reads `t.category` directly and the synthetic catalog-join shim (`categoryById`) was deleted — user/local templates now carry a real category instead of `Uncategorized`. Clean-state: required, no compat default. Adding a real new category (Product/Design) is now a one-line data change + authoring those templates (unspecced content). Commits `b54b0b6`,`58bd3f5`.)*
 - ⚪ **Initiative Implementation `INITIATIVE_GRAPH` validity** and the catalog reconcile test's `goals` insert columns — confirm against the real schema during execution; check for lingering references to the removed `orca/engineering` / `orca/feature-development` seeds. *(Phase-4: non-change — `INITIATIVE_GRAPH` does not exist in code (subsumed into `orca/adaptive-delivery`); the catalog reconcile test's `goals` INSERT has no schema drift (omitted columns carry defaults); stale `orca/engineering` actionable refs handled in Task S1, `orca/feature-development` has zero code hits.)*
 - *(The Fan-out / fan-in primitive that used to live here is the same delegate seam as Phase 5.1 — owned there.)*
 

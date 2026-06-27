@@ -218,7 +218,7 @@ Make `category` a first-class persisted attribute of `WorkflowTemplate` (Depth B
 - Test: `apps/daemon/src/workflows/templates/*.test.ts` (projection/usecases round-trip)
 
 **Interfaces:**
-- Produces: `WorkflowTemplate.category` (persisted, `z.string().min(1).max(64).default("Engineering")`).
+- Produces: `WorkflowTemplate.category` (persisted, strictly required `z.string().min(1).max(64)` — NO `.default()`; see clean-state Global Constraint).
 - Consumed by: Task S6 (desktop).
 
 - [ ] **Step 1: Write the failing migration + contract test**
