@@ -373,6 +373,18 @@ describe("step_result confirmed-frame enrichment", () => {
       { label: "Constraints", value: ["Revised constraint"] },
     ]);
   });
+
+  it("uses confirmed_lead snapshot over resultSummary when present", () => {
+    insertExpiredConfirmation();
+    // Simulate what the service writes at confirm-pause (scoring.reason text,
+    // which differs from the resultSummary stored on the step_result).
+    db.prepare("UPDATE workflow_step_runs SET confirmed_lead = ? WHERE id = ?")
+      .run("Scored: workspace picker replaces filesystem browse.", "s1");
+    const a = listActivitiesByGoal(db, "g1").find((x) => x.id === "a-res")!;
+    expect(a.confirmationSummary?.lead).toBe(
+      "Scored: workspace picker replaces filesystem browse."
+    );
+  });
 });
 
 describe("mark_done_pending recommendationId projection", () => {

@@ -56,6 +56,7 @@ export const migrationFiles = [
   "0042_gate_approval_counts.sql",
   "0043_activity_recommendation_id.sql",
   "0044_workflow_template_category.sql",
+  "0045_step_run_confirmed_lead.sql",
 ] as const;
 
 export function runMigrations(

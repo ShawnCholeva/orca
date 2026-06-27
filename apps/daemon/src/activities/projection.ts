@@ -94,7 +94,8 @@ function rebuildConfirmedFrame(
   stepRunId: string,
   stepTemplateId: string,
   stepsJson: string | null,
-  stepResult: WorkflowStepResultT
+  stepResult: WorkflowStepResultT,
+  confirmedLead: string | null
 ): ConfirmationSummaryT | undefined {
   const confirmed = db
     .prepare(
@@ -122,7 +123,7 @@ function rebuildConfirmedFrame(
   let block: unknown;
   try { block = JSON.parse(artifact.body); } catch { return undefined; }
 
-  const leadText = stepResult.resultSummary ?? stepResult.outcome.reason;
+  const leadText = confirmedLead ?? (stepResult.resultSummary ?? stepResult.outcome.reason);
   return buildConfirmationSummary(schemaParse.data, block, null, leadText);
 }
 
@@ -132,6 +133,7 @@ function enrichStepResult(db: Database.Database, activity: ActivityT): ActivityT
     .prepare(
       `SELECT sr.step_result_json AS result_json,
               sr.step_template_id,
+              sr.confirmed_lead,
               wt.steps_json
        FROM workflow_step_runs sr
        LEFT JOIN workflow_runs wr ON wr.id = sr.workflow_run_id
@@ -141,6 +143,7 @@ function enrichStepResult(db: Database.Database, activity: ActivityT): ActivityT
     .get(activity.stepRunId) as {
       result_json: string | null;
       step_template_id: string;
+      confirmed_lead: string | null;
       steps_json: string | null;
     } | undefined;
   if (!row?.result_json) return activity;
@@ -155,7 +158,8 @@ function enrichStepResult(db: Database.Database, activity: ActivityT): ActivityT
     activity.stepRunId,
     row.step_template_id,
     row.steps_json,
-    stepResult
+    stepResult,
+    row.confirmed_lead
   );
   return Activity.parse({
     ...activity,

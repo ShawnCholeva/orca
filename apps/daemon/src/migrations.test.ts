@@ -170,6 +170,7 @@ describe("runMigrations", () => {
       "0042_gate_approval_counts.sql",
       "0043_activity_recommendation_id.sql",
       "0044_workflow_template_category.sql",
+      "0045_step_run_confirmed_lead.sql",
     ]);
   });
 
@@ -306,6 +307,7 @@ describe("runMigrations", () => {
       "0042_gate_approval_counts.sql",
       "0043_activity_recommendation_id.sql",
       "0044_workflow_template_category.sql",
+      "0045_step_run_confirmed_lead.sql",
     ]);
 
     const goalCount = (
@@ -595,6 +597,7 @@ describe("session tables migration", () => {
       "0042_gate_approval_counts.sql",
       "0043_activity_recommendation_id.sql",
       "0044_workflow_template_category.sql",
+      "0045_step_run_confirmed_lead.sql",
     ]);
 
     const tables = (
@@ -1117,6 +1120,7 @@ describe("migration 0010 workflows", () => {
       "0042_gate_approval_counts.sql",
       "0043_activity_recommendation_id.sql",
       "0044_workflow_template_category.sql",
+      "0045_step_run_confirmed_lead.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1716,6 +1720,7 @@ describe("migration 0012 orchestration transport", () => {
       "0042_gate_approval_counts.sql",
       "0043_activity_recommendation_id.sql",
       "0044_workflow_template_category.sql",
+      "0045_step_run_confirmed_lead.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

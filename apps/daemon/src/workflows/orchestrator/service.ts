@@ -60,6 +60,7 @@ import { interruptLive, expireConfirmation, openOrUpdateLive, pauseForConfirmati
 import { setSessionStatus } from "../../sessions/projection.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
 import { extractProposal, summarizeScoring } from "./scoring-summary.js";
+import { confirmationLead } from "./confirmation-summary.js";
 import { scoringFacts, buildApprovalStepResult, replayEvaluationFailedResult } from "./step-result-builder.js";
 import {
   type GoalRow,
@@ -1199,10 +1200,12 @@ export class OrchestratorService {
           const scoringParse = StepResultScoringProposal.safeParse(action.scoring);
           const scoring = scoringParse.success ? scoringParse.data : undefined;
           const proposal = extractProposal(responseText);
+          const confirmedLead = confirmationLead(scoring?.reason, proposal);
           db.prepare(
-            "UPDATE workflow_step_runs SET pending_completion_json = ? WHERE id = ?"
+            "UPDATE workflow_step_runs SET pending_completion_json = ?, confirmed_lead = ? WHERE id = ?"
           ).run(
             JSON.stringify({ block: block ?? {}, scoring: scoring ?? null, finishedAt, proposal }),
+            confirmedLead,
             ctx.stepRun.id
           );
           // This is an early-return pause: for non-gated steps the downstream

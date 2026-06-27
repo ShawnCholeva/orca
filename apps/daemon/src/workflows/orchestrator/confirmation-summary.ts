@@ -25,6 +25,15 @@ function fieldValue(raw: unknown): string | string[] | null {
   return null; // objects / null are omitted
 }
 
+/** Returns the lead text for a confirmation card — the same formula used in both
+ *  the live card and the confirm-pause snapshot so neither site can drift. */
+export function confirmationLead(
+  scoringReason: string | undefined,
+  proposal: string | null
+): string {
+  return scoringReason?.trim() || proposal?.trim() || "Step complete.";
+}
+
 /** Builds the structured confirmation-card payload from a step's recorded output
  *  block and the mediator's scoring. Empty/missing fields and the internal
  *  `_completion` key are omitted so the card never shows a blank label. */
@@ -42,6 +51,6 @@ export function buildConfirmationSummary(
     if (value === null) continue;
     fields.push({ label: humanizeKey(field.key), value });
   }
-  const lead = scoring?.reason?.trim() || proposal?.trim() || "Step complete.";
+  const lead = confirmationLead(scoring?.reason, proposal);
   return { lead, fields, scoring };
 }
