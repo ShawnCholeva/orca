@@ -35,6 +35,32 @@ describe("detectStateConflicts", () => {
       currentVersions: new Map([["ws1","v"]]),
     })).toEqual([]);
   });
+  it("discriminates by kind: a file and a memory_item at the same ref do not collide", () => {
+    // self writes file:x; prior writes memory_item:x and reads file:x. Same ref
+    // string, different kinds -> neither write_write nor read_stale.
+    const c = detectStateConflicts({
+      self: { read_set: [entry("file", "x")], write_set: [entry("file", "x")], version_deps: [] },
+      priors: [
+        {
+          transitionId: "t",
+          read_set: [entry("file", "x")],
+          write_set: [entry("memory_item", "x")],
+        },
+      ],
+      currentVersions: new Map(),
+    });
+    expect(c).toEqual([]);
+  });
+
+  it("treats an absent current version as divergence (the ref vanished under the step)", () => {
+    const c = detectStateConflicts({
+      self: { read_set: [], write_set: [], version_deps: [{ ref: "ws1", observed_version: "main:false" }] },
+      priors: [],
+      currentVersions: new Map(), // ws1 absent -> get() is undefined !== observed
+    });
+    expect(c.find((x) => x.kind === "belief_divergence")?.refs).toContain("ws1");
+  });
+
   it("a refuting judge drops candidates", () => {
     const c = detectStateConflicts({
       self: { read_set: [], write_set: [entry("file","x")], version_deps: [] },
