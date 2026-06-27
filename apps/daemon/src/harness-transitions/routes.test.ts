@@ -32,6 +32,8 @@ describe("GET /v1/harness/registry", () => {
     expect(body.boundaries.map((b: { key: string }) => b.key).sort()).toEqual(["mark_done", "step_complete", "step_launch", "tool_gate"]);
     const sensorByKind = Object.fromEntries(body.sensors.map((s: { kind: string; status: string }) => [s.kind, s.status]));
     expect(sensorByKind.typecheck).toBe("implemented");
-    expect(sensorByKind.integration).toBe("unimplemented");
+    // Full ladder registered in Phase 3 — integration + static are now implemented.
+    expect(sensorByKind.integration).toBe("implemented");
+    expect(sensorByKind.static).toBe("implemented");
   });
 });
