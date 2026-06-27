@@ -15,7 +15,7 @@
 - **Append-only event spine + projections.** Clients render projections + send commands; no orchestration logic in the desktop app.
 - **Surgical changes.** Touch only what each task requires; match existing style; don't reformat adjacent code.
 - **Done-marker legend** (FUTURE_WORK.md): ✅ done · 🟡 deferred-by-decision · 🔴 blocked · ⚪ non-change. **No 🟢.**
-- **Backward-compat (item 20):** `WorkflowTemplate.category` MUST be `z.string().min(1).max(64).default("Engineering")` — old `template_snapshot_json` blobs captured before this field exists must still `WorkflowTemplate.parse(...)`. The DB column is `category TEXT NOT NULL DEFAULT 'Engineering'`.
+- **Future-shape-only (item 20) — clean-state, NO compat, NO backfill:** `WorkflowTemplate.category` is **strictly required** — `z.string().min(1).max(64)` (NO `.default()`). The dev database is **reset to a clean state** before/with this work, so there is no pre-existing data to migrate. The migration only *defines* the column for fresh DBs; there is **no data backfill** (no rows, no snapshots to patch). **Explicit consequence:** this migration will fail to load runs from any DB that is NOT reset — old `template_snapshot_json` blobs lack `category` and would throw on `WorkflowTemplate.parse(...)`. The DB column is `category TEXT NOT NULL DEFAULT 'Engineering'` (the `DEFAULT` is required by SQLite for an `ADD COLUMN NOT NULL` and supplies the value for newly-created custom templates — a DB default for the single existing category, not a compat affordance). **Operational prerequisite (surfaced separately): the dev DB reset is a destructive action tied to the daemon restart and is confirmed with the user before execution.**
 - **Contracts dist is gitignored + built:** after any `@orca/contracts` change, run `pnpm --filter @orca/contracts build` before daemon/desktop tests, or they fail on a stale dist.
 - **Commands:** daemon `pnpm --filter @orca/daemon test -- <path>` / `… typecheck`; contracts `pnpm --filter @orca/contracts test -- <path>` / `… build` / `… typecheck`; desktop `pnpm --filter @orca/desktop test -- <path>` / `… typecheck`.
 - **Pre-existing (not this stream):** desktop package-wide `tsc --noEmit` is already red on `main` (App.test.tsx/GoalDetailView.test.tsx fixtures miss `operatingMode`). For desktop tasks verify "no NEW type error in changed files," not package-wide green. Desktop vitest is green.
@@ -223,28 +223,31 @@ Make `category` a first-class persisted attribute of `WorkflowTemplate` (Depth B
 
 - [ ] **Step 1: Write the failing migration + contract test**
 
-Add a contract test: `WorkflowTemplate.parse({...full template WITHOUT category...})` yields `category === "Engineering"` (the default — proves old snapshots still parse); and a template WITH `category: "Product"` round-trips.
-Add a daemon test: install a built-in via `upsertBuiltInTemplate`, then `getTemplateById` and assert `.category === "Engineering"`; `duplicateTemplate` of it yields a template whose `category` equals the source's.
-Run both → FAIL.
+Add a contract test: `WorkflowTemplate.parse({...full template WITHOUT category...})` **THROWS** (category is required, no default); and a template WITH `category: "Product"` round-trips.
+Add a daemon test: on a fresh in-memory DB (`runMigrations` from scratch), install a built-in via `upsertBuiltInTemplate`, then `getTemplateById` and assert `.category === "Engineering"`; `duplicateTemplate` of it yields a template whose `category` equals the source's. (No snapshot-backfill test — clean-state means no pre-existing snapshots; the test harness always builds the schema from scratch.)
+Run all → FAIL.
 
-- [ ] **Step 2: Add the contract field**
+- [ ] **Step 2: Add the contract field (required, no default)**
 
 In `WorkflowTemplate` (`:344-363`), add (after `scopeName`, before `graph` to match field grouping):
 ```ts
-    category: z.string().min(1).max(64).default("Engineering"),
+    category: z.string().min(1).max(64),
 ```
-The `.default("Engineering")` is mandatory — old `template_snapshot_json` blobs lack the field and must still parse (see Global Constraints).
-Run: `pnpm --filter @orca/contracts test -- <contract test>` → the no-category-defaults case PASSes. Then `pnpm --filter @orca/contracts build`.
+**No `.default()`** — the future shape is the only shape; existing data is migrated to carry the field (Step 3), so nothing relies on a fallback (see Global Constraints).
+Run: `pnpm --filter @orca/contracts test -- <contract test>` → the without-category case THROWS as asserted. Then `pnpm --filter @orca/contracts build`.
 
-- [ ] **Step 3: Write the migration**
+- [ ] **Step 3: Write the migration (column + data backfill, incl. snapshots)**
 
 Create `apps/daemon/migrations/0044_workflow_template_category.sql`:
 ```sql
 -- 0044_workflow_template_category.sql
 -- Promote template category from catalog-display-only to a first-class persisted
 -- attribute so post-install surfaces (Workflows tab filter) read it directly
--- instead of reconstructing it by joining against the catalog by id. All current
--- built-ins are "Engineering"; the default backfills existing rows correctly.
+-- instead of reconstructing it by joining against the catalog by id.
+-- Clean-state / future-shape-only: the contract requires `category` (no default).
+-- The dev DB is reset, so there is no pre-existing data to migrate — this only
+-- defines the column for fresh DBs. The DEFAULT is required by SQLite for an
+-- ADD COLUMN NOT NULL and supplies the value for newly-created custom templates.
 ALTER TABLE workflow_templates ADD COLUMN category TEXT NOT NULL DEFAULT 'Engineering';
 ```
 
@@ -307,7 +310,7 @@ Run: `pnpm --filter @orca/desktop test -- workflows/WorkflowsPage.test.tsx` → 
 In `WorkflowsPage.tsx`:
 - Delete `const [categoryById, setCategoryById] = useState…` (`:55`).
 - Delete the entire catalog-fetch `useEffect` (`:82-100`).
-- Replace `categoryOf` (`:132-136`) with `const categoryOf = (t: WorkflowTemplate) => t.category;` (the contract guarantees a value via its default, so no `Uncategorized` fallback is needed). Keep `categoryOptions` computed from `categoryOf`.
+- Replace `categoryOf` (`:132-136`) with `const categoryOf = (t: WorkflowTemplate) => t.category;` (category is a required contract field, so every template carries it — no `Uncategorized` fallback is needed). Keep `categoryOptions` computed from `categoryOf`.
 - Remove the `UNCATEGORIZED` const (`:11`) and the `listTemplateCatalog` import **iff** nothing else in the file uses them (grep first).
 
 - [ ] **Step 3: Run test + verify no new type error**
