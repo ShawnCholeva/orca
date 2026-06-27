@@ -41,6 +41,10 @@ export interface ShadowSessionDeps {
   readyQuietMs?: number;              // settle delay after trust before "ready" (default 1500)
   submitSettleMs?: number;            // delay after paste before Enter, so a bracketed paste is ingested (default 200)
   submitConfirmMs?: number;           // max wait for the turn to start before re-sending Enter (default 2000)
+  // PROVISIONAL: receives the full orchestrator turn text before parseAction strips it to
+  // the action block. This in-process tap moves to the Runner Protocol boundary at the
+  // control/execution-plane split.
+  onOrchestratorTurn?: (goalId: string, fullText: string) => void;
 }
 
 interface Pending {
@@ -274,6 +278,10 @@ export class ShadowSessionManager {
       });
       return;
     }
+    // PROVISIONAL: capture the orchestrator's full turn text for the auditable
+    // activity trajectory before parseAction strips it to the action block. This
+    // in-process tap moves to the Runner Protocol boundary at the plane split.
+    try { this.deps.onOrchestratorTurn?.(goalId, result.text ?? ""); } catch { /* never break the loop */ }
     const block = session.provider.turnParser().parseAction(result.text ?? "");
     if (block === null) {
       this.settlePending(goalId, pending, {

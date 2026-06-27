@@ -223,6 +223,8 @@ import { deriveTurnSummary } from './activities/turn-summary.js';
 import { reconstructEditDiff } from './activities/diff.js';
 import type { ActivitySignal } from './activities/signals.js';
 import type { ActivityStoreCtx } from './activities/store.js';
+import { recordOrchestratorReasoning } from './activities/store.js';
+import { extractOrchestratorReasoning } from './orchestrator-llm/reasoning-extract.js';
 import { ActivityUpdater } from './activities/updater.js';
 import { reconcileStepResultActivities } from './activities/step-result-activity.js';
 import { extractReasoningSince } from './activities/transcript.js';
@@ -567,6 +569,24 @@ export function createServer(
     }
   });
 
+  // Resolve the active workflow run's current step run for a goal.
+  // Used by the orchestrator-reasoning tap to attach the activity to the right step.
+  function resolveStepContextFromGoal(
+    dbConn: typeof db,
+    goalId: string
+  ): { workflowRunId: string; stepRunId: string } | null {
+    const row = dbConn
+      .prepare(
+        `SELECT wr.id AS workflow_run_id, wr.current_step_run_id AS step_run_id
+         FROM goals g
+         JOIN workflow_runs wr ON wr.id = g.active_workflow_run_id AND wr.goal_id = g.id
+         WHERE g.id = ? AND wr.status = 'active' AND wr.current_step_run_id IS NOT NULL`
+      )
+      .get(goalId) as { workflow_run_id: string; step_run_id: string } | undefined;
+    if (!row) return null;
+    return { workflowRunId: row.workflow_run_id, stepRunId: row.step_run_id };
+  }
+
   // Shadow session manager for the orchestrator-LLM (tmux-backed).
   const shadowSessions = new ShadowSessionManager({
     shadowRoot: path.join(config.dataDir, "shadow"),
@@ -581,6 +601,19 @@ export function createServer(
     claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
     codexBin: process.env["ORCA_CODEX_BIN"] ?? "codex",
     antigravityBin: process.env["ORCA_ANTIGRAVITY_BIN"] ?? "agy",
+    // PROVISIONAL: in-process tap that persists each orchestrator LLM turn as an
+    // auditable activity. Moves to the Runner Protocol at the plane split.
+    onOrchestratorTurn: (goalId, fullText) => {
+      try {
+        const ctx = resolveStepContextFromGoal(db, goalId);
+        if (!ctx) return;
+        const reasoning = extractOrchestratorReasoning(fullText);
+        recordOrchestratorReasoning(
+          { db, bus: eventBus },
+          { goalId, workflowRunId: ctx.workflowRunId, stepRunId: ctx.stepRunId, text: reasoning }
+        );
+      } catch { /* auditable-trajectory capture must never break orchestration */ }
+    },
   });
 
   // Worker session manager for orchestrator-dispatched agent sessions (tmux-backed).

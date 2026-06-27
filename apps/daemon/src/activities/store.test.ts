@@ -13,6 +13,7 @@ import {
   pauseForInput,
   pauseForMarkDone,
   pauseForProviderRecovery,
+  recordOrchestratorReasoning,
   resolveMarkDoneActivity,
   resumeFromConfirmation,
   resumeFromProviderRecovery,
@@ -324,5 +325,21 @@ describe("ActivityStore", () => {
     const done = resolveMarkDoneActivity(ctx, { stepRunId: "s1" });
     expect(done?.status).toBe("completed");
     expect(getLiveForStepRun(db, "s1")).toBeUndefined();
+  });
+
+  it("records a completed orchestrator_reasoning activity attributed to the orch session", () => {
+    const { ctx } = ctxFor(db);
+    const a = recordOrchestratorReasoning(ctx, {
+      goalId: "g1", workflowRunId: "r1", stepRunId: "s1", text: "routing because the spec exists",
+    });
+    expect(a?.sourceKind).toBe("orchestrator_reasoning");
+    expect(a?.status).toBe("completed");
+    expect(a?.agentSessionId).toBe("orchsess-g1");
+    expect(a?.finalSummary).toBe("routing because the spec exists");
+  });
+
+  it("skips empty orchestrator reasoning", () => {
+    const { ctx } = ctxFor(db);
+    expect(recordOrchestratorReasoning(ctx, { goalId: "g1", workflowRunId: "r1", stepRunId: "s1", text: "  " })).toBeUndefined();
   });
 });

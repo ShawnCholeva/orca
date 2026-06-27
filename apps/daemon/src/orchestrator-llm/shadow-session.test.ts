@@ -82,4 +82,39 @@ describe("ShadowSessionManager spawn", () => {
     m.resolvePending("G1", { text: "quota exceeded", failure: true });
     await expect(p).rejects.toThrow("quota exceeded");
   });
+
+  it("calls onOrchestratorTurn with the raw text before parseAction strips it", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    const tmux = fakeTmux();
+    const captured: Array<{ goalId: string; text: string }> = [];
+    const m = new ShadowSessionManager({
+      ...deps(root, tmux),
+      onOrchestratorTurn: (goalId, text) => { captured.push({ goalId, text }); },
+    });
+    await m.spawn("G1");
+    const p = m.ask("G1", { systemPrompt: "S", userPrompt: "q", timeoutMs: 1000 });
+    await waitReady();
+    const rawTurn = "routing because spec exists\n\n```orca:action\n{\"kind\":\"noop\"}\n```";
+    m.resolvePending("G1", { text: rawTurn });
+    await p; // resolve succeeds
+    expect(captured).toHaveLength(1);
+    expect(captured[0]!.goalId).toBe("G1");
+    expect(captured[0]!.text).toBe(rawTurn);
+  });
+
+  it("does not call onOrchestratorTurn on a failure hook", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    const tmux = fakeTmux();
+    const captured: string[] = [];
+    const m = new ShadowSessionManager({
+      ...deps(root, tmux),
+      onOrchestratorTurn: (_g, t) => { captured.push(t); },
+    });
+    await m.spawn("G1");
+    const p = m.ask("G1", { systemPrompt: "S", userPrompt: "q", timeoutMs: 1000 });
+    await waitReady();
+    m.resolvePending("G1", { text: "quota exceeded", failure: true });
+    await expect(p).rejects.toThrow();
+    expect(captured).toHaveLength(0);
+  });
 });

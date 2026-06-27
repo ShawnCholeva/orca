@@ -16,6 +16,7 @@ import {
 } from "@orca/contracts";
 
 import type { EventBus } from "../events.js";
+import { shadowSessionId } from "../orchestrator-llm/shadow-session.js";
 
 export interface ActivityStoreCtx {
   db: Database.Database;
@@ -739,6 +740,38 @@ export function expireConfirmation(
     if (expired === undefined) throw new Error(`Activity disappeared: ${live.id}`);
     event = insertActivityChangedEvent(ctx.db, expired, now);
     return expired;
+  })();
+  publishActivityChanged(ctx, event);
+  return activity;
+}
+
+// Point-in-time record of one orchestrator LLM turn (auditable trajectory).
+// A completed row (not the one-live-per-step bubble) so it never conflicts with
+// the live worker activity for the same step.
+export function recordOrchestratorReasoning(
+  ctx: ActivityStoreCtx,
+  input: { goalId: string; workflowRunId: string; stepRunId: string; text: string }
+): ActivityT | undefined {
+  const text = input.text.trim();
+  if (text.length === 0) return undefined;
+  let event: DomainEvent | undefined;
+  const activity = ctx.db.transaction(() => {
+    const now = currentTime(ctx);
+    const id = nextActivityId(ctx);
+    const turnOrdinal = nextTurnOrdinal(ctx.db, input.stepRunId);
+    ctx.db
+      .prepare(
+        `INSERT INTO activities (
+           id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+           status, current_text, final_summary, source_kind, work_category, confidence,
+           pending_question, recommendation_id, created_at, updated_at, completed_at
+         ) VALUES (?, ?, ?, ?, ?, ?, 'completed', ?, ?, 'orchestrator_reasoning', NULL, NULL, NULL, NULL, ?, ?, ?)`
+      )
+      .run(id, input.goalId, input.workflowRunId, input.stepRunId, shadowSessionId(input.goalId), turnOrdinal, text, text, now, now, now);
+    const inserted = getActivityById(ctx.db, id);
+    if (inserted === undefined) throw new Error(`Activity insert failed: ${id}`);
+    event = insertActivityChangedEvent(ctx.db, inserted, now);
+    return inserted;
   })();
   publishActivityChanged(ctx, event);
   return activity;

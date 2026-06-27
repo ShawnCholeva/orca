@@ -55,6 +55,7 @@ import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.
 import { appendWorkflowEvent } from "../events.js";
 import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
 import { resolveGateDecisionActivity, pauseForGateDecision, pauseForConfirmation, openOrUpdateLive, expireConfirmation, pauseForMarkDone } from "../../activities/store.js";
+import { shadowSessionId } from "../../orchestrator-llm/shadow-session.js";
 import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import { createStepOutputArtifact } from "./ledger-commit.js";
@@ -1415,12 +1416,13 @@ export class DispatchEngine {
       // finalized — pauseForConfirmation alone would no-op and strand the run.
       // Mirror the supervised step-completion path: guarantee a live activity
       // for the source step run exists before pausing, so a confirmation card
-      // is always created (no agent → agentSessionId null).
+      // is always created. Attributed to the orchestrator shadow session (it
+      // produced this routing decision).
       openOrUpdateLive(activityCtx, {
         goalId: goal.id,
         workflowRunId: run.id,
         stepRunId: stepRun.id,
-        agentSessionId: null,
+        agentSessionId: shadowSessionId(goal.id),
         sourceKind: "step_started",
         currentText: summary,
         workCategory: null,
