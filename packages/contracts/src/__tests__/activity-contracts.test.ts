@@ -51,3 +51,19 @@ test("ActivityStep accepts an optional diff", () => {
   expect(step.diff?.additions).toBe(2);
   expect(step.status).toBe("done");
 });
+
+it("accepts the mark_done_pending source kind", () => {
+  expect(ActivitySourceKind.parse("mark_done_pending")).toBe("mark_done_pending");
+});
+
+it("carries an optional recommendationId for the mark-done card", () => {
+  const a = Activity.parse({
+    id: "a1", goalId: "g1", workflowRunId: "r1", stepRunId: "s1",
+    agentSessionId: null, turnOrdinal: 0, status: "paused_for_input",
+    currentText: "Approve to complete the run.", finalSummary: null,
+    sourceKind: "mark_done_pending", workCategory: null, confidence: null,
+    recommendationId: "rec-1",
+    createdAt: "t", updatedAt: "t", completedAt: null, steps: [],
+  });
+  expect(a.recommendationId).toBe("rec-1");
+});

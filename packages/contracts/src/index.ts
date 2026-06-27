@@ -1205,6 +1205,10 @@ export const ActivitySourceKind = z.enum([
   // survives a daemon restart), and the persisted record once decided.
   "gate_decision_pending",
   "gate_decision",
+  // A workflow run whose final step produced output and is awaiting the
+  // human's approve-to-complete decision (live, persisted so it survives a
+  // daemon restart and the chat rebuilds the affordance from activities alone).
+  "mark_done_pending",
 ]);
 export type ActivitySourceKind = z.infer<typeof ActivitySourceKind>;
 
@@ -1292,6 +1296,7 @@ export const Activity = z
     confidence: ActivityConfidence.nullable(),
     pendingQuestion: PendingQuestion.optional(),
     stepName: z.string().max(256).optional(),
+    recommendationId: z.string().optional(),
     stepResult: WorkflowStepResult.optional(),
     confirmationSummary: ConfirmationSummary.optional(),
     providerRecovery: ProviderRecoveryCheckpoint.optional(),
