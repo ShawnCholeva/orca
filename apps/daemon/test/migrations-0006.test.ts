@@ -181,6 +181,7 @@ describe('context migration 0006_context.sql', () => {
       '0041_goal_operating_mode.sql',
       '0042_gate_approval_counts.sql',
       '0043_activity_recommendation_id.sql',
+      '0044_workflow_template_category.sql',
     ]);
 
     const tables = (
@@ -288,6 +289,7 @@ describe('context migration 0006_context.sql', () => {
       '0041_goal_operating_mode.sql',
       '0042_gate_approval_counts.sql',
       '0043_activity_recommendation_id.sql',
+      '0044_workflow_template_category.sql',
     ]);
 
     const counts = {

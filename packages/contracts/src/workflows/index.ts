@@ -358,6 +358,7 @@ export const WorkflowTemplate = z
     updatedAt: z.string().datetime(),
     scope: WorkflowScope.default("global"),
     scopeName: z.string().max(WORKFLOW_TEMPLATE_MAX_SCOPE_NAME_CHARS).default(""),
+    category: z.string().min(1).max(64),
     graph: WorkflowGraph.nullable().default(null),
   })
   .strict();

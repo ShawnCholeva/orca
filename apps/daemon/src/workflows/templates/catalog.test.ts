@@ -31,7 +31,7 @@ describe("built-in template catalog", () => {
     for (const d of BUILTIN_TEMPLATE_CATALOG) {
       expect(d.bestFor.length).toBeGreaterThan(0);
       expect(d.bestFor.length).toBeLessThanOrEqual(200);
-      expect(d.category).toBe("Engineering");
+      expect(["Engineering"]).toContain(d.category); // extend this set as categories are added
     }
   });
 

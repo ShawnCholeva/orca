@@ -4,6 +4,7 @@ import type Database from "better-sqlite3";
 import { runMigrations, defaultMigrationsDir } from "../../migrations.js";
 import { EventBus } from "../../events.js";
 import {
+  duplicateTemplate,
   installBuiltInTemplates,
   reconcileBuiltInTemplates,
   upgradeInstalledBuiltInTemplates,
@@ -76,6 +77,27 @@ describe("reconcileBuiltInTemplates", () => {
     reconcileBuiltInTemplates(db);
     const row = db.prepare("SELECT id FROM workflow_templates WHERE id = ?").get("orca/adaptive-delivery");
     expect(row).toBeTruthy();
+  });
+});
+
+describe("category persistence", () => {
+  it("upsertBuiltInTemplate persists category from catalog definition", () => {
+    installBuiltInTemplates(ctx(), ["orca/adaptive-delivery"]);
+    const row = db
+      .prepare("SELECT category FROM workflow_templates WHERE id = ?")
+      .get("orca/adaptive-delivery") as { category: string } | undefined;
+    expect(row?.category).toBe("Engineering");
+  });
+
+  it("installBuiltInTemplates returns templates with category field", () => {
+    const [template] = installBuiltInTemplates(ctx(), ["orca/code-review"]);
+    expect(template?.category).toBe("Engineering");
+  });
+
+  it("duplicateTemplate inherits source category", () => {
+    installBuiltInTemplates(ctx(), ["orca/bug-triage-fix"]);
+    const copy = duplicateTemplate(ctx(), { sourceTemplateId: "orca/bug-triage-fix", name: "Copy" });
+    expect(copy.category).toBe("Engineering");
   });
 });
 

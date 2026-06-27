@@ -137,7 +137,7 @@ export function duplicateTemplate(
   const staged = ctx.db.transaction(() => {
     ctx.db
       .prepare(
-        "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at, scope, scope_name, graph_json) VALUES (?, ?, ?, 1, 0, 0, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at, scope, scope_name, category, graph_json) VALUES (?, ?, ?, 1, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)"
       )
       .run(
         templateId,
@@ -149,6 +149,7 @@ export function duplicateTemplate(
         now,
         source.scope,
         source.scopeName,
+        source.category,
         source.graph ? JSON.stringify(source.graph) : null
       );
     const event = appendWorkflowEvent(
@@ -190,14 +191,14 @@ function upsertBuiltInTemplate(
   const staged = ctx.db.transaction(() => {
     if (existing) {
       ctx.db.prepare(
-        "UPDATE workflow_templates SET name = ?, description = ?, version = ?, is_built_in = 1, is_locked = 1, steps_json = ?, guardrails_json = ?, graph_json = ?, scope = 'global', scope_name = '', updated_at = ? WHERE id = ?"
-      ).run(def.name, def.description, def.version, stepsJson, guardrailsJson, graphJson, now, def.id);
+        "UPDATE workflow_templates SET name = ?, description = ?, version = ?, is_built_in = 1, is_locked = 1, steps_json = ?, guardrails_json = ?, graph_json = ?, scope = 'global', scope_name = '', category = ?, updated_at = ? WHERE id = ?"
+      ).run(def.name, def.description, def.version, stepsJson, guardrailsJson, graphJson, def.category, now, def.id);
       const event = appendWorkflowEvent(ctx.db, "workflow.template.updated", { templateId: def.id, version: def.version }, now, ctx.idFactory);
       return [event];
     }
     ctx.db.prepare(
-      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at, scope, scope_name, graph_json) VALUES (?, ?, ?, ?, 1, 1, ?, ?, ?, ?, 'global', '', ?)"
-    ).run(def.id, def.name, def.description, def.version, stepsJson, guardrailsJson, now, now, graphJson);
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at, scope, scope_name, category, graph_json) VALUES (?, ?, ?, ?, 1, 1, ?, ?, ?, ?, 'global', '', ?, ?)"
+    ).run(def.id, def.name, def.description, def.version, stepsJson, guardrailsJson, now, now, def.category, graphJson);
     const event = appendWorkflowEvent(ctx.db, "workflow.template.created", { templateId: def.id, version: def.version }, now, ctx.idFactory);
     return [event];
   })();
