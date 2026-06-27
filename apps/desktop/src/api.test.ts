@@ -1442,7 +1442,7 @@ describe("desktop api client", () => {
   it("installTemplates POSTs the selected ids and returns templates", async () => {
     const template = {
       id: "orca/brainstorm", name: "Brainstorm", description: "d", version: 1,
-      isBuiltIn: true, isLocked: true,
+      category: "Engineering", isBuiltIn: true, isLocked: true,
       steps: [{ id: "frame", ordinal: 0, name: "Frame", instructions: "x",
         outputSchema: [{ key: "problem", type: "string", required: true }],
         agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] }],
