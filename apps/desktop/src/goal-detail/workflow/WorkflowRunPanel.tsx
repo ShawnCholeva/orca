@@ -405,7 +405,7 @@ function findPendingHumanReviewAttempt(
 }
 
 function formatTemplateLabel(templateId: string): string {
-  return templateId === "orca/engineering" ? "Engineering workflow" : templateId;
+  return templateId;
 }
 
 function formatStepLabel(stepTemplateId: string): string {

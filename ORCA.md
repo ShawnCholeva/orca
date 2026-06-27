@@ -98,7 +98,7 @@ The daemon (`apps/daemon/src`) is organized by subsystem. Each typically has `us
 
 Inside `workflows/`:
 
-- `templates/` — workflow definitions (e.g. `seed-engineering.ts`, the `orca/engineering` template) and validation pipeline.
+- `templates/` — workflow definitions (built-ins registered in `catalog.ts`'s `BUILTIN_TEMPLATE_CATALOG`) and validation pipeline.
 - `runs/` — run lifecycle.
 - `steps/` — per-step run state.
 - `orchestrator/` — the mediation engine: step dispatch, agent interview, judgement, revise loop, crash retry, idle timeout, resume, worker sessions/questions, synthesis.

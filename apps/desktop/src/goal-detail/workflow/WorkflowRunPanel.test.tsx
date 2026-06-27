@@ -181,7 +181,7 @@ describe("WorkflowRunPanel", () => {
     render(<WorkflowRunPanel goalId="goal-1" initialRunId="run-1" />);
 
     await waitFor(() => {
-      expect(screen.getByText("Engineering workflow · Issue Breakdown")).toBeInTheDocument();
+      expect(screen.getByText("orca/engineering · Issue Breakdown")).toBeInTheDocument();
     });
 
     expect(screen.getAllByText("advance: execution")).toHaveLength(2);
