@@ -238,4 +238,18 @@ describe("round-trip", () => {
       expect(parsed.schema.find((f) => f.key === "items")?.description).toBe("list of results");
     }
   });
+
+  it("preserves a description on a non-last leaf field (comma not absorbed)", () => {
+    const schema = [
+      { key: "tag", type: "string" as const, required: true, description: "a label" },
+      { key: "count", type: "number" as const, required: true },
+    ];
+    const text = serializeOutputSchema(schema as any);
+    const parsed = parseOutputSchemaText(text);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.schema.find((f) => f.key === "tag")?.description).toBe("a label");
+      expect(parsed.schema.find((f) => f.key === "count")?.description ?? undefined).toBeUndefined();
+    }
+  });
 });
