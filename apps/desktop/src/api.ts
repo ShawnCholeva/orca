@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { openPath } from "@tauri-apps/plugin-opener";
 import {
   AppSettings,
   type PutSettingsRequest,
@@ -2023,4 +2024,8 @@ export function openSessionStream(handlers: SessionStreamHandlers): {
       onStatus("closed");
     },
   };
+}
+
+export function openArtifact(reference: string): Promise<void> {
+  return openPath(reference);
 }

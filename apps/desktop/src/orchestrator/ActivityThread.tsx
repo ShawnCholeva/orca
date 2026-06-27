@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Activity } from "@orca/contracts";
 import type { ComponentType, ReactNode } from "react";
+import { openArtifact } from "../api";
 
 type ProviderRecoveryProps = {
   runId: string;
@@ -218,9 +219,14 @@ export function StepResultCard({ activity }: { activity: Activity }) {
       </div>
       <div className="step-result-summary" data-testid="step-result-summary">{headline}</div>
       {r.primaryArtifact ? (
-        <div className="step-result-artifact" data-testid="step-result-artifact" title={r.primaryArtifact.reference}>
+        <button
+          type="button"
+          className="step-result-artifact"
+          data-testid="step-result-artifact"
+          onClick={() => { void openArtifact(r.primaryArtifact!.reference); }}
+        >
           {r.primaryArtifact.description || "Artifact"}: {r.primaryArtifact.reference}
-        </div>
+        </button>
       ) : null}
       <div className="step-result-footer">
         <span />

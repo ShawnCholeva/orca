@@ -2,6 +2,12 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import type { Activity, ProviderRecoveryCheckpoint } from "@orca/contracts";
 import { describe, expect, it, vi } from "vitest";
 
+const openArtifactMock = vi.fn();
+
+vi.mock("../api", () => ({
+  openArtifact: (...args: unknown[]) => openArtifactMock(...args),
+}));
+
 import {
   ActivityCard,
   LiveActivity,
@@ -418,5 +424,38 @@ describe("StepResultCard confirmed frame", () => {
     );
     expect(screen.queryByText("Problem")).toBeNull();
     expect(screen.queryByTestId("step-result-confirmed")).toBeNull();
+  });
+});
+
+describe("StepResultCard artifact open affordance", () => {
+  const artifactActivity: Activity = {
+    id: "art1", goalId: "g1", workflowRunId: "r1", stepRunId: "s1",
+    agentSessionId: null, turnOrdinal: 1, status: "completed",
+    currentText: "", finalSummary: null, sourceKind: "step_result",
+    workCategory: null, confidence: null, stepName: "Design",
+    stepResult: {
+      stepId: "s1", stepStatus: "completed", evaluationStatus: "scored",
+      successScore: 0.9,
+      quality: { outputCompleteness: 0.9, outputCorrectness: 0.9, instructionAdherence: 0.9, downstreamReadiness: 0.9, riskLevel: 0.1 },
+      performance: { durationSeconds: 60, retries: 0 },
+      outcome: { reason: "Done.", producedArtifactsCount: 1, blockingIssuesCount: 0, warningsCount: 0, handoffReady: true },
+      primaryArtifact: { reference: ".orca/specs/x.md", description: "design spec" },
+    },
+    createdAt: "2026-06-27T00:00:00.000Z",
+    updatedAt: "2026-06-27T00:00:00.000Z",
+    completedAt: "2026-06-27T00:00:00.000Z",
+    steps: [],
+  };
+
+  it("renders the artifact as a button and calls openArtifact on click", () => {
+    openArtifactMock.mockResolvedValue(undefined);
+    render(<StepResultCard activity={artifactActivity} />);
+
+    const artifact = screen.getByTestId("step-result-artifact");
+    expect(artifact.tagName).toBe("BUTTON");
+    expect(artifact).toHaveTextContent("design spec: .orca/specs/x.md");
+
+    fireEvent.click(artifact);
+    expect(openArtifactMock).toHaveBeenCalledWith(".orca/specs/x.md");
   });
 });
