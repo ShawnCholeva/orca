@@ -64,6 +64,7 @@ import {
   canonicalizeProposedActionJson,
 } from './fingerprint.js';
 import { emitMarkDone } from "../harness-transitions/emit.js";
+import { resolveMarkDoneActivity } from "../activities/store.js";
 import { buildGoalWriteSetRollup } from "../harness-state/write-set-rollup.js";
 import type { TelemetryFacet } from "@orca/contracts";
 
@@ -565,6 +566,10 @@ function recordTerminalFeedback(
       emitMarkDone(
         { db, bus, now: () => now, idFactory: idFn },
         { goalId: rec.goalId, workflowRunId: rec.proposedAction.workflowRunId, telemetry, stateDeps }
+      );
+      resolveMarkDoneActivity(
+        { db, bus, now: () => now, idFactory: idFn },
+        { stepRunId: rec.proposedAction.workflowStepRunId }
       );
     } catch (err) {
       console.error("emitMarkDone failed", err);

@@ -45,6 +45,7 @@ import type { ProviderRecoveryCheckpoint } from "@orca/contracts";
 import { listOrchestratorMessagesByGoal } from "../../orchestrator-chat/projection.js";
 import { listActivitiesByGoal } from "../../activities/projection.js";
 import { appendActivityStep, openOrUpdateLive } from "../../activities/store.js";
+import { acceptRecommendation } from "../../recommendations/usecases.js";
 import {
   OrchestratorProviderRecoveryInvalidTransitionError,
   OrchestratorProviderRecoveryNotFoundError,
@@ -985,13 +986,14 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
         )
         .get()
     ).toEqual({ count: 1 });
+    // step_result + mark_done_pending both emit activity.changed for step-1
     expect(
       events.filter(
         (event) =>
           event.type === "activity.changed" &&
           (event.payload as { stepRunId?: string }).stepRunId === "step-1"
       )
-    ).toHaveLength(1);
+    ).toHaveLength(2);
   });
 
   it("ask_user posts a chat message carrying an interactive pending_question", async () => {
@@ -2160,6 +2162,34 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     expect(launchFn).not.toHaveBeenCalled();
   });
 
+  it("persists a mark_done_pending activity with the rec id, resolved on accept", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" }); // single terminal step
+    db.prepare(
+      "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-final', 'goal-1', 'run-1', 'step-1', 'step_output', 'Implement', ?, 'orchestrator', NULL, NULL, NULL, ?)"
+    ).run(JSON.stringify({ result: "done", _completion: {} }), NOW);
+
+    const { engine } = makeAgentService(makeLauncher());
+    await engine.advanceToNextStep(db, () => NOW, "run-1");
+
+    // dispatch should have written a mark_done_pending activity
+    const acts = listActivitiesByGoal(db, "goal-1");
+    const pending = acts.find((a) => a.sourceKind === "mark_done_pending");
+    expect(pending).toBeDefined();
+
+    const recRow = db
+      .prepare("SELECT id FROM recommendations WHERE type = 'complete_workflow_run' LIMIT 1")
+      .get() as { id: string } | undefined;
+    expect(recRow).toBeDefined();
+    expect(pending?.recommendationId).toBe(recRow!.id);
+
+    // accepting the recommendation should flip the activity to completed
+    acceptRecommendation({ db, bus, now: () => NOW, idFactory }, recRow!.id);
+
+    const after = listActivitiesByGoal(db, "goal-1").find((a) => a.sourceKind === "mark_done_pending");
+    expect(after?.status).toBe("completed");
+  });
+
   it("startWorkflowFirstStep includes attached workspaces in the step agent objective", async () => {
     const { db } = setupHarness();
     setupFirstStepRun(db);
@@ -2237,7 +2267,7 @@ describe("OrchestratorService.confirmStep", () => {
       .get() as { pending_completion_json: string | null };
     expect(row.pending_completion_json).toBeNull();
     const liveAfter = db
-      .prepare("SELECT status, source_kind FROM activities WHERE step_run_id = 'step-1' AND status IN ('active','paused_for_input')")
+      .prepare("SELECT status, source_kind FROM activities WHERE step_run_id = 'step-1' AND status IN ('active','paused_for_input') AND source_kind != 'mark_done_pending'")
       .get() as { status: string; source_kind: string } | undefined;
     expect(liveAfter).toBeUndefined();
   });
