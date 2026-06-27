@@ -679,7 +679,9 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ---
 
-## Task U2: `(Recommended)` badge detection (item 14)
+## Task U2: `(Recommended)` badge detection (item 14) — 🟡 DEFERRED (dropped at sign-off)
+
+**Not executed this stream.** Cut at sign-off as the lowest-value item (a convention-sniffing render heuristic with no architectural weight). Item 14 stays 🟡 deferred-by-decision in FUTURE_WORK.md. The steps below are retained for reference only — **skip them.**
 
 Best-effort render-time heuristic: when a worker question option label ends with Claude's `(Recommended)` convention, render a badge and strip the suffix from the visible label. Pure render-time; no contract change.
 
@@ -979,4 +981,4 @@ The running daemon in the `daemon-terminal` tmux session is on **older code**, a
 
 ## FUTURE_WORK.md updates (do as the final commit of this stream)
 
-When the stream's tasks are done, update `FUTURE_WORK.md` Phase 4 markers: item 5 ✅, item 1 ✅, item 3 ✅, item 4 ✅ (offline) with the live half noted 🔴/parked, item 13 ✅, item 14 ✅, item 21 ✅, item 2 ✅ (after Task O1). Use the legend exactly (no 🟢).
+When the stream's tasks are done, update `FUTURE_WORK.md` Phase 4 markers: item 5 ✅, item 1 ✅, item 3 ✅, item 4 ✅ (offline) with the live half noted 🔴/parked, item 13 ✅, item 14 🟡 (dropped at sign-off), item 21 ✅, item 2 ✅ (after Task O1). Use the legend exactly (no 🟢).
