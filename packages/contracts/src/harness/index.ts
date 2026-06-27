@@ -134,7 +134,7 @@ export const TelemetryFacet = z
   .strict();
 export type TelemetryFacet = z.infer<typeof TelemetryFacet>;
 
-export const StateRefKind = z.enum(["file", "memory_item", "decision", "task", "workspace_version"]);
+export const StateRefKind = z.enum(["file", "memory_item", "decision", "goal_refinement", "task", "workspace_version"]);
 export type StateRefKind = z.infer<typeof StateRefKind>;
 
 export const StateChangeKind = z.enum(["created", "modified", "deleted"]);

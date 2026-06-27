@@ -14,7 +14,7 @@ export function deriveReadSet(input: ReadSetInput): { read_set: StateDepReadEntr
   for (const m of input.memory) read_set.push({ kind: "memory_item", ref: m.id, version: m.updatedAt });
   for (const d of input.decisions) read_set.push({ kind: "decision", ref: d.id, version: d.updatedAt });
   for (const s of input.summaries) read_set.push({ kind: "task", ref: s.id, version: s.created_at });
-  if (input.refinement) read_set.push({ kind: "decision", ref: input.refinement.goalId, version: input.refinement.refinedAt });
+  if (input.refinement) read_set.push({ kind: "goal_refinement", ref: input.refinement.goalId, version: input.refinement.refinedAt });
   if (input.workspace) {
     const wv = `${input.workspace.branch ?? ""}:${input.workspace.dirty?.toString() ?? ""}`;
     read_set.push({ kind: "workspace_version", ref: input.workspace.id, version: wv });

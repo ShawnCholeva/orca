@@ -15,6 +15,17 @@ describe("deriveReadSet", () => {
     expect(r.read_set).toContainEqual({ kind: "workspace_version", ref: "ws1", version: "main:false" });
     expect(r.version_deps).toContainEqual({ ref: "ws1", observed_version: "main:false" });
   });
+  it("records the refinement under its own kind, not the decision namespace", () => {
+    const r = deriveReadSet({
+      memory: [],
+      decisions: [],
+      summaries: [],
+      refinement: { goalId: "g", refinedAt: "2026-06-24T00:03:00.000Z" },
+      workspace: null,
+    });
+    expect(r.read_set).toContainEqual({ kind: "goal_refinement", ref: "g", version: "2026-06-24T00:03:00.000Z" });
+    expect(r.read_set.some((e) => e.kind === "decision")).toBe(false);
+  });
   it("handles empty inputs", () => {
     const r = deriveReadSet({ memory: [], decisions: [], summaries: [], refinement: null, workspace: null });
     expect(r.read_set).toEqual([]);
