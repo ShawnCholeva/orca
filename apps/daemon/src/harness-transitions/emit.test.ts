@@ -61,7 +61,7 @@ describe("emit factory", () => {
       tool_gate: ["risk"],
       step_complete: ["evidence", "stateDeps", "telemetry"],
       step_launch: ["stateDeps"],
-      mark_done: ["telemetry"],
+      mark_done: ["telemetry", "stateDeps"],
     });
   });
 });

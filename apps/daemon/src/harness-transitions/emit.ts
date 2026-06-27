@@ -32,4 +32,4 @@ function defineBoundary<F extends readonly FacetKey[]>(
 export const emitToolGate = defineBoundary("tool_gate", ["risk"] as const);
 export const emitStepComplete = defineBoundary("step_complete", ["evidence", "stateDeps", "telemetry"] as const);
 export const emitStepLaunch = defineBoundary("step_launch", ["stateDeps"] as const);
-export const emitMarkDone = defineBoundary("mark_done", ["telemetry"] as const);
+export const emitMarkDone = defineBoundary("mark_done", ["telemetry", "stateDeps"] as const);

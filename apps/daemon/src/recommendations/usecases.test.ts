@@ -30,6 +30,7 @@ import { getFeedbackByRecommendationId } from './feedback.js';
 import { recommendationFingerprint } from './fingerprint.js';
 import { FakeRecommendationProvider } from './provider.js';
 import { listTransitionsByGoal } from '../harness-transitions/usecases.js';
+import { insertTransition } from '../harness-transitions/projection.js';
 
 const tempDirs: string[] = [];
 const NOW = '2026-01-01T00:00:00.000Z';
@@ -355,6 +356,42 @@ describe('acceptRecommendation', () => {
     expect(markDone!.telemetry?.human_interventions).toEqual([
       { kind: 'mark_done_approval', ref: 'rec-1' },
     ]);
+  });
+
+  it('carries the run\'s cumulative write-set roll-up on the mark_done terminal (2.7a)', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedWorkflow(db, 'g1', { finalStep: true, outstanding: [] });
+    // A completed step in run-1 changed a file and created a memory item.
+    insertTransition(db, {
+      id: 'sc-1', goalId: 'g1', workflowRunId: 'run-1', workflowStepRunId: 'step-1',
+      boundary: 'step_complete', risk: null, evidence: null,
+      stateDeps: {
+        read_set: [],
+        write_set: [
+          { kind: 'file', ref: 'src/x.ts', change_kind: 'modified' },
+          { kind: 'memory_item', ref: 'm1', change_kind: 'created' },
+        ],
+        assumptions: [], version_deps: [], conflict_policy: 'escalate', conflicts: [],
+      },
+      telemetry: null, createdAt: '2026-06-26T00:00:00.000Z',
+    });
+    seedRec(db, {
+      goalId: 'g1',
+      type: 'complete_workflow_run',
+      workflowStepRunId: 'step-1',
+      proposedActionJson: JSON.stringify({
+        kind: 'complete_workflow_run',
+        workflowRunId: 'run-1',
+        workflowStepRunId: 'step-1',
+      }),
+    });
+
+    acceptRecommendation(makeCtx(db), 'rec-1');
+
+    const markDone = listTransitionsByGoal(db, 'g1').find((t) => t.boundary === 'mark_done');
+    expect(markDone!.stateDeps?.write_set).toContainEqual({ kind: 'file', ref: 'src/x.ts', change_kind: 'modified' });
+    expect(markDone!.stateDeps?.write_set).toContainEqual({ kind: 'memory_item', ref: 'm1', change_kind: 'created' });
   });
 
   // DELETED: 'accepting mark_artifact_satisfied records matching exit criteria'.
