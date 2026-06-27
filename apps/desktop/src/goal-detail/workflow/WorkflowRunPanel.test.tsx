@@ -17,6 +17,7 @@ const apiMocks = vi.hoisted(() => ({
   listWorkflowRunArtifacts: vi.fn(),
   getWorkflowStepRun: vi.fn(),
   getOrchestrationWorker: vi.fn(),
+  getWorkflowRunLedger: vi.fn(),
   submitHumanReviewDecision: vi.fn(),
   listTasks: vi.fn(),
   listSessions: vi.fn(),
@@ -176,6 +177,10 @@ describe("WorkflowRunPanel", () => {
     });
     apiMocks.listOrchestrationAttempts.mockResolvedValue({
       attempts: [],
+    });
+    apiMocks.getWorkflowRunLedger.mockResolvedValue({
+      committed: { version: 0, records: [] },
+      versions: [],
     });
 
     render(<WorkflowRunPanel goalId="goal-1" initialRunId="run-1" />);
@@ -341,6 +346,10 @@ describe("WorkflowRunPanel", () => {
         outputTail: "sanitized tail",
       },
     });
+    apiMocks.getWorkflowRunLedger.mockResolvedValue({
+      committed: { version: 0, records: [] },
+      versions: [],
+    });
 
     render(<WorkflowRunPanel goalId="goal-1" initialRunId="run-1" />);
 
@@ -462,6 +471,10 @@ describe("WorkflowRunPanel", () => {
           },
         },
       ],
+    });
+    apiMocks.getWorkflowRunLedger.mockResolvedValue({
+      committed: { version: 0, records: [] },
+      versions: [],
     });
 
     render(<WorkflowRunPanel goalId="goal-1" initialRunId="run-1" />);

@@ -75,6 +75,7 @@ import {
   ListTasksResponse,
   ListWorkflowArtifactsResponse,
   ListWorkflowDecisionsResponse,
+  WorkflowRunLedgerResponse,
   ListWorkflowRunsResponse,
   ListWorkflowTemplatesResponse,
   MemoryExtraction,
@@ -1259,6 +1260,19 @@ export async function listWorkflowRunArtifacts(
     { headers: authHeaders(token) },
     ListWorkflowArtifactsResponse,
     "List workflow run artifacts failed",
+  );
+}
+
+export async function getWorkflowRunLedger(
+  goalId: string,
+  runId: string,
+): Promise<WorkflowRunLedgerResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-runs/${encodeURIComponent(runId)}/ledger`,
+    { headers: authHeaders(token) },
+    WorkflowRunLedgerResponse,
+    "Get workflow run ledger failed",
   );
 }
 

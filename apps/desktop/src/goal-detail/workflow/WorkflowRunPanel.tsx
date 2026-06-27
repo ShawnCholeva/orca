@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
+  CommittedLedger,
   ContextPackage,
+  LedgerVersionEntry,
   OrchestrationTransportAttempt,
   SessionSummary,
   Task,
@@ -11,6 +13,7 @@ import type {
 } from "@orca/contracts";
 import {
   getWorkflowRun,
+  getWorkflowRunLedger,
   getWorkflowStepRun,
   listContextPackages,
   listOrchestrationAttempts,
@@ -22,6 +25,7 @@ import {
   toErrorMessage,
 } from "../../api";
 import { ArtifactsList } from "./ArtifactsList";
+import { LedgerPanel } from "./LedgerPanel";
 import { DecisionTraceTimeline } from "./DecisionTraceTimeline";
 import { StepTimeline } from "./StepTimeline";
 import { TaskDagPreview } from "./TaskDagPreview";
@@ -45,6 +49,7 @@ type WorkflowPanelState = {
   tasks: Task[];
   sessions: SessionSummary[];
   contextPackages: ContextPackage[];
+  ledger: { committed: CommittedLedger; versions: LedgerVersionEntry[] } | null;
 };
 
 const EMPTY_STATE: WorkflowPanelState = {
@@ -57,6 +62,7 @@ const EMPTY_STATE: WorkflowPanelState = {
   tasks: [],
   sessions: [],
   contextPackages: [],
+  ledger: null,
 };
 
 const VALIDATION_ARTIFACT_TYPES = new Set(["test_report", "qa_report", "review_report"]);
@@ -96,6 +102,7 @@ export function WorkflowRunPanel({
         sessionsResponse,
         contextResponse,
         attemptsResponse,
+        ledgerResponse,
       ] =
         await Promise.all([
           getWorkflowRun(goalId, nextRunId),
@@ -105,6 +112,7 @@ export function WorkflowRunPanel({
           listSessions(goalId),
           listContextPackages(goalId, { limit: 50 }),
           listOrchestrationAttempts(goalId, nextRunId).catch(() => ({ attempts: [] })),
+          getWorkflowRunLedger(goalId, nextRunId).catch(() => null),
         ]);
 
       const stepRunIds = collectStepRunIds(
@@ -157,6 +165,7 @@ export function WorkflowRunPanel({
             pkg.workflowStepRunId !== undefined &&
             stepRunIdSet.has(pkg.workflowStepRunId),
         ),
+        ledger: ledgerResponse,
       });
     } catch (err) {
       setError(toErrorMessage(err, "Failed to load workflow run."));
@@ -311,6 +320,12 @@ export function WorkflowRunPanel({
             currentStepRunId={state.run.currentStepRunId}
           />
           <ArtifactsList artifacts={state.artifacts} stepRuns={state.stepRuns} />
+          {state.ledger !== null && (
+            <LedgerPanel
+              committed={state.ledger.committed}
+              versionCount={state.ledger.versions.length}
+            />
+          )}
           <TaskDagPreview tasks={state.tasks} sessions={state.sessions} />
           <DecisionTraceTimeline
             decisions={state.decisions}
