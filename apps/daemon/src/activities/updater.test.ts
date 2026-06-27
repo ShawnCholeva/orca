@@ -285,4 +285,21 @@ describe("ActivityUpdater steps", () => {
     ]);
     expect(live.steps[0].status).toBe("active");
   });
+
+  it("throttles reasoning notes within ACTIVITY_THROTTLE_MS for a step", () => {
+    let t = 0;
+    const c = ctx();
+    const u = new ActivityUpdater(() => t);
+    u.apply(c, { kind: "step_started", ...sig, stepName: "S" });
+    u.apply(c, { kind: "reasoning_note", ...sig, text: "first thought" });
+    t = 1000; // < ACTIVITY_THROTTLE_MS (3000) — within window
+    u.apply(c, { kind: "reasoning_note", ...sig, text: "second thought (throttled)" });
+    t = 4000; // > ACTIVITY_THROTTLE_MS since the first note — outside window
+    u.apply(c, { kind: "reasoning_note", ...sig, text: "third thought" });
+    const live = getLiveForStepRun(c.db, "s1");
+    const noteTexts = live!.steps.map((s) => s.text);
+    expect(noteTexts).toContain("first thought");
+    expect(noteTexts).not.toContain("second thought (throttled)");
+    expect(noteTexts).toContain("third thought");
+  });
 });

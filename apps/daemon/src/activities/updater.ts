@@ -18,6 +18,7 @@ import {
 interface StepState {
   lastUpdateMs: number;
   lastCategory: ActivityWorkCategory | null;
+  lastReasoningNoteMs?: number;
 }
 
 export class ActivityUpdater {
@@ -108,6 +109,11 @@ export class ActivityUpdater {
       case "reasoning_note": {
         const text = signal.text.trim();
         if (text.length === 0) return;
+        const now = this.nowMs();
+        const state = this.perStep.get(signal.stepRunId);
+        if (state?.lastReasoningNoteMs !== undefined && now - state.lastReasoningNoteMs < ACTIVITY_THROTTLE_MS) {
+          return;
+        }
         appendActivityStep(ctx, {
           goalId: signal.goalId,
           workflowRunId: signal.workflowRunId,
@@ -117,6 +123,7 @@ export class ActivityUpdater {
           category: "other",
           diff: null,
         });
+        this.perStep.set(signal.stepRunId, { lastUpdateMs: state?.lastUpdateMs ?? now, lastCategory: state?.lastCategory ?? null, lastReasoningNoteMs: now });
         return;
       }
 
