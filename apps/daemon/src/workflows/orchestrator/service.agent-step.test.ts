@@ -889,7 +889,16 @@ describe("OrchestratorService agent step", () => {
       `INSERT OR IGNORE INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
     ).run("goal-1", "ws-1", NOW);
 
-    const { engine } = makeAgentService(makeLauncher(vi.fn(async () => ({ sessionId: "sess-1" }))));
+    // The real launcher creates the step's session in ws-1; mirror that so
+    // recordStepLaunchTransition can probe the session's workspace. Created
+    // INSIDE launch() (after the re-launch check) so it doesn't block dispatch.
+    const launchFn = vi.fn(async () => {
+      db.prepare(
+        `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES ('sess-1', 'goal-1', 'ws-1', 'claude-code', 't', 'running', ?, 'step-1')`
+      ).run(NOW);
+      return { sessionId: "sess-1" };
+    });
+    const { engine } = makeAgentService(makeLauncher(launchFn));
     await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 

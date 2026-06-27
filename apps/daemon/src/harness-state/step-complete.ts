@@ -8,7 +8,7 @@ import type { StateVersionDep } from "@orca/contracts";
 import { deriveReadSet } from "./read-set.js";
 import { deriveWriteSet, type GitDiffer } from "./write-set.js";
 import { detectStateConflicts, noopConflictJudge } from "./detect.js";
-import { probeWorkspaceVersion, realVersionProbe, type VersionProbe } from "./workspace-version.js";
+import { probeWorkspaceForSession, realVersionProbe, type VersionProbe } from "./workspace-version.js";
 
 export interface StepCompleteStateInput {
   goalId: string;
@@ -56,7 +56,7 @@ export function buildStepCompleteStateFacet(
   }));
   const ref = getGoalRefinement(db, input.goalId);
   const refinement = ref ? { goalId: ref.goalId, refinedAt: ref.refinedAt } : null;
-  const workspace = probeWorkspaceVersion(db, input.goalId, probe);
+  const workspace = probeWorkspaceForSession(db, input.sessionId, probe);
 
   // Live-derived deps = the workspace version as it stands at completion.
   const { read_set, version_deps: liveVersionDeps } = deriveReadSet({

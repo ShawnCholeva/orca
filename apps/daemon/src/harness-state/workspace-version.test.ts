@@ -7,7 +7,7 @@ import type { Config } from "../config.js";
 import { closeDatabase, openDatabase } from "../db.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import { insertWorkspaceEntity, linkGoalWorkspace } from "../workspaces/projection.js";
-import { probeWorkspaceVersion, realVersionProbe } from "./workspace-version.js";
+import { probeWorkspaceForSession, realVersionProbe } from "./workspace-version.js";
 
 const tempDirs: string[] = [];
 
@@ -54,19 +54,32 @@ function seedWorkspace(db: Database.Database, id: string, goalId: string, p: str
   linkGoalWorkspace(db, goalId, id, NOW);
 }
 
-describe("probeWorkspaceVersion", () => {
-  it("returns the first-attached workspace's id, path, and live branch/dirty from the probe", () => {
+function seedSession(db: Database.Database, id: string, goalId: string, workspaceId: string): void {
+  db.prepare(
+    "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at) VALUES (?, ?, ?, 'claude-code', 't', 'running', ?)"
+  ).run(id, goalId, workspaceId, NOW);
+}
+
+describe("probeWorkspaceForSession", () => {
+  it("returns the session's workspace id, path, and live branch/dirty from the probe", () => {
     const db = setupDb();
     seedWorkspace(db, "ws1", "g1", "/repo/one");
+    seedSession(db, "s1", "g1", "ws1");
 
-    const result = probeWorkspaceVersion(db, "g1", () => ({ branch: "feature/x", dirty: true }));
+    const result = probeWorkspaceForSession(db, "s1", () => ({ branch: "feature/x", dirty: true }));
 
     expect(result).toEqual({ id: "ws1", path: "/repo/one", branch: "feature/x", dirty: true });
   });
 
-  it("returns null when no workspace is attached to the goal", () => {
+  it("returns null when the session does not exist", () => {
     const db = setupDb();
-    expect(probeWorkspaceVersion(db, "g-none", () => ({ branch: "main", dirty: false }))).toBeNull();
+    expect(probeWorkspaceForSession(db, "s-none", () => ({ branch: "main", dirty: false }))).toBeNull();
+  });
+
+  it("returns null when the session's workspace entity is absent", () => {
+    const db = setupDb();
+    seedSession(db, "s1", "g1", "ws-gone");
+    expect(probeWorkspaceForSession(db, "s1", () => ({ branch: "main", dirty: false }))).toBeNull();
   });
 });
 

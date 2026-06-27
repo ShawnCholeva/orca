@@ -72,7 +72,7 @@ import { collectPriorStepArtifacts, latestRejectingGate } from "./repair-context
 import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.js";
 import { stepRequiresExecution } from "./requires-execution.js";
 import { deriveReadSet } from "../../harness-state/read-set.js";
-import { probeWorkspaceVersion } from "../../harness-state/workspace-version.js";
+import { probeWorkspaceForSession } from "../../harness-state/workspace-version.js";
 import { conflictPolicyForGoal } from "../../harness-state/conflict-policy.js";
 import { emitStepComplete, emitStepLaunch } from "../../harness-transitions/emit.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
@@ -772,8 +772,8 @@ export class DispatchEngine {
     // Direct launch: await to catch direct_launch_unsupported (e.g. no workspace attached).
     // On failure, fall back to a recommendation so the user can resolve the issue.
     try {
-      await this.launcher.launch(launchCtx);
-      this.recordStepLaunchTransition(db, now, goal, run, stepRun, options);
+      const { sessionId } = await this.launcher.launch(launchCtx);
+      this.recordStepLaunchTransition(db, now, goal, run, stepRun, sessionId, options);
       return this.commitNoopLatestDecision(db, run.id, stepRun.id);
     } catch {
       return this.commitLaunchRecommendation(db, now, ctx, chosen, objective, options);
@@ -795,6 +795,7 @@ export class DispatchEngine {
     goal: GoalRow,
     run: WorkflowRunT,
     stepRun: StepRunRow,
+    sessionId: string,
     options: RequestNextDecisionOptions
   ): void {
     try {
@@ -808,10 +809,11 @@ export class DispatchEngine {
       }));
       const ref = getGoalRefinement(db, goal.id);
       const refinement = ref ? { goalId: ref.goalId, refinedAt: ref.refinedAt } : null;
-      // Goal's first-attached workspace is its working workspace (same convention
-      // as the sensor-ladder lookup), probed live for its branch/dirty version —
-      // the "state as of launch" belief-divergence compares against at complete.
-      const workspace = probeWorkspaceVersion(db, goal.id);
+      // The step's session is launched into its target workspace; probe THAT
+      // workspace (not the goal's first-attached one) for its live branch/dirty
+      // version — the "state as of launch" belief-divergence compares against at
+      // complete (which keys off the same session, so they always agree).
+      const workspace = probeWorkspaceForSession(db, sessionId);
 
       const { read_set, version_deps } = deriveReadSet({
         memory,

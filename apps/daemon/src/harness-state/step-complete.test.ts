@@ -45,9 +45,16 @@ function setupDb(): Database.Database {
 const NOW = "2026-06-26T00:00:00.000Z";
 const noFiles = () => [];
 
-function seedWorkspace(db: Database.Database, id: string, goalId: string, p: string): void {
+function seedWorkspace(db: Database.Database, id: string, goalId: string, p: string, attachedAt = NOW): void {
   insertWorkspaceEntity(db, { id, path: p, name: id, description: "", createdAt: NOW, updatedAt: NOW });
-  linkGoalWorkspace(db, goalId, id, NOW);
+  linkGoalWorkspace(db, goalId, id, attachedAt);
+}
+
+/** The step's session — its workspace_id is the authoritative target workspace. */
+function seedSession(db: Database.Database, id: string, goalId: string, workspaceId: string): void {
+  db.prepare(
+    "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at) VALUES (?, ?, ?, 'claude-code', 't', 'running', ?)"
+  ).run(id, goalId, workspaceId, NOW);
 }
 
 /** Seed the step_launch transition that recorded the launch-time version snapshot. */
@@ -86,6 +93,7 @@ describe("buildStepCompleteStateFacet belief-divergence", () => {
   it("fires belief_divergence when the live workspace version moved since launch", () => {
     const db = setupDb();
     seedWorkspace(db, "ws1", "g1", "/repo");
+    seedSession(db, "s1", "g1", "ws1");
     seedLaunch(db, "g1", "sr1", [{ ref: "ws1", observed_version: "main:false" }]);
 
     // Workspace got dirty during the step: live probe now reports main:true.
@@ -98,6 +106,7 @@ describe("buildStepCompleteStateFacet belief-divergence", () => {
   it("does not fire belief_divergence when the live workspace version is unchanged since launch", () => {
     const db = setupDb();
     seedWorkspace(db, "ws1", "g1", "/repo");
+    seedSession(db, "s1", "g1", "ws1");
     seedLaunch(db, "g1", "sr1", [{ ref: "ws1", observed_version: "main:false" }]);
 
     const facet = buildStepCompleteStateFacet(db, input("g1", "sr1"), noFiles, () => ({ branch: "main", dirty: false }));
@@ -108,10 +117,33 @@ describe("buildStepCompleteStateFacet belief-divergence", () => {
   it("stays inert when no launch snapshot exists (cannot fabricate divergence)", () => {
     const db = setupDb();
     seedWorkspace(db, "ws1", "g1", "/repo");
+    seedSession(db, "s1", "g1", "ws1");
     // No step_launch transition seeded.
 
     const facet = buildStepCompleteStateFacet(db, input("g1", "sr1"), noFiles, () => ({ branch: "main", dirty: true }));
 
     expect(facet.conflicts.some((c) => c.kind === "belief_divergence")).toBe(false);
+  });
+});
+
+describe("buildStepCompleteStateFacet workspace selection (2.3)", () => {
+  it("records the completing session's workspace, not the goal's first-attached one", () => {
+    const db = setupDb();
+    // ws1 is attached first (the [0] workspace); ws2 attached later.
+    seedWorkspace(db, "ws1", "g1", "/repo/one", "2026-06-26T00:00:00.000Z");
+    seedWorkspace(db, "ws2", "g1", "/repo/two", "2026-06-26T01:00:00.000Z");
+    // The step's session targets ws2 (the non-[0] workspace).
+    seedSession(db, "s2", "g1", "ws2");
+
+    const facet = buildStepCompleteStateFacet(
+      db,
+      { goalId: "g1", sessionId: "s2", thisStepRunId: "sr1", assumptions: [], conflictPolicy: "escalate" },
+      noFiles,
+      () => ({ branch: "feature", dirty: false })
+    );
+
+    const wsEntry = facet.read_set.find((e) => e.kind === "workspace_version");
+    expect(wsEntry?.ref).toBe("ws2");
+    expect(facet.version_deps).toContainEqual({ ref: "ws2", observed_version: "feature:false" });
   });
 });

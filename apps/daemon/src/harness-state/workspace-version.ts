@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import type Database from "better-sqlite3";
-import { listWorkspacesByGoal } from "../workspaces/projection.js";
+import { findWorkspaceById } from "../workspaces/projection.js";
 
 const GIT_TIMEOUT_MS = 2000;
 const GIT_MAX_BUFFER = 1_048_576; // 1 MB
@@ -44,18 +44,25 @@ export const realVersionProbe: VersionProbe = (cwd) => {
 };
 
 /**
- * The goal's working workspace (first-attached convention, same as the sensor
- * ladder) probed for its live branch/dirty version. `null` when no workspace is
- * attached. The `{ id, branch, dirty }` fields feed `deriveReadSet`'s workspace
- * input; `path` feeds `deriveWriteSet`. (Multi-workspace selection — picking the
- * step's target rather than `[0]` — is FUTURE_WORK 2.3.)
+ * The workspace a step's session targets — `sessions.workspace_id` is the
+ * authoritative per-step workspace (the launcher places the session there).
+ * Both belief-state sites key off the SAME step session (launch records it,
+ * complete completes it), so they always agree on the workspace — which is what
+ * makes the launch-snapshot↔complete-current divergence comparison sound for
+ * multi-workspace goals, rather than each re-deriving the goal's first-attached
+ * `[0]` independently. `null` when the session or its workspace is absent. The
+ * `{ id, branch, dirty }` fields feed `deriveReadSet`; `path` feeds `deriveWriteSet`.
  */
-export function probeWorkspaceVersion(
+export function probeWorkspaceForSession(
   db: Database.Database,
-  goalId: string,
+  sessionId: string,
   probe: VersionProbe = realVersionProbe,
 ): { id: string; path: string; branch: string | null; dirty: boolean | null } | null {
-  const ws = listWorkspacesByGoal(db, goalId)[0];
+  const row = db.prepare("SELECT workspace_id FROM sessions WHERE id = ?").get(sessionId) as
+    | { workspace_id: string }
+    | undefined;
+  if (!row) return null;
+  const ws = findWorkspaceById(db, row.workspace_id);
   if (!ws) return null;
   return { id: ws.id, path: ws.path, ...probe(ws.path) };
 }
