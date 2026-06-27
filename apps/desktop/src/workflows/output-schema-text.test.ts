@@ -211,4 +211,31 @@ describe("round-trip", () => {
       if (parsed.ok) expect(parsed.schema).toEqual(schema);
     }
   });
+
+  it("preserves descriptions on object and array-of-object fields", () => {
+    const schema = [
+      {
+        key: "meta",
+        type: "object" as const,
+        required: true,
+        description: "the metadata block",
+        fields: [{ key: "id", type: "string" as const, required: true }],
+      },
+      {
+        key: "items",
+        type: "array" as const,
+        itemType: "object" as const,
+        required: true,
+        description: "list of results",
+        fields: [{ key: "name", type: "string" as const, required: true }],
+      },
+    ];
+    const text = serializeOutputSchema(schema as any);
+    const parsed = parseOutputSchemaText(text);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.schema.find((f) => f.key === "meta")?.description).toBe("the metadata block");
+      expect(parsed.schema.find((f) => f.key === "items")?.description).toBe("list of results");
+    }
+  });
 });

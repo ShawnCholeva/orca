@@ -10,10 +10,12 @@ function quoteLiteral(value: string): string {
 function renderField(f: WorkflowStepOutputField, depth: number): string {
   const opt = f.required ? "" : "?";
   if (f.type === "object" && f.fields) {
-    return `${pad(depth)}${f.key}${opt} {\n${renderFields(f.fields, depth + 1)}\n${pad(depth)}}`;
+    const desc = f.description ? `  # ${f.description}` : "";
+    return `${pad(depth)}${f.key}${opt} {\n${renderFields(f.fields, depth + 1)}\n${pad(depth)}}${desc}`;
   }
   if (f.type === "array" && f.itemType === "object" && f.fields) {
-    return `${pad(depth)}${f.key}${opt}[] {\n${renderFields(f.fields, depth + 1)}\n${pad(depth)}}`;
+    const desc = f.description ? `  # ${f.description}` : "";
+    return `${pad(depth)}${f.key}${opt}[] {\n${renderFields(f.fields, depth + 1)}\n${pad(depth)}}${desc}`;
   }
   let typ = "";
   if (f.type === "array") {
@@ -28,7 +30,15 @@ function renderField(f: WorkflowStepOutputField, depth: number): string {
 }
 
 function renderFields(fields: WorkflowStepOutputField[], depth: number): string {
-  return fields.map((f) => renderField(f, depth)).join(",\n");
+  return fields
+    .map((f, i, arr) => {
+      const s = renderField(f, depth);
+      if (i === arr.length - 1) return s;
+      // If this field has an inline description, the comma must go on its own
+      // line so the tokenizer doesn't swallow it as part of the # comment.
+      return f.description ? s + "\n," : s + ",";
+    })
+    .join("\n");
 }
 
 export function serializeOutputSchema(schema: WorkflowStepOutputSchema): string {
