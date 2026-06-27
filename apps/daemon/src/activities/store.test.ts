@@ -11,7 +11,9 @@ import {
   openOrUpdateLive,
   pauseForConfirmation,
   pauseForInput,
+  pauseForMarkDone,
   pauseForProviderRecovery,
+  resolveMarkDoneActivity,
   resumeFromConfirmation,
   resumeFromProviderRecovery,
   type ActivityStoreCtx
@@ -299,5 +301,28 @@ describe("ActivityStore", () => {
     const row = db.prepare("SELECT status, source_kind FROM activities WHERE step_run_id = 's1'").get() as { status: string; source_kind: string };
     expect(row.status).toBe("paused_for_input");
     expect(row.source_kind).toBe("step_confirmation_pending");
+  });
+
+  it("pauseForMarkDone persists a mark_done_pending row carrying the rec id", () => {
+    const { ctx } = ctxFor(db);
+    const a = pauseForMarkDone(ctx, {
+      goalId: "g1", workflowRunId: "r1", stepRunId: "s1", recommendationId: "rec-9",
+    });
+    expect(a.sourceKind).toBe("mark_done_pending");
+    expect(a.status).toBe("paused_for_input");
+    expect(a.recommendationId).toBe("rec-9");
+    // idempotent re-park returns the same row
+    const again = pauseForMarkDone(ctx, {
+      goalId: "g1", workflowRunId: "r1", stepRunId: "s1", recommendationId: "rec-9",
+    });
+    expect(again.id).toBe(a.id);
+  });
+
+  it("resolveMarkDoneActivity completes the parked mark-done row", () => {
+    const { ctx } = ctxFor(db);
+    pauseForMarkDone(ctx, { goalId: "g1", workflowRunId: "r1", stepRunId: "s1", recommendationId: "rec-9" });
+    const done = resolveMarkDoneActivity(ctx, { stepRunId: "s1" });
+    expect(done?.status).toBe("completed");
+    expect(getLiveForStepRun(db, "s1")).toBeUndefined();
   });
 });

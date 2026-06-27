@@ -29,6 +29,7 @@ interface ActivityRow {
   work_category: string | null;
   confidence: string | null;
   pending_question: string | null;
+  recommendation_id: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -76,6 +77,7 @@ function rowToActivity(db: Database.Database, row: ActivityRow): ActivityT {
     workCategory: row.work_category,
     confidence: row.confidence,
     ...(pendingQuestion !== undefined ? { pendingQuestion } : {}),
+    ...(row.recommendation_id !== null ? { recommendationId: row.recommendation_id } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
@@ -222,7 +224,7 @@ export function listActivitiesByGoal(
     .prepare(
       `SELECT id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
               status, current_text, final_summary, source_kind, work_category, confidence,
-              pending_question, created_at, updated_at, completed_at
+              pending_question, recommendation_id, created_at, updated_at, completed_at
        FROM activities
        WHERE goal_id = ?
        ORDER BY created_at ASC, id ASC`

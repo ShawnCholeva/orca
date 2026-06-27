@@ -1,8 +1,22 @@
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { EventBus } from "../events.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import { listActivitiesByGoal } from "./projection.js";
+import { pauseForMarkDone, type ActivityStoreCtx } from "./store.js";
+
+function ctxFor(db: Database.Database) {
+  const bus = new EventBus();
+  let n = 0;
+  const ctx: ActivityStoreCtx = {
+    db,
+    bus,
+    now: () => "2026-06-27T00:00:00.000Z",
+    idFactory: () => `id-${++n}`
+  };
+  return { ctx };
+}
 
 const STEP_RESULT_JSON = JSON.stringify({
   stepId: "s1",
@@ -358,5 +372,30 @@ describe("step_result confirmed-frame enrichment", () => {
       { label: "Problem", value: "Revised problem statement." },
       { label: "Constraints", value: ["Revised constraint"] },
     ]);
+  });
+});
+
+describe("mark_done_pending recommendationId projection", () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    runMigrations(db, defaultMigrationsDir());
+    db.prepare(
+      `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+       VALUES ('g1', 'Goal', '', 'active', 1, '2026-06-27', '2026-06-27', NULL)`
+    ).run();
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("projects recommendationId for mark_done_pending activities", () => {
+    const { ctx } = ctxFor(db);
+    pauseForMarkDone(ctx, { goalId: "g1", workflowRunId: "r1", stepRunId: "s1", recommendationId: "rec-7" });
+    const list = listActivitiesByGoal(db, "g1");
+    const mark = list.find((a) => a.sourceKind === "mark_done_pending");
+    expect(mark?.recommendationId).toBe("rec-7");
   });
 });

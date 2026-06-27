@@ -48,6 +48,7 @@ interface ActivityRow {
   work_category: string | null;
   confidence: string | null;
   pending_question: string | null;
+  recommendation_id: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -103,6 +104,7 @@ function rowToActivity(db: Database.Database, row: ActivityRow): ActivityT {
     workCategory: row.work_category,
     confidence: row.confidence,
     ...(pendingQuestion !== undefined ? { pendingQuestion } : {}),
+    ...(row.recommendation_id !== null ? { recommendationId: row.recommendation_id } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
@@ -435,6 +437,69 @@ export function resolveGateDecisionActivity(
         `UPDATE activities
          SET status = 'completed', source_kind = 'gate_decision', current_text = ?,
              final_summary = ?, completed_at = ?, updated_at = ?
+         WHERE id = ?`
+      )
+      .run(summary, summary, now, now, live.id);
+    const resolved = getActivityById(ctx.db, live.id);
+    if (resolved === undefined) throw new Error(`Activity disappeared: ${live.id}`);
+    event = insertActivityChangedEvent(ctx.db, resolved, now);
+    return resolved;
+  })();
+  publishActivityChanged(ctx, event);
+  return activity;
+}
+
+// Open (or reuse) a persisted mark-done activity awaiting the human's
+// approve-to-complete decision. Its own row (sourceKind mark_done_pending,
+// status paused_for_input) carries the complete_workflow_run recommendation id
+// so the chat rebuilds the affordance from the activities list alone.
+export function pauseForMarkDone(
+  ctx: ActivityStoreCtx,
+  input: { goalId: string; workflowRunId: string; stepRunId: string; recommendationId: string }
+): ActivityT {
+  let event: DomainEvent | undefined;
+  const activity = ctx.db.transaction(() => {
+    const now = currentTime(ctx);
+    const existing = getLiveForStepRun(ctx.db, input.stepRunId);
+    if (existing?.sourceKind === "mark_done_pending") return existing; // idempotent re-park
+    const id = nextActivityId(ctx);
+    const turnOrdinal = nextTurnOrdinal(ctx.db, input.stepRunId);
+    const text = "Final step output produced — approve to complete the run.";
+    ctx.db
+      .prepare(
+        `INSERT INTO activities (
+           id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+           status, current_text, final_summary, source_kind, work_category, confidence,
+           pending_question, recommendation_id, created_at, updated_at, completed_at
+         ) VALUES (?, ?, ?, ?, NULL, ?, 'paused_for_input', ?, NULL, 'mark_done_pending', NULL, NULL, NULL, ?, ?, ?, NULL)`
+      )
+      .run(id, input.goalId, input.workflowRunId, input.stepRunId, turnOrdinal, text, input.recommendationId, now, now);
+    const inserted = getActivityById(ctx.db, id);
+    if (inserted === undefined) throw new Error(`Activity insert failed: ${id}`);
+    event = insertActivityChangedEvent(ctx.db, inserted, now);
+    return inserted;
+  })();
+  publishActivityChanged(ctx, event);
+  return activity;
+}
+
+// Resolve the parked mark-done activity into a completed record once the user
+// approves run completion, so it stays in the thread.
+export function resolveMarkDoneActivity(
+  ctx: ActivityStoreCtx,
+  input: { stepRunId: string }
+): ActivityT | undefined {
+  let event: DomainEvent | undefined;
+  const activity = ctx.db.transaction(() => {
+    const live = getLiveForStepRun(ctx.db, input.stepRunId);
+    if (live === undefined || live.sourceKind !== "mark_done_pending") return undefined;
+    const now = currentTime(ctx);
+    const summary = "Approved — completing the run.";
+    ctx.db
+      .prepare(
+        `UPDATE activities
+         SET status = 'completed', current_text = ?, final_summary = ?,
+             completed_at = ?, updated_at = ?
          WHERE id = ?`
       )
       .run(summary, summary, now, now, live.id);
