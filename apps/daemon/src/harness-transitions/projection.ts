@@ -100,6 +100,25 @@ export function insertTransition(db: Database.Database, row: HarnessTransition):
   );
 }
 
+/**
+ * `created_at` of the most recent transition at `boundary` for a goal, or `null`
+ * if none exists yet. Used to bound "since the previous transition" reads (e.g.
+ * feedback attribution) without loading the transition rows.
+ */
+export function latestTransitionCreatedAt(
+  db: Database.Database,
+  goalId: string,
+  boundary: HarnessTransition["boundary"]
+): string | null {
+  const row = db
+    .prepare(
+      `SELECT created_at FROM harness_transitions
+       WHERE goal_id = ? AND boundary = ? ORDER BY created_at DESC, id DESC LIMIT 1`
+    )
+    .get(goalId, boundary) as { created_at: string } | undefined;
+  return row?.created_at ?? null;
+}
+
 export function listTransitionsByGoal(
   db: Database.Database,
   goalId: string,

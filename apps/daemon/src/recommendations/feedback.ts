@@ -112,6 +112,28 @@ export function listRecentFeedbackByGoal(
   return rows.map(rowToFeedback);
 }
 
+/**
+ * Feedback created strictly after `sinceExclusive` (an ISO timestamp), newest
+ * first. `null` means no lower bound (return all, as on the first step). Used to
+ * attribute feedback to the step during which it arrived rather than re-stamping
+ * the whole recent window on every step_complete.
+ */
+export function listFeedbackByGoalSince(
+  db: Database.Database,
+  goalId: string,
+  sinceExclusive: string | null,
+  limit = 10
+): RecommendationFeedback[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM recommendation_feedback
+       WHERE goal_id = ? AND (? IS NULL OR created_at > ?)
+       ORDER BY created_at DESC LIMIT ?`
+    )
+    .all(goalId, sinceExclusive, sinceExclusive, Math.min(limit, 50)) as FeedbackDbRow[];
+  return rows.map(rowToFeedback);
+}
+
 export function getTerminalFeedbackByRecommendationId(
   db: Database.Database,
   recommendationId: string

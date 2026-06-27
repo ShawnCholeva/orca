@@ -75,6 +75,7 @@ import { deriveReadSet } from "../../harness-state/read-set.js";
 import { probeWorkspaceForSession } from "../../harness-state/workspace-version.js";
 import { conflictPolicyForGoal } from "../../harness-state/conflict-policy.js";
 import { emitStepComplete, emitStepLaunch } from "../../harness-transitions/emit.js";
+import { latestTransitionCreatedAt } from "../../harness-transitions/usecases.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
 import { listMemoryByGoal } from "../../memory/projection.js";
 import { listDecisionsByGoal } from "../../decisions/projection.js";
@@ -86,7 +87,7 @@ import { buildAgentObjective } from "./agent-objective.js";
 import { buildStepExecutionInput } from "./step-input.js";
 import { assembleWorkspaceContext } from "./workspace-context.js";
 import { reconstructTranscript } from "./interview.js";
-import { listRecentFeedbackByGoal } from "../../recommendations/feedback.js";
+import { listFeedbackByGoalSince } from "../../recommendations/feedback.js";
 import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
 
 export const NULL_ACCUMULATOR: TokenAccumulator = { drain: () => null };
@@ -176,16 +177,19 @@ export function buildTelemetry(
 }
 
 /**
- * Reads a goal's recent recommendation feedback (bounded to the existing MAX 10)
- * and maps each row to a `recommendation_feedback` human-intervention entry. This
- * revives the previously-dead feedback by surfacing it on the inspectable
- * step_complete transition.
+ * Maps the recommendation feedback that arrived *during the current step* to
+ * `recommendation_feedback` human-intervention entries for the step_complete
+ * transition. Scoped to feedback created since the previous step_complete (the
+ * last time feedback was attributed) so each row lands on exactly one step
+ * rather than re-stamping the whole recent window on every step_complete. On the
+ * first step there is no prior step_complete, so all feedback so far is stamped.
  */
 export function recommendationFeedbackInterventions(
   db: Database.Database,
   goalId: string
 ): TelemetryFacet["human_interventions"] {
-  return listRecentFeedbackByGoal(db, goalId).map((f) => ({
+  const since = latestTransitionCreatedAt(db, goalId, "step_complete");
+  return listFeedbackByGoalSince(db, goalId, since).map((f) => ({
     kind: "recommendation_feedback",
     ref: f.id,
   }));
