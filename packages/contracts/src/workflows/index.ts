@@ -1891,6 +1891,33 @@ export const LedgerRecord = z
   .strict();
 export type LedgerRecord = z.infer<typeof LedgerRecord>;
 
+// Read-model response shapes for the ledger endpoint.
+export const CommittedLedger = z
+  .object({
+    version: z.number().int().nonnegative(),
+    records: z.array(LedgerRecord),
+  })
+  .strict();
+export type CommittedLedger = z.infer<typeof CommittedLedger>;
+
+export const LedgerVersionEntry = z
+  .object({
+    version: z.number().int().nonnegative(),
+    sourceStepRunId: z.string().nullable(),
+    traversalSeq: z.number().int().nonnegative(),
+    createdAt: z.string(),
+  })
+  .strict();
+export type LedgerVersionEntry = z.infer<typeof LedgerVersionEntry>;
+
+export const WorkflowRunLedgerResponse = z
+  .object({
+    committed: CommittedLedger,
+    versions: z.array(LedgerVersionEntry),
+  })
+  .strict();
+export type WorkflowRunLedgerResponse = z.infer<typeof WorkflowRunLedgerResponse>;
+
 // Mirrors PendingQuestionItem in ../index.ts. Kept local because ../index.ts
 // imports this module, so importing it back would create a circular reference;
 // the shapes are structurally identical and stay interchangeable.

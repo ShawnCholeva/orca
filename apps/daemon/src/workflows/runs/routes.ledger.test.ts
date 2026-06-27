@@ -6,6 +6,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 
+import { WorkflowRunLedgerResponse } from "@orca/contracts";
+
 import type { Config } from "../../config.js";
 import { closeDatabase, openDatabase } from "../../db.js";
 import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
@@ -192,5 +194,38 @@ describe("GET /v1/goals/:goalId/workflow-runs/:id/ledger", () => {
       url: "/v1/goals/goal-1/workflow-runs/run-1/ledger",
     });
     expect(response.statusCode).toBe(401);
+  });
+
+  it("response body satisfies WorkflowRunLedgerResponse contract", async () => {
+    seedGoal(db, "goal-1");
+    seedTemplate(db);
+    seedRun(db, "goal-1", "run-1");
+
+    commitLedgerVersion(db, () => "2026-06-14T00:00:01.000Z", {
+      goalId: "goal-1",
+      workflowRunId: "run-1",
+      sourceStepRunId: "sr-1",
+      traversalSeq: 1,
+      updates: [
+        {
+          operation: "create",
+          record_id: "local:req1",
+          record_type: "requirement",
+          status: "open",
+          evidence_refs: [],
+          note: "req",
+        },
+      ],
+    });
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/v1/goals/goal-1/workflow-runs/run-1/ledger",
+      headers: AUTH_HEADERS,
+    });
+    expect(response.statusCode).toBe(200);
+
+    const parsed = WorkflowRunLedgerResponse.safeParse(JSON.parse(response.body));
+    expect(parsed.success).toBe(true);
   });
 });

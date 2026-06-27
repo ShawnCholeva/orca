@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import {
   ListWorkflowRunsResponse,
   StartWorkflowRunRequest,
+  WorkflowRunLedgerResponse,
   WorkflowRunResponse,
 } from "@orca/contracts";
 import type { EventBus } from "../../events.js";
@@ -211,9 +212,9 @@ export function registerWorkflowRunRoutes(
         `Workflow run not found for goal ${goalId}: ${id}`
       );
     }
-    return {
+    return WorkflowRunLedgerResponse.parse({
       committed: latestCommittedLedger(deps.db, id),
       versions: listLedgerVersionsForRun(deps.db, id),
-    };
+    });
   });
 }
