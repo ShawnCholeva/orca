@@ -139,7 +139,7 @@ With the substrate locked and the four axes live, catch the surfaces up. These a
 - 🟡 **Verbatim confirmation `lead` capture** — deferred; lead is rebuilt from `resultSummary ?? outcome.reason`, not snapshotted at confirm time.
 - 🟡 **Run-pinning UI / template version history** — no "pinned to version N" view, no historical-version store; backfilling snapshots for pre-migration runs is out of scope.
 - 🟡 **Output-schema object-level descriptions** — the shorthand grammar restricts rather than round-trips them on multi-line objects; `onValidityChange` save-gating polish was left optional.
-- 🟡 **Step terminal-event payload carrying full `stepResult`** — left conditional on the workflow event payload budget; events may carry identifiers only with consumers fetching the step run.
+- 🟡 **Step terminal-event payload carrying full `stepResult`** — left conditional on the workflow event payload budget; events may carry identifiers only with consumers fetching the step run. *(Phase-4: deferred-by-decision — terminal events carry identifiers only by design (4 KiB cap + content-free `FORBIDDEN_KEYS`); no consumer needs the full `stepResult` (desktop refetches on event type; projection/replay read the DB). Identifiers-only is the correct, exit-criterion-aligned choice.)*
 
 ## OrcaChat conversational surface
 
@@ -156,13 +156,13 @@ With the substrate locked and the four axes live, catch the surfaces up. These a
 - 🟡 **Daemon addressing — remote daemon.** Only the discovery-file/resolver seam exists; the remote endpoint + token refresh plug in later with no worker changes.
 - 🟡 **Client-triggered re-adopt/respawn when daemon health is lost mid-use** — described (`lib.rs`) but has no dedicated automated test (manual smoke only).
 - 🟡 **Prod-SEA packaging / Node availability** for the cross-platform resolver script; Windows file-permission handling is best-effort (chmod skipped).
-- 🟡 **Phase-2 ledger open decisions to confirm against live code:** exact transaction structure for atomic ledger-commit + `step_output` + advance (async review kept outside the sync txn); always-commit empty ledger versions vs only non-empty; whether orchestrator review uses a real broker correction pass or the deterministic normalizer alone.
+- ✅ **Phase-2 ledger open decisions to confirm against live code:** exact transaction structure for atomic ledger-commit + `step_output` + advance (async review kept outside the sync txn); always-commit empty ledger versions vs only non-empty; whether orchestrator review uses a real broker correction pass or the deterministic normalizer alone. *(Phase-4: confirmed correct as-is — atomic txn wraps `step_output` + ledger version only, async review runs before the txn and cursor advance after (`ledger-commit.ts:42,72`); empty ledger versions are **always** committed (`ledger/usecases.ts:53`); orchestrator review is the **deterministic normalizer only**, broker pass descoped (`ledger/review.ts:1-19`). No code change.)*
 
 ## Templates, onboarding & splitter
 
 - 🟡 **Phase-2 platform-managed ledger for templates** (the `<orca:step-complete>` envelope, versioning, canonical-ID allocation, orchestrator review) — see the ledger items above; the Feature-Development template runs without it.
 - 🟡 **Future template categories** (Product, Design, …) — grouping is data-driven/additive but only `Engineering` exists today.
-- 🟡 **Initiative Implementation `INITIATIVE_GRAPH` validity** and the catalog reconcile test's `goals` insert columns — confirm against the real schema during execution; check for lingering references to the removed `orca/engineering` / `orca/feature-development` seeds.
+- ⚪ **Initiative Implementation `INITIATIVE_GRAPH` validity** and the catalog reconcile test's `goals` insert columns — confirm against the real schema during execution; check for lingering references to the removed `orca/engineering` / `orca/feature-development` seeds. *(Phase-4: non-change — `INITIATIVE_GRAPH` does not exist in code (subsumed into `orca/adaptive-delivery`); the catalog reconcile test's `goals` INSERT has no schema drift (omitted columns carry defaults); stale `orca/engineering` actionable refs handled in Task S1, `orca/feature-development` has zero code hits.)*
 - *(The Fan-out / fan-in primitive that used to live here is the same delegate seam as Phase 5.1 — owned there.)*
 
 ## Honest, participatory brainstorm
