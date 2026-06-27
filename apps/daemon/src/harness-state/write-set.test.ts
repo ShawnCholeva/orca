@@ -6,7 +6,7 @@ import type Database from "better-sqlite3";
 import type { Config } from "../config.js";
 import { closeDatabase, openDatabase } from "../db.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
-import { deriveWriteSet } from "./write-set.js";
+import { deriveWriteSet, parseNameStatus } from "./write-set.js";
 
 const tempDirs: string[] = [];
 
@@ -57,6 +57,29 @@ function seedDecision(db: Database.Database, id: string, sessionId: string | nul
      VALUES (?, 'g1', 't', 'd', 'proposed', 'session', ?, ?, ?)`,
   ).run(id, sessionId, NOW, NOW);
 }
+
+describe("parseNameStatus", () => {
+  it("parses ordinary M/A/D lines as status + path", () => {
+    expect(parseNameStatus("M\tsrc/x.ts\nA\tsrc/new.ts\nD\tsrc/gone.ts\n")).toEqual([
+      { status: "M", path: "src/x.ts" },
+      { status: "A", path: "src/new.ts" },
+      { status: "D", path: "src/gone.ts" },
+    ]);
+  });
+
+  it("parses rename/copy lines (two tabs) to the DESTINATION path, not a tab-embedded ref", () => {
+    expect(parseNameStatus("R100\tsrc/old.ts\tsrc/new.ts\n")).toEqual([
+      { status: "R100", path: "src/new.ts" },
+    ]);
+    expect(parseNameStatus("C75\ta.ts\tb.ts\n")).toEqual([{ status: "C75", path: "b.ts" }]);
+  });
+
+  it("skips blank lines and lines without a tab", () => {
+    expect(parseNameStatus("\nM\tsrc/x.ts\nnotabhere\n")).toEqual([
+      { status: "M", path: "src/x.ts" },
+    ]);
+  });
+});
 
 describe("deriveWriteSet", () => {
   it("combines bounded git diff file entries with session-created memory/decision rows", () => {

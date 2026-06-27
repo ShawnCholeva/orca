@@ -14,32 +14,44 @@ export interface GitDiffEntry {
 export type GitDiffer = (cwd: string) => GitDiffEntry[];
 
 /**
+ * Parse `git diff --name-status` output. Each line is tab-separated:
+ *   M\tpath          (modify/add/delete: status + one path)
+ *   R100\told\tnew   (rename/copy: status + source + DESTINATION)
+ * The path is the LAST tab segment, so rename/copy lines resolve to the
+ * destination rather than a tab-embedded `old\tnew` ref.
+ */
+export function parseNameStatus(stdout: string): GitDiffEntry[] {
+  const entries: GitDiffEntry[] = [];
+  for (const line of stdout.split("\n")) {
+    if (!line) continue;
+    const parts = line.split("\t");
+    if (parts.length < 2) continue;
+    const status = parts[0];
+    const path = parts[parts.length - 1].trim();
+    if (path) entries.push({ status, path });
+  }
+  return entries;
+}
+
+/**
  * Bounded `git diff --name-status` over `cwd`. Fail-safe: any error or timeout
  * (git unavailable, not a repo, buffer overflow) resolves to `[]` so a missing
  * git binary never throws.
  */
 const realGitDiffer: GitDiffer = (cwd) => {
-  let stdout: string;
   try {
-    stdout = execFileSync("git", ["diff", "--name-status"], {
-      cwd,
-      timeout: GIT_TIMEOUT_MS,
-      maxBuffer: GIT_MAX_BUFFER,
-      encoding: "utf8",
-    });
+    return parseNameStatus(
+      execFileSync("git", ["diff", "--name-status"], {
+        cwd,
+        timeout: GIT_TIMEOUT_MS,
+        maxBuffer: GIT_MAX_BUFFER,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+    );
   } catch {
     return [];
   }
-  const entries: GitDiffEntry[] = [];
-  for (const line of stdout.split("\n")) {
-    if (!line) continue;
-    const tab = line.indexOf("\t");
-    if (tab === -1) continue;
-    const status = line.slice(0, tab);
-    const path = line.slice(tab + 1).trim();
-    if (path) entries.push({ status, path });
-  }
-  return entries;
 };
 
 function toChangeKind(status: string): StateChangeKind {
