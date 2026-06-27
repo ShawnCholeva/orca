@@ -56,6 +56,7 @@ function makeTemplate(overrides: Partial<WorkflowTemplate> = {}): WorkflowTempla
     updatedAt: now,
     scope: "global",
     scopeName: "",
+    category: "Engineering",
     graph: null,
     ...overrides,
   };
@@ -261,8 +262,10 @@ describe("WorkflowsPage", () => {
 
     expect(within(sidebar).getByRole("button", { name: /built-in/i })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: /custom/i })).toBeInTheDocument();
-    expect(within(sidebar).getByText("Engineering")).toBeInTheDocument();
-    expect(within(sidebar).getByText("My Flow")).toBeInTheDocument();
+    // Scope template name queries to the scroll list to avoid matching the category dropdown option.
+    const list = sidebar.querySelector(".scroll") as HTMLElement;
+    expect(within(list).getByText("Engineering")).toBeInTheDocument();
+    expect(within(list).getByText("My Flow")).toBeInTheDocument();
   });
 
   it("hides a section that has no items", async () => {
@@ -285,45 +288,43 @@ describe("WorkflowsPage", () => {
     render(<WorkflowsPage />);
     const heading = await screen.findByRole("heading", { name: "Workflows" });
     const sidebar = heading.closest(".workflows-page__sidebar") as HTMLElement;
-    await within(sidebar).findByText("Engineering");
+    // Scope to .scroll to avoid ambiguity with the "Engineering" category dropdown option.
+    const list = sidebar.querySelector(".scroll") as HTMLElement;
+    await within(list).findByText("Engineering");
 
     fireEvent.click(within(sidebar).getByRole("button", { name: /built-in/i }));
 
-    expect(within(sidebar).queryByText("Engineering")).toBeNull();
-    expect(within(sidebar).getByText("My Flow")).toBeInTheDocument();
+    expect(within(list).queryByText("Engineering")).toBeNull();
+    expect(within(list).getByText("My Flow")).toBeInTheDocument();
   });
 
-  it("type filter narrows the list by category", async () => {
-    const builtIn = makeTemplate({ id: "orca/engineering", name: "Engineering", isBuiltIn: true });
-    const custom = makeTemplate({ id: "custom/mine", name: "My Flow", isBuiltIn: false, isLocked: false });
+  it("type filter narrows the list by category — reads t.category directly, never calls listTemplateCatalog", async () => {
+    // Templates carry category on the substrate contract — no catalog join needed.
+    const builtIn = makeTemplate({ id: "orca/engineering", name: "Engineering", isBuiltIn: true, category: "Engineering" });
+    const custom = makeTemplate({ id: "custom/mine", name: "My Flow", isBuiltIn: false, isLocked: false, category: "Design" });
     listTemplatesMock.mockResolvedValue({ templates: [builtIn, custom] });
-    listTemplateCatalogMock.mockResolvedValue([
-      {
-        id: "orca/engineering",
-        name: "Engineering",
-        category: "Engineering",
-        recommended: false,
-        description: "Built-in engineering workflow",
-        bestFor: "Shipping code",
-        stepCount: 1,
-      },
-    ]);
 
     render(<WorkflowsPage />);
     const heading = await screen.findByRole("heading", { name: "Workflows" });
     const sidebar = heading.closest(".workflows-page__sidebar") as HTMLElement;
-    // wait for the catalog-derived category to appear as an option
+
+    // Category options come from the templates' own category fields.
     await waitFor(() =>
       expect(within(sidebar).getByRole("option", { name: "Engineering" })).toBeInTheDocument(),
     );
+    expect(within(sidebar).getByRole("option", { name: "Design" })).toBeInTheDocument();
 
+    // Filter to Engineering only.
     fireEvent.change(within(sidebar).getByRole("combobox"), {
       target: { value: "Engineering" },
     });
 
-    // Scope row assertions to the scrollable list so the <option> text doesn't match.
+    // Scroll list shows Engineering, not My Flow.
     const list = sidebar.querySelector(".scroll") as HTMLElement;
     expect(within(list).getByText("Engineering")).toBeInTheDocument();
     expect(within(list).queryByText("My Flow")).toBeNull();
+
+    // The catalog is never consulted for category derivation.
+    expect(listTemplateCatalogMock).not.toHaveBeenCalled();
   });
 });

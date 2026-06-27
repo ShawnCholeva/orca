@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { WorkflowScope, WorkflowTemplate } from "@orca/contracts";
-import { listGoals, listTemplateCatalog, toErrorMessage } from "../api";
+import { listGoals, toErrorMessage } from "../api";
 import { listTemplates } from "./api";
 import { ChevronRightIcon } from "./icons";
 import { ScopeBadge, ScopeFilter, inputStyle } from "./ScopeControls";
@@ -8,7 +8,6 @@ import { TemplateDetail } from "./TemplateDetail";
 import "./workflows.css";
 
 const DRAFT_ID = "draft/new";
-const UNCATEGORIZED = "Uncategorized";
 
 type ScopeFilterValue = "all" | WorkflowScope;
 type SectionKey = "builtin" | "custom";
@@ -35,6 +34,7 @@ function makeDraftTemplate(): WorkflowTemplate {
     guardrails: [],
     scope: "global" as const,
     scopeName: "",
+    category: "Custom",
     graph: null,
     createdAt: now,
     updatedAt: now,
@@ -52,7 +52,6 @@ export function WorkflowsPage() {
     builtin: false,
     custom: false,
   });
-  const [categoryById, setCategoryById] = useState<Record<string, string>>({});
   const [goalOptions, setGoalOptions] = useState<string[]>([]);
   const [hasDraft, setHasDraft] = useState(false);
 
@@ -73,26 +72,6 @@ export function WorkflowsPage() {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Load the built-in template catalog once — used to derive each template's
-  // category by id (built-ins inherit their catalog category; everything else
-  // is "Uncategorized").
-  useEffect(() => {
-    let cancelled = false;
-    listTemplateCatalog()
-      .then((catalog) => {
-        if (cancelled) return;
-        setCategoryById(
-          Object.fromEntries(catalog.map((t) => [t.id, t.category])),
-        );
-      })
-      .catch(() => {
-        // non-fatal — templates just fall back to "Uncategorized"
       });
     return () => {
       cancelled = true;
@@ -129,10 +108,7 @@ export function WorkflowsPage() {
     goal: templates.filter((t) => t.scope === "goal").length,
   };
 
-  // A template's category — inherited from its matching built-in catalog entry,
-  // else "Uncategorized".
-  const categoryOf = (t: WorkflowTemplate) =>
-    categoryById[t.id] ?? UNCATEGORIZED;
+  const categoryOf = (t: WorkflowTemplate) => t.category;
   const categoryOptions = [...new Set(templates.map(categoryOf))].sort();
 
   // Filters compose: scope first, then category. The draft is always shown.
