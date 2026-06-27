@@ -1,6 +1,8 @@
+import { useState } from "react";
 import type { Activity, ActivityDiff, ActivityStep } from "@orca/contracts";
 
 export function AgentActivity({ activity }: { activity: Activity }) {
+  const [expanded, setExpanded] = useState(false);
   const completed = activity.status === "completed";
   // A finished activity (completed/expired) that still carries an active step was
   // cut short — the user interrupted it. Render that step as paused, not running.
@@ -15,9 +17,18 @@ export function AgentActivity({ activity }: { activity: Activity }) {
     <div className="agent-activity" data-testid="agent-activity" data-status={activity.status}>
       {activity.stepName ? <div className="agent-activity-head">{activity.stepName}</div> : null}
       <div className="agent-activity-steps">
-        {doneSteps.map((step) => (
+        {finished ? (
+          <button
+            className="agent-activity-toggle"
+            data-testid="agent-activity-toggle"
+            onClick={() => setExpanded((e) => !e)}
+          >
+            {expanded ? "Collapse" : `Show ${doneSteps.length} steps`}
+          </button>
+        ) : null}
+        {(!finished || expanded) ? doneSteps.map((step) => (
           <StepRow key={step.id} step={step} state="done" />
-        ))}
+        )) : null}
         {activeStep ? (
           <StepRow key={activeStep.id} step={activeStep} state={finished ? "interrupted" : "running"} />
         ) : null}

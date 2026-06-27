@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Activity } from "@orca/contracts";
 import { AgentActivity, CodeChangeCard } from "./AgentActivity";
@@ -55,6 +55,24 @@ describe("AgentActivity", () => {
     expect(screen.queryByTestId("agent-activity-diff-toggle")).toBeNull();
     expect(screen.queryByTestId("code-change-card")).toBeNull();
   });
+});
+
+it("collapses a completed card to the summary, expands on click", () => {
+  const completed = {
+    id: "a1", goalId: "g1", workflowRunId: "r1", stepRunId: "s1", agentSessionId: null,
+    turnOrdinal: 0, status: "completed", currentText: "", finalSummary: "Did the thing",
+    sourceKind: "turn_completed", workCategory: null, confidence: null,
+    createdAt: "t", updatedAt: "t", completedAt: "t",
+    steps: [
+      { id: "st1", text: "edited a.ts", category: "editing", status: "done", createdAt: "t" },
+      { id: "st2", text: "ran tests", category: "running", status: "done", createdAt: "t" },
+    ],
+  };
+  render(<AgentActivity activity={completed as any} />);
+  expect(screen.getByText("Did the thing")).toBeInTheDocument();
+  expect(screen.queryByText("edited a.ts")).not.toBeInTheDocument(); // collapsed by default
+  fireEvent.click(screen.getByTestId("agent-activity-toggle"));
+  expect(screen.getByText("edited a.ts")).toBeInTheDocument(); // expanded
 });
 
 describe("CodeChangeCard", () => {
