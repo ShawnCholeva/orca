@@ -72,6 +72,7 @@ import { collectPriorStepArtifacts, latestRejectingGate } from "./repair-context
 import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.js";
 import { stepRequiresExecution } from "./requires-execution.js";
 import { deriveReadSet } from "../../harness-state/read-set.js";
+import { probeWorkspaceVersion } from "../../harness-state/workspace-version.js";
 import { emitStepComplete, emitStepLaunch } from "../../harness-transitions/emit.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
 import { listMemoryByGoal } from "../../memory/projection.js";
@@ -807,10 +808,9 @@ export class DispatchEngine {
       const ref = getGoalRefinement(db, goal.id);
       const refinement = ref ? { goalId: ref.goalId, refinedAt: ref.refinedAt } : null;
       // Goal's first-attached workspace is its working workspace (same convention
-      // as the sensor-ladder lookup). branch/dirty are not persisted metadata, so
-      // mirror buildContextAssemblyInput and leave them null.
-      const ws = listWorkspacesByGoal(db, goal.id)[0];
-      const workspace = ws ? { id: ws.id, branch: null, dirty: null } : null;
+      // as the sensor-ladder lookup), probed live for its branch/dirty version —
+      // the "state as of launch" belief-divergence compares against at complete.
+      const workspace = probeWorkspaceVersion(db, goal.id);
 
       const { read_set, version_deps } = deriveReadSet({
         memory,

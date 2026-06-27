@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -862,6 +863,40 @@ describe("OrchestratorService agent step", () => {
     expect(stateDeps!.read_set.some((e) => e.kind === "memory_item" && e.ref === "mem-1")).toBe(true);
     expect(stateDeps!.read_set.some((e) => e.kind === "decision" && e.ref === "dec-1")).toBe(true);
     expect(stateDeps!.write_set).toEqual([]);
+  });
+
+  it("direct-launch path: records the live workspace branch:dirty as the launch version snapshot", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+
+    // A real git repo on a known branch with an uncommitted file (dirty).
+    const dir = join(tmpdir(), `orca-launch-ws-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(dir, { recursive: true });
+    tempDirs.push(dir);
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+    git("init");
+    git("checkout", "-b", "orca-launch-test");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    writeFileSync(join(dir, "a.txt"), "committed");
+    git("add", ".");
+    git("commit", "-m", "init");
+    writeFileSync(join(dir, "b.txt"), "uncommitted"); // untracked → dirty
+    db.prepare(
+      `INSERT OR IGNORE INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run("ws-1", dir, "main", "", NOW, NOW);
+    db.prepare(
+      `INSERT OR IGNORE INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+    ).run("goal-1", "ws-1", NOW);
+
+    const { engine } = makeAgentService(makeLauncher(vi.fn(async () => ({ sessionId: "sess-1" }))));
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    const launch = listTransitionsByGoal(db, "goal-1").find((t) => t.boundary === "step_launch");
+    const wsEntry = launch!.stateDeps!.read_set.find((e) => e.kind === "workspace_version");
+    expect(wsEntry?.version).toBe("orca-launch-test:true");
+    expect(launch!.stateDeps!.version_deps).toContainEqual({ ref: "ws-1", observed_version: "orca-launch-test:true" });
   });
 
   it("does not re-launch while a session linked to the step is still running", async () => {

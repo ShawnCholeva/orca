@@ -3,11 +3,12 @@ import type { ConflictPolicy, StateAssumption, StateDepsFacet } from "@orca/cont
 import { listMemoryByGoal } from "../memory/projection.js";
 import { listDecisionsByGoal } from "../decisions/projection.js";
 import { getGoalRefinement } from "../goal-refinements.js";
-import { listWorkspacesByGoal } from "../workspaces/projection.js";
 import { listTransitionsByGoal } from "../harness-transitions/projection.js";
+import type { StateVersionDep } from "@orca/contracts";
 import { deriveReadSet } from "./read-set.js";
 import { deriveWriteSet, type GitDiffer } from "./write-set.js";
 import { detectStateConflicts, noopConflictJudge } from "./detect.js";
+import { probeWorkspaceVersion, realVersionProbe, type VersionProbe } from "./workspace-version.js";
 
 export interface StepCompleteStateInput {
   goalId: string;
@@ -25,18 +26,25 @@ export interface StepCompleteStateInput {
  * Derive the step_complete StateDepsFacet and run deterministic conflict
  * detection against concurrent priors on the same goal.
  *
- * read_set/version_deps are re-derived via the SAME readers Task 3's launch
- * hook used (first-attached workspace convention). write_set is the bounded git
- * diff over that workspace plus the rows this session created. The
- * concurrent-set is the goal's prior transitions whose owning session is still
- * active, excluding self. currentVersions is built densely from self's observed
- * versions (same null-encoding as launch) so belief_divergence does not
- * spuriously fire — see the limitation note in the task report.
+ * read_set/write_set are derived via the SAME readers Task 3's launch hook used
+ * (first-attached workspace convention); write_set adds the bounded git diff over
+ * that workspace plus the rows this session created. The concurrent-set is the
+ * goal's prior transitions whose owning session is still active, excluding self.
+ *
+ * belief_divergence compares the launch SNAPSHOT against the LIVE state now:
+ * `version_deps` carries the version_deps recorded by this step's step_launch
+ * transition (what the step assumed when it started), and `currentVersions`
+ * carries a fresh live probe of the same refs. Divergence fires when the
+ * workspace moved (branch/dirty) under the step while it ran. When no launch
+ * snapshot exists (gated/approved launches don't record one), version_deps falls
+ * back to the live-derived deps so the comparison is self-consistent (inert) —
+ * we never fabricate divergence without a baseline.
  */
 export function buildStepCompleteStateFacet(
   db: Database.Database,
   input: StepCompleteStateInput,
-  differ?: GitDiffer
+  differ?: GitDiffer,
+  probe: VersionProbe = realVersionProbe
 ): StateDepsFacet {
   const memory = listMemoryByGoal(db, input.goalId, { includeArchived: false }).map((m) => ({
     id: m.id,
@@ -48,10 +56,10 @@ export function buildStepCompleteStateFacet(
   }));
   const ref = getGoalRefinement(db, input.goalId);
   const refinement = ref ? { goalId: ref.goalId, refinedAt: ref.refinedAt } : null;
-  const ws = listWorkspacesByGoal(db, input.goalId)[0];
-  const workspace = ws ? { id: ws.id, branch: null, dirty: null } : null;
+  const workspace = probeWorkspaceVersion(db, input.goalId, probe);
 
-  const { read_set, version_deps } = deriveReadSet({
+  // Live-derived deps = the workspace version as it stands at completion.
+  const { read_set, version_deps: liveVersionDeps } = deriveReadSet({
     memory,
     decisions,
     summaries: [],
@@ -59,8 +67,8 @@ export function buildStepCompleteStateFacet(
     workspace,
   });
 
-  const write_set = ws
-    ? deriveWriteSet(db, { workspacePath: ws.path, sessionId: input.sessionId }, differ)
+  const write_set = workspace
+    ? deriveWriteSet(db, { workspacePath: workspace.path, sessionId: input.sessionId }, differ)
     : [];
 
   const assumptions: StateAssumption[] = input.assumptions.map((statement) => ({
@@ -71,11 +79,11 @@ export function buildStepCompleteStateFacet(
 
   const priors = gatherConcurrentPriors(db, input.goalId, input.thisStepRunId);
 
-  // Dense + same encoding as the observed versions: an absent ref counts as
-  // divergence, so we copy every observed version. Because both sides are
-  // null-encoded today this is always-consistent (divergence inert) by design.
+  // Observed = launch snapshot (what the step assumed); current = live now.
+  const launchVersionDeps = readLaunchVersionDeps(db, input.goalId, input.thisStepRunId);
+  const version_deps = launchVersionDeps ?? liveVersionDeps;
   const currentVersions = new Map<string, string>();
-  for (const dep of version_deps) currentVersions.set(dep.ref, dep.observed_version);
+  for (const dep of liveVersionDeps) currentVersions.set(dep.ref, dep.observed_version);
 
   const conflicts = detectStateConflicts({
     self: { read_set, write_set, version_deps },
@@ -92,6 +100,25 @@ export function buildStepCompleteStateFacet(
     conflict_policy: input.conflictPolicy,
     conflicts,
   };
+}
+
+/**
+ * The version_deps this step recorded at its step_launch boundary — the
+ * "state as of launch" belief-divergence compares against. null when no launch
+ * transition carries a stateDeps facet for this step run.
+ */
+function readLaunchVersionDeps(
+  db: Database.Database,
+  goalId: string,
+  stepRunId: string
+): StateVersionDep[] | null {
+  const launch = listTransitionsByGoal(db, goalId, 10_000).find(
+    (t) =>
+      t.boundary === "step_launch" &&
+      t.workflowStepRunId === stepRunId &&
+      t.stateDeps !== null
+  );
+  return launch?.stateDeps?.version_deps ?? null;
 }
 
 /**
