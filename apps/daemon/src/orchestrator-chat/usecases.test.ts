@@ -15,6 +15,7 @@ import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import { listOrchestratorMessagesByGoal } from "./projection.js";
 import {
   createOrchestratorMessage,
+  deletePendingApprovalMessage,
   GoalOrchestratorModelMissingError,
   type OrchestratorChatCtx,
 } from "./usecases.js";
@@ -203,6 +204,26 @@ describe("orchestrator chat usecases", () => {
       count: number;
     };
     expect(afterCount.count).toBe(beforeCount.count);
+  });
+
+  it("deletePendingApprovalMessage removes the message and emits message.updated", () => {
+    const { db, ctx, events } = setup();
+    db.prepare(
+      `INSERT INTO orchestrator_messages (id, goal_id, role, kind, body, correlation_id, created_at, pending_approval)
+       VALUES ('msg-ap', 'goal-1', 'orchestrator', 'message', 'The agent wants to run Bash.', NULL, ?, ?)`
+    ).run(NOW, JSON.stringify({ approvalId: "ap-1", sessionId: "s1", toolName: "Bash", summary: "ls" }));
+
+    const ok = deletePendingApprovalMessage(ctx, { goalId: "goal-1", approvalId: "ap-1" });
+
+    expect(ok).toBe(true);
+    expect(listOrchestratorMessagesByGoal(db, "goal-1")).toHaveLength(0);
+    expect(events.map((e) => e.type)).toEqual(["orchestrator.message.updated"]);
+  });
+
+  it("deletePendingApprovalMessage is a no-op (returns false) for an unknown approval", () => {
+    const { ctx, events } = setup();
+    expect(deletePendingApprovalMessage(ctx, { goalId: "goal-1", approvalId: "nope" })).toBe(false);
+    expect(events).toHaveLength(0);
   });
 
   it("routes Google provider shadow chat through antigravity", async () => {

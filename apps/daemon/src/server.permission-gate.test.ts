@@ -73,4 +73,33 @@ describe("resolvePermissionDecision", () => {
     expect(gates).toHaveLength(1);
     expect(gates[0]?.risk?.gate_decision).toBe("deny");
   });
+
+  describe("worker_permission_mode overrides operating_mode (the Auto-run toggle)", () => {
+    const setWorkerMode = (m: string) => db.prepare("UPDATE goals SET worker_permission_mode = ? WHERE id = 'g'").run(m);
+
+    it("auto allows an edit even when operating_mode is human_review", () => {
+      seed(db, "human_review");
+      setWorkerMode("auto");
+      expect(resolvePermissionDecision(ctx(), "s", { toolName: "Edit", toolInput: { file_path: "/tmp/r/a" }, toolUseId: "w1" })).toBe("allow");
+    });
+    it("auto still denies a hard-constraint command (floor preserved)", () => {
+      seed(db, "human_review");
+      setWorkerMode("auto");
+      expect(resolvePermissionDecision(ctx(), "s", { toolName: "Bash", toolInput: { command: "rm -rf /" }, toolUseId: "w2" })).toBe("deny");
+    });
+    it("ask defers to operating_mode (does not downgrade an automated goal)", () => {
+      seed(db, "automated");
+      setWorkerMode("ask"); // the column default; must not force human_review
+      expect(resolvePermissionDecision(ctx(), "s", { toolName: "Edit", toolInput: { file_path: "/tmp/r/a" }, toolUseId: "w3" })).toBe("allow");
+    });
+    it("ask under human_review still requires approval for an edit", () => {
+      seed(db, "human_review");
+      setWorkerMode("ask");
+      expect(resolvePermissionDecision(ctx(), "s", { toolName: "Edit", toolInput: { file_path: "/tmp/r/a" }, toolUseId: "w3b" })).toBe("require_approval");
+    });
+    it("falls back to operating_mode when worker_permission_mode is unset", () => {
+      seed(db, "automated"); // worker_permission_mode left NULL
+      expect(resolvePermissionDecision(ctx(), "s", { toolName: "Edit", toolInput: { file_path: "/tmp/r/a" }, toolUseId: "w4" })).toBe("allow");
+    });
+  });
 });

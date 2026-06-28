@@ -18,6 +18,7 @@ const goal = {
   status: "active" as const,
   autonomyLevel: 1,
   workerPermissionMode: "ask" as const,
+  operatingMode: "human_review" as const,
   createdAt: now,
   updatedAt: now,
   archivedAt: null,

@@ -219,7 +219,6 @@ import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js'
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerActivityRoutes } from './activities/routes.js';
 import { categorizeClaudeTool, isLowSignalTool, narrateToolDetail } from './activities/claude-adapter.js';
-import { deriveTurnSummary } from './activities/turn-summary.js';
 import { reconstructEditDiff } from './activities/diff.js';
 import type { ActivitySignal } from './activities/signals.js';
 import type { ActivityStoreCtx } from './activities/store.js';
@@ -227,10 +226,9 @@ import { recordOrchestratorReasoning } from './activities/store.js';
 import { extractOrchestratorReasoning } from './orchestrator-llm/reasoning-extract.js';
 import { ActivityUpdater } from './activities/updater.js';
 import { reconcileStepResultActivities } from './activities/step-result-activity.js';
-import { extractReasoningSince } from './activities/transcript.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
-import { insertMessageWithEvent, recordWorkerQuestionAnswer } from './orchestrator-chat/usecases.js';
+import { deletePendingApprovalMessage, insertMessageWithEvent, recordWorkerQuestionAnswer } from './orchestrator-chat/usecases.js';
 import { registerShadowHookRoutes } from './shadow-hooks/routes.js';
 import { ShadowSessionManager, shadowSessionId, type ShadowAdapterId } from './orchestrator-llm/shadow-session.js';
 import {
@@ -284,10 +282,15 @@ function isShadowAdapterId(adapterId: string): adapterId is ShadowAdapterId {
   return adapterId === "claude-code" || adapterId === "codex" || adapterId === "antigravity";
 }
 
+// Tauri webview origins, plus any loopback origin on any port so browser mode
+// (`pnpm dev:browser`, see CLAUDE.md) works regardless of which dev port Vite
+// picks. Loopback-only: requests can only originate from this machine.
 const CORS_ORIGINS = [
-  'http://localhost:5173',
   'tauri://localhost',
-  'http://tauri.localhost'
+  'http://tauri.localhost',
+  /^http:\/\/localhost(:\d+)?$/,
+  /^http:\/\/127\.0\.0\.1(:\d+)?$/,
+  /^http:\/\/\[::1\](:\d+)?$/
 ];
 
 export function createServer(
@@ -638,7 +641,6 @@ export function createServer(
   const permissionApprovals = new PermissionApprovalStore(daemonContext.idFactory);
   const PERMISSION_DECISION_TIMEOUT_MS = 1_790_000; // ~under the 1800s PermissionRequest hook timeout; then deny
   const activityUpdater = new ActivityUpdater();
-  const reasoningCursors = new Map<string, number>();
   const activityCtx: ActivityStoreCtx = {
     db,
     bus: eventBus,
@@ -1530,10 +1532,15 @@ export function createServer(
         });
       } finally {
         if (stepContext) {
+          // The activity card carries no worker-authored summary: the worker's
+          // raw narration would leak first-person voice and internal mechanics.
+          // The clean per-turn narration is the orchestrator's sanitized
+          // paraphrase (its own chat bubble); the card stays a tool-step
+          // checklist (empty-summary turns are filtered out client-side).
           applyActivitySafely("agent.response_done", {
             kind: "turn_completed",
             stepRunId: stepContext.stepRunId,
-            summary: deriveTurnSummary(payload.responseText),
+            summary: "",
             confidence: null,
           });
         }
@@ -1544,23 +1551,6 @@ export function createServer(
     onToolUse: async (sessionId, payload) => {
       const stepContext = resolveStepContext(sessionId);
       if (!stepContext) return;
-      if (payload.transcriptPath) {
-        try {
-          const text = readFileSync(payload.transcriptPath, "utf8");
-          const prev = reasoningCursors.get(stepContext.stepRunId) ?? 0;
-          const { notes, cursor } = extractReasoningSince(text, prev);
-          reasoningCursors.set(stepContext.stepRunId, cursor);
-          for (const note of notes) {
-            applyActivitySafely("agent.reasoning_note", {
-              kind: "reasoning_note",
-              ...stepContext,
-              text: note,
-            });
-          }
-        } catch {
-          // transcript read/parse must never break tool_use handling
-        }
-      }
       // Curate the checklist: searches and read-only look-around are low signal —
       // skip them so the persisted steps stay substantive (reads, edits, runs).
       if (isLowSignalTool(payload.toolName, payload.toolInput)) return;
@@ -1585,9 +1575,12 @@ export function createServer(
       if (!sessionRow) return "deny";
       const goalId = sessionRow.goal_id;
       const summary = summarizePermission(payload.toolName, payload.toolInput);
+      // Human one-liner (e.g. "Edited App.tsx", "Ran tests: …") so the approval
+      // card conveys what's being approved, not just the tool name.
+      const detail = narrateToolDetail(payload.toolName, payload.toolInput);
       const { approvalId, answered, isNew } = permissionApprovals.record({
         toolUseId: payload.toolUseId, sessionId, goalId,
-        toolName: payload.toolName, summary, toolInput: payload.toolInput,
+        toolName: payload.toolName, summary, detail, toolInput: payload.toolInput,
       });
       if (isNew) {
         const adapterId = (db.prepare("SELECT adapter_id FROM sessions WHERE id = ?").get(sessionId) as { adapter_id: string } | undefined)?.adapter_id ?? "claude-code";
@@ -1606,7 +1599,7 @@ export function createServer(
             body: `The agent wants to run ${payload.toolName}.`,
             correlationId: daemonContext.idFactory(),
             createdAt: daemonContext.now(),
-            pendingApproval: { approvalId, sessionId, toolName: payload.toolName, summary, canRemember },
+            pendingApproval: { approvalId, sessionId, toolName: payload.toolName, summary, detail, canRemember },
           }
         );
       }
@@ -1622,7 +1615,20 @@ export function createServer(
       const timed = new Promise<"deny">((res) => { timerId = setTimeout(() => res("deny"), PERMISSION_DECISION_TIMEOUT_MS); });
       const result = await Promise.race([answered, timed]);
       clearTimeout(timerId!);
-      permissionApprovals.resolveDecision(approvalId, result); // no-op if answer route already resolved
+      const resolvedByTimeout = permissionApprovals.resolveDecision(approvalId, result); // false if answer route already resolved
+      if (resolvedByTimeout) {
+        // The decision timed out with no human answer. The answer route deletes the
+        // card when it resolves; on timeout we must do it too, else the card lingers
+        // and a later click 404s (approval_not_found). Best-effort.
+        try {
+          deletePendingApprovalMessage(
+            { db, bus: eventBus, idFactory: daemonContext.idFactory },
+            { goalId, approvalId }
+          );
+        } catch (err) {
+          console.error("[permission] deletePendingApprovalMessage (timeout) failed", err);
+        }
+      }
       return result;
     },
     onWorkerQuestion: async (sessionId, payload) => {
@@ -1736,9 +1742,31 @@ export function createServer(
     const parsed = SubmitPermissionDecisionRequest.safeParse(request.body);
     if (!parsed.success) { reply.status(400); return { error: "validation_failed", issues: parsed.error.issues }; }
     const pending = permissionApprovals.get(approvalId);
-    if (!pending || pending.goalId !== goalId) { reply.status(404); return { error: { code: "approval_not_found" } }; }
+    if (!pending || pending.goalId !== goalId) {
+      // The approval is gone (resolved/expired) but the client may still be showing
+      // its card — clean it up so the phantom card disappears on this interaction.
+      try {
+        deletePendingApprovalMessage(
+          { db, bus: eventBus, idFactory: daemonContext.idFactory },
+          { goalId, approvalId }
+        );
+      } catch (err) {
+        console.error("[permission] deletePendingApprovalMessage (stale 404) failed", err);
+      }
+      reply.status(404); return { error: { code: "approval_not_found" } };
+    }
     const ok = permissionApprovals.resolveDecision(approvalId, parsed.data.decision);
     if (!ok) { reply.status(409); return { error: { code: "already_answered" } }; }
+    // The approval prompt is ephemeral: once decided, delete the whole message so it
+    // doesn't persist or reappear on reload. Best-effort — never fail the decision.
+    try {
+      deletePendingApprovalMessage(
+        { db, bus: eventBus, idFactory: daemonContext.idFactory },
+        { goalId, approvalId }
+      );
+    } catch (err) {
+      console.error("[permission] deletePendingApprovalMessage failed", err);
+    }
     const actionClass = actionClassOf(
       pending.toolName,
       classifyToolAction({ toolName: pending.toolName, toolInput: pending.toolInput })
@@ -1897,15 +1925,20 @@ export function createServer(
     return reply.code(202).send({ ok: true });
   });
 
-  server.post<{ Params: { id: string } }>("/v1/workflows/runs/:id/confirm-split", async (request, reply) => {
-    await dispatchEngine.confirmSplit(
-      getDatabase(),
-      daemonContext.now,
-      request.params.id,
-      { bus: eventBus, idFactory: daemonContext.idFactory }
-    );
-    return reply.code(202).send({ ok: true });
-  });
+  server.post<{ Params: { id: string }; Body: { branch?: string } }>(
+    "/v1/workflows/runs/:id/confirm-split",
+    async (request, reply) => {
+      const branch = typeof request.body?.branch === "string" ? request.body.branch : undefined;
+      await dispatchEngine.confirmSplit(
+        getDatabase(),
+        daemonContext.now,
+        request.params.id,
+        { bus: eventBus, idFactory: daemonContext.idFactory },
+        branch
+      );
+      return reply.code(202).send({ ok: true });
+    }
+  );
 
   server.post<{ Params: { id: string } }>("/v1/workflows/runs/:id/interrupt", async (request, reply) => {
     const interrupted = await orchestratorService.interruptStepAgent(
@@ -2537,6 +2570,11 @@ function summarizePermission(toolName: string, toolInput: unknown): string {
   if (toolName === "Bash" && toolInput && typeof toolInput === "object" && "command" in toolInput) {
     const cmd = String((toolInput as { command: unknown }).command ?? "").trim();
     if (cmd) return cmd.length > 200 ? `${cmd.slice(0, 200)}…` : cmd;
+  }
+  // File tools: surface the path so the card isn't a bare "Edit"/"Write".
+  if (toolInput && typeof toolInput === "object" && "file_path" in toolInput) {
+    const path = String((toolInput as { file_path: unknown }).file_path ?? "").trim();
+    if (path) return `${toolName} ${path}`;
   }
   return toolName;
 }

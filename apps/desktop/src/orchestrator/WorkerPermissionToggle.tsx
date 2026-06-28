@@ -26,26 +26,15 @@ export function WorkerPermissionToggle({
   }
 
   return (
-    <div className="orca-perm-toggle" role="group" aria-label="Worker tool permissions">
-      <span className="orca-perm-toggle-label mono">tools</span>
-      <button
-        type="button"
-        className={`orca-perm-toggle-opt${current === "auto" ? " orca-perm-toggle-opt--active" : ""}`}
-        aria-pressed={current === "auto"}
-        disabled={disabled}
-        onClick={() => void choose("auto")}
-      >
-        Auto-run
-      </button>
-      <button
-        type="button"
-        className={`orca-perm-toggle-opt${current === "ask" ? " orca-perm-toggle-opt--active" : ""}`}
-        aria-pressed={current === "ask"}
-        disabled={disabled}
-        onClick={() => void choose("ask")}
-      >
-        Ask-in-chat
-      </button>
-    </div>
+    <select
+      className="orca-perm-toggle-select"
+      aria-label="Worker tool permissions"
+      value={current}
+      disabled={disabled}
+      onChange={(event) => void choose(event.target.value as WorkerPermissionMode)}
+    >
+      <option value="auto">Auto-run</option>
+      <option value="ask">Ask-in-chat</option>
+    </select>
   );
 }

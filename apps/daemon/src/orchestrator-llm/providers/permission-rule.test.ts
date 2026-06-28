@@ -15,13 +15,15 @@ describe("permissionRule (claude)", () => {
     expect(claude.permissionRule("Bash", { command: "   " })).toBeNull();
     expect(claude.permissionRule("Bash", {})).toBeNull();
   });
-  it("Read/Edit/Write → exact file path", () => {
+  it("Read → exact file path (reads stay narrow)", () => {
     expect(claude.permissionRule("Read", { file_path: "/p/a.ts" })).toBe("Read(/p/a.ts)");
-    expect(claude.permissionRule("Edit", { file_path: "/p/b.ts" })).toBe("Edit(/p/b.ts)");
-    expect(claude.permissionRule("Write", { file_path: "/p/c.ts" })).toBe("Write(/p/c.ts)");
   });
-  it("NotebookEdit → notebook_path", () => {
-    expect(claude.permissionRule("NotebookEdit", { notebook_path: "/p/n.ipynb" })).toBe("NotebookEdit(/p/n.ipynb)");
+  it("Edit/Write → parent-directory glob (so Always-allow covers sibling edits)", () => {
+    expect(claude.permissionRule("Edit", { file_path: "/p/b.ts" })).toBe("Edit(/p/**)");
+    expect(claude.permissionRule("Write", { file_path: "/p/sub/c.ts" })).toBe("Write(/p/sub/**)");
+  });
+  it("NotebookEdit → parent-directory glob", () => {
+    expect(claude.permissionRule("NotebookEdit", { notebook_path: "/p/n.ipynb" })).toBe("NotebookEdit(/p/**)");
   });
   it("WebFetch → domain from url; unparseable → null", () => {
     expect(claude.permissionRule("WebFetch", { url: "https://api.github.com/x" })).toBe("WebFetch(domain:api.github.com)");

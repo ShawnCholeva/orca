@@ -14,17 +14,16 @@ describe("PermissionApprovalCard", () => {
     submitPermissionDecisionMock.mockResolvedValue(undefined);
   });
 
-  it("renders the tool name and summary", async () => {
+  it("renders the command summary", async () => {
     const { PermissionApprovalCard } = await import("./PermissionApprovalCard");
     render(<PermissionApprovalCard goalId="g1" pending={pending} />);
-    expect(screen.getByText(/Bash/)).toBeInTheDocument();
-    expect(screen.getByText(/rm -rf build/)).toBeInTheDocument();
+    expect(screen.getByText("rm -rf build")).toBeInTheDocument();
   });
 
   it("calls submitPermissionDecision with allow when Allow is clicked", async () => {
     const { PermissionApprovalCard } = await import("./PermissionApprovalCard");
     render(<PermissionApprovalCard goalId="g1" pending={pending} />);
-    fireEvent.click(screen.getByText("Allow"));
+    fireEvent.click(screen.getByRole("button", { name: "Allow" }));
     await waitFor(() => {
       expect(submitPermissionDecisionMock).toHaveBeenCalledWith("g1", "a1", "allow", false);
     });
@@ -48,13 +47,13 @@ describe("PermissionApprovalCard", () => {
     });
   });
 
-  it("disables the buttons after a decision is submitted", async () => {
+  it("removes the card once a decision is submitted (ephemeral)", async () => {
     const { PermissionApprovalCard } = await import("./PermissionApprovalCard");
     render(<PermissionApprovalCard goalId="g1" pending={pending} />);
-    fireEvent.click(screen.getByText("Allow"));
+    fireEvent.click(screen.getByRole("button", { name: "Allow" }));
     await waitFor(() => {
-      expect((screen.getByText("Allow") as HTMLButtonElement).disabled).toBe(true);
-      expect((screen.getByText("Deny") as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.queryByRole("button", { name: "Allow" })).toBeNull();
+      expect(screen.queryByText("Deny")).toBeNull();
     });
   });
 
@@ -62,9 +61,9 @@ describe("PermissionApprovalCard", () => {
     submitPermissionDecisionMock.mockRejectedValueOnce(new Error("nope"));
     const { PermissionApprovalCard } = await import("./PermissionApprovalCard");
     render(<PermissionApprovalCard goalId="g1" pending={pending} />);
-    fireEvent.click(screen.getByText("Allow"));
+    fireEvent.click(screen.getByRole("button", { name: "Allow" }));
     expect(await screen.findByText(/could not be submitted/i)).toBeInTheDocument();
-    expect((screen.getByText("Allow") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Allow" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("hides Always allow when the provider cannot persist (canRemember false)", async () => {

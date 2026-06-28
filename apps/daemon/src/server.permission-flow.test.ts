@@ -256,6 +256,90 @@ describe('permission decision flow', () => {
     expect(await readCanRemember('session-codex-cr', 'tu-cr-codex')).toBe(false);
   });
 
+  // (b3) the pending-approval card carries a file-path summary + a human detail line
+  it('ask-mode goal: Edit pendingApproval has a file-path summary and a non-empty detail', async () => {
+    const goalId = 'goal-detail-1';
+    const sessionId = 'session-detail-1';
+    insertGoal(db, goalId, 'ask');
+    insertSession(db, sessionId, goalId);
+
+    const hookPromise = server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Edit', tool_input: { file_path: '/tmp/r/App.tsx', old_string: 'a', new_string: 'b' }, tool_use_id: 'tu-detail-1' },
+    });
+
+    const approval = await vi.waitFor(
+      () => {
+        const row = db
+          .prepare("SELECT pending_approval FROM orchestrator_messages WHERE goal_id = ? AND pending_approval IS NOT NULL")
+          .get(goalId) as { pending_approval: string } | undefined;
+        if (!row) throw new Error('pending approval message not yet posted');
+        return JSON.parse(row.pending_approval) as { approvalId: string; summary: string; detail?: string };
+      },
+      { timeout: 2000, interval: 50 }
+    );
+
+    expect(approval.summary).toContain('/tmp/r/App.tsx'); // not a bare "Edit"
+    expect(approval.detail).toBeTruthy();
+    expect(approval.detail).toContain('App.tsx');
+
+    // Resolve so the held hook doesn't dangle.
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/permission-approvals/${approval.approvalId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { decision: 'deny' },
+    });
+    await hookPromise;
+  });
+
+  // (b4) re-answering an already-resolved approval → 404 and clears any lingering card
+  it('ask-mode goal: re-POST after resolution returns 404 and clears the card (no phantom)', async () => {
+    const goalId = 'goal-phantom-1';
+    const sessionId = 'session-phantom-1';
+    insertGoal(db, goalId, 'ask');
+    insertSession(db, sessionId, goalId);
+
+    const hookPromise = server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Bash', tool_input: { command: 'echo hi' }, tool_use_id: 'tu-phantom-1' },
+    });
+    const approvalId = await vi.waitFor(
+      () => {
+        const row = db
+          .prepare("SELECT pending_approval FROM orchestrator_messages WHERE goal_id = ? AND pending_approval IS NOT NULL")
+          .get(goalId) as { pending_approval: string } | undefined;
+        if (!row) throw new Error('pending approval message not yet posted');
+        return (JSON.parse(row.pending_approval) as { approvalId: string }).approvalId;
+      },
+      { timeout: 2000, interval: 50 }
+    );
+
+    // First answer resolves + deletes the message.
+    await server.inject({
+      method: 'POST', url: `/v1/goals/${goalId}/permission-approvals/${approvalId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS }, payload: { decision: 'allow' },
+    });
+    await hookPromise;
+
+    // Re-POST the same (now-gone) approval → 404, and the route must not error.
+    const reRes = await server.inject({
+      method: 'POST', url: `/v1/goals/${goalId}/permission-approvals/${approvalId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS }, payload: { decision: 'allow' },
+    });
+    expect(reRes.statusCode).toBe(404);
+    expect(reRes.json()).toMatchObject({ error: { code: 'approval_not_found' } });
+    // The card stays gone (no phantom resurrected).
+    const remaining = db
+      .prepare("SELECT COUNT(*) AS cnt FROM orchestrator_messages WHERE goal_id = ? AND pending_approval IS NOT NULL")
+      .get(goalId) as { cnt: number };
+    expect(remaining.cnt).toBe(0);
+  });
+
   // (c) answer route with wrong goalId → 404, then resolve with correct goalId to unblock
   it('answer route with a different goalId returns 404', async () => {
     const goalId = 'goal-ask-2';

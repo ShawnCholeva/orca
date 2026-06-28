@@ -12,55 +12,43 @@ describe("WorkerPermissionToggle", () => {
     setWorkerPermissionModeMock.mockResolvedValue(undefined);
   });
 
-  it("reflects the current mode (ask) as the active option", async () => {
+  it("reflects the current mode (ask) as the selected option", async () => {
     const { WorkerPermissionToggle } = await import("./WorkerPermissionToggle");
     render(<WorkerPermissionToggle goalId="g1" mode="ask" disabled={false} />);
-    const ask = screen.getByRole("button", { name: /Ask-in-chat/ });
-    expect(ask.getAttribute("aria-pressed")).toBe("true");
-    const auto = screen.getByRole("button", { name: /Auto-run/ });
-    expect(auto.getAttribute("aria-pressed")).toBe("false");
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("ask");
   });
 
-  it("switches to auto and calls setWorkerPermissionMode when Auto-run clicked", async () => {
+  it("switches to auto and calls setWorkerPermissionMode when Auto-run selected", async () => {
     const { WorkerPermissionToggle } = await import("./WorkerPermissionToggle");
     render(<WorkerPermissionToggle goalId="g1" mode="ask" disabled={false} />);
-    fireEvent.click(screen.getByRole("button", { name: /Auto-run/ }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "auto" } });
     await waitFor(() => {
       expect(setWorkerPermissionModeMock).toHaveBeenCalledWith("g1", "auto");
     });
-    expect(screen.getByRole("button", { name: /Auto-run/ }).getAttribute("aria-pressed")).toBe("true");
-  });
-
-  it("does not call the api when clicking the already-active mode", async () => {
-    const { WorkerPermissionToggle } = await import("./WorkerPermissionToggle");
-    render(<WorkerPermissionToggle goalId="g1" mode="auto" disabled={false} />);
-    fireEvent.click(screen.getByRole("button", { name: /Auto-run/ }));
-    expect(setWorkerPermissionModeMock).not.toHaveBeenCalled();
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("auto");
   });
 
   it("reverts the optimistic mode if the api call fails", async () => {
     setWorkerPermissionModeMock.mockRejectedValueOnce(new Error("nope"));
     const { WorkerPermissionToggle } = await import("./WorkerPermissionToggle");
     render(<WorkerPermissionToggle goalId="g1" mode="ask" disabled={false} />);
-    fireEvent.click(screen.getByRole("button", { name: /Auto-run/ }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "auto" } });
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Ask-in-chat/ }).getAttribute("aria-pressed")).toBe("true");
+      expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("ask");
     });
   });
 
-  it("disables both options when disabled", async () => {
+  it("disables the dropdown when disabled", async () => {
     const { WorkerPermissionToggle } = await import("./WorkerPermissionToggle");
     render(<WorkerPermissionToggle goalId="g1" mode="ask" disabled={true} />);
-    expect((screen.getByRole("button", { name: /Auto-run/ }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: /Ask-in-chat/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox") as HTMLSelectElement).disabled).toBe(true);
   });
 
   it("re-syncs to the mode prop when it changes (server truth wins)", async () => {
     const { WorkerPermissionToggle } = await import("./WorkerPermissionToggle");
     const { rerender } = render(<WorkerPermissionToggle goalId="g1" mode="ask" disabled={false} />);
-    expect(screen.getByRole("button", { name: /Ask-in-chat/ }).getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("ask");
     rerender(<WorkerPermissionToggle goalId="g1" mode="auto" disabled={false} />);
-    expect(screen.getByRole("button", { name: /Auto-run/ }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: /Ask-in-chat/ }).getAttribute("aria-pressed")).toBe("false");
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("auto");
   });
 });

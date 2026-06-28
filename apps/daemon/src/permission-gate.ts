@@ -12,6 +12,19 @@ export interface PermissionGateCtx {
   idFactory?: () => string;
 }
 
+// The "Auto-run" worker toggle must actually auto-approve, so worker_permission_mode
+// === "auto" upgrades the effective mode to "automated". "ask" (which is also the
+// column default) does NOT downgrade — it defers to operating_mode, so an
+// operating_mode="automated" goal still auto-runs. The hard-constraint/critical
+// floor in decideGate applies regardless.
+export function effectiveOperatingMode(
+  operatingMode: string,
+  workerPermissionMode: string | null | undefined
+): OperatingMode {
+  if (workerPermissionMode === "auto") return "automated";
+  return operatingMode as OperatingMode;
+}
+
 // Pure-ish decision: classify, read the goal's mode, decide, and record a tool_gate
 // transition carrying the RiskFacet. Returns the gate decision; the caller maps
 // "allow"/"deny" to an immediate hook response and "require_approval" to the
@@ -23,9 +36,15 @@ export function resolvePermissionDecision(
 ): GateDecision {
   const sessionRow = ctx.db.prepare("SELECT goal_id FROM sessions WHERE id = ?").get(sessionId) as { goal_id: string } | undefined;
   if (!sessionRow) return "deny";
-  const goalRow = ctx.db.prepare("SELECT operating_mode FROM goals WHERE id = ?").get(sessionRow.goal_id) as { operating_mode: string } | undefined;
+  const goalRow = ctx.db
+    .prepare("SELECT operating_mode, worker_permission_mode FROM goals WHERE id = ?")
+    .get(sessionRow.goal_id) as { operating_mode: string; worker_permission_mode: string | null } | undefined;
   if (!goalRow) return "deny";
-  const mode = goalRow.operating_mode as OperatingMode;
+  // The "Auto-run / Ask-in-chat" toggle writes worker_permission_mode; when set it
+  // is the source of truth for gating ('auto'→automated, 'ask'→human_review).
+  // Falls back to operating_mode when unset. The hard-constraint/critical floor in
+  // decideGate still applies in either mode.
+  const mode = effectiveOperatingMode(goalRow.operating_mode, goalRow.worker_permission_mode);
 
   const classification = classifyToolAction({ toolName: payload.toolName, toolInput: payload.toolInput });
   const gateDecision = decideGate(mode, classification);

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { extractActionBlock } from "../sentinel.js";
 import { buildShadowHookSettings } from "../shadow-hook-settings.js";
 import { buildAgentHookSettings } from "../../agent-hooks/hook-settings.js";
@@ -195,13 +195,20 @@ export class ClaudeAgentProvider implements AgentProvider {
       const firstToken = cmd.split(/\s+/)[0] ?? "";
       return firstToken ? `Bash(${firstToken}:*)` : null;
     }
-    if (toolName === "Read" || toolName === "Edit" || toolName === "Write") {
+    // Edits broaden to the file's parent directory so "Always allow" covers
+    // sibling edits (matching the user's "always allow edits here" intent), not
+    // just the one exact file. Reads stay per-file (low-risk, narrower is fine).
+    if (toolName === "Edit" || toolName === "Write") {
       const p = typeof input.file_path === "string" ? input.file_path : "";
-      return p ? `${toolName}(${p})` : null;
+      return p ? `${toolName}(${dirname(p)}/**)` : null;
+    }
+    if (toolName === "Read") {
+      const p = typeof input.file_path === "string" ? input.file_path : "";
+      return p ? `Read(${p})` : null;
     }
     if (toolName === "NotebookEdit") {
       const p = typeof input.notebook_path === "string" ? input.notebook_path : "";
-      return p ? `NotebookEdit(${p})` : null;
+      return p ? `NotebookEdit(${dirname(p)}/**)` : null;
     }
     if (toolName === "WebFetch") {
       const url = typeof input.url === "string" ? input.url : "";

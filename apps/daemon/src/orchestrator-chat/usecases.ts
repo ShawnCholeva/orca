@@ -325,3 +325,45 @@ export function recordWorkerQuestionAnswer(
   ctx.bus.publish(stagedEvent);
   return true;
 }
+
+// Delete the approval message once its decision is made. The whole message
+// exists only to host the permission card ("The agent wants to run X." + the
+// approval), so once decided it's pure noise: ephemeral, gone on reload (the
+// in-memory approval is gone anyway, so a re-rendered card would only 404).
+// Emits message.updated so chats refresh.
+export function deletePendingApprovalMessage(
+  ctx: Pick<OrchestratorChatCtx, "db" | "bus" | "idFactory">,
+  input: { goalId: string; approvalId: string }
+): boolean {
+  const idFactory = ctx.idFactory ?? randomUUID;
+  const stagedEvent = ctx.db.transaction(() => {
+    const row = ctx.db
+      .prepare(
+        `SELECT id FROM orchestrator_messages
+          WHERE goal_id = ? AND json_extract(pending_approval, '$.approvalId') = ?
+          LIMIT 1`
+      )
+      .get(input.goalId, input.approvalId) as { id: string } | undefined;
+    if (row == null) return undefined;
+
+    ctx.db.prepare("DELETE FROM orchestrator_messages WHERE id = ?").run(row.id);
+
+    const payload = { messageId: row.id };
+    const eventId = idFactory();
+    const result = ctx.db
+      .prepare("INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(eventId, "orchestrator.message.updated", input.goalId, JSON.stringify(payload), new Date().toISOString());
+    return {
+      seq: Number(result.lastInsertRowid),
+      id: eventId,
+      type: "orchestrator.message.updated",
+      goalId: input.goalId,
+      payload,
+      createdAt: new Date().toISOString(),
+    } satisfies DomainEvent;
+  })();
+
+  if (stagedEvent === undefined) return false;
+  ctx.bus.publish(stagedEvent);
+  return true;
+}

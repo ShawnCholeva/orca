@@ -77,6 +77,9 @@
 }
 
 .orca-chat-composer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   border-top: 1px solid var(--hairline);
   background: var(--panel-2);
   padding: 10px 12px 12px;
@@ -84,6 +87,8 @@
 }
 
 .orca-chat-input-wrapper {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: flex-end;
   gap: 8px;
@@ -924,24 +929,125 @@
 .orca-chat-question-submit:hover:not(:disabled) { border-color: var(--accent-line); background: var(--accent-soft); }
 .orca-chat-question-submit:disabled { opacity: 0.5; cursor: default; }
 
-/* Worker tool-permission mode toggle */
-.orca-perm-toggle { display: flex; align-items: center; gap: 6px; margin: 6px 0 10px; }
-.orca-perm-toggle-label { opacity: 0.6; font-size: 11px; }
-.orca-perm-toggle-opt { font-size: 12px; padding: 2px 8px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.15); background: transparent; color: inherit; cursor: pointer; }
-.orca-perm-toggle-opt--active { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.3); }
-.orca-perm-toggle-opt:disabled { opacity: 0.4; cursor: default; }
+/* Worker tool-permission mode dropdown (right of the composer input) */
+.orca-perm-toggle-select {
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.orca-perm-toggle-select:hover:not(:disabled) { color: var(--text); border-color: var(--hairline-strong); }
+.orca-perm-toggle-select:disabled { opacity: 0.4; cursor: default; }
 
-/* Tool-permission approval card */
-.orca-chat-approval { margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; }
-.orca-chat-approval-tool { display: flex; gap: 8px; align-items: baseline; margin: 0 0 6px; }
-.orca-chat-approval-summary { font-size: 13px; }
-.orca-chat-approval-detail { white-space: pre-wrap; font-size: 12px; opacity: 0.85; margin: 4px 0 0; }
-.orca-chat-approval-actions { display: flex; gap: 8px; }
-.orca-chat-approval-deny { font-size: 12px; padding: 3px 12px; border-radius: 6px; border: 1px solid rgba(255, 120, 120, 0.4); background: transparent; color: inherit; cursor: pointer; }
-.orca-chat-approval-deny:disabled { opacity: 0.5; cursor: default; }
-.orca-chat-approval-always { font-size: 12px; padding: 3px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.2); background: transparent; color: inherit; cursor: pointer; }
+/* Tool-permission approval card — mirrors the question card, with an amber
+   "caution" rail and a PERMISSION REQUEST header instead of the blue QUESTION. */
+.orca-chat-approval {
+  position: relative;
+  overflow: hidden;
+  margin-top: 8px;
+  max-width: 720px;
+  padding: 14px 16px 14px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--panel-2);
+}
+.orca-chat-approval::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--warn);
+}
+.orca-chat-approval-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--warn);
+}
+.orca-chat-approval-header-icon { flex: none; }
+
+/* Command line — framed dark box with a terminal glyph, like the reference. */
+.orca-chat-approval-command {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  background: var(--bg);
+}
+.orca-chat-approval-command-icon { flex: none; color: var(--text-3); }
+.orca-chat-approval-command-text {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.orca-chat-approval-detail { font-size: 12px; color: var(--text-2); margin: 2px 0 0 24px; }
+
+.orca-chat-approval-actions { display: flex; align-items: center; gap: 8px; }
+/* Primary "Allow" — filled accent, mirrors the question card's send button family. */
+.orca-chat-approval-allow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.orca-chat-approval-allow:hover:not(:disabled) { background: var(--accent-hover); }
+.orca-chat-approval-allow:disabled { opacity: 0.5; cursor: default; }
+/* Secondary "Always allow" — panel-style, matches option-row chrome. */
+.orca-chat-approval-always {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.orca-chat-approval-always:hover:not(:disabled) { border-color: var(--accent-line); background: var(--accent-soft); }
 .orca-chat-approval-always:disabled { opacity: 0.5; cursor: default; }
-.orca-chat-approval-status { font-size: 12px; opacity: 0.8; margin: 6px 0 0; }
+/* "Deny" — quiet text button pushed to the far right. */
+.orca-chat-approval-deny {
+  margin-left: auto;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-3);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.orca-chat-approval-deny:hover:not(:disabled) { color: var(--err); }
+.orca-chat-approval-deny:disabled { opacity: 0.5; cursor: default; }
 
 .step-confirm-lead { font-weight: 600; margin-bottom: 16px; }
 .step-confirm-fields { display: grid; gap: 16px; margin: 0 0 16px; }
@@ -1175,3 +1281,41 @@
 .diff-line--add { background: rgba(63,185,80,0.12); }
 .diff-line--remove { background: rgba(248,81,73,0.12); }
 .diff-gutter { width: 1ch; opacity: 0.7; }
+
+/* Honest terminal state: a blocked run waiting on a human. Amber, matching the
+   workflow-banner blocked status, so a halted run reads as attention-needed
+   rather than as in-progress work. */
+.orca-chat-blocked {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.12);
+}
+.orca-chat-blocked-title { font-weight: 600; color: #92400e; font-size: 13px; }
+.orca-chat-blocked-reason { margin: 0; color: var(--text-2); font-size: 12px; }
+
+/* Human routing choice for an undecidable splitter: pick the next step. Neutral
+   (not alarming) — it's an awaiting-input state, not an error. */
+.orca-chat-split-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline, rgba(0,0,0,0.12));
+  background: var(--bg-2, rgba(0,0,0,0.03));
+}
+.orca-chat-split-choice-title { font-weight: 600; font-size: 13px; color: var(--text-1); }
+.orca-chat-split-choice-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.orca-chat-split-choice-btn {
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--hairline, rgba(0,0,0,0.18));
+  background: var(--bg, #fff);
+  font-size: 13px;
+}
+.orca-chat-split-choice-btn:hover { background: var(--bg-3, rgba(0,0,0,0.06)); }
