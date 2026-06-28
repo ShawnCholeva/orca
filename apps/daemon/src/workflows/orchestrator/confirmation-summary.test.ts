@@ -29,4 +29,52 @@ describe("buildConfirmationSummary", () => {
     expect(buildConfirmationSummary(schema, {}, null, "  Proposed the frame  ").lead).toBe("Proposed the frame");
     expect(buildConfirmationSummary(schema, {}, null, null).lead).toBe("Step complete.");
   });
+
+  const nestedSchema: WorkflowStepOutputSchema = [
+    {
+      key: "decision",
+      type: "object",
+      required: true,
+      fields: [
+        { key: "tier", type: "string", required: true },
+        { key: "reason", type: "string", required: true },
+      ],
+    },
+    {
+      key: "candidates",
+      type: "array",
+      itemType: "object",
+      required: false,
+      fields: [
+        { key: "file", type: "string", required: true },
+        { key: "risk", type: "string", required: false },
+      ],
+    },
+  ];
+
+  it("flattens a nested object decision into composite-labeled rows (no silent drop)", () => {
+    const out = buildConfirmationSummary(
+      nestedSchema,
+      { decision: { tier: "ground_and_design", reason: "single justified tier" }, candidates: [] },
+      null,
+      null
+    );
+    expect(out.fields).toEqual([
+      { label: "Decision · Tier", value: "ground_and_design" },
+      { label: "Decision · Reason", value: "single justified tier" },
+    ]);
+  });
+
+  it("renders an array of objects as one compact line per item", () => {
+    const out = buildConfirmationSummary(
+      nestedSchema,
+      { decision: { tier: "x", reason: "y" }, candidates: [{ file: "a.ts", risk: "low" }, { file: "b.ts" }] },
+      null,
+      null
+    );
+    expect(out.fields.find((f) => f.label === "Candidates")?.value).toEqual([
+      "File: a.ts · Risk: low",
+      "File: b.ts",
+    ]);
+  });
 });

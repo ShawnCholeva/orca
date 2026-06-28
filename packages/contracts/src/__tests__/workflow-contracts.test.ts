@@ -124,6 +124,7 @@ const template = {
   isLocked: true,
   steps: [step],
   guardrails: [guardrail],
+  category: "Engineering",
   createdAt: now,
   updatedAt: now
 };

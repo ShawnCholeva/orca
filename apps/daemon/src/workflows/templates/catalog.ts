@@ -309,7 +309,7 @@ const GATE_INSTRUCTIONS_FOR_ADAPTIVE =
 const ADAPTIVE_GRAPH: WorkflowGraph = {
   nodes: [
     { id: "triage", type: "step", name: "Triage", stepId: "triage" },
-    { id: "route", type: "splitter", name: "Route", instructions: ROUTE_INSTRUCTIONS, branches: ["clarify_first", "ground_and_design", "approach_only"] },
+    { id: "route", type: "splitter", name: "Route", instructions: ROUTE_INSTRUCTIONS, branches: ["clarify_first", "ground_and_design", "approach_only"], branchKey: "recommended_tier" },
     { id: "clarify", type: "step", name: "Clarify", stepId: "clarify" },
     { id: "research", type: "step", name: "Research", stepId: "research" },
     { id: "proposal", type: "step", name: "Proposal", stepId: "proposal" },
@@ -701,7 +701,9 @@ export const BUILTIN_TEMPLATE_CATALOG: BuiltInTemplateDefinition[] = [
     id: "orca/adaptive-delivery", name: "Adaptive Delivery",
     description: "Triage routes the goal to the right entry depth — full clarify, ground-and-design, or straight to proposing — then runs design → build → release with backward routing for rework.",
     bestFor: "Most engineering goals: it adapts how much up-front design happens to how clear the goal already is.",
-    version: 5, category: CATEGORY, recommended: true,
+    // v6: route splitter routes deterministically from Triage's recommended_tier
+    // (branchKey) instead of a second LLM evaluation.
+    version: 6, category: CATEGORY, recommended: true,
     steps: ADAPTIVE_STEPS, guardrails: [APPROVAL_MARK_DONE, validationRule(["execution"]), CONTEXT_RULE], graph: ADAPTIVE_GRAPH,
   },
   {

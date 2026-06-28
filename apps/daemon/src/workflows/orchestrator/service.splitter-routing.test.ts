@@ -88,6 +88,20 @@ function fakeSplitBroker(selectedBranch: string): Pick<OrchestrationTransportBro
   };
 }
 
+/**
+ * Broker whose automated transports always fail (mirrors production, where no
+ * LLM transport runner is wired into the broker). Any `evaluate_split` that
+ * reaches this broker blocks the run — so a passing deterministic-routing test
+ * proves the branch was chosen WITHOUT the broker.
+ */
+function unwiredBroker(): Pick<OrchestrationTransportBroker, "propose"> {
+  return {
+    async propose() {
+      return { status: "needs_human_review" as const, attemptId: "a1", reviewPayloadId: "r1" };
+    },
+  };
+}
+
 function makeLauncher(launch = vi.fn(async () => ({ sessionId: "sess-1" }))): WorkflowSessionLauncher {
   return { launch };
 }
@@ -278,30 +292,128 @@ describe("OrchestratorService splitter routing", () => {
     expect(decisions[0]).toMatchObject({ selectedBranch: "go_b", selectedEdgeTo: "b" });
   });
 
-  it("undeclared branch: blocks the run with a clear reason, no decision recorded, no route taken", async () => {
+  it("undecidable splitter: parks for a HUMAN routing choice (no block, no default)", async () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "unsupervised", NOW);
     seedRunAtSource(db);
-    // Broker keeps proposing an undeclared branch; validateProposal rejects it on
-    // both attempts, so the run blocks.
-    const engine = makeEngine(fakeSplitBroker("go_nowhere"));
+    // No branchKey on the route + an unwired broker (as in production) → neither
+    // deterministic routing nor the orchestrator can decide. The run must NOT
+    // block or default: it parks awaiting a human routing choice.
+    const engine = makeEngine(unwiredBroker());
 
     await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
 
     const run = db
-      .prepare("SELECT status, blocked_reason, current_node_kind FROM workflow_runs WHERE id = 'run-1'")
-      .get() as { status: string; blocked_reason: string | null; current_node_kind: string };
-    expect(run.status).toBe("blocked");
-    expect(run.blocked_reason).toMatch(/splitter route evaluation failed/i);
-
-    // No split decision recorded, no branch step run created.
+      .prepare("SELECT status, current_node_kind, pending_split_route_json FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { status: string; current_node_kind: string; pending_split_route_json: string | null };
+    expect(run.status).toBe("active"); // parked, NOT blocked
+    expect(run.current_node_kind).toBe("splitter");
+    const stash = JSON.parse(run.pending_split_route_json!);
+    expect(stash.needsHumanChoice).toBe(true);
+    expect(stash.options.map((o: { branch: string }) => o.branch)).toEqual(["go_a", "go_b"]);
+    expect(stash.options.map((o: { label: string }) => o.label)).toEqual(["A", "B"]); // labeled by dest step
+    // No decision and no branch step run until the user picks.
     expect(listSplitDecisionsForRun(db, "run-1")).toHaveLength(0);
-    const branchRuns = db
-      .prepare(
-        "SELECT id FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id IN ('a', 'b')"
-      )
+    expect(
+      db.prepare("SELECT id FROM workflow_step_runs WHERE workflow_run_id='run-1' AND step_template_id IN ('a','b')").all()
+    ).toHaveLength(0);
+  });
+
+  it("undecidable splitter: confirmSplit(branch) routes to the chosen branch and spawns its worker", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "unsupervised", NOW);
+    seedRunAtSource(db);
+    const launch = vi.fn(async (_input: { workflowRunId: string }) => ({ sessionId: "sess-b" }));
+    const engine = makeEngine(unwiredBroker(), makeLauncher(launch));
+
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory }); // parks for choice
+    await engine.confirmSplit(db, () => NOW, "run-1", { bus, idFactory }, "go_b");
+
+    const run = db
+      .prepare("SELECT current_node_id, current_node_kind, pending_split_route_json FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { current_node_id: string; current_node_kind: string; pending_split_route_json: string | null };
+    expect(run.current_node_id).toBe("b");
+    expect(run.current_node_kind).toBe("step");
+    expect(run.pending_split_route_json).toBeNull();
+    expect(launch).toHaveBeenCalledTimes(1);
+    const decisions = listSplitDecisionsForRun(db, "run-1");
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({ selectedBranch: "go_b", selectedEdgeTo: "b" });
+  });
+
+  it("undecidable splitter: an invalid user branch is a no-op (stash retained, still parked)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "unsupervised", NOW);
+    seedRunAtSource(db);
+    const engine = makeEngine(unwiredBroker());
+
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.confirmSplit(db, () => NOW, "run-1", { bus, idFactory }, "go_nowhere");
+
+    const run = db
+      .prepare("SELECT current_node_kind, pending_split_route_json FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { current_node_kind: string; pending_split_route_json: string | null };
+    expect(run.current_node_kind).toBe("splitter"); // still parked
+    expect(run.pending_split_route_json).not.toBeNull();
+    expect(JSON.parse(run.pending_split_route_json!).needsHumanChoice).toBe(true);
+    expect(listSplitDecisionsForRun(db, "run-1")).toHaveLength(0);
+  });
+
+  it("deterministic branchKey: routes from the source step's output without the broker", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "unsupervised", NOW);
+    seedRunAtSource(db);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    // Route deterministically from the source step's `route_choice` output field.
+    const graph = splitterGraph();
+    const route = graph.nodes.find((n) => n.id === "route")!;
+    (route as { branchKey?: string }).branchKey = "route_choice";
+    db.prepare("UPDATE workflow_templates SET graph_json = ? WHERE id = 'orca/engineering'").run(
+      JSON.stringify(graph)
+    );
+    db.prepare("UPDATE workflow_artifacts SET body = ? WHERE id = 'art-s0'").run(
+      JSON.stringify({ result: "source done", route_choice: "go_b", _completion: {} })
+    );
+    // Broker always fails (as in production) — a successful route proves the
+    // branch came from the deterministic output field, not an LLM call.
+    const engine = makeEngine(unwiredBroker());
+
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    const run = db
+      .prepare("SELECT status, current_node_id, current_node_kind FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { status: string; current_node_id: string; current_node_kind: string };
+    expect(run.status).toBe("active");
+    expect(run.current_node_id).toBe("b");
+    expect(run.current_node_kind).toBe("step");
+
+    const decisions = listSplitDecisionsForRun(db, "run-1");
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({ selectedBranch: "go_b", selectedEdgeTo: "b" });
+
+    const bRuns = db
+      .prepare("SELECT id FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = 'b'")
       .all() as Array<{ id: string }>;
-    expect(branchRuns).toHaveLength(0);
+    expect(bRuns).toHaveLength(1);
+  });
+
+  it("supervised: confirmSplit spawns the destination step's worker, not just an operator selection", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "supervised", NOW);
+    seedRunAtSource(db);
+    const launch = vi.fn(async (_input: { workflowRunId: string }) => ({ sessionId: "sess-a" }));
+    const engine = makeEngine(fakeSplitBroker("go_a"), makeLauncher(launch));
+
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    expect(launch).not.toHaveBeenCalled(); // parked at the splitter awaiting Continue
+
+    await engine.confirmSplit(db, () => NOW, "run-1", { bus, idFactory });
+
+    // Regression: confirmSplit previously called requestNextDecision, which only
+    // SELECTS the operator on a fresh step and returns — so the worker was never
+    // launched and the step hung "active" with no activity. It must spawn.
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(launch.mock.calls[0][0]).toMatchObject({ workflowRunId: "run-1" });
   });
 
   it("confirmSplit is idempotent: a second call after the stash is cleared is a no-op", async () => {

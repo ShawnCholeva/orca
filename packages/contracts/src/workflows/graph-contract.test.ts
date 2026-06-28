@@ -91,6 +91,17 @@ describe("WorkflowGraphNode splitter", () => {
     ).toThrow();
   });
 
+  it("parses a splitter with a deterministic branchKey", () => {
+    const node = WorkflowGraphNode.parse({
+      id: "route",
+      type: "splitter",
+      name: "Route",
+      branches: ["clarify_first", "ground_and_design", "approach_only"],
+      branchKey: "recommended_tier",
+    });
+    expect(node.branchKey).toBe("recommended_tier");
+  });
+
   it("accepts an arbitrary string edge port (splitter branch label)", () => {
     const edge = WorkflowGraphEdge.parse({ from: "route", to: "clarify", port: "clarify_first" });
     expect(edge.port).toBe("clarify_first");

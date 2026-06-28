@@ -35,6 +35,7 @@ import { emitStepComplete } from "../../harness-transitions/emit.js";
 import { runSensors } from "../../harness-sensors/runner.js";
 import { stepRequiresExecution } from "./requires-execution.js";
 import { judgeAgentResponse } from "./judgement.js";
+import { sanitizeNarration } from "./sanitize-narration.js";
 import { extractOrcaStepCompleteBlock } from "./orca-output.js";
 import { completeStepWithLedger } from "./ledger-commit.js";
 import { incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
@@ -56,7 +57,7 @@ import {
   recoverStepScoring,
   type ShadowAsk,
 } from "./recover-step-scoring.js";
-import { interruptLive, expireConfirmation, openOrUpdateLive, pauseForConfirmation, pauseForProviderRecovery, resumeFromConfirmation, resumeFromProviderRecovery } from "../../activities/store.js";
+import { interruptLive, expireConfirmation, pauseForConfirmation, pauseForProviderRecovery, resumeFromConfirmation, resumeFromProviderRecovery } from "../../activities/store.js";
 import { setSessionStatus } from "../../sessions/projection.js";
 import { recordRevisionSignal } from "../revision-signals/store.js";
 import { extractProposal, summarizeScoring } from "./scoring-summary.js";
@@ -952,7 +953,7 @@ export class OrchestratorService {
       case "paraphrase_agent_message":
       case "answer_user_directly":
       case "escalate_to_user": {
-        postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options);
+        postOrchestratorMessage(db, now, ctx.run.goalId, sanitizeNarration(action.body), options);
         return { postedChatReply: true };
       }
       case "ask_user": {
@@ -965,7 +966,7 @@ export class OrchestratorService {
           toolUseId: idFactory(),
           questions: action.questions,
         };
-        postOrchestratorMessage(db, now, ctx.run.goalId, action.body, options, "orchestrator", pendingQuestion);
+        postOrchestratorMessage(db, now, ctx.run.goalId, sanitizeNarration(action.body), options, "orchestrator", pendingQuestion);
         return { postedChatReply: true };
       }
       case "forward_to_agent": {
@@ -1230,16 +1231,14 @@ export class OrchestratorService {
           }
           const summary = conflictPause?.summary ?? summarizeScoring(scoring, proposal);
           const activityCtx = { db, bus: options.bus ?? new EventBus() };
-          openOrUpdateLive(activityCtx, {
+          // Finalizes the still-active worker turn as its own durable card, then
+          // opens a separate confirmation gate row (preserving the steps thread).
+          pauseForConfirmation(activityCtx, {
             goalId: ctx.run.goalId,
             workflowRunId: ctx.run.id,
             stepRunId: ctx.stepRun.id,
-            agentSessionId: sessionId,
-            sourceKind: "step_started",
-            currentText: summary,
-            workCategory: null,
+            summary,
           });
-          pauseForConfirmation(activityCtx, { stepRunId: ctx.stepRun.id, summary });
           return { postedChatReply: false };
         }
 
@@ -1295,11 +1294,12 @@ export class OrchestratorService {
     options: RequestNextDecisionOptions
   ): Promise<{ postedChatReply: boolean }> {
     const counter = incrementReviseAttempt(ctx.stepRun.revise_attempts ?? 0);
-    db.prepare("UPDATE workflow_step_runs SET revise_attempts = ? WHERE id = ?").run(
-      counter.nextAttempt,
-      ctx.stepRun.id
-    );
     if (counter.capReached) {
+      // Persist the exhausted-attempt state and escalate to the user.
+      db.prepare("UPDATE workflow_step_runs SET revise_attempts = ? WHERE id = ?").run(
+        counter.nextAttempt,
+        ctx.stepRun.id
+      );
       postOrchestratorMessage(
         db,
         now,
@@ -1309,21 +1309,7 @@ export class OrchestratorService {
       );
       return { postedChatReply: true };
     }
-    if (sessionId && this.workerDeliver) {
-      const r = await this.workerDeliver(sessionId, feedback);
-      if (r !== "delivered") {
-        postOrchestratorMessage(
-          db,
-          now,
-          ctx.run.goalId,
-          r === "timeout"
-            ? "Unable to send revision feedback because the step agent did not become idle in time."
-            : "Unable to send revision feedback because the step agent session is not running.",
-          options
-        );
-        return { postedChatReply: true };
-      }
-    } else {
+    if (!sessionId || !this.workerDeliver) {
       postOrchestratorMessage(
         db,
         now,
@@ -1333,7 +1319,78 @@ export class OrchestratorService {
       );
       return { postedChatReply: true };
     }
+    // Persist the revision as durable pending state and deliver it AFTER this
+    // request returns. Delivering inline self-deadlocks: this code runs inside
+    // the worker's own Stop-hook request, and the worker cannot return to idle
+    // until that request responds — but workerDeliver() waits for idle. So an
+    // inline await always times out and strands the step. Persist-and-flush
+    // keeps the lifecycle deterministic and lets reconcile re-drive on restart.
+    db.prepare("UPDATE workflow_step_runs SET pending_revision_json = ? WHERE id = ?").run(
+      JSON.stringify({ feedback, sessionId, attempt: counter.nextAttempt }),
+      ctx.stepRun.id
+    );
+    const stepRunId = ctx.stepRun.id;
+    const goalId = ctx.run.goalId;
+    // Detach from the Stop-hook await chain so the request can return and the
+    // worker can go idle; flushPendingRevision then polls for idle and delivers.
+    setImmediate(() => {
+      void this.flushPendingRevision(
+        db,
+        now,
+        goalId,
+        stepRunId,
+        sessionId,
+        feedback,
+        counter.nextAttempt,
+        options
+      );
+    });
     return { postedChatReply: false };
+  }
+
+  /**
+   * Delivers a stashed revision (pending_revision_json) to the step worker once
+   * it is idle, then clears the stash and records the attempt. Runs OUT of band
+   * (scheduled off the Stop-hook request) so it does not deadlock against the
+   * worker's own in-flight hook. On failure the stash is left in place so
+   * reconcile can re-drive it after a restart. Never throws.
+   */
+  private async flushPendingRevision(
+    db: Database.Database,
+    now: () => string,
+    goalId: string,
+    stepRunId: string,
+    sessionId: string,
+    feedback: string,
+    nextAttempt: number,
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    try {
+      const r = await this.workerDeliver!(sessionId, feedback);
+      // The deferred flush can outlive a short-lived caller (e.g. a test that
+      // closes the db in teardown). A closed handle means there is nothing to
+      // persist to — bail quietly rather than throwing from the detached task.
+      if (!db.open) return;
+      if (r === "delivered") {
+        db.prepare(
+          "UPDATE workflow_step_runs SET revise_attempts = ?, pending_revision_json = NULL WHERE id = ?"
+        ).run(nextAttempt, stepRunId);
+        return;
+      }
+      // Leave pending_revision_json set (reconcile will re-drive it) and do not
+      // burn a revise attempt on a delivery that never landed.
+      postOrchestratorMessage(
+        db,
+        now,
+        goalId,
+        r === "timeout"
+          ? "Unable to send revision feedback because the step agent did not become idle in time."
+          : "Unable to send revision feedback because the step agent session is not running.",
+        options
+      );
+    } catch (err) {
+      console.error("[orchestrator] flushPendingRevision failed", err);
+    }
   }
 
   /**

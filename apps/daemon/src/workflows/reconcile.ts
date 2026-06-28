@@ -57,9 +57,13 @@ export function reconcileWorkflowsOnBoot(db: Database, now: () => string): void 
       );
     }
 
+    // A run parked at a splitter (current_step_run_id NULL, node kind 'splitter')
+    // holding a pending_split_route_json is awaiting a supervised Continue or a
+    // human routing choice — a valid paused state, not drift. Excluding it keeps
+    // both the supervised-split park and the human-routing-choice park resumable.
     const driftRuns = db
       .prepare(
-        "SELECT wr.id AS run_id, wr.goal_id AS goal_id FROM workflow_runs wr LEFT JOIN workflow_step_runs ws ON ws.id = wr.current_step_run_id WHERE wr.status = 'active' AND (wr.current_node_kind IS NULL OR wr.current_node_kind <> 'gate') AND (ws.id IS NULL OR ws.status IN ('passed','failed','skipped'))"
+        "SELECT wr.id AS run_id, wr.goal_id AS goal_id FROM workflow_runs wr LEFT JOIN workflow_step_runs ws ON ws.id = wr.current_step_run_id WHERE wr.status = 'active' AND (wr.current_node_kind IS NULL OR wr.current_node_kind <> 'gate') AND wr.pending_split_route_json IS NULL AND (ws.id IS NULL OR ws.status IN ('passed','failed','skipped'))"
       )
       .all() as DriftRunRow[];
 
@@ -74,6 +78,41 @@ export function reconcileWorkflowsOnBoot(db: Database, now: () => string): void 
           goalId: run.goal_id,
           workflowRunId: run.run_id,
           failureCode: "daemon_restart_state_drift",
+        },
+        now()
+      );
+    }
+
+    // A step stashed a revision (pending_revision_json) whose deferred delivery
+    // did not survive the restart. The step is still active (so the drift clause
+    // above misses it), and reconcile cannot reach the possibly-gone worker to
+    // re-deliver. Block the run with a clear reason so the stalled step is
+    // inspectable/resumable instead of silently active, and clear the stash so
+    // it does not re-fire on the next boot.
+    const pendingRevisions = db
+      .prepare(
+        `SELECT ws.id AS step_run_id, ws.workflow_run_id AS run_id, ws.goal_id AS goal_id
+         FROM workflow_step_runs ws
+         JOIN workflow_runs wr ON wr.id = ws.workflow_run_id
+         WHERE ws.pending_revision_json IS NOT NULL AND ws.finished_at IS NULL AND wr.status = 'active'`
+      )
+      .all() as { step_run_id: string; run_id: string; goal_id: string }[];
+
+    for (const pr of pendingRevisions) {
+      db.prepare(
+        "UPDATE workflow_step_runs SET pending_revision_json = NULL WHERE id = ?"
+      ).run(pr.step_run_id);
+      db.prepare(
+        "UPDATE workflow_runs SET status='blocked', blocked_reason='revision_delivery_failed' WHERE id=? AND status='active'"
+      ).run(pr.run_id);
+      appendWorkflowEvent(
+        db,
+        "workflow.run.blocked",
+        {
+          goalId: pr.goal_id,
+          workflowRunId: pr.run_id,
+          stepRunId: pr.step_run_id,
+          failureCode: "revision_delivery_failed",
         },
         now()
       );
@@ -102,21 +141,17 @@ export function reconcileWorkflowsOnBoot(db: Database, now: () => string): void 
       } catch {
         // keep the default summary
       }
-      // openOrUpdateLive ensures a live row (or returns an existing paused one);
-      // pauseForConfirmation then sets it to the confirmation-pending state. Idempotent.
-      openOrUpdateLive(
+      // After a restart there is no active worker row, so pauseForConfirmation
+      // just (idempotently) inserts the confirmation gate row.
+      pauseForConfirmation(
         { db, bus },
         {
           goalId: h.goal_id,
           workflowRunId: h.workflow_run_id,
           stepRunId: h.step_run_id,
-          agentSessionId: null,
-          sourceKind: "step_started",
-          currentText: summary,
-          workCategory: null,
+          summary,
         }
       );
-      pauseForConfirmation({ db, bus }, { stepRunId: h.step_run_id, summary });
     }
   }
 

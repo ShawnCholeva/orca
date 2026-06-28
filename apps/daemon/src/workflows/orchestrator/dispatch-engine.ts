@@ -54,8 +54,7 @@ import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.js";
 import { appendWorkflowEvent } from "../events.js";
 import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
-import { resolveGateDecisionActivity, pauseForGateDecision, pauseForConfirmation, openOrUpdateLive, expireConfirmation, pauseForMarkDone } from "../../activities/store.js";
-import { shadowSessionId } from "../../orchestrator-llm/shadow-session.js";
+import { resolveGateDecisionActivity, pauseForGateDecision, pauseForConfirmation, expireConfirmation, pauseForMarkDone } from "../../activities/store.js";
 import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import { createStepOutputArtifact } from "./ledger-commit.js";
@@ -1201,6 +1200,35 @@ export class DispatchEngine {
   }
 
   /**
+   * Deterministic splitter routing. When the splitter declares a `branchKey`,
+   * the branch is taken directly from the source step's structured output field
+   * of that key — no LLM call — provided the value is one of the declared
+   * branches. Returns undefined when there is no branchKey or the field is
+   * absent/not a declared branch, so the caller falls back to broker evaluation.
+   */
+  private resolveDeterministicSplit(
+    db: Database.Database,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      splitterNode: WorkflowGraphNode;
+      branches: string[];
+    }
+  ): SplitEvaluationProposal | undefined {
+    const { run, stepRun, splitterNode, branches } = ctx;
+    const branchKey = splitterNode.branchKey;
+    if (!branchKey) return undefined;
+    const output = readStepOutputAsRecord(db, run.id, stepRun.id);
+    const raw = output?.[branchKey];
+    if (typeof raw !== "string" || !branches.includes(raw)) return undefined;
+    return {
+      selectedBranch: raw,
+      reason: `Routed deterministically from ${stepRun.step_template_id}.${branchKey} = "${raw}".`,
+      inputsConsidered: [branchKey],
+    };
+  }
+
+  /**
    * Builds the broker request payload for a splitter evaluation: the splitter's
    * declared branches/instructions, the goal, the source step output, prior split
    * decisions, and the committed ledger (capped to the contract's serialized-size
@@ -1282,58 +1310,73 @@ export class DispatchEngine {
     }
     const branches = splitterNode.branches ?? [];
 
-    // The broker requires a concrete orchestrator provider + model; a goal with
-    // neither cannot be evaluated, so block with a clear reason rather than
-    // passing null into the OrchestrationRequest (which would throw on parse).
-    if (!goal.orchestrator_provider || !goal.orchestrator_model) {
-      this.blockRun(
-        db,
-        now,
-        { run, stepRun, stepTpl, goal },
-        `goal has no orchestrator provider/model for splitter ${splitterNode.id}`,
-        options
-      );
-      return;
-    }
+    // Deterministic routing first: when the splitter declares a `branchKey`, the
+    // branch is read straight from the source step's structured output field of
+    // that key. This keeps routing in the deterministic core
+    // (FUTURE_ARCHITECTURE: "deterministic code owns lifecycle, routing, gates")
+    // and avoids a fragile second model round-trip — the failure mode that
+    // silently blocked runs when an upstream step (e.g. Triage's
+    // `recommended_tier`) had already emitted the decision.
+    let proposal = this.resolveDeterministicSplit(db, { run, stepRun, splitterNode, branches });
 
-    const request = OrchestrationRequest.parse({
-      kind: "evaluate_split",
-      goalId: goal.id,
-      workflowRunId: run.id,
-      stepRunId: stepRun.id,
-      providerId: goal.orchestrator_provider,
-      modelId: goal.orchestrator_model,
-      payload: this.buildSplitEvaluationRequest(db, { run, stepRun, goal, splitterNode }),
-    });
-    const validate = (raw: unknown) => {
-      const parsed = SplitEvaluationProposal.safeParse(raw);
-      if (!parsed.success) {
-        return { accepted: false as const, failureMessage: "invalid split proposal" };
+    if (!proposal) {
+      // Fallback: ask the orchestrator to choose the branch. The broker requires
+      // a concrete provider + model; a goal with neither cannot be evaluated, so
+      // block with a clear reason rather than passing null into the
+      // OrchestrationRequest (which would throw on parse).
+      if (!goal.orchestrator_provider || !goal.orchestrator_model) {
+        this.blockRun(
+          db,
+          now,
+          { run, stepRun, stepTpl, goal },
+          `goal has no orchestrator provider/model for splitter ${splitterNode.id}`,
+          options
+        );
+        return;
       }
-      if (!branches.includes(parsed.data.selectedBranch)) {
-        return {
-          accepted: false as const,
-          failureMessage: `selectedBranch '${parsed.data.selectedBranch}' is not a declared branch`,
-        };
-      }
-      return { accepted: true as const, parsed: parsed.data };
-    };
 
-    let result = await this.broker.propose(request, { validateProposal: validate });
-    if (result.status !== "proposed") {
-      result = await this.broker.propose(request, { validateProposal: validate });
+      const request = OrchestrationRequest.parse({
+        kind: "evaluate_split",
+        goalId: goal.id,
+        workflowRunId: run.id,
+        stepRunId: stepRun.id,
+        providerId: goal.orchestrator_provider,
+        modelId: goal.orchestrator_model,
+        payload: this.buildSplitEvaluationRequest(db, { run, stepRun, goal, splitterNode }),
+      });
+      const validate = (raw: unknown) => {
+        const parsed = SplitEvaluationProposal.safeParse(raw);
+        if (!parsed.success) {
+          return { accepted: false as const, failureMessage: "invalid split proposal" };
+        }
+        if (!branches.includes(parsed.data.selectedBranch)) {
+          return {
+            accepted: false as const,
+            failureMessage: `selectedBranch '${parsed.data.selectedBranch}' is not a declared branch`,
+          };
+        }
+        return { accepted: true as const, parsed: parsed.data };
+      };
+
+      let result = await this.broker.propose(request, { validateProposal: validate });
+      if (result.status !== "proposed") {
+        result = await this.broker.propose(request, { validateProposal: validate });
+      }
+      if (result.status !== "proposed") {
+        // Neither deterministic routing nor the orchestrator could decide the
+        // branch. Rather than block or silently default, escalate to a HUMAN
+        // routing choice: park the run at the splitter and surface the declared
+        // branches (labeled by destination step) for the user to pick.
+        this.parkForHumanSplitChoice(
+          db,
+          now,
+          { run, stepRun, stepTpl, goal, graph, splitterNode, branches },
+          options
+        );
+        return;
+      }
+      proposal = result.parsed as SplitEvaluationProposal;
     }
-    if (result.status !== "proposed") {
-      this.blockRun(
-        db,
-        now,
-        { run, stepRun, stepTpl, goal },
-        `splitter ${splitterNode.id} evaluation failed`,
-        options
-      );
-      return;
-    }
-    const proposal = result.parsed as SplitEvaluationProposal;
 
     let dest: Destination;
     try {
@@ -1412,22 +1455,15 @@ export class DispatchEngine {
       publishStaged(options.bus, stagedEvents);
       const summary = `Routing to "${proposal.selectedBranch}": ${proposal.reason}`;
       const activityCtx = { db, bus: options.bus ?? new EventBus() };
-      // The source step has already completed, so its live activity is likely
-      // finalized — pauseForConfirmation alone would no-op and strand the run.
-      // Mirror the supervised step-completion path: guarantee a live activity
-      // for the source step run exists before pausing, so a confirmation card
-      // is always created. Attributed to the orchestrator shadow session (it
-      // produced this routing decision).
-      openOrUpdateLive(activityCtx, {
+      // pauseForConfirmation always inserts the gate row (finalizing the worker
+      // turn first if it is still active), so the confirmation card is created
+      // whether or not the source step's activity is already finalized.
+      pauseForConfirmation(activityCtx, {
         goalId: goal.id,
         workflowRunId: run.id,
         stepRunId: stepRun.id,
-        agentSessionId: shadowSessionId(goal.id),
-        sourceKind: "step_started",
-        currentText: summary,
-        workCategory: null,
+        summary,
       });
-      pauseForConfirmation(activityCtx, { stepRunId: stepRun.id, summary });
       return;
     }
 
@@ -1452,6 +1488,96 @@ export class DispatchEngine {
         );
       }
     }
+  }
+
+  /**
+   * Park a run at a splitter that could not be routed (no deterministic branchKey
+   * value AND no orchestrator decision) so a human can pick the branch. Surfaces
+   * the declared branches labeled by their destination step. No silent default, no
+   * dead-end block. The choice is resolved by confirmSplit(runId, branch).
+   */
+  private parkForHumanSplitChoice(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      goal: GoalRow;
+      graph: ReturnType<typeof effectiveGraph>;
+      splitterNode: WorkflowGraphNode;
+      branches: string[];
+    },
+    options: RequestNextDecisionOptions
+  ): void {
+    const { run, stepRun, stepTpl, goal, graph, splitterNode, branches } = ctx;
+    const opts: Array<{ branch: string; destNodeId: string; destKind: string; label: string }> = [];
+    for (const branch of branches) {
+      let dest: Destination;
+      try {
+        dest = resolveSplitterNext(graph, splitterNode.id, branch);
+      } catch {
+        continue;
+      }
+      if (dest.kind !== "step" && dest.kind !== "gate" && dest.kind !== "splitter") continue;
+      const destNode = graph.nodes.find((n) => n.id === dest.nodeId);
+      opts.push({ branch, destNodeId: dest.nodeId, destKind: dest.kind, label: destNode?.name || dest.nodeId });
+    }
+    if (opts.length === 0) {
+      this.blockRun(
+        db,
+        now,
+        { run, stepRun, stepTpl, goal },
+        `splitter ${splitterNode.id} has no routable branches`,
+        options
+      );
+      return;
+    }
+    const prompt = `Couldn't determine routing for "${splitterNode.name || splitterNode.id}" — choose the next step.`;
+    const stagedEvents: DomainEvent[] = [];
+    db.transaction(() => {
+      db.prepare("UPDATE workflow_runs SET pending_split_route_json = ? WHERE id = ?").run(
+        JSON.stringify({
+          splitterNodeId: splitterNode.id,
+          sourceStepRunId: stepRun.id,
+          needsHumanChoice: true,
+          prompt,
+          options: opts,
+        }),
+        run.id
+      );
+      // Record a decision so the caller (commitNoopLatestDecision) has a trace and
+      // the escalation is auditable: an undecidable split routed to the human.
+      recordDecisionInTx(
+        db,
+        now,
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          stepRunId: stepRun.id,
+          decisionType: "evaluate_split",
+          selectedAction: `splitter:${splitterNode.id}:awaiting_human_choice`,
+          reason: prompt,
+          influencedBy: [
+            { kind: "workflow_step", id: stepTpl.id, label: stepTpl.name, effect: "satisfied" },
+          ],
+          inputFingerprint: decisionFingerprint({
+            runId: run.id,
+            stepRunId: stepRun.id,
+            decisionType: "evaluate_split",
+            payload: `${splitterNode.id}:awaiting_human_choice`,
+          }),
+        },
+        { idFactory: options.idFactory, stagedEvents }
+      );
+    })();
+    publishStaged(options.bus, stagedEvents);
+    // Finalize the source worker turn + create a paused checkpoint so the run reads
+    // as awaiting input; the frontend renders the choice from run.pendingSplitChoice.
+    pauseForConfirmation(
+      { db, bus: options.bus ?? new EventBus() },
+      { goalId: goal.id, workflowRunId: run.id, stepRunId: stepRun.id, summary: prompt }
+    );
   }
 
   /**
@@ -1664,6 +1790,37 @@ export class DispatchEngine {
    * is a no-op so a double-Continue cannot double-route. The gate is NOT
    * re-evaluated — the decision is already recorded and deduped by traversal_seq.
    */
+  /**
+   * After a supervised Continue routes to a step destination, launch that step's
+   * worker agent. The confirm paths reach a freshly-created attempt with no
+   * operator selected, so they must call spawnStepAgent — requestNextDecision
+   * only *selects* the operator on a fresh step and returns without launching,
+   * which left the destination step hung "active" with no worker. spawnStepAgent
+   * is idempotent on selection, and a gate/splitter destination has a null
+   * current step (it re-parks inside routeGateDestination), so this no-ops there.
+   * Mirrors the unsupervised inline splitter path and decideGate.
+   */
+  private async spawnRoutedStep(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    template: WorkflowTemplateT,
+    goal: GoalRow,
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    const after = getWorkflowRunById(db, runId);
+    if (!after || after.status !== "active" || !after.currentStepRunId) return;
+    const nextStepRun = readStepRun(db, after.currentStepRunId);
+    const nextTpl = template.steps.find((s) => s.id === nextStepRun.step_template_id);
+    if (!nextTpl) return;
+    await this.spawnStepAgent(
+      db,
+      now,
+      { run: after, stepRun: nextStepRun, stepTpl: nextTpl, template, goal },
+      options
+    );
+  }
+
   async confirmGate(
     db: Database.Database,
     now: () => string,
@@ -1715,13 +1872,9 @@ export class DispatchEngine {
       options
     );
 
-    // If the destination is a step, deterministically select/spawn its agent
-    // (mirrors the requestNextDecision recursion the unsupervised inline path
-    // relies on). A gate destination re-pauses inside routeGateDestination.
-    const after = getWorkflowRunById(db, runId);
-    if (after && after.status === "active" && after.currentStepRunId) {
-      await this.requestNextDecision(db, now, runId, options);
-    }
+    // If the destination is a step, launch its worker agent (a gate destination
+    // re-pauses inside routeGateDestination, so this no-ops there).
+    await this.spawnRoutedStep(db, now, runId, template, goal, options);
   }
 
   /**
@@ -1735,7 +1888,8 @@ export class DispatchEngine {
     db: Database.Database,
     now: () => string,
     runId: string,
-    options: RequestNextDecisionOptions = {}
+    options: RequestNextDecisionOptions = {},
+    branch?: string
   ): Promise<void> {
     const run = getWorkflowRunById(db, runId);
     if (!run) return;
@@ -1746,10 +1900,12 @@ export class DispatchEngine {
 
     let stash: {
       splitterNodeId: string;
-      selectedBranch: string;
-      destNodeId: string;
-      destKind: "step" | "gate" | "splitter";
+      selectedBranch?: string;
+      destNodeId?: string;
+      destKind?: "step" | "gate" | "splitter";
       sourceStepRunId: string;
+      needsHumanChoice?: boolean;
+      options?: Array<{ branch: string; destNodeId: string; destKind: string; label: string }>;
     };
     try {
       stash = JSON.parse(stashRow.pending_split_route_json);
@@ -1762,6 +1918,42 @@ export class DispatchEngine {
     if (!template) return;
     const goal = readGoal(db, run.goalId);
 
+    // Human routing-choice path: the run parked because routing was undecidable;
+    // the user picks one of the offered branches. An absent/invalid branch is a
+    // no-op (the stash is retained so the user can still choose).
+    if (stash.needsHumanChoice) {
+      if (!branch) return;
+      const chosen = (stash.options ?? []).find((o) => o.branch === branch);
+      if (!chosen) return;
+      const ledger = latestCommittedLedger(db, run.id);
+      const seq = nextTraversalSeq(db, run.id);
+      recordSplitDecision(db, now, {
+        goalId: goal.id,
+        workflowRunId: run.id,
+        nodeId: stash.splitterNodeId,
+        traversalSeq: seq,
+        selectedBranch: chosen.branch,
+        reason: "human routing choice",
+        selectedEdgeTo: chosen.destNodeId,
+        inputsConsidered: [],
+        ledgerVersion: ledger.version,
+      });
+      db.prepare("UPDATE workflow_runs SET pending_split_route_json = NULL WHERE id = ?").run(runId);
+      expireConfirmation(
+        { db, bus: options.bus ?? new EventBus() },
+        { stepRunId: stash.sourceStepRunId }
+      );
+      await this.routeGateDestination(
+        db,
+        now,
+        { run, template, goal, sourceStepRunId: stash.sourceStepRunId },
+        { kind: chosen.destKind as "step" | "gate" | "splitter", nodeId: chosen.destNodeId },
+        options
+      );
+      await this.spawnRoutedStep(db, now, runId, template, goal, options);
+      return;
+    }
+
     // Clear the stash first so a racing Continue cannot double-route.
     db.prepare("UPDATE workflow_runs SET pending_split_route_json = NULL WHERE id = ?").run(runId);
     expireConfirmation(
@@ -1773,17 +1965,13 @@ export class DispatchEngine {
       db,
       now,
       { run, template, goal, sourceStepRunId: stash.sourceStepRunId },
-      { kind: stash.destKind, nodeId: stash.destNodeId },
+      { kind: stash.destKind!, nodeId: stash.destNodeId! },
       options
     );
 
-    // If the destination is a step, deterministically select/spawn its agent
-    // (mirrors the requestNextDecision recursion). A splitter/gate destination
-    // re-parks inside routeGateDestination.
-    const after = getWorkflowRunById(db, runId);
-    if (after && after.status === "active" && after.currentStepRunId) {
-      await this.requestNextDecision(db, now, runId, options);
-    }
+    // If the destination is a step, launch its worker agent (a splitter/gate
+    // destination re-parks inside routeGateDestination, so this no-ops there).
+    await this.spawnRoutedStep(db, now, runId, template, goal, options);
   }
 
   blockRun(

@@ -309,6 +309,10 @@ function lastOrchestratorMessageBody(db: Database.Database): string {
   ).body;
 }
 
+/** Let the deferred revision flush (scheduled via setImmediate) run to completion. */
+const flushDeferred = () =>
+  new Promise<void>((resolve) => setImmediate(() => setImmediate(() => resolve())));
+
 /** Seed a workflow with an agent-capable template step */
 function setupAgentStepRun(db: Database.Database, opts: { guardrailsJson?: string } = {}) {
   const step = makeStep({
@@ -1269,6 +1273,8 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     // No step_output, no advance, no ledger version committed; step is revised.
     expect(stepOutputCount(db)).toBe(0);
     expect(latestCommittedLedger(db, "run-1").version).toBe(0);
+    // Revision delivery is deferred off the response handler; flush it.
+    await flushDeferred();
     const row = db
       .prepare("SELECT revise_attempts, step_result_json FROM workflow_step_runs WHERE id = 'step-1'")
       .get() as { revise_attempts: number; step_result_json: string | null };
@@ -1315,7 +1321,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     expect(ledger.records).toHaveLength(0);
   });
 
-  it("revise_step under cap: bumps revise_attempts to 1 and sends feedback to the agent", async () => {
+  it("revise_step under cap: stashes the revision, then flushes it off-band and bumps revise_attempts", async () => {
     const { db, bus, idFactory } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" });
     seedWorkspace(db);
@@ -1338,15 +1344,59 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     );
 
     expect(mediator.calls).toBe(0);
-    const row = db
-      .prepare("SELECT revise_attempts FROM workflow_step_runs WHERE id = 'step-1'")
-      .get() as { revise_attempts: number };
-    expect(row.revise_attempts).toBe(1);
+    // Delivery is deferred off the Stop-hook request (avoids the self-deadlock):
+    // right after the response handler returns, the revision is stashed and the
+    // attempt is NOT yet burned and nothing is delivered.
+    const stashed = db
+      .prepare("SELECT revise_attempts, pending_revision_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { revise_attempts: number; pending_revision_json: string | null };
+    expect(stashed.revise_attempts).toBe(0);
+    expect(stashed.pending_revision_json).toBeTruthy();
+    expect(deliver).not.toHaveBeenCalled();
+
+    await flushDeferred();
+
+    // The deferred flush delivers the feedback, bumps the attempt, clears stash.
     expect(deliver).toHaveBeenCalledTimes(1);
     const [sessionId, text] = deliver.mock.calls[0]!;
     expect(sessionId).toBe("sess-judge");
     expect(text).toContain("schema validation");
+    const after = db
+      .prepare("SELECT revise_attempts, pending_revision_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { revise_attempts: number; pending_revision_json: string | null };
+    expect(after.revise_attempts).toBe(1);
+    expect(after.pending_revision_json).toBeNull();
     expect(stepOutputCount(db)).toBe(0);
+  });
+
+  it("revise_step delivery timeout: keeps the revision stashed for reconcile and does not burn an attempt", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db, { reviseAttempts: 0 });
+
+    const deliver = vi.fn(async (_sid: string, _text: string) => "timeout" as const);
+    const service = makeJudgeService(spyMediator({ kind: "approve_step_complete" }), deliver);
+
+    const responseText =
+      "Attempt.\n```orca:step-complete\n" + JSON.stringify({ wrong: "field" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+    await flushDeferred();
+
+    expect(deliver).toHaveBeenCalledTimes(1);
+    const row = db
+      .prepare("SELECT revise_attempts, pending_revision_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { revise_attempts: number; pending_revision_json: string | null };
+    // Timeout: attempt NOT burned; stash retained so reconcile can re-drive it.
+    expect(row.revise_attempts).toBe(0);
+    expect(row.pending_revision_json).toBeTruthy();
+    expect(lastOrchestratorMessageBody(db)).toContain("did not become idle");
   });
 
   it("revise_step at cap: posts an orchestrator escalation message and does NOT message the agent", async () => {
@@ -1412,7 +1462,9 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     expect(mediator.calls).toBe(1);
     // Step did NOT complete: no step_output artifact written.
     expect(stepOutputCount(db)).toBe(0);
-    // Revise path was taken: revise_attempts incremented.
+    // Revise path was taken; delivery is deferred off the response handler, so
+    // flush it before asserting the attempt bump + delivery.
+    await flushDeferred();
     const row = db
       .prepare("SELECT revise_attempts FROM workflow_step_runs WHERE id = 'step-1'")
       .get() as { revise_attempts: number };
@@ -3626,7 +3678,9 @@ describe("OrchestratorService evidence veto (deterministic)", () => {
       .get() as { current_step_run_id: string };
     expect(after.current_step_run_id).toBe(before.current_step_run_id);
 
-    // (b) a revise occurred (feedback delivered to the agent session).
+    // (b) a revise occurred (feedback delivered to the agent session). Delivery
+    // is deferred off the response handler, so flush it before asserting.
+    await flushDeferred();
     expect(deliver).toHaveBeenCalled();
 
     // (c) a step_complete transition recorded the failed evidence verdict.

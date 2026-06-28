@@ -1,8 +1,11 @@
 import type {
   ConfirmationSummary as ConfirmationSummaryT,
   StepResultScoringProposal,
+  WorkflowStepOutputField,
   WorkflowStepOutputSchema,
 } from "@orca/contracts";
+
+type CardField = ConfirmationSummaryT["fields"][number];
 
 function humanizeKey(key: string): string {
   const spaced = key.replace(/_/g, " ").trim();
@@ -22,7 +25,60 @@ function fieldValue(raw: unknown): string | string[] | null {
       .filter((v) => v.length > 0);
     return items.length > 0 ? items : null;
   }
-  return null; // objects / null are omitted
+  return null; // primitives only; objects are handled by flattenField
+}
+
+function isPlainObject(raw: unknown): raw is Record<string, unknown> {
+  return raw !== null && typeof raw === "object" && !Array.isArray(raw);
+}
+
+// Serialize an object's primitive leaves into one compact line ("File: a.ts · Risk: low")
+// so deeper/opaque structures still render instead of being silently dropped.
+function objectToLine(obj: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [key, raw] of Object.entries(obj)) {
+    const value = fieldValue(raw);
+    if (value === null) continue;
+    parts.push(`${humanizeKey(key)}: ${Array.isArray(value) ? value.join(", ") : value}`);
+  }
+  return parts.join(" · ");
+}
+
+// Project one schema field + its value into zero or more card rows. Nested objects
+// recurse into composite-labeled rows (matching the validator's 2-level depth);
+// arrays of objects render one compact line per item; primitives pass through.
+function flattenField(
+  field: WorkflowStepOutputField,
+  raw: unknown,
+  labelPrefix: string,
+  depth: number,
+  out: CardField[]
+): void {
+  const label = labelPrefix ? `${labelPrefix} · ${humanizeKey(field.key)}` : humanizeKey(field.key);
+
+  if (field.type === "object" && isPlainObject(raw)) {
+    if (field.fields && field.fields.length > 0 && depth > 0) {
+      for (const child of field.fields) {
+        flattenField(child, raw[child.key], label, depth - 1, out);
+      }
+      return;
+    }
+    const line = objectToLine(raw);
+    if (line.length > 0) out.push({ label, value: line });
+    return;
+  }
+
+  if (field.type === "array" && field.itemType === "object" && Array.isArray(raw)) {
+    const items = raw
+      .filter(isPlainObject)
+      .map(objectToLine)
+      .filter((line) => line.length > 0);
+    if (items.length > 0) out.push({ label, value: items });
+    return;
+  }
+
+  const value = fieldValue(raw);
+  if (value !== null) out.push({ label, value });
 }
 
 /** Returns the lead text for a confirmation card — the same formula used in both
@@ -44,13 +100,11 @@ export function buildConfirmationSummary(
   proposal: string | null
 ): ConfirmationSummaryT {
   const obj = (block ?? {}) as Record<string, unknown>;
-  const fields: ConfirmationSummaryT["fields"] = [];
+  const fields: CardField[] = [];
   for (const field of outputSchema) {
     if (field.key === "_completion") continue;
-    const value = fieldValue(obj[field.key]);
-    if (value === null) continue;
-    fields.push({ label: humanizeKey(field.key), value });
+    flattenField(field, obj[field.key], "", 1, fields);
   }
   const lead = confirmationLead(scoring?.reason, proposal);
-  return { lead, fields, scoring };
+  return { lead, fields: fields.slice(0, 32), scoring };
 }

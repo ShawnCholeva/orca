@@ -14,6 +14,7 @@ interface WorkflowRunRow {
   current_node_id: string | null;
   current_node_kind: string | null;
   traversal_seq: number;
+  pending_split_route_json: string | null;
 }
 
 let _db: Database.Database | null = null;
@@ -27,10 +28,10 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
     _db = db;
     _stmts = {
       getById: db.prepare(
-        "SELECT id, goal_id, template_id, template_version, status, current_step_run_id, started_at, finished_at, blocked_reason, current_node_id, current_node_kind, traversal_seq FROM workflow_runs WHERE id = ?"
+        "SELECT id, goal_id, template_id, template_version, status, current_step_run_id, started_at, finished_at, blocked_reason, current_node_id, current_node_kind, traversal_seq, pending_split_route_json FROM workflow_runs WHERE id = ?"
       ),
       listByGoal: db.prepare(
-        "SELECT id, goal_id, template_id, template_version, status, current_step_run_id, started_at, finished_at, blocked_reason, current_node_id, current_node_kind, traversal_seq FROM workflow_runs WHERE goal_id = ? ORDER BY started_at DESC"
+        "SELECT id, goal_id, template_id, template_version, status, current_step_run_id, started_at, finished_at, blocked_reason, current_node_id, current_node_kind, traversal_seq, pending_split_route_json FROM workflow_runs WHERE goal_id = ? ORDER BY started_at DESC"
       ),
     };
   }
@@ -43,6 +44,28 @@ export function resetPreparedStatements(): void {
 }
 
 function rowToRun(row: WorkflowRunRow): WorkflowRunT {
+  // Surface a pending human routing choice (set when a splitter parked because it
+  // could not be routed deterministically and the orchestrator gave no decision).
+  let pendingSplitChoice: WorkflowRunT["pendingSplitChoice"] = null;
+  if (row.pending_split_route_json) {
+    try {
+      const s = JSON.parse(row.pending_split_route_json) as {
+        needsHumanChoice?: boolean;
+        splitterNodeId?: string;
+        prompt?: string;
+        options?: Array<{ branch: string; label: string }>;
+      };
+      if (s.needsHumanChoice && s.splitterNodeId && Array.isArray(s.options) && s.options.length > 0) {
+        pendingSplitChoice = {
+          splitterNodeId: s.splitterNodeId,
+          prompt: s.prompt ?? "Choose the next step.",
+          options: s.options.map((o) => ({ branch: o.branch, label: o.label })),
+        };
+      }
+    } catch {
+      // ignore malformed stash; leave pendingSplitChoice null
+    }
+  }
   return WorkflowRun.parse({
     id: row.id,
     goalId: row.goal_id,
@@ -56,6 +79,7 @@ function rowToRun(row: WorkflowRunRow): WorkflowRunT {
     currentNodeId: row.current_node_id,
     currentNodeKind: row.current_node_kind,
     traversalSeq: row.traversal_seq,
+    pendingSplitChoice,
   });
 }
 

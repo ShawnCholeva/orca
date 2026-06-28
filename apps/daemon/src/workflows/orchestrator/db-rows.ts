@@ -26,6 +26,7 @@ export interface StepRunRow {
   step_result_json: string | null;
   pending_provider_recovery_json: string | null;
   pending_judge_json: string | null;
+  pending_revision_json: string | null;
 }
 
 export class OrchestratorStepNotFoundError extends Error {

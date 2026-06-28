@@ -54,6 +54,7 @@ function makeTemplate(overrides: Partial<WorkflowTemplate> = {}): WorkflowTempla
     updatedAt: now,
     scope: "global",
     scopeName: "",
+    category: "Engineering",
     graph: null,
     ...overrides,
   };

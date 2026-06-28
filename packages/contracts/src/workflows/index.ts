@@ -311,6 +311,13 @@ export const WorkflowGraphNode = z
       .min(WORKFLOW_SPLITTER_MIN_BRANCHES)
       .max(WORKFLOW_SPLITTER_MAX_BRANCHES)
       .optional(),
+    // Splitter nodes: when set, the branch is chosen deterministically from the
+    // source step's structured output field of this key (its value must be one
+    // of `branches`) instead of an LLM evaluation. Keeps routing in the
+    // deterministic core (FUTURE_ARCHITECTURE: "deterministic code owns routing")
+    // and avoids a fragile second model round-trip when an upstream step already
+    // emitted the decision (e.g. Triage's `recommended_tier`).
+    branchKey: z.string().min(1).max(WORKFLOW_SPLITTER_MAX_BRANCH_LABEL_CHARS).optional(),
     // Step nodes: explicit terminal designation. Exactly one per valid template.
     terminal: z.boolean().optional(),
   })
@@ -364,6 +371,28 @@ export const WorkflowTemplate = z
   .strict();
 export type WorkflowTemplate = z.infer<typeof WorkflowTemplate>;
 
+// A splitter that could not be routed deterministically (and whose orchestrator
+// evaluation produced no decision) escalates to a human routing choice rather
+// than blocking or silently defaulting. The run parks at the splitter and
+// surfaces the declared branches, each labeled by its destination step, for the
+// user to pick. (FUTURE_ARCHITECTURE: human-in-the-loop as durable harness state.)
+export const SplitChoiceOption = z
+  .object({
+    branch: z.string().min(1).max(WORKFLOW_SPLITTER_MAX_BRANCH_LABEL_CHARS),
+    label: z.string().max(200),
+  })
+  .strict();
+export type SplitChoiceOption = z.infer<typeof SplitChoiceOption>;
+
+export const PendingSplitChoice = z
+  .object({
+    splitterNodeId: Id100,
+    prompt: z.string().max(500),
+    options: z.array(SplitChoiceOption).min(1).max(WORKFLOW_SPLITTER_MAX_BRANCHES),
+  })
+  .strict();
+export type PendingSplitChoice = z.infer<typeof PendingSplitChoice>;
+
 export const WorkflowRun = z
   .object({
     id: Id,
@@ -378,6 +407,8 @@ export const WorkflowRun = z
     currentNodeId: z.string().nullable().default(null),
     currentNodeKind: z.string().nullable().default(null),
     traversalSeq: z.number().int().nonnegative().default(0),
+    // Set only when the run is parked awaiting a human routing choice at a splitter.
+    pendingSplitChoice: PendingSplitChoice.nullable().optional(),
   })
   .strict();
 export type WorkflowRun = z.infer<typeof WorkflowRun>;

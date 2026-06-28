@@ -1781,11 +1781,15 @@ export async function confirmStep(runId: string): Promise<void> {
   );
 }
 
-export async function confirmSplit(runId: string): Promise<void> {
+export async function confirmSplit(runId: string, branch?: string): Promise<void> {
   const { baseUrl, token } = await loadConfig();
   await requestVoid(
     `${baseUrl}/v1/workflows/runs/${runId}/confirm-split`,
-    { method: "POST", headers: authHeaders(token) },
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify(branch ? { branch } : {}),
+    },
     "Failed to confirm split",
   );
 }

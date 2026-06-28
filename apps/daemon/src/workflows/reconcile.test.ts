@@ -316,4 +316,81 @@ describe("reconcileWorkflowsOnBoot", () => {
       },
     ]);
   });
+
+  it("blocks an active run whose step has an undelivered pending revision", () => {
+    const db = setup();
+    seedGoal(db);
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, '[]', '[]', ?, ?)"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)"
+    ).run(NOW);
+    // Active (non-terminal) step — so the drift clause does NOT catch it — that
+    // stashed a revision whose deferred delivery did not survive the restart.
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-1', 'goal-1', 'run-1', 'execution', 0, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1')"
+    ).run(NOW);
+    db.prepare("UPDATE workflow_step_runs SET pending_revision_json = ? WHERE id = 'step-1'").run(
+      JSON.stringify({ feedback: "fix the thing", sessionId: "sess-1", attempt: 1 })
+    );
+
+    reconcileWorkflowsOnBoot(db, () => NOW);
+
+    const run = db
+      .prepare("SELECT status, blocked_reason FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { status: string; blocked_reason: string | null };
+    expect(run).toEqual({ status: "blocked", blocked_reason: "revision_delivery_failed" });
+
+    // Stash cleared so it does not re-fire on the next boot.
+    const step = db
+      .prepare("SELECT pending_revision_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { pending_revision_json: string | null };
+    expect(step.pending_revision_json).toBeNull();
+
+    const events = db
+      .prepare("SELECT payload FROM events WHERE type='workflow.run.blocked'")
+      .all() as Array<{ payload: string }>;
+    expect(events).toHaveLength(1);
+    expect(JSON.parse(events[0]!.payload)).toMatchObject({
+      goalId: "goal-1",
+      workflowRunId: "run-1",
+      stepRunId: "step-1",
+      failureCode: "revision_delivery_failed",
+    });
+  });
+
+  it("leaves a splitter parked for a human routing choice ACTIVE (not drift-blocked)", () => {
+    const db = setup();
+    seedGoal(db);
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, '[]', '[]', ?, ?)"
+    ).run(NOW, NOW);
+    // Parked at a splitter (no current step) awaiting a human routing choice.
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, pending_split_route_json, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', NULL, 'route', 'splitter', ?, NULL, ?, NULL)"
+    ).run(
+      JSON.stringify({
+        splitterNodeId: "route",
+        sourceStepRunId: "step-1",
+        needsHumanChoice: true,
+        prompt: "Couldn't determine routing — choose the next step.",
+        options: [{ branch: "go_a", destNodeId: "a", destKind: "step", label: "A" }],
+      }),
+      NOW
+    );
+
+    reconcileWorkflowsOnBoot(db, () => NOW);
+
+    const run = db
+      .prepare("SELECT status, blocked_reason, pending_split_route_json FROM workflow_runs WHERE id='run-1'")
+      .get() as { status: string; blocked_reason: string | null; pending_split_route_json: string | null };
+    expect(run.status).toBe("active"); // NOT drift-blocked
+    expect(run.blocked_reason).toBeNull();
+    expect(run.pending_split_route_json).not.toBeNull(); // choice still pending
+    const blocked = db
+      .prepare("SELECT id FROM events WHERE type='workflow.run.blocked'")
+      .all() as Array<{ id: string }>;
+    expect(blocked).toHaveLength(0);
+  });
 });
