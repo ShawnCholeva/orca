@@ -103,7 +103,6 @@ const EMPTY_ACTIVITY_STATE: ActivityState = {
 export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkflows }: Props) {
   const [workflowState, setWorkflowState] = useState<WorkflowState>(EMPTY_WORKFLOW_STATE);
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -140,6 +139,11 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   // Last tail card (live confirmation/step card or terminal card) we scrolled for,
   // so a newly-arrived card jumps into view exactly once.
   const scrolledTailKeyRef = useRef<string | null>(null);
+  // True while the user is at (or near) the bottom of the chat. Streaming steps
+  // grow the tail card in place under the same activity id, so the discrete-event
+  // scroll effects below never re-fire for them. We follow that growth to the
+  // bottom while pinned, and leave the user alone once they scroll up to read.
+  const pinnedToBottomRef = useRef(true);
 
   const selectedGoal = goals.find((goal) => goal.id === selectedGoalId) ?? null;
   const connected = connectionStatus === "open";
@@ -466,6 +470,24 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     scrolledTailKeyRef.current = tailCardKey;
   }, [tailCardKey]);
 
+  function handleScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    pinnedToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
+  }
+
+  // Follow streaming content to the bottom while pinned. A running agent appends
+  // steps (and grows currentText / diffs) within the SAME activity id, so the
+  // discrete-event scroll effects above never fire — the new lines slide below
+  // the fold. This re-pins on every content-bearing change, but only when the
+  // user was already at the bottom, so it never yanks a reader who scrolled up.
+  useEffect(() => {
+    if (!pinnedToBottomRef.current) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [activities, messages, workflowState, answerPendingSince, sendingMessage, awaitingReply]);
+
   // Suppress the "starting" indicator once any persisted agent-activity card is
   // present — the agent has already emitted steps, so there is nothing to wait for.
   const hasAgentActivityCard = activities.some(isAgentActivityCard);
@@ -478,12 +500,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     !orcaHasSpoken &&
     !hasLiveActivity &&
     !hasAgentActivityCard;
-  // While the indicator is up, tick once a second so the elapsed time advances.
-  useEffect(() => {
-    if (!showStarting) return;
-    const id = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [showStarting]);
 
   // The latest unanswered worker question in the message list — the composer
   // routes its text here instead of to the orchestrator when this is non-null.
@@ -522,10 +538,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     return () => clearTimeout(id);
   }, [answerPendingSince]);
 
-  const startingElapsed =
-    workflowState.stepRun?.startedAt != null
-      ? formatElapsed(nowMs - Date.parse(workflowState.stepRun.startedAt))
-      : null;
   // Workflow tracker data: the run's full step list plus which step the
   // Conductor is currently on, derived from the active step run (not a progress
   // heuristic — the run knows its exact current step).
@@ -588,6 +600,36 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const showTracker = workflowState.run !== null && trackerSteps.length > 0;
   const runId = workflowState.run?.id ?? null;
 
+  // A blocked run has stopped making progress and is waiting on a human, not on
+  // the agent. Surface it explicitly (with the reason) and freeze every "working"
+  // affordance so the UI never shows a live spinner over work that has halted.
+  const runBlocked = workflowState.run?.status === "blocked";
+  const blockedReason = workflowState.run?.blockedReason ?? null;
+
+  // A splitter that couldn't be routed (no deterministic field, no orchestrator
+  // decision) escalates to a human routing choice instead of blocking/defaulting.
+  const pendingSplitChoice = workflowState.run?.pendingSplitChoice ?? null;
+
+  // Honest live progress for a step's OPENING gap only. A freshly-routed step
+  // spends its first seconds generating before it emits any activity; without a
+  // signal there the chat looks frozen between a confirmed gate and the next
+  // visible card. But once the step has produced ANY activity, its own thread
+  // (and the live activity's pulse) carry the "working" signal — so this generic
+  // row must retire then, or it lingers redundantly below a streaming thread.
+  const activeStepName =
+    sortedSteps.find((step) => step.id === workflowState.stepRun?.stepTemplateId)?.name ?? null;
+  const currentStepHasActivity =
+    currentStepRunId != null && activities.some((a) => a.stepRunId === currentStepRunId);
+  const showStepWorking =
+    activeStepRunning &&
+    !hasLiveActivity &&
+    !currentStepHasActivity &&
+    answerPendingSince == null &&
+    !sendingMessage &&
+    !awaitingReply &&
+    !runBlocked &&
+    !showStarting;
+
   // Escape interrupts the running step agent so the user can course-correct:
   // it aborts the agent's current turn and focuses the composer. The correction
   // typed there is forwarded to the now-idle agent through the normal send path.
@@ -609,12 +651,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [activeStepRunning, runId]);
-
-  const startingLabel = workflowState.stepRun
-    ? `Step ${workflowState.stepRun.ordinal + 1}${
-        workflowState.stepName ? ` · ${workflowState.stepName}` : ""
-      } — starting${startingElapsed ? ` ${startingElapsed}` : "…"}`
-    : "";
 
   // Merge messages and terminal activity cards into one timeline ordered by
   // createdAt (id breaks ties), so a step-result card lands between the messages
@@ -684,6 +720,17 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
       }
     } finally {
       setRefreshNonce((current) => current + 1);
+    }
+  }
+
+  async function handleSplitChoice(branch: string) {
+    if (!runId) return;
+    setActionError(null);
+    try {
+      await confirmSplit(runId, branch);
+      setRefreshNonce((current) => current + 1);
+    } catch (err) {
+      setActionError(toErrorMessage(err, "Failed to route the workflow."));
     }
   }
 
@@ -799,7 +846,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
         />
       )}
       <div className="orca-chat">
-        <div className="orca-chat-scroll scroll" ref={scrollRef}>
+        <div className="orca-chat-scroll scroll" ref={scrollRef} onScroll={handleScroll}>
         {!selectedGoal && (
           <SystemCard
             title="Select a goal"
@@ -809,12 +856,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
 
         {selectedGoal && (
           <>
-            <WorkerPermissionToggle
-              goalId={selectedGoal.id}
-              mode={selectedGoal.workerPermissionMode}
-              disabled={!connected}
-            />
-
             {!loading && error && (
               <div className="form-error" role="alert">
                 {error}
@@ -855,6 +896,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                       ) : (
                         <>
                           <select
+                            aria-label="Choose workflow"
                             value={recoveryTemplateId ?? ""}
                             onChange={(e) => setRecoveryTemplateId(e.target.value || null)}
                           >
@@ -940,7 +982,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                   <OrcaMark />
                   <div className="msg-body">
                     <div className="mono msg-meta">orca</div>
-                    <AgentActivity activity={entry.activity} />
+                    <AgentActivity activity={entry.activity} interrupted={runBlocked} />
                   </div>
                 </div>
               )
@@ -959,6 +1001,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                 hint, and the orchestrator "thinking" dots all pin to the bottom
                 of the timeline so they trail the most recent activity. */}
             {liveActivity &&
+              !runBlocked &&
               !(liveActivity.sourceKind === "step_confirmation_pending" &&
                 pendingRevisionRunId === liveActivity.workflowRunId) && (
               <div className="msg msg--orca">
@@ -983,7 +1026,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
               </div>
             )}
 
-            {answerPendingSince != null && (
+            {answerPendingSince != null && !runBlocked && (
               <div data-testid="answer-thinking">
                 <ThinkingRow label="Thinking…" />
               </div>
@@ -991,16 +1034,56 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
 
             {showStarting && (
               <div data-testid="step-starting">
-                <ThinkingRow label={startingLabel} />
+                <ThinkingRow label="Starting workflow" />
+              </div>
+            )}
+
+            {showStepWorking && (
+              <div data-testid="step-working">
+                <ThinkingRow label={activeStepName ? `Working on ${activeStepName}…` : "Working…"} />
               </div>
             )}
 
             {/* Show Orca is working from the moment the send is in flight
                 (covers the blocking one_shot path) through the async wait for a
-                deferred reply (shadow_session / active-run, reply:null). */}
-            {(sendingMessage || awaitingReply) && (
+                deferred reply (shadow_session / active-run, reply:null). A blocked
+                run is waiting on a human, not the agent, so never spin then. */}
+            {(sendingMessage || awaitingReply) && !runBlocked && (
               <div data-testid="awaiting-reply">
                 <RoutingCard />
+              </div>
+            )}
+
+            {/* Undecidable splitter escalated to a human routing choice: present
+                the branches (labeled by destination step) for the user to pick,
+                instead of blocking or silently defaulting. */}
+            {pendingSplitChoice && !runBlocked && (
+              <div className="orca-chat-split-choice" role="group" data-testid="split-choice">
+                <span className="orca-chat-split-choice-title">{pendingSplitChoice.prompt}</span>
+                <div className="orca-chat-split-choice-options">
+                  {pendingSplitChoice.options.map((opt) => (
+                    <button
+                      key={opt.branch}
+                      type="button"
+                      className="orca-chat-split-choice-btn"
+                      onClick={() => void handleSplitChoice(opt.branch)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Honest, inspectable terminal state: the run halted and is waiting
+                on a human. Show it plainly with the reason instead of leaving a
+                spinner running over work that has stopped. */}
+            {runBlocked && (
+              <div className="orca-chat-blocked" role="alert" data-testid="run-blocked">
+                <span className="orca-chat-blocked-title">Run blocked — needs your attention</span>
+                <p className="orca-chat-blocked-reason">
+                  {blockedReason ?? "The workflow stopped and could not continue automatically."}
+                </p>
               </div>
             )}
 
@@ -1072,6 +1155,11 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
               </button>
             </div>
           </div>
+          <WorkerPermissionToggle
+            goalId={selectedGoal.id}
+            mode={selectedGoal.workerPermissionMode}
+            disabled={!connected}
+          />
         </form>
       )}
       </div>
@@ -1093,9 +1181,12 @@ export function ChatMessageRow({ message, goalId, onWorkerAnswered }: { message:
       <OrcaMark />
       <div className="msg-body">
         <div className="mono msg-meta">orca</div>
-        {/* For a question card the question itself leads; the third-person
-            framing body is suppressed so it isn't shown above the question. */}
-        {!message.pendingQuestion && <div className="orca-chat-message">{message.body}</div>}
+        {/* For a question or approval card the card leads; the third-person
+            framing body ("The agent wants to run X.") is redundant, so it's
+            suppressed and only the card is shown. */}
+        {!message.pendingQuestion && !message.pendingApproval && (
+          <div className="orca-chat-message">{message.body}</div>
+        )}
         {message.pendingQuestion && message.pendingQuestion.source === "worker" ? (
           // Worker question: an agent's AskUserQuestion tool call is blocked on
           // this; answering resolves it and persists the answer on the message.

@@ -19,8 +19,61 @@ export function materializeStepResultActivity(
   const now = ctx.now?.() ?? new Date().toISOString();
   const id = ctx.idFactory?.() ?? randomUUID();
   let event: DomainEvent | undefined;
+  const sweepEvents: DomainEvent[] = [];
 
   ctx.db.transaction(() => {
+    // Finalize any dangling 'active' worker activities for this step run. Their
+    // turn ended but `turn_completed` never fired (the Stop hook raced the step
+    // advance, so resolveStepContext's current_step_run_id check failed), leaving
+    // them — and their open substep — 'active' forever, which the UI renders as a
+    // perpetual "Working on the step…" pulse. Expire them (mirrors expireLive) and
+    // close their active substeps so the projection is honest. Targets only
+    // status='active', so it never touches interrupt-glyph rows (status='completed'
+    // with an active substep), step_result/gate rows, or other steps' activities.
+    const stale = ctx.db
+      .prepare(
+        "SELECT id, goal_id, workflow_run_id, turn_ordinal FROM activities WHERE step_run_id = ? AND status = 'active'"
+      )
+      .all(input.stepRunId) as Array<{
+      id: string;
+      goal_id: string;
+      workflow_run_id: string;
+      turn_ordinal: number;
+    }>;
+    for (const a of stale) {
+      ctx.db
+        .prepare(
+          `UPDATE activities
+             SET status = 'expired', final_summary = NULL, confidence = NULL,
+                 pending_question = NULL, updated_at = ?, completed_at = ?
+           WHERE id = ?`
+        )
+        .run(now, now, a.id);
+      ctx.db
+        .prepare("UPDATE activity_steps SET status = 'done' WHERE activity_id = ? AND status = 'active'")
+        .run(a.id);
+      const sweepPayload = {
+        activityId: a.id,
+        goalId: a.goal_id,
+        workflowRunId: a.workflow_run_id,
+        stepRunId: input.stepRunId,
+        turnOrdinal: a.turn_ordinal,
+        status: "expired"
+      };
+      const sweepEventId = randomUUID();
+      const sweepResult = ctx.db
+        .prepare("INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(sweepEventId, "activity.changed", a.goal_id, JSON.stringify(sweepPayload), now);
+      sweepEvents.push({
+        seq: Number(sweepResult.lastInsertRowid),
+        id: sweepEventId,
+        type: "activity.changed",
+        goalId: a.goal_id,
+        payload: sweepPayload,
+        createdAt: now
+      });
+    }
+
     const turn = ctx.db
       .prepare("SELECT MAX(turn_ordinal) AS m FROM activities WHERE step_run_id = ?")
       .get(input.stepRunId) as { m: number | null };
@@ -72,6 +125,7 @@ export function materializeStepResultActivity(
     };
   })();
 
+  for (const swept of sweepEvents) ctx.bus.publish(swept);
   if (event !== undefined) ctx.bus.publish(event);
 }
 

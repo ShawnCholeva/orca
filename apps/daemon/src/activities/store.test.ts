@@ -246,22 +246,27 @@ describe("ActivityStore", () => {
     expect(events.filter((event) => event.type === "activity.changed").length).toBe(eventCount);
   });
 
-  it("pauses a live activity for confirmation", () => {
+  it("pauses for confirmation as a separate row, finalizing the worker turn", () => {
     const { ctx } = ctxFor(db);
     openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "working", workCategory: null });
     const paused = pauseForConfirmation(ctx, {
+      goalId: "g1",
+      workflowRunId: "r1",
       stepRunId: "s1",
       summary: "Completeness 90% · Correctness 85% · Ready for handoff"
     });
-    expect(paused?.status).toBe("paused_for_input");
-    expect(paused?.sourceKind).toBe("step_confirmation_pending");
-    expect(paused?.currentText).toContain("90%");
+    expect(paused.status).toBe("paused_for_input");
+    expect(paused.sourceKind).toBe("step_confirmation_pending");
+    expect(paused.currentText).toContain("90%");
+    // The worker turn is finalized as its own durable card, not overwritten.
+    const worker = db.prepare("SELECT status, source_kind FROM activities WHERE step_run_id='s1' AND source_kind='turn_completed'").get() as { status: string; source_kind: string };
+    expect(worker.status).toBe("completed");
   });
 
   it("resumes a confirmation activity back to active", () => {
     const { ctx } = ctxFor(db);
     openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "working", workCategory: null });
-    pauseForConfirmation(ctx, { stepRunId: "s1", summary: "x" });
+    pauseForConfirmation(ctx, { goalId: "g1", workflowRunId: "r1", stepRunId: "s1", summary: "x" });
     const resumed = resumeFromConfirmation(ctx, { stepRunId: "s1" });
     expect(resumed?.status).toBe("active");
     expect(resumed?.sourceKind).toBe("step_started");
@@ -296,12 +301,15 @@ describe("ActivityStore", () => {
   it("completeLive does not close a confirmation checkpoint", () => {
     const { ctx } = ctxFor(db);
     openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "working", workCategory: null });
-    pauseForConfirmation(ctx, { stepRunId: "s1", summary: "score summary" });
+    pauseForConfirmation(ctx, { goalId: "g1", workflowRunId: "r1", stepRunId: "s1", summary: "score summary" });
     const result = completeLive(ctx, { stepRunId: "s1", finalSummary: "turn done", confidence: null });
     expect(result).toBeUndefined();
-    const row = db.prepare("SELECT status, source_kind FROM activities WHERE step_run_id = 's1'").get() as { status: string; source_kind: string };
-    expect(row.status).toBe("paused_for_input");
-    expect(row.source_kind).toBe("step_confirmation_pending");
+    const confirm = db.prepare("SELECT status, source_kind FROM activities WHERE step_run_id='s1' AND source_kind='step_confirmation_pending'").get() as { status: string; source_kind: string };
+    expect(confirm.status).toBe("paused_for_input");
+    expect(confirm.source_kind).toBe("step_confirmation_pending");
+    // The worker turn was finalized at pause time and stays a durable card.
+    const worker = db.prepare("SELECT status FROM activities WHERE step_run_id='s1' AND source_kind='turn_completed'").get() as { status: string };
+    expect(worker.status).toBe("completed");
   });
 
   it("pauseForMarkDone persists a mark_done_pending row carrying the rec id", () => {

@@ -1036,7 +1036,7 @@ describe("daemon activity integration", () => {
     expect(activities.items[0]?.agentSessionId).toBeNull();
   });
 
-  it("completes the live activity with the first meaningful response line capped at 280 characters", async () => {
+  it("does not surface the worker's raw response text as the activity summary", async () => {
     const ids = {
       goalId: "goal-response-done",
       runId: "run-response-done",
@@ -1076,12 +1076,11 @@ describe("daemon activity integration", () => {
     });
     const activities = ListActivitiesResponse.parse(activitiesResponse.json());
     expect(activities.items).toHaveLength(1);
-    expect(activities.items[0]).toMatchObject({
-      status: "completed",
-      sourceKind: "turn_completed",
-      finalSummary: longLine.slice(0, 280),
-      confidence: null,
-    });
+    const item = activities.items[0]!;
+    // The worker's raw first-person prose is never used as a user-facing summary;
+    // the card stays a tool-step checklist (the orchestrator paraphrase narrates).
+    expect(item.finalSummary).toBeNull();
+    expect(item.steps.length).toBeGreaterThan(0);
   });
 
   it("continues an unknown-session tool hook without creating activity", async () => {

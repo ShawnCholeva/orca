@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { uuidv7 } from './ids.js';
 import type Database from 'better-sqlite3';
 import type { EventBus } from './events.js';
 import type { SessionPreparationAssembler } from './context/assembler.js';
@@ -61,7 +61,7 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
     readinessService
   );
   const now = () => new Date().toISOString();
-  const idFactory = randomUUID;
+  const idFactory = uuidv7;
   const adapterDispatcher = new AdapterDispatcher({ db });
   const stepDispatchCapabilities: StepDispatchCapabilities = {
     isAdapterReady: async (adapterId) => {

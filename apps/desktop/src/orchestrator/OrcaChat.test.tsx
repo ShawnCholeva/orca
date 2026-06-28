@@ -83,6 +83,7 @@ const goal: Goal = {
   status: "active",
   autonomyLevel: 1,
   workerPermissionMode: "ask",
+  operatingMode: "human_review",
   orchestratorProvider: "orca/openai",
   orchestratorModel: "gpt-5",
   activeWorkflowRunId: null,
@@ -285,9 +286,7 @@ describe("OrcaChat", () => {
     );
 
     const indicator = await screen.findByTestId("step-starting");
-    // ordinal is 4 → "Step 5"; the resolved-name variant is covered separately.
-    expect(indicator).toHaveTextContent("Step 5");
-    expect(indicator).toHaveTextContent("starting");
+    expect(indicator).toHaveTextContent("Starting workflow");
   });
 
   it("hides the starting indicator once an orchestrator message exists", async () => {
@@ -332,6 +331,33 @@ describe("OrcaChat", () => {
 
     expect(await screen.findByPlaceholderText("Message Orca…")).toBeInTheDocument();
     expect(screen.queryByTestId("step-starting")).toBeNull();
+  });
+
+  it("surfaces a blocked run with its reason and suppresses the working spinner", async () => {
+    setupRunLoad();
+    // The run halted at the splitter and was blocked with a reason.
+    getWorkflowRunMock.mockResolvedValue({
+      run: {
+        id: "run-1",
+        goalId: "goal-1",
+        templateId: "orca/engineering",
+        templateVersion: 1,
+        status: "blocked",
+        currentStepRunId: "step-1",
+        startedAt: now,
+        finishedAt: null,
+        blockedReason: "splitter route evaluation failed: orchestrator returned no routing decision",
+      },
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const blocked = await screen.findByTestId("run-blocked");
+    expect(blocked.textContent).toContain("splitter route evaluation failed");
+    // Honest status: no "starting"/"awaiting" spinner over a halted run.
+    expect(screen.queryByTestId("step-starting")).toBeNull();
+    expect(screen.queryByTestId("awaiting-reply")).toBeNull();
   });
 
   it("does not render the goal title/description header card", async () => {
@@ -536,7 +562,7 @@ describe("OrcaChat", () => {
     fireEvent.click(await screen.findByText("Start Workflow"));
 
     // Select the template
-    const select = await screen.findByRole("combobox");
+    const select = await screen.findByRole("combobox", { name: /Choose workflow/ });
     fireEvent.change(select, { target: { value: "orca/engineering" } });
 
     // Submit
@@ -572,6 +598,42 @@ describe("OrcaChat", () => {
 
     expect(await screen.findByTestId("agent-activity")).toBeInTheDocument();
     expect(screen.queryByText("routing")).not.toBeInTheDocument();
+  });
+
+  it("shows a per-step working indicator for a running step that has not emitted activity yet", async () => {
+    setupRunLoad();
+    // Orca has already spoken (so the first-step "Starting workflow" hint is
+    // suppressed) and the current step run is active with no activity yet — the
+    // opening generation gap of a routed step. The UI must still show work.
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [orcaMessage] });
+    listActivitiesMock.mockResolvedValue([]);
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const working = await screen.findByTestId("step-working");
+    expect(working.textContent).toContain("Working on Build It");
+    expect(screen.queryByTestId("step-starting")).toBeNull();
+  });
+
+  it("retires the per-step working row once the step has emitted activity", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [orcaMessage] });
+    // The current step run (step-1) already produced a (finalized) activity — its
+    // own thread now carries the "working" signal, so the generic row must hide.
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity,
+        status: "completed",
+        steps: [{ id: "s1", text: "Read App.tsx", category: "reading", status: "done", createdAt: now }],
+      },
+    ]);
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByTestId("agent-activity")).toBeInTheDocument();
+    expect(screen.queryByTestId("step-working")).toBeNull();
   });
 
   it("refreshes the visible activity when activity.changed arrives without resubscribing", async () => {
@@ -1173,12 +1235,12 @@ describe("OrcaChat", () => {
     expect(screen.getByRole("button", { name: /send answer/i })).toBeEnabled();
   });
 
-  it("renders the permission toggle reflecting the goal's mode when a goal is selected", async () => {
+  it("renders the permission dropdown reflecting the goal's mode when a goal is selected", async () => {
     setupRunLoad();
     const { OrcaChat } = await import("./OrcaChat");
     render(<OrcaChat goals={[{ ...goal, workerPermissionMode: "ask" }]} selectedGoalId="goal-1" connectionStatus="open" />);
-    expect(await screen.findByRole("button", { name: /Ask-in-chat/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Ask-in-chat/ }).getAttribute("aria-pressed")).toBe("true");
+    const select = await screen.findByRole("combobox", { name: /Worker tool permissions/ });
+    expect((select as HTMLSelectElement).value).toBe("ask");
   });
 
   it("renders an Allow/Deny approval card for a message with pendingApproval", async () => {
@@ -1195,60 +1257,6 @@ describe("OrcaChat", () => {
     expect(await screen.findByText("Allow")).toBeInTheDocument();
     expect(screen.getByText("Deny")).toBeInTheDocument();
     expect(screen.getByText(/rm -rf build/)).toBeInTheDocument();
-  });
-
-  it("labels the starting indicator with the resolved step name", async () => {
-    setupRunLoad();
-    const { OrcaChat } = await import("./OrcaChat");
-
-    render(
-      <OrcaChat
-        goals={[goal]}
-        selectedGoalId="goal-1"
-        connectionStatus="open"
-      />,
-    );
-
-    const indicator = await screen.findByTestId("step-starting");
-    expect(indicator).toHaveTextContent("Step 5 · Build It");
-    expect(indicator).toHaveTextContent("— starting");
-  });
-
-  it("falls back to an ordinal-only label when the template fetch fails", async () => {
-    setupRunLoad();
-    getWorkflowTemplateMock.mockRejectedValue(new Error("nope"));
-    const { OrcaChat } = await import("./OrcaChat");
-
-    render(
-      <OrcaChat
-        goals={[goal]}
-        selectedGoalId="goal-1"
-        connectionStatus="open"
-      />,
-    );
-
-    const indicator = await screen.findByTestId("step-starting");
-    expect(indicator).toHaveTextContent("Step 5 — starting");
-    expect(indicator).not.toHaveTextContent("Build It");
-    expect(indicator).not.toHaveTextContent("·");
-  });
-
-  it("shows the elapsed time since the step started, not the static hint", async () => {
-    setupRunLoad(); // stepRun.startedAt === now ("2026-01-01T00:00:00.000Z")
-    vi.spyOn(Date, "now").mockReturnValue(Date.parse(now) + 45_000);
-    const { OrcaChat } = await import("./OrcaChat");
-
-    render(
-      <OrcaChat
-        goals={[goal]}
-        selectedGoalId="goal-1"
-        connectionStatus="open"
-      />,
-    );
-
-    const indicator = await screen.findByTestId("step-starting");
-    expect(indicator).toHaveTextContent("starting 0:45");
-    expect(indicator).not.toHaveTextContent("~30");
   });
 
   it("clicking Continue on a checkpoint calls confirmStep with the run id", async () => {
@@ -1344,6 +1352,50 @@ describe("OrcaChat", () => {
     fireEvent.click(btn);
     await waitFor(() => expect(confirmSplitMock).toHaveBeenCalledWith("run-1"));
     expect(confirmStepMock).not.toHaveBeenCalled();
+  });
+
+  it("renders a human routing choice and routes to the picked branch via confirmSplit", async () => {
+    const ts = new Date().toISOString();
+    listActivitiesMock.mockResolvedValue([]);
+    getGoalDetailMock.mockResolvedValue({
+      goal: { ...goal, activeWorkflowRunId: "run-1" },
+      refinement: null,
+      workspaces: [],
+    });
+    getWorkflowRunMock.mockResolvedValue({
+      run: {
+        id: "run-1",
+        goalId: "goal-1",
+        templateId: "orca/engineering",
+        templateVersion: 1,
+        status: "active",
+        currentStepRunId: null,
+        currentNodeKind: "splitter",
+        currentNodeId: "route",
+        startedAt: ts,
+        finishedAt: null,
+        blockedReason: null,
+        pendingSplitChoice: {
+          splitterNodeId: "route",
+          prompt: "Couldn't determine routing for \"Route\" — choose the next step.",
+          options: [
+            { branch: "ground_and_design", label: "Research" },
+            { branch: "approach_only", label: "Proposal" },
+          ],
+        },
+      },
+    });
+    listWorkflowDecisionsMock.mockResolvedValue({ decisions: [] });
+    listWorkflowRunArtifactsMock.mockResolvedValue({ artifacts: [] });
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(
+      <OrcaChat goals={[{ ...goal, activeWorkflowRunId: "run-1" }]} selectedGoalId="goal-1" connectionStatus="open" />,
+    );
+
+    expect(await screen.findByTestId("split-choice")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Proposal" }));
+    await waitFor(() => expect(confirmSplitMock).toHaveBeenCalledWith("run-1", "approach_only"));
   });
 
   it("does not flash a loading indicator or blank content on SSE-driven refresh once loaded", async () => {
@@ -1967,5 +2019,96 @@ describe("ChatMessageRow worker questions", () => {
     rerender(<ChatMessageRow message={answered as never} goalId="g1" />);
     expect(screen.getByRole("button", { name: "Sent" })).toBeDisabled();
     expect(screen.getByRole("radio", { name: "A" })).toBeDisabled();
+  });
+
+  // jsdom does no layout, so simulate an overflowing, scrollable viewport with a
+  // backing store for scrollTop (jsdom's own scrollTop setter is a no-op).
+  function instrumentScroller(scroller: HTMLElement, scrollHeight: () => number) {
+    let scrollTopVal = 0;
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 100 });
+    Object.defineProperty(scroller, "scrollHeight", { configurable: true, get: scrollHeight });
+    Object.defineProperty(scroller, "scrollTop", {
+      configurable: true,
+      get: () => scrollTopVal,
+      set: (v: number) => { scrollTopVal = v; },
+    });
+    return { get scrollTop() { return scrollTopVal; }, set scrollTop(v: number) { scrollTopVal = v; } };
+  }
+
+  const streamingActivity = (steps: { id: string; text: string; status: "done" | "active" }[]): Activity => ({
+    ...activeActivity,
+    id: "stream-card",
+    status: "active",
+    currentText: "Working…",
+    steps: steps.map((s) => ({ ...s, createdAt: now, category: "reading" as const })),
+  });
+
+  it("follows streaming activity steps to the bottom while pinned", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+    let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+    openEventStreamMock.mockImplementation(({ onEvent }: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+      capturedOnEvent = onEvent;
+      return { close: vi.fn() };
+    });
+    listActivitiesMock.mockResolvedValue([streamingActivity([{ id: "s1", text: "Read file A", status: "done" }])]);
+
+    const { OrcaChat } = await import("./OrcaChat");
+    const { container } = render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+    await screen.findByText("Read file A");
+
+    const scroller = container.querySelector(".orca-chat-scroll") as HTMLElement;
+    let height = 200;
+    const view = instrumentScroller(scroller, () => height);
+    view.scrollTop = 0; // user is sitting at the bottom (no scroll-up event fired)
+
+    // A new step streams into the SAME activity id — content grows past the fold.
+    listActivitiesMock.mockResolvedValue([
+      streamingActivity([
+        { id: "s1", text: "Read file A", status: "done" },
+        { id: "s2", text: "Read file B", status: "done" },
+        { id: "s3", text: "Editing file C", status: "active" },
+      ]),
+    ]);
+    height = 600;
+    capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
+
+    await screen.findByText("Read file B");
+    await waitFor(() => expect(view.scrollTop).toBe(600));
+  });
+
+  it("does not follow streaming steps when the user has scrolled up", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+    let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+    openEventStreamMock.mockImplementation(({ onEvent }: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+      capturedOnEvent = onEvent;
+      return { close: vi.fn() };
+    });
+    listActivitiesMock.mockResolvedValue([streamingActivity([{ id: "s1", text: "Read file A", status: "done" }])]);
+
+    const { OrcaChat } = await import("./OrcaChat");
+    const { container } = render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+    await screen.findByText("Read file A");
+
+    const scroller = container.querySelector(".orca-chat-scroll") as HTMLElement;
+    let height = 600;
+    const view = instrumentScroller(scroller, () => height);
+    // User scrolls up to read history: far from the bottom.
+    view.scrollTop = 0;
+    fireEvent.scroll(scroller);
+
+    listActivitiesMock.mockResolvedValue([
+      streamingActivity([
+        { id: "s1", text: "Read file A", status: "done" },
+        { id: "s2", text: "Read file B", status: "done" },
+      ]),
+    ]);
+    height = 1200;
+    capturedOnEvent!({ type: "activity.changed", goalId: "goal-1" });
+
+    await screen.findByText("Read file B");
+    // The follow effect must leave the scrolled-up reader where they are.
+    expect(view.scrollTop).toBe(0);
   });
 });

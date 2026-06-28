@@ -89,19 +89,19 @@ export function composeOrchestratorPrompt(input: OrchestratorPromptInput): Orche
     "On each invocation, return EXACTLY ONE action object whose discriminator field is",
     'named "kind". Use one of these shapes EXACTLY — these field names are mandatory',
     'and validated; do not rename "kind"/"body"/"translated"/"feedback"/"questions" or add others:',
-    '- {"kind":"paraphrase_agent_message","body":"<agent output, narrated from the agent\'s perspective in the third person>"}',
+    '- {"kind":"paraphrase_agent_message","body":"<what happened, described as activity — what is being done, not who is doing it>"}',
     '- {"kind":"forward_to_agent","translated":"<the user\'s message translated into a prompt for the agent>"}',
     '- {"kind":"answer_user_directly","body":"<reply when the user\'s message is meta and need not reach the agent>"}',
     '- {"kind":"approve_step_complete","scoring":{"successScore":0.0,"quality":{"outputCompleteness":0.0,"outputCorrectness":0.0,"instructionAdherence":0.0,"downstreamReadiness":0.0,"riskLevel":0.0},"reason":"<short>","handoffReady":true}}  (the agent\'s orca:step-complete block satisfies the step; ALWAYS include scoring when you approve)',
     '- {"kind":"revise_step","feedback":"<concrete feedback; the agent\'s proposal is insufficient>"}',
     '- {"kind":"escalate_to_user","body":"<describe the failure and ask for guidance>"}',
-    '- {"kind":"ask_user","body":"<short third-person framing, e.g. \'Step 1 agent needs a decision before it can continue\'>","questions":[{"header":"<chip ≤12 chars>","question":"<the decision to make>","multiSelect":false,"options":[{"label":"<choice>","description":"<what it means>"}]}]}  (the step agent needs a DECISION from the user — present concrete choices)',
+    '- {"kind":"ask_user","body":"<short framing of the decision needed, e.g. \'A decision is needed before this can continue\'>","questions":[{"header":"<chip ≤12 chars>","question":"<the decision to make>","multiSelect":false,"options":[{"label":"<choice>","description":"<what it means>"}]}]}  (a DECISION from the user is needed — present concrete choices)',
     "When you approve_step_complete you MUST score the completed step. All scoring numbers are 0..1.",
     "successScore and each quality dimension: 1 = best. riskLevel is inverted: 0 = no risk, 1 = severe risk.",
     "Score from the agent evidence (output block, artifacts, assumptions, warnings). The agent never authors its own score.",
     "Keep scoring.reason concise (about one sentence, under 240 characters); longer reasons are truncated on the result card.",
     'Every shape also accepts an optional "rationale":"<short why>".',
-    'Voice: narrate the agent\'s work in the third person, from the agent\'s perspective. Refer to the active step agent as "Step N agent" (e.g. "Step 1 agent is running the tests"). Never speak as if you personally do the work — do not write "I\'m running the agent" or "I\'ll do X".',
+    'Voice: narrate what is happening as activity, not who is doing it (e.g. "Running the tests", "Confirming the readiness brief"). NEVER reference step numbers, internal step ids, or agent/sub-agent names or roles, and never imply that "agents" do the work — the user sees the activity, not the internal mechanics. Never speak as if you personally do the work — do not write "I\'m running X" or "I\'ll do X".',
     "For user_message triggers, answer simple greetings, status checks, and meta questions directly.",
     "Only use forward_to_agent when the user is asking the active step agent to do work or providing information the step agent needs.",
     "When forward_to_agent succeeds, the application may show no immediate chat reply until agent hooks report a response.",
@@ -117,9 +117,38 @@ export function composeOrchestratorPrompt(input: OrchestratorPromptInput): Orche
     SENTINEL_INSTRUCTION,
   ].join("\n");
 
+  // Source-starve internal identifiers from the model's view: it cannot leak a
+  // step number, internal step id, or agent adapter id that it never sees. The
+  // model still gets instructions/outputSchema/completionPolicy to reason with.
+  const { workflowRun, currentStep, ...restContext } = input.context ?? ({} as OrchestratorInvocationContext);
+  const promptContext = {
+    ...restContext,
+    ...(workflowRun
+      ? {
+          workflowRun: {
+            templateId: workflowRun.templateId,
+            templateVersion: workflowRun.templateVersion,
+            status: workflowRun.status,
+          },
+        }
+      : {}),
+    ...(currentStep
+      ? {
+          currentStep: {
+            instructions: currentStep.instructions,
+            outputSchema: currentStep.outputSchema,
+            executionMode: currentStep.executionMode,
+            ...(currentStep.completionPolicy !== undefined
+              ? { completionPolicy: currentStep.completionPolicy }
+              : {}),
+          },
+        }
+      : {}),
+  };
+
   const userPrompt = JSON.stringify({
     triggerKind: input.triggerKind,
-    context: input.context,
+    context: promptContext,
     trigger: input.triggerPayload,
   });
 

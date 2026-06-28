@@ -18,7 +18,6 @@ import {
 interface StepState {
   lastUpdateMs: number;
   lastCategory: ActivityWorkCategory | null;
-  lastReasoningNoteMs?: number;
 }
 
 export class ActivityUpdater {
@@ -106,26 +105,12 @@ export class ActivityUpdater {
         });
         return;
 
-      case "reasoning_note": {
-        const text = signal.text.trim();
-        if (text.length === 0) return;
-        const now = this.nowMs();
-        const state = this.perStep.get(signal.stepRunId);
-        if (state?.lastReasoningNoteMs !== undefined && now - state.lastReasoningNoteMs < ACTIVITY_THROTTLE_MS) {
-          return;
-        }
-        appendActivityStep(ctx, {
-          goalId: signal.goalId,
-          workflowRunId: signal.workflowRunId,
-          stepRunId: signal.stepRunId,
-          agentSessionId: signal.agentSessionId,
-          text,
-          category: "other",
-          diff: null,
-        });
-        this.perStep.set(signal.stepRunId, { lastUpdateMs: state?.lastUpdateMs ?? now, lastCategory: state?.lastCategory ?? null, lastReasoningNoteMs: now });
+      // reasoning_note signals are intentionally not surfaced: the worker's raw
+      // assistant prose leaks first-person voice and internal mechanics. The
+      // activity card carries only tool-derived steps; the orchestrator's
+      // sanitized paraphrase is the clean narration channel.
+      case "reasoning_note":
         return;
-      }
 
       case "turn_completed": {
         const summary = signal.summary.trim();

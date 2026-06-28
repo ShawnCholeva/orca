@@ -169,4 +169,31 @@ describe("composeOrchestratorPrompt", () => {
     expect(systemPrompt).toMatch(/interview: never approve_step_complete while the step output's open_questions is non-empty/);
     expect(systemPrompt).not.toMatch(/ask the user to confirm/);
   });
+
+  it("source-starves internal identifiers (step number, step id, agent adapter) from the model context", () => {
+    const { userPrompt } = composeOrchestratorPrompt({
+      triggerKind: "agent_response",
+      context: {
+        goal: { id: "G1", title: "T", description: "D", attachedWorkspaces: [] },
+        workflowRun: { templateId: "tmpl", templateVersion: 1, ordinal: 7, status: "active" },
+        currentStep: { id: "triage", instructions: "do the thing", outputSchema: [], agentAdapterId: "codex", executionMode: "shadow_session" },
+        conversation: { chatMessages: [], currentStepAgentTurns: [] },
+        priorStepArtifacts: [],
+      },
+      triggerPayload: {},
+    });
+    const ctx = JSON.parse(userPrompt).context;
+    expect(ctx.workflowRun.ordinal).toBeUndefined();
+    expect(ctx.currentStep.id).toBeUndefined();
+    expect(ctx.currentStep.agentAdapterId).toBeUndefined();
+    // Reasoning material the model still needs is retained.
+    expect(ctx.currentStep.instructions).toBe("do the thing");
+    expect(ctx.goal.title).toBe("T");
+  });
+
+  it("voice rule forbids internal identifiers and no longer mandates 'Step N agent'", () => {
+    const { systemPrompt } = composeOrchestratorPrompt({ triggerKind: "agent_response" } as any);
+    expect(systemPrompt).toMatch(/NEVER reference step numbers/);
+    expect(systemPrompt).not.toMatch(/Refer to the active step agent as "Step N agent"/);
+  });
 });

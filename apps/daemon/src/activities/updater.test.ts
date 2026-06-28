@@ -270,36 +270,15 @@ describe("ActivityUpdater steps", () => {
     expect(getLiveForStepRun(c.db, "s1")!.steps).toEqual([]);
   });
 
-  it("appends a reasoning note as an activity step", () => {
+  it("does not surface reasoning notes as activity steps (raw worker prose is suppressed)", () => {
     const c = ctx();
     const u = new ActivityUpdater();
     u.apply(c, { kind: "step_started", ...sig, stepName: "Root Cause" });
     u.apply(c, {
       kind: "reasoning_note",
       ...sig,
-      text: "Comparing an app-wide table against per-goal storage",
+      text: "I'll compare an app-wide table against per-goal storage",
     });
-    const live = getLiveForStepRun(c.db, "s1")!;
-    expect(live.steps.map((s) => s.text)).toEqual([
-      "Comparing an app-wide table against per-goal storage",
-    ]);
-    expect(live.steps[0].status).toBe("active");
-  });
-
-  it("throttles reasoning notes within ACTIVITY_THROTTLE_MS for a step", () => {
-    let t = 0;
-    const c = ctx();
-    const u = new ActivityUpdater(() => t);
-    u.apply(c, { kind: "step_started", ...sig, stepName: "S" });
-    u.apply(c, { kind: "reasoning_note", ...sig, text: "first thought" });
-    t = 1000; // < ACTIVITY_THROTTLE_MS (3000) — within window
-    u.apply(c, { kind: "reasoning_note", ...sig, text: "second thought (throttled)" });
-    t = 4000; // > ACTIVITY_THROTTLE_MS since the first note — outside window
-    u.apply(c, { kind: "reasoning_note", ...sig, text: "third thought" });
-    const live = getLiveForStepRun(c.db, "s1");
-    const noteTexts = live!.steps.map((s) => s.text);
-    expect(noteTexts).toContain("first thought");
-    expect(noteTexts).not.toContain("second thought (throttled)");
-    expect(noteTexts).toContain("third thought");
+    expect(getLiveForStepRun(c.db, "s1")!.steps).toEqual([]);
   });
 });

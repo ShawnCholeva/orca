@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Activity } from "@orca/contracts";
 import { AgentActivity, CodeChangeCard } from "./AgentActivity";
@@ -45,6 +45,18 @@ describe("AgentActivity", () => {
     expect(screen.queryByTestId("agent-activity-active")).toBeNull();
   });
 
+  it("renders the active step as interrupted (no pulse) when interrupted is set, even on an active activity", () => {
+    render(<AgentActivity interrupted activity={baseActivity({
+      status: "active",
+      steps: [
+        { id: "1", text: "Read App.tsx", category: "reading", status: "done", createdAt: "t" },
+        { id: "2", text: "Working on the step...", category: "other", status: "active", createdAt: "t" },
+      ],
+    })} />);
+    expect(screen.getByTestId("agent-activity-interrupted").textContent).toContain("Working on the step...");
+    expect(screen.queryByTestId("agent-activity-active")).toBeNull();
+  });
+
   it("no longer renders diffs inside the activity card (they are external cards now)", () => {
     render(<AgentActivity activity={baseActivity({
       steps: [{ id: "1", text: "Edited verifier.ts", category: "editing", status: "done", createdAt: "t",
@@ -57,7 +69,7 @@ describe("AgentActivity", () => {
   });
 });
 
-it("collapses a completed card to the summary, expands on click", () => {
+it("renders a completed card's summary with all steps always expanded (no toggle)", () => {
   const completed = {
     id: "a1", goalId: "g1", workflowRunId: "r1", stepRunId: "s1", agentSessionId: null,
     turnOrdinal: 0, status: "completed", currentText: "", finalSummary: "Did the thing",
@@ -70,9 +82,9 @@ it("collapses a completed card to the summary, expands on click", () => {
   };
   render(<AgentActivity activity={completed as any} />);
   expect(screen.getByText("Did the thing")).toBeInTheDocument();
-  expect(screen.queryByText("edited a.ts")).not.toBeInTheDocument(); // collapsed by default
-  fireEvent.click(screen.getByTestId("agent-activity-toggle"));
-  expect(screen.getByText("edited a.ts")).toBeInTheDocument(); // expanded
+  expect(screen.getByText("edited a.ts")).toBeInTheDocument(); // always expanded
+  expect(screen.getByText("ran tests")).toBeInTheDocument();
+  expect(screen.queryByTestId("agent-activity-toggle")).toBeNull(); // no collapse button
 });
 
 describe("CodeChangeCard", () => {

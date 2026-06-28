@@ -1,12 +1,19 @@
-import { useState } from "react";
 import type { Activity, ActivityDiff, ActivityStep } from "@orca/contracts";
 
-export function AgentActivity({ activity }: { activity: Activity }) {
-  const [expanded, setExpanded] = useState(false);
+export function AgentActivity({
+  activity,
+  interrupted = false,
+}: {
+  activity: Activity;
+  // Forces the active line to render paused instead of pulsing. Set when the run
+  // is no longer making progress (e.g. blocked) so the UI never shows a live
+  // spinner over work that has actually stopped (honest, inspectable status).
+  interrupted?: boolean;
+}) {
   const completed = activity.status === "completed";
-  // A finished activity (completed/expired) that still carries an active step was
-  // cut short — the user interrupted it. Render that step as paused, not running.
-  const finished = activity.status === "completed" || activity.status === "expired";
+  // A finished activity (completed/expired/interrupted) that still carries an
+  // active step was cut short — render that step as paused, not running.
+  const finished = interrupted || activity.status === "completed" || activity.status === "expired";
   // The active line is the last step still marked active; if there is none yet
   // (step opened, no tool call run), fall back to a single pulse.
   const activeStep = [...activity.steps].reverse().find((s) => s.status === "active") ?? null;
@@ -17,18 +24,9 @@ export function AgentActivity({ activity }: { activity: Activity }) {
     <div className="agent-activity" data-testid="agent-activity" data-status={activity.status}>
       {activity.stepName ? <div className="agent-activity-head">{activity.stepName}</div> : null}
       <div className="agent-activity-steps">
-        {finished ? (
-          <button
-            className="agent-activity-toggle"
-            data-testid="agent-activity-toggle"
-            onClick={() => setExpanded((e) => !e)}
-          >
-            {expanded ? "Collapse" : `Show ${doneSteps.length} steps`}
-          </button>
-        ) : null}
-        {(!finished || expanded) ? doneSteps.map((step) => (
+        {doneSteps.map((step) => (
           <StepRow key={step.id} step={step} state="done" />
-        )) : null}
+        ))}
         {activeStep ? (
           <StepRow key={activeStep.id} step={activeStep} state={finished ? "interrupted" : "running"} />
         ) : null}

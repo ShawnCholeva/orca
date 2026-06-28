@@ -17,6 +17,7 @@ import {
 
 import type { EventBus } from "../events.js";
 import { shadowSessionId } from "../orchestrator-llm/shadow-session.js";
+import { deriveTurnSummary } from "./turn-summary.js";
 
 export interface ActivityStoreCtx {
   db: Database.Database;
@@ -355,33 +356,50 @@ export function pauseForInput(
   return activity;
 }
 
+// Park a step awaiting the human's continue/revise decision. The confirmation
+// gate is its OWN row (sourceKind step_confirmation_pending, status
+// paused_for_input, no steps) — mirroring pauseForGateDecision. Crucially, when
+// the worker turn is still active (the supervised step-completion path), it is
+// first finalized as a durable turn_completed card so its activity thread
+// survives the pause instead of being overwritten.
 export function pauseForConfirmation(
   ctx: ActivityStoreCtx,
-  input: { stepRunId: string; summary: string }
-): ActivityT | undefined {
-  let event: DomainEvent | undefined;
+  input: { goalId: string; workflowRunId: string; stepRunId: string; summary: string }
+): ActivityT {
+  const events: DomainEvent[] = [];
   const activity = ctx.db.transaction(() => {
-    const live = getLiveForStepRun(ctx.db, input.stepRunId);
-    if (live === undefined) return undefined;
-
     const now = currentTime(ctx);
+    const existing = getLiveForStepRun(ctx.db, input.stepRunId);
+    if (existing?.sourceKind === "step_confirmation_pending") return existing; // idempotent re-park
+
+    // Finalize the still-active worker turn BEFORE inserting the gate row, so its
+    // steps thread persists as its own card. (At the split/reconcile sites the
+    // worker turn is already completed, so this branch no-ops.)
+    if (existing !== undefined && existing.status === "active") {
+      finalizeTurnRow(ctx.db, existing.id, deriveTurnSummary(existing.currentText), null, now);
+      const finalized = getActivityById(ctx.db, existing.id);
+      if (finalized === undefined) throw new Error(`Activity disappeared: ${existing.id}`);
+      events.push(insertActivityChangedEvent(ctx.db, finalized, now));
+    }
+
+    const id = nextActivityId(ctx);
+    const turnOrdinal = nextTurnOrdinal(ctx.db, input.stepRunId);
     ctx.db
       .prepare(
-        `UPDATE activities
-         SET status = 'paused_for_input', current_text = ?,
-             source_kind = 'step_confirmation_pending', work_category = NULL,
-             pending_question = NULL, updated_at = ?
-         WHERE id = ?`
+        `INSERT INTO activities (
+           id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+           status, current_text, final_summary, source_kind, work_category, confidence,
+           pending_question, created_at, updated_at, completed_at
+         ) VALUES (?, ?, ?, ?, NULL, ?, 'paused_for_input', ?, NULL, 'step_confirmation_pending', NULL, NULL, NULL, ?, ?, NULL)`
       )
-      .run(input.summary, now, live.id);
-
-    const paused = getActivityById(ctx.db, live.id);
-    if (paused === undefined) throw new Error(`Activity disappeared: ${live.id}`);
-    event = insertActivityChangedEvent(ctx.db, paused, now);
-    return paused;
+      .run(id, input.goalId, input.workflowRunId, input.stepRunId, turnOrdinal, input.summary, now, now);
+    const inserted = getActivityById(ctx.db, id);
+    if (inserted === undefined) throw new Error(`Activity insert failed: ${id}`);
+    events.push(insertActivityChangedEvent(ctx.db, inserted, now));
+    return inserted;
   })();
 
-  publishActivityChanged(ctx, event);
+  for (const event of events) publishActivityChanged(ctx, event);
   return activity;
 }
 
@@ -602,6 +620,45 @@ export function resumeFromProviderRecovery(
   return activity;
 }
 
+// Finalize a turn row into its durable, surfaced `turn_completed` card: flip it
+// completed, close any still-active step, and drop a trailing step that merely
+// duplicates the derived summary. Shared by completeLive and pauseForConfirmation
+// so a confirmation pause preserves the worker turn's activity thread instead of
+// overwriting it.
+function finalizeTurnRow(
+  db: Database.Database,
+  activityId: string,
+  finalSummary: string,
+  confidence: ActivityConfidence | null,
+  now: string
+): void {
+  db
+    .prepare(
+      `UPDATE activities
+       SET status = 'completed', final_summary = ?, source_kind = 'turn_completed',
+           confidence = ?, pending_question = NULL, updated_at = ?, completed_at = ?
+       WHERE id = ?`
+    )
+    .run(finalSummary, confidence, now, now, activityId);
+
+  db
+    .prepare("UPDATE activity_steps SET status = 'done' WHERE activity_id = ? AND status = 'active'")
+    .run(activityId);
+
+  // The agent's final narration is captured as a reasoning-note step AND
+  // derived into final_summary, so a one-line turn renders the same text twice
+  // (last checkmark step + summary below the divider). Drop the trailing step
+  // when it reduces to the same summary; keep the summary as the recap slot.
+  const lastDone = db
+    .prepare(
+      "SELECT id, text FROM activity_steps WHERE activity_id = ? AND status = 'done' ORDER BY ordinal DESC LIMIT 1"
+    )
+    .get(activityId) as { id: string; text: string } | undefined;
+  if (lastDone !== undefined && deriveTurnSummary(lastDone.text) === finalSummary) {
+    db.prepare("DELETE FROM activity_steps WHERE id = ?").run(lastDone.id);
+  }
+}
+
 export function completeLive(
   ctx: ActivityStoreCtx,
   input: {
@@ -617,18 +674,7 @@ export function completeLive(
     if (live.sourceKind === "step_confirmation_pending") return undefined;
 
     const now = currentTime(ctx);
-    ctx.db
-      .prepare(
-        `UPDATE activities
-         SET status = 'completed', final_summary = ?, source_kind = 'turn_completed',
-             confidence = ?, pending_question = NULL, updated_at = ?, completed_at = ?
-         WHERE id = ?`
-      )
-      .run(input.finalSummary, input.confidence, now, now, live.id);
-
-    ctx.db
-      .prepare("UPDATE activity_steps SET status = 'done' WHERE activity_id = ? AND status = 'active'")
-      .run(live.id);
+    finalizeTurnRow(ctx.db, live.id, input.finalSummary, input.confidence, now);
 
     const completed = getActivityById(ctx.db, live.id);
     if (completed === undefined) throw new Error(`Activity disappeared: ${live.id}`);
