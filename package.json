@@ -6,6 +6,7 @@
     "dev": "pnpm -r dev",
     "daemon:kill": "node scripts/kill-daemon.mjs",
     "dev:desktop": "node scripts/kill-daemon.mjs && pnpm --filter @orca/contracts build && pnpm --filter @orca/daemon build && pnpm --filter @orca/desktop tauri:dev",
+    "dev:browser": "pnpm --filter @orca/desktop dev:browser",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",

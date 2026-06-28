@@ -10,3 +10,8 @@ apps/desktop/src-tauri/gen/
 scripts/paper-rag/.venv/
 .orca/paper-index/
 agent-harness.pdf
+
+# Playwright MCP / browser-driving artifacts
+.playwright-mcp/
+apps/desktop/test-results/
+/image.png

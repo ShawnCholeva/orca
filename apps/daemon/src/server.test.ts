@@ -2854,3 +2854,42 @@ describe('POST /v1/workflows/runs/:id/provider-recovery/*', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 });
+
+describe('CORS', () => {
+  async function preflight(origin: string): Promise<string | undefined> {
+    const { server, db, dataDir } = await startServer();
+    try {
+      const res = await server.inject({
+        method: 'OPTIONS',
+        url: '/v1/agents',
+        headers: {
+          origin,
+          'access-control-request-method': 'GET',
+          'access-control-request-headers': 'authorization',
+        },
+      });
+      return res.headers['access-control-allow-origin'] as string | undefined;
+    } finally {
+      await server.close();
+      db.close();
+      closeDatabase();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  }
+
+  it('allows the tauri webview origins', async () => {
+    expect(await preflight('tauri://localhost')).toBe('tauri://localhost');
+    expect(await preflight('http://tauri.localhost')).toBe('http://tauri.localhost');
+  });
+
+  it('allows any loopback dev origin so browser mode works on any port', async () => {
+    expect(await preflight('http://localhost:5173')).toBe('http://localhost:5173');
+    expect(await preflight('http://localhost:5174')).toBe('http://localhost:5174');
+    expect(await preflight('http://127.0.0.1:61758')).toBe('http://127.0.0.1:61758');
+  });
+
+  it('rejects non-loopback origins', async () => {
+    expect(await preflight('https://evil.example.com')).toBeUndefined();
+    expect(await preflight('http://localhost.evil.com')).toBeUndefined();
+  });
+});

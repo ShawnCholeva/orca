@@ -8,6 +8,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Orca is a **local-first desktop application for multi-agent AI orchestration**. It coordinates multiple AI agent sessions (Claude Code, opencode, Codex, shell) around long-running engineering Goals by preserving operational reasoning, managing shared context, and enabling progression from supervised to autonomous execution (Levels 4 and 5).
 
+## Orientation docs (consult to stay aligned)
+
+Three durable docs sit at the repo root. Read the relevant one **before non-trivial work** so changes align with how Orca actually works and where it's headed:
+
+- **ORCA.md** — the durable **present**: what Orca is, why it's shaped this way, and where things live (the daemon subsystem map, the workflow model, the harness axes). **Consult before touching any subsystem** to match existing patterns and intent. When the code and ORCA.md disagree about *today*, the code wins — fix ORCA.md.
+- **FUTURE_ARCHITECTURE.md** — the **destination**: the end-state Orca steers toward (daemon as a standalone server, the control-plane/execution-plane split + Runner Protocol, multi-tenant SaaS tiers, the learning loop). **Consult before any architectural or design decision** — new seams, abstractions, storage/identity choices, or cross-subsystem changes — to confirm the work moves toward, or at least does not preclude, the end-state spine. Flag in your response when a proposed change conflicts with it.
+- **FUTURE_WORK.md** — the sequenced **path** (substrate-up phases 0→5). Consult to see whether a task is already planned and where it fits.
+
+Rule of thumb: ORCA.md answers *"how does this work today?"*; FUTURE_ARCHITECTURE.md answers *"is this the right direction?"*; FUTURE_WORK.md answers *"when/where does this land?"*.
+
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
