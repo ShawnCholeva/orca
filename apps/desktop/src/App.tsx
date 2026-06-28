@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from "react";
-import { Goal, DomainEventType, type Agent, type PluginSummary, type SkillSummary } from "@orca/contracts";
+import { Goal, DomainEventType, type Agent, type GoalListItem, type PluginSummary, type SkillSummary } from "@orca/contracts";
 import {
   fetchHealth,
   listAgents,
@@ -21,6 +21,7 @@ import { BootstrapErrorScreen } from "./chrome/BootstrapErrorScreen";
 import { NoReadyAgentsBanner } from "./chrome/NoReadyAgentsBanner";
 import { OrcaChat } from "./orchestrator/OrcaChat";
 import { WorkflowsPage } from "./workflows/WorkflowsPage";
+import { inputStyle } from "./workflows/ScopeControls";
 import { WorkspacesPage } from "./workspaces/WorkspacesPage";
 import { EmptyGoalsView } from "./empty-state/EmptyGoalsView";
 import { SettingsModal, GearIcon } from "./settings/SettingsModal";
@@ -40,7 +41,7 @@ function toErrorMessage(err: unknown, fallback: string): string {
 type Diagnostics = { plugins: PluginSummary[]; skills: SkillSummary[] };
 
 const DETAIL_REFETCH_EVENTS = new Set<DomainEventType>(["goal.refined", "workspace.attached", "workspace.removed"]);
-const GOAL_LIST_EVENTS = new Set<DomainEventType>(["goal.created", "goal.updated", "goal.archived", "goal.worker_permission_mode_changed"]);
+const GOAL_LIST_EVENTS = new Set<DomainEventType>(["goal.created", "goal.updated", "goal.archived", "goal.worker_permission_mode_changed", "workspace.attached", "workspace.removed"]);
 
 export default function App() {
   const [onboardingState, setOnboardingState] = useState<OnboardingState>("checking");
@@ -53,7 +54,8 @@ export default function App() {
   const [showCreateFlow, setShowCreateFlow] = useState(false);
   const [createFlowWorkspacePath, setCreateFlowWorkspacePath] = useState<string | undefined>(undefined);
   const [showSettings, setShowSettings] = useState(false);
-  const [goals, setGoals] = useState<Goal[]>([]);
+  const [goals, setGoals] = useState<GoalListItem[]>([]);
+  const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
   const [selectedOrchestratorGoalId, setSelectedOrchestratorGoalId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("workspaces");
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
@@ -164,6 +166,26 @@ export default function App() {
       setSelectedOrchestratorGoalId(goals[0]!.id);
     }
   }, [goals, selectedOrchestratorGoalId]);
+
+  // Workspace identities present across the loaded goals, deduped by id and
+  // sorted by name — the source for the rail's filter options.
+  const workspaceOptions = [
+    ...new Map(goals.flatMap((g) => g.workspaces.map((w) => [w.id, w.name] as const))).entries(),
+  ].sort((a, b) => a[1].localeCompare(b[1]));
+
+  // Reset a dangling filter: if the selected workspace no longer appears in any
+  // goal (e.g. its last goal was detached), fall back to "all" so the <select>
+  // never shows a blank value.
+  useEffect(() => {
+    if (workspaceFilter !== "all" && !workspaceOptions.some(([id]) => id === workspaceFilter)) {
+      setWorkspaceFilter("all");
+    }
+  }, [workspaceFilter, workspaceOptions]);
+
+  const visibleGoals =
+    workspaceFilter === "all"
+      ? goals
+      : goals.filter((g) => g.workspaces.some((w) => w.id === workspaceFilter));
 
   // WebSocket event stream — refreshes goal list or detail on relevant events
   useEffect(() => {
@@ -282,13 +304,32 @@ export default function App() {
                 </svg>
               </button>
             </div>
+            {workspaceOptions.length > 0 && (
+              <div className="orchestrator-rail-filter">
+                <select
+                  aria-label="Filter goals by workspace"
+                  value={workspaceFilter}
+                  onChange={(e) => setWorkspaceFilter(e.target.value)}
+                  style={{ ...inputStyle, fontSize: 12, padding: "7px 10px", cursor: "pointer" }}
+                >
+                  <option value="all">All workspaces</option>
+                  {workspaceOptions.map(([id, name]) => (
+                    <option key={id} value={id}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             {goals.length === 0 ? (
               <p className="orchestrator-rail-empty">
                 No goals yet. Click <strong>+</strong> to start.
               </p>
+            ) : visibleGoals.length === 0 ? (
+              <p className="orchestrator-rail-empty">No goals in this workspace.</p>
             ) : (
               <ul className="orchestrator-rail-list">
-                {goals.map((goal) => (
+                {visibleGoals.map((goal) => (
                   <GoalCard
                     key={goal.id}
                     goal={goal}
@@ -423,6 +464,8 @@ export default function App() {
                     onCreate={() => setShowCreateFlow(true)}
                     disabled={!connected}
                   />
+                ) : !visibleGoals.some((g) => g.id === selectedOrchestratorGoalId) ? (
+                  <p className="orchestrator-pane-empty">Select a goal to view the orchestrator.</p>
                 ) : (
                   <OrcaChat
                     goals={goals}

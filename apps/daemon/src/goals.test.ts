@@ -24,7 +24,8 @@ import {
   ValidationError,
   DuplicateWorkspaceInRequestError,
 } from "./goals.js";
-import type { InspectWorkspacePreview } from "@orca/contracts";
+import type { InspectWorkspacePreview, Workspace } from "@orca/contracts";
+import { insertWorkspaceEntity, linkGoalWorkspace } from "./workspaces/projection.js";
 import { ModelProviderRegistry } from "./llm/registry.js";
 import type { ModelProvider } from "./llm/types.js";
 
@@ -691,6 +692,36 @@ describe("listGoals", () => {
     expect(goals[0]!.id).toBe(created.id);
     expect(goals[0]!.title).toBe("Beta");
     expect(goals[0]!.status).toBe("active");
+  });
+
+  it("populates per-goal workspace identity ({id,name}) for zero, one, and many workspaces", async () => {
+    const { db, ctx } = setup();
+
+    const none = await createGoal({ title: "No workspace" }, ctx);
+    const one = await createGoal({ title: "One workspace" }, ctx);
+    const many = await createGoal({ title: "Many workspaces" }, ctx);
+
+    const at = "2026-01-01T00:00:00.000Z";
+    const mkWs = (id: string, name: string): Workspace => ({
+      id, path: `/tmp/${id}`, name, description: "", createdAt: at, updatedAt: at,
+    });
+    const alpha = mkWs("ws-alpha", "Alpha");
+    const beta = mkWs("ws-beta", "Beta");
+    for (const ws of [alpha, beta]) insertWorkspaceEntity(db, ws);
+
+    linkGoalWorkspace(db, one.id, alpha.id, at);
+    // attach in beta-then-alpha order to assert attached_at ordering is preserved
+    linkGoalWorkspace(db, many.id, beta.id, "2026-01-01T00:00:01.000Z");
+    linkGoalWorkspace(db, many.id, alpha.id, "2026-01-01T00:00:02.000Z");
+
+    const byId = new Map(listGoals().map((g) => [g.id, g.workspaces]));
+
+    expect(byId.get(none.id)).toEqual([]);
+    expect(byId.get(one.id)).toEqual([{ id: "ws-alpha", name: "Alpha" }]);
+    expect(byId.get(many.id)).toEqual([
+      { id: "ws-beta", name: "Beta" },
+      { id: "ws-alpha", name: "Alpha" },
+    ]);
   });
 });
 

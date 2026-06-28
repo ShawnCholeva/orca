@@ -65,6 +65,16 @@
   cursor: not-allowed;
 }
 
+.orchestrator-rail-filter {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+
+.orchestrator-rail-filter select {
+  width: 100%;
+}
+
 .orchestrator-rail-list {
   flex: 1;
   min-height: 0;
@@ -471,6 +481,13 @@
   flex-direction: column;
   padding: 14px;
   overflow: hidden;
+}
+
+.orchestrator-pane-empty {
+  margin: auto;
+  font-size: 13px;
+  color: var(--text-3);
+  text-align: center;
 }
 
 /* Inline disconnect banner */

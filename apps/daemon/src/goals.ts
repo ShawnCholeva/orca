@@ -6,6 +6,7 @@ import {
   GuidedRefinementOutput,
   OrchestratorModelChoice,
   UpdateGoalRequest,
+  type GoalListItem,
   type UpdateGoalOrchestratorModelResponse,
   type DomainEvent,
   type DomainEventType,
@@ -19,7 +20,7 @@ import { deleteApprovalCountsForGoal } from "./harness-risk/accountability.js";
 import type { SkillRegistry } from "./registry/skill-registry.js";
 import { insertGoalRefinement } from "./goal-refinements.js";
 import { seedRefinementMemory } from "./memory/refinement-seed.js";
-import { findWorkspaceByPath, insertWorkspaceEntity, linkGoalWorkspace } from "./workspaces/projection.js";
+import { findWorkspaceByPath, insertWorkspaceEntity, linkGoalWorkspace, listWorkspaceIdentitiesByGoal } from "./workspaces/projection.js";
 import type { ModelProviderRegistry } from "./llm/registry.js";
 
 export interface CreateGoalCtx {
@@ -491,10 +492,15 @@ export async function updateGoalOrchestratorModel(
   };
 }
 
-export function listGoals(): Goal[] {
-  const stmts = ensureStmts(getDatabase());
+export function listGoals(): GoalListItem[] {
+  const db = getDatabase();
+  const stmts = ensureStmts(db);
   const rows = stmts.selectGoals.all() as GoalRow[];
-  return rows.map(rowToGoal);
+  const workspacesByGoal = listWorkspaceIdentitiesByGoal(db);
+  return rows.map((row) => {
+    const goal = rowToGoal(row);
+    return { ...goal, workspaces: workspacesByGoal.get(goal.id) ?? [] };
+  });
 }
 
 export function getGoalById(db: Database.Database, id: string): Goal | null {

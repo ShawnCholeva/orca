@@ -31,6 +31,9 @@ function stmts(db: Database.Database) {
       byGoal: db.prepare(
         "SELECT w.id,w.path,w.name,w.description,w.created_at,w.updated_at FROM workspaces w " +
         "JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC, w.id ASC"),
+      identitiesByGoal: db.prepare(
+        "SELECT gw.goal_id AS goal_id, w.id AS id, w.name AS name FROM goal_workspaces gw " +
+        "JOIN workspaces w ON w.id = gw.workspace_id ORDER BY gw.attached_at ASC, w.id ASC"),
       linksByGoal: db.prepare(
         "SELECT workspace_id, attached_at FROM goal_workspaces WHERE goal_id = ? ORDER BY attached_at ASC"),
       byIdAndGoal: db.prepare(
@@ -99,6 +102,23 @@ export function unlinkGoalWorkspace(db: Database.Database, goalId: string, works
 
 export function listWorkspacesByGoal(db: Database.Database, goalId: string): Workspace[] {
   return (stmts(db).byGoal.all(goalId) as EntityRow[]).map(toWorkspace);
+}
+
+// Batched goal→workspace identity map for the goals-list payload: one grouped
+// query over all attachments (no N+1), keyed by goal_id. Goals with no
+// workspaces are simply absent from the map (callers default to []).
+export function listWorkspaceIdentitiesByGoal(
+  db: Database.Database,
+): Map<string, { id: string; name: string }[]> {
+  type Row = { goal_id: string; id: string; name: string };
+  const rows = stmts(db).identitiesByGoal.all() as Row[];
+  const byGoal = new Map<string, { id: string; name: string }[]>();
+  for (const r of rows) {
+    const list = byGoal.get(r.goal_id);
+    if (list) list.push({ id: r.id, name: r.name });
+    else byGoal.set(r.goal_id, [{ id: r.id, name: r.name }]);
+  }
+  return byGoal;
 }
 
 export function listGoalWorkspaceLinks(db: Database.Database, goalId: string): { workspaceId: string; attachedAt: string }[] {

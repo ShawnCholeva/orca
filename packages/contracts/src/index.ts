@@ -134,8 +134,18 @@ export const ArchiveGoalResponse = z.object({
 });
 export type ArchiveGoalResponse = z.infer<typeof ArchiveGoalResponse>;
 
+// Goals-list items carry minimal workspace identity ({id,name}) so the goals
+// rail can filter by workspace without a second fetch. Base Goal stays untouched
+// (CreateGoalResponse / GoalDetailResponse.goal keep their lean shape); the list
+// deliberately carries {id,name}[] rather than full Workspace[] — the filter only
+// needs id+name, and full Workspace × N goals would be wasteful.
+export const GoalListItem = Goal.extend({
+  workspaces: z.array(z.object({ id: z.string(), name: z.string() }))
+});
+export type GoalListItem = z.infer<typeof GoalListItem>;
+
 export const ListGoalsResponse = z.object({
-  goals: z.array(Goal)
+  goals: z.array(GoalListItem)
 });
 export type ListGoalsResponse = z.infer<typeof ListGoalsResponse>;
 
