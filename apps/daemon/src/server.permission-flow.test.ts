@@ -743,3 +743,167 @@ describe('permission decision flow', () => {
     resetAccountabilityStatements();
   });
 });
+
+// ---- Worker question (elicit hook) flow ----
+
+describe('worker question (elicit hook) flow', () => {
+  let server: FastifyInstance;
+  let db: ReturnType<typeof openDatabase>;
+  let dataDir: string;
+
+  beforeEach(async () => {
+    const result = await startServer();
+    server = result.server;
+    db = result.db;
+    dataDir = result.dataDir;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    closeDatabase();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  /**
+   * Seed a full workflow step-run context so resolveStepContext() returns a
+   * non-null result for the given session.
+   */
+  function insertSessionWithWorkflowContext(
+    sessionId: string,
+    goalId: string,
+  ): { stepRunId: string; workflowRunId: string } {
+    const now = new Date().toISOString();
+    const workspaceId = `ws-wf-${sessionId}`;
+    const templateId = `tmpl-wf-${sessionId}`;
+    const workflowRunId = `wr-wf-${sessionId}`;
+    const stepRunId = `sr-wf-${sessionId}`;
+
+    db.prepare(
+      `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(workspaceId, `/tmp/ws-wf-${sessionId}`, 'test', '', now, now);
+    db.prepare(
+      `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+    ).run(goalId, workspaceId, now);
+    db.prepare(
+      `INSERT INTO workflow_templates (id, name, description, version, steps_json, created_at, updated_at) VALUES (?, ?, '', 1, '[]', ?, ?)`
+    ).run(templateId, 'test-template', now, now);
+    db.prepare(
+      `INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, started_at) VALUES (?, ?, ?, 1, 'active', ?, ?)`
+    ).run(workflowRunId, goalId, templateId, stepRunId, now);
+    db.prepare(
+      `INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, status, fingerprint, started_at) VALUES (?, ?, ?, 'step-1', 0, 'active', 'fp-test', ?)`
+    ).run(stepRunId, goalId, workflowRunId, now);
+    db.prepare(
+      `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, workflow_step_run_id, created_at) VALUES (?, ?, ?, 'claude-code', 'test session', 'running', ?, ?)`
+    ).run(sessionId, goalId, workspaceId, stepRunId, now);
+
+    return { stepRunId, workflowRunId };
+  }
+
+  it('elicit hook stamps stepRunId on pending_question and supersedes open orchestrator question', async () => {
+    const goalId = 'goal-elicit-wf';
+    const sessionId = 'session-elicit-wf';
+    insertGoal(db, goalId, 'ask');
+    const { stepRunId } = insertSessionWithWorkflowContext(sessionId, goalId);
+
+    // Pre-seed an open orchestrator question for the same step run.
+    const orchMsgId = 'orch-msg-wf';
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO orchestrator_messages (id, goal_id, role, kind, body, correlation_id, pending_question, created_at)
+       VALUES (?, ?, 'orchestrator', 'message', 'What should I do?', 'corr-wf', ?, ?)`
+    ).run(
+      orchMsgId, goalId,
+      JSON.stringify({
+        questionId: 'orch-q-wf',
+        toolUseId: 'tu-orch-wf',
+        source: 'orchestrator',
+        questions: [{ question: 'Q?', header: 'H', options: [{ label: 'Yes', description: 'Proceed' }], multiSelect: false }],
+        stepRunId,
+      }),
+      now
+    );
+
+    // Fire elicit hook without awaiting — it holds until the question is answered.
+    const elicitPromise = server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/elicit?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: {
+        tool_input: { questions: [{ question: 'What next?', header: 'H', options: [{ label: 'OK', description: 'proceed' }], multiSelect: false }] },
+        tool_use_id: 'tu-elicit-wf',
+      },
+    });
+
+    // Wait for the worker question message to appear in orchestrator_messages.
+    const workerQ = await vi.waitFor(
+      () => {
+        const row = db
+          .prepare("SELECT pending_question FROM orchestrator_messages WHERE goal_id = ? AND json_extract(pending_question, '$.source') = 'worker'")
+          .get(goalId) as { pending_question: string } | undefined;
+        if (!row) throw new Error('worker question message not yet posted');
+        return JSON.parse(row.pending_question) as { questionId: string; stepRunId?: string };
+      },
+      { timeout: 2000, interval: 50 }
+    );
+
+    // The worker question must carry stepRunId (Task 6 requirement).
+    expect(workerQ.stepRunId).toBe(stepRunId);
+
+    // onWorkerQuestion itself must have superseded the pre-seeded orchestrator
+    // question for this step run (no direct helper call — the route does it).
+    const orchRow = db
+      .prepare("SELECT pending_question FROM orchestrator_messages WHERE id = ?")
+      .get(orchMsgId) as { pending_question: string };
+    expect(JSON.parse(orchRow.pending_question)).toMatchObject({ withdrawn: true });
+
+    // Answer the question to unblock the held hook.
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/worker-questions/${workerQ.questionId}/answer`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { freeText: 'proceed' },
+    });
+    const elicitRes = await elicitPromise;
+    expect(elicitRes.statusCode).toBe(200);
+  });
+
+  it('elicit hook without workflow context: pending_question has no stepRunId (no crash)', async () => {
+    const goalId = 'goal-elicit-plain';
+    const sessionId = 'session-elicit-plain';
+    insertGoal(db, goalId, 'ask');
+    insertSession(db, sessionId, goalId);
+
+    const elicitPromise = server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/elicit?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: {
+        tool_input: { questions: [{ question: 'Proceed?', header: 'H', options: [], multiSelect: false }] },
+        tool_use_id: 'tu-elicit-plain',
+      },
+    });
+
+    const workerQ = await vi.waitFor(
+      () => {
+        const row = db
+          .prepare("SELECT pending_question FROM orchestrator_messages WHERE goal_id = ? AND json_extract(pending_question, '$.source') = 'worker'")
+          .get(goalId) as { pending_question: string } | undefined;
+        if (!row) throw new Error('worker question not yet posted');
+        return JSON.parse(row.pending_question) as { questionId: string; stepRunId?: string };
+      },
+      { timeout: 2000, interval: 50 }
+    );
+
+    // No workflow context → no stepRunId on the message.
+    expect(workerQ.stepRunId).toBeUndefined();
+
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/worker-questions/${workerQ.questionId}/answer`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { freeText: 'ok' },
+    });
+    await elicitPromise;
+  });
+});

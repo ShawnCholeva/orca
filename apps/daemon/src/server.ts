@@ -228,7 +228,7 @@ import { ActivityUpdater } from './activities/updater.js';
 import { reconcileStepResultActivities } from './activities/step-result-activity.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
-import { deletePendingApprovalMessage, insertMessageWithEvent, recordWorkerQuestionAnswer } from './orchestrator-chat/usecases.js';
+import { deletePendingApprovalMessage, insertMessageWithEvent, recordWorkerQuestionAnswer, withdrawOrchestratorPromptsForStepRun } from './orchestrator-chat/usecases.js';
 import { registerShadowHookRoutes } from './shadow-hooks/routes.js';
 import { ShadowSessionManager, shadowSessionId, type ShadowAdapterId } from './orchestrator-llm/shadow-session.js';
 import {
@@ -1646,6 +1646,9 @@ export function createServer(
         questions: payload.questions,
       });
       if (isNew) {
+        // Resolve step context first so it's available for both the
+        // pending_question payload and the supersede call below.
+        const stepContext = resolveStepContext(sessionId);
         // Persist the worker question as a first-class chat message so it lives
         // in chat history and can render an answered state later.
         insertMessageWithEvent(
@@ -1662,13 +1665,24 @@ export function createServer(
               toolUseId: payload.toolUseId,
               source: "worker",
               questions: payload.questions,
+              ...(stepContext ? { stepRunId: stepContext.stepRunId } : {}),
             },
           },
         );
-        // Settle the current activity thread (empty summary -> expireLive) so the
+        // Supersede any redundant orchestrator question for this step run, then
+        // settle the current activity thread (empty summary -> expireLive) so the
         // agent's post-answer work opens a fresh thread after the question bubble.
-        const stepContext = resolveStepContext(sessionId);
         if (stepContext) {
+          try {
+            withdrawOrchestratorPromptsForStepRun(
+              { db, bus: eventBus, idFactory: daemonContext.idFactory },
+              { goalId, stepRunId: stepContext.stepRunId }
+            );
+          } catch (err) {
+            console.error("[worker-question] withdrawOrchestratorPromptsForStepRun failed", {
+              goalId, stepRunId: stepContext.stepRunId, err,
+            });
+          }
           applyActivitySafely("agent.question_pending", {
             kind: "turn_completed",
             stepRunId: stepContext.stepRunId,
