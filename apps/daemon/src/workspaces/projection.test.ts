@@ -57,6 +57,15 @@ it("goal views for a workspace include archived via archived_at", () => {
   expect(views[0]).toMatchObject({ id: "g1", status: "archived", progress: null });
 });
 
+it("a completed goal's view reports full (100%) progress", () => {
+  const db = freshDb();
+  goal(db, "g1", "completed");
+  P.insertWorkspaceEntity(db, { id: "w1", path: "/r/a", name: "a", description: "", createdAt: ISO, updatedAt: ISO });
+  P.linkGoalWorkspace(db, "g1", "w1", ISO);
+  const views = P.listGoalViewsForWorkspace(db, "w1");
+  expect(views[0]).toMatchObject({ id: "g1", status: "completed", progress: 1 });
+});
+
 it("getWorkspaceByIdAndGoal returns entity when linked, null when not linked", () => {
   const db = freshDb();
   goal(db, "g1");

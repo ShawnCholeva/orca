@@ -25,6 +25,8 @@ export type ActivitySignal =
       category: ActivityWorkCategory;
       detail: string;
       diff: ActivityDiff | null;
+      // The agent's tool_use_id, used to dedupe at-least-once spool redeliveries.
+      toolUseId: string | null;
     }
   | {
       kind: "question_pending";

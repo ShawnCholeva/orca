@@ -58,6 +58,7 @@ export const migrationFiles = [
   "0044_workflow_template_category.sql",
   "0045_step_run_confirmed_lead.sql",
   "0046_step_run_pending_revision.sql",
+  "0047_activity_steps_tool_use_id.sql",
 ] as const;
 
 export function runMigrations(

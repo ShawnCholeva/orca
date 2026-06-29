@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EventBus } from "../events.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import {
+  appendActivityStep,
   completeLive,
   expireLive,
   getLiveForStepRun,
@@ -129,6 +130,106 @@ describe("ActivityStore", () => {
     expect(completed?.status).toBe("completed");
     expect(completed?.confidence).toBeNull();
     expect(stored).toEqual({ status: "completed", confidence: null });
+  });
+
+  it("keeps a completed tool-call step's checkmark even when its text matches the turn summary (O1)", () => {
+    const { ctx } = ctxFor(db);
+    openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "Watching...", workCategory: null });
+    appendActivityStep(ctx, { ...base, text: "Read ORCA.md", category: "reading", diff: null });
+    appendActivityStep(ctx, { ...base, text: "Read config.ts", category: "reading", diff: null });
+
+    // The turn's derived summary coincides with the last tool call's text.
+    completeLive(ctx, { stepRunId: "s1", finalSummary: "Read config.ts", confidence: null });
+
+    const steps = db
+      .prepare(
+        "SELECT text, status FROM activity_steps WHERE activity_id=(SELECT id FROM activities WHERE step_run_id='s1') ORDER BY ordinal"
+      )
+      .all() as Array<{ text: string; status: string }>;
+    // Both tool-call steps survive as done — the last one keeps its checkmark.
+    expect(steps.map((s) => s.text)).toEqual(["Read ORCA.md", "Read config.ts"]);
+    expect(steps.every((s) => s.status === "done")).toBe(true);
+    // The redundant summary is dropped so the action is not rendered twice.
+    const a = db.prepare("SELECT final_summary FROM activities WHERE step_run_id='s1'").get() as { final_summary: string | null };
+    expect(a.final_summary).toBeNull();
+  });
+
+  it("is idempotent on tool_use_id: a redelivered tool call appends no second step", () => {
+    const { ctx, events } = ctxFor(db);
+    openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "Watching...", workCategory: null });
+    const before = events.length;
+    const first = appendActivityStep(ctx, { ...base, text: "Read x.ts", category: "reading", diff: null, toolUseId: "tu-1" });
+    const again = appendActivityStep(ctx, { ...base, text: "Read x.ts", category: "reading", diff: null, toolUseId: "tu-1" });
+
+    expect(first.steps.length).toBe(1);
+    expect(again.steps.length).toBe(1); // no duplicate row
+    expect(again.id).toBe(first.id);
+    // The no-op redelivery publishes no activity.changed event (nothing changed).
+    expect(events.length - before).toBe(1);
+  });
+
+  it("a tool_use redelivered AFTER the turn completes does not spawn a new activity", () => {
+    const { ctx } = ctxFor(db);
+    openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "Watching...", workCategory: null });
+    appendActivityStep(ctx, { ...base, text: "Read x.ts", category: "reading", diff: null, toolUseId: "tu-1" });
+    completeLive(ctx, { stepRunId: "s1", finalSummary: "done", confidence: null });
+
+    // Spool re-POSTs the same tool call after the activity is no longer live.
+    appendActivityStep(ctx, { ...base, text: "Read x.ts", category: "reading", diff: null, toolUseId: "tu-1" });
+
+    const rows = db.prepare("SELECT COUNT(*) AS c FROM activities WHERE step_run_id='s1'").get() as { c: number };
+    const steps = db.prepare("SELECT COUNT(*) AS c FROM activity_steps").get() as { c: number };
+    expect(rows.c).toBe(1); // no second activity lazily created
+    expect(steps.c).toBe(1); // no duplicate step
+  });
+
+  it("still appends every step when no tool_use_id is provided (back-compat)", () => {
+    const { ctx } = ctxFor(db);
+    openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "Watching...", workCategory: null });
+    appendActivityStep(ctx, { ...base, text: "Read x.ts", category: "reading", diff: null });
+    const out = appendActivityStep(ctx, { ...base, text: "Read x.ts", category: "reading", diff: null });
+    expect(out.steps.length).toBe(2);
+  });
+
+  it("keeps a distinct turn summary as the recap when it differs from the last step", () => {
+    const { ctx } = ctxFor(db);
+    openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "Watching...", workCategory: null });
+    appendActivityStep(ctx, { ...base, text: "Read config.ts", category: "reading", diff: null });
+
+    completeLive(ctx, { stepRunId: "s1", finalSummary: "Confirmed the default is 5000ms.", confidence: null });
+
+    const steps = db
+      .prepare(
+        "SELECT text, status FROM activity_steps WHERE activity_id=(SELECT id FROM activities WHERE step_run_id='s1') ORDER BY ordinal"
+      )
+      .all() as Array<{ text: string; status: string }>;
+    // The tool-call step survives with its checkmark…
+    expect(steps).toEqual([{ text: "Read config.ts", status: "done" }]);
+    // …and a non-duplicate summary is preserved as the recap.
+    const a = db.prepare("SELECT final_summary FROM activities WHERE step_run_id='s1'").get() as { final_summary: string | null };
+    expect(a.final_summary).toBe("Confirmed the default is 5000ms.");
+  });
+
+  it("parks for confirmation even when a stale paused_for_input activity is still live (reconcile robustness)", () => {
+    const { ctx } = ctxFor(db);
+    // A worker left a live permission/question activity (paused_for_input) when the
+    // daemon restarted — e.g. a pending permission that never resolved.
+    openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "Watching...", workCategory: null });
+    db.prepare("UPDATE activities SET status='paused_for_input', source_kind='tool_use' WHERE step_run_id='s1'").run();
+
+    // Reconcile re-parks the held step for confirmation; it must not collide with
+    // the one-live-per-step unique index over the stale activity.
+    expect(() =>
+      pauseForConfirmation(ctx, { goalId: "g1", workflowRunId: "r1", stepRunId: "s1", summary: "Review and Continue" })
+    ).not.toThrow();
+
+    // The step now has exactly one live activity — the confirmation gate.
+    const live = getLiveForStepRun(db, "s1");
+    expect(live?.sourceKind).toBe("step_confirmation_pending");
+    const liveCount = db
+      .prepare("SELECT COUNT(*) AS n FROM activities WHERE step_run_id='s1' AND status IN ('active','paused_for_input')")
+      .get() as { n: number };
+    expect(liveCount.n).toBe(1);
   });
 
   it("pauses with an embedded question and resolves it via getPausedForGoal", () => {

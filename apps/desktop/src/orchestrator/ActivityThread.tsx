@@ -126,6 +126,7 @@ export function ConfirmationCard({
   action,
   scoresTestid,
   fallbackText,
+  stepName,
   testid = "activity-bubble",
 }: {
   summary: NonNullable<Activity["confirmationSummary"]> | null;
@@ -133,6 +134,7 @@ export function ConfirmationCard({
   action: ReactNode;
   scoresTestid: string;
   fallbackText?: string;
+  stepName?: string;
   testid?: string;
 }) {
   const [scoresOpen, setScoresOpen] = useState(false);
@@ -144,6 +146,9 @@ export function ConfirmationCard({
   }, [scoresOpen]);
   return (
     <div className="activity-bubble" data-testid={testid}>
+      {stepName ? (
+        <div className="step-confirm-head" data-testid="step-confirm-step-name">{stepName}</div>
+      ) : null}
       {summary ? (
         <ConfirmationFrame summary={summary} />
       ) : fallbackText ? (
@@ -198,6 +203,7 @@ export function StepResultCard({ activity }: { activity: Activity }) {
     return (
       <ConfirmationCard
         summary={frame}
+        stepName={activity.stepName}
         scores={
           scored
             ? { successScore: r.successScore, quality: r.quality, handoffReady: r.outcome.handoffReady }
@@ -337,6 +343,7 @@ export function LiveActivity({
     return (
       <ConfirmationCard
         summary={activity.confirmationSummary ?? null}
+        stepName={activity.stepName}
         scores={
           scoring
             ? { successScore: scoring.successScore, quality: scoring.quality, handoffReady: scoring.handoffReady }

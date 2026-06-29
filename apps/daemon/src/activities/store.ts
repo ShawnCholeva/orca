@@ -263,12 +263,31 @@ export interface AppendStepInput {
   text: string;
   category: ActivityWorkCategory | null;
   diff: ActivityDiff | null;
+  // The agent's tool_use_id, when known. Makes the append idempotent: the hook
+  // spool redelivers at-least-once (across daemon restarts), so a redelivered
+  // tool call must not append a second identical step. Omitted/null for steps
+  // with no tool id (idempotency simply doesn't apply).
+  toolUseId?: string | null;
 }
 
 export function appendActivityStep(ctx: ActivityStoreCtx, input: AppendStepInput): ActivityT {
   let event: DomainEvent | undefined;
   const activity = ctx.db.transaction(() => {
     const now = currentTime(ctx);
+
+    // Idempotent on tool_use_id: if this tool call was already recorded (a spool
+    // redelivery), return its owning activity unchanged — no second step, no
+    // event, and no lazily-created activity even after the turn has completed.
+    if (input.toolUseId) {
+      const seen = ctx.db
+        .prepare("SELECT activity_id FROM activity_steps WHERE tool_use_id = ?")
+        .get(input.toolUseId) as { activity_id: string } | undefined;
+      if (seen !== undefined) {
+        const owner = getActivityById(ctx.db, seen.activity_id);
+        if (owner !== undefined) return owner;
+      }
+    }
+
     let live = getLiveForStepRun(ctx.db, input.stepRunId);
 
     // Create the activity lazily if no live one exists (defensive — normally
@@ -301,11 +320,11 @@ export function appendActivityStep(ctx: ActivityStoreCtx, input: AppendStepInput
       .get(live.id) as { m: number | null }).m;
     ctx.db
       .prepare(
-        `INSERT INTO activity_steps (id, activity_id, ordinal, text, category, status, diff, created_at)
-         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`
+        `INSERT INTO activity_steps (id, activity_id, ordinal, text, category, status, diff, tool_use_id, created_at)
+         VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`
       )
       .run(nextActivityId(ctx), live.id, (ord ?? -1) + 1, input.text, input.category,
-        input.diff ? JSON.stringify(input.diff) : null, now);
+        input.diff ? JSON.stringify(input.diff) : null, input.toolUseId ?? null, now);
 
     // Mirror latest text + source onto the activity row (back-compat).
     ctx.db
@@ -372,10 +391,12 @@ export function pauseForConfirmation(
     const existing = getLiveForStepRun(ctx.db, input.stepRunId);
     if (existing?.sourceKind === "step_confirmation_pending") return existing; // idempotent re-park
 
-    // Finalize the still-active worker turn BEFORE inserting the gate row, so its
-    // steps thread persists as its own card. (At the split/reconcile sites the
-    // worker turn is already completed, so this branch no-ops.)
-    if (existing !== undefined && existing.status === "active") {
+    // Finalize the prior live turn BEFORE inserting the gate row, so its steps
+    // thread persists as its own card and the one-live-per-step index is freed.
+    // This covers an active worker turn AND a stale paused_for_input activity (a
+    // permission/question left live when the daemon restarted mid-step): both must
+    // be closed, or the gate insert collides on the unique live-activity index.
+    if (existing !== undefined) {
       finalizeTurnRow(ctx.db, existing.id, deriveTurnSummary(existing.currentText), null, now);
       const finalized = getActivityById(ctx.db, existing.id);
       if (finalized === undefined) throw new Error(`Activity disappeared: ${existing.id}`);
@@ -645,17 +666,18 @@ function finalizeTurnRow(
     .prepare("UPDATE activity_steps SET status = 'done' WHERE activity_id = ? AND status = 'active'")
     .run(activityId);
 
-  // The agent's final narration is captured as a reasoning-note step AND
-  // derived into final_summary, so a one-line turn renders the same text twice
-  // (last checkmark step + summary below the divider). Drop the trailing step
-  // when it reduces to the same summary; keep the summary as the recap slot.
+  // The activity card carries only tool-derived steps (reasoning notes are not
+  // surfaced — see updater.ts), so when the derived summary reduces to the last
+  // step's text the redundant copy is the SUMMARY, not the step. Drop the
+  // duplicate summary and keep the completed step with its checkmark, rather
+  // than stripping a finished action's done-state from the timeline.
   const lastDone = db
     .prepare(
       "SELECT id, text FROM activity_steps WHERE activity_id = ? AND status = 'done' ORDER BY ordinal DESC LIMIT 1"
     )
     .get(activityId) as { id: string; text: string } | undefined;
   if (lastDone !== undefined && deriveTurnSummary(lastDone.text) === finalSummary) {
-    db.prepare("DELETE FROM activity_steps WHERE id = ?").run(lastDone.id);
+    db.prepare("UPDATE activities SET final_summary = NULL WHERE id = ?").run(activityId);
   }
 }
 

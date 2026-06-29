@@ -143,7 +143,10 @@ export function listGoalViewsForWorkspace(db: Database.Database, workspaceId: st
   const rows = stmts(db).goalsForWs.all(workspaceId) as Row[];
   return rows.map((g) => {
     let progress: number | null = null;
-    if (g.status === "active" && g.run_id) {
+    if (g.status === "completed") {
+      // A completed goal is, by definition, fully progressed.
+      progress = 1;
+    } else if (g.status === "active" && g.run_id) {
       const p = stmts(db).runProgress.get(g.run_id) as { total: number; done: number };
       progress = p.total > 0 ? p.done / p.total : null;
     }

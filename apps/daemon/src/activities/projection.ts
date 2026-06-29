@@ -14,6 +14,25 @@ import {
   type WorkflowStepResult as WorkflowStepResultT
 } from "@orca/contracts";
 import { buildConfirmationSummary } from "../workflows/orchestrator/confirmation-summary.js";
+import {
+  splitterRoutingForStep,
+  type StepSplitterRouting,
+} from "../workflows/graph/graph-routing.js";
+import type { WorkflowGraph } from "@orca/contracts";
+
+/** Parses a template's stored graph and resolves the splitter a step routes
+ *  into, so a routing output field renders as the destination step's name.
+ *  Tolerant: any parse/shape problem yields null and the field falls back to its
+ *  raw value. */
+function routingForStep(graphJson: string | null, stepTemplateId: string): StepSplitterRouting | null {
+  if (!graphJson) return null;
+  try {
+    const graph = JSON.parse(graphJson) as WorkflowGraph;
+    return splitterRoutingForStep(graph, stepTemplateId);
+  } catch {
+    return null;
+  }
+}
 
 interface ActivityRow {
   id: string;
@@ -94,6 +113,7 @@ function rebuildConfirmedFrame(
   stepRunId: string,
   stepTemplateId: string,
   stepsJson: string | null,
+  graphJson: string | null,
   stepResult: WorkflowStepResultT,
   confirmedLead: string | null
 ): ConfirmationSummaryT | undefined {
@@ -124,7 +144,13 @@ function rebuildConfirmedFrame(
   try { block = JSON.parse(artifact.body); } catch { return undefined; }
 
   const leadText = confirmedLead ?? (stepResult.resultSummary ?? stepResult.outcome.reason);
-  return buildConfirmationSummary(schemaParse.data, block, null, leadText);
+  return buildConfirmationSummary(
+    schemaParse.data,
+    block,
+    null,
+    leadText,
+    routingForStep(graphJson, stepTemplateId),
+  );
 }
 
 function enrichStepResult(db: Database.Database, activity: ActivityT): ActivityT {
@@ -134,7 +160,8 @@ function enrichStepResult(db: Database.Database, activity: ActivityT): ActivityT
       `SELECT sr.step_result_json AS result_json,
               sr.step_template_id,
               sr.confirmed_lead,
-              wt.steps_json
+              wt.steps_json,
+              wt.graph_json
        FROM workflow_step_runs sr
        LEFT JOIN workflow_runs wr ON wr.id = sr.workflow_run_id
        LEFT JOIN workflow_templates wt ON wt.id = wr.template_id
@@ -145,6 +172,7 @@ function enrichStepResult(db: Database.Database, activity: ActivityT): ActivityT
       step_template_id: string;
       confirmed_lead: string | null;
       steps_json: string | null;
+      graph_json: string | null;
     } | undefined;
   if (!row?.result_json) return activity;
   let stepName: string | undefined;
@@ -158,6 +186,7 @@ function enrichStepResult(db: Database.Database, activity: ActivityT): ActivityT
     activity.stepRunId,
     row.step_template_id,
     row.steps_json,
+    row.graph_json,
     stepResult,
     row.confirmed_lead
   );
@@ -175,7 +204,8 @@ function enrichConfirmationSummary(db: Database.Database, activity: ActivityT): 
     .prepare(
       `SELECT sr.pending_completion_json AS stash,
               sr.step_template_id,
-              wt.steps_json
+              wt.steps_json,
+              wt.graph_json
        FROM workflow_step_runs sr
        LEFT JOIN workflow_runs wr ON wr.id = sr.workflow_run_id
        LEFT JOIN workflow_templates wt ON wt.id = wr.template_id
@@ -185,13 +215,14 @@ function enrichConfirmationSummary(db: Database.Database, activity: ActivityT): 
       stash: string | null;
       step_template_id: string;
       steps_json: string | null;
+      graph_json: string | null;
     } | undefined;
   if (!row?.stash || !row.steps_json) return activity;
 
   let stash: { block?: unknown; scoring?: unknown; proposal?: unknown };
   try { stash = JSON.parse(row.stash); } catch { return activity; }
 
-  const steps = JSON.parse(row.steps_json) as Array<{ id: string; outputSchema?: unknown }>;
+  const steps = JSON.parse(row.steps_json) as Array<{ id: string; name?: string; outputSchema?: unknown }>;
   const step = steps.find((s) => s.id === row.step_template_id);
   const schemaParse = WorkflowStepOutputSchema.safeParse(step?.outputSchema);
   if (!schemaParse.success) return activity;
@@ -202,8 +233,13 @@ function enrichConfirmationSummary(db: Database.Database, activity: ActivityT): 
     stash.block,
     scoringParse.success ? scoringParse.data : null,
     typeof stash.proposal === "string" ? stash.proposal : null,
+    routingForStep(row.graph_json, row.step_template_id),
   );
-  return Activity.parse({ ...activity, confirmationSummary });
+  return Activity.parse({
+    ...activity,
+    ...(step?.name !== undefined ? { stepName: step.name } : {}),
+    confirmationSummary,
+  });
 }
 
 function enrichProviderRecovery(db: Database.Database, activity: ActivityT): ActivityT {

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { closeDatabase, openDatabase } from "../../db.js";
 import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
-import { resetWorkflowStepProjectionPreparedStatements, getWorkflowStepRunById, recordOperatorSelection } from "./projection.js";
+import { resetWorkflowStepProjectionPreparedStatements, getWorkflowStepRunById, listStepRunsForRun, recordOperatorSelection } from "./projection.js";
 
 const tempDirs: string[] = [];
 const NOW = "2026-01-01T00:00:00.000Z";
@@ -84,6 +84,32 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe("listStepRunsForRun", () => {
+  it("returns only the steps that actually ran, ordered by ordinal — skipped steps are absent", () => {
+    const db = setup();
+    seedGoal(db, "goal-1");
+    // Two executed steps (triage ordinal 0, proposal ordinal 3) — Clarify/Research
+    // (ordinals 1,2) were routed past (approach_only) so they have no row.
+    insertMinimalStepRun(db, "sr-triage"); // creates tpl-1 + wr-1 + a step at ordinal 1
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, started_at, finished_at, blocked_reason, fingerprint) VALUES ('sr-triage0','goal-1','wr-1','triage',0,1,'passed','[]','[]',?,?,NULL,'fp-t')"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, started_at, finished_at, blocked_reason, fingerprint) VALUES ('sr-proposal','goal-1','wr-1','proposal',3,1,'active','[]','[]',?,NULL,NULL,'fp-p')"
+    ).run(NOW);
+
+    const runs = listStepRunsForRun(db, "wr-1");
+    const templateIds = runs.map((r) => r.stepTemplateId);
+    expect(templateIds).toContain("triage");
+    expect(templateIds).toContain("proposal");
+    // The skipped design steps never produced a step run.
+    expect(templateIds).not.toContain("clarify");
+    expect(templateIds).not.toContain("research");
+    // Ordered by ordinal ascending.
+    expect(runs[0].stepTemplateId).toBe("triage");
+  });
 });
 
 describe("recordOperatorSelection", () => {

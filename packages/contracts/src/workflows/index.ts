@@ -1175,6 +1175,15 @@ export const WorkflowStepRunResponse = z
   .strict();
 export type WorkflowStepRunResponse = z.infer<typeof WorkflowStepRunResponse>;
 
+export const ListWorkflowStepRunsResponse = z
+  .object({
+    stepRuns: z.array(WorkflowStepRun)
+  })
+  .strict();
+export type ListWorkflowStepRunsResponse = z.infer<
+  typeof ListWorkflowStepRunsResponse
+>;
+
 export const SubmitWorkflowUserInputRequest = z
   .object({
     stepRunId: Id,

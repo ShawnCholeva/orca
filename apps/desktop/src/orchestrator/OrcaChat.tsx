@@ -28,6 +28,8 @@ import {
   listOrchestratorMessages,
   listWorkflowDecisions,
   listWorkflowRunArtifacts,
+  listWorkflowRuns,
+  listWorkflowStepRuns,
   listWorkflowTemplates,
   openEventStream,
   requestNextOrchestratorDecision,
@@ -70,6 +72,9 @@ type WorkflowState = {
   template: WorkflowTemplate | null;
   decisions: WorkflowDecisionTrace[];
   artifacts: WorkflowArtifact[];
+  // Template step ids that actually ran (have a step run). Steps in the template
+  // but absent here were routed past (skipped) — the tracker renders them muted.
+  executedStepIds: string[];
 };
 
 type ActivityState = {
@@ -93,6 +98,7 @@ const EMPTY_WORKFLOW_STATE: WorkflowState = {
   template: null,
   decisions: [],
   artifacts: [],
+  executedStepIds: [],
 };
 
 const EMPTY_ACTIVITY_STATE: ActivityState = {
@@ -308,7 +314,20 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
         const detail = await getGoalDetail(goalId);
         if (cancelled) return;
 
-        const runId = detail.goal.activeWorkflowRunId;
+        let runId = detail.goal.activeWorkflowRunId;
+        // A completed run detaches from its goal (active_workflow_run_id is
+        // nulled), so a completed goal has no active run id. Load its most-recent
+        // run (runs are ordered newest-first) so the tracker shows the finished
+        // workflow instead of the "no workflow running" empty state.
+        if (!runId && detail.goal.status === "completed") {
+          try {
+            const runsResponse = await listWorkflowRuns(goalId);
+            if (cancelled) return;
+            runId = runsResponse.runs[0]?.id ?? null;
+          } catch {
+            runId = null;
+          }
+        }
         if (!runId) {
           setWorkflowState({
             detail,
@@ -318,15 +337,17 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
             template: null,
             decisions: [],
             artifacts: [],
+            executedStepIds: [],
           });
           workflowLoadedGoalRef.current = goalId;
           return;
         }
 
-        const [runResponse, decisionsResponse, artifactsResponse] = await Promise.all([
+        const [runResponse, decisionsResponse, artifactsResponse, stepRunsResponse] = await Promise.all([
           getWorkflowRun(goalId, runId),
           listWorkflowDecisions(goalId, runId),
           listWorkflowRunArtifacts(goalId, runId),
+          listWorkflowStepRuns(goalId, runId),
         ]);
         if (cancelled) return;
 
@@ -362,6 +383,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
           template,
           decisions: sortByCreatedAtDesc(decisionsResponse.decisions),
           artifacts: sortByCreatedAtDesc(artifactsResponse.artifacts),
+          executedStepIds: stepRunsResponse.stepRuns.map((s) => s.stepTemplateId),
         });
         workflowLoadedGoalRef.current = goalId;
       } catch (err) {
@@ -575,20 +597,31 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     const raw = byId >= 0 ? byId : workflowState.stepRun?.ordinal ?? 0;
     return Math.min(sortedSteps.length - 1, Math.max(0, raw));
   })();
+  // A step that has produced its output and parked for the human to Continue/
+  // Revise emits a step_confirmation_pending activity (status paused_for_input).
+  // The step run stays "active" while parked, so without this signal the tracker
+  // would pulse "running" over work that has actually stopped.
+  const awaitingStepConfirm = activities.some(
+    (a) => a.sourceKind === "step_confirmation_pending" && a.status === "paused_for_input",
+  );
   // The current step pulses "running" only while its step run is genuinely
   // executing. Once it finishes — most notably the terminal step, which passes
   // but parks the run "active" awaiting completion approval rather than
-  // auto-completing (see daemon advanceToNextStepOrGate) — it must stop pulsing.
+  // auto-completing (see daemon advanceToNextStepOrGate) — or once it parks for
+  // a Continue/Revise confirmation, it must stop pulsing.
   const activeStepRunning =
-    workflowState.stepRun?.status === "active" && workflowState.stepRun?.finishedAt == null;
+    workflowState.stepRun?.status === "active" &&
+    workflowState.stepRun?.finishedAt == null &&
+    !awaitingStepConfirm;
   // The workflow has done all its work once the final step has passed. A truly
   // completed run detaches from the goal (active_workflow_run_id is nulled), so
   // the run we can still see here is parked on the passed terminal step. Treat
   // that as completion for the tracker header and the chat notice, which would
   // otherwise go silent after the last step.
   const workflowFinished =
-    workflowState.stepRun?.status === "passed" &&
-    trackerActiveIndex === sortedSteps.length - 1;
+    workflowState.run?.status === "completed" ||
+    (workflowState.stepRun?.status === "passed" &&
+      trackerActiveIndex === sortedSteps.length - 1);
   // Derive the approve-to-complete affordance from the persisted activity stream.
   // The daemon emits a mark_done_pending activity (status paused_for_input) that
   // carries the complete_workflow_run recommendation id; no side fetch needed.
@@ -597,6 +630,19 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   );
   const awaitingApproval = markDonePending != null;
   const completionRecId = markDonePending?.recommendationId ?? null;
+  // A tracker step the run has already moved past (or, once finished, any step)
+  // that produced NO step run was routed past — render it "skipped", not a green
+  // completed check. Guarded on having step-run data so a load gap never paints
+  // every step as skipped.
+  const executedStepIds = new Set(workflowState.executedStepIds);
+  const skippedIndices =
+    executedStepIds.size === 0
+      ? []
+      : sortedSteps.reduce<number[]>((acc, step, i) => {
+          const behind = workflowFinished || i < trackerActiveIndex;
+          if (behind && !executedStepIds.has(step.id)) acc.push(i);
+          return acc;
+        }, []);
   const showTracker = workflowState.run !== null && trackerSteps.length > 0;
   const runId = workflowState.run?.id ?? null;
 
@@ -718,6 +764,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
       } else {
         await confirmStep(runId);
       }
+      markAnswerPending();
     } finally {
       setRefreshNonce((current) => current + 1);
     }
@@ -766,6 +813,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   async function handleRevise(runId: string) {
     try {
       await requestStepRevision(runId);
+      markAnswerPending();
     } finally {
       setRefreshNonce((current) => current + 1);
     }
@@ -842,6 +890,8 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
           onApprove={completionRecId ? () => void handleApproveCompletion() : undefined}
           approving={approvingCompletion}
           awaitingGate={awaitingGate}
+          awaitingConfirm={awaitingStepConfirm}
+          skippedIndices={skippedIndices}
           onViewWorkflows={onViewWorkflows}
         />
       )}

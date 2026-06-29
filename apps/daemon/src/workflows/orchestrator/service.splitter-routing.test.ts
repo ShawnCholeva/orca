@@ -163,15 +163,26 @@ function step(id: string, ordinal: number): SkillStep {
   });
 }
 
-/** Seed a run positioned at the active `s0` step holding a step_output artifact. */
-function seedRunAtSource(db: Database.Database) {
+/** Seed a run positioned at the active `s0` step holding a step_output artifact.
+ *  Pass `branchKey` to make the splitter route deterministic (read from the source
+ *  step's output) and `sourceOutput` to add fields (e.g. the branch value) to that
+ *  output. */
+function seedRunAtSource(
+  db: Database.Database,
+  opts?: { branchKey?: string; sourceOutput?: Record<string, unknown> }
+) {
   const steps = [step("s0", 0), step("a", 1), step("b", 2), step("done", 3)];
+  const graph = splitterGraph();
+  if (opts?.branchKey) {
+    const route = graph.nodes.find((n) => n.id === "route") as { branchKey?: string };
+    route.branchKey = opts.branchKey;
+  }
   db.prepare(
     "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('goal-1', 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, 'orca/anthropic', 'claude-sonnet-4-6')"
   ).run(NOW, NOW);
   db.prepare(
     "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, graph_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', 'desc', 1, 1, 1, ?, '[]', ?, ?, ?)"
-  ).run(JSON.stringify(steps), JSON.stringify(splitterGraph()), NOW, NOW);
+  ).run(JSON.stringify(steps), JSON.stringify(graph), NOW, NOW);
   db.prepare(
     "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, traversal_seq, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-s0', 's0', 'step', 0, NULL, ?, NULL)"
   ).run(NOW);
@@ -180,7 +191,7 @@ function seedRunAtSource(db: Database.Database) {
   ).run(NOW, NOW);
   db.prepare(
     "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-s0', 'goal-1', 'run-1', 'step-s0', 'step_output', 'Source', ?, 'orchestrator', NULL, NULL, NULL, ?)"
-  ).run(JSON.stringify({ result: "source done", _completion: {} }), NOW);
+  ).run(JSON.stringify({ result: "source done", ...(opts?.sourceOutput ?? {}), _completion: {} }), NOW);
 }
 
 afterEach(() => {
@@ -191,6 +202,43 @@ afterEach(() => {
 });
 
 describe("OrchestratorService splitter routing", () => {
+  it("supervised: a DETERMINISTIC splitter route auto-advances without a redundant Continue", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "supervised", NOW);
+    // The splitter reads its branch straight from the source step's output
+    // (branchKey="branch" → "go_a"); the route involves no human judgment.
+    seedRunAtSource(db, { branchKey: "branch", sourceOutput: { branch: "go_a" } });
+    // unwiredBroker: if the engine consulted the broker, the run would park for a
+    // human split choice — so reaching step 'a' proves the route was deterministic.
+    const engine = makeEngine(unwiredBroker());
+
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    // No park: the run advanced straight to branch 'a' with no stashed route and
+    // no confirmation card — the deterministic route is owned by the core, not gated.
+    const run = db
+      .prepare(
+        "SELECT current_node_id, current_node_kind, pending_split_route_json FROM workflow_runs WHERE id = 'run-1'"
+      )
+      .get() as { current_node_id: string; current_node_kind: string; pending_split_route_json: string | null };
+    expect(run.current_node_id).toBe("a");
+    expect(run.current_node_kind).toBe("step");
+    expect(run.pending_split_route_json).toBeNull();
+
+    // No step-confirmation card was created for the source step.
+    const paused = db
+      .prepare(
+        "SELECT id FROM activities WHERE step_run_id = 'step-s0' AND status = 'paused_for_input' AND source_kind = 'step_confirmation_pending' LIMIT 1"
+      )
+      .get();
+    expect(paused).toBeUndefined();
+
+    // The route is still recorded for inspectability (decisions / Goal Details).
+    const decisions = listSplitDecisionsForRun(db, "run-1");
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({ nodeId: "route", selectedBranch: "go_a", selectedEdgeTo: "a" });
+  });
+
   it("supervised: parks at the splitter with a confirmation card, then confirmSplit routes to the chosen branch", async () => {
     const { db, bus, idFactory } = setupHarness();
     setSupervisionMode(db, "supervised", NOW);

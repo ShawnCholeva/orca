@@ -73,6 +73,21 @@ export function getWorkflowStepRunById(
   return row ? rowToStepRun(row) : null;
 }
 
+// All step runs for a run (executed steps), ordered by ordinal then attempt. A
+// step that was routed past (e.g. an approach_only skip) has NO row here — that
+// absence is how the UI tells a skipped node from one that actually ran.
+export function listStepRunsForRun(
+  db: Database.Database,
+  workflowRunId: string
+): WorkflowStepRunT[] {
+  const rows = db
+    .prepare(
+      "SELECT id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, started_at, finished_at, blocked_reason, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at, step_result_json FROM workflow_step_runs WHERE workflow_run_id = ? ORDER BY ordinal ASC, attempt ASC"
+    )
+    .all(workflowRunId) as WorkflowStepRunRow[];
+  return rows.map(rowToStepRun);
+}
+
 export function recordOperatorSelection(
   db: Database.Database,
   id: string,

@@ -4,6 +4,7 @@ import type {
   WorkflowStepOutputField,
   WorkflowStepOutputSchema,
 } from "@orca/contracts";
+import type { StepSplitterRouting } from "../graph/graph-routing.js";
 
 type CardField = ConfirmationSummaryT["fields"][number];
 
@@ -97,12 +98,24 @@ export function buildConfirmationSummary(
   outputSchema: WorkflowStepOutputSchema,
   block: unknown,
   scoring: StepResultScoringProposal | null,
-  proposal: string | null
+  proposal: string | null,
+  routing: StepSplitterRouting | null = null
 ): ConfirmationSummaryT {
   const obj = (block ?? {}) as Record<string, unknown>;
   const fields: CardField[] = [];
   for (const field of outputSchema) {
     if (field.key === "_completion") continue;
+    // A field that feeds a downstream splitter (e.g. Triage's `recommended_tier`)
+    // is a routing decision; show the destination step's name instead of the raw
+    // branch token so the user reads "Recommended step: Proposal", not the tier.
+    if (routing && field.key === routing.branchKey) {
+      const raw = obj[field.key];
+      const name = typeof raw === "string" ? routing.branchToName[raw.trim()] : undefined;
+      if (name) {
+        fields.push({ label: "Recommended step", value: name });
+        continue;
+      }
+    }
     flattenField(field, obj[field.key], "", 1, fields);
   }
   const lead = confirmationLead(scoring?.reason, proposal);

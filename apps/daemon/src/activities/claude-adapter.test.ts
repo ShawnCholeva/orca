@@ -3,6 +3,7 @@ import {
   categorizeClaudeTool,
   isLowSignalTool,
   narrateCategory,
+  narratePendingToolDetail,
   narrateToolDetail,
 } from "./claude-adapter";
 
@@ -57,6 +58,23 @@ describe("narrateToolDetail", () => {
   });
 });
 
+describe("narratePendingToolDetail (present tense — describes a not-yet-run action)", () => {
+  it("describes a pending edit in present tense, not 'Edited'", () => {
+    expect(narratePendingToolDetail("Edit", { file_path: "/repo/store.ts" })).toBe("Edit store.ts");
+    expect(narratePendingToolDetail("Write", { file_path: "/repo/new.ts" })).toBe("Edit new.ts");
+  });
+  it("describes a pending read in present tense", () => {
+    expect(narratePendingToolDetail("Read", { file_path: "/repo/x.ts" })).toBe("Read x.ts");
+  });
+  it("describes a pending search in present tense, not 'Searched'", () => {
+    expect(narratePendingToolDetail("Grep", { pattern: "retryCharge(" })).toBe('Search "retryCharge("');
+  });
+  it("describes a pending bash command WITHOUT echoing it (the command is shown separately)", () => {
+    expect(narratePendingToolDetail("Bash", { command: "rm -rf build && echo done" })).toBe("Run a shell command");
+    expect(narratePendingToolDetail("Bash", { command: "pnpm test billing" })).toBe("Run tests");
+  });
+});
+
 describe("test-command classification (no substring false positives)", () => {
   it("classifies real test runs as testing", () => {
     expect(categorizeClaudeTool("Bash", { command: "pnpm test billing" })).toBe("testing");
@@ -76,12 +94,43 @@ describe("test-command classification (no substring false positives)", () => {
   });
 });
 
+describe("read narration disambiguates by line range", () => {
+  it("appends the Read tool's offset/limit as a line range", () => {
+    expect(narrateToolDetail("Read", { file_path: "/r/x.ts", offset: 200, limit: 61 }))
+      .toBe("Read x.ts (lines 200–260)");
+    expect(narrateToolDetail("Read", { file_path: "/r/x.ts", offset: 200 }))
+      .toBe("Read x.ts (from line 200)");
+    expect(narrateToolDetail("Read", { file_path: "/r/x.ts", limit: 20 }))
+      .toBe("Read x.ts (first 20 lines)");
+  });
+  it("leaves a whole-file Read (no offset/limit) unchanged", () => {
+    expect(narrateToolDetail("Read", { file_path: "/r/x.ts" })).toBe("Read x.ts");
+  });
+  it("ignores non-numeric offset/limit", () => {
+    expect(narrateToolDetail("Read", { file_path: "/r/x.ts", offset: "nope", limit: null }))
+      .toBe("Read x.ts");
+  });
+  it("extracts the range from sed/head/tail read commands", () => {
+    expect(narrateToolDetail("Bash", { command: "sed -n '1030,1050p' apps/desktop/src/App.tsx" }))
+      .toBe("Read App.tsx (lines 1030–1050)");
+    expect(narrateToolDetail("Bash", { command: "sed -n '50p' src/x.ts" }))
+      .toBe("Read x.ts (line 50)");
+    expect(narrateToolDetail("Bash", { command: "sed -n '1030,$p' src/x.ts" }))
+      .toBe("Read x.ts (from line 1030)");
+    expect(narrateToolDetail("Bash", { command: "head -n 20 src/x.ts" }))
+      .toBe("Read x.ts (first 20 lines)");
+    expect(narrateToolDetail("Bash", { command: "tail -n 20 server.log" }))
+      .toBe("Read server.log (last 20 lines)");
+  });
+  it("adds no range for a whole-file cat or a following tail", () => {
+    expect(narrateToolDetail("Bash", { command: "cat apps/foo.ts" })).toBe("Read foo.ts");
+    expect(narrateToolDetail("Bash", { command: "tail -f server.log" })).toBe("Read server.log");
+  });
+});
+
 describe("file-reading shell commands render as Read", () => {
   it("treats sed/cat/head/tail of a file as a read", () => {
-    expect(narrateToolDetail("Bash", { command: "sed -n '1030,1050p' apps/desktop/src/App.tsx" }))
-      .toBe("Read App.tsx");
     expect(narrateToolDetail("Bash", { command: "cat apps/foo.ts" })).toBe("Read foo.ts");
-    expect(narrateToolDetail("Bash", { command: "head -n 20 src/x.ts" })).toBe("Read x.ts");
     expect(narrateToolDetail("Bash", { command: "tail -f server.log" })).toBe("Read server.log");
   });
   it("keeps file reads in the checklist (not low-signal)", () => {

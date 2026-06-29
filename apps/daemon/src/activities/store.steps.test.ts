@@ -23,7 +23,7 @@ function ctx() {
       pending_question TEXT, created_at TEXT, updated_at TEXT, completed_at TEXT);
     CREATE TABLE activity_steps (
       id TEXT PRIMARY KEY, activity_id TEXT, ordinal INTEGER, text TEXT,
-      category TEXT, status TEXT, diff TEXT, created_at TEXT);
+      category TEXT, status TEXT, diff TEXT, tool_use_id TEXT, created_at TEXT);
   `);
   let n = 0;
   return { db, bus: { publish() {} } as unknown as EventBus, now: () => "2026-06-16T00:00:00.000Z", idFactory: () => `id-${n++}` };
@@ -62,14 +62,17 @@ describe("activity steps", () => {
     expect(stepStatus.status).toBe("done");
   });
 
-  it("completeLive drops the trailing step that duplicates the summary", () => {
+  it("completeLive keeps the trailing step's checkmark and drops the duplicate summary", () => {
     appendActivityStep(c, { ...base, text: "Read verifier.ts", category: "reading", diff: null });
     appendActivityStep(c, { ...base, text: "The exploration agent is running.", category: "other", diff: null });
     completeLive(c, { stepRunId: "s1", finalSummary: "The exploration agent is running.", confidence: null });
-    const texts = c.db.prepare("SELECT text FROM activity_steps ORDER BY ordinal").all() as any[];
-    expect(texts.map((s) => s.text)).toEqual(["Read verifier.ts"]);
+    // Every completed step keeps its done-state; the redundant copy is the
+    // summary, which is dropped so the action is not rendered twice.
+    const steps = c.db.prepare("SELECT text, status FROM activity_steps ORDER BY ordinal").all() as any[];
+    expect(steps.map((s) => s.text)).toEqual(["Read verifier.ts", "The exploration agent is running."]);
+    expect(steps.every((s) => s.status === "done")).toBe(true);
     const row = c.db.prepare("SELECT final_summary FROM activities WHERE step_run_id='s1'").get() as any;
-    expect(row.final_summary).toBe("The exploration agent is running.");
+    expect(row.final_summary).toBeNull();
   });
 
   it("completeLive keeps a trailing step whose text differs from the summary", () => {

@@ -529,11 +529,17 @@ function WorkspaceGoalCard({ g, onOpen }: { g: WorkspaceGoalView; onOpen: () => 
         </span>
       </div>
 
-      {/* progress — only for active goals with a non-null progress value */}
-      {g.status === "active" && g.progress != null && (
+      {/* progress — active goals show live progress; a completed goal shows a full 100% bar */}
+      {(g.status === "active" || g.status === "completed") && g.progress != null && (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ flex: 1, height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
-            <div style={{ width: `${Math.round(g.progress * 100)}%`, height: "100%", background: "var(--accent)" }} />
+            <div
+              style={{
+                width: `${Math.round(g.progress * 100)}%`,
+                height: "100%",
+                background: g.status === "completed" ? "#3fb950" : "var(--accent)",
+              }}
+            />
           </div>
           <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)", width: 30, textAlign: "right" }}>
             {Math.round(g.progress * 100)}%

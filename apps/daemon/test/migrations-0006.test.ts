@@ -184,6 +184,7 @@ describe('context migration 0006_context.sql', () => {
       '0044_workflow_template_category.sql',
       '0045_step_run_confirmed_lead.sql',
       '0046_step_run_pending_revision.sql',
+      '0047_activity_steps_tool_use_id.sql',
     ]);
 
     const tables = (
@@ -294,6 +295,7 @@ describe('context migration 0006_context.sql', () => {
       '0044_workflow_template_category.sql',
       '0045_step_run_confirmed_lead.sql',
       '0046_step_run_pending_revision.sql',
+      '0047_activity_steps_tool_use_id.sql',
     ]);
 
     const counts = {

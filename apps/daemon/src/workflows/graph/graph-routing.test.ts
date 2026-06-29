@@ -6,6 +6,7 @@ import {
   resolveGateNext,
   resolveStepNext,
   resolveSplitterNext,
+  splitterRoutingForStep,
 } from "./graph-routing.js";
 
 const steps: WorkflowStepTemplate[] = [
@@ -106,5 +107,41 @@ describe("resolveSplitterNext", () => {
     expect(() => resolveSplitterNext(splitterGraph, "route", "go_c")).toThrow(
       "splitter route must have exactly one 'go_c' edge, found 0"
     );
+  });
+});
+
+describe("splitterRoutingForStep", () => {
+  const tierGraph: WorkflowGraph = {
+    nodes: [
+      { id: "triage", type: "step", name: "Triage", stepId: "triage" },
+      { id: "route", type: "splitter", name: "Route", branches: ["clarify_first", "approach_only"], branchKey: "recommended_tier" },
+      { id: "clarify", type: "step", name: "Clarify", stepId: "clarify" },
+      { id: "proposal", type: "step", name: "Proposal", stepId: "proposal", terminal: true },
+    ],
+    edges: [
+      { from: "triage", to: "route" },
+      { from: "route", to: "clarify", port: "clarify_first" },
+      { from: "route", to: "proposal", port: "approach_only" },
+    ],
+    positions: {},
+  };
+
+  it("maps a step's branch key to each branch's destination name", () => {
+    expect(splitterRoutingForStep(tierGraph, "triage")).toEqual({
+      branchKey: "recommended_tier",
+      branchToName: { clarify_first: "Clarify", approach_only: "Proposal" },
+    });
+  });
+
+  it("returns null when the step does not feed a splitter", () => {
+    expect(splitterRoutingForStep(featureGraph, "analysis")).toBeNull();
+  });
+
+  it("returns null when the splitter has no branchKey", () => {
+    expect(splitterRoutingForStep(splitterGraph, "triage")).toBeNull();
+  });
+
+  it("returns null for an unknown step", () => {
+    expect(splitterRoutingForStep(tierGraph, "nope")).toBeNull();
   });
 });

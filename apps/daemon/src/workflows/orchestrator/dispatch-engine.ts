@@ -1318,6 +1318,11 @@ export class DispatchEngine {
     // silently blocked runs when an upstream step (e.g. Triage's
     // `recommended_tier`) had already emitted the decision.
     let proposal = this.resolveDeterministicSplit(db, { run, stepRun, splitterNode, branches });
+    // A deterministic route carries no human judgment — it is read straight from
+    // an already-produced (and, in supervised mode, already-confirmed) step output.
+    // Such a route is owned by the deterministic core and must NOT raise a second
+    // redundant Continue gate; only an orchestrator-judged route is reviewable.
+    const wasDeterministic = proposal != null;
 
     if (!proposal) {
       // Fallback: ask the orchestrator to choose the branch. The broker requires
@@ -1416,7 +1421,7 @@ export class DispatchEngine {
       ledgerVersion: ledger.version,
     });
 
-    if (goalRequiresHumanReview(db, run.goalId)) {
+    if (goalRequiresHumanReview(db, run.goalId) && !wasDeterministic) {
       const stagedEvents: DomainEvent[] = [];
       db.transaction(() => {
         db.prepare("UPDATE workflow_runs SET pending_split_route_json = ? WHERE id = ?").run(

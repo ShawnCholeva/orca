@@ -54,6 +54,82 @@ export function bashReadFile(command: string): string | null {
   return basename(last);
 }
 
+/** Format a line-range descriptor into the activity-step suffix, e.g.
+ *  "(lines 1030–1050)". Returns null when there is no range to show, so reads of
+ *  a whole file stay a plain "Read X". Shared by the Read tool and Bash reads so
+ *  the wording lives in one place. */
+function lineRangeSuffix(r: {
+  start?: number;
+  end?: number;
+  first?: number;
+  last?: number;
+}): string | null {
+  if (typeof r.first === "number") return `(first ${r.first} lines)`;
+  if (typeof r.last === "number") return `(last ${r.last} lines)`;
+  if (typeof r.start === "number" && typeof r.end === "number") {
+    return r.start === r.end ? `(line ${r.start})` : `(lines ${r.start}–${r.end})`;
+  }
+  if (typeof r.start === "number") return `(from line ${r.start})`;
+  return null;
+}
+
+/** Line-range suffix for the Read tool's offset (1-based start) + limit (count).
+ *  Different chunks of the same file then read as distinct steps instead of
+ *  identical "Read X" rows. */
+function readToolRange(input: Record<string, unknown>): string | null {
+  const offset = typeof input.offset === "number" ? input.offset : null;
+  const limit = typeof input.limit === "number" ? input.limit : null;
+  if (offset !== null && limit !== null) return lineRangeSuffix({ start: offset, end: offset + limit - 1 });
+  if (offset !== null) return lineRangeSuffix({ start: offset });
+  if (limit !== null) return lineRangeSuffix({ first: limit });
+  return null;
+}
+
+/** -n N / --lines N / -N count for a head/tail command (null if absent, e.g.
+ *  `tail -f`). */
+function headTailCount(args: string[]): number | null {
+  for (let j = 0; j < args.length; j += 1) {
+    const a = args[j] ?? "";
+    if (a === "-n" || a === "--lines") {
+      const v = args[j + 1];
+      return v !== undefined && /^\d+$/.test(v) ? Number(v) : null;
+    }
+    const m = /^-(\d+)$/.exec(a);
+    if (m) return Number(m[1]);
+  }
+  return null;
+}
+
+/** Line-range suffix for a Bash read command (sed -n 'a,bp' / head -n N /
+ *  tail -n N), mirroring bashReadFile's matching. Returns null for whole-file
+ *  reads (cat, tail -f) where there is nothing to disambiguate. */
+export function bashReadRange(command: string): string | null {
+  if (command.includes("|")) return null;
+  const raw = command.trim().split(/\s+/);
+  let i = 0;
+  while (i < raw.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(raw[i] ?? "")) i += 1;
+  const cmd = (raw[i] ?? "").replace(/.*[\\/]/, "").toLowerCase();
+  const args = raw.slice(i + 1);
+
+  if (cmd === "sed") {
+    for (const a of args) {
+      const m = /^(\d+)(?:,(\d+|\$))?p$/.exec(a.replace(/^['"]|['"]$/g, ""));
+      if (!m) continue;
+      const start = Number(m[1]);
+      if (m[2] === undefined) return lineRangeSuffix({ start, end: start });
+      if (m[2] === "$") return lineRangeSuffix({ start });
+      return lineRangeSuffix({ start, end: Number(m[2]) });
+    }
+    return null;
+  }
+  if (cmd === "head" || cmd === "tail") {
+    const n = headTailCount(args);
+    if (n === null) return null;
+    return cmd === "head" ? lineRangeSuffix({ first: n }) : lineRangeSuffix({ last: n });
+  }
+  return null;
+}
+
 /** Low-signal look-around the activity checklist should not persist as a step:
  *  searches (Grep/Glob) and read-only inspection shell commands. Substantive
  *  work (reads, edits, test/build/run commands, git mutations) returns false. */
@@ -127,13 +203,53 @@ function truncate(s: string, max = 80): string {
 
 /** Human one-liner for a tool call, derived from its input. Falls back to the
  *  generic category narration for unknown tools or malformed input. */
-export function narrateToolDetail(toolName: string, toolInput: unknown): string {
+// Present-tense companion to narrateToolDetail, for the PENDING permission card:
+// the action has NOT run yet, so "Edited"/"Ran" would be dishonest. Describes the
+// requested action in the present tense and, for Bash, does NOT echo the command
+// (the card already shows it verbatim) so the card never states it twice.
+export function narratePendingToolDetail(toolName: string, toolInput: unknown): string {
   try {
     const input = (toolInput ?? {}) as Record<string, unknown>;
     const file = typeof input.file_path === "string" ? basename(input.file_path) : null;
     switch (toolName) {
       case "Read":
         return file ? `Read ${file}` : narrateCategory("reading");
+      case "Edit":
+      case "Write":
+      case "MultiEdit":
+      case "NotebookEdit":
+        return file ? `Edit ${file}` : narrateCategory("editing");
+      case "Grep":
+      case "Glob": {
+        const pattern = typeof input.pattern === "string" ? input.pattern
+          : typeof input.glob === "string" ? input.glob : null;
+        return pattern ? `Search "${truncate(pattern, 60)}"` : narrateCategory("searching");
+      }
+      case "Bash": {
+        const cmd = typeof input.command === "string" ? input.command : null;
+        if (!cmd) return "Run a shell command";
+        const readFile = bashReadFile(cmd);
+        if (readFile) return `Read ${readFile}`;
+        return isTestCommand(cmd) ? "Run tests" : "Run a shell command";
+      }
+      default:
+        return narrateCategory(categorizeClaudeTool(toolName, toolInput));
+    }
+  } catch {
+    return narrateCategory("other");
+  }
+}
+
+export function narrateToolDetail(toolName: string, toolInput: unknown): string {
+  try {
+    const input = (toolInput ?? {}) as Record<string, unknown>;
+    const file = typeof input.file_path === "string" ? basename(input.file_path) : null;
+    switch (toolName) {
+      case "Read": {
+        if (!file) return narrateCategory("reading");
+        const range = readToolRange(input);
+        return range ? `Read ${file} ${range}` : `Read ${file}`;
+      }
       case "Edit":
       case "Write":
       case "MultiEdit":
@@ -149,7 +265,10 @@ export function narrateToolDetail(toolName: string, toolInput: unknown): string 
         const cmd = typeof input.command === "string" ? input.command : null;
         if (!cmd) return narrateCategory("running");
         const readFile = bashReadFile(cmd);
-        if (readFile) return `Read ${readFile}`;
+        if (readFile) {
+          const range = bashReadRange(cmd);
+          return range ? `Read ${readFile} ${range}` : `Read ${readFile}`;
+        }
         return isTestCommand(cmd) ? `Ran tests: ${truncate(cmd)}` : `Ran ${truncate(cmd)}`;
       }
       default:

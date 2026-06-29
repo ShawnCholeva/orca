@@ -218,7 +218,7 @@ import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js';
 import { registerWorkflowDecisionRoutes } from './workflows/decisions/routes.js';
 import { registerActivityRoutes } from './activities/routes.js';
-import { categorizeClaudeTool, isLowSignalTool, narrateToolDetail } from './activities/claude-adapter.js';
+import { categorizeClaudeTool, isLowSignalTool, narratePendingToolDetail, narrateToolDetail } from './activities/claude-adapter.js';
 import { reconstructEditDiff } from './activities/diff.js';
 import type { ActivitySignal } from './activities/signals.js';
 import type { ActivityStoreCtx } from './activities/store.js';
@@ -1560,6 +1560,8 @@ export function createServer(
         category: categorizeClaudeTool(payload.toolName, payload.toolInput),
         detail: narrateToolDetail(payload.toolName, payload.toolInput),
         diff: reconstructEditDiff(payload.toolName, payload.toolInput),
+        // Dedupes at-least-once spool redeliveries (empty when the id is absent).
+        toolUseId: payload.toolUseId || null,
       });
     },
     onPermissionRequest: async (sessionId, payload) => {
@@ -1575,9 +1577,11 @@ export function createServer(
       if (!sessionRow) return "deny";
       const goalId = sessionRow.goal_id;
       const summary = summarizePermission(payload.toolName, payload.toolInput);
-      // Human one-liner (e.g. "Edited App.tsx", "Ran tests: …") so the approval
-      // card conveys what's being approved, not just the tool name.
-      const detail = narrateToolDetail(payload.toolName, payload.toolInput);
+      // Present-tense one-liner (e.g. "Edit App.tsx", "Run tests") so the approval
+      // card honestly describes the action being REQUESTED — not a past-tense
+      // "Edited/Ran" that implies it already executed — and, for Bash, without
+      // re-echoing the command the card already shows verbatim.
+      const detail = narratePendingToolDetail(payload.toolName, payload.toolInput);
       const { approvalId, answered, isNew } = permissionApprovals.record({
         toolUseId: payload.toolUseId, sessionId, goalId,
         toolName: payload.toolName, summary, detail, toolInput: payload.toolInput,

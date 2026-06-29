@@ -77,6 +77,7 @@ import {
   ListWorkflowDecisionsResponse,
   WorkflowRunLedgerResponse,
   ListWorkflowRunsResponse,
+  ListWorkflowStepRunsResponse,
   ListWorkflowTemplatesResponse,
   MemoryExtraction,
   ModifyRecommendationRequest,
@@ -1206,6 +1207,19 @@ export async function getWorkflowStepRun(
     { headers: authHeaders(token) },
     WorkflowStepRunResponse,
     "Get workflow step run failed",
+  );
+}
+
+export async function listWorkflowStepRuns(
+  goalId: string,
+  runId: string,
+): Promise<ListWorkflowStepRunsResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-runs/${encodeURIComponent(runId)}/step-runs`,
+    { headers: authHeaders(token) },
+    ListWorkflowStepRunsResponse,
+    "List workflow step runs failed",
   );
 }
 

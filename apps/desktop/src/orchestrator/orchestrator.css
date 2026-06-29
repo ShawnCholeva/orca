@@ -192,6 +192,11 @@
   background: var(--run-soft);
 }
 
+.goal-card-status--completed {
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.12);
+}
+
 .goal-card-status--archived {
   color: var(--text-3);
   background: rgba(255, 255, 255, 0.04);

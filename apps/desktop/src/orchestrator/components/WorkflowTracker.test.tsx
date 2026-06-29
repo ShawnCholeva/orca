@@ -142,6 +142,42 @@ describe("WorkflowTracker", () => {
     expect(screen.queryByRole("button", { name: /^reject$/i })).toBeNull();
   });
 
+  it("marks a step parked for Continue/Revise 'awaiting confirmation', not 'running'", () => {
+    render(
+      <WorkflowTracker
+        workflowName="Adaptive Delivery"
+        steps={steps}
+        activeIndex={0}
+        activeRunning={false}
+        awaitingConfirm
+      />,
+    );
+
+    // A step whose work is done but is parked for the human to Continue must read
+    // as awaiting the human — never as a live "running" spinner over stopped work.
+    expect(screen.getByText(/awaiting confirmation/i)).toBeInTheDocument();
+    expect(screen.queryByText("running")).toBeNull();
+    // The Continue/Revise action lives in the chat thread, not the tracker.
+    expect(screen.queryByRole("button", { name: /continue/i })).toBeNull();
+  });
+
+  it("marks routed-past steps 'skipped' rather than showing them as completed", () => {
+    render(
+      <WorkflowTracker
+        workflowName="Adaptive Delivery"
+        steps={steps}
+        activeIndex={2}
+        skippedIndices={[1]}
+      />,
+    );
+
+    // The skipped step is labelled 'skipped' and is NOT one of the completed checks.
+    expect(screen.getByText(/skipped/i)).toBeInTheDocument();
+    // Step 0 ran (done check), step 2 is active; only ONE check (step 0), not two —
+    // the skipped step 1 must not render a completed checkmark.
+    expect(screen.getAllByTestId("tracker-done-check")).toHaveLength(1);
+  });
+
   it("calls onViewWorkflows when the view button is clicked", () => {
     const onViewWorkflows = vi.fn();
     render(

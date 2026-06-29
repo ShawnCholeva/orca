@@ -40,6 +40,8 @@ const requestStepRevisionMock = vi.fn();
 const submitStepRevisionMock = vi.fn();
 const listRecommendationsMock = vi.fn();
 const acceptRecommendationMock = vi.fn();
+const listWorkflowRunsMock = vi.fn();
+const listWorkflowStepRunsMock = vi.fn();
 
 vi.mock("../api", () => ({
   confirmSplit: (...args: unknown[]) => confirmSplitMock(...args),
@@ -47,6 +49,8 @@ vi.mock("../api", () => ({
   createOrchestratorMessage: (...args: unknown[]) => createOrchestratorMessageMock(...args),
   getGoalDetail: (...args: unknown[]) => getGoalDetailMock(...args),
   getWorkflowRun: (...args: unknown[]) => getWorkflowRunMock(...args),
+  listWorkflowRuns: (...args: unknown[]) => listWorkflowRunsMock(...args),
+  listWorkflowStepRuns: (...args: unknown[]) => listWorkflowStepRunsMock(...args),
   getWorkflowStepRun: (...args: unknown[]) => getWorkflowStepRunMock(...args),
   getWorkflowTemplate: (...args: unknown[]) => getWorkflowTemplateMock(...args),
   listActivities: (...args: unknown[]) => listActivitiesMock(...args),
@@ -252,6 +256,10 @@ describe("OrcaChat", () => {
     listRecommendationsMock.mockResolvedValue({ recommendations: [], generations: [] });
     acceptRecommendationMock.mockReset();
     acceptRecommendationMock.mockResolvedValue({});
+    listWorkflowRunsMock.mockReset();
+    listWorkflowRunsMock.mockResolvedValue({ runs: [] });
+    listWorkflowStepRunsMock.mockReset();
+    listWorkflowStepRunsMock.mockResolvedValue({ stepRuns: [] });
   });
 
   afterEach(() => {
@@ -397,6 +405,98 @@ describe("OrcaChat", () => {
     );
 
     expect(await screen.findByText("Goal needs an orchestrator model")).toBeInTheDocument();
+  });
+
+  it("shows the completed workflow tracker for a completed goal whose run has detached", async () => {
+    // A completed run detaches from the goal (active_workflow_run_id nulled), so
+    // goal.activeWorkflowRunId is null but goal.status is "completed". The view
+    // must load the most-recent (completed) run and show the finished tracker
+    // instead of the misleading "No workflow running / Start Workflow" empty state.
+    const completedRun = {
+      id: "run-1",
+      goalId: "goal-1",
+      templateId: "orca/engineering",
+      templateVersion: 1,
+      status: "completed",
+      currentStepRunId: null,
+      startedAt: now,
+      finishedAt: now,
+      blockedReason: null,
+    };
+    getGoalDetailMock.mockResolvedValue({
+      goal: { ...goal, status: "completed", activeWorkflowRunId: null },
+      refinement: null,
+      workspaces: [],
+    });
+    listWorkflowRunsMock.mockResolvedValue({ runs: [completedRun] });
+    getWorkflowRunMock.mockResolvedValue({ run: completedRun });
+    listWorkflowDecisionsMock.mockResolvedValue({ decisions: [] });
+    listWorkflowRunArtifactsMock.mockResolvedValue({ artifacts: [] });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[{ ...goal, status: "completed" }]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByText("Workflow complete")).toBeInTheDocument();
+    expect(screen.queryByText("No workflow running")).toBeNull();
+  });
+
+  it("shows 'awaiting confirmation' (not 'running') when a step is parked for Continue/Revise", async () => {
+    setupRunLoad();
+    // The active step has produced its output and parked for the human to confirm.
+    listActivitiesMock.mockResolvedValue([
+      { ...activeActivity, id: "act-confirm", status: "paused_for_input", sourceKind: "step_confirmation_pending" },
+    ]);
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByText(/awaiting confirmation/i)).toBeInTheDocument();
+    // Honest status: no live "running" spinner over a step that has stopped.
+    expect(screen.queryByText("running")).toBeNull();
+  });
+
+  it("renders routed-past design steps as 'skipped' (approach_only) rather than completed", async () => {
+    getGoalDetailMock.mockResolvedValue({
+      goal: { ...goal, activeWorkflowRunId: "run-1" },
+      refinement: null,
+      workspaces: [],
+    });
+    getWorkflowRunMock.mockResolvedValue({
+      run: {
+        id: "run-1", goalId: "goal-1", templateId: "orca/adaptive-delivery", templateVersion: 1,
+        status: "active", currentStepRunId: "sr-proposal", startedAt: now, finishedAt: null, blockedReason: null,
+      },
+    });
+    getWorkflowTemplateMock.mockResolvedValue({
+      template: {
+        steps: [
+          { id: "triage", ordinal: 0, name: "Triage" },
+          { id: "clarify", ordinal: 1, name: "Clarify" },
+          { id: "research", ordinal: 2, name: "Research" },
+          { id: "proposal", ordinal: 3, name: "Proposal" },
+        ],
+      },
+    });
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: { id: "sr-proposal", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "proposal", ordinal: 3, attempt: 1, status: "active", startedAt: now, finishedAt: null, blockedReason: null },
+    });
+    // Only Triage and Proposal actually ran — Clarify/Research were routed past.
+    listWorkflowStepRunsMock.mockResolvedValue({
+      stepRuns: [
+        { id: "sr-triage", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "triage", ordinal: 0, attempt: 1, status: "passed", startedAt: now, finishedAt: now, blockedReason: null },
+        { id: "sr-proposal", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "proposal", ordinal: 3, attempt: 1, status: "active", startedAt: now, finishedAt: null, blockedReason: null },
+      ],
+    });
+    listWorkflowDecisionsMock.mockResolvedValue({ decisions: [] });
+    listWorkflowRunArtifactsMock.mockResolvedValue({ artifacts: [] });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    // Clarify + Research show a 'skipped' marker (two of them); they did not run.
+    await waitFor(() => expect(screen.getAllByText(/skipped/i).length).toBeGreaterThanOrEqual(2));
+    // Triage actually ran → it is one of the completed checks (not skipped).
+    expect(screen.getAllByTestId("tracker-done-check").length).toBeGreaterThanOrEqual(1);
   });
 
   it("does not show provider metadata on the initial goal message", async () => {

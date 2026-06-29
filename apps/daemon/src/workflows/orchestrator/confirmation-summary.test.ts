@@ -77,4 +77,29 @@ describe("buildConfirmationSummary", () => {
       "File: b.ts",
     ]);
   });
+
+  describe("splitter-branch field", () => {
+    const tierSchema: WorkflowStepOutputSchema = [
+      { key: "recommended_tier", type: "string", required: true },
+    ];
+    const routing = {
+      branchKey: "recommended_tier",
+      branchToName: { clarify_first: "Clarify", ground_and_design: "Research", approach_only: "Proposal" },
+    };
+
+    it("shows the destination step name instead of the raw branch token", () => {
+      const out = buildConfirmationSummary(tierSchema, { recommended_tier: "approach_only" }, null, null, routing);
+      expect(out.fields).toEqual([{ label: "Recommended step", value: "Proposal" }]);
+    });
+
+    it("falls back to the raw value when the branch has no mapped destination", () => {
+      const out = buildConfirmationSummary(tierSchema, { recommended_tier: "unknown_tier" }, null, null, routing);
+      expect(out.fields).toEqual([{ label: "Recommended tier", value: "unknown_tier" }]);
+    });
+
+    it("renders the raw value when no routing is supplied", () => {
+      const out = buildConfirmationSummary(tierSchema, { recommended_tier: "approach_only" }, null, null);
+      expect(out.fields).toEqual([{ label: "Recommended tier", value: "approach_only" }]);
+    });
+  });
 });

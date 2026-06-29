@@ -332,6 +332,60 @@ describe('acceptRecommendation', () => {
     expect(step.status).toBe('passed');
   });
 
+  it('accepting complete_workflow_run transitions the goal to completed (human-authoritative completion)', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedWorkflow(db, 'g1', { finalStep: true, outstanding: [] });
+    // Production invariant: an active run is recorded as the goal's active_workflow_run_id.
+    db.prepare("UPDATE goals SET active_workflow_run_id = 'run-1' WHERE id = 'g1'").run();
+    seedRec(db, {
+      goalId: 'g1',
+      type: 'complete_workflow_run',
+      workflowStepRunId: 'step-1',
+      proposedActionJson: JSON.stringify({
+        kind: 'complete_workflow_run',
+        workflowRunId: 'run-1',
+        workflowStepRunId: 'step-1',
+      }),
+    });
+
+    acceptRecommendation(makeCtx(db), 'rec-1');
+
+    const goal = db
+      .prepare("SELECT status, active_workflow_run_id FROM goals WHERE id='g1'")
+      .get() as { status: string; active_workflow_run_id: string | null };
+    expect(goal.status).toBe('completed');
+    expect(goal.active_workflow_run_id).toBeNull();
+  });
+
+  it('completing a run does not un-archive an archived goal', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedWorkflow(db, 'g1', { finalStep: true, outstanding: [] });
+    // Goal was archived while its run was still active.
+    db.prepare(
+      "UPDATE goals SET status = 'archived', archived_at = ?, active_workflow_run_id = 'run-1' WHERE id = 'g1'"
+    ).run(NOW);
+    seedRec(db, {
+      goalId: 'g1',
+      type: 'complete_workflow_run',
+      workflowStepRunId: 'step-1',
+      proposedActionJson: JSON.stringify({
+        kind: 'complete_workflow_run',
+        workflowRunId: 'run-1',
+        workflowStepRunId: 'step-1',
+      }),
+    });
+
+    acceptRecommendation(makeCtx(db), 'rec-1');
+
+    const goal = db
+      .prepare("SELECT status, active_workflow_run_id FROM goals WHERE id='g1'")
+      .get() as { status: string; active_workflow_run_id: string | null };
+    expect(goal.status).toBe('archived');
+    expect(goal.active_workflow_run_id).toBeNull();
+  });
+
   it('fires a mark_done harness transition carrying telemetry on accept', () => {
     const db = freshDb();
     seedGoal(db, 'g1');

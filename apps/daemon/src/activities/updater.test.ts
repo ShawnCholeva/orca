@@ -69,11 +69,11 @@ describe("ActivityUpdater", () => {
     updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
 
     nowMs += 100;
-    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null });
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null, toolUseId: null });
     nowMs += 1_000;
-    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null });
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null, toolUseId: null });
     nowMs += 1_000;
-    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null });
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null, toolUseId: null });
 
     const activities = listActivitiesByGoal(db, "g1");
     expect(activities.filter((activity) => activity.workCategory === "reading")).toHaveLength(1);
@@ -83,9 +83,9 @@ describe("ActivityUpdater", () => {
   it("updates immediately when the tool category changes", () => {
     updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
     nowMs += 100;
-    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null });
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null, toolUseId: null });
     nowMs += 100;
-    updater.apply(ctx, { kind: "tool_use", ...base, category: "editing", detail: "Edited store.ts", diff: null });
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "editing", detail: "Edited store.ts", diff: null, toolUseId: null });
 
     expect(listActivitiesByGoal(db, "g1")).toMatchObject([
       {
@@ -238,7 +238,7 @@ function ctx() {
       pending_question TEXT, created_at TEXT, updated_at TEXT, completed_at TEXT);
     CREATE TABLE activity_steps (
       id TEXT PRIMARY KEY, activity_id TEXT, ordinal INTEGER, text TEXT,
-      category TEXT, status TEXT, diff TEXT, created_at TEXT);
+      category TEXT, status TEXT, diff TEXT, tool_use_id TEXT, created_at TEXT);
   `);
   let n = 0;
   return { db, bus: { publish() {} } as unknown as EventBus, now: () => "2026-06-16T00:00:00.000Z", idFactory: () => `id-${n++}` };
@@ -256,7 +256,7 @@ describe("ActivityUpdater steps", () => {
     const c = ctx();
     const u = new ActivityUpdater();
     u.apply(c, { kind: "step_started", ...sig, stepName: "Root Cause" });
-    u.apply(c, { kind: "tool_use", ...sig, category: "reading", detail: "Read verifier.ts", diff: null });
+    u.apply(c, { kind: "tool_use", ...sig, category: "reading", detail: "Read verifier.ts", diff: null, toolUseId: null });
     const live = getLiveForStepRun(c.db, "s1")!;
     expect(live.steps.map((s) => s.text)).toEqual(["Read verifier.ts"]);
     expect(live.steps[0].status).toBe("active");

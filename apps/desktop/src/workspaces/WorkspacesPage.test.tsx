@@ -140,10 +140,10 @@ describe("WorkspacesPage", () => {
     expect(getWorkspaceMock).toHaveBeenCalledWith("ws-2");
   });
 
-  it("progress bar shown for active goal with progress, absent for completed goal", async () => {
+  it("progress bar shows the active goal's percent and a full 100% bar for a completed goal", async () => {
     const ws = makeWorkspaceSummary();
     const activeGoal = makeGoal({ id: "g-active", title: "Active task", status: "active", progress: 0.5 });
-    const completedGoal = makeGoal({ id: "g-done", title: "Done task", status: "completed", progress: null });
+    const completedGoal = makeGoal({ id: "g-done", title: "Done task", status: "completed", progress: 1 });
 
     listWorkspacesMock.mockResolvedValue([ws]);
     getWorkspaceMock.mockResolvedValue({ workspace: makeWorkspace(), goals: [activeGoal, completedGoal] });
@@ -153,14 +153,10 @@ describe("WorkspacesPage", () => {
     await screen.findByText("Active task");
     await screen.findByText("Done task");
 
-    // Progress percentage only appears for active goals with progress set
+    // Active goal shows its in-progress percentage…
     expect(screen.getByText("50%")).toBeInTheDocument();
-
-    // Completed goal card has no percentage text
-    const doneCards = screen.getAllByText("Done task");
-    expect(doneCards.length).toBeGreaterThan(0);
-    // The "50%" progress text should be present exactly once (for the active goal)
-    expect(screen.queryAllByText(/^\d+%$/).length).toBe(1);
+    // …and the completed goal shows a full 100% bar.
+    expect(screen.getByText("100%")).toBeInTheDocument();
   });
 
   it("create: Browse triggers dialog → inspectWorkspace resolves preview → submit calls createWorkspace", async () => {

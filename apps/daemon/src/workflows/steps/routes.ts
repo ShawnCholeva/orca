@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import {
   type DomainEvent,
+  ListWorkflowStepRunsResponse,
   SubmitWorkflowUserInputRequest,
   WorkflowStepRunResponse,
 } from "@orca/contracts";
@@ -17,7 +18,7 @@ import { DispatchEngine } from "../orchestrator/dispatch-engine.js";
 import type { WorkflowSessionLauncher } from "../orchestrator/session-launcher.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
 import { getDecisionById } from "../decisions/usecases.js";
-import { getWorkflowStepRunById } from "./projection.js";
+import { getWorkflowStepRunById, listStepRunsForRun } from "./projection.js";
 import { injectAnswerToSession } from "../orchestrator/agent-interview.js";
 
 export interface WorkflowStepRouteDeps {
@@ -59,6 +60,12 @@ export function registerWorkflowStepRoutes(
     if (!stepRun || stepRun.goalId !== goalId) return null;
     return stepRun;
   }
+
+  server.get("/v1/goals/:goalId/workflow-runs/:runId/step-runs", async (request, reply) => {
+    const { runId } = request.params as { goalId: string; runId: string };
+    const stepRuns = listStepRunsForRun(deps.db, runId);
+    return ListWorkflowStepRunsResponse.parse({ stepRuns });
+  });
 
   server.get("/v1/goals/:goalId/workflow-step-runs/:id", async (request, reply) => {
     const { goalId, id } = request.params as { goalId: string; id: string };

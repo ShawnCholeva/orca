@@ -57,6 +57,7 @@ export class ActivityUpdater {
           text: signal.detail,
           category: signal.category,
           diff: signal.diff,
+          toolUseId: signal.toolUseId,
         });
         this.perStep.set(signal.stepRunId, { lastUpdateMs: now, lastCategory: signal.category });
         return;

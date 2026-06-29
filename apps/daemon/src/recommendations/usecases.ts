@@ -430,9 +430,15 @@ function applyWorkflowAcceptSideEffectsInTx(
       db.prepare(
         "UPDATE workflow_runs SET status = 'completed', finished_at = ?, current_step_run_id = NULL, current_node_id = NULL, current_node_kind = NULL WHERE id = ?"
       ).run(now, action.workflowRunId);
+      // Human-authoritative completion: accepting the terminal recommendation
+      // transitions the goal's lifecycle to completed in the same transaction as
+      // the run completion (preserving an archived goal). Deterministic control-
+      // plane owns the lifecycle; clients read the resulting projection.
       db.prepare(
-        'UPDATE goals SET active_workflow_run_id = NULL WHERE id = ? AND active_workflow_run_id = ?'
-      ).run(rec.goalId, action.workflowRunId);
+        "UPDATE goals SET active_workflow_run_id = NULL, " +
+          "status = CASE WHEN status = 'archived' THEN status ELSE 'completed' END, " +
+          "updated_at = ? WHERE id = ? AND active_workflow_run_id = ?"
+      ).run(now, rec.goalId, action.workflowRunId);
       stagedEvents.push(
         appendWorkflowEvent(
           db,

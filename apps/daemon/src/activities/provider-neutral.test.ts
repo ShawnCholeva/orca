@@ -52,7 +52,8 @@ describe("provider-neutral activity contract", () => {
       agentSessionId: "codex-sess",
       category: "running",
       detail: "ran build",
-      diff: null
+      diff: null,
+      toolUseId: null
     });
     updater.apply(ctx, {
       kind: "turn_completed",

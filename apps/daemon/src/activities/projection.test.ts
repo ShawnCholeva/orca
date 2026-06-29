@@ -228,6 +228,7 @@ describe("enrichConfirmationSummary", () => {
   it("attaches confirmationSummary to a step_confirmation_pending activity from the stash", () => {
     const activities = listActivitiesByGoal(db, "g1");
     const confirm = activities.find((a) => a.sourceKind === "step_confirmation_pending");
+    expect(confirm?.stepName).toBe("Frame");
     expect(confirm?.confirmationSummary?.lead).toBe("Done.");
     expect(confirm?.confirmationSummary?.fields).toEqual([{ label: "Problem", value: "Can't rename" }]);
     expect(confirm?.confirmationSummary?.scoring?.successScore).toBe(0.9);

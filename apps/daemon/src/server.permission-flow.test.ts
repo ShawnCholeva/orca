@@ -284,6 +284,9 @@ describe('permission decision flow', () => {
     expect(approval.summary).toContain('/tmp/r/App.tsx'); // not a bare "Edit"
     expect(approval.detail).toBeTruthy();
     expect(approval.detail).toContain('App.tsx');
+    // Honest tense: the action has NOT run yet, so the detail must be present-tense
+    // ("Edit App.tsx"), never past-tense ("Edited App.tsx").
+    expect(approval.detail).toBe('Edit App.tsx');
 
     // Resolve so the held hook doesn't dangle.
     await server.inject({

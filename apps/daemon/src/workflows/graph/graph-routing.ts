@@ -100,6 +100,44 @@ export function resolveGateNext(
   return classify(graph, out[0].to);
 }
 
+export type StepSplitterRouting = {
+  branchKey: string;
+  branchToName: Record<string, string>;
+};
+
+/**
+ * When `stepTemplateId`'s node routes directly into a splitter, returns that
+ * splitter's branch key plus a map from each branch value to the destination
+ * node's display name. Returns null when the step does not feed a splitter. Lets
+ * a step's routing output field (e.g. `recommended_tier`) be rendered as the
+ * name of the step the chosen branch leads to.
+ */
+export function splitterRoutingForStep(
+  graph: WorkflowGraph,
+  stepTemplateId: string
+): StepSplitterRouting | null {
+  const stepNode = graph.nodes.find(
+    (n) => n.type === "step" && (n.stepId ?? n.id) === stepTemplateId
+  );
+  if (!stepNode) return null;
+  let dest: Destination;
+  try {
+    dest = resolveStepNext(graph, stepNode.id);
+  } catch {
+    return null;
+  }
+  if (dest.kind !== "splitter") return null;
+  const splitter = nodeById(graph, dest.nodeId);
+  if (!splitter || splitter.type !== "splitter" || !splitter.branchKey) return null;
+  const branchToName: Record<string, string> = {};
+  for (const edge of graph.edges) {
+    if (edge.from !== splitter.id || edge.port == null) continue;
+    const target = nodeById(graph, edge.to);
+    if (target?.name) branchToName[edge.port] = target.name;
+  }
+  return { branchKey: splitter.branchKey, branchToName };
+}
+
 /** Resolves the destination for a splitter branch via the branch-labeled edge. */
 export function resolveSplitterNext(
   graph: WorkflowGraph,

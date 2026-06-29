@@ -36,6 +36,15 @@ type Props = {
   // the step at activeIndex (the gate's source step) renders "awaiting approval".
   // The Approve/Reject action lives in the chat thread, not here.
   awaitingGate?: boolean;
+  // When a step has produced its output and is parked for the human to
+  // Continue/Revise, the step at activeIndex renders "awaiting confirmation"
+  // instead of pulsing "running" (honest status — the work has stopped, it's the
+  // human's turn). The Continue/Revise action lives in the chat thread.
+  awaitingConfirm?: boolean;
+  // Indices of steps the run routed PAST (e.g. an approach_only skip of Clarify/
+  // Research). They render as "skipped" — muted, no completion check — so the user
+  // can tell a bypassed step from one that actually ran.
+  skippedIndices?: number[];
   onViewWorkflows?: () => void;
 };
 
@@ -94,6 +103,8 @@ export function WorkflowTracker({
   onApprove,
   approving = false,
   awaitingGate = false,
+  awaitingConfirm = false,
+  skippedIndices = [],
   onViewWorkflows,
 }: Props) {
   if (steps.length === 0) return null;
@@ -182,10 +193,13 @@ export function WorkflowTracker({
       {/* stepper */}
       <div style={{ display: "flex", alignItems: "flex-start" }}>
         {steps.map((step, i) => {
-          const isAwaiting = !completed && (awaitingApproval || awaitingGate) && i === activeIndex;
+          const isSkipped = skippedIndices.includes(i);
+          const isAwaiting =
+            !completed && (awaitingApproval || awaitingGate || awaitingConfirm) && i === activeIndex;
           const done =
-            completed || i < activeIndex || (i === activeIndex && !activeRunning && !isAwaiting);
-          const isActive = !completed && activeRunning && i === activeIndex;
+            !isSkipped &&
+            (completed || i < activeIndex || (i === activeIndex && !activeRunning && !isAwaiting));
+          const isActive = !completed && !isSkipped && activeRunning && i === activeIndex;
           const dotColor = done
             ? "var(--run)"
             : isActive || isAwaiting
@@ -224,8 +238,16 @@ export function WorkflowTracker({
                     transition: "background 160ms ease, box-shadow 160ms ease",
                   }}
                 >
-                  {done || isAwaiting ? (
+                  {done ? (
+                    <span data-testid="tracker-done-check" style={{ display: "inline-flex" }}>
+                      <CheckIcon size={13} color="#fff" />
+                    </span>
+                  ) : isAwaiting ? (
                     <CheckIcon size={13} color="#fff" />
+                  ) : isSkipped ? (
+                    <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: "var(--text-4)" }}>
+                      –
+                    </span>
                   ) : (
                     <span
                       className="mono"
@@ -302,7 +324,22 @@ export function WorkflowTracker({
                         boxShadow: "0 0 0 3px var(--accent-soft)",
                       }}
                     />
-                    awaiting approval
+                    {awaitingConfirm && !awaitingApproval && !awaitingGate
+                      ? "awaiting confirmation"
+                      : "awaiting approval"}
+                  </span>
+                )}
+                {isSkipped && (
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: 9,
+                      letterSpacing: 0.8,
+                      textTransform: "uppercase",
+                      color: "var(--text-4)",
+                    }}
+                  >
+                    skipped
                   </span>
                 )}
               </div>
@@ -312,10 +349,15 @@ export function WorkflowTracker({
                   // completed steps when the next step is done (step i is then
                   // necessarily done too), so it goes green to match the
                   // completed checkmark. Otherwise blue once we're past step i.
+                  // A connector touching a skipped node is muted — the path was
+                  // routed past, so it is neither a completed (green) nor an
+                  // in-progress (blue) segment.
+                  const touchesSkipped = isSkipped || skippedIndices.includes(i + 1);
                   const nextDone =
-                    completed ||
-                    i + 1 < activeIndex ||
-                    (i + 1 === activeIndex && !activeRunning);
+                    !touchesSkipped &&
+                    (completed ||
+                      i + 1 < activeIndex ||
+                      (i + 1 === activeIndex && !activeRunning));
                   return (
                     <div
                       style={{
@@ -324,11 +366,13 @@ export function WorkflowTracker({
                         height: 2,
                         marginTop: 11,
                         borderRadius: 1,
-                        background: nextDone
-                          ? "var(--run)"
-                          : i < activeIndex
-                            ? "var(--accent)"
-                            : "var(--hairline)",
+                        background: touchesSkipped
+                          ? "var(--hairline)"
+                          : nextDone
+                            ? "var(--run)"
+                            : i < activeIndex
+                              ? "var(--accent)"
+                              : "var(--hairline)",
                         transition: "background 160ms ease",
                       }}
                     />
