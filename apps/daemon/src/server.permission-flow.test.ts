@@ -879,7 +879,7 @@ describe('worker question (elicit hook) flow', () => {
       url: `/v1/agent-hooks/elicit?sessionId=${sessionId}`,
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: {
-        tool_input: { questions: [{ question: 'Proceed?', header: 'H', options: [], multiSelect: false }] },
+        tool_input: { questions: [{ question: 'Proceed?', header: 'H', options: [{ label: 'OK', description: 'ok' }], multiSelect: false }] },
         tool_use_id: 'tu-elicit-plain',
       },
     });
