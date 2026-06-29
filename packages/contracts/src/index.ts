@@ -218,6 +218,7 @@ export const DomainEventType = z.enum([
   "user.feedback.recorded",
   "orchestrator.message.created",
   "orchestrator.message.updated",
+  "orchestrator.prompt.suppressed",
   "goal.orchestrator_model_changed",
   "workflow.template.created",
   "workflow.template.updated",
@@ -1105,7 +1106,11 @@ export const PendingQuestion = z
     toolUseId: z.string().min(1),
     questions: z.array(PendingQuestionItem).min(1).max(4),
     source: z.enum(["worker", "orchestrator"]).optional(),
-    answer: PendingQuestionAnswer.optional()
+    answer: PendingQuestionAnswer.optional(),
+    // Step-run scope so the human-prompt gate can read prompts per step run.
+    stepRunId: z.string().min(1).optional(),
+    // Set when a worker hard-block supersedes a now-redundant orchestrator question.
+    withdrawn: z.literal(true).optional()
   })
   .strict();
 export type PendingQuestion = z.infer<typeof PendingQuestion>;
