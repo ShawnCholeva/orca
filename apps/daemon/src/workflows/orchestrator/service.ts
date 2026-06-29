@@ -77,6 +77,8 @@ import {
   buildStepResultBuilderDeps,
 } from "./queries.js";
 import { postOrchestratorMessage } from "./orchestrator-message.js";
+import { isHumanPromptOpen } from "./human-prompt-gate.js";
+import { recordPromptSuppressed } from "../../orchestrator-chat/usecases.js";
 
 import {
   type StepDispatchCapabilities,
@@ -957,14 +959,24 @@ export class OrchestratorService {
         return { postedChatReply: true };
       }
       case "ask_user": {
-        // The step agent needs a decision. Surface it as an interactive choice
-        // (pending_question on the chat message); the user's answer flows back
-        // as ordinary guidance via onUserMessage → forward_to_agent.
+        // Acquire the human-prompt gate: if any prompt is already open for this
+        // step run (worker hard-block, prior orchestrator question, or a
+        // confirmation card), suppress this redundant ask. Deferral, not loss —
+        // the judge re-raises a genuinely-distinct question after release.
+        if (isHumanPromptOpen(db, ctx.stepRun.id)) {
+          recordPromptSuppressed(
+            { db, bus: options.bus ?? new EventBus(), idFactory: options.idFactory ?? randomUUID },
+            { goalId: ctx.run.goalId, stepRunId: ctx.stepRun.id, questions: action.questions, openPrompt: "worker_question" }
+          );
+          return { postedChatReply: false };
+        }
         const idFactory = options.idFactory ?? randomUUID;
         const pendingQuestion: PendingQuestionT = {
           questionId: idFactory(),
           toolUseId: idFactory(),
           questions: action.questions,
+          source: "orchestrator",
+          stepRunId: ctx.stepRun.id,
         };
         postOrchestratorMessage(db, now, ctx.run.goalId, sanitizeNarration(action.body), options, "orchestrator", pendingQuestion);
         return { postedChatReply: true };
