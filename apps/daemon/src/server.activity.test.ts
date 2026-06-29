@@ -503,6 +503,7 @@ describe("daemon activity integration", () => {
       toolUseId: "question-tool-pending",
       source: "worker",
       questions,
+      stepRunId: ids.stepRunId,
     });
     const chatRows = db
       .prepare(
