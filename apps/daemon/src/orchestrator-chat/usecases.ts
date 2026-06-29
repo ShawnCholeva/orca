@@ -15,6 +15,7 @@ import {
   type PendingApproval as PendingApprovalT,
   type PendingQuestion as PendingQuestionT,
   type PendingQuestionAnswer as PendingQuestionAnswerT,
+  type PendingQuestionItem as PendingQuestionItemT,
 } from "@orca/contracts";
 
 import type { EventBus } from "../events.js";
@@ -413,4 +414,31 @@ export function deletePendingApprovalMessage(
   if (stagedEvent === undefined) return false;
   ctx.bus.publish(stagedEvent);
   return true;
+}
+
+/**
+ * Inspectable-axis audit: a suppressed orchestrator ask_user leaves a queryable
+ * record on the append-only events spine (never a silent drop). Suppression is
+ * deferral — the judge re-raises any genuinely-distinct question after release.
+ */
+export function recordPromptSuppressed(
+  ctx: Pick<OrchestratorChatCtx, "db" | "bus" | "idFactory">,
+  input: {
+    goalId: string;
+    stepRunId: string;
+    questions: PendingQuestionItemT[];
+    openPrompt: "worker_question" | "orchestrator_question" | "confirmation_card";
+  }
+): void {
+  const idFactory = ctx.idFactory ?? randomUUID;
+  const payload = { stepRunId: input.stepRunId, openPrompt: input.openPrompt, questions: input.questions };
+  const eventId = idFactory();
+  const createdAt = new Date().toISOString();
+  const result = ctx.db
+    .prepare("INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run(eventId, "orchestrator.prompt.suppressed", input.goalId, JSON.stringify(payload), createdAt);
+  ctx.bus.publish({
+    seq: Number(result.lastInsertRowid), id: eventId, type: "orchestrator.prompt.suppressed",
+    goalId: input.goalId, payload, createdAt,
+  });
 }

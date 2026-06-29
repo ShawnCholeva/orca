@@ -18,6 +18,7 @@ import {
   createOrchestratorMessage,
   deletePendingApprovalMessage,
   GoalOrchestratorModelMissingError,
+  recordPromptSuppressed,
   withdrawOrchestratorPromptsForStepRun,
   type OrchestratorChatCtx,
 } from "./usecases.js";
@@ -279,5 +280,22 @@ describe("withdrawOrchestratorPromptsForStepRun", () => {
     const n = withdrawOrchestratorPromptsForStepRun(ctx, { goalId: "goal-1", stepRunId: "sr1" });
     expect(n).toBe(0);
     expect(readPq(db, "mb").withdrawn).toBeUndefined();
+  });
+});
+
+describe("recordPromptSuppressed", () => {
+  it("appends a queryable suppression event to the spine", () => {
+    const { db, ctx } = setup();
+    recordPromptSuppressed(ctx, {
+      goalId: "goal-1", stepRunId: "sr1", questions: ITEM, openPrompt: "worker_question",
+    });
+    const row = db
+      .prepare("SELECT type, goal_id, payload FROM events WHERE type = 'orchestrator.prompt.suppressed'")
+      .get() as { type: string; goal_id: string; payload: string } | undefined;
+    expect(row).toBeDefined();
+    const payload = JSON.parse(row!.payload);
+    expect(payload.stepRunId).toBe("sr1");
+    expect(payload.openPrompt).toBe("worker_question");
+    expect(Array.isArray(payload.questions)).toBe(true);
   });
 });
