@@ -16,7 +16,7 @@ describe("SelfImprovementRail", () => {
     render(<SelfImprovementRail wf={wf} />);
     fireEvent.click(screen.getAllByRole("button", { name: "Review" })[0]);
     expect(screen.getByText("Current instruction")).toBeInTheDocument();
-    expect(screen.getByText("Proposed")).toBeInTheDocument();
+    expect(screen.getByText("Orca proposes")).toBeInTheDocument();
   });
 
   it("renders the learning log timeline", () => {

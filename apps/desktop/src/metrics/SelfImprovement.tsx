@@ -112,7 +112,7 @@ export function ImprovementCard({ imp }: { imp: Improvement }) {
 const logMeta: Record<LearningLogEntry["type"], { tone: "run" | "info" | "accent" | "neutral"; label: string; icon: ComponentType<{ size?: number; color?: string }>; color: string }> = {
   applied: { tone: "run", label: "Applied", icon: Check, color: "var(--run)" },
   observed: { tone: "info", label: "Observed", icon: Spark, color: "var(--info)" },
-  proposed: { tone: "accent", label: "Proposal", icon: Sparkle, color: "var(--accent)" },
+  proposed: { tone: "accent", label: "Proposed", icon: Sparkle, color: "var(--accent)" },
   reverted: { tone: "neutral", label: "Reverted", icon: ChevronLeft, color: "var(--text-3)" },
 };
 
