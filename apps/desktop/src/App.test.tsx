@@ -132,12 +132,12 @@ describe("App tab visibility with zero goals", () => {
     expect(await screen.findByTestId("workflows-stub")).toBeInTheDocument();
   });
 
-  it("switches to Runtime Diagnostics when the Metrics tab is clicked", async () => {
+  it("switches to Metrics when the Metrics tab is clicked", async () => {
     await renderApp();
 
     fireEvent.click(screen.getByRole("tab", { name: /Metrics/ }));
 
-    expect(await screen.findByText("Runtime Diagnostics")).toBeInTheDocument();
+    expect(await screen.findByText("Workflow health")).toBeInTheDocument();
   });
 });
 

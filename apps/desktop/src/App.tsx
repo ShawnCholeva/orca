@@ -1,11 +1,9 @@
 import { useState, useEffect, FormEvent } from "react";
-import { Goal, DomainEventType, type Agent, type GoalListItem, type PluginSummary, type SkillSummary } from "@orca/contracts";
+import { Goal, DomainEventType, type Agent, type GoalListItem } from "@orca/contracts";
 import {
   fetchHealth,
   listAgents,
   listGoals,
-  listPlugins,
-  listSkills,
   updateGoal,
   updateAgentConnection,
   archiveGoal,
@@ -24,6 +22,7 @@ import { WorkflowsPage } from "./workflows/WorkflowsPage";
 import { inputStyle } from "./workflows/ScopeControls";
 import { WorkspacesPage } from "./workspaces/WorkspacesPage";
 import { EmptyGoalsView } from "./empty-state/EmptyGoalsView";
+import { MetricsPage } from "./metrics/MetricsPage";
 import { SettingsModal, GearIcon } from "./settings/SettingsModal";
 import "./orchestrator/orchestrator.css";
 import "./styles.css";
@@ -37,8 +36,6 @@ type WorkspaceTab = "workspaces" | "orchestrator" | "workflows" | "reasoning";
 function toErrorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
 }
-
-type Diagnostics = { plugins: PluginSummary[]; skills: SkillSummary[] };
 
 const DETAIL_REFETCH_EVENTS = new Set<DomainEventType>(["goal.refined", "workspace.attached", "workspace.removed"]);
 const GOAL_LIST_EVENTS = new Set<DomainEventType>(["goal.created", "goal.updated", "goal.archived", "goal.worker_permission_mode_changed", "workspace.attached", "workspace.removed"]);
@@ -58,24 +55,7 @@ export default function App() {
   const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
   const [selectedOrchestratorGoalId, setSelectedOrchestratorGoalId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("workspaces");
-  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
-  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
-  const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
-
-  async function loadDiagnostics() {
-    if (diagnosticsLoading) return;
-    setDiagnosticsLoading(true);
-    setDiagnosticsError(null);
-    try {
-      const [plugins, skills] = await Promise.all([listPlugins(), listSkills()]);
-      setDiagnostics({ plugins, skills });
-    } catch (err) {
-      setDiagnosticsError(toErrorMessage(err, "Failed to load diagnostics."));
-    } finally {
-      setDiagnosticsLoading(false);
-    }
-  }
 
   async function loadGoals() {
     try {
@@ -145,13 +125,12 @@ export default function App() {
     setOnboardingState("checking");
   }
 
-  // Load goals/diagnostics once the daemon is reachable, and refetch on every
-  // reconnect. Firing on mount instead races the daemon's HTTP server coming
-  // up — the fetch fails silently and the list stays empty until a goal event.
+  // Load goals once the daemon is reachable, and refetch on every reconnect.
+  // Firing on mount instead races the daemon's HTTP server coming up — the
+  // fetch fails silently and the list stays empty until a goal event.
   useEffect(() => {
     if (connectionStatus !== "open") return;
     loadGoals();
-    loadDiagnostics();
   }, [connectionStatus]);
 
   useEffect(() => {
@@ -477,36 +456,7 @@ export default function App() {
               </section>
             ) : activeTab === "reasoning" ? (
               <section className="reasoning-pane" role="tabpanel" aria-label="Metrics">
-                <div className="reasoning-card">
-                  <div className="reasoning-card-header">
-                    <h2 className="reasoning-card-title">Runtime Diagnostics</h2>
-                    <button
-                      type="button"
-                      className="reasoning-action-btn"
-                      onClick={loadDiagnostics}
-                      disabled={diagnosticsLoading}
-                    >
-                      {diagnosticsLoading ? "Loading…" : "Refresh"}
-                    </button>
-                  </div>
-                  {diagnosticsError && <p className="reasoning-error">{diagnosticsError}</p>}
-                  {!diagnosticsLoading && !diagnosticsError && diagnostics !== null && (
-                    <>
-                      <h3 className="reasoning-card-subtitle">Plugins ({diagnostics.plugins.length})</h3>
-                      <ul className="reasoning-list">
-                        {diagnostics.plugins.map((p) => (
-                          <li key={p.id}>{p.id} — {p.capabilities.join(", ")}</li>
-                        ))}
-                      </ul>
-                      <h3 className="reasoning-card-subtitle">Skills ({diagnostics.skills.length})</h3>
-                      <ul className="reasoning-list">
-                        {diagnostics.skills.map((s) => (
-                          <li key={s.id}>{s.id} — {s.extensionPoint} ({s.title})</li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                </div>
+                <MetricsPage />
               </section>
             ) : (
               <section className="workflows-pane" role="tabpanel" aria-label="Workflows">
