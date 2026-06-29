@@ -527,7 +527,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   // routes its text here instead of to the orchestrator when this is non-null.
   const pendingWorkerQuestionId =
     [...messages].reverse().find(
-      (m) => m.pendingQuestion?.source === "worker" && m.pendingQuestion.answer == null,
+      (m) => m.pendingQuestion?.source === "worker" && m.pendingQuestion.answer == null && !m.pendingQuestion.withdrawn,
     )?.pendingQuestion?.questionId ?? null;
 
   const pendingRevisionRunId =
@@ -1237,7 +1237,13 @@ export function ChatMessageRow({ message, goalId, onWorkerAnswered }: { message:
         {!message.pendingQuestion && !message.pendingApproval && (
           <div className="orca-chat-message">{message.body}</div>
         )}
-        {message.pendingQuestion && message.pendingQuestion.source === "worker" ? (
+        {message.pendingQuestion && message.pendingQuestion.withdrawn ? (
+          // Superseded by a worker hard-block asking the same thing for this
+          // step run: retracted, no longer answerable.
+          <div className="pending-question withdrawn" data-testid="question-withdrawn">
+            <span className="question-withdrawn-note">Question withdrawn — already answered elsewhere.</span>
+          </div>
+        ) : message.pendingQuestion && message.pendingQuestion.source === "worker" ? (
           // Worker question: an agent's AskUserQuestion tool call is blocked on
           // this; answering resolves it and persists the answer on the message.
           <WorkerQuestionForm

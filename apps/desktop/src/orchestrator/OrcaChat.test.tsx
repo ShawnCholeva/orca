@@ -924,6 +924,34 @@ describe("OrcaChat", () => {
     );
   });
 
+  it("renders a withdrawn (superseded) question as retracted, not answerable", async () => {
+    setupRunLoad();
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "wq-withdrawn", goalId: "goal-1", role: "orchestrator", kind: "message",
+          body: "A choice of which blue to use is needed.", correlationId: null, createdAt: now,
+          pendingQuestion: {
+            questionId: "q-withdrawn", toolUseId: "t-withdrawn", source: "orchestrator", withdrawn: true,
+            questions: [
+              {
+                header: "Active blue", question: "Which blue?", multiSelect: false,
+                options: [{ label: "info", description: "sky" }],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText(/withdrawn/i);
+    // A withdrawn question is not answerable: no option control, no send button.
+    expect(screen.queryByRole("radio", { name: /info/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /send answer/i })).toBeNull();
+  });
+
   it("offers 'Something else' on a live worker question and submits free text", async () => {
     setupRunLoad();
     listOrchestratorMessagesMock.mockResolvedValue({
