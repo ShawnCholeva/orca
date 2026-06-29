@@ -4,6 +4,7 @@ import path from "node:path";
 
 import type Database from "better-sqlite3";
 import type { DomainEvent } from "@orca/contracts";
+import { PendingQuestion } from "@orca/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Config } from "../config.js";
@@ -17,6 +18,7 @@ import {
   createOrchestratorMessage,
   deletePendingApprovalMessage,
   GoalOrchestratorModelMissingError,
+  withdrawOrchestratorPromptsForStepRun,
   type OrchestratorChatCtx,
 } from "./usecases.js";
 
@@ -243,5 +245,39 @@ describe("orchestrator chat usecases", () => {
     );
 
     expect(shadowAsk.mock.calls[0]?.[1].adapterId).toBe("antigravity");
+  });
+});
+
+function seedQuestion(db: Database.Database, id: string, pq: Record<string, unknown>): void {
+  db.prepare(
+    "INSERT INTO orchestrator_messages (id, goal_id, role, kind, body, correlation_id, created_at, pending_question) VALUES (?, 'goal-1', 'orchestrator', 'message', 'b', ?, ?, ?)"
+  ).run(id, id, NOW, JSON.stringify(pq));
+}
+function readPq(db: Database.Database, id: string) {
+  const row = db.prepare("SELECT pending_question FROM orchestrator_messages WHERE id = ?").get(id) as { pending_question: string };
+  return PendingQuestion.parse(JSON.parse(row.pending_question));
+}
+const ITEM = [{ question: "?", header: "h", multiSelect: false, options: [{ label: "a", description: "d" }] }];
+
+describe("withdrawOrchestratorPromptsForStepRun", () => {
+  it("withdraws an open orchestrator question but not the worker hard-block", () => {
+    const { db, ctx } = setup();
+    seedQuestion(db, "mo", { questionId: "qo", toolUseId: "to", questions: ITEM, source: "orchestrator", stepRunId: "sr1" });
+    seedQuestion(db, "mw", { questionId: "qw", toolUseId: "tw", questions: ITEM, source: "worker", stepRunId: "sr1" });
+
+    const n = withdrawOrchestratorPromptsForStepRun(ctx, { goalId: "goal-1", stepRunId: "sr1" });
+
+    expect(n).toBe(1);
+    expect(readPq(db, "mo").withdrawn).toBe(true);
+    expect(readPq(db, "mw").withdrawn).toBeUndefined();
+  });
+
+  it("ignores already-answered and other step runs", () => {
+    const { db, ctx } = setup();
+    seedQuestion(db, "ma", { questionId: "qa", toolUseId: "ta", questions: ITEM, source: "orchestrator", stepRunId: "sr1", answer: { viaChat: true } });
+    seedQuestion(db, "mb", { questionId: "qb", toolUseId: "tb", questions: ITEM, source: "orchestrator", stepRunId: "sr2" });
+    const n = withdrawOrchestratorPromptsForStepRun(ctx, { goalId: "goal-1", stepRunId: "sr1" });
+    expect(n).toBe(0);
+    expect(readPq(db, "mb").withdrawn).toBeUndefined();
   });
 });

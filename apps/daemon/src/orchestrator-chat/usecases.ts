@@ -326,6 +326,53 @@ export function recordWorkerQuestionAnswer(
   return true;
 }
 
+/**
+ * Supersede: when a worker hard-block opens for a step run, retract any open
+ * orchestrator question for the same step run (the worker's covers the decision).
+ * Mirrors recordWorkerQuestionAnswer's transaction + event pattern. Returns the
+ * number of questions withdrawn.
+ */
+export function withdrawOrchestratorPromptsForStepRun(
+  ctx: Pick<OrchestratorChatCtx, "db" | "bus" | "idFactory">,
+  input: { goalId: string; stepRunId: string }
+): number {
+  const idFactory = ctx.idFactory ?? randomUUID;
+  const staged = ctx.db.transaction(() => {
+    const rows = ctx.db
+      .prepare(
+        `SELECT id, pending_question FROM orchestrator_messages
+          WHERE goal_id = ?
+            AND json_extract(pending_question, '$.stepRunId') = ?
+            AND json_extract(pending_question, '$.answer') IS NULL
+            AND json_extract(pending_question, '$.withdrawn') IS NULL
+            AND IFNULL(json_extract(pending_question, '$.source'), '') != 'worker'`
+      )
+      .all(input.goalId, input.stepRunId) as Array<{ id: string; pending_question: string }>;
+
+    const events: DomainEvent[] = [];
+    for (const row of rows) {
+      const pending = PendingQuestion.parse(JSON.parse(row.pending_question));
+      const next = { ...pending, withdrawn: true as const };
+      ctx.db
+        .prepare("UPDATE orchestrator_messages SET pending_question = ? WHERE id = ?")
+        .run(JSON.stringify(next), row.id);
+      const payload = { messageId: row.id };
+      const eventId = idFactory();
+      const result = ctx.db
+        .prepare("INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(eventId, "orchestrator.message.updated", input.goalId, JSON.stringify(payload), new Date().toISOString());
+      events.push({
+        seq: Number(result.lastInsertRowid), id: eventId, type: "orchestrator.message.updated",
+        goalId: input.goalId, payload, createdAt: new Date().toISOString(),
+      });
+    }
+    return events;
+  })();
+
+  for (const e of staged) ctx.bus.publish(e);
+  return staged.length;
+}
+
 // Delete the approval message once its decision is made. The whole message
 // exists only to host the permission card ("The agent wants to run X." + the
 // approval), so once decided it's pure noise: ephemeral, gone on reload (the
