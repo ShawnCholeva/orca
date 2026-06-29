@@ -90,7 +90,7 @@ export function Sparkline({ data, color = "var(--text-2)", w = 76, h = 26 }: { d
   const max = Math.max(...data);
   const span = max - min || 1;
   const pts = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * (w - 2) + 1;
+    const x = (i / Math.max(data.length - 1, 1)) * (w - 2) + 1; // clamp divisor so a 1-point series renders a dot instead of NaN
     const y = h - 2 - ((v - min) / span) * (h - 4);
     return [x, y] as const;
   });

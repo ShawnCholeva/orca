@@ -26,8 +26,6 @@ vi.mock("./workspaces/WorkspacesPage", () => ({
 const fetchHealthMock = vi.fn();
 const listAgentsMock = vi.fn();
 const listGoalsMock = vi.fn();
-const listPluginsMock = vi.fn();
-const listSkillsMock = vi.fn();
 const openEventStreamMock = vi.fn();
 
 vi.mock("./api", async (importOriginal) => {
@@ -37,8 +35,6 @@ vi.mock("./api", async (importOriginal) => {
     fetchHealth: (...args: unknown[]) => fetchHealthMock(...args),
     listAgents: (...args: unknown[]) => listAgentsMock(...args),
     listGoals: (...args: unknown[]) => listGoalsMock(...args),
-    listPlugins: (...args: unknown[]) => listPluginsMock(...args),
-    listSkills: (...args: unknown[]) => listSkillsMock(...args),
     openEventStream: (...args: unknown[]) => openEventStreamMock(...args),
   };
 });
@@ -82,15 +78,11 @@ describe("App tab visibility with zero goals", () => {
     fetchHealthMock.mockReset();
     listAgentsMock.mockReset();
     listGoalsMock.mockReset();
-    listPluginsMock.mockReset();
-    listSkillsMock.mockReset();
     openEventStreamMock.mockReset();
 
     fetchHealthMock.mockResolvedValue({ status: "ok" });
     listAgentsMock.mockResolvedValue([makeAgent()]);
     listGoalsMock.mockResolvedValue({ goals: [] });
-    listPluginsMock.mockResolvedValue([]);
-    listSkillsMock.mockResolvedValue([]);
     openEventStreamMock.mockReturnValue({ close: vi.fn() });
   });
 
@@ -146,13 +138,9 @@ describe("App goal loading on daemon connect", () => {
     fetchHealthMock.mockReset();
     listAgentsMock.mockReset();
     listGoalsMock.mockReset();
-    listPluginsMock.mockReset();
-    listSkillsMock.mockReset();
     openEventStreamMock.mockReset();
 
     listAgentsMock.mockResolvedValue([makeAgent()]);
-    listPluginsMock.mockResolvedValue([]);
-    listSkillsMock.mockResolvedValue([]);
   });
 
   // Regression: when the app starts before the daemon's HTTP server is
@@ -208,15 +196,11 @@ describe("Goals rail workspace filter", () => {
     fetchHealthMock.mockReset();
     listAgentsMock.mockReset();
     listGoalsMock.mockReset();
-    listPluginsMock.mockReset();
-    listSkillsMock.mockReset();
     openEventStreamMock.mockReset();
 
     fetchHealthMock.mockResolvedValue({ status: "ok" });
     listAgentsMock.mockResolvedValue([makeAgent()]);
     listGoalsMock.mockResolvedValue({ goals });
-    listPluginsMock.mockResolvedValue([]);
-    listSkillsMock.mockResolvedValue([]);
     openEventStreamMock.mockReturnValue({ close: vi.fn() });
   });
 

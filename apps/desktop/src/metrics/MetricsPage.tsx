@@ -10,6 +10,7 @@ const PERIODS = ["24h", "7d", "30d"] as const;
 export function MetricsPage() {
   const workflows = getWorkflowMetrics();
   const [wfId, setWfId] = useState(workflows[0].id);
+  // Period toggle is display-only today — mock data has no time dimension; wired for the future real-data seam.
   const [period, setPeriod] = useState<(typeof PERIODS)[number]>("7d");
   const [openStep, setOpenStep] = useState<string | null>("Verify Proposal");
   const wf = workflows.find((w) => w.id === wfId) ?? workflows[0];

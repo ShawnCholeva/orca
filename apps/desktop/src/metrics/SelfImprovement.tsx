@@ -142,7 +142,7 @@ export function AutoApplyToggle() {
       aria-pressed={on}
       style={{ width: 32, height: 18, borderRadius: 999, border: "none", cursor: "pointer", flexShrink: 0, background: on ? "var(--accent)" : "rgba(255,255,255,0.12)", position: "relative", transition: "background 160ms ease", padding: 0 }}
     >
-      <span style={{ position: "absolute", top: 2, left: on ? 16 : 2, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left 160ms ease" }} />
+      <span style={{ position: "absolute", top: 2, left: on ? 16 : 2, width: 14, height: 14, borderRadius: "50%", background: "#FFFFFF", transition: "left 160ms ease" }} />
     </button>
   );
 }
