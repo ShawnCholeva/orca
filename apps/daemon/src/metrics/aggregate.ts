@@ -1,6 +1,6 @@
 import type { HarnessMetrics } from "../harness-metrics/usecases.js";
 import { computeHarnessMetricsFromTransitions } from "../harness-metrics/usecases.js";
-import type { MetricPeriod, TemplateMetricsSummary } from "@orca/contracts";
+import type { MetricPeriod, TemplateMetricsSummary, StepMetrics } from "@orca/contracts";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
 
 export const SAMPLE_MIN = 5;
@@ -148,4 +148,173 @@ export function computeTemplateSummary(input: {
     versions: input.versions,
     confidence: input.runCount < SAMPLE_MIN ? "low" : "ok",
   };
+}
+
+const FAILED_OUTCOME = new Set(["failed", "escalated", "denied"]);
+const TREND_BUCKETS = 12;
+
+function mean(xs: number[]): number | null {
+  return xs.length === 0 ? null : xs.reduce((a, b) => a + b, 0) / xs.length;
+}
+function p50(xs: number[]): number | null {
+  if (xs.length === 0) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 === 0 ? (s[mid - 1] + s[mid]) / 2 : s[mid];
+}
+function uniqueCapped(values: string[], cap = 12): string[] {
+  return [...new Set(values)].slice(0, cap);
+}
+function countBy<T>(items: T[], key: (t: T) => string | null | undefined): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const it of items) { const k = key(it); if (k != null) out[k] = (out[k] ?? 0) + 1; }
+  return out;
+}
+
+export function deriveInsights(step: StepMetrics): string[] {
+  const out: string[] = [];
+  // I4a — false confidence: passes but the oracle is inadequate.
+  if (step.quality.verdictPassRate >= 0.8 && step.quality.oracleSufficientRate < 0.5) {
+    out.push("Passes, but the oracle is inadequate — verified output may not be the full specification.");
+  }
+  // I4b — cost without verification gain.
+  if ((step.cost.meanTokens ?? 0) > 0 && (step.score ?? 0) < 70 && (step.cost.meanTokens ?? 0) >= 4000) {
+    out.push("High token cost with low verification gain.");
+  }
+  // I4c — loop / churn.
+  if ((step.cost.meanRetries ?? 0) >= 1.5) {
+    out.push("Loops between failed strategies — high retry churn.");
+  }
+  return out;
+}
+
+export function computeStepMetrics(input: {
+  transitions: TemplateTransition[];
+  stepRuns: TemplateStepRun[];
+  stepNames: Map<string, { name: string; ordinal: number }>;
+  nowIso: string;
+  period: MetricPeriod;
+}): StepMetrics[] {
+  const byStep = new Map<string, TemplateTransition[]>();
+  for (const t of input.transitions) {
+    if (!t.stepTemplateId) continue;
+    (byStep.get(t.stepTemplateId) ?? byStep.set(t.stepTemplateId, []).get(t.stepTemplateId)!).push(t);
+  }
+  const runsByStep = new Map<string, TemplateStepRun[]>();
+  for (const r of input.stepRuns) {
+    (runsByStep.get(r.stepTemplateId) ?? runsByStep.set(r.stepTemplateId, []).get(r.stepTemplateId)!).push(r);
+  }
+
+  const sinceIso = windowStart(input.nowIso, input.period);
+  const sinceMs = new Date(sinceIso).getTime();
+  const spanMs = new Date(input.nowIso).getTime() - sinceMs;
+
+  const steps: StepMetrics[] = [];
+  for (const [stepTemplateId, ts] of byStep) {
+    const meta = input.stepNames.get(stepTemplateId) ?? { name: stepTemplateId, ordinal: 999 };
+    const stepRuns = runsByStep.get(stepTemplateId) ?? [];
+    const completes = ts.filter((t) => t.transition.boundary === "step_complete" && t.transition.evidence);
+    const verification = dimsFromTransitions(ts).verification_strength.value ?? 0;
+
+    // CHANNEL 1 — quality / scope.
+    const verdictPassRate = completes.length === 0 ? 0 :
+      completes.filter((t) => t.transition.evidence!.verdict === "passed").length / completes.length;
+    const allSensors = completes.flatMap((t) => t.transition.evidence!.sensorsRun);
+    const sensorPassRate = allSensors.length === 0 ? 1 :
+      allSensors.filter((s) => s.result === "passed").length / allSensors.length;
+    const oracleSufficientRate = completes.length === 0 ? 0 :
+      completes.filter((t) => t.transition.evidence!.oracleAdequacy.sufficient).length / completes.length;
+
+    // CHANNEL 2 — cost / trajectory.
+    const latencies = ts.map((t) => t.transition.telemetry?.latency_ms).filter((x): x is number => typeof x === "number");
+    const tokens = ts.map((t) => t.transition.telemetry?.cost).filter((c): c is NonNullable<typeof c> => c != null)
+      .map((c) => c.tokens_in + c.tokens_out);
+    const usds = ts.map((t) => t.transition.telemetry?.cost?.usd).filter((x): x is number => typeof x === "number");
+    const finals = (() => {
+      const byKey = new Map<string, TemplateStepRun>();
+      for (const r of stepRuns) {
+        const k = r.workflowRunId; const prev = byKey.get(k);
+        if (!prev || r.attempt > prev.attempt) byKey.set(k, r);
+      }
+      return [...byKey.values()];
+    })();
+    const meanRetries = finals.length === 0 ? null : mean(finals.map((r) => r.attempt - 1));
+
+    // CHANNEL 3 — risk / boundary.
+    const riskTs = ts.filter((t) => t.transition.risk);
+    const riskClassDist = countBy(riskTs, (t) => t.transition.risk!.risk_class);
+    const gateDecisionDist = countBy(riskTs, (t) => t.transition.risk!.gate_decision);
+    const hardConstraintViolations = riskTs.reduce((n, t) => n + t.transition.risk!.hard_constraint_violations.length, 0);
+    const approvalTs = riskTs.filter((t) => t.transition.risk!.approval);
+    const approvals = { count: approvalTs.length, sampleTransitionIds: approvalTs.slice(0, 3).map((t) => t.transition.id) };
+
+    // Failure clusters (categorical, deterministic).
+    const failedTs = ts.filter((t) => FAILED_OUTCOME.has(t.transition.telemetry?.outcome.status ?? ""));
+    const clusterMap = new Map<string, { failureCode: string | null; boundary: string; ids: string[] }>();
+    for (const t of failedTs) {
+      const fc = t.transition.telemetry!.outcome.failure_code;
+      const key = `${fc ?? "null"}::${t.transition.boundary}`;
+      const entry = clusterMap.get(key) ?? { failureCode: fc, boundary: t.transition.boundary, ids: [] };
+      entry.ids.push(t.transition.id);
+      clusterMap.set(key, entry);
+    }
+    const failureClusters = [...clusterMap.values()]
+      .map((c) => ({ failureCode: c.failureCode, boundary: c.boundary, count: c.ids.length, sampleTransitionIds: c.ids.slice(0, 3) }))
+      .sort((a, b) => b.count - a.count);
+
+    // Counts.
+    const passedFirstTry = finals.filter((r) => r.attempt === 1 && r.status === "passed").length;
+    const recovered = finals.filter((r) => r.attempt > 1 && r.status === "passed").length;
+    const failed = finals.filter((r) => FAILED_STATUSES.has(r.status)).length;
+    const sampleSize = Math.max(finals.length, completes.length);
+
+    // Trend (bucketed verification strength) + version boundaries.
+    const trend: number[] = [];
+    const versionBoundaries: number[] = [];
+    if (sampleSize >= SAMPLE_MIN && spanMs > 0) {
+      let lastVersion: number | null = null;
+      for (let i = 0; i < TREND_BUCKETS; i++) {
+        const lo = sinceMs + (spanMs * i) / TREND_BUCKETS;
+        const hi = sinceMs + (spanMs * (i + 1)) / TREND_BUCKETS;
+        const bucket = completes.filter((t) => {
+          const at = new Date(t.transition.createdAt).getTime();
+          return at >= lo && at < hi;
+        });
+        if (bucket.length > 0) {
+          trend.push(Math.round((dimsFromTransitions(bucket).verification_strength.value ?? 0) * 100));
+          const v = bucket[bucket.length - 1].templateVersion;
+          if (lastVersion !== null && v !== lastVersion) versionBoundaries.push(i);
+          lastVersion = v;
+        } else {
+          trend.push(trend.length > 0 ? trend[trend.length - 1] : 0);
+        }
+      }
+    }
+
+    // Recent raw reasons (full-fidelity tail) from step-run blocked_reason.
+    const recentReasons = [...stepRuns]
+      .filter((r) => r.blockedReason)
+      .sort((a, b) => (b.finishedAt ?? "").localeCompare(a.finishedAt ?? ""))
+      .slice(0, 5)
+      .map((r) => ({ at: r.finishedAt ?? r.startedAt ?? "", reason: r.blockedReason! }));
+
+    const step: StepMetrics = {
+      stepTemplateId, name: meta.name, ordinal: meta.ordinal,
+      score: Math.round(verification * 100), sampleSize, confidence: sampleSize < SAMPLE_MIN ? "low" : "ok",
+      runs: finals.length, passedFirstTry, recovered, failed,
+      quality: {
+        verdictPassRate, sensorPassRate, oracleSufficientRate,
+        untestedRegions: uniqueCapped(completes.flatMap((t) => t.transition.evidence!.untestedRegions)),
+        residualRisk: uniqueCapped(completes.flatMap((t) => t.transition.evidence!.residualRisk)),
+        oracleGaps: uniqueCapped(completes.flatMap((t) => t.transition.evidence!.oracleAdequacy.gaps)),
+        limitingDimension: null,
+      },
+      cost: { p50LatencyMs: p50(latencies), meanTokens: mean(tokens), meanUsd: mean(usds), meanRetries },
+      risk: { riskClassDist, gateDecisionDist, hardConstraintViolations, approvals },
+      failureClusters, trend, versionBoundaries, insights: [], recentReasons,
+    };
+    step.insights = deriveInsights(step);
+    steps.push(step);
+  }
+  return steps.sort((a, b) => a.ordinal - b.ordinal);
 }
