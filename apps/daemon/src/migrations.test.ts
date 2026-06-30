@@ -173,6 +173,7 @@ describe("runMigrations", () => {
       "0045_step_run_confirmed_lead.sql",
       "0046_step_run_pending_revision.sql",
       "0047_activity_steps_tool_use_id.sql",
+      "0048_step_run_prior_claims.sql",
     ]);
   });
 
@@ -312,6 +313,7 @@ describe("runMigrations", () => {
       "0045_step_run_confirmed_lead.sql",
       "0046_step_run_pending_revision.sql",
       "0047_activity_steps_tool_use_id.sql",
+      "0048_step_run_prior_claims.sql",
     ]);
 
     const goalCount = (
@@ -604,6 +606,7 @@ describe("session tables migration", () => {
       "0045_step_run_confirmed_lead.sql",
       "0046_step_run_pending_revision.sql",
       "0047_activity_steps_tool_use_id.sql",
+      "0048_step_run_prior_claims.sql",
     ]);
 
     const tables = (
@@ -1129,6 +1132,7 @@ describe("migration 0010 workflows", () => {
       "0045_step_run_confirmed_lead.sql",
       "0046_step_run_pending_revision.sql",
       "0047_activity_steps_tool_use_id.sql",
+      "0048_step_run_prior_claims.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1731,6 +1735,7 @@ describe("migration 0012 orchestration transport", () => {
       "0045_step_run_confirmed_lead.sql",
       "0046_step_run_pending_revision.sql",
       "0047_activity_steps_tool_use_id.sql",
+      "0048_step_run_prior_claims.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

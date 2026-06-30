@@ -446,6 +446,31 @@ function setupHandoffStepRun(db: Database.Database) {
   ).run(step.id, step.ordinal, NOW);
 }
 
+/** Seed a completed step_complete transition in run-1 with a USD cost, so the
+ *  budget pre-check sees accumulated spend for the run. */
+function seedRunSpend(db: Database.Database, usd: number, id = "sc-budget") {
+  insertTransition(db, {
+    id,
+    goalId: "goal-1",
+    workflowRunId: "run-1",
+    workflowStepRunId: "step-1",
+    boundary: "step_complete",
+    risk: null,
+    evidence: null,
+    stateDeps: null,
+    telemetry: {
+      cost: {
+        tokens_in: 1000, tokens_out: 300,
+        cache_read_tokens: null, cache_creation_tokens: null, usd,
+      },
+      latency_ms: null, model: "claude", provider_id: null, provider_version: null,
+      prompt_ref: null, raw_output_ref: null, rejected_alternatives: [],
+      human_interventions: [], outcome: { status: "succeeded", failure_code: null },
+    },
+    createdAt: NOW,
+  });
+}
+
 /** Insert a minimal workspace so sessions FK is satisfied */
 function seedWorkspace(db: Database.Database) {
   db.prepare(
@@ -759,6 +784,64 @@ describe("OrchestratorService agent step", () => {
     expect(recommendationCount(db, "launch_workflow_session")).toBe(1);
 
     expect(launchFn).not.toHaveBeenCalled();
+  });
+
+  it("budget_rule over cap under human_review escalates to a launch recommendation, does NOT launch", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const guardrails = JSON.stringify([
+      { id: "g-budget", kind: "budget_rule", label: "Cap run spend", configJson: { maxUsd: 0.1, scope: "workflow" } },
+    ]);
+    setupAgentStepRun(db, { guardrailsJson: guardrails });
+    seedRunSpend(db, 0.5); // already spent $0.50 in run-1 → over the $0.10 cap
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
+    const { engine } = makeAgentService(makeLauncher(launchFn));
+
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    const second = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    expect(second.recommendationIds).toHaveLength(1);
+    expect(recommendationCount(db, "launch_workflow_session")).toBe(1);
+    expect(launchFn).not.toHaveBeenCalled();
+  });
+
+  it("budget_rule over cap under automated hard-stops the run, does NOT launch", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const guardrails = JSON.stringify([
+      { id: "g-budget", kind: "budget_rule", label: "Cap run spend", configJson: { maxUsd: 0.1, scope: "workflow" } },
+    ]);
+    setupAgentStepRun(db, { guardrailsJson: guardrails });
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    seedRunSpend(db, 0.5);
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
+    const { engine } = makeAgentService(makeLauncher(launchFn));
+
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    expect(launchFn).not.toHaveBeenCalled();
+    expect(
+      db.prepare("SELECT status, blocked_reason FROM workflow_runs WHERE id = 'run-1'").get()
+    ).toMatchObject({ status: "blocked", blocked_reason: expect.stringMatching(/budget_exhausted/i) });
+  });
+
+  it("budget_rule under cap launches normally (does not interfere with the run)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const guardrails = JSON.stringify([
+      { id: "g-budget", kind: "budget_rule", label: "Cap run spend", configJson: { maxUsd: 1.0, scope: "workflow" } },
+    ]);
+    setupAgentStepRun(db, { guardrailsJson: guardrails });
+    seedRunSpend(db, 0.5); // under the $1.00 cap
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-1" }));
+    const { engine } = makeAgentService(makeLauncher(launchFn));
+
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    expect(launchFn).toHaveBeenCalledOnce();
+    expect(recommendationCount(db, "launch_workflow_session")).toBe(0);
   });
 
   it("is idempotent: subsequent calls with existing unaccepted launch recommendation return noop, no new recommendations", async () => {
@@ -1143,6 +1226,75 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       .prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'")
       .get() as { pending_completion_json: string | null };
     expect(row.pending_completion_json).toBeNull();
+  });
+
+  it("2.8: a correction inventing a new unresolved file path is rejected (re-revise), not approved", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db); // ws-1 → /tmp/repo (the invented path won't resolve there)
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    // This output is a CORRECTION (attempt 1) whose prior claim-set did not
+    // include the invented path.
+    db.prepare(
+      "UPDATE workflow_step_runs SET revise_attempts = 1, prior_claims_json = ? WHERE id = 'step-1'"
+    ).run(JSON.stringify(["src/real.ts"]));
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), deliver);
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({ result: "implemented", changed_files: ["src/real.ts", "src/invented.ts"] }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // Not approved: no step_output artifact, no scored result — a re-revise fired.
+    expect(stepOutputCount(db)).toBe(0);
+    const row = db
+      .prepare(
+        "SELECT step_result_json, pending_revision_json FROM workflow_step_runs WHERE id = 'step-1'"
+      )
+      .get() as { step_result_json: string | null; pending_revision_json: string | null };
+    expect(row.step_result_json).toBeNull();
+    expect(row.pending_revision_json).not.toBeNull();
+    expect(JSON.parse(row.pending_revision_json!).feedback).toMatch(/src\/invented\.ts/);
+  });
+
+  it("2.8: a first attempt (not a correction) is not claim-gated even with an unresolved path", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    // revise_attempts defaults to 0 → first attempt, claim verification does not apply.
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete" }), deliver);
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({ result: "implemented", changed_files: ["src/invented.ts"] }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // Proceeds to normal completion (writes the step_output artifact).
+    expect(stepOutputCount(db)).toBe(1);
+    expect(
+      db.prepare("SELECT pending_revision_json FROM workflow_step_runs WHERE id = 'step-1'").get()
+    ).toMatchObject({ pending_revision_json: null });
   });
 
   it("approve_step_complete: writes step_output artifact and recommends run completion", async () => {

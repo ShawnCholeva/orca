@@ -31,6 +31,8 @@ import { detectPendingAgentQuestion } from "./agent-interview.js";
 import { listWorkspacesByGoal } from "../../workspaces/projection.js";
 import { buildStepCompleteStateFacet, decideConflictResponse } from "../../harness-state/step-complete.js";
 import { conflictPolicyForGoal } from "../../harness-state/conflict-policy.js";
+import { probeWorkspaceForSession } from "../../harness-state/workspace-version.js";
+import { extractFileClaims, verifyCorrectionClaims } from "../../harness-state/claim-verification.js";
 import { emitStepComplete } from "../../harness-transitions/emit.js";
 import { runSensors } from "../../harness-sensors/runner.js";
 import { stepRequiresExecution } from "./requires-execution.js";
@@ -1052,6 +1054,61 @@ export class OrchestratorService {
               options
             );
           }
+        }
+
+        // Stateful axis (2.8) — assumption-level claim verification (fabrication
+        // rollback). On a correction (a revision attempt), reject the corrected
+        // output if it INTRODUCED file-path claims that don't resolve against the
+        // step's own workspace root — a revision that invents nonexistent paths.
+        // Diffing against the prior attempt's claim-set avoids flagging paths the
+        // step is legitimately about to create. Correction-only + new-claim-only
+        // gating keeps it non-universal (prose/reasoning corrections never fire).
+        // Plane note: the path resolution reads the working tree (an execution-
+        // plane capability behind the future RunnerPort); the reject decision here
+        // stays control-plane. Guarded so it can never break completion.
+        try {
+          if ((ctx.stepRun.revise_attempts ?? 0) > 0 && sessionId) {
+            const ws = probeWorkspaceForSession(db, sessionId);
+            if (ws) {
+              const priorRow = db
+                .prepare("SELECT prior_claims_json FROM workflow_step_runs WHERE id = ?")
+                .get(ctx.stepRun.id) as { prior_claims_json: string | null } | undefined;
+              const priorClaims = priorRow?.prior_claims_json
+                ? (JSON.parse(priorRow.prior_claims_json) as string[])
+                : [];
+              const { fabricatedClaims } = verifyCorrectionClaims({
+                priorOutput: priorClaims,
+                correctedOutput: block,
+                roots: [ws.path],
+              });
+              if (fabricatedClaims.length > 0) {
+                // Bounded issue list (the paper's PEV "fix only these" routing) —
+                // do not re-revise what is already correct. The snapshot is NOT
+                // advanced here, so a still-present fabrication keeps re-flagging
+                // until removed (or the revise cap escalates to the human).
+                return this.reviseStep(
+                  db,
+                  now,
+                  ctx,
+                  sessionId,
+                  `This revision references ${fabricatedClaims.length} path(s) that do not exist in the workspace: ${fabricatedClaims.join(", ")}. Fix only these references — remove them or correct them to real paths — and do not rewrite the parts of the output that are already correct.`,
+                  options
+                );
+              }
+            }
+          }
+        } catch (err) {
+          console.error("2.8 claim verification failed", err);
+        }
+        // Snapshot the proceeding output's claim-set so the NEXT correction can
+        // diff against it. Runs for first attempts too (seeds the baseline).
+        try {
+          db.prepare("UPDATE workflow_step_runs SET prior_claims_json = ? WHERE id = ?").run(
+            JSON.stringify(extractFileClaims(block)),
+            ctx.stepRun.id
+          );
+        } catch (err) {
+          console.error("2.8 claim snapshot failed", err);
         }
 
         // Stateful axis: derive write_set + assumptions, detect concurrent state
