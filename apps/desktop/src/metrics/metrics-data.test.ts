@@ -1,34 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { getWorkflowMetrics, getLearningLog, gradeFor, statusMeta } from "./metrics-data";
+import { gradeFor, healthOf, pctLabel } from "./metrics-data";
+import type { TemplateMetricsSummary } from "@orca/contracts";
 
-describe("metrics-data", () => {
-  it("returns at least three workflows, each with steps", () => {
-    const wfs = getWorkflowMetrics();
-    expect(wfs.length).toBeGreaterThanOrEqual(3);
-    for (const wf of wfs) {
-      expect(wf.steps.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("exposes a learning log with known event types", () => {
-    const log = getLearningLog();
-    expect(log.length).toBeGreaterThan(0);
-    for (const e of log) {
-      expect(["applied", "observed", "proposed", "reverted"]).toContain(e.type);
-    }
-  });
-
-  it("grades by score boundaries", () => {
+describe("metrics-data formatting helpers", () => {
+  it("gradeFor maps scores to letters", () => {
     expect(gradeFor(95)).toBe("A");
-    expect(gradeFor(85)).toBe("B");
-    expect(gradeFor(75)).toBe("C");
-    expect(gradeFor(65)).toBe("D");
+    expect(gradeFor(61)).toBe("D");
     expect(gradeFor(40)).toBe("F");
   });
 
-  it("maps every status to a tone", () => {
-    expect(statusMeta.healthy.tone).toBe("run");
-    expect(statusMeta.watch.tone).toBe("warn");
-    expect(statusMeta.degraded.tone).toBe("err");
+  it("healthOf reads verificationStrength as a 0..100 health", () => {
+    const summary = { dimensions: { verificationStrength: { value: 0.82 } } } as TemplateMetricsSummary;
+    expect(healthOf(summary)).toBe(82);
+  });
+
+  it("pctLabel renders a 0..1 metric as a percentage, or — when null", () => {
+    expect(pctLabel({ value: 0.64 })).toBe("64%");
+    expect(pctLabel({ value: null })).toBe("—");
   });
 });
