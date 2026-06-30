@@ -381,6 +381,13 @@ export class DispatchEngine {
         objective,
       });
 
+      // Record the step_launch transition (belief-divergence baseline). This is
+      // the bootstrap/advance launch path (first step + post-completion + gate
+      // routing); commitAgentStepDecision records it on its own direct-launch
+      // path. Without this, steps launched here never capture a launch-time
+      // workspace version, so belief-divergence has nothing to compare against.
+      this.recordStepLaunchTransition(db, now, ctx.goal, ctx.run, ctx.stepRun, sessionId, options);
+
       // Run the agent as a headless tmux worker, then submit its objective.
       await this.workerSpawn?.({ sessionId, goalId: ctx.goal.id, adapterId: dispatch.adapterId });
       const delivered = await this.workerDeliver?.(sessionId, objective);

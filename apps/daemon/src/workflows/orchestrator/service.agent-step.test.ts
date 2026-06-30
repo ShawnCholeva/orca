@@ -996,6 +996,30 @@ describe("OrchestratorService agent step", () => {
     expect(launch!.stateDeps!.version_deps).toContainEqual({ ref: "ws-1", observed_version: "orca-launch-test:true" });
   });
 
+  it("first-step launch (startWorkflowFirstStep → spawnStepAgent) records a step_launch transition (belief-divergence baseline)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+
+    // The real launcher creates the step's session in its workspace; mirror that
+    // so recordStepLaunchTransition can probe the workspace for its version.
+    const launchFn = vi.fn(async () => {
+      db.prepare(
+        "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES ('sess-1', 'goal-1', 'ws-1', 'claude-code', 't', 'running', ?, 'step-1')"
+      ).run(NOW);
+      return { sessionId: "sess-1" };
+    });
+    const { service } = makeAgentService(makeLauncher(launchFn));
+
+    await service.startWorkflowFirstStep(db, () => NOW, "run-1", { bus, idFactory });
+
+    expect(launchFn).toHaveBeenCalledOnce();
+    const launch = listTransitionsByGoal(db, "goal-1").find((t) => t.boundary === "step_launch");
+    expect(launch).toBeTruthy();
+    expect(launch!.workflowStepRunId).toBe("step-1");
+    expect(launch!.stateDeps).toBeTruthy();
+  });
+
   it("does not re-launch while a session linked to the step is still running", async () => {
     const { db, bus, idFactory } = setupHarness();
 
