@@ -12,6 +12,7 @@ import { AdapterId } from "./adapters/ids.js";
 
 export * from "./workflows/index.js";
 export * from "./harness/index.js";
+export * from "./metrics/index.js";
 export * from "./adapters/ids.js";
 
 const UTF8_ENCODER = new TextEncoder();
