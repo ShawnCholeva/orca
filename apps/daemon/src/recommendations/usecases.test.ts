@@ -448,6 +448,42 @@ describe('acceptRecommendation', () => {
     expect(markDone!.stateDeps?.write_set).toContainEqual({ kind: 'memory_item', ref: 'm1', change_kind: 'created' });
   });
 
+  it('carries the run\'s Goal-total cost roll-up on the mark_done terminal (2.7)', () => {
+    const db = freshDb();
+    seedGoal(db, 'g1');
+    seedWorkflow(db, 'g1', { finalStep: true, outstanding: [] });
+    const stepCost = {
+      tokens_in: 1000, tokens_out: 300,
+      cache_read_tokens: null, cache_creation_tokens: null, usd: 0.05,
+    };
+    insertTransition(db, {
+      id: 'sc-cost-1', goalId: 'g1', workflowRunId: 'run-1', workflowStepRunId: 'step-1',
+      boundary: 'step_complete', risk: null, evidence: null, stateDeps: null,
+      telemetry: {
+        cost: stepCost, latency_ms: null, model: 'claude', provider_id: null,
+        provider_version: null, prompt_ref: null, raw_output_ref: null,
+        rejected_alternatives: [], human_interventions: [],
+        outcome: { status: 'succeeded', failure_code: null },
+      },
+      createdAt: '2026-06-26T00:00:00.000Z',
+    });
+    seedRec(db, {
+      goalId: 'g1',
+      type: 'complete_workflow_run',
+      workflowStepRunId: 'step-1',
+      proposedActionJson: JSON.stringify({
+        kind: 'complete_workflow_run',
+        workflowRunId: 'run-1',
+        workflowStepRunId: 'step-1',
+      }),
+    });
+
+    acceptRecommendation(makeCtx(db), 'rec-1');
+
+    const markDone = listTransitionsByGoal(db, 'g1').find((t) => t.boundary === 'mark_done');
+    expect(markDone!.telemetry?.cost).toEqual(stepCost);
+  });
+
   // DELETED: 'accepting mark_artifact_satisfied records matching exit criteria'.
   // Exit criteria were removed in the instruction-driven redesign (Task 9); the step-run
   // satisfied/outstanding exit-criteria recording no longer exists. The instruction-driven

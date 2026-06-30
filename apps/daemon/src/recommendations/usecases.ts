@@ -66,6 +66,7 @@ import {
 import { emitMarkDone } from "../harness-transitions/emit.js";
 import { resolveMarkDoneActivity } from "../activities/store.js";
 import { buildGoalWriteSetRollup } from "../harness-state/write-set-rollup.js";
+import { buildGoalCostRollup } from "../harness-state/cost-rollup.js";
 import type { TelemetryFacet } from "@orca/contracts";
 
 export {
@@ -556,12 +557,13 @@ function recordTerminalFeedback(
   // Human-authoritative completion crossed the harness ledger's terminal boundary.
   // Emitted post-commit because recordHarnessTransition opens its own transaction
   // and better-sqlite3 forbids nesting. Swallow-and-log: a transition failure must
-  // never break completion. Deferred enrichments (cumulative write-set, Goal-total
-  // cost roll-up) are tracked in FUTURE_WORK.md 2.7.
+  // never break completion. Carries the run's cumulative write-set and Goal-total
+  // cost roll-ups (FUTURE_WORK.md 2.7).
   if (action === "accept" && rec.proposedAction.kind === "complete_workflow_run") {
     try {
       const telemetry: TelemetryFacet = {
-        cost: null, latency_ms: null, model: null,
+        cost: buildGoalCostRollup(db, rec.goalId, rec.proposedAction.workflowRunId),
+        latency_ms: null, model: null,
         provider_id: null, provider_version: null,
         prompt_ref: null, raw_output_ref: null,
         rejected_alternatives: [],
