@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import type { HarnessTransition } from "@orca/contracts";
 import { listTransitionsByGoal } from "../harness-transitions/usecases.js";
 
 export type Metric = { value: number | null; reason?: string };
@@ -12,7 +13,10 @@ export type HarnessMetrics = {
 };
 
 export function computeHarnessMetrics(db: Database.Database, goalId: string): HarnessMetrics {
-  const ts = listTransitionsByGoal(db, goalId, 10_000);
+  return computeHarnessMetricsFromTransitions(listTransitionsByGoal(db, goalId, 10_000));
+}
+
+export function computeHarnessMetricsFromTransitions(ts: HarnessTransition[]): HarnessMetrics {
   const n = ts.length;
   const withRisk = ts.filter((t) => t.risk !== null);
   const withStateDeps = ts.filter((t) => t.stateDeps !== null);

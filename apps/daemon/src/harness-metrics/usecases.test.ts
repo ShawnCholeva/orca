@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
-import type { DomainEvent } from "@orca/contracts";
+import type { DomainEvent, HarnessTransition } from "@orca/contracts";
 import type { Config } from "../config.js";
 import { closeDatabase, openDatabase } from "../db.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
@@ -14,7 +14,7 @@ import {
   type HarnessTransitionCtx,
 } from "../harness-transitions/usecases.js";
 import { resetPreparedStatements as resetProjectionStmts } from "../harness-transitions/projection.js";
-import { computeHarnessMetrics } from "./usecases.js";
+import { computeHarnessMetrics, computeHarnessMetricsFromTransitions } from "./usecases.js";
 
 const tempDirs: string[] = [];
 
@@ -175,4 +175,31 @@ describe("computeHarnessMetrics", () => {
     const m = computeHarnessMetrics(db, "rec");
     expect(m.recovery.value).toBe(1);
   });
+});
+
+it("computeHarnessMetricsFromTransitions returns null metrics for an empty list", () => {
+  const metrics = computeHarnessMetricsFromTransitions([]);
+  expect(metrics.trajectory_efficiency).toEqual({ value: null, reason: "no transitions" });
+  expect(metrics.replayability).toEqual({ value: null, reason: "no transitions" });
+});
+
+it("computeHarnessMetricsFromTransitions computes verification_strength from step_complete evidence", () => {
+  const base = {
+    id: "t1", goalId: "g", workflowRunId: "r", workflowStepRunId: "s",
+    boundary: "step_complete" as const,
+    risk: null, stateDeps: null,
+    evidence: {
+      sensorsRun: [], verdict: "passed" as const, untestedRegions: [], residualRisk: [],
+      oracleAdequacy: { sufficient: true, gaps: [] },
+    },
+    telemetry: {
+      cost: null, latency_ms: 100, model: null, provider_id: null, provider_version: null,
+      prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [],
+      outcome: { status: "succeeded" as const, failure_code: null },
+    },
+    createdAt: "2026-05-01T00:00:00.000Z",
+  };
+  const ts: HarnessTransition[] = [base];
+  const metrics = computeHarnessMetricsFromTransitions(ts);
+  expect(metrics.verification_strength.value).toBe(1);
 });
