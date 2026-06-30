@@ -210,7 +210,9 @@ export function computeStepMetrics(input: {
   const spanMs = new Date(input.nowIso).getTime() - sinceMs;
 
   const steps: StepMetrics[] = [];
-  for (const [stepTemplateId, ts] of byStep) {
+  const allStepIds = new Set([...byStep.keys(), ...input.stepNames.keys()]);
+  for (const stepTemplateId of allStepIds) {
+    const ts = byStep.get(stepTemplateId) ?? [];
     const meta = input.stepNames.get(stepTemplateId) ?? { name: stepTemplateId, ordinal: 999 };
     const stepRuns = runsByStep.get(stepTemplateId) ?? [];
     const completes = ts.filter((t) => t.transition.boundary === "step_complete" && t.transition.evidence);
