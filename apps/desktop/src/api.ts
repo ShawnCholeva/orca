@@ -141,6 +141,7 @@ import {
   TemplateMetricsSummary,
   TemplateMetricsDetail,
   type MetricPeriod,
+  TemplateInstructionProposal,
 } from "@orca/contracts";
 
 export type {
@@ -939,6 +940,52 @@ export async function getTemplateMetricsDetail(templateId: string, period: Metri
   const res = await fetch(`${baseUrl}/v1/metrics/templates/${encodeURIComponent(templateId)}?period=${period}`, { headers: authHeaders(token) });
   const body = await parseResponse(res, z.object({ detail: TemplateMetricsDetail }));
   return body.detail;
+}
+
+export async function analyzeTemplate(templateId: string, period: MetricPeriod): Promise<TemplateInstructionProposal[]> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/learning/templates/${encodeURIComponent(templateId)}/analyze?period=${period}`,
+    { method: "POST", headers: authHeaders(token) });
+  const body = await parseResponse(res, z.object({ proposals: z.array(TemplateInstructionProposal) }));
+  return body.proposals;
+}
+
+export async function listProposals(templateId: string, period: MetricPeriod): Promise<TemplateInstructionProposal[]> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/learning/templates/${encodeURIComponent(templateId)}/proposals?period=${period}`,
+    { headers: authHeaders(token) });
+  const body = await parseResponse(res, z.object({ proposals: z.array(TemplateInstructionProposal) }));
+  return body.proposals;
+}
+
+export async function applyProposal(id: string, editedInstructions?: string): Promise<TemplateInstructionProposal> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/learning/proposals/${encodeURIComponent(id)}/apply`, {
+    method: "POST", headers: { ...authHeaders(token), "content-type": "application/json" },
+    body: JSON.stringify(editedInstructions !== undefined ? { editedInstructions } : {}),
+  });
+  const body = await parseResponse(res, z.object({ proposal: TemplateInstructionProposal }));
+  return body.proposal;
+}
+
+export async function dismissProposal(id: string): Promise<TemplateInstructionProposal> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/learning/proposals/${encodeURIComponent(id)}/dismiss`, { method: "POST", headers: authHeaders(token) });
+  const body = await parseResponse(res, z.object({ proposal: TemplateInstructionProposal }));
+  return body.proposal;
+}
+
+export async function rollbackProposal(id: string): Promise<TemplateInstructionProposal> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/learning/proposals/${encodeURIComponent(id)}/rollback`, { method: "POST", headers: authHeaders(token) });
+  const body = await parseResponse(res, z.object({ proposal: TemplateInstructionProposal }));
+  return body.proposal;
+}
+
+export async function restoreTemplateDefault(templateId: string): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/learning/templates/${encodeURIComponent(templateId)}/restore-default`, { method: "POST", headers: authHeaders(token) });
+  await parseResponse(res, z.object({ restored: z.boolean(), newVersion: z.number() }));
 }
 
 export async function startWorkflowRun(
