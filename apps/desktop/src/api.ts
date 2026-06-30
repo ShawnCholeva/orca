@@ -1,5 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { z } from "zod";
 import {
   AppSettings,
   type PutSettingsRequest,
@@ -926,35 +927,17 @@ export async function installTemplates(ids: string[]): Promise<WorkflowTemplate[
   return body.templates;
 }
 
-const TemplateMetricsSummariesResponse = {
-  parse(data: unknown): { summaries: TemplateMetricsSummary[] } {
-    if (!isRecord(data) || !("summaries" in data) || !Array.isArray(data.summaries)) {
-      throw new Error("invalid template metrics summaries response");
-    }
-    return { summaries: data.summaries.map((item) => TemplateMetricsSummary.parse(item)) };
-  },
-};
-
-const TemplateMetricsDetailResponse = {
-  parse(data: unknown): { detail: TemplateMetricsDetail } {
-    if (!isRecord(data) || !("detail" in data)) {
-      throw new Error("invalid template metrics detail response");
-    }
-    return { detail: TemplateMetricsDetail.parse(data.detail) };
-  },
-};
-
 export async function getTemplateMetricsSummaries(period: MetricPeriod): Promise<TemplateMetricsSummary[]> {
   const { baseUrl, token } = await loadConfig();
   const res = await fetch(`${baseUrl}/v1/metrics/templates?period=${period}`, { headers: authHeaders(token) });
-  const body = await parseResponse(res, TemplateMetricsSummariesResponse);
+  const body = await parseResponse(res, z.object({ summaries: z.array(TemplateMetricsSummary) }));
   return body.summaries;
 }
 
 export async function getTemplateMetricsDetail(templateId: string, period: MetricPeriod): Promise<TemplateMetricsDetail> {
   const { baseUrl, token } = await loadConfig();
   const res = await fetch(`${baseUrl}/v1/metrics/templates/${encodeURIComponent(templateId)}?period=${period}`, { headers: authHeaders(token) });
-  const body = await parseResponse(res, TemplateMetricsDetailResponse);
+  const body = await parseResponse(res, z.object({ detail: TemplateMetricsDetail }));
   return body.detail;
 }
 

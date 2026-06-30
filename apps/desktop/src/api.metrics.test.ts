@@ -40,3 +40,38 @@ describe("getTemplateMetricsSummaries", () => {
     expect(fetchMock.mock.calls[0]![0]).toContain("/v1/metrics/templates?period=7d");
   });
 });
+
+describe("getTemplateMetricsDetail", () => {
+  let api: ApiModule;
+  const fetchMock = vi.fn<typeof fetch>();
+
+  beforeEach(async () => {
+    vi.resetModules();
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    api = await import("./api");
+  });
+
+  it("requests the template detail endpoint with period and returns detail", async () => {
+    const summary = {
+      templateId: "tpl", name: "Brainstorm", latestVersion: 1, runs: 3,
+      dimensions: {
+        trajectoryEfficiency: { value: null }, verificationStrength: { value: 0.8 },
+        recovery: { value: null }, stateConsistency: { value: 1 },
+        safetyCompliance: { value: 1 }, replayability: { value: 1 },
+      },
+      firstPass: null, recovered: null, escalated: null,
+      latencyP50Ms: null,
+      deltas: { trajectoryEfficiency: null, verificationStrength: null, recovery: null,
+                stateConsistency: null, safetyCompliance: null, replayability: null, latencyP50Ms: null },
+      versionComparison: null, versions: [], confidence: "low",
+    };
+    const detail = { summary, steps: [] };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ detail }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const result = await api.getTemplateMetricsDetail("tpl", "7d");
+    expect(result.summary.templateId).toBe("tpl");
+    expect(result.steps).toEqual([]);
+    expect(fetchMock.mock.calls[0]![0]).toContain("/v1/metrics/templates/tpl?period=7d");
+  });
+});
