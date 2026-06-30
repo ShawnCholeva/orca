@@ -241,7 +241,8 @@ export const GuardrailKind = z.enum([
   "validation_rule",
   "context_rule",
   "concurrency_rule",
-  "cost_speed_preference"
+  "cost_speed_preference",
+  "budget_rule"
 ]);
 export type GuardrailKind = z.infer<typeof GuardrailKind>;
 

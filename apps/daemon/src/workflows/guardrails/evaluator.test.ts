@@ -217,6 +217,33 @@ describe("workflow guardrail evaluator", () => {
     ).toBe("allow");
   });
 
+  it("budget_rule denies launch when scoped spend reaches the cap", () => {
+    const overCtx = {
+      ...baseContext({ kind: "launch_workflow_session", operatorId: "codex" }),
+      budgetSpentUsd: 1.5,
+    };
+    expect(
+      evaluateGuardrail(guardrail("budget_rule", { maxUsd: 1.0 }), overCtx)
+    ).toMatchObject({ result: "deny" });
+
+    const underCtx = {
+      ...baseContext({ kind: "launch_workflow_session", operatorId: "codex" }),
+      budgetSpentUsd: 0.5,
+    };
+    expect(
+      evaluateGuardrail(guardrail("budget_rule", { maxUsd: 1.0 }), underCtx).result
+    ).toBe("allow");
+  });
+
+  it("budget_rule allows when no spend signal is supplied (generic pass is a no-op)", () => {
+    expect(
+      evaluateGuardrail(
+        guardrail("budget_rule", { maxUsd: 1.0 }),
+        baseContext({ kind: "launch_workflow_session", operatorId: "codex" })
+      ).result
+    ).toBe("allow");
+  });
+
   it("risk_rule requires approval for matched risk labels", () => {
     const ctx = {
       ...baseContext({ kind: "advance_step" }),

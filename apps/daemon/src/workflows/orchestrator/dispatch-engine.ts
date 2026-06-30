@@ -82,7 +82,12 @@ import { listDecisionsByGoal } from "../../decisions/projection.js";
 import { getGoalRefinement } from "../../goal-refinements.js";
 import { adapterIdForProvider } from "../../orchestrator-llm/model-provider-llm-client.js";
 import { listArtifactsForRun } from "../artifacts/projection.js";
-import { evaluateGuardrailRequiresApproval } from "../guardrails/evaluator.js";
+import {
+  evaluateGuardrail,
+  evaluateGuardrailRequiresApproval,
+  parseBudgetRuleConfig,
+} from "../guardrails/evaluator.js";
+import { buildGoalCostRollup } from "../../harness-state/cost-rollup.js";
 import { buildAgentObjective } from "./agent-objective.js";
 import { buildStepExecutionInput } from "./step-input.js";
 import { assembleWorkspaceContext } from "./workspace-context.js";
@@ -744,6 +749,22 @@ export class DispatchEngine {
 
     // (c) build objective
     const objective = buildAgentObjective(stepTpl, { goal, stepRun });
+
+    // (c2) budget pre-check (control-plane spend gate). A runaway step otherwise
+    // has no spend floor. Over-budget is a hard cap, routed by operating_mode:
+    // escalate to the human under human_review (a launch recommendation they can
+    // approve), hard-stop the run under automated (no human is watching).
+    const budgetReason = this.budgetDenyReason(db, template.guardrails, {
+      goalId: goal.id,
+      workflowRunId: run.id,
+      stepRunId: stepRun.id,
+      stepTemplateId: stepTpl.id,
+    });
+    if (budgetReason) {
+      return goalRequiresHumanReview(db, goal.id)
+        ? this.commitLaunchRecommendation(db, now, ctx, chosen, objective, options)
+        : this.blockRun(db, now, ctx, budgetReason, options);
+    }
 
     // (d) evaluate guardrails
     const guardrailCheck = evaluateGuardrailRequiresApproval(template.guardrails, {
@@ -1977,6 +1998,39 @@ export class DispatchEngine {
     // If the destination is a step, launch its worker agent (a splitter/gate
     // destination re-parks inside routeGateDestination, so this no-ops there).
     await this.spawnRoutedStep(db, now, runId, template, goal, options);
+  }
+
+  /**
+   * Returns a `budget_exhausted` deny reason if any `budget_rule` guardrail's cap
+   * is reached by the run's accumulated spend, else null. Spend is summed from the
+   * step_complete telemetry cost (per-workflow, or per-step-type for that scope) —
+   * the deterministic control-plane spend signal; the evaluator owns the compare.
+   */
+  private budgetDenyReason(
+    db: Database.Database,
+    guardrails: WorkflowTemplateT["guardrails"],
+    scope: { goalId: string; workflowRunId: string; stepRunId: string; stepTemplateId: string }
+  ): string | null {
+    for (const g of guardrails) {
+      if (g.kind !== "budget_rule") continue;
+      const cfg = parseBudgetRuleConfig(g.configJson);
+      const rollup =
+        cfg.scope === "step_type"
+          ? buildGoalCostRollup(db, scope.goalId, scope.workflowRunId, {
+              stepTemplateId: scope.stepTemplateId,
+            })
+          : buildGoalCostRollup(db, scope.goalId, scope.workflowRunId);
+      const result = evaluateGuardrail(g, {
+        goalId: scope.goalId,
+        workflowRunId: scope.workflowRunId,
+        stepRunId: scope.stepRunId,
+        stepTemplateId: scope.stepTemplateId,
+        candidateAction: { kind: "launch_workflow_session", operatorId: "" },
+        budgetSpentUsd: rollup?.usd ?? 0,
+      });
+      if (result.result === "deny") return result.message ?? "budget_exhausted";
+    }
+    return null;
   }
 
   blockRun(

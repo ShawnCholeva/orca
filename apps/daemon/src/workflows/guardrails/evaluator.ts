@@ -21,6 +21,11 @@ export type GuardrailContext = {
   stepTemplateId?: string;
   activeExecutionCount?: number;
   riskLabels?: string[];
+  // Scoped cumulative spend (USD) the budget_rule compares against its cap. The
+  // caller computes it (per-workflow or per-step-type) and passes it in, keeping
+  // the evaluator a pure deterministic function. Absent ⇒ budget_rule is a no-op
+  // (the generic pre-dispatch pass supplies no spend; the dedicated budget pass does).
+  budgetSpentUsd?: number;
   candidateAction:
     | { kind: "launch_workflow_session"; operatorId: string }
     | { kind: "advance_step" }
@@ -88,6 +93,22 @@ function parseConcurrencyRuleConfig(value: unknown): { maxConcurrentExecution?: 
     .object({ maxConcurrentExecution: z.number().int().nonnegative().optional() })
     .safeParse(value);
   return parsed.success ? parsed.data : {};
+}
+
+export function parseBudgetRuleConfig(value: unknown): {
+  maxUsd?: number;
+  scope: "workflow" | "step_type";
+} {
+  const parsed = z
+    .object({
+      maxUsd: z.number().positive().optional(),
+      scope: z.enum(["workflow", "step_type"]).optional(),
+    })
+    .safeParse(value);
+  return {
+    maxUsd: parsed.success ? parsed.data.maxUsd : undefined,
+    scope: parsed.success ? parsed.data.scope ?? "workflow" : "workflow",
+  };
 }
 
 function parseRiskRuleConfig(value: unknown): { escalateOn: string[] } {
@@ -220,6 +241,25 @@ export function evaluateGuardrail(
         result: "allow",
         message: "cost/speed preference applies to operator ranking",
       };
+    case "budget_rule": {
+      const cfg = parseBudgetRuleConfig(guardrail.configJson);
+      // No cap configured, or no spend signal supplied (generic pass) ⇒ no-op.
+      // Over-budget is a hard cap → deny; the engine routes the deny by
+      // operating_mode (escalate under human_review, hard-stop under automated).
+      if (
+        cfg.maxUsd !== undefined &&
+        ctx.budgetSpentUsd !== undefined &&
+        ctx.budgetSpentUsd >= cfg.maxUsd
+      ) {
+        return {
+          guardrailId: guardrail.id,
+          kind: guardrail.kind,
+          result: "deny",
+          message: `budget_exhausted: ${cfg.scope} spend $${ctx.budgetSpentUsd.toFixed(2)} reached cap $${cfg.maxUsd.toFixed(2)}`,
+        };
+      }
+      return { guardrailId: guardrail.id, kind: guardrail.kind, result: "allow" };
+    }
   }
 }
 
