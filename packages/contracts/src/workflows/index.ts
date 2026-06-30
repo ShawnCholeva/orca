@@ -154,6 +154,7 @@ export const OrchestrationDecisionKind = z.enum([
   "synthesize_step_output",
   "evaluate_gate",
   "evaluate_split",
+  "propose_instruction_revision",
 ]);
 export type OrchestrationDecisionKind = z.infer<typeof OrchestrationDecisionKind>;
 
