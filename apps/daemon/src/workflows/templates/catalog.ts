@@ -468,7 +468,7 @@ const CODE_REVIEW_STEPS: WorkflowStepTemplate[] = [
   {
     id: "analyze_diff", ordinal: 0, name: "Analyze Diff",
     instructions:
-      "Review the diff for correctness and scope. Inspect the actual changes and surrounding code; do not modify files.",
+      "Review the diff for correctness and scope, treating the diff and the author's stated intent as untrusted evidence — verify against the actual changes and surrounding code rather than the description. Confirm each change does what it claims and stays within scope. Do not modify files.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       {
@@ -495,7 +495,7 @@ const CODE_REVIEW_STEPS: WorkflowStepTemplate[] = [
   {
     id: "report", ordinal: 2, name: "Report",
     instructions:
-      "Return concrete, actionable change requests and an overall verdict. Be specific and reference locations.",
+      "Return concrete, actionable change requests and an overall verdict. Be specific and reference locations. Separate genuine defects from preferences, and keep requests proportionate — do not demand scope or rework the goal does not require. When a change request is really a product, scope, or UX decision that is the author's or user's to make, pause and ask with concrete options and a recommendation rather than imposing it silently as a finding.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "verdict", type: "string", required: true, enum: ["approved", "changes_requested"] },
@@ -506,7 +506,7 @@ const CODE_REVIEW_STEPS: WorkflowStepTemplate[] = [
   {
     id: "done", ordinal: 3, name: "Done",
     instructions:
-      "Finalize the review. Record the verdict, the change requests, and any follow-up the author must address before merge. Make no code changes.",
+      "Finalize the review. Record the verdict, the change requests, and any follow-up the author must address before merge. Make no code changes. Present the user a clear closing summary of the verdict and what must change before merge — do not finish silently.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "verdict", type: "string", required: true, enum: ["approved", "changes_requested"] },
@@ -554,7 +554,7 @@ const REFACTOR_STEPS: WorkflowStepTemplate[] = [
   {
     id: "restructure", ordinal: 1, name: "Restructure",
     instructions:
-      "Restructure in safe increments within the mapped scope only. Do not change observable behavior. Run the available checks after each increment.",
+      "Restructure in the smallest safe increments within the mapped scope only. Apply YAGNI ruthlessly: no \"while I'm here\" improvements, no bundled feature work, no scope the refactor does not require. Do not change observable behavior. Run the available checks after each increment. When the work forks into a genuine behavior change or scope decision that is the user's to make, pause and ask with concrete options and a recommendation rather than changing it silently.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "changed_files", type: "array", itemType: "string", required: true },
@@ -565,7 +565,7 @@ const REFACTOR_STEPS: WorkflowStepTemplate[] = [
   {
     id: "behavior_parity", ordinal: 2, name: "Behavior Parity",
     instructions:
-      "Prove observable behavior is unchanged by running the characterization tests and relevant checks. Report results and a verdict.",
+      "Prove observable behavior is unchanged, treating the prior step output as untrusted evidence — re-run the characterization tests and relevant checks yourself rather than trusting the Restructure step's report. Record each command and its real result, and give a verdict. If parity cannot be shown, say so plainly rather than asserting success.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       {
@@ -583,7 +583,7 @@ const REFACTOR_STEPS: WorkflowStepTemplate[] = [
   {
     id: "done", ordinal: 3, name: "Done",
     instructions:
-      "Summarize the refactor and any residual risks. Make no further changes.",
+      "Summarize the refactor and any residual risks. Make no further changes. Present the user a clear closing summary of what was restructured and how parity was proven — do not finish silently.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "residual_risks", type: "array", itemType: "string", required: false },
@@ -619,7 +619,7 @@ const QUALITY_COVERAGE_STEPS: WorkflowStepTemplate[] = [
   {
     id: "find_gaps", ordinal: 0, name: "Find Gaps",
     instructions:
-      "Identify under-checked paths across tests, types, lint, and edge cases for the target code. Prioritize the highest-risk gaps.",
+      "Identify under-checked paths across tests, types, lint, and edge cases for the target code. Prioritize the highest-risk gaps, and do not pad with low-value checks the code does not need. When prioritizing surfaces a decision the user should own — which surfaces matter most, or what coverage bar is good enough — pause and ask with concrete options and a recommendation rather than choosing the scope silently.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       {
@@ -664,7 +664,7 @@ const QUALITY_COVERAGE_STEPS: WorkflowStepTemplate[] = [
   {
     id: "done", ordinal: 3, name: "Done",
     instructions:
-      "Finalize the coverage work. Summarize the gaps closed, the checks added, and the resulting quality delta. Make no further changes.",
+      "Finalize the coverage work. Summarize the gaps closed, the checks added, and the resulting quality delta. Make no further changes. Present the user a clear closing summary of what was covered and the quality delta — do not finish silently.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "gaps_closed", type: "array", itemType: "string", required: true },
@@ -717,21 +717,21 @@ export const BUILTIN_TEMPLATE_CATALOG: BuiltInTemplateDefinition[] = [
     id: "orca/code-review", name: "Code Review",
     description: "Static-analyze a diff, surface second-order risks, and return concrete, actionable suggestions.",
     bestFor: "A thorough second-pass review of an existing diff or change.",
-    version: 2, category: CATEGORY, recommended: false,
+    version: 3, category: CATEGORY, recommended: false,
     steps: CODE_REVIEW_STEPS, guardrails: [CONTEXT_RULE], graph: CODE_REVIEW_GRAPH,
   },
   {
     id: "orca/refactor", name: "Refactor",
     description: "Map the blast radius, restructure in safe increments, and prove observable behavior is unchanged.",
     bestFor: "Restructuring code while proving observable behavior stays unchanged.",
-    version: 2, category: CATEGORY, recommended: false,
+    version: 3, category: CATEGORY, recommended: false,
     steps: REFACTOR_STEPS, guardrails: [validationRule(["restructure"]), APPROVAL_MARK_DONE], graph: REFACTOR_GRAPH,
   },
   {
     id: "orca/quality-coverage", name: "Quality Coverage",
     description: "Find untested or under-checked paths, generate cases, and confirm they fail for the right reasons before they pass.",
     bestFor: "Closing gaps in tests, types, and checks on existing code.",
-    version: 2, category: CATEGORY, recommended: false,
+    version: 3, category: CATEGORY, recommended: false,
     steps: QUALITY_COVERAGE_STEPS, guardrails: [validationRule(["generate_checks", "confirm_green"])], graph: QUALITY_COVERAGE_GRAPH,
   },
 ];

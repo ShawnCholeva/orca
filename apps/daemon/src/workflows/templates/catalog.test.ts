@@ -159,6 +159,39 @@ describe("Bug Triage & Fix systematic debugging (Four Phases)", () => {
   });
 });
 
+describe("honest/participatory rewrite of the secondary templates", () => {
+  const def = (id: string) => BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === id)!;
+  const step = (id: string, sid: string) => def(id).steps.find((s) => s.id === sid)!;
+
+  it("bumps code-review, refactor, and quality-coverage to version 3", () => {
+    expect(def("orca/code-review").version).toBe(3);
+    expect(def("orca/refactor").version).toBe(3);
+    expect(def("orca/quality-coverage").version).toBe(3);
+  });
+
+  it("tells the analytical/change steps to pause and ask at a user-owned fork", () => {
+    expect(step("orca/code-review", "report").instructions).toMatch(/pause and ask/i);
+    expect(step("orca/refactor", "restructure").instructions).toMatch(/pause and ask/i);
+    expect(step("orca/quality-coverage", "find_gaps").instructions).toMatch(/pause and ask/i);
+  });
+
+  it("tells the verification steps to treat prior output as untrusted evidence", () => {
+    expect(step("orca/code-review", "analyze_diff").instructions).toMatch(/untrusted/i);
+    expect(step("orca/refactor", "behavior_parity").instructions).toMatch(/untrusted/i);
+  });
+
+  it("applies YAGNI to the change steps", () => {
+    expect(step("orca/refactor", "restructure").instructions).toMatch(/YAGNI|smallest|no .*improvement/i);
+    expect(step("orca/quality-coverage", "generate_checks").instructions).toMatch(/right reason/i);
+  });
+
+  it("gives every Done step a closing summary that does not finish silently", () => {
+    for (const id of ["orca/code-review", "orca/refactor", "orca/quality-coverage"]) {
+      expect(step(id, "done").instructions).toMatch(/do not finish silently/i);
+    }
+  });
+});
+
 describe("Adaptive Delivery splitter wiring", () => {
   const def = BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === "orca/adaptive-delivery")!;
   const g = def.graph!;
