@@ -37,4 +37,19 @@ describe("MetricsPage", () => {
     render(<MetricsPage />);
     await waitFor(() => expect(screen.getByText(/Couldn't load metrics/i)).toBeInTheDocument());
   });
+
+  it("renders em dash for null metrics (not 0 / F)", async () => {
+    const nullSummary = {
+      ...summary,
+      dimensions: { ...summary.dimensions, verificationStrength: { value: null } },
+      firstPass: null, confidence: "ok" as const,
+    };
+    vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([nullSummary]);
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary: nullSummary, steps: [] });
+    render(<MetricsPage />);
+    await waitFor(() => expect(screen.getByText("Workflow health")).toBeInTheDocument());
+    const dashes = screen.getAllByText("—");
+    expect(dashes.length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("F")).not.toBeInTheDocument();
+  });
 });

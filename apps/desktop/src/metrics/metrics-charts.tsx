@@ -155,7 +155,7 @@ export function StatTile({
   grade,
 }: {
   label: string;
-  value: number | string;
+  value: number | string | null;
   unit?: string;
   delta?: number;
   deltaGood?: "up" | "down";
@@ -163,7 +163,7 @@ export function StatTile({
   accent?: string;
   spark?: number[];
   sparkColor?: string;
-  grade?: string;
+  grade?: string | null;
 }) {
   return (
     <div style={{ flex: 1, minWidth: 0, background: "var(--panel)", border: "1px solid var(--hairline)", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
@@ -173,9 +173,9 @@ export function StatTile({
       </div>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-          <span style={{ fontSize: 26, fontWeight: 600, letterSpacing: -0.5, color: accent || "var(--text)", lineHeight: 1 }}>{value}</span>
-          {unit && <span className="mono" style={{ fontSize: 12, color: "var(--text-3)" }}>{unit}</span>}
-          {grade && (
+          <span style={{ fontSize: 26, fontWeight: 600, letterSpacing: -0.5, color: accent || "var(--text)", lineHeight: 1 }}>{value == null ? "—" : value}</span>
+          {value != null && unit && <span className="mono" style={{ fontSize: 12, color: "var(--text-3)" }}>{unit}</span>}
+          {value != null && grade && (
             <span style={{ marginLeft: 4, fontSize: 12, fontWeight: 700, color: accent, border: `1px solid ${accent}`, borderRadius: 5, padding: "1px 6px", lineHeight: 1.3 }}>{grade}</span>
           )}
         </div>

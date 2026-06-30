@@ -29,7 +29,8 @@ export function MetricsPage() {
   }, [period, reloadKey]);
 
   useEffect(() => {
-    if (!wfId) { setDetail(null); return; }
+    setDetail(null);
+    if (!wfId) { return; }
     let live = true;
     getTemplateMetricsDetail(wfId, period).then((d) => { if (live) setDetail(d); }).catch(() => { if (live) setError(true); });
     return () => { live = false; };
@@ -43,7 +44,7 @@ export function MetricsPage() {
 
   const wf = summaries.find((s) => s.templateId === wfId) ?? summaries[0];
   const health = healthOf(wf);
-  const healthColor = health >= 80 ? "var(--run)" : health >= 70 ? "var(--warn)" : "var(--err)";
+  const healthColor = health == null ? "var(--text-3)" : health >= 80 ? "var(--run)" : health >= 70 ? "var(--warn)" : "var(--err)";
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 340px", gap: 12, padding: 12, height: "100%", minHeight: 0, overflow: "hidden" }}>
@@ -65,7 +66,7 @@ export function MetricsPage() {
         </div>
 
         <div style={{ display: "flex", gap: 10, flexShrink: 0, opacity: wf.confidence === "low" ? 0.55 : 1 }}>
-          <StatTile label="Workflow health" value={health} accent={healthColor} grade={gradeFor(health)} delta={pctDelta(wf.deltas.verificationStrength)} deltaGood="up" />
+          <StatTile label="Workflow health" value={health} accent={healthColor} grade={health == null ? null : gradeFor(health)} delta={pctDelta(wf.deltas.verificationStrength)} deltaGood="up" />
           <StatTile label="First-pass" value={rate(wf.firstPass)} unit="%" />
           <StatTile label="Self-recovered" value={rate(wf.recovered)} unit="%" accent="var(--warn)" />
           <StatTile label="Escalated" value={rate(wf.escalated)} unit="%" accent="var(--err)" />
@@ -82,7 +83,7 @@ export function MetricsPage() {
 }
 
 const linkBtn: React.CSSProperties = { background: "transparent", color: "var(--accent)", border: "none", cursor: "pointer", fontSize: 11, padding: "4px 6px" };
-function rate(r: number | null): number { return r == null ? 0 : Math.round(r * 100); }
+function rate(r: number | null): number | null { return r == null ? null : Math.round(r * 100); }
 function pctDelta(d: number | null): number { return d == null ? 0 : Math.round(d * 100); }
 function CenterNote({ children }: { children: React.ReactNode }) {
   return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-3)", fontSize: 13 }}>{children}</div>;

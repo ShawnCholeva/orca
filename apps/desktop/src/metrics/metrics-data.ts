@@ -20,8 +20,9 @@ export function statusForScore(score: number): StepStatus {
   return score >= 80 ? "healthy" : score >= 70 ? "watch" : "degraded";
 }
 
-export function healthOf(summary: TemplateMetricsSummary): number {
-  return Math.round((summary.dimensions.verificationStrength.value ?? 0) * 100);
+export function healthOf(summary: TemplateMetricsSummary): number | null {
+  const v = summary.dimensions.verificationStrength.value;
+  return v == null ? null : Math.round(v * 100);
 }
 
 export function pctLabel(m: Metric): string {

@@ -53,10 +53,6 @@ export function recoveredRate(runs: TemplateStepRun[]): number | null {
   return recovered / finals.length;
 }
 
-export function failedCount(runs: TemplateStepRun[]): number {
-  return finalAttempts(runs).filter((r) => FAILED_STATUSES.has(r.status)).length;
-}
-
 // Escalated: distinct (run, step) that had a require_approval/deny gate or a human
 // intervention, over distinct (run, step) total.
 export function escalatedRate(ts: TemplateTransition[]): number | null {
@@ -178,7 +174,7 @@ export function deriveInsights(step: StepMetrics): string[] {
     out.push("Passes, but the oracle is inadequate — verified output may not be the full specification.");
   }
   // I4b — cost without verification gain.
-  if ((step.cost.meanTokens ?? 0) > 0 && (step.score ?? 0) < 70 && (step.cost.meanTokens ?? 0) >= 4000) {
+  if ((step.cost.meanTokens ?? 0) >= 4000 && step.score < 70) {
     out.push("High token cost with low verification gain.");
   }
   // I4c — loop / churn.

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { StepMetrics, TemplateMetricsDetail, TemplateMetricsSummary } from "@orca/contracts";
 import { Pill } from "../workspaces/primitives";
 import { gradeFor, latencyLabel, statusForScore, statusMeta } from "./metrics-data";
-import { Delta, OutcomeBar, Panel, SectionLabel, Sparkline } from "./metrics-charts";
+import { OutcomeBar, Panel, SectionLabel, Sparkline } from "./metrics-charts";
 import { ChevronDown, ChevronRight, Sparkle, Workflow } from "./metrics-icons";
 
 const GRID = "34px minmax(0,1fr) 88px 64px 22px";

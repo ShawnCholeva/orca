@@ -69,6 +69,13 @@ describe("metrics routes", () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it("400 on invalid period for detail route", async () => {
+    const db = openTestDb(); seed(db);
+    const f = Fastify(); registerMetricsRoutes(f, { db });
+    const res = await f.inject({ method: "GET", url: "/v1/metrics/templates/tpl?period=1y" });
+    expect(res.statusCode).toBe(400);
+  });
+
   it("404 on unknown template", async () => {
     const db = openTestDb(); seed(db);
     const f = Fastify(); registerMetricsRoutes(f, { db });
