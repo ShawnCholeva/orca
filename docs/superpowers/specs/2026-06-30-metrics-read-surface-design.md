@@ -1,7 +1,8 @@
 # Metrics Read Surface — Design (Sub-project A of Phase 5)
 
 **Date:** 2026-06-30
-**Status:** Approved design, pending implementation plan
+**Status:** Approved (user-approved 2026-06-30), pending implementation plan
+**Settled trade-off:** F2 is decided in favor of **TS-side, storage-agnostic derivation** (large portability gain) over SQL-side aggregation (raw query speed) — do not revisit during planning.
 **Supersedes:** the data layer of `2026-06-29-metrics-tab-rebuild-design.md` (that doc built the mock view; this replaces the mock with real, derived data)
 
 ---
