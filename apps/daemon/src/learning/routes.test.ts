@@ -57,7 +57,7 @@ function seed(db: Database.Database) {
 
 function deps() {
   const parsed = { proposedInstructions: "Generate a proposal, then validate it against the output schema.", predictedImprovement: "fewer invalid", invariantsPreserved: ["safetyCompliance"], rationale: "r" };
-  const broker: BrokerLike = { propose: vi.fn(async () => ({ status: "proposed", parsed })) };
+  const broker: BrokerLike = { propose: vi.fn(async () => ({ status: "proposed" as const, parsed })) };
   return { broker, actor: () => "owner" };
 }
 

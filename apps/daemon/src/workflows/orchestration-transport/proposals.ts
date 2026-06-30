@@ -165,6 +165,7 @@ function validatePayload(
     }
     case "score_transition":
     case "score_step_result":
+    case "propose_instruction_revision":
     case "evaluate_gate":
     case "evaluate_split":
     case "repair_artifact":
