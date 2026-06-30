@@ -32,12 +32,12 @@ describe("validateRevisionProposal", () => {
 describe("proposeInstructionRevision", () => {
   it("returns the parsed fill on a proposed result", async () => {
     const parsed = { proposedInstructions: "New, schema-aware instruction.", predictedImprovement: "fewer invalid", invariantsPreserved: ["safetyCompliance"], rationale: "r" };
-    const broker: BrokerLike = { propose: vi.fn(async (_req, opts) => { opts.validateProposal(parsed); return { status: "proposed", parsed }; }) };
+    const broker: BrokerLike = { propose: vi.fn(async (_req, opts) => { opts.validateProposal(parsed); return { status: "proposed" as const, parsed }; }) };
     const out = await proposeInstructionRevision({ broker, providerId: "orca/anthropic", modelId: "m" }, { goalId: "g", workflowRunId: "r", stepRunId: "sr" }, bundle);
     expect(out?.proposedInstructions).toBe("New, schema-aware instruction.");
   });
   it("returns null when the broker escalates to human review", async () => {
-    const broker: BrokerLike = { propose: vi.fn(async () => ({ status: "needs_human_review", reviewPayloadId: "x" })) };
+    const broker: BrokerLike = { propose: vi.fn(async () => ({ status: "needs_human_review" as const, reviewPayloadId: "x" })) };
     const out = await proposeInstructionRevision({ broker, providerId: "p", modelId: "m" }, { goalId: "g", workflowRunId: "r", stepRunId: "sr" }, bundle);
     expect(out).toBeNull();
   });
