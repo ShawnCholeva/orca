@@ -36,4 +36,12 @@ describe("SelfImprovementRail", () => {
     await waitFor(() => expect(applySpy).toHaveBeenCalledWith("p1", undefined));
     await waitFor(() => expect(onMutated).toHaveBeenCalled());
   });
+
+  it("shows error message when applyProposal rejects", async () => {
+    vi.spyOn(api, "listProposals").mockResolvedValue([pending as never]);
+    vi.spyOn(api, "applyProposal").mockRejectedValue(new api.ApiError("Stale proposal — template was modified."));
+    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^apply$/i }));
+    expect(await screen.findByText(/Stale proposal — template was modified\./i)).toBeTruthy();
+  });
 });

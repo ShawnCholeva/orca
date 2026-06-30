@@ -19,7 +19,7 @@ function readTemplate(db: Database.Database, templateId: string): TemplateRow | 
 // Privileged in-place write — bypasses the is_locked/is_built_in guard the generic PATCH enforces.
 // MUST only be called from applyLearnedInstructionEdit or rollbackAppliedProposal, which enforce the
 // proposal guards. Do not import and call this directly from outside the learning module.
-export function setStepInstructionsInPlace(db: Database.Database, templateId: string, stepTemplateId: string, instructions: string, now: string): number {
+function setStepInstructionsInPlace(db: Database.Database, templateId: string, stepTemplateId: string, instructions: string, now: string): number {
   const tpl = readTemplate(db, templateId);
   if (!tpl) throw new StepNotFoundError(`template ${templateId} not found`);
   const steps = JSON.parse(tpl.steps_json) as { id: string; instructions?: string }[];

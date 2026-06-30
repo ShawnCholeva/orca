@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TemplateInstructionProposal, TemplateMetricsDetail } from "@orca/contracts";
-import { analyzeTemplate, applyProposal, dismissProposal, listProposals, restoreTemplateDefault, rollbackProposal } from "../api";
+import { analyzeTemplate, applyProposal, dismissProposal, listProposals, restoreTemplateDefault, rollbackProposal, toErrorMessage } from "../api";
 import { Panel } from "./metrics-charts";
 import { statusForScore } from "./metrics-data";
 import { Sparkle } from "./metrics-icons";
@@ -17,6 +17,9 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
   const [proposals, setProposals] = useState<TemplateInstructionProposal[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [editing, setEditing] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
   useEffect(() => {
     let live = true;
@@ -24,7 +27,12 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
     return () => { live = false; };
   }, [templateId, period]);
 
-  const refresh = async () => { if (templateId) setProposals(await listProposals(templateId, period)); };
+  const refresh = async () => {
+    if (!templateId) return;
+    const capturedId = templateId;
+    const ps = await listProposals(capturedId, period);
+    if (mountedRef.current && capturedId === templateId) setProposals(ps);
+  };
 
   const onAnalyze = async () => {
     if (!templateId) return;
@@ -32,11 +40,22 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
     try { setProposals(await analyzeTemplate(templateId, period)); } finally { setAnalyzing(false); }
   };
   const onApply = async (p: TemplateInstructionProposal) => {
-    await applyProposal(p.id, editing[p.id]); await refresh(); onMutated();
+    try { setError(null); await applyProposal(p.id, editing[p.id]); await refresh(); onMutated(); }
+    catch (err) { setError(toErrorMessage(err, "Failed to apply proposal.")); }
   };
-  const onDismiss = async (p: TemplateInstructionProposal) => { await dismissProposal(p.id); await refresh(); };
-  const onRollback = async (p: TemplateInstructionProposal) => { await rollbackProposal(p.id); await refresh(); onMutated(); };
-  const onRestore = async () => { if (!templateId) return; await restoreTemplateDefault(templateId); await refresh(); onMutated(); };
+  const onDismiss = async (p: TemplateInstructionProposal) => {
+    try { setError(null); await dismissProposal(p.id); await refresh(); }
+    catch (err) { setError(toErrorMessage(err, "Failed to dismiss proposal.")); }
+  };
+  const onRollback = async (p: TemplateInstructionProposal) => {
+    try { setError(null); await rollbackProposal(p.id); await refresh(); onMutated(); }
+    catch (err) { setError(toErrorMessage(err, "Failed to rollback proposal.")); }
+  };
+  const onRestore = async () => {
+    if (!templateId) return;
+    try { setError(null); await restoreTemplateDefault(templateId); await refresh(); onMutated(); }
+    catch { setError("No learned changes to restore."); }
+  };
 
   const pending = proposals.filter((p) => p.status === "pending");
   const applied = proposals.filter((p) => p.status === "applied");
@@ -56,6 +75,8 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
       <button type="button" onClick={onAnalyze} disabled={analyzing || !templateId} style={{ alignSelf: "flex-start" }}>
         {analyzing ? "Reviewing runs…" : "Analyze this template"}
       </button>
+
+      {error && <div style={{ fontSize: 12, color: "var(--danger)" }}>{error}</div>}
 
       {!analyzing && pending.length === 0 && applied.length === 0 && (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", color: "var(--text-3)", gap: 8, padding: "16px 12px" }}>
