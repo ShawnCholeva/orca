@@ -13,6 +13,8 @@ type Props = {
   onDone: (goalId: string) => void;
   connectionStatus: ConnectionStatus;
   initialWorkspacePath?: string;
+  /** Jump to the Workspaces tab (the registry picker's empty state offers this). */
+  onNavigateToWorkspaces?: () => void;
 };
 
 const STEP_LABELS = ["Describe", "Coordinate"];
@@ -56,7 +58,7 @@ function WorkflowFailedPanel({
   );
 }
 
-export function CreateGoalFlow({ onClose, onDone, connectionStatus: _connectionStatus, initialWorkspacePath }: Props) {
+export function CreateGoalFlow({ onClose, onDone, connectionStatus: _connectionStatus, initialWorkspacePath, onNavigateToWorkspaces }: Props) {
   const [state, dispatch] = useReducer(reducer, initialState);
   // Pre-fetched workspace preview for seeding; resolved before user reaches coordinate phase.
   const pendingPreview = useRef<{ preview: InspectWorkspacePreview; inputPath: string } | null>(null);
@@ -183,7 +185,7 @@ export function CreateGoalFlow({ onClose, onDone, connectionStatus: _connectionS
           )}
 
           {state.phase === "coordinate" && (
-            <CoordinateStep state={state} dispatch={dispatch} />
+            <CoordinateStep state={state} dispatch={dispatch} onNavigateToWorkspaces={onNavigateToWorkspaces} />
           )}
 
           {state.phase === "submitting" && (

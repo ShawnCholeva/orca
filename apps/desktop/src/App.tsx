@@ -473,6 +473,11 @@ export default function App() {
           onClose={() => { setShowCreateFlow(false); setCreateFlowWorkspacePath(undefined); }}
           onDone={handleCreateFlowDone}
           initialWorkspacePath={createFlowWorkspacePath}
+          onNavigateToWorkspaces={() => {
+            setShowCreateFlow(false);
+            setCreateFlowWorkspacePath(undefined);
+            setActiveTab("workspaces");
+          }}
         />
       )}
 

@@ -1,14 +1,17 @@
 import { useState, useEffect, type Dispatch } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { FlowAction, FlowState, PendingWorkspace } from "../state";
-import type { ModelProviderInfo, WorkflowTemplate } from "@orca/contracts";
+import type { ModelProviderInfo, WorkflowTemplate, WorkspaceSummary } from "@orca/contracts";
 import { inspectWorkspace, listModelProviders, listWorkflowTemplates, toErrorMessage } from "../../api";
 import type { ApiError } from "../../api";
 import { defaultModelForProvider } from "../orchestratorDefaults";
+import { WorkspacePickerModal } from "./WorkspacePickerModal";
 
 type Props = {
   state: Extract<FlowState, { phase: "coordinate" }>;
   dispatch: Dispatch<FlowAction>;
+  /** When provided, the picker's empty state can jump to the Workspaces tab. */
+  onNavigateToWorkspaces?: () => void;
 };
 
 const SOFT_CAP = 8;
@@ -239,16 +242,16 @@ function WorkflowSelector({
 }
 
 // ── Main CoordinateStep ────────────────────────────────────────
-export function CoordinateStep({ state, dispatch }: Props) {
+export function CoordinateStep({ state, dispatch, onNavigateToWorkspaces }: Props) {
   const [inspectError, setInspectError] = useState<string | null>(null);
+  const [showPicker, setShowPicker] = useState(false);
 
   const atCap = state.pendingWorkspaces.length >= SOFT_CAP;
 
-  async function handlePickFolder() {
-    if (state.inspecting || atCap) return;
-    const selected = await openDialog({ directory: true, multiple: false });
-    if (!selected) return;
-    const path = selected as string;
+  // Inspect a folder path and add it to the pending workspaces. Shared by the
+  // filesystem Browse flow and the registry picker — both arrive at the same
+  // inspectSucceeded action, so the rest of the flow is source-agnostic.
+  async function addWorkspaceByPath(path: string) {
     setInspectError(null);
     dispatch({ type: "inspectRequested" });
     try {
@@ -259,6 +262,18 @@ export function CoordinateStep({ state, dispatch }: Props) {
       dispatch({ type: "inspectFailed", error: code });
       setInspectError(code);
     }
+  }
+
+  async function handlePickFolder() {
+    if (state.inspecting || atCap) return;
+    const selected = await openDialog({ directory: true, multiple: false });
+    if (!selected) return;
+    await addWorkspaceByPath(selected as string);
+  }
+
+  function handlePickRegistered(ws: WorkspaceSummary) {
+    setShowPicker(false);
+    void addWorkspaceByPath(ws.path);
   }
 
   return (
@@ -285,6 +300,14 @@ export function CoordinateStep({ state, dispatch }: Props) {
             >
               {state.inspecting ? "Inspecting…" : "Browse…"}
             </button>
+            <button
+              type="button"
+              className="goal-action-button workspace-pick-btn"
+              onClick={() => setShowPicker(true)}
+              disabled={state.inspecting}
+            >
+              Pick from registered
+            </button>
             {inspectError && (
               <p className="form-error workspace-inspect-error">
                 {inspectError}
@@ -305,6 +328,15 @@ export function CoordinateStep({ state, dispatch }: Props) {
         )}
         <p className="form-hint">Add local folders or git repos this Goal will operate on.</p>
       </div>
+
+      {showPicker && (
+        <WorkspacePickerModal
+          existingPaths={state.pendingWorkspaces.map((ws) => ws.path)}
+          onPick={handlePickRegistered}
+          onClose={() => setShowPicker(false)}
+          onNavigateToWorkspaces={onNavigateToWorkspaces}
+        />
+      )}
 
       {/* Orchestrator LLM + model */}
       <OrchestratorPicker
