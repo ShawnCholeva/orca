@@ -1066,6 +1066,13 @@ export class OrchestratorService {
         // Plane note: the path resolution reads the working tree (an execution-
         // plane capability behind the future RunnerPort); the reject decision here
         // stays control-plane. Guarded so it can never break completion.
+        //
+        // On a proceeding correction, the claims it verified-to-exist are recorded
+        // as a SCOPED verifier obligation in the step's evidence bundle (the
+        // paper's "assumptions preserved", p.62/p.64): each entry declares what was
+        // checked — that the path exists — and carries verified:true. It does NOT
+        // assert the reference is semantically correct; that scope stays explicit.
+        const correctionClaimAssumptions: StateDepsFacet["assumptions"] = [];
         try {
           if ((ctx.stepRun.revise_attempts ?? 0) > 0 && sessionId) {
             const ws = probeWorkspaceForSession(db, sessionId);
@@ -1076,7 +1083,7 @@ export class OrchestratorService {
               const priorClaims = priorRow?.prior_claims_json
                 ? (JSON.parse(priorRow.prior_claims_json) as string[])
                 : [];
-              const { fabricatedClaims } = verifyCorrectionClaims({
+              const { fabricatedClaims, verifiedClaims } = verifyCorrectionClaims({
                 priorOutput: priorClaims,
                 correctedOutput: block,
                 roots: [ws.path],
@@ -1094,6 +1101,13 @@ export class OrchestratorService {
                   `This revision references ${fabricatedClaims.length} path(s) that do not exist in the workspace: ${fabricatedClaims.join(", ")}. Fix only these references — remove them or correct them to real paths — and do not rewrite the parts of the output that are already correct.`,
                   options
                 );
+              }
+              for (const c of verifiedClaims) {
+                correctionClaimAssumptions.push({
+                  statement: `references path ${c}, verified to exist in the step workspace (existence only — not semantic correctness)`,
+                  source_ref: c,
+                  verified: true,
+                });
               }
             }
           }
@@ -1132,6 +1146,11 @@ export class OrchestratorService {
             assumptions,
             conflictPolicy: conflictPolicyForGoal(db, ctx.run.goalId),
           });
+          // Fold in the 2.8 claim-verification obligations (verified file claims),
+          // bounded to the facet's assumption cap.
+          if (correctionClaimAssumptions.length > 0) {
+            facet.assumptions = [...facet.assumptions, ...correctionClaimAssumptions].slice(0, 64);
+          }
           stateFacet = facet;
           if (decideConflictResponse(facet.conflict_policy, facet.conflicts.length).pause) {
             const c = facet.conflicts[0];

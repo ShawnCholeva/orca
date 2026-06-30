@@ -1321,6 +1321,54 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     ).toMatchObject({ pending_revision_json: null });
   });
 
+  it("2.8: a proceeding correction records its verified path claims as scoped assumptions on step_complete", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupTwoStepAgentRun(db); // step-1 (implement) is NOT terminal → completing it emits step_complete
+    const dir = seedWorkspaceWithTypecheck(db, 0); // ws-1 → real temp dir
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "real.ts"), "export const x = 1;\n"); // the verified path exists
+    seedAgentSession(db); // links sess-judge to step-1 in ws-1
+    setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    // A correction (attempt 1) whose prior claim-set did not include src/real.ts.
+    db.prepare(
+      "UPDATE workflow_step_runs SET revise_attempts = 1, prior_claims_json = ? WHERE id = 'step-1'"
+    ).run(JSON.stringify(["src/old.ts"]));
+
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          successScore: 0.82,
+          quality: {
+            outputCompleteness: 0.8, outputCorrectness: 0.85,
+            instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2,
+          },
+          reason: "ok",
+          handoffReady: true,
+        },
+      }),
+      vi.fn(async () => "delivered" as const)
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" +
+      JSON.stringify({ result: "implemented", changed_files: ["src/old.ts", "src/real.ts"] }) +
+      "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    const sc = listTransitionsByGoal(db, "goal-1").find((t) => t.boundary === "step_complete");
+    expect(sc).toBeTruthy();
+    expect(sc!.stateDeps!.assumptions).toContainEqual(
+      expect.objectContaining({ source_ref: "src/real.ts", verified: true })
+    );
+  });
+
   it("approve_step_complete: writes step_output artifact and recommends run completion", async () => {
     const { db, bus, idFactory } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" });

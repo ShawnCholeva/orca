@@ -45,20 +45,25 @@ const defaultResolve: ClaimResolver = (path, roots) =>
 
 /**
  * Item 2.8 — assumption-level claim verification on a correction. Diff the file
- * claim-set the correction introduced against the pre-correction output, and
- * return the NEW claims that don't resolve against the step's workspace roots —
- * the fabricated paths a revision invented. Claims carried over from before the
- * correction are not the correction's fault and are not flagged.
+ * claim-set the correction introduced against the pre-correction output, then
+ * split the NEW claims by whether they resolve against the step's workspace
+ * roots: `fabricatedClaims` (don't resolve — the paths a revision invented) and
+ * `verifiedClaims` (resolve — the assumptions the check confirmed, recorded as a
+ * scoped evidence-bundle entry per the paper's "assumptions preserved"). Claims
+ * carried over from before the correction are not the correction's fault and
+ * appear in neither set.
  */
 export function verifyCorrectionClaims(args: {
   priorOutput: unknown;
   correctedOutput: unknown;
   roots: string[];
   resolve?: ClaimResolver;
-}): { fabricatedClaims: string[] } {
+}): { fabricatedClaims: string[]; verifiedClaims: string[] } {
   const resolve = args.resolve ?? defaultResolve;
   const prior = new Set(extractFileClaims(args.priorOutput));
   const introduced = extractFileClaims(args.correctedOutput).filter((c) => !prior.has(c));
-  const fabricatedClaims = introduced.filter((c) => !resolve(c, args.roots));
-  return { fabricatedClaims };
+  const fabricatedClaims: string[] = [];
+  const verifiedClaims: string[] = [];
+  for (const c of introduced) (resolve(c, args.roots) ? verifiedClaims : fabricatedClaims).push(c);
+  return { fabricatedClaims, verifiedClaims };
 }

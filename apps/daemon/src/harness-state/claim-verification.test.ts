@@ -58,6 +58,19 @@ describe("verifyCorrectionClaims", () => {
     expect(result.fabricatedClaims).toEqual([]);
   });
 
+  it("reports the new claims it verified to exist (scoped evidence bundle)", () => {
+    const result = verifyCorrectionClaims({
+      priorOutput: { changed_files: ["src/a.ts"] },
+      correctedOutput: { changed_files: ["src/a.ts", "src/real.ts", "src/invented.ts"] },
+      roots: ["/repo"],
+      resolve: onDisk(["/repo/src/a.ts", "/repo/src/real.ts"]),
+    });
+    // src/real.ts is new + resolves → verified; src/invented.ts is new + missing → fabricated;
+    // src/a.ts is carried over → neither.
+    expect(result.verifiedClaims).toEqual(["src/real.ts"]);
+    expect(result.fabricatedClaims).toEqual(["src/invented.ts"]);
+  });
+
   it("does not flag a missing claim that was already present before the correction", () => {
     // src/preexisting.ts is missing on disk but was already in the prior output —
     // the correction did not introduce it, so it is not the correction's fabrication.
