@@ -68,7 +68,19 @@ describe("applyLearnedInstructionEdit", () => {
   it("rejects a stale proposal (template moved)", () => {
     insertProposal(db, proposal({ templateVersionAtProposal: 99 }));
     expect(() => applyLearnedInstructionEdit(db, "p1", { decidedBy: "owner", now: "2026-06-30T01:00:00.000Z" })).toThrow(StaleProposalError);
+    // Supersede write must persist even though the function threw.
     expect(getProposal(db, "p1")?.status).toBe("superseded");
+    // Template must NOT have been written — the throw happens before the success-path transaction.
+    expect(stepsJson(db)).not.toContain("new schema-aware text");
+    expect(stepsJson(db)).toContain('"instructions":"old"');
+  });
+
+  it("supersedes other pending proposals for the same step when one is applied", () => {
+    insertProposal(db, proposal({ id: "p1" }));
+    insertProposal(db, proposal({ id: "p2" }));
+    applyLearnedInstructionEdit(db, "p1", { decidedBy: "owner", now: "2026-06-30T01:00:00.000Z" });
+    expect(getProposal(db, "p1")?.status).toBe("applied");
+    expect(getProposal(db, "p2")?.status).toBe("superseded");
   });
 });
 

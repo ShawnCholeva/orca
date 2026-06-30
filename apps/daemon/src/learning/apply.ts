@@ -16,8 +16,9 @@ function readTemplate(db: Database.Database, templateId: string): TemplateRow | 
   return db.prepare(`SELECT version, steps_json, is_built_in FROM workflow_templates WHERE id = ?`).get(templateId) as TemplateRow | undefined;
 }
 
-// Privileged in-place write. Bypasses the is_locked/is_built_in guard the generic PATCH enforces;
-// reachable only from the learning module behind a confirmed proposal / explicit user action.
+// Privileged in-place write — bypasses the is_locked/is_built_in guard the generic PATCH enforces.
+// MUST only be called from applyLearnedInstructionEdit or rollbackAppliedProposal, which enforce the
+// proposal guards. Do not import and call this directly from outside the learning module.
 export function setStepInstructionsInPlace(db: Database.Database, templateId: string, stepTemplateId: string, instructions: string, now: string): number {
   const tpl = readTemplate(db, templateId);
   if (!tpl) throw new StepNotFoundError(`template ${templateId} not found`);
@@ -50,39 +51,43 @@ export function applyLearnedInstructionEdit(
   if (p.status !== "pending") throw new ProposalNotPendingError(`proposal ${proposalId} is ${p.status}`);
   const tpl = readTemplate(db, p.templateId);
   if (!tpl) throw new StepNotFoundError(`template ${p.templateId} not found`);
-  // Staleness guard.
+  // Staleness guard — MUST stay outside the transaction so the supersede write persists on throw.
   if (tpl.version !== p.templateVersionAtProposal) {
     updateProposalDecision(db, proposalId, { status: "superseded" });
     throw new StaleProposalError(`template moved from v${p.templateVersionAtProposal} to v${tpl.version}`);
   }
-  // First learned edit on a built-in -> capture pristine baseline.
-  if (tpl.is_built_in === 1) captureBaseline(db, p.templateId, tpl.steps_json, opts.now);
-
-  const finalText = opts.editedInstructions ?? p.afterInstructions;
-  const newVersion = setStepInstructionsInPlace(db, p.templateId, p.stepTemplateId, finalText, opts.now);
-
-  updateProposalDecision(db, proposalId, {
-    status: "applied", decidedAt: opts.now, decidedBy: opts.decidedBy, appliedAsVersion: newVersion,
-    afterInstructions: finalText, humanEdited: opts.editedInstructions !== undefined,
-  });
-  supersedeOtherPending(db, p.templateId, p.stepTemplateId, proposalId);
-  return { newVersion };
+  return db.transaction(() => {
+    // First learned edit on a built-in -> capture pristine baseline.
+    if (tpl.is_built_in === 1) captureBaseline(db, p.templateId, tpl.steps_json, opts.now);
+    const finalText = opts.editedInstructions ?? p.afterInstructions;
+    const newVersion = setStepInstructionsInPlace(db, p.templateId, p.stepTemplateId, finalText, opts.now);
+    updateProposalDecision(db, proposalId, {
+      status: "applied", decidedAt: opts.now, decidedBy: opts.decidedBy, appliedAsVersion: newVersion,
+      afterInstructions: finalText, humanEdited: opts.editedInstructions !== undefined,
+    });
+    supersedeOtherPending(db, p.templateId, p.stepTemplateId, proposalId);
+    return { newVersion };
+  })();
 }
 
 export function rollbackAppliedProposal(db: Database.Database, proposalId: string, opts: { decidedBy: string; now: string }): { newVersion: number } {
   const p = getProposal(db, proposalId);
   if (!p) throw new StepNotFoundError(`proposal ${proposalId} not found`);
   if (p.status !== "applied") throw new ProposalNotAppliedError(`proposal ${proposalId} is ${p.status}`);
-  const newVersion = setStepInstructionsInPlace(db, p.templateId, p.stepTemplateId, p.beforeInstructions, opts.now);
-  updateProposalDecision(db, proposalId, { status: "rolled_back", decidedAt: opts.now, decidedBy: opts.decidedBy });
-  return { newVersion };
+  return db.transaction(() => {
+    const newVersion = setStepInstructionsInPlace(db, p.templateId, p.stepTemplateId, p.beforeInstructions, opts.now);
+    updateProposalDecision(db, proposalId, { status: "rolled_back", decidedAt: opts.now, decidedBy: opts.decidedBy });
+    return { newVersion };
+  })();
 }
 
 export function restoreTemplateDefault(db: Database.Database, templateId: string, now: string): { newVersion: number } {
   const baseline = getBaseline(db, templateId);
   if (!baseline) throw new NoBaselineError(`no baseline for ${templateId}`);
-  const newVersion = setStepsJsonInPlace(db, templateId, baseline.baselineStepsJson, now);
-  supersedeAppliedForTemplate(db, templateId);
-  markBaselineRestored(db, templateId, now);
-  return { newVersion };
+  return db.transaction(() => {
+    const newVersion = setStepsJsonInPlace(db, templateId, baseline.baselineStepsJson, now);
+    supersedeAppliedForTemplate(db, templateId);
+    markBaselineRestored(db, templateId, now);
+    return { newVersion };
+  })();
 }
