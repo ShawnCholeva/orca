@@ -137,6 +137,9 @@ import {
   type SkillSummary,
   type ProviderRecoveryActionRequest,
   type ProviderRecoverySwitchRequest,
+  TemplateMetricsSummary,
+  TemplateMetricsDetail,
+  type MetricPeriod,
 } from "@orca/contracts";
 
 export type {
@@ -921,6 +924,38 @@ export async function installTemplates(ids: string[]): Promise<WorkflowTemplate[
     "Install workflow templates failed",
   );
   return body.templates;
+}
+
+const TemplateMetricsSummariesResponse = {
+  parse(data: unknown): { summaries: TemplateMetricsSummary[] } {
+    if (!isRecord(data) || !("summaries" in data) || !Array.isArray(data.summaries)) {
+      throw new Error("invalid template metrics summaries response");
+    }
+    return { summaries: data.summaries.map((item) => TemplateMetricsSummary.parse(item)) };
+  },
+};
+
+const TemplateMetricsDetailResponse = {
+  parse(data: unknown): { detail: TemplateMetricsDetail } {
+    if (!isRecord(data) || !("detail" in data)) {
+      throw new Error("invalid template metrics detail response");
+    }
+    return { detail: TemplateMetricsDetail.parse(data.detail) };
+  },
+};
+
+export async function getTemplateMetricsSummaries(period: MetricPeriod): Promise<TemplateMetricsSummary[]> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/metrics/templates?period=${period}`, { headers: authHeaders(token) });
+  const body = await parseResponse(res, TemplateMetricsSummariesResponse);
+  return body.summaries;
+}
+
+export async function getTemplateMetricsDetail(templateId: string, period: MetricPeriod): Promise<TemplateMetricsDetail> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/metrics/templates/${encodeURIComponent(templateId)}?period=${period}`, { headers: authHeaders(token) });
+  const body = await parseResponse(res, TemplateMetricsDetailResponse);
+  return body.detail;
 }
 
 export async function startWorkflowRun(
