@@ -43,6 +43,8 @@ Each lands as its own spec → plan → implementation cycle. A has **no upstrea
 | Cold-start | **Show with low-confidence marking** (faded + `n=` caveat; suppress sparkline below density) | Keeps the "this template is new" signal without faking precision. |
 | Aggregation mechanism | **On-read SQL/JS derivation** (no new tables, no migration) | Paper-aligned: the view is an always-rederivable projection over preserved full-fidelity artifacts — can never drift; audit/replay/version-comparison reconstruct from source. A materialized rollup is a permitted later optimization behind the same endpoint contract. |
 | Substrate | **`harness_transitions` spine** (not `step_result_json`) | See §3 — the canonical Inspectable substrate; the paper prefers deterministic sensors over self-report. |
+| Comparison axis | **vs prior time-window AND vs prior template-version** | §3.5.1 wants reliability *"compared across harness versions"* — the cross-version delta is what proves a future template edit (B/5.2) actually helped. |
+| Verification framing | **Score is a navigational headline, not the verdict** | §5.2.2 warns against treating pass/fail as *"a single terminal signal"*; the verdict is the composed evidence bundle (scope + untested + residual risk). |
 
 ### Paper alignment (`agent-harness.pdf`)
 - **Three channels are the paper's, verbatim** (§3.5.1) → sourced from `EvidenceFacet` / `TelemetryFacet` / `RiskFacet`.
@@ -50,6 +52,15 @@ Each lands as its own spec → plan → implementation cycle. A has **no upstrea
 - **Artifact-linked, replayable, version-comparable** (§3.5.1, §5.1 replayability) → `harness_transitions` is append-only, linked to run/step/version, already backing `/harness-replay` + `/provenance`.
 - **Categorical failure clustering** (§3.5.1) → `FailureCode` enum + `attributeFailures`.
 - A is the **"Collect" / read surface** of the AHE loop in Fig. 9 (Collect → Failure Diagnosis → Evolution Agent → Replay → Governed Promotion); **B (5.2)** is the Evolution Agent downstream.
+
+### Alignment audit & improvements (2026-06-30)
+A second, deliberate pass against the paper (beyond confirming directional fit) surfaced five places A was *under-developing* the paper's guidance. All five are folded into §4:
+- **I1 — verification *scope*, not just pass-rate** (§5.2.2 *"declare what it verifies, what it cannot verify… untested regions… remaining risks"*): `quality` now carries `untestedRegions`, `residualRisk`, `oracleGaps` from the EvidenceFacet, not only pass-rates.
+- **I2 — cross-version comparison** (§3.5.1 *"compared across harness versions… evaluate whether a change improves reliability"*): `summary.versionComparison` reports the six dimensions latest-vs-prior **version** (not only vs prior time-window) — the signal B/5.2 needs to prove an edit helped.
+- **I3 — wire replayability** (§5.1 replayability dimension; §3.5.1 artifact-linked): `sampleTransitionIds` drill through the **existing** `/harness-replay` + `/provenance` endpoints from clusters and approvals.
+- **I4 — three paper-named deterministic insights**: false-confidence (pass + inadequate oracle), cost-without-verification, loop/churn (§3.5.1, §5.2.2).
+- **I5 — HITL approvals as auditable transitions** (p.64 *"high-stakes approvals should be auditable state transitions: what was proposed, what evidence, what risks, who approved"*): `risk.approvals` surfaces the count + drill-through to the approval transition.
+- **Verification is not a single terminal signal** (§5.2.2): the per-step `score` is explicitly demoted to a *navigational headline*; the composed evidence bundle is the verdict.
 
 ---
 
@@ -101,6 +112,11 @@ TemplateMetricsSummary {
   latencyP50Ms: number | null
   // deltas vs the immediately-prior window of equal length:
   deltas: { <same six keys + latency>: number | null }
+  // I2 (paper §3.5.1 "compared across harness versions"): same six dimensions
+  // for the latest version vs the immediately-prior version, so a template edit's
+  // effect on reliability is measurable. This is the comparison B/5.2 consumes to
+  // prove a proposed instruction edit helped. null when only one version has runs.
+  versionComparison: { latest: number, prior: number, byDimension: Record<string, number | null> } | null
   versions: { version, runs, firstSeenAt }[]   // version-awareness
   confidence: "low" | "ok"              // low when runs < SAMPLE_MIN
 }
@@ -108,22 +124,29 @@ TemplateMetricsSummary {
 // Per-step detail — three channels, deterministic
 StepMetrics {
   stepTemplateId, name, ordinal
-  score: number                          // 0..100 composite; grade A–F; status healthy|watch|degraded
+  score: number                          // 0..100 NAVIGATIONAL HEADLINE (not the verdict — see below);
+                                         // grade A–F; status healthy|watch|degraded
   sampleSize: number; confidence: "low"|"ok"
   runs, passedFirstTry, recovered, failed: number
+  // CHANNEL 1 (EvidenceFacet) — verification. Surfaces SCOPE, not just pass-rate,
+  // per paper §5.2.2 ("declare what it verifies, what it cannot verify"):
   quality:  { verdictPassRate, sensorPassRate, oracleSufficientRate: number,
-              limitingDimension: <quality dim> | null }     // CHANNEL 1 (EvidenceFacet;
-                                                            // limitingDimension is part of the
-                                                            // OPTIONAL step_result_json enrichment,
-                                                            // null when that enrichment is absent)
+              untestedRegions: string[],                    // I1: "what it cannot verify"
+              residualRisk: string[],                       // I1: "remaining risks"
+              oracleGaps: string[],                         // I1: oracleAdequacy.gaps
+              limitingDimension: <quality dim> | null }     // OPTIONAL step_result_json enrichment;
+                                                            // null when that enrichment is absent
   cost:     { p50LatencyMs, meanTokens, meanUsd, meanRetries: number | null }  // CHANNEL 2 (TelemetryFacet)
   risk:     { riskClassDist, gateDecisionDist: Record<string,number>,
-              hardConstraintViolations: number }            // CHANNEL 3 (RiskFacet)
+              hardConstraintViolations: number,
+              approvals: { count: number, sampleTransitionIds: string[] } }  // CHANNEL 3 (RiskFacet);
+                                                            // I5: HITL approvals as auditable
+                                                            // transitions (paper p.64), drill-through below
   failureClusters: { failureCode: string|null, boundary: string, count: number,
                      sampleTransitionIds: string[] }[]      // categorical, deterministic
-  trend: number[]                        // composite score per time-bucket; [] if below density threshold
+  trend: number[]                        // headline score per time-bucket; [] if below density threshold
   versionBoundaries: number[]            // bucket indices where template_version changed
-  insight: string | null                 // deterministic, rule-based (no LLM)
+  insights: string[]                     // deterministic, rule-based (no LLM) — see rule set below
   recentReasons: { at, reason }[]         // raw outcome.reason / blockedReason tail (full-fidelity)
 }
 
@@ -131,12 +154,17 @@ TemplateMetricsDetail { summary: TemplateMetricsSummary, steps: StepMetrics[] }
 ```
 
 **Derivations (pure arithmetic over preserved facets):**
-- `score` (the per-step 0..100 composite headline + its A–F grade + healthy/watch/degraded status) = `verificationStrength × 100` — the deterministic-sensor evaluator channel is the headline (paper-aligned: sensors over self-report). Status thresholds and any cross-channel weighting are fixed in the implementation plan; the trend buckets the same composite over time.
+- `score` = `verificationStrength × 100`. **This is a navigational HEADLINE, not the verification verdict.** Paper §5.2.2 warns against treating *"pass/fail as a single terminal signal"*: the actual verdict is the **composed evidence bundle** (`quality.{verdictPassRate, sensorPassRate, oracleSufficientRate, untestedRegions, residualRisk, oracleGaps}`), always one expand away. The headline orders the list and flags attention; it never stands in for the scope. Status thresholds fixed in the plan; the trend buckets the headline over time.
 - `firstPass` = distinct (run, step) passing on `attempt=1` ÷ total.
 - `recovered` = distinct (run, step) ending `passed` with `attempt>1`.
 - `escalated` (a tile) = rate of transitions with `RiskFacet.gate_decision ∈ {require_approval, deny}` **or** non-empty `TelemetryFacet.human_interventions`. **No `gate_decision_ledger` join** — both signals are on the facets.
-- `insight` = a small fixed rule set (e.g. *"Most revisions in this workflow originate here (54%)"*, *"Weakest step"*, *"`correctness` limits low-scoring runs"*, *"Trending down N pts this window"*). Enumerable, testable, zero LLM.
+- `insights[]` = a small **fixed, enumerable, zero-LLM** rule set. Baseline rules: *"Most revisions in this workflow originate here (54%)"*, *"Weakest step"*, *"Trending down N pts this window"*. **Plus three paper-derived diagnostic flags (§3.5.1 / §5.2.2):**
+  - **I4a — false-confidence flag:** high `verdictPassRate` with low `oracleSufficientRate` → *"Passes, but the oracle is inadequate (verifies X, can't verify Y)."* (§5.2.2 *"green test is not the full specification"*).
+  - **I4b — cost-without-verification flag:** high `cost.meanTokens`/`meanUsd` with low or declining `verificationStrength` → *"High cost, low verification gain."* (§3.5.1 *"token-cost traces reveal when retrieval or reflection consume budget without improving verification"*).
+  - **I4c — loop/churn flag:** high `meanRetries` / repeated same-failure-code revisions → *"Loops between failed strategies."* (§3.5.1 decision-tree traces).
 - `failureClusters` = `attributeFailures` variant, filtered to the template/window and grouped by `step_template_id`.
+
+**Drill-through (I3 — paper §5.1 replayability, §3.5.1 artifact-linked):** every `sampleTransitionIds[]` (on failure clusters and `risk.approvals`) is a stable handle into the **existing** `GET /v1/goals/:goalId/harness-replay` and `…/harness-transitions/:id/provenance` endpoints — so a user (and later B) can drill from an aggregate cluster down to the concrete transition, its evidence, and the approval audit trail. The read-model carries the ids; the desktop links them; no new replay machinery.
 
 The mock's four tiles re-map onto this vocabulary: health ≈ verificationStrength, recovered ≈ recovery, escalated ≈ 1 − safetyCompliance / human-intervention rate, latency from `telemetry.latency_ms`.
 
@@ -163,7 +191,8 @@ Components are purely presentational; wiring is surgical.
 
 - **`metrics/metrics-data.ts`:** replace the synchronous `getWorkflowMetrics()` / `getLearningLog()` mock with a fetch against the two endpoints via the **existing daemon HTTP client** (browser-proxy + Tauri-token both already handled). Realign the exported view types to the §4 contracts; a thin mapper adapts facet-sourced fields to existing component props.
 - **`MetricsPage.tsx`:** fetch hook keyed on `(templateId, period)`; the toggle + dropdown drive real re-fetches; add a **refresh button**. Four states: **loading** (skeleton), **error** (retryable inline), **empty** ("Run a workflow to see metrics"), **data**.
-- **`StepPerformance.tsx`:** the expanded `StepRow` failure block renders **categorical `failureClusters`** (count + boundary) + `recentReasons` tail (replacing mock labels). `OutcomeBar` + `Sparkline` (with version-boundary ticks) map directly. **Low-confidence marking:** sub-threshold steps render faded with an `n=` chip; sparkline suppressed until density. Deterministic `insight` line stays.
+- **`StepPerformance.tsx`:** the expanded `StepRow` shows, per channel: **categorical `failureClusters`** (count + boundary) + `recentReasons` tail (replacing mock labels); a **verification-scope** block (I1 — `untestedRegions` / `residualRisk` / `oracleGaps`, so the panel says what was *not* verified, not just a pass-rate); the **deterministic `insights[]`** list (I4 — including the false-confidence / cost-without-verification / loop flags); and an **approvals** line (I5). `failureClusters` and `approvals` ids render as **drill-through links** (I3) into the existing provenance/replay views. `OutcomeBar` + `Sparkline` (with version-boundary ticks) map directly. **Low-confidence marking:** sub-threshold steps render faded with an `n=` chip; sparkline suppressed until density. The headline `score` is styled as a navigational figure, with the evidence-bundle scope as the authoritative detail beneath it.
+- **Tiles / summary:** the four stat tiles re-map onto the six dimensions; the **`versionComparison`** (I2) renders as a "vs previous version" delta beside the "vs previous window" delta, so an edit's effect is legible at a glance.
 - **`SelfImprovement.tsx` (right rail — B's territory):** renders the **deferred state** — a deterministic header (*"N steps underperforming in {template}"*) + an explicit **"Learning loop not yet enabled"** placeholder where proposals/activity will land. The **`AutoApplyToggle` is removed from A** (it governs autonomous template mutation — B/5.2's governed-promotion concern; a live toggle with nothing behind it would mislead).
 
 No new view components.
@@ -173,11 +202,14 @@ No new view components.
 ## 7. Testing (TDD — tests before implementation)
 
 - **Daemon core:** unit-test `computeHarnessMetricsFromTransitions` (six dimensions + null-facet handling) against synthetic transition lists; existing per-goal suite continues to pass (refactor net).
-- **Per-template aggregation:** seed a temp SQLite with `workflow_runs` + `workflow_step_runs` + `harness_transitions` spanning **two template versions** and **straddling a window boundary**; assert summary dimensions, per-step rollups, version bucketing, delta-vs-prior-window, confidence threshold, empty/cold-start.
+- **Per-template aggregation:** seed a temp SQLite with `workflow_runs` + `workflow_step_runs` + `harness_transitions` spanning **two template versions** and **straddling a window boundary**; assert summary dimensions, per-step rollups, version bucketing, delta-vs-prior-window, **`versionComparison` latest-vs-prior (I2)**, confidence threshold, empty/cold-start.
+- **Verification scope (I1):** assert `untestedRegions` / `residualRisk` / `oracleGaps` aggregate from EvidenceFacet and degrade to `[]` when the facet is absent.
+- **Insight rules (I4):** unit-test each rule fires on its trigger and stays silent otherwise — false-confidence (high pass + low oracle), cost-without-verification, loop/churn.
+- **Drill-through (I3):** assert `failureClusters[].sampleTransitionIds` and `risk.approvals.sampleTransitionIds` reference real transition ids resolvable by the existing provenance endpoint.
 - **Failure clustering:** step-grouped, template-filtered `attributeFailures` — ordering + counts.
 - **Contracts:** zod parse/round-trip.
 - **Endpoints:** 200 shape, 404 unknown template, invalid `period` → 400, empty 200.
-- **Desktop:** extend `MetricsPage` / `StepPerformance` / `metrics-charts` tests to the real data shape + four states + failure-cluster rendering + low-confidence marking + deferred B-rail.
+- **Desktop:** extend `MetricsPage` / `StepPerformance` / `metrics-charts` tests to the real data shape + four states + failure-cluster rendering + verification-scope block + version-comparison delta + low-confidence marking + deferred B-rail.
 
 ---
 
@@ -201,7 +233,9 @@ No new view components.
 ## 10. Exit criteria
 
 1. The Metrics tab renders real per-template, windowed, version-aware data with zero mock and zero LLM calls.
-2. Per-step view shows the three telemetry channels + categorical failure clusters + deterministic insight, sourced from `harness_transitions` facets.
-3. Cold-start / low-sample states are honest (marked, not faked).
-4. The per-goal `harness-metrics` suite still passes against the shared, extracted computation core.
-5. The learning-loop rail renders an explicit deferred state (no proposals, no auto-apply) — ready for B to fill.
+2. Per-step view shows the three telemetry channels + categorical failure clusters + deterministic `insights[]`, sourced from `harness_transitions` facets.
+3. The per-step view surfaces verification **scope** (untested regions / residual risk / oracle gaps), not just a pass-rate — the score is a headline, the evidence bundle is the verdict (I1, §5.2.2).
+4. Reliability is comparable **across template versions** (`versionComparison`), and failure clusters + approvals **drill through** to the existing provenance/replay views (I2/I3).
+5. Cold-start / low-sample states are honest (marked, not faked).
+6. The per-goal `harness-metrics` suite still passes against the shared, extracted computation core.
+7. The learning-loop rail renders an explicit deferred state (no proposals, no auto-apply) — ready for B to fill.
