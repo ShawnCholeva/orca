@@ -28,6 +28,7 @@ Per FUTURE_WORK 5.1 this is also "the same primitive the Fan-out / fan-in idea n
 - **Workspace file-rollback on child failure** — the engine rolls back run *state*, not files (git is the user's). Not built.
 - **Per-child runner placement** — forward-compatible (spawn/join is control-plane; child steps ride `RunnerPort`), not built.
 - **Child goals / a lighter non-run sub-construct** — rejected during brainstorming (goals are heavyweight; a second run concept diverges the engine).
+- **MAS-level failure attribution (E, §4.3 EvoMAC):** distinguishing a child's *internal* failure from *bad `reads`* handed down by the parent — deferred. The `CompositionFacet` already links each child run to its delegation context, so B's future diagnosis can segment a reused child template's metrics by delegation context (rather than pooling heterogeneous parents) when this lands. Recorded, not built.
 
 ---
 
@@ -38,7 +39,8 @@ The through-line: **the delegate boundary is a governed, verified, state-tracked
 - **Transactional shared program state (p.64):** "each action should declare its **read set, write set, assumptions, version dependencies, verifier obligations, and conflict policy**… re-verification after merge." → The delegate node carries `reads`/`writes`/pinned `childTemplateVersion`; the join runs belief-divergence (assumptions), an `operating_mode`-derived conflict policy, and an optional deterministic re-verify (I1/I3/I4).
 - **Context offloading / "a coherent view too large for one window" (§3.2.6, §4.3):** the isolated child state space + compact `writes` summary keep the parent blackboard lean.
 - **Planning as contract formation (§3.4.2):** the delegate node's explicit contract *is* a per-action contract over the next state transition.
-- **Permissioned state transition + safety governor (§3.4.3, p.64):** child steps are risk-classified, permission-tiered, budget-capped, and safety-floored exactly like any step; the spawn adds a depth/cycle guard (I8) and a budget that spans the composition (I2).
+- **Permissioned state transition + safety governor (§3.4.3, p.64):** child steps are risk-classified, permission-tiered, budget-capped, and safety-floored exactly like any step; the spawn adds a depth/cycle guard (I8), a budget that spans the composition (I2), an **auditable `GoalDecision` + opt-in Supervised launch confirm** (B, §5.2.5 HITL-as-durable-state).
+- **Termination governed by verification (§3.4.4, §5.2.2):** the join is **verdict-gated** — a child that terminates with a non-`passed` evidence verdict does not join cleanly (A1); the child's verification *scope* (verdict/untested/residual-risk) is surfaced to the parent, not just its outputs (A2).
 - **Inspectable / replayable (§3.5.1):** spawn/join emit `HarnessTransition`s with a `CompositionFacet` (I7); child-step transitions accumulate the child template's metrics **cross-goal**, feeding B's learning loop.
 - **FUTURE_ARCHITECTURE:** spawn/join is **control-plane** `DispatchEngine` logic; child steps ride the existing `RunnerPort` (runner-agnostic, I6). The child template version pin makes composition reproducible/replayable (the versioned/stable spine). The **typed template interface** (`inputs` → terminal `outputSchema`) is the composable, versioned unit the marketplace destination assumes (I5). Owner-scoping of child-template resolution is the additive tenancy seam.
 
@@ -55,6 +57,7 @@ childTemplateVersion?: number            // pinned (version dependency)
 reads?: Record<string, string>           // { childInputKey: parentKeyName } — parentKeyName is a bare output key available on incoming paths (NOT a {{...}} template)
 writes?: Record<string, string>          // { parentOutputKey: childOutputKey } — childOutputKey is a bare key on the child's terminal outputSchema
 validationRequired?: boolean             // I4 — re-verify child changes at join
+requiresLaunchApproval?: boolean         // B — park for a human launch confirm before spawning, only under operating_mode = human_review (default off)
 ```
 Routing: **one outgoing edge, no port** — treated like a step node in `resolveStepNext` (`graph-routing.ts:69`). Outcome ports are the deferred enhancement; the single edge keeps them additive.
 
@@ -72,6 +75,12 @@ CompositionFacet {
   writesKeys: string[]
   depth: number
   costRollupUsd: number | null
+  // A1/A2 — the child's terminal EvidenceFacet, surfaced so the parent's continuation is
+  // evidence-grounded (§3.4.4 "termination governed by verification", §5.2.2 "declare what it
+  // verifies, what it cannot verify"). null when the child produced no terminal evidence.
+  childVerdict?: "passed" | "failed" | "partial" | null            // join only
+  childUntestedRegions?: string[]                                  // join only
+  childResidualRisk?: string[]                                     // join only
   beliefDivergence?: { diverged: boolean; details?: string } | null   // join only
   verifyResult?: { ran: boolean; vetoed: boolean; reason?: string } | null  // join only
 }
@@ -88,24 +97,26 @@ CompositionFacet {
 ## 4. Child-run lifecycle & the delegation stack
 
 ### 4.1 Spawn (`DispatchEngine` reaches a delegate node)
-1. Resolve `reads` → gather the parent's current values for the mapped keys from the parent blackboard.
-2. **Snapshot the goal's workspace version(s)** onto the composition row (I3 baseline).
-3. Create a **child `WorkflowRun`** — same goal, child template at the pinned version, its own immutable `template_snapshot_json` (via the existing `startWorkflowRun` path, generalized to accept a parent-composition context). Status `active`.
-4. **Seed isolated state:** materialize the mapped `reads` as a synthetic *entry* `step_output` artifact in the **child** namespace (so the child's first step sees them through the normal prior-outputs/`{{key}}` path — and only them).
-5. Parent → status **`delegating`**; `goals.active_workflow_run_id` → child (active leaf). Write the composition row; emit a `delegate_spawn` transition.
-6. Child's initial step launches via the existing `createInitialStep`/`spawnStepAgent`.
+1. Resolve `reads` → gather the parent's current **values** for the mapped keys from the parent blackboard.
+2. **Snapshot the goal's workspace version(s)** onto the composition row (I3 baseline). The snapshot reads workspace version **through the existing `RunnerPort`-movable resolver** the belief-divergence launch-snapshot already uses (D) — so composition stays control-plane-pure when the control/execution split becomes a network boundary.
+3. **Governed launch (B):** record the spawn as an auditable `GoalDecision` (what template, what version, what resolved `reads`, depth) — HITL-as-durable-state (p.64 §5.2.5), not only a transition. Under `operating_mode = human_review`, a delegate may **park for a launch confirm** before spawning (opt-in per node via `requiresLaunchApproval?`, default off so L4 isn't over-gated); under `automated` it never parks. The child's internal steps remain individually gated regardless.
+4. Create a **child `WorkflowRun`** — same goal, child template at the pinned version, its own immutable `template_snapshot_json` (via the existing `startWorkflowRun` path, generalized to accept a parent-composition context). Status `active`.
+5. **Seed isolated state:** materialize the mapped `reads` as a synthetic *entry* `step_output` artifact in the **child** namespace (so the child's first step sees them through the normal prior-outputs/`{{key}}` path — and only them). **This artifact IS the resolved `reads` values, persisted** — so the delegation is fully replayable (C); the `delegate_spawn` transition links to it.
+6. Parent → status **`delegating`**; `goals.active_workflow_run_id` → child (active leaf). Write the composition row; emit a `delegate_spawn` transition.
+7. Child's initial step launches via the existing `createInitialStep`/`spawnStepAgent`.
 
 ### 4.2 Advance
 The child runs its own graph with the **entire existing engine** (steps, gates, splitters, step cards, transitions, crash-retry). The active leaf is the child; supervision applies to child steps.
 
 ### 4.3 Join (child reaches its terminal step)
 Detected because the run has a `parent_composition_id` → it does **not** yield a goal-level mark-done. Instead:
-1. Read the child's terminal output; map `writes` → materialize a `step_output` artifact **attributed to the parent's delegate node** in the parent namespace (**untrusted evidence**, I4).
-2. **Belief-divergence (I3):** compare the composition-row workspace snapshot vs live; on divergence apply the `operating_mode`-derived conflict policy (warn-proceed / escalate-pause), surfaced on the `delegate_join` transition's StateDeps.
-3. **Re-verify (I4):** if `validationRequired`, run the deterministic **sensor veto** over the child's changes; a veto blocks the parent with the veto reason.
-4. **Cost roll-up (I2):** the child run's `step_complete` costs fold into the composition row and the parent's cumulative spend.
-5. Child → `completed`; parent → `active`, cursor advances from the delegate node's single outgoing edge; `active_workflow_run_id` → parent. Emit `delegate_join`.
-6. Parent's next node launches, reading `writes` via the unchanged blackboard/`{{key}}` path.
+1. **Verdict-gated join (A1 — termination governed by verification, §3.4.4):** read the child's terminal step `EvidenceFacet.verdict`. A **non-`passed`** terminal verdict (`failed`/`partial`) is **not** a clean join — it is treated as a child failure per §4.5 (propagate → parent blocks; escalate-pause under Supervised). Only a `passed` terminal verdict proceeds to the writes-back below. The child's `verdict` + `untestedRegions` + `residualRisk` are recorded on the `CompositionFacet` (A2) so the parent's continuation — and the human — see the sub-workflow's verification *scope*, not just its outputs (§5.2.2).
+2. Map `writes` → materialize a `step_output` artifact **attributed to the parent's delegate node** in the parent namespace (**untrusted evidence**, I4).
+3. **Belief-divergence (I3):** compare the composition-row workspace snapshot vs live (via the same `RunnerPort` resolver); on divergence apply the `operating_mode`-derived conflict policy (warn-proceed / escalate-pause), surfaced on the `delegate_join` transition's StateDeps.
+4. **Re-verify (I4):** if `validationRequired`, run the deterministic **sensor veto** over the child's changes; a veto blocks the parent with the veto reason.
+5. **Cost roll-up (I2):** the child run's `step_complete` costs fold into the composition row and the parent's cumulative spend.
+6. Child → `completed`; parent → `active`, cursor advances from the delegate node's single outgoing edge; `active_workflow_run_id` → parent. Emit `delegate_join`.
+7. Parent's next node launches, reading `writes` via the unchanged blackboard/`{{key}}` path.
 
 ### 4.4 The delegation-stack invariant
 `delegating` is a **new** status outside the existing partial-unique index predicate (`active|paused|blocked`), so delegating parents are automatically excluded from the "one active" uniqueness — no index change needed (§5). A chain of `delegating` parents coexists with exactly one active leaf; `active_workflow_run_id` always points to the deepest active leaf. Single-child → a linear stack; fan-out later → siblings under one parent (the same invariant already permits it).
@@ -170,7 +181,9 @@ Reuse maximally; the genuinely-new surfaces:
 - **Validation:** delegate node rules (single outgoing edge, child resolves, `reads`↔child `inputs`, `writes`↔child terminal outputs); **delegation-DAG cycle rejection**; depth cap.
 - **Engine spawn:** delegate node → child run created, reads entry-artifact seeded, parent→`delegating`, `active_workflow_run_id`→child, composition row + `delegate_spawn` transition.
 - **Isolation:** a child step's assembled context contains the mapped reads and **nothing** from the parent blackboard.
-- **Join:** child terminal → `writes` materialized as the parent delegate-node `step_output`, parent→`active`, cursor advances, `delegate_join` transition, child→`completed`, **no goal-level mark-done for the child**.
+- **Join:** child terminal (with a `passed` verdict) → `writes` materialized as the parent delegate-node `step_output`, parent→`active`, cursor advances, `delegate_join` transition, child→`completed`, **no goal-level mark-done for the child**.
+- **Verdict-gated join (A1/A2):** a child that reaches terminal with a `failed`/`partial` verdict is treated as a child failure (parent blocks / escalates), **not** a clean join; the `CompositionFacet` carries the child's `verdict` + `untestedRegions` + `residualRisk`.
+- **Governed launch (B):** the spawn writes an auditable `GoalDecision`; a `requiresLaunchApproval` delegate parks for a human confirm under `human_review` and never parks under `automated`.
 - **Four-axis:** belief-divergence surfaces on a workspace move (I3); child step costs count against the parent budget cap + `mark_done` roll-up (I2); `validationRequired` join runs the sensor veto and a veto blocks the parent (I4).
 - **Failure/cancel/re-entry/resume:** child-run failure → parent blocks with reason; cancel cascades down the stack; delegate re-entry → new composition row (`spawn_seq`+1); delegating-parent + active-child survive a simulated restart.
 - **Desktop:** breadcrumb + nested child graph render; delegate node states; isolation visible in context preview.
@@ -189,7 +202,7 @@ Reuse maximally; the genuinely-new surfaces:
 
 1. A parent template with a `delegate` node runs a **child `WorkflowRun`** of an independently-versioned template on the same goal, with the parent parked in `delegating` and the child as the active leaf.
 2. The child runs with an **isolated state space** — it sees only the mapped `reads`, never the parent blackboard; the parent's next step sees only the mapped `writes` (a compact summary), materialized on the delegate node.
-3. The delegate boundary is **governed/verified/state-tracked/inspectable**: `operating_mode`-derived conflict policy + belief-divergence at join (I3/I1), budget spanning the composition (I2), optional deterministic re-verify (I4), and `delegate_spawn`/`delegate_join` `HarnessTransition`s (I7).
+3. The delegate boundary is **governed/verified/state-tracked/inspectable**: the join is **verdict-gated** and surfaces the child's verification scope (A1/A2); `operating_mode`-derived conflict policy + belief-divergence at join (I3/I1), budget spanning the composition (I2), optional deterministic re-verify (I4), an auditable `GoalDecision` + opt-in Supervised launch confirm (B), and `delegate_spawn`/`delegate_join` `HarnessTransition`s carrying resolved `reads` values (I7/C).
 4. Cross-template validation rejects cyclic delegation and unresolved/over-deep children; failure propagates to the parent; cancel cascades; re-entry is append-only via `spawn_seq`; the stack survives restart.
 5. The Workflow panel renders the delegate node + a delegation breadcrumb into the nested child run; isolation is visible in the context preview.
 6. One **composed built-in** exercises the seam end-to-end in the app.
