@@ -76,7 +76,13 @@ export function MetricsPage() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
-        <SelfImprovementRail detail={detail} workflowName={wf.name} />
+        <SelfImprovementRail
+          detail={detail}
+          workflowName={wf.name}
+          templateId={wfId}
+          period={period}
+          onMutated={() => setReloadKey((k) => k + 1)}
+        />
       </div>
     </div>
   );
