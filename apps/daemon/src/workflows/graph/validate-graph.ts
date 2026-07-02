@@ -1,14 +1,19 @@
-import type { WorkflowGraph, WorkflowStepTemplate } from "@orca/contracts";
+import type { WorkflowGraph, WorkflowStepTemplate, WorkflowTemplate as WorkflowTemplateT } from "@orca/contracts";
 import { findInitialStepNode } from "./graph-routing.js";
+import { delegationTargets } from "../composition/depth.js";
 
 /**
  * Returns a list of human-readable rule violations for a graph against its step
  * templates. An empty list means the graph is valid. Backward edges and cycles
  * are valid; there is no visit cap.
+ *
+ * Pass `opts.resolveChild` to validate delegate node reads/writes against the
+ * child template's declared inputs and terminal step outputSchema.
  */
 export function validateGraph(
   graph: WorkflowGraph,
-  steps: WorkflowStepTemplate[]
+  steps: WorkflowStepTemplate[],
+  opts?: { resolveChild?: (templateId: string) => WorkflowTemplateT | null }
 ): string[] {
   const errors: string[] = [];
   const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
@@ -62,6 +67,44 @@ export function validateGraph(
       for (const e of out) {
         if (e.port !== "approved" && e.port !== "rejected") {
           errors.push(`gate edge must carry a valid port: ${e.from} -> ${e.to}`);
+        }
+      }
+    } else if (node.type === "delegate") {
+      if (!node.childTemplateId || node.childTemplateVersion === undefined) {
+        errors.push(`delegate node '${node.id}' is missing childTemplateId or childTemplateVersion`);
+      }
+      if (out.length !== 1) {
+        errors.push(`delegate '${node.id}' must have exactly one outgoing edge (found ${out.length})`);
+      }
+      for (const e of out) {
+        if (e.port) errors.push(`delegate edge must not carry a port: ${e.from} -> ${e.to}`);
+      }
+      if (node.childTemplateId && opts?.resolveChild) {
+        const child = opts.resolveChild(node.childTemplateId);
+        if (!child) {
+          errors.push(`delegate '${node.id}' references unresolvable child template '${node.childTemplateId}'`);
+        } else {
+          // reads: { childInputKey: parentKeyName } — childInputKey must be in child.inputs
+          const childInputKeys = new Set((child.inputs ?? []).map((f) => f.key));
+          for (const childInputKey of Object.keys(node.reads ?? {})) {
+            if (!childInputKeys.has(childInputKey)) {
+              errors.push(
+                `delegate '${node.id}' reads key '${childInputKey}' not declared in child template '${node.childTemplateId}' inputs`
+              );
+            }
+          }
+          // writes: { parentOutputKey: childOutputKey } — childOutputKey must be in child terminal step outputSchema
+          const childTerminalNode = child.graph?.nodes.find((n) => n.type === "step" && n.terminal);
+          const childTerminalStepId = childTerminalNode?.stepId ?? childTerminalNode?.id;
+          const childTerminalStep = child.steps.find((s) => s.id === childTerminalStepId);
+          const childOutputKeys = new Set(childTerminalStep?.outputSchema.map((f) => f.key) ?? []);
+          for (const childOutputKey of Object.values(node.writes ?? {})) {
+            if (!childOutputKeys.has(childOutputKey)) {
+              errors.push(
+                `delegate '${node.id}' writes child key '${childOutputKey}' not in child terminal step outputSchema`
+              );
+            }
+          }
         }
       }
     } else {
@@ -172,6 +215,9 @@ export function validateSchemaReferences(
     if (node.type === "step") {
       const tpl = stepById.get(node.stepId ?? node.id);
       produces.set(node.id, new Set(tpl ? tpl.outputSchema.map((f) => f.key) : []));
+    } else if (node.type === "delegate") {
+      // Delegate nodes produce the parentOutputKeys declared in `writes`.
+      produces.set(node.id, new Set(Object.keys(node.writes ?? {})));
     } else {
       produces.set(node.id, new Set());
     }
@@ -226,4 +272,33 @@ export function validateSchemaReferences(
     }
   }
   return errors;
+}
+
+/**
+ * Checks the delegation graph rooted at `template` for cycles. Returns a list
+ * of violation strings (empty means acyclic). `resolveChild` is called for each
+ * child template ID referenced by a delegate node; return null for unknown IDs.
+ */
+export function validateDelegationAcyclic(
+  resolveChild: (templateId: string) => Pick<WorkflowTemplateT, "id" | "graph"> | null,
+  template: Pick<WorkflowTemplateT, "id" | "graph">
+): string[] {
+  const seen = new Set<string>();
+  const stack = new Set<string>();
+
+  const visit = (tplId: string, tpl: Pick<WorkflowTemplateT, "id" | "graph"> | null): string[] => {
+    if (!tpl) return [];
+    if (stack.has(tplId)) return [`delegation cycle detected at template '${tplId}'`];
+    if (seen.has(tplId)) return [];
+    seen.add(tplId);
+    stack.add(tplId);
+    const out: string[] = [];
+    for (const t of delegationTargets(tpl)) {
+      out.push(...visit(t.childTemplateId, resolveChild(t.childTemplateId)));
+    }
+    stack.delete(tplId);
+    return out;
+  };
+
+  return visit(template.id, template);
 }

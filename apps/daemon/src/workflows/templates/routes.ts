@@ -26,7 +26,7 @@ import {
   type WorkflowTemplateUsecaseCtx,
   updateCustomTemplate,
 } from "./usecases.js";
-import { validateGraph, validateSchemaReferences } from "../graph/validate-graph.js";
+import { validateGraph, validateSchemaReferences, validateDelegationAcyclic } from "../graph/validate-graph.js";
 import { effectiveGraph } from "../graph/graph-routing.js";
 
 export interface WorkflowTemplateRouteDeps {
@@ -102,8 +102,9 @@ export function registerWorkflowTemplateRoutes(
     {
       const steps = normalizeStepsForValidation(parsed.data.steps);
       const graph = effectiveGraph(parsed.data.graph ?? null, steps);
+      const resolveChild = (id: string) => getTemplateById(deps.db, id);
       const issues = [
-        ...validateGraph(graph, steps),
+        ...validateGraph(graph, steps, { resolveChild }),
         ...validateSchemaReferences(graph, steps),
       ];
       if (issues.length > 0) {
@@ -129,13 +130,21 @@ export function registerWorkflowTemplateRoutes(
     {
       const steps = normalizeStepsForValidation(parsed.data.steps);
       const graph = effectiveGraph(parsed.data.graph ?? null, steps);
+      const resolveChild = (childId: string) => getTemplateById(deps.db, childId);
       const issues = [
-        ...validateGraph(graph, steps),
+        ...validateGraph(graph, steps, { resolveChild }),
         ...validateSchemaReferences(graph, steps),
       ];
       if (issues.length > 0) {
         reply.status(400);
         return { error: "invalid_graph", issues };
+      }
+      // Acyclic delegation check: build a proposed template view using the
+      // update request data and the existing template id, then verify no cycle.
+      const acyclicIssues = validateDelegationAcyclic(resolveChild, { id, graph });
+      if (acyclicIssues.length > 0) {
+        reply.status(400);
+        return { error: "invalid_graph", issues: acyclicIssues };
       }
     }
 
