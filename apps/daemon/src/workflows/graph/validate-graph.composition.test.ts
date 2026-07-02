@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowGraph, WorkflowStepTemplate, WorkflowTemplate } from "@orca/contracts";
-import { validateGraph, validateDelegationAcyclic } from "./validate-graph.js";
+import { validateGraph, validateDelegationAcyclic, validateSchemaReferences } from "./validate-graph.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -148,6 +148,22 @@ describe("validateGraph — delegate node cross-template validation", () => {
     };
     const errors = validateGraph(graph, parentSteps, { resolveChild });
     expect(errors.some((e) => e.includes("del") && e.includes("outgoing"))).toBe(true);
+  });
+});
+
+describe("validateSchemaReferences — delegate reads availability", () => {
+  it("(valid) returns [] when the delegate reads value is produced by an upstream step", () => {
+    // makeParentGraph has reads: { ticket_id: "init_out" }, "init" produces "init_out"
+    const errors = validateSchemaReferences(makeParentGraph(), parentSteps);
+    expect(errors).toEqual([]);
+  });
+
+  it("(invalid) reports a violation when a delegate reads from a parent key not produced on any incoming path", () => {
+    const graph = makeParentGraph({
+      reads: { ticket_id: "typo_key" }, // "typo_key" is not produced by any upstream step
+    });
+    const errors = validateSchemaReferences(graph, parentSteps);
+    expect(errors.some((e) => e.includes("typo_key"))).toBe(true);
   });
 });
 

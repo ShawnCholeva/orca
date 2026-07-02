@@ -259,15 +259,25 @@ export function validateSchemaReferences(
 
   const errors: string[] = [];
   for (const node of graph.nodes) {
-    if (node.type !== "step") continue;
-    const tpl = stepById.get(node.stepId ?? node.id);
-    if (!tpl) continue;
-    const here = available.get(node.id)!;
-    for (const ref of refsIn(tpl.instructions)) {
-      if (!here.has(ref) && !PLATFORM_KEYS.has(ref)) {
-        errors.push(
-          `step '${node.id}' references '{{${ref}}}' which is not produced on every incoming path`
-        );
+    if (node.type === "step") {
+      const tpl = stepById.get(node.stepId ?? node.id);
+      if (!tpl) continue;
+      const here = available.get(node.id)!;
+      for (const ref of refsIn(tpl.instructions)) {
+        if (!here.has(ref) && !PLATFORM_KEYS.has(ref)) {
+          errors.push(
+            `step '${node.id}' references '{{${ref}}}' which is not produced on every incoming path`
+          );
+        }
+      }
+    } else if (node.type === "delegate") {
+      const here = available.get(node.id)!;
+      for (const [childKey, parentKey] of Object.entries(node.reads ?? {})) {
+        if (!here.has(parentKey)) {
+          errors.push(
+            `delegate node ${node.id} reads "${childKey}" from parent key "${parentKey}" which is not produced on any incoming path`
+          );
+        }
       }
     }
   }
