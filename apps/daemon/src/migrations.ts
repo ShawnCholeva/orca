@@ -11,6 +11,7 @@ const ORCHESTRATOR_MESSAGES_MIGRATION = "0013_orchestrator_messages.sql";
 const WORKFLOW_STEP_RUNS_OPERATOR_SELECTION_MIGRATION =
   "0014_workflow_step_runs_operator_selection.sql";
 const WORKSPACES_FIRST_CLASS_MIGRATION = "0036_workspaces_first_class.sql";
+const WORKFLOW_COMPOSITIONS_MIGRATION = "0050_workflow_compositions.sql";
 
 export const migrationFiles = [
   "0001_init.sql",
@@ -60,6 +61,7 @@ export const migrationFiles = [
   "0046_step_run_pending_revision.sql",
   "0047_activity_steps_tool_use_id.sql",
   "0048_step_run_prior_claims.sql",
+  WORKFLOW_COMPOSITIONS_MIGRATION,
 ] as const;
 
 export function runMigrations(
@@ -127,6 +129,21 @@ export function runMigrations(
     }
 
     if (file === WORKSPACES_FIRST_CLASS_MIGRATION) {
+      const foreignKeys = db.pragma("foreign_keys", { simple: true }) as number;
+      db.pragma("foreign_keys = OFF");
+      try {
+        db.transaction(() => {
+          db.exec(sql);
+          insertMigration.run(file, now);
+        })();
+      } finally {
+        db.pragma(`foreign_keys = ${foreignKeys ? "ON" : "OFF"}`);
+      }
+      applied.push(file);
+      continue;
+    }
+
+    if (file === WORKFLOW_COMPOSITIONS_MIGRATION) {
       const foreignKeys = db.pragma("foreign_keys", { simple: true }) as number;
       db.pragma("foreign_keys = OFF");
       try {
