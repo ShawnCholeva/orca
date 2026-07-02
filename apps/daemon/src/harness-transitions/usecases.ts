@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import {
   HARNESS_FACETS,
   HarnessTransition,
+  type CompositionFacet,
   type DomainEvent,
   type EvidenceFacet,
   type HarnessTransitionBoundary,
@@ -36,6 +37,7 @@ export type RecordTransitionInput = {
   evidence?: EvidenceFacet | null;
   stateDeps?: StateDepsFacet | null;
   telemetry?: TelemetryFacet | null;
+  composition?: CompositionFacet | null;
 };
 
 let _db: Database.Database | null = null;

@@ -9,7 +9,8 @@ import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import { EventBus } from "../events.js";
 import { listTransitionsByGoal, resetPreparedStatements, type HarnessTransitionCtx } from "./usecases.js";
 import { resetPreparedStatements as resetProjStmts } from "./projection.js";
-import { emitStepComplete, emitMarkDone, HARNESS_BOUNDARIES } from "./emit.js";
+import { emitDelegateSpawn, emitDelegateJoin } from "./emit.js";
+import type { CompositionFacet } from "@orca/contracts";
 
 const dirs: string[] = [];
 function cfg(d: string): Config {
@@ -23,47 +24,46 @@ function seedGoal(db: Database.Database, id: string) {
 }
 let db: Database.Database; let ctx: HarnessTransitionCtx; let n = 0;
 beforeEach(() => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "orca-emit-")); dirs.push(dir);
+  const dir = mkdtempSync(path.join(os.tmpdir(), "orca-emit-comp-")); dirs.push(dir);
   db = openDatabase(cfg(dir)); runMigrations(db, defaultMigrationsDir());
   n = 0; ctx = { db, bus: new EventBus(), now: () => "2026-05-01T00:00:00.000Z", idFactory: () => `id-${++n}` };
 });
 afterEach(() => { closeDatabase(); resetPreparedStatements(); resetProjStmts(); for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
-describe("emit factory", () => {
-  it("emitStepComplete records the step_complete boundary", () => {
+const compositionFacet: CompositionFacet = {
+  childRunId: "run-child-1",
+  childTemplateId: "tpl-abc",
+  childTemplateVersion: 1,
+  readsKeys: ["context.goal"],
+  writesKeys: ["output.result"],
+  depth: 1,
+  costRollupUsd: 0.05,
+};
+
+describe("emitDelegateSpawn / emitDelegateJoin", () => {
+  it("emitDelegateSpawn records delegate_spawn boundary with composition facet round-tripped from DB", () => {
     seedGoal(db, "g1");
-    emitStepComplete(ctx, { goalId: "g1", workflowRunId: "r1", workflowStepRunId: "s1" });
+    emitDelegateSpawn(ctx, { goalId: "g1", workflowRunId: "r1", composition: compositionFacet });
     const items = listTransitionsByGoal(db, "g1");
     expect(items).toHaveLength(1);
-    expect(items[0]!.boundary).toBe("step_complete");
+    expect(items[0]!.boundary).toBe("delegate_spawn");
+    expect(items[0]!.composition).toEqual(compositionFacet);
   });
 
-  it("emitMarkDone records a mark_done transition carrying telemetry", () => {
+  it("emitDelegateJoin records delegate_join boundary with composition facet round-tripped from DB", () => {
     seedGoal(db, "g1");
-    emitMarkDone(ctx, {
-      goalId: "g1", workflowRunId: "r1",
-      telemetry: {
-        cost: null, latency_ms: null, model: null, provider_id: null, provider_version: null,
-        prompt_ref: null, raw_output_ref: null, rejected_alternatives: [],
-        human_interventions: [{ kind: "mark_done_approval", ref: "rec-1" }],
-        outcome: { status: "succeeded", failure_code: null },
-      },
-    });
+    emitDelegateJoin(ctx, { goalId: "g1", workflowRunId: "r1", composition: compositionFacet });
     const items = listTransitionsByGoal(db, "g1");
-    expect(items[0]!.boundary).toBe("mark_done");
-    expect(items[0]!.telemetry?.outcome.status).toBe("succeeded");
-    expect(items[0]!.telemetry?.human_interventions[0]!.kind).toBe("mark_done_approval");
+    expect(items).toHaveLength(1);
+    expect(items[0]!.boundary).toBe("delegate_join");
+    expect(items[0]!.composition).toEqual(compositionFacet);
   });
 
-  it("registers every boundary with its declared facets", () => {
-    const byKey = Object.fromEntries(HARNESS_BOUNDARIES.map((b) => [b.key, b.facets]));
-    expect(byKey).toEqual({
-      tool_gate: ["risk"],
-      step_complete: ["evidence", "stateDeps", "telemetry"],
-      step_launch: ["stateDeps"],
-      mark_done: ["telemetry", "stateDeps"],
-      delegate_spawn: ["composition"],
-      delegate_join: ["composition"],
-    });
+  it("emitDelegateSpawn accepts null workflowStepRunId (no step run for delegate boundaries)", () => {
+    seedGoal(db, "g1");
+    emitDelegateSpawn(ctx, { goalId: "g1", workflowRunId: "r1", workflowStepRunId: null, composition: compositionFacet });
+    const items = listTransitionsByGoal(db, "g1");
+    expect(items[0]!.workflowStepRunId).toBeNull();
+    expect(items[0]!.composition!.childRunId).toBe("run-child-1");
   });
 });
