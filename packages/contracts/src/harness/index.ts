@@ -5,6 +5,8 @@ export const HarnessTransitionBoundary = z.enum([
   "step_complete",
   "tool_gate",
   "mark_done",
+  "delegate_spawn",
+  "delegate_join",
 ]);
 export type HarnessTransitionBoundary = z.infer<typeof HarnessTransitionBoundary>;
 
@@ -188,7 +190,7 @@ export type StateDepsFacet = z.infer<typeof StateDepsFacet>;
 // this instead of hand-listing each facet. `HarnessTransition` below stays
 // hand-written (no codegen); a conformance guard (daemon) asserts they agree.
 export type FacetSpec = {
-  key: "risk" | "evidence" | "stateDeps" | "telemetry";
+  key: "risk" | "evidence" | "stateDeps" | "telemetry" | "composition";
   column: string;
   schema: z.ZodTypeAny;
 };
@@ -205,6 +207,24 @@ defineFacet({ key: "evidence", column: "evidence_json", schema: EvidenceFacet })
 defineFacet({ key: "stateDeps", column: "state_deps_json", schema: StateDepsFacet });
 defineFacet({ key: "telemetry", column: "telemetry_json", schema: TelemetryFacet });
 
+export const CompositionFacet = z.object({
+  childRunId: z.string(),
+  childTemplateId: z.string(),
+  childTemplateVersion: z.number().int(),
+  readsKeys: z.array(z.string()),
+  writesKeys: z.array(z.string()),
+  depth: z.number().int(),
+  costRollupUsd: z.number().nullable(),
+  childVerdict: z.enum(["passed", "failed", "partial"]).nullable().optional(),
+  childUntestedRegions: z.array(z.string()).optional(),
+  childResidualRisk: z.array(z.string()).optional(),
+  beliefDivergence: z.object({ diverged: z.boolean(), details: z.string().optional() }).nullable().optional(),
+  verifyResult: z.object({ ran: z.boolean(), vetoed: z.boolean(), reason: z.string().optional() }).nullable().optional(),
+}).strict();
+export type CompositionFacet = z.infer<typeof CompositionFacet>;
+
+defineFacet({ key: "composition", column: "composition_json", schema: CompositionFacet });
+
 export const HARNESS_FACETS: readonly FacetSpec[] = FACET_REGISTRY;
 
 // `risk` (RiskFacet), `evidence` (EvidenceFacet), `telemetry` (TelemetryFacet), and
@@ -220,6 +240,7 @@ export const HarnessTransition = z
     evidence: EvidenceFacet.nullable(),
     stateDeps: StateDepsFacet.nullable(),
     telemetry: TelemetryFacet.nullable(),
+    composition: CompositionFacet.nullable().optional(),
     createdAt: z.string().datetime(),
   })
   .strict();

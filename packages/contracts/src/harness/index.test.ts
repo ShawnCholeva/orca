@@ -16,6 +16,7 @@ describe("HARNESS_FACETS registry", () => {
       ["evidence", "evidence_json"],
       ["stateDeps", "state_deps_json"],
       ["telemetry", "telemetry_json"],
+      ["composition", "composition_json"],
     ]);
   });
 });
