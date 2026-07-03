@@ -754,7 +754,8 @@ export function createServer(
     daemonContext.stepDispatchCapabilities,
     workerSpawnFn,
     workerDeliverFn,
-    otlpAccumulator
+    otlpAccumulator,
+    shadowSessions
   );
 
   // Shared orchestrator service instance — receives sessionOutputStore so that
