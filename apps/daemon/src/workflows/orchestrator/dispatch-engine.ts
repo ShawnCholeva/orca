@@ -1967,10 +1967,15 @@ export class DispatchEngine {
 
   private buildGateEvaluationRequest(
     db: Database.Database,
-    ctx: { run: WorkflowRunT; stepRun: StepRunRow; goal: GoalRow; gateNode: WorkflowGraphNode }
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      goal: GoalRow;
+      gateNode: WorkflowGraphNode;
+      graph: ReturnType<typeof effectiveGraph>;
+    }
   ): GateEvaluationRequest {
-    const { run, stepRun, goal, gateNode } = ctx;
-    const graph = effectiveGraph(loadRunTemplate(db, run)!.graph, loadRunTemplate(db, run)!.steps);
+    const { run, stepRun, goal, gateNode, graph } = ctx;
     const availableOutcomes = (["approved", "rejected"] as const).filter((o) =>
       graph.edges.some((e) => e.from === gateNode.id && e.port === o)
     );
@@ -2041,7 +2046,7 @@ export class DispatchEngine {
     const proposal = await evaluateGate(this.shadowAsk, {
       goalId: goal.id,
       adapterId,
-      request: this.buildGateEvaluationRequest(db, { run, stepRun, goal, gateNode }),
+      request: this.buildGateEvaluationRequest(db, { run, stepRun, goal, gateNode, graph }),
       timeoutMs: SHADOW_LLM_TIMEOUT_MS,
     });
     if (!proposal) {

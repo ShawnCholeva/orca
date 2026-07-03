@@ -700,7 +700,12 @@ describe("OrchestratorService automated gate evaluation (L5)", () => {
     db.prepare("UPDATE goals SET operating_mode = 'automated', orchestrator_provider = 'orca/anthropic' WHERE id = 'goal-1'").run();
     const brokenAsk: ShadowAsk = { async ask() { throw new Error("shadow down"); } };
     const engine = makeEngineWithAsk(fakeStepBroker(), brokenAsk);
+    // evaluateGate logs one [gate-eval] observability line before returning null;
+    // silence it for pristine output and assert the fallback was surfaced.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     await advanceRunToGate(engine);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("[gate-eval]"));
+    warnSpy.mockRestore();
 
     // No automated decision recorded; the run is parked awaiting a human decideGate.
     expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(0);

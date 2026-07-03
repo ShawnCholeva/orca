@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { GateEvaluationRequest, GateEvaluationProposal } from "@orca/contracts";
 import type { ShadowAsk } from "./recover-step-scoring.js";
 import { evaluateGate, composeGateEvaluationPrompt, issueRefsEqual, GATE_REJECT_CAP } from "./gate-evaluation.js";
@@ -20,6 +20,16 @@ function askThrowing(): ShadowAsk {
 }
 
 describe("evaluateGate", () => {
+  // The failure paths log one [gate-eval] line for observability; mock it so the
+  // suite output stays pristine and so the reason can be asserted.
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
   it("parses an approved proposal", async () => {
     const proposal: GateEvaluationProposal = {
       outcome: "approved", reason: "Meets the goal.", issueRefs: [], inputsConsidered: ["sourceStepOutput"],
@@ -50,6 +60,18 @@ describe("evaluateGate", () => {
   it("returns null on non-JSON and on an invalid proposal", async () => {
     expect(await evaluateGate(askReturning("not json"), { goalId: "g", adapterId: "claude-code", request: REQUEST, timeoutMs: 1000 })).toBeNull();
     expect(await evaluateGate(askReturning(JSON.stringify({ outcome: "maybe" })), { goalId: "g", adapterId: "claude-code", request: REQUEST, timeoutMs: 1000 })).toBeNull();
+  });
+
+  it("logs the failure reason (observability) before falling back to null", async () => {
+    const result = await evaluateGate(askThrowing(), {
+      goalId: "goal-1", adapterId: "claude-code", request: REQUEST, timeoutMs: 1000,
+    });
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const msg = String(warnSpy.mock.calls[0]![0]);
+    expect(msg).toContain("[gate-eval]");
+    expect(msg).toContain("gate"); // the gate nodeId from the request
+    expect(msg).toContain("shadow down"); // the underlying failure reason is surfaced
   });
 
   it("retries once, then succeeds on the second turn", async () => {

@@ -62,6 +62,7 @@ export async function evaluateGate(
   }
 ): Promise<GateEvaluationProposal | null> {
   const { systemPrompt, userPrompt } = composeGateEvaluationPrompt(input.request);
+  let lastFailure = "no attempts made";
   for (let attempt = 0; attempt < 2; attempt++) {
     let text: string;
     try {
@@ -71,17 +72,29 @@ export async function evaluateGate(
         userPrompt,
         timeoutMs: input.timeoutMs,
       }));
-    } catch {
+    } catch (err) {
+      lastFailure = `shadow ask failed: ${err instanceof Error ? err.message : String(err)}`;
       continue; // retry once
     }
     let raw: unknown;
     try {
       raw = JSON.parse(text);
     } catch {
+      lastFailure = "response was not JSON";
       continue;
     }
     const parsed = GateEvaluationProposal.safeParse(raw);
     if (parsed.success) return parsed.data;
+    lastFailure = `invalid GateEvaluationProposal: ${parsed.error.issues
+      .map((i) => `${i.path.join(".")} ${i.message}`)
+      .join("; ")
+      .slice(0, 200)}`;
   }
+  // The caller falls back to a human park on null; surface WHY the automated
+  // evaluation was abandoned so an L5 gate silently reverting to human review is
+  // diagnosable (agent-harness.pdf p.33 — failure traces make progress inspectable).
+  console.warn(
+    `[gate-eval] evaluation failed for gate ${input.request.gate.nodeId} (goal ${input.goalId}); falling back to human review: ${lastFailure}`
+  );
   return null;
 }
