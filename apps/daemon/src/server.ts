@@ -215,6 +215,8 @@ import {
   pauseForProviderRecovery as pauseForProviderRecoveryActivity,
 } from './activities/store.js';
 import { resumeActiveRuns } from './workflows/orchestrator/resume.js';
+import { joinChildRun } from './workflows/composition/join.js';
+import { realVersionProbe } from './harness-state/workspace-version.js';
 import { registerWorkflowTemplateRoutes } from './workflows/templates/routes.js';
 import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js';
@@ -892,6 +894,28 @@ export function createServer(
           }
         );
         pauseForProviderRecoveryActivity({ db, bus: eventBus }, { stepRunId, summary });
+      },
+      listFailedChildCompositions: async () => {
+        const rows = db.prepare(`
+          SELECT wrc.child_run_id
+          FROM workflow_run_compositions wrc
+          JOIN workflow_runs child ON child.id = wrc.child_run_id
+          WHERE wrc.status = 'active'
+            AND child.status = 'failed'
+        `).all() as Array<{ child_run_id: string }>;
+        return rows.map((r) => ({ childRunId: r.child_run_id }));
+      },
+      propagateChildFailure: async (childRunId: string) => {
+        await joinChildRun(
+          {
+            db,
+            bus: eventBus,
+            now: daemonContext.now ?? (() => new Date().toISOString()),
+            idFactory: daemonContext.idFactory,
+          },
+          childRunId,
+          realVersionProbe
+        );
       },
     }).catch((err) => console.error("[resume] boot resume failed", err));
   }

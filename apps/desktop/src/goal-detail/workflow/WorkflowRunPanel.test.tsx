@@ -22,6 +22,7 @@ const apiMocks = vi.hoisted(() => ({
   listTasks: vi.fn(),
   listSessions: vi.fn(),
   listContextPackages: vi.fn(),
+  listWorkflowRunCompositions: vi.fn(),
   toErrorMessage: vi.fn((err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback,
   ),
@@ -32,6 +33,7 @@ vi.mock("../../api", () => apiMocks);
 describe("WorkflowRunPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    apiMocks.listWorkflowRunCompositions.mockResolvedValue({ compositions: [] });
   });
 
   it("renders the active run with influenced-by chips and linked tasks", async () => {

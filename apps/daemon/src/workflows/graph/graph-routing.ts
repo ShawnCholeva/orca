@@ -8,6 +8,7 @@ export type Destination =
   | { kind: "step"; nodeId: string }
   | { kind: "gate"; nodeId: string }
   | { kind: "splitter"; nodeId: string }
+  | { kind: "delegate"; nodeId: string }
   | { kind: "terminal" };
 
 export type GateOutcome = "approved" | "rejected";
@@ -63,6 +64,7 @@ function classify(graph: WorkflowGraph, toId: string): Destination {
   if (!node) throw new GraphRoutingError(`edge points to unknown node: ${toId}`);
   if (node.type === "gate") return { kind: "gate", nodeId: toId };
   if (node.type === "splitter") return { kind: "splitter", nodeId: toId };
+  if (node.type === "delegate") return { kind: "delegate", nodeId: toId };
   return { kind: "step", nodeId: toId };
 }
 

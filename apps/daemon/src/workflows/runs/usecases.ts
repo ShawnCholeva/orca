@@ -11,8 +11,11 @@ import { appendWorkflowEvent, publishStagedWorkflowEvents } from "../events.js";
 import { createInitialStep } from "../steps/usecases.js";
 import { getTemplateById } from "../templates/projection.js";
 import { getWorkflowRunById } from "./projection.js";
+import { descendantRunIds } from "../composition/store.js";
 
-const ACTIVE_WORKFLOW_RUN_STATUSES = ["active", "paused", "blocked"] as const;
+// A delegating parent (composition stack) is also cancellable — cancelling it
+// cascades down to its active child + deeper descendants.
+const CANCELLABLE_WORKFLOW_RUN_STATUSES = ["active", "paused", "blocked", "delegating"] as const;
 
 export interface WorkflowRunUsecaseCtx {
   db: Database.Database;
@@ -210,17 +213,43 @@ export function cancelWorkflowRun(
   const now = nowIso(ctx);
   const staged = ctx.db.transaction(() => {
     const run = requireRun(ctx.db, runId);
-    assertTransition(run, ACTIVE_WORKFLOW_RUN_STATUSES, "cancel");
+    assertTransition(run, CANCELLABLE_WORKFLOW_RUN_STATUSES, "cancel");
     ctx.db
       .prepare(
         "UPDATE workflow_runs SET status = 'cancelled', finished_at = ? WHERE id = ?"
       )
       .run(now, runId);
+
+    // Composition cancel cascade (I2/§4.5): cancel every descendant child run and
+    // mark its composition row cancelled. Terminal descendants are left untouched.
+    const descendants = descendantRunIds(ctx.db, runId).filter((id) => id !== runId);
+    for (const childId of descendants) {
+      ctx.db
+        .prepare(
+          "UPDATE workflow_runs SET status = 'cancelled', finished_at = ? WHERE id = ? AND status NOT IN ('completed','failed','cancelled')"
+        )
+        .run(now, childId);
+    }
+    // Mark composition rows for the cancelled subtree (root + descendants).
+    const cancelledSet = [runId, ...descendants];
+    if (cancelledSet.length > 0) {
+      const placeholders = cancelledSet.map(() => "?").join(",");
+      ctx.db
+        .prepare(
+          `UPDATE workflow_run_compositions SET status = 'cancelled', finished_at = ?
+             WHERE child_run_id IN (${placeholders}) AND status NOT IN ('completed','failed','cancelled')`
+        )
+        .run(now, ...cancelledSet);
+    }
+    // Clear the goal's active pointer if it points at any run in the cancelled set
+    // (for delegating parents, the pointer is on the leaf child, not the parent).
+    const goalPlaceholders = cancelledSet.map(() => "?").join(",");
     ctx.db
       .prepare(
-        "UPDATE goals SET active_workflow_run_id = NULL WHERE id = ? AND active_workflow_run_id = ?"
+        `UPDATE goals SET active_workflow_run_id = NULL WHERE id = ? AND active_workflow_run_id IN (${goalPlaceholders})`
       )
-      .run(run.goalId, runId);
+      .run(run.goalId, ...cancelledSet);
+
     const event = appendWorkflowEvent(
       ctx.db,
       "workflow.run.cancelled",

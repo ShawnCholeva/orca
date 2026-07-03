@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import {
+  ListWorkflowRunCompositionsResponse,
   ListWorkflowRunsResponse,
   StartWorkflowRunRequest,
   WorkflowRunLedgerResponse,
@@ -8,6 +9,7 @@ import {
 } from "@orca/contracts";
 import type { EventBus } from "../../events.js";
 import { getWorkflowRunById, listWorkflowRunsForGoal } from "./projection.js";
+import { listCompositionsForGoal } from "../composition/store.js";
 import {
   latestCommittedLedger,
   listLedgerVersionsForRun,
@@ -109,6 +111,17 @@ export function registerWorkflowRunRoutes(
     }
     return ListWorkflowRunsResponse.parse({
       runs: listWorkflowRunsForGoal(deps.db, goalId),
+    });
+  });
+
+  server.get("/v1/goals/:goalId/workflow-run-compositions", async (request, reply) => {
+    const { goalId } = request.params as { goalId: string };
+    if (!goalExists(goalId)) {
+      reply.status(404);
+      return apiError("goal_not_found", `Goal not found: ${goalId}`);
+    }
+    return ListWorkflowRunCompositionsResponse.parse({
+      compositions: listCompositionsForGoal(deps.db, goalId),
     });
   });
 

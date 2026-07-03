@@ -21,6 +21,7 @@ function makeDraftTemplate(): WorkflowTemplate {
     version: 0,
     isBuiltIn: false,
     isLocked: false,
+    inputs: [],
     steps: [
       {
         id: "step-1",

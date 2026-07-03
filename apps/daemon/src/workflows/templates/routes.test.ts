@@ -338,11 +338,11 @@ describe("workflow template routes", () => {
     expect(body.error.code).toBe("workflow_template_locked");
   });
 
-  it("GET /v1/workflow-templates/catalog returns the 5 summaries", async () => {
+  it("GET /v1/workflow-templates/catalog returns the 7 summaries", async () => {
     const res = await server.inject({ method: "GET", url: "/v1/workflow-templates/catalog", headers: AUTH_HEADERS });
     expect(res.statusCode).toBe(200);
     const body = ListBuiltInTemplateCatalogResponse.parse(res.json());
-    expect(body.catalog).toHaveLength(5);
+    expect(body.catalog).toHaveLength(7);
     expect(body.catalog.find((c) => c.id === "orca/adaptive-delivery")?.name).toBe("Adaptive Delivery");
   });
 

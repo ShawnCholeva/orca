@@ -10,6 +10,8 @@ export interface WorkflowFlowProps {
   onRemoveNode: (id: string) => void;
   onResetLayout: () => void;
   readOnly?: boolean;
+  nodeStatuses?: Record<string, string>;
+  highlightNodeId?: string | null;
 }
 
 const NODE_W = 240;
@@ -55,6 +57,8 @@ export function WorkflowFlow({
   onRemoveNode,
   onResetLayout,
   readOnly = false,
+  nodeStatuses = {},
+  highlightNodeId = null,
 }: WorkflowFlowProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{
@@ -460,8 +464,11 @@ export function WorkflowFlow({
                 const isLinkTarget = linkDrag != null && linkDrag.overId === n.id;
                 const isGate = n.type === "gate";
                 const isSplitter = n.type === "splitter";
-                const baseBg = isGate ? "rgba(255, 160, 100, 0.06)" : isSplitter ? "rgba(100, 160, 255, 0.06)" : "var(--panel-2)";
-                const baseBorder = isGate ? "var(--accent-line)" : isSplitter ? "var(--hairline-strong)" : "var(--hairline)";
+                const isDelegate = n.type === "delegate";
+                const baseBg = isGate ? "rgba(255, 160, 100, 0.06)" : isSplitter ? "rgba(100, 160, 255, 0.06)" : isDelegate ? "rgba(160, 100, 255, 0.06)" : "var(--panel-2)";
+                const baseBorder = isGate ? "var(--accent-line)" : isSplitter ? "var(--hairline-strong)" : isDelegate ? "rgba(160, 100, 255, 0.35)" : "var(--hairline)";
+                const borderRadius = isGate ? 28 : isSplitter ? 14 : isDelegate ? 10 : 8;
+                const nodeStatus = nodeStatuses[n.id];
 
                 return (
                   <div
@@ -481,7 +488,8 @@ export function WorkflowFlow({
                           : isDragging
                             ? "var(--hairline-strong)"
                             : baseBorder),
-                      borderRadius: isGate ? 28 : isSplitter ? 14 : 8,
+                      borderRadius,
+                      outline: highlightNodeId === n.id ? "2px solid var(--accent)" : undefined,
                       padding: "0 12px",
                       display: "flex",
                       alignItems: "center",
@@ -523,6 +531,10 @@ export function WorkflowFlow({
                       <span style={{ display: "inline-flex", flexShrink: 0, color: "var(--text-2)" }}>
                         <SplitterGlyph size={13} />
                       </span>
+                    ) : isDelegate ? (
+                      <span style={{ display: "inline-flex", flexShrink: 0, color: "rgba(160, 100, 255, 0.8)" }}>
+                        <ArrowRightIcon size={13} />
+                      </span>
                     ) : (
                       <span
                         className="mono"
@@ -545,7 +557,7 @@ export function WorkflowFlow({
                         style={{
                           fontSize: 12.5,
                           fontWeight: 500,
-                          color: isGate ? "var(--accent)" : isSplitter ? "var(--text-2)" : "var(--text)",
+                          color: isGate ? "var(--accent)" : isSplitter ? "var(--text-2)" : isDelegate ? "rgba(160, 100, 255, 0.9)" : "var(--text)",
                           minWidth: 0,
                           overflow: "hidden",
                           textOverflow: "ellipsis",
@@ -553,14 +565,32 @@ export function WorkflowFlow({
                           letterSpacing: isGate ? 0.2 : isSplitter ? 0.1 : 0,
                         }}
                       >
-                        {n.name || (isGate ? "Gate" : isSplitter ? "Splitter" : "Step")}
+                        {isDelegate
+                          ? `→ ${n.childTemplateId ?? "delegate"} v${n.childTemplateVersion ?? "?"}`
+                          : n.name || (isGate ? "Gate" : isSplitter ? "Splitter" : "Step")}
                       </span>
+                      {isDelegate && (
+                        <span style={{ fontSize: 10, color: "var(--text-4)", display: "flex", gap: 6 }}>
+                          <span>R:{Object.keys(n.reads ?? {}).length}</span>
+                          <span>W:{Object.keys(n.writes ?? {}).length}</span>
+                        </span>
+                      )}
+                      {nodeStatus && (
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 500,
+                          color: nodeStatus === "active" ? "rgba(160, 100, 255, 0.9)" : nodeStatus === "completed" ? "var(--green, #4caf50)" : "var(--text-3)",
+                          marginTop: 1,
+                        }}>
+                          {nodeStatus === "active" ? "Delegating…" : nodeStatus === "completed" ? "Joined" : nodeStatus === "failed" ? "Blocked" : "Cancelled"}
+                        </span>
+                      )}
                     </div>
 
-                    {!isGate && !isSplitter && <ArrowRightIcon size={11} color="var(--text-4)" />}
+                    {!isGate && !isSplitter && !isDelegate && <ArrowRightIcon size={11} color="var(--text-4)" />}
 
                     {/* link-out port(s) — hidden in readOnly */}
-                    {!readOnly && !isGate && !isSplitter && (
+                    {!readOnly && !isGate && !isSplitter && !isDelegate && (
                       <button
                         type="button"
                         onMouseDown={(e) => {

@@ -1,5 +1,5 @@
 import type {
-  EvidenceFacet, FacetKey, HarnessTransition, HarnessTransitionBoundary,
+  CompositionFacet, EvidenceFacet, FacetKey, HarnessTransition, HarnessTransitionBoundary,
   RiskFacet, StateDepsFacet, TelemetryFacet,
 } from "@orca/contracts";
 import { recordHarnessTransition, type HarnessTransitionCtx } from "./usecases.js";
@@ -9,6 +9,7 @@ type FacetValues = {
   evidence: EvidenceFacet;
   stateDeps: StateDepsFacet;
   telemetry: TelemetryFacet;
+  composition: CompositionFacet;
 };
 
 type EmitInput<F extends FacetKey> = {
@@ -33,3 +34,5 @@ export const emitToolGate = defineBoundary("tool_gate", ["risk"] as const);
 export const emitStepComplete = defineBoundary("step_complete", ["evidence", "stateDeps", "telemetry"] as const);
 export const emitStepLaunch = defineBoundary("step_launch", ["stateDeps"] as const);
 export const emitMarkDone = defineBoundary("mark_done", ["telemetry", "stateDeps"] as const);
+export const emitDelegateSpawn = defineBoundary("delegate_spawn", ["composition"] as const);
+export const emitDelegateJoin = defineBoundary("delegate_join", ["composition"] as const);

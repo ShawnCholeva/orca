@@ -71,3 +71,38 @@ export function buildGoalCostRollup(
     usd,
   };
 }
+
+/**
+ * Cost roll-up summed across several workflow runs (I2 — a composition's budget
+ * and mark_done cost span the parent + all descendant child runs). Folds each
+ * run's `buildGoalCostRollup`; returns null only when every run reported no cost.
+ */
+export function buildGoalCostRollupAcross(
+  db: Database.Database,
+  goalId: string,
+  workflowRunIds: string[]
+): CostEntry | null {
+  let acc: CostEntry | null = null;
+  for (const runId of workflowRunIds) {
+    const entry = buildGoalCostRollup(db, goalId, runId);
+    if (!entry) continue;
+    if (!acc) {
+      acc = { ...entry };
+      continue;
+    }
+    acc = {
+      tokens_in: acc.tokens_in + entry.tokens_in,
+      tokens_out: acc.tokens_out + entry.tokens_out,
+      cache_read_tokens:
+        acc.cache_read_tokens === null && entry.cache_read_tokens === null
+          ? null
+          : (acc.cache_read_tokens ?? 0) + (entry.cache_read_tokens ?? 0),
+      cache_creation_tokens:
+        acc.cache_creation_tokens === null && entry.cache_creation_tokens === null
+          ? null
+          : (acc.cache_creation_tokens ?? 0) + (entry.cache_creation_tokens ?? 0),
+      usd: acc.usd + entry.usd,
+    };
+  }
+  return acc;
+}

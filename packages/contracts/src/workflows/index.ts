@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AdapterId } from "../adapters/ids.js";
-import { WorkflowStepOutputSchema } from "./output-schema.js";
+import { WorkflowStepOutputSchema, WorkflowStepOutputField } from "./output-schema.js";
 
 export {
   WorkflowStepOutputSchema,
@@ -100,6 +100,7 @@ export const WorkflowRunStatus = z.enum([
   "active",
   "paused",
   "blocked",
+  "delegating",
   "completed",
   "failed",
   "cancelled"
@@ -297,10 +298,10 @@ export type WorkflowStepTemplate = z.infer<typeof WorkflowStepTemplate>;
 export const WorkflowScope = z.enum(["global", "workspace", "goal"]);
 export type WorkflowScope = z.infer<typeof WorkflowScope>;
 
-export const WorkflowGraphNode = z
+const WorkflowGraphNodeBase = z
   .object({
     id: Id100,
-    type: z.enum(["step", "gate", "splitter"]),
+    type: z.enum(["step", "gate", "splitter", "delegate"]),
     name: z.string().max(100).default(""),
     stepId: Id100.optional(),
     // Legacy gate field, retained read-only so pre-migration graphs still parse.
@@ -322,8 +323,20 @@ export const WorkflowGraphNode = z
     branchKey: z.string().min(1).max(WORKFLOW_SPLITTER_MAX_BRANCH_LABEL_CHARS).optional(),
     // Step nodes: explicit terminal designation. Exactly one per valid template.
     terminal: z.boolean().optional(),
+    // Delegate nodes: spawn a child WorkflowRun of another template.
+    childTemplateId: Id100.optional(),
+    childTemplateVersion: z.number().int().nonnegative().optional(),
+    reads: z.record(z.string().min(1).max(64), z.string().min(1).max(64)).optional(),   // { childInputKey: parentKeyName }
+    writes: z.record(z.string().min(1).max(64), z.string().min(1).max(64)).optional(),  // { parentOutputKey: childOutputKey }
+    validationRequired: z.boolean().optional(),
+    requiresLaunchApproval: z.boolean().optional(),
   })
   .strict();
+export const WorkflowGraphNode = WorkflowGraphNodeBase.superRefine((n, ctx) => {
+  if (n.type === "delegate" && (!n.childTemplateId || n.childTemplateVersion === undefined)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "delegate node requires childTemplateId + childTemplateVersion" });
+  }
+});
 export type WorkflowGraphNode = z.infer<typeof WorkflowGraphNode>;
 
 export const WorkflowGraphEdge = z.preprocess(
@@ -362,6 +375,7 @@ export const WorkflowTemplate = z
     isBuiltIn: z.boolean(),
     isLocked: z.boolean(),
     steps: z.array(WorkflowStepTemplate).min(1).max(20),
+    inputs: z.array(WorkflowStepOutputField).max(32).optional().default([]),   // typed entry inputs (I5)
     guardrails: z.array(WorkflowGuardrailConfig).max(20),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
@@ -411,6 +425,7 @@ export const WorkflowRun = z
     traversalSeq: z.number().int().nonnegative().default(0),
     // Set only when the run is parked awaiting a human routing choice at a splitter.
     pendingSplitChoice: PendingSplitChoice.nullable().optional(),
+    parentCompositionId: z.string().nullable().default(null),
   })
   .strict();
 export type WorkflowRun = z.infer<typeof WorkflowRun>;
@@ -1083,6 +1098,7 @@ export const CreateWorkflowTemplateRequest = z
     scope: WorkflowScope.default("global"),
     scopeName: z.string().max(WORKFLOW_TEMPLATE_MAX_SCOPE_NAME_CHARS).default(""),
     graph: WorkflowGraph.nullable().default(null),
+    inputs: z.array(WorkflowStepOutputField).max(32).optional(), // typed entry inputs (I5)
   })
   .strict();
 export type CreateWorkflowTemplateRequest = z.infer<
@@ -1988,3 +2004,25 @@ export const OrchestratorAction = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("ask_user"), body: z.string().min(1).max(8000), questions: z.array(AskUserQuestionItem).min(1).max(4), rationale: z.string().max(2000).optional() }),
 ]);
 export type OrchestratorAction = z.infer<typeof OrchestratorAction>;
+
+export const WorkflowRunComposition = z.object({
+  id: z.string(),
+  goalId: z.string(),
+  parentRunId: z.string(),
+  childRunId: z.string(),
+  delegateNodeId: z.string(),
+  spawnSeq: z.number().int().nonnegative(),
+  reads: z.record(z.string(), z.string()),
+  writes: z.record(z.string(), z.string()),
+  depth: z.number().int().nonnegative(),
+  status: z.enum(["active", "completed", "failed", "cancelled"]),
+  costRollupUsd: z.number().nullable(),
+  createdAt: z.string(),
+  finishedAt: z.string().nullable(),
+}).strict();
+export type WorkflowRunComposition = z.infer<typeof WorkflowRunComposition>;
+
+export const ListWorkflowRunCompositionsResponse = z.object({
+  compositions: z.array(WorkflowRunComposition),
+}).strict();
+export type ListWorkflowRunCompositionsResponse = z.infer<typeof ListWorkflowRunCompositionsResponse>;

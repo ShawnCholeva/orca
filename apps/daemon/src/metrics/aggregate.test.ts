@@ -33,7 +33,7 @@ function gateTransition(id: string, runId: string, step: string, version: number
     templateVersion: version, stepTemplateId: step,
     transition: {
       id, goalId: "g", workflowRunId: runId, workflowStepRunId: `${runId}-${step}`,
-      boundary: "step_complete", risk: gateDecision ? { gate_decision: gateDecision } : null, stateDeps: null,
+      boundary: "step_complete", risk: gateDecision ? { risk_class: "medium", permission_tier: "sandbox_edit", classification_reasons: [], gate_decision: gateDecision, hard_constraint_violations: [] } : null, stateDeps: null,
       evidence: { sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: true, gaps: [] } },
       telemetry: { cost: null, latency_ms: 100, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
       createdAt: "2026-05-01T00:00:00.000Z",
@@ -48,7 +48,7 @@ function humanInterventionTransition(id: string, runId: string, step: string, ve
       id, goalId: "g", workflowRunId: runId, workflowStepRunId: `${runId}-${step}`,
       boundary: "step_complete", risk: null, stateDeps: null,
       evidence: { sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: true, gaps: [] } },
-      telemetry: { cost: null, latency_ms: 100, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [{ timestamp: "2026-05-01T00:00:00.000Z", action: "approved" }], outcome: { status: "succeeded", failure_code: null } },
+      telemetry: { cost: null, latency_ms: 100, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [{ kind: "approval", ref: "appr-1" }], outcome: { status: "succeeded", failure_code: null } },
       createdAt: "2026-05-01T00:00:00.000Z",
     },
   };
@@ -144,7 +144,7 @@ describe("escalatedRate", () => {
         templateVersion: 1, stepTemplateId: "s",
         transition: {
           id: "a", goalId: "g", workflowRunId: null, workflowStepRunId: null,
-          boundary: "step_complete", risk: { gate_decision: "require_approval" }, stateDeps: null,
+          boundary: "step_complete", risk: { risk_class: "medium", permission_tier: "sandbox_edit", classification_reasons: [], gate_decision: "require_approval", hard_constraint_violations: [] }, stateDeps: null,
           evidence: { sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: true, gaps: [] } },
           telemetry: { cost: null, latency_ms: 100, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
           createdAt: "2026-05-01T00:00:00.000Z",
@@ -163,7 +163,7 @@ describe("escalatedRate", () => {
         templateVersion: 1, stepTemplateId: "s",
         transition: {
           id: "a", goalId: "g", workflowRunId: null, workflowStepRunId: null,
-          boundary: "step_complete", risk: { gate_decision: "require_approval" }, stateDeps: null,
+          boundary: "step_complete", risk: { risk_class: "medium", permission_tier: "sandbox_edit", classification_reasons: [], gate_decision: "require_approval", hard_constraint_violations: [] }, stateDeps: null,
           evidence: { sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: true, gaps: [] } },
           telemetry: { cost: null, latency_ms: 100, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
           createdAt: "2026-05-01T00:00:00.000Z",
