@@ -6,17 +6,23 @@ const GIT_TIMEOUT_MS = 2000;
 const GIT_MAX_BUFFER = 1_048_576; // 1 MB
 
 /**
- * Injectable workspace git-version probe (branch + dirty). Mirrors write-set's
- * `GitDiffer` so belief-state detection stays unit-testable without real git.
+ * Injectable workspace git-version probe (branch + dirty + commit hash). Mirrors
+ * write-set's `GitDiffer` so belief-state detection stays unit-testable without
+ * real git. `commitHash` lets belief-divergence catch a same-branch clean commit
+ * advance that the branch+dirty signal alone misses.
  */
-export type VersionProbe = (cwd: string) => { branch: string | null; dirty: boolean | null };
+export type VersionProbe = (cwd: string) => {
+  branch: string | null;
+  dirty: boolean | null;
+  commitHash: string | null;
+};
 
 /**
- * Bounded, fail-safe sync git probe of a workspace's branch + dirty flag. Any
- * error/timeout (git missing, not a repo, detached HEAD) resolves to
- * `{ branch: null, dirty: null }` so belief-state recording never throws. Sync
- * to match the surrounding sync fail-safe record paths (and write-set's sync git
- * diff in the same code path).
+ * Bounded, fail-safe sync git probe of a workspace's branch + dirty flag + HEAD
+ * commit hash. Any error/timeout (git missing, not a repo, detached HEAD)
+ * resolves to `{ branch: null, dirty: null, commitHash: null }` so belief-state
+ * recording never throws. Sync to match the surrounding sync fail-safe record
+ * paths (and write-set's sync git diff in the same code path).
  */
 export const realVersionProbe: VersionProbe = (cwd) => {
   try {
@@ -29,7 +35,7 @@ export const realVersionProbe: VersionProbe = (cwd) => {
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     // Detached HEAD reports the literal "HEAD"; treat as unprobeable (mirror inspect.ts).
-    if (!branch || branch === "HEAD") return { branch: null, dirty: null };
+    if (!branch || branch === "HEAD") return { branch: null, dirty: null, commitHash: null };
     const status = execFileSync("git", ["status", "--porcelain"], {
       cwd,
       timeout: GIT_TIMEOUT_MS,
@@ -37,9 +43,16 @@ export const realVersionProbe: VersionProbe = (cwd) => {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
-    return { branch, dirty: status.length > 0 };
+    const commitHash = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd,
+      timeout: GIT_TIMEOUT_MS,
+      maxBuffer: GIT_MAX_BUFFER,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return { branch, dirty: status.length > 0, commitHash: commitHash || null };
   } catch {
-    return { branch: null, dirty: null };
+    return { branch: null, dirty: null, commitHash: null };
   }
 };
 
@@ -57,7 +70,7 @@ export function probeWorkspaceForSession(
   db: Database.Database,
   sessionId: string,
   probe: VersionProbe = realVersionProbe,
-): { id: string; path: string; branch: string | null; dirty: boolean | null } | null {
+): { id: string; path: string; branch: string | null; dirty: boolean | null; commitHash: string | null } | null {
   const row = db.prepare("SELECT workspace_id FROM sessions WHERE id = ?").get(sessionId) as
     | { workspace_id: string }
     | undefined;

@@ -116,11 +116,10 @@ function readChildTerminalStepOutput(
  * no path, or both sides unprobeable) — we never fabricate divergence without
  * a baseline. Returns { diverged: true, details } when branch or dirty changed.
  *
- * NOTE — granularity: belief-divergence uses the shared VersionProbe granularity
- * (branch + dirty), consistent with the system's existing belief-divergence
- * (read-set.ts encodes version as `${branch}:${dirty}`). A same-branch clean
- * commit advance is NOT detected by the current probe. VersionProbe is injectable
- * so a commit-hash-aware probe can be supplied later for finer detection.
+ * Granularity: compares branch + dirty + HEAD commit hash. The commit-hash
+ * comparison catches a same-branch clean commit advance under the child that the
+ * branch+dirty signal alone would miss. Each field is null-safe — an unprobeable
+ * or pre-commit-hash snapshot side never fabricates divergence.
  */
 function computeBeliefDivergence(
   snapshotJson: string | null,
@@ -128,9 +127,14 @@ function computeBeliefDivergence(
 ): { diverged: boolean; details?: string } {
   if (!snapshotJson) return { diverged: false };
 
-  let snapshot: { path?: string; branch?: string | null; dirty?: boolean | null };
+  let snapshot: { path?: string; branch?: string | null; dirty?: boolean | null; commitHash?: string | null };
   try {
-    snapshot = JSON.parse(snapshotJson) as { path?: string; branch?: string | null; dirty?: boolean | null };
+    snapshot = JSON.parse(snapshotJson) as {
+      path?: string;
+      branch?: string | null;
+      dirty?: boolean | null;
+      commitHash?: string | null;
+    };
   } catch {
     return { diverged: false };
   }
@@ -141,17 +145,22 @@ function computeBeliefDivergence(
   const live = probe(wsPath);
   const snapBranch = snapshot.branch ?? null;
   const snapDirty = snapshot.dirty ?? null;
+  const snapCommit = snapshot.commitHash ?? null;
 
   // Branch comparison: any difference (including null ↔ non-null) signals divergence.
   const branchDiverged = snapBranch !== live.branch;
   // Dirty comparison: only when both sides were readable.
   const dirtyDiverged = snapDirty !== null && live.dirty !== null && snapDirty !== live.dirty;
+  // Commit comparison: only when both sides were readable (a pre-commit-hash
+  // snapshot has null commitHash and must not fabricate divergence).
+  const commitDiverged = snapCommit !== null && live.commitHash !== null && snapCommit !== live.commitHash;
 
-  if (!branchDiverged && !dirtyDiverged) return { diverged: false };
+  if (!branchDiverged && !dirtyDiverged && !commitDiverged) return { diverged: false };
 
   const parts: string[] = [];
   if (branchDiverged) parts.push(`branch: ${snapBranch ?? "null"} → ${live.branch ?? "null"}`);
   if (dirtyDiverged) parts.push(`dirty: ${String(snapDirty)} → ${String(live.dirty)}`);
+  if (commitDiverged) parts.push(`commit: ${snapCommit} → ${live.commitHash}`);
   return { diverged: true, details: parts.join(", ") };
 }
 
