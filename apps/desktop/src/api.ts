@@ -77,6 +77,7 @@ import {
   ListWorkflowArtifactsResponse,
   ListWorkflowDecisionsResponse,
   WorkflowRunLedgerResponse,
+  ListWorkflowRunCompositionsResponse,
   ListWorkflowRunsResponse,
   ListWorkflowStepRunsResponse,
   ListWorkflowTemplatesResponse,
@@ -1030,6 +1031,18 @@ export async function listWorkflowRuns(
     { headers: authHeaders(token) },
     ListWorkflowRunsResponse,
     "List workflow runs failed",
+  );
+}
+
+export async function listWorkflowRunCompositions(
+  goalId: string,
+): Promise<ListWorkflowRunCompositionsResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-run-compositions`,
+    { headers: authHeaders(token) },
+    ListWorkflowRunCompositionsResponse,
+    "List workflow run compositions failed",
   );
 }
 

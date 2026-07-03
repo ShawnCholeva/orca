@@ -2020,3 +2020,8 @@ export const WorkflowRunComposition = z.object({
   finishedAt: z.string().nullable(),
 }).strict();
 export type WorkflowRunComposition = z.infer<typeof WorkflowRunComposition>;
+
+export const ListWorkflowRunCompositionsResponse = z.object({
+  compositions: z.array(WorkflowRunComposition),
+}).strict();
+export type ListWorkflowRunCompositionsResponse = z.infer<typeof ListWorkflowRunCompositionsResponse>;

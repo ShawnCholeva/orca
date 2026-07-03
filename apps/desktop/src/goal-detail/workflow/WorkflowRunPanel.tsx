@@ -9,6 +9,7 @@ import type {
   WorkflowArtifact,
   WorkflowDecisionTrace,
   WorkflowRun,
+  WorkflowRunComposition,
   WorkflowStepRun,
 } from "@orca/contracts";
 import {
@@ -21,6 +22,7 @@ import {
   listTasks,
   listWorkflowDecisions,
   listWorkflowRunArtifacts,
+  listWorkflowRunCompositions,
   listWorkflowRuns,
   toErrorMessage,
 } from "../../api";
@@ -32,6 +34,7 @@ import { TaskDagPreview } from "./TaskDagPreview";
 import { WorkflowHumanReviewPanel } from "./WorkflowHumanReviewPanel";
 import { WorkflowTransportDebugDrawer } from "./WorkflowTransportDebugDrawer";
 import { summarizeWorkflowTransportStatus } from "./transportStatus";
+import { DelegationBreadcrumb } from "./DelegationBreadcrumb";
 
 type Props = {
   goalId: string;
@@ -50,6 +53,7 @@ type WorkflowPanelState = {
   sessions: SessionSummary[];
   contextPackages: ContextPackage[];
   ledger: { committed: CommittedLedger; versions: LedgerVersionEntry[] } | null;
+  compositions: WorkflowRunComposition[];
 };
 
 const EMPTY_STATE: WorkflowPanelState = {
@@ -63,6 +67,7 @@ const EMPTY_STATE: WorkflowPanelState = {
   sessions: [],
   contextPackages: [],
   ledger: null,
+  compositions: [],
 };
 
 const VALIDATION_ARTIFACT_TYPES = new Set(["test_report", "qa_report", "review_report"]);
@@ -103,6 +108,7 @@ export function WorkflowRunPanel({
         contextResponse,
         attemptsResponse,
         ledgerResponse,
+        compositionsResponse,
       ] =
         await Promise.all([
           getWorkflowRun(goalId, nextRunId),
@@ -113,6 +119,7 @@ export function WorkflowRunPanel({
           listContextPackages(goalId, { limit: 50 }),
           listOrchestrationAttempts(goalId, nextRunId).catch(() => ({ attempts: [] })),
           getWorkflowRunLedger(goalId, nextRunId).catch(() => null),
+          listWorkflowRunCompositions(goalId).catch(() => ({ compositions: [] })),
         ]);
 
       const stepRunIds = collectStepRunIds(
@@ -166,6 +173,7 @@ export function WorkflowRunPanel({
             stepRunIdSet.has(pkg.workflowStepRunId),
         ),
         ledger: ledgerResponse,
+        compositions: compositionsResponse.compositions,
       });
     } catch (err) {
       setError(toErrorMessage(err, "Failed to load workflow run."));
@@ -183,6 +191,21 @@ export function WorkflowRunPanel({
     state.run?.currentStepRunId !== null
       ? state.stepRuns.find((step) => step.id === state.run?.currentStepRunId) ?? null
       : null;
+
+  // Find active child composition for a delegating parent
+  const activeChildComposition = state.run?.status === "delegating"
+    ? state.compositions.find(c => c.parentRunId === state.run?.id && c.status === "active")
+    : null;
+  const childRun = activeChildComposition
+    ? state.runs.find(r => r.id === activeChildComposition.childRunId) ?? null
+    : null;
+  // Also check if selected run is a child (parentCompositionId set)
+  const parentComposition = state.run?.parentCompositionId
+    ? state.compositions.find(c => c.id === state.run?.parentCompositionId)
+    : null;
+  const parentRun = parentComposition
+    ? state.runs.find(r => r.id === parentComposition.parentRunId) ?? null
+    : null;
   const validationArtifactCount = state.artifacts.filter((artifact) =>
     VALIDATION_ARTIFACT_TYPES.has(artifact.type),
   ).length;
@@ -232,6 +255,23 @@ export function WorkflowRunPanel({
             Retry
           </button>
         </div>
+      )}
+
+      {state.run && activeChildComposition && childRun && (
+        <DelegationBreadcrumb
+          parentRun={state.run}
+          childRun={childRun}
+          activeRunId={selectedRunId ?? state.run.id}
+          onSelect={setSelectedRunId}
+        />
+      )}
+      {state.run && parentRun && (
+        <DelegationBreadcrumb
+          parentRun={parentRun}
+          childRun={state.run}
+          activeRunId={selectedRunId ?? state.run.id}
+          onSelect={setSelectedRunId}
+        />
       )}
 
       {state.run && (

@@ -38,6 +38,9 @@ export function getCompositionByChildRun(db: Database.Database, childRunId: stri
 export function listChildCompositions(db: Database.Database, parentRunId: string): WorkflowRunComposition[] {
   return (db.prepare(`SELECT * FROM workflow_run_compositions WHERE parent_run_id = ? ORDER BY created_at ASC`).all(parentRunId) as Row[]).map(rowTo);
 }
+export function listCompositionsForGoal(db: Database.Database, goalId: string): WorkflowRunComposition[] {
+  return (db.prepare(`SELECT * FROM workflow_run_compositions WHERE goal_id = ? ORDER BY created_at ASC`).all(goalId) as Row[]).map(rowTo);
+}
 export function nextSpawnSeq(db: Database.Database, parentRunId: string, delegateNodeId: string): number {
   const r = db.prepare(`SELECT COALESCE(MAX(spawn_seq), -1) AS m FROM workflow_run_compositions WHERE parent_run_id = ? AND delegate_node_id = ?`)
     .get(parentRunId, delegateNodeId) as { m: number };
