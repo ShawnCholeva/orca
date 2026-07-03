@@ -41,6 +41,7 @@ function makeTemplate(overrides: Partial<WorkflowTemplate> = {}): WorkflowTempla
     version: 1,
     isBuiltIn: true,
     isLocked: true,
+    inputs: [],
     steps: [
       {
         id: "intake",

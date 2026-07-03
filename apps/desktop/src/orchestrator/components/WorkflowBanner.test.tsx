@@ -22,6 +22,7 @@ describe("WorkflowBanner", () => {
           startedAt: now,
           finishedAt: null,
           blockedReason: null,
+          parentCompositionId: null,
         }}
         stepRun={{
           id: "step-1",
