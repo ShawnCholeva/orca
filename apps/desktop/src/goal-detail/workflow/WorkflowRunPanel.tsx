@@ -11,11 +11,13 @@ import type {
   WorkflowRun,
   WorkflowRunComposition,
   WorkflowStepRun,
+  WorkflowTemplate,
 } from "@orca/contracts";
 import {
   getWorkflowRun,
   getWorkflowRunLedger,
   getWorkflowStepRun,
+  getWorkflowTemplate,
   listContextPackages,
   listOrchestrationAttempts,
   listSessions,
@@ -35,6 +37,7 @@ import { WorkflowHumanReviewPanel } from "./WorkflowHumanReviewPanel";
 import { WorkflowTransportDebugDrawer } from "./WorkflowTransportDebugDrawer";
 import { summarizeWorkflowTransportStatus } from "./transportStatus";
 import { DelegationBreadcrumb } from "./DelegationBreadcrumb";
+import { WorkflowFlow } from "../../workflows/WorkflowFlow";
 
 type Props = {
   goalId: string;
@@ -54,6 +57,7 @@ type WorkflowPanelState = {
   contextPackages: ContextPackage[];
   ledger: { committed: CommittedLedger; versions: LedgerVersionEntry[] } | null;
   compositions: WorkflowRunComposition[];
+  template: WorkflowTemplate | null;
 };
 
 const EMPTY_STATE: WorkflowPanelState = {
@@ -68,9 +72,12 @@ const EMPTY_STATE: WorkflowPanelState = {
   contextPackages: [],
   ledger: null,
   compositions: [],
+  template: null,
 };
 
 const VALIDATION_ARTIFACT_TYPES = new Set(["test_report", "qa_report", "review_report"]);
+
+const noop = () => {};
 
 export function WorkflowRunPanel({
   goalId,
@@ -121,6 +128,10 @@ export function WorkflowRunPanel({
           getWorkflowRunLedger(goalId, nextRunId).catch(() => null),
           listWorkflowRunCompositions(goalId).catch(() => ({ compositions: [] })),
         ]);
+
+      const templateResponse = await getWorkflowTemplate(runResponse.run.templateId).catch(
+        () => ({ template: null }),
+      );
 
       const stepRunIds = collectStepRunIds(
         runResponse.run,
@@ -174,6 +185,7 @@ export function WorkflowRunPanel({
         ),
         ledger: ledgerResponse,
         compositions: compositionsResponse.compositions,
+        template: templateResponse.template,
       });
     } catch (err) {
       setError(toErrorMessage(err, "Failed to load workflow run."));
@@ -206,6 +218,15 @@ export function WorkflowRunPanel({
   const parentRun = parentComposition
     ? state.runs.find(r => r.id === parentComposition.parentRunId) ?? null
     : null;
+  const runGraph = state.template?.graph ?? null;
+  const nodeStatuses: Record<string, string> = {};
+  if (state.run) {
+    for (const composition of state.compositions) {
+      if (composition.parentRunId === state.run.id) {
+        nodeStatuses[composition.delegateNodeId] = composition.status;
+      }
+    }
+  }
   const validationArtifactCount = state.artifacts.filter((artifact) =>
     VALIDATION_ARTIFACT_TYPES.has(artifact.type),
   ).length;
@@ -353,6 +374,24 @@ export function WorkflowRunPanel({
               currentStepLabel={currentStep ? formatStepLabel(currentStep.stepTemplateId) : null}
               onSubmitted={load}
             />
+          )}
+
+          {runGraph && (
+            <section className="workflow-run-graph" aria-label="Workflow graph">
+              <div style={{ display: "flex", height: 360 }}>
+                <WorkflowFlow
+                  graph={runGraph}
+                  onGraphChange={noop}
+                  onOpenNode={noop}
+                  onAddNode={noop}
+                  onRemoveNode={noop}
+                  onResetLayout={noop}
+                  readOnly
+                  nodeStatuses={nodeStatuses}
+                  highlightNodeId={state.run.currentNodeId}
+                />
+              </div>
+            </section>
           )}
 
           <StepTimeline

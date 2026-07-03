@@ -23,6 +23,7 @@ const apiMocks = vi.hoisted(() => ({
   listSessions: vi.fn(),
   listContextPackages: vi.fn(),
   listWorkflowRunCompositions: vi.fn(),
+  getWorkflowTemplate: vi.fn(),
   toErrorMessage: vi.fn((err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback,
   ),
@@ -34,6 +35,7 @@ describe("WorkflowRunPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMocks.listWorkflowRunCompositions.mockResolvedValue({ compositions: [] });
+    apiMocks.getWorkflowTemplate.mockResolvedValue({ template: null });
   });
 
   it("renders the active run with influenced-by chips and linked tasks", async () => {
