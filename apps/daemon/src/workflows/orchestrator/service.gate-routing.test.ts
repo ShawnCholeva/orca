@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { closeDatabase } from "../../db.js";
 import { resetWorkflowEventPreparedStatements } from "../events.js";
@@ -9,6 +9,7 @@ import type { WorkflowLaunchContext, WorkflowSessionLauncher } from "./session-l
 import { DispatchEngine } from "./dispatch-engine.js";
 import { listGateDecisionsForRun } from "../gates/projection.js";
 import { listSplitDecisionsForRun } from "../splitters/projection.js";
+import { getWorkflowRunById } from "../runs/projection.js";
 import { setSupervisionMode } from "../../settings/store.js";
 import {
   cleanupHarness,
@@ -24,6 +25,8 @@ import type {
 } from "../orchestration-transport/broker.js";
 import { commitLedgerVersion } from "../ledger/usecases.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
+import type { ShadowAsk } from "./recover-step-scoring.js";
+import { latestRejectingGate } from "./repair-context.js";
 
 const AGENT_OPERATOR_ID = "agent:claude-code";
 
@@ -121,6 +124,43 @@ function fakeStepBroker(): Pick<OrchestrationTransportBroker, "propose"> {
 
 function makeLauncher(launch = vi.fn(async () => ({ sessionId: "sess-1" }))): WorkflowSessionLauncher {
   return { launch };
+}
+
+function fakeGateAsk(proposal: {
+  outcome: "approved" | "rejected";
+  reason: string;
+  issueRefs?: string[];
+  inputsConsidered?: string[];
+}): ShadowAsk {
+  return {
+    async ask() {
+      return {
+        text: JSON.stringify({
+          outcome: proposal.outcome,
+          reason: proposal.reason,
+          issueRefs: proposal.issueRefs ?? [],
+          inputsConsidered: proposal.inputsConsidered ?? ["sourceStepOutput"],
+        }),
+      };
+    },
+  };
+}
+
+function makeEngineWithAsk(
+  broker: Pick<OrchestrationTransportBroker, "propose">,
+  shadowAsk: ShadowAsk | undefined,
+  launcher: WorkflowSessionLauncher = makeLauncher()
+): DispatchEngine {
+  return new DispatchEngine(
+    broker,
+    { async list() { return [agentOperatorDescriptor()]; } },
+    launcher,
+    fakeStepDispatch(),
+    undefined,
+    undefined,
+    undefined,
+    shadowAsk
+  );
 }
 
 function makeEngine(
@@ -565,5 +605,77 @@ describe("OrchestratorService gate routing", () => {
     const splitDecisions = listSplitDecisionsForRun(db, "run-1");
     expect(splitDecisions).toHaveLength(1);
     expect(splitDecisions[0]).toMatchObject({ nodeId: "route", selectedBranch: "go_a", selectedEdgeTo: "branch_a" });
+  });
+});
+
+describe("OrchestratorService automated gate evaluation (L5)", () => {
+  let db: Database.Database;
+  let bus: ReturnType<typeof setupHarness>["bus"];
+  let idFactory: ReturnType<typeof setupHarness>["idFactory"];
+
+  beforeEach(() => {
+    ({ db, bus, idFactory } = setupHarness());
+    setSupervisionMode(db, "unsupervised", NOW);
+    seedRunAtValidation(db);
+  });
+
+  /** Drives the run so the validation step completes and the cursor reaches the gate. */
+  async function advanceRunToGate(engine: DispatchEngine): Promise<void> {
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+  }
+
+  it("approves and routes forward without a human decision", async () => {
+    db.prepare("UPDATE goals SET operating_mode = 'automated', orchestrator_provider = 'orca/anthropic' WHERE id = 'goal-1'").run();
+    const engine = makeEngineWithAsk(fakeStepBroker(), fakeGateAsk({ outcome: "approved", reason: "Meets the goal." }));
+    await advanceRunToGate(engine);
+
+    const decisions = listGateDecisionsForRun(db, "run-1");
+    expect(decisions.at(-1)).toMatchObject({ nodeId: "gate", outcome: "approved" });
+    const run = getWorkflowRunById(db, "run-1")!;
+    expect(run.status).toBe("active"); // routed forward, not parked awaiting a human
+    expect(db.prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'").get())
+      .toMatchObject({ pending_gate_route_json: null });
+  });
+
+  it("rejects, records the enumerated issueRefs, and routes back to the closing step", async () => {
+    db.prepare("UPDATE goals SET operating_mode = 'automated', orchestrator_provider = 'orca/anthropic' WHERE id = 'goal-1'").run();
+    const engine = makeEngineWithAsk(
+      fakeStepBroker(),
+      fakeGateAsk({ outcome: "rejected", reason: "Missing tests.", issueRefs: ["missing-tests", "no-error-handling"] })
+    );
+    await advanceRunToGate(engine);
+
+    const decision = listGateDecisionsForRun(db, "run-1").at(-1)!;
+    expect(decision.outcome).toBe("rejected");
+    expect(decision.issueRefs).toEqual(["missing-tests", "no-error-handling"]);
+    expect(latestRejectingGate(db, "run-1")).toEqual({
+      reason: "Missing tests.",
+      issueRefs: ["missing-tests", "no-error-handling"],
+    });
+  });
+
+  it("falls back to a human park when the evaluator returns null", async () => {
+    db.prepare("UPDATE goals SET operating_mode = 'automated', orchestrator_provider = 'orca/anthropic' WHERE id = 'goal-1'").run();
+    const brokenAsk: ShadowAsk = { async ask() { throw new Error("shadow down"); } };
+    const engine = makeEngineWithAsk(fakeStepBroker(), brokenAsk);
+    await advanceRunToGate(engine);
+
+    // No automated decision recorded; the run is parked awaiting a human decideGate.
+    expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(0);
+    const stash = db.prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'").get() as { pending_gate_route_json: string | null };
+    expect(JSON.parse(stash.pending_gate_route_json!)).toMatchObject({ awaitingHumanDecision: true });
+  });
+
+  it("L4 human_review still parks for a human decideGate (no auto-eval)", async () => {
+    // operating_mode left at default (human_review); shadowAsk present but must NOT be consulted.
+    const asked = { n: 0 };
+    const spyAsk: ShadowAsk = { async ask() { asked.n += 1; return { text: "{}" }; } };
+    const engine = makeEngineWithAsk(fakeStepBroker(), spyAsk);
+    await advanceRunToGate(engine);
+
+    expect(asked.n).toBe(0);
+    expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(0);
+    const stash = db.prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'").get() as { pending_gate_route_json: string | null };
+    expect(JSON.parse(stash.pending_gate_route_json!)).toMatchObject({ awaitingHumanDecision: true });
   });
 });

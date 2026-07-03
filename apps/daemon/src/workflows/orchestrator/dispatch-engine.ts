@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import {
   OrchestrationRequest,
+  GateEvaluationRequest,
   SplitEvaluationProposal,
   SplitEvaluationRequest,
   StepSkillProposal,
@@ -43,6 +44,7 @@ import {
 } from "../steps/usecases.js";
 import { effectiveGraph, resolveGateNext, resolveSplitterNext, resolveStepNext, type Destination } from "../graph/graph-routing.js";
 import { nextTraversalSeq, recordGateDecision } from "../gates/usecases.js";
+import { listGateDecisionsForRun } from "../gates/projection.js";
 import { listSplitDecisionsForRun } from "../splitters/projection.js";
 import { recordSplitDecision } from "../splitters/usecases.js";
 import { loadRunTemplate } from "../runs/run-template.js";
@@ -100,6 +102,9 @@ import { assembleWorkspaceContext } from "./workspace-context.js";
 import { reconstructTranscript } from "./interview.js";
 import { listFeedbackByGoalSince } from "../../recommendations/feedback.js";
 import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
+import { SHADOW_LLM_TIMEOUT_MS } from "../../orchestrator-llm/shadow-llm-client.js";
+import type { ShadowAsk } from "./recover-step-scoring.js";
+import { evaluateGate, issueRefsEqual, GATE_REJECT_CAP } from "./gate-evaluation.js";
 
 export const NULL_ACCUMULATOR: TokenAccumulator = { drain: () => null };
 
@@ -244,6 +249,7 @@ export class DispatchEngine {
     private readonly workerSpawn: ((input: { sessionId: string; goalId: string; adapterId: string }) => Promise<void>) | undefined,
     private readonly workerDeliver: ((sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">) | undefined,
     private readonly otlpAccumulator: TokenAccumulator = NULL_ACCUMULATOR,
+    private readonly shadowAsk?: ShadowAsk,
   ) {}
 
   /**
@@ -1020,7 +1026,7 @@ export class DispatchEngine {
       publishStaged(options.bus, stagedEvents);
 
       if (result.kind === "gate") {
-        this.parkForGateApproval(
+        await this.evaluateAndParkGate(
           db,
           now,
           { run, stepRun, stepTpl, template, goal, gateNodeId: result.nodeId },
@@ -1959,6 +1965,165 @@ export class DispatchEngine {
     }
   }
 
+  private buildGateEvaluationRequest(
+    db: Database.Database,
+    ctx: { run: WorkflowRunT; stepRun: StepRunRow; goal: GoalRow; gateNode: WorkflowGraphNode }
+  ): GateEvaluationRequest {
+    const { run, stepRun, goal, gateNode } = ctx;
+    const graph = effectiveGraph(loadRunTemplate(db, run)!.graph, loadRunTemplate(db, run)!.steps);
+    const availableOutcomes = (["approved", "rejected"] as const).filter((o) =>
+      graph.edges.some((e) => e.from === gateNode.id && e.port === o)
+    );
+    const priorGateDecisions = listGateDecisionsForRun(db, run.id)
+      .map((d) => ({ nodeId: d.nodeId, outcome: d.outcome, reason: d.reason.slice(0, 1024) }))
+      .slice(-50);
+    const committedLedger = latestCommittedLedger(db, run.id)
+      .records.slice(-35)
+      .map((r) => ({
+        id: r.id.slice(0, 128),
+        recordType: r.recordType.slice(0, 64),
+        status: r.status.slice(0, 64),
+        note: r.note.slice(0, 500),
+      }));
+    return GateEvaluationRequest.parse({
+      gate: { nodeId: gateNode.id, name: gateNode.name, instructions: gateNode.instructions ?? "" },
+      goal: { id: goal.id, description: goal.description },
+      sourceStepOutput: readStepOutputAsRecord(db, run.id, stepRun.id),
+      priorGateDecisions,
+      availableOutcomes,
+      committedLedger,
+    });
+  }
+
+  /**
+   * Gate = the PEV Verify phase. In human_review (L4) — or when no shadow
+   * evaluator is available — parks for a human decideGate (unchanged). In
+   * automated (L5), the LLM fills the verdict + issue list; the deterministic
+   * core branches, bounds the reject loop (GATE_REJECT_CAP), records the decision
+   * with issueRefs (which flow to the closing step via latestRejectingGate ->
+   * repairContext), and routes inline (forward on approve, backward on reject).
+   */
+  private async evaluateAndParkGate(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+      gateNodeId: string;
+    },
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    const { run, stepRun, stepTpl, template, goal, gateNodeId } = ctx;
+    const graph = effectiveGraph(template.graph, template.steps);
+    const gateNode = graph.nodes.find((n) => n.id === gateNodeId && n.type === "gate");
+    if (!gateNode) {
+      this.blockRun(db, now, { run, stepRun, stepTpl, goal }, `gate node not found in graph: ${gateNodeId}`, options);
+      return;
+    }
+
+    // L4, or no evaluator wired: keep the human-authoritative park (unchanged).
+    let adapterId: ShadowAdapterId | null = null;
+    if (this.shadowAsk && !goalRequiresHumanReview(db, goal.id)) {
+      try {
+        adapterId = resolveShadowAdapterId(goal);
+      } catch {
+        adapterId = null;
+      }
+    }
+    if (!this.shadowAsk || goalRequiresHumanReview(db, goal.id) || !adapterId) {
+      this.parkForGateApproval(db, now, { run, stepRun, stepTpl, template, goal, gateNodeId }, options);
+      return;
+    }
+
+    const proposal = await evaluateGate(this.shadowAsk, {
+      goalId: goal.id,
+      adapterId,
+      request: this.buildGateEvaluationRequest(db, { run, stepRun, goal, gateNode }),
+      timeoutMs: SHADOW_LLM_TIMEOUT_MS,
+    });
+    if (!proposal) {
+      // Escalate to a human — the same safety terminus as the broker's human_review.
+      this.parkForGateApproval(db, now, { run, stepRun, stepTpl, template, goal, gateNodeId }, options);
+      return;
+    }
+
+    // Honest, verification-governed termination (agent-harness.pdf p.31/p.46):
+    // stop on an OBJECTIVE non-progress signal — the same unresolved issues recur
+    // (stagnation) — or at the hard GATE_REJECT_CAP ceiling; never on model
+    // confidence. The block reason carries the enumerated issue evidence.
+    if (proposal.outcome === "rejected") {
+      const priorRejects = listGateDecisionsForRun(db, run.id).filter(
+        (d) => d.nodeId === gateNode.id && d.outcome === "rejected"
+      );
+      const issues = proposal.issueRefs ?? [];
+      const stagnated =
+        issues.length > 0 &&
+        priorRejects.length > 0 &&
+        issueRefsEqual(issues, priorRejects[priorRejects.length - 1]!.issueRefs);
+      if (priorRejects.length + 1 >= GATE_REJECT_CAP || stagnated) {
+        const detail = issues.join(", ");
+        const why = stagnated ? "unresolved issues recurred" : `${priorRejects.length + 1} rejections`;
+        this.blockRun(
+          db,
+          now,
+          { run, stepRun, stepTpl, goal },
+          `gate "${gateNode.name}" not converging (${why}): ${proposal.reason}${detail ? ` [${detail}]` : ""}`,
+          options
+        );
+        return;
+      }
+    }
+
+    let dest: Destination;
+    try {
+      dest = resolveGateNext(graph, gateNode.id, proposal.outcome);
+    } catch (e) {
+      this.blockRun(db, now, { run, stepRun, stepTpl, goal }, `gate ${gateNode.id} routing failed: ${(e as Error).message}`, options);
+      return;
+    }
+    if (dest.kind !== "step" && dest.kind !== "gate" && dest.kind !== "splitter") {
+      this.blockRun(db, now, { run, stepRun, stepTpl, goal }, `gate ${gateNode.id} resolved to an unroutable destination`, options);
+      return;
+    }
+
+    const ledger = latestCommittedLedger(db, run.id);
+    const seq = nextTraversalSeq(db, run.id);
+    recordGateDecision(db, now, {
+      goalId: goal.id,
+      workflowRunId: run.id,
+      nodeId: gateNode.id,
+      traversalSeq: seq,
+      outcome: proposal.outcome,
+      reason: proposal.reason,
+      selectedEdgeTo: dest.nodeId,
+      inputsConsidered: proposal.inputsConsidered,
+      issueRefs: proposal.issueRefs ?? [],
+      ledgerVersion: ledger.version,
+    });
+
+    // Route inline (automated => no Continue). Mirrors evaluateAndParkSplitter's
+    // unsupervised tail: route the cursor, then spawn the destination step (a
+    // gate/splitter destination re-parks inside routeGateDestination and no-ops here).
+    await this.routeGateDestination(
+      db,
+      now,
+      { run, template, goal, sourceStepRunId: stepRun.id },
+      { kind: dest.kind, nodeId: dest.nodeId },
+      options
+    );
+    const after = getWorkflowRunById(db, run.id);
+    if (after && after.status === "active" && after.currentStepRunId) {
+      const nextStepRun = readStepRun(db, after.currentStepRunId);
+      const nextTpl = template.steps.find((s) => s.id === nextStepRun.step_template_id);
+      if (nextTpl) {
+        await this.spawnStepAgent(db, now, { run: after, stepRun: nextStepRun, stepTpl: nextTpl, template, goal }, options);
+      }
+    }
+  }
+
   /**
    * Park a run at a splitter that could not be routed (no deterministic branchKey
    * value AND no orchestrator decision) so a human can pick the branch. Surfaces
@@ -2216,7 +2381,7 @@ export class DispatchEngine {
         );
         return;
       }
-      this.parkForGateApproval(
+      await this.evaluateAndParkGate(
         db,
         now,
         { run, stepRun, stepTpl, template, goal, gateNodeId: dest.nodeId },
