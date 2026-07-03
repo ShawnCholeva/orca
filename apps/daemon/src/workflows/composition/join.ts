@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { WorkflowGraph } from "@orca/contracts";
 import type { EventBus } from "../../events.js";
-import { getCompositionByChildRun, updateCompositionStatus, descendantRunIds } from "./store.js";
+import { getCompositionByChildRun, updateCompositionStatus, descendantRunIds, readWorkspaceSnapshot } from "./store.js";
 import { mapWrites } from "./reads-writes.js";
 import { createArtifact } from "../artifacts/usecases.js";
 import { getWorkflowRunById } from "../runs/projection.js";
@@ -12,6 +12,10 @@ import { emitDelegateJoin } from "../../harness-transitions/emit.js";
 import { insertStepForRouting, nextAttemptForStep, stepFingerprint } from "../steps/usecases.js";
 import { effectiveGraph } from "../graph/graph-routing.js";
 import type { Destination } from "../graph/graph-routing.js";
+import { realVersionProbe, type VersionProbe } from "../../harness-state/workspace-version.js";
+import { runSensors } from "../../harness-sensors/runner.js";
+import { HARNESS_SENSORS } from "../../harness-sensors/detect.js";
+import { listWorkspacesByGoal } from "../../workspaces/projection.js";
 
 export interface JoinDeps {
   db: Database.Database;
@@ -19,6 +23,30 @@ export interface JoinDeps {
   now: () => string;
   idFactory: () => string;
 }
+
+/**
+ * Injectable sensor runner for I4 re-verify at join. Default runs all
+ * HARNESS_SENSORS labels against the workspace and returns verdict + reason.
+ * Injectable so unit tests can simulate veto without a real workspace.
+ */
+export type SensorRunner = (workspacePath: string) => Promise<{
+  verdict: "passed" | "failed" | "partial";
+  reason?: string;
+}>;
+
+const defaultSensorRunner: SensorRunner = async (workspacePath: string) => {
+  const allLabels = HARNESS_SENSORS.map((s) => s.label);
+  const evidence = await runSensors({ workspacePath, required: allLabels });
+  const failingReason = evidence.sensorsRun
+    .filter((s) => s.result === "failed")
+    .map((s) => `${s.kind}: ${s.summary.slice(0, 300)}`)
+    .join("; ");
+  const gapReason = evidence.oracleAdequacy.gaps.join(", ");
+  return {
+    verdict: evidence.verdict,
+    reason: failingReason || gapReason || undefined,
+  };
+};
 
 /**
  * Resolve the next destination for a delegate node. Cannot use resolveStepNext
@@ -83,17 +111,83 @@ function readChildTerminalStepOutput(
 }
 
 /**
+ * I3: Compare the spawn-time workspace snapshot against a fresh probe.
+ * Returns { diverged: false } when there is nothing to compare (null snapshot,
+ * no path, or both sides unprobeable) — we never fabricate divergence without
+ * a baseline. Returns { diverged: true, details } when branch or dirty changed.
+ */
+function computeBeliefDivergence(
+  snapshotJson: string | null,
+  probe: VersionProbe,
+): { diverged: boolean; details?: string } {
+  if (!snapshotJson) return { diverged: false };
+
+  let snapshot: { path?: string; branch?: string | null; dirty?: boolean | null };
+  try {
+    snapshot = JSON.parse(snapshotJson) as { path?: string; branch?: string | null; dirty?: boolean | null };
+  } catch {
+    return { diverged: false };
+  }
+
+  const wsPath = snapshot.path;
+  if (!wsPath) return { diverged: false };
+
+  const live = probe(wsPath);
+  const snapBranch = snapshot.branch ?? null;
+  const snapDirty = snapshot.dirty ?? null;
+
+  // Branch comparison: any difference (including null ↔ non-null) signals divergence.
+  const branchDiverged = snapBranch !== live.branch;
+  // Dirty comparison: only when both sides were readable.
+  const dirtyDiverged = snapDirty !== null && live.dirty !== null && snapDirty !== live.dirty;
+
+  if (!branchDiverged && !dirtyDiverged) return { diverged: false };
+
+  const parts: string[] = [];
+  if (branchDiverged) parts.push(`branch: ${snapBranch ?? "null"} → ${live.branch ?? "null"}`);
+  if (dirtyDiverged) parts.push(`dirty: ${String(snapDirty)} → ${String(live.dirty)}`);
+  return { diverged: true, details: parts.join(", ") };
+}
+
+/**
+ * Derive a meaningful blocked_reason for the parent from the child's state.
+ * Prefers the child run's own blocked_reason (set if the child was previously
+ * blocked before joinChildRun was called). Falls back to a verdict-based message.
+ */
+function resolveChildBlockedReason(
+  db: Database.Database,
+  childRunId: string,
+  verdict: "failed" | "partial" | null,
+): string {
+  const row = db
+    .prepare(`SELECT blocked_reason FROM workflow_runs WHERE id = ?`)
+    .get(childRunId) as { blocked_reason: string | null } | undefined;
+  const childReason = row?.blocked_reason ?? null;
+  if (childReason) return `child run failed: ${childReason}`;
+  if (verdict) return `child run failed (verdict: ${verdict})`;
+  return "child run failed";
+}
+
+/**
  * Join a completed child run back into its parent. Reads the child's verdict,
  * maps its writes into the parent namespace, advances the parent cursor to the
  * next node, and emits a delegate_join harness transition.
  *
- * Returns `outcome: "joined"` on a passed verdict, or `"propagated_failure"`
- * when the verdict is non-passing (parent is blocked and composition is failed).
+ * I3: Compares the spawn-time workspace snapshot against a fresh probe (injectable
+ * via `probe`) and records beliefDivergence on the CompositionFacet.
+ *
+ * I4: If the delegate node has validationRequired, runs the sensor veto (injectable
+ * via `sensorRunner`). A veto blocks the parent and returns propagated_failure.
+ *
+ * Returns `outcome: "joined"` on a passed verdict (and non-vetoed I4), or
+ * `"propagated_failure"` when the verdict is non-passing or I4 vetos.
  */
-export function joinChildRun(
+export async function joinChildRun(
   deps: JoinDeps,
-  childRunId: string
-): { parentRunId: string; outcome: "joined" | "propagated_failure" } {
+  childRunId: string,
+  probe: VersionProbe = realVersionProbe,
+  sensorRunner: SensorRunner = defaultSensorRunner,
+): Promise<{ parentRunId: string; outcome: "joined" | "propagated_failure" }> {
   const { db, bus, now, idFactory } = deps;
 
   // 1. Load composition (fail fast if missing — programming error)
@@ -154,6 +248,8 @@ export function joinChildRun(
 
   // 4. Verdict gate — non-passing verdict propagates failure to parent
   if (verdict !== "passed") {
+    const blockedReason = resolveChildBlockedReason(db, childRunId, verdict);
+
     db.transaction(() => {
       updateCompositionStatus(db, compositionId, { status: "failed", finishedAt: now() });
       // Mark child run failed BEFORE setting parent to 'blocked' to avoid the
@@ -161,8 +257,8 @@ export function joinChildRun(
       // IN ('active','paused','blocked')). Child must exit the constraint set first.
       db.prepare(`UPDATE workflow_runs SET status = 'failed', finished_at = ? WHERE id = ?`)
         .run(now(), childRunId);
-      db.prepare(`UPDATE workflow_runs SET status = 'blocked', blocked_reason = 'child run failed' WHERE id = ?`)
-        .run(parentRunId);
+      db.prepare(`UPDATE workflow_runs SET status = 'blocked', blocked_reason = ? WHERE id = ?`)
+        .run(blockedReason, parentRunId);
       db.prepare(`UPDATE goals SET active_workflow_run_id = ? WHERE id = ?`).run(parentRunId, goalId);
 
       // emit delegate_join (nested SAVEPOINT via better-sqlite3 transaction-in-transaction)
@@ -191,6 +287,77 @@ export function joinChildRun(
     })();
 
     return { parentRunId, outcome: "propagated_failure" };
+  }
+
+  // === I3: Belief-divergence (sync, OUTSIDE transaction) ===
+  const snapshotJson = readWorkspaceSnapshot(db, compositionId);
+  const beliefDivergence = computeBeliefDivergence(snapshotJson, probe);
+
+  // === Load parent template + delegate node (needed for I4 and cursor advance) ===
+  const parentRunForTemplate = getWorkflowRunById(db, parentRunId);
+  const parentTemplate = parentRunForTemplate ? loadRunTemplate(db, parentRunForTemplate) : null;
+  const delegateNode = parentTemplate?.graph?.nodes?.find((n) => n.id === delegateNodeId);
+  const validationRequired = delegateNode?.validationRequired ?? false;
+
+  // === I4: Re-verify via sensor veto (async, OUTSIDE transaction) ===
+  let verifyResult: { ran: boolean; vetoed: boolean; reason?: string } = { ran: false, vetoed: false };
+
+  if (validationRequired) {
+    const workspacePath = listWorkspacesByGoal(db, goalId)[0]?.path ?? null;
+    if (workspacePath) {
+      try {
+        const sensorResult = await sensorRunner(workspacePath);
+        const vetoed = sensorResult.verdict !== "passed";
+        verifyResult = {
+          ran: true,
+          vetoed,
+          ...(vetoed && sensorResult.reason ? { reason: sensorResult.reason } : {}),
+        };
+
+        if (vetoed) {
+          const vetoReason = `validation veto at join: ${sensorResult.reason ?? sensorResult.verdict}`;
+          db.transaction(() => {
+            updateCompositionStatus(db, compositionId, { status: "failed", finishedAt: now() });
+            // Child completed (its verdict passed; the veto is join-side)
+            // Child must exit the active set before parent enters the blocked set.
+            db.prepare(`UPDATE workflow_runs SET status = 'completed', finished_at = ? WHERE id = ?`)
+              .run(now(), childRunId);
+            db.prepare(`UPDATE workflow_runs SET status = 'blocked', blocked_reason = ? WHERE id = ?`)
+              .run(vetoReason, parentRunId);
+            db.prepare(`UPDATE goals SET active_workflow_run_id = ? WHERE id = ?`).run(parentRunId, goalId);
+
+            emitDelegateJoin(
+              { db, bus, now, idFactory },
+              {
+                goalId,
+                workflowRunId: parentRunId,
+                workflowStepRunId: null,
+                composition: {
+                  childRunId,
+                  childTemplateId: childRun.templateId,
+                  childTemplateVersion: childRun.templateVersion,
+                  readsKeys: Object.keys(reads),
+                  writesKeys: Object.keys(writes),
+                  depth,
+                  costRollupUsd: null,
+                  childVerdict: "passed",
+                  childUntestedRegions,
+                  childResidualRisk,
+                  beliefDivergence,
+                  verifyResult,
+                },
+              }
+            );
+          })();
+
+          return { parentRunId, outcome: "propagated_failure" };
+        }
+      } catch (err) {
+        console.error("[joinChildRun] sensor veto check failed — skipping veto (fail-safe)", err);
+        // On sensor infrastructure failure, don't block the join.
+        verifyResult = { ran: false, vetoed: false };
+      }
+    }
   }
 
   // 5. Passed path — all mutations in one outer transaction
@@ -239,15 +406,7 @@ export function joinChildRun(
       []
     );
 
-    // 5d. Belief-divergence detection — deferred (Task 9 concern).
-    //     null = "not checked yet"; { diverged: false } would dishonestly claim the
-    //     check ran and found no divergence. Keep null until Task 9 runs the check.
-    const beliefDivergence = null;
-
-    // 5e. Validation sensor veto — deferred (Task 9 concern)
-    const verifyResult = { ran: false, vetoed: false };
-
-    // 5f. Cost rollup: sum buildGoalCostRollup over all descendant run IDs.
+    // 5d. Cost rollup: sum buildGoalCostRollup over all descendant run IDs.
     const runIds = descendantRunIds(db, childRunId);
     for (const runId of runIds) {
       const entry = buildGoalCostRollup(db, goalId, runId);
@@ -256,31 +415,27 @@ export function joinChildRun(
       }
     }
 
-    // 5g. Mark child run completed (direct SQL; completeWorkflowRun resets goals.status)
+    // 5e. Mark child run completed (direct SQL; completeWorkflowRun resets goals.status)
     db.prepare(`UPDATE workflow_runs SET status = 'completed', finished_at = ? WHERE id = ?`)
       .run(now(), childRunId);
 
-    // 5h. Mark composition completed
+    // 5f. Mark composition completed
     updateCompositionStatus(db, compositionId, {
       status: "completed",
       costRollupUsd: totalCostUsd,
       finishedAt: now(),
     });
 
-    // 5i. Restore parent run to active
+    // 5g. Restore parent run to active
     db.prepare(`UPDATE workflow_runs SET status = 'active' WHERE id = ?`).run(parentRunId);
 
-    // 5j. Point the goal at the parent again
+    // 5h. Point the goal at the parent again
     db.prepare(`UPDATE goals SET active_workflow_run_id = ? WHERE id = ?`).run(parentRunId, goalId);
 
-    // 5k. Advance the parent cursor past the delegate node.
+    // 5i. Advance the parent cursor past the delegate node.
     //     Best-effort: if graph is absent or cursor advance throws, log and continue.
     //     The parent is active; Task 9 must handle the resume.
     try {
-      const parentRun = getWorkflowRunById(db, parentRunId);
-      if (!parentRun) throw new Error("parent run not found after restoring active");
-
-      const parentTemplate = loadRunTemplate(db, parentRun);
       if (!parentTemplate?.graph) {
         throw new Error("parent template has no graph; cursor advance deferred to Task 9");
       }
@@ -313,7 +468,7 @@ export function joinChildRun(
       });
     }
 
-    // 5l. Emit delegate_join with full CompositionFacet (nested SAVEPOINT)
+    // 5j. Emit delegate_join with full CompositionFacet (nested SAVEPOINT)
     emitDelegateJoin(
       { db, bus, now, idFactory },
       {

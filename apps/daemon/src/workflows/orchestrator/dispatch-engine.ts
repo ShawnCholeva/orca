@@ -91,6 +91,7 @@ import {
 import { buildGoalCostRollup, buildGoalCostRollupAcross } from "../../harness-state/cost-rollup.js";
 import { spawnChildRun, DelegationDepthError } from "../composition/spawn.js";
 import { joinChildRun } from "../composition/join.js";
+import { realVersionProbe } from "../../harness-state/workspace-version.js";
 import { rootRunId, descendantRunIds } from "../composition/store.js";
 import { createDecision } from "../../decisions/usecases.js";
 import { buildAgentObjective } from "./agent-objective.js";
@@ -1525,7 +1526,7 @@ export class DispatchEngine {
   ): Promise<{ decision: WorkflowDecisionTrace; recommendationIds: string[] }> {
     const { run, stepRun, stepTpl, goal } = ctx;
     const idFactory = options.idFactory ?? randomUUID;
-    const join = joinChildRun({ db, bus: options.bus ?? new EventBus(), now, idFactory }, run.id);
+    const join = await joinChildRun({ db, bus: options.bus ?? new EventBus(), now, idFactory }, run.id, realVersionProbe);
     if (join.outcome === "joined") {
       await this.resumeParentAfterJoin(db, now, join.parentRunId, options);
     }

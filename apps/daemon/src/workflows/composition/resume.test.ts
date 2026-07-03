@@ -294,7 +294,7 @@ describe("Task 3: Child-terminal-FAILURE propagation on resume", () => {
 });
 
 describe("Task 4: Non-gated clean-join via step_result_json fallback", () => {
-  it("child terminal with step_result_json.stepStatus=completed (no evidence) → joined", () => {
+  it("child terminal with step_result_json.stepStatus=completed (no evidence) → joined", async () => {
     seedFixtures("active");
 
     // Simulate what dispatch-engine.ts now writes before joinChildToParentTerminal:
@@ -307,7 +307,7 @@ describe("Task 4: Non-gated clean-join via step_result_json fallback", () => {
     // joinChildRun's step_result_json fallback reads stepStatus=completed → verdict=passed.
 
     const deps = makeDeps();
-    const result = joinChildRun(deps, "r-child");
+    const result = await joinChildRun(deps, "r-child");
 
     expect(result.outcome).toBe("joined");
     expect(result.parentRunId).toBe("r-parent");
@@ -319,7 +319,7 @@ describe("Task 4: Non-gated clean-join via step_result_json fallback", () => {
     expect(comp.status).toBe("completed");
   });
 
-  it("child terminal with step_result_json.stepStatus=failed (no evidence) → propagated_failure", () => {
+  it("child terminal with step_result_json.stepStatus=failed (no evidence) → propagated_failure", async () => {
     seedFixtures("active");
 
     db.prepare(
@@ -327,7 +327,7 @@ describe("Task 4: Non-gated clean-join via step_result_json fallback", () => {
     ).run(JSON.stringify({ stepStatus: "failed" }));
 
     const deps = makeDeps();
-    const result = joinChildRun(deps, "r-child");
+    const result = await joinChildRun(deps, "r-child");
 
     expect(result.outcome).toBe("propagated_failure");
 
@@ -335,12 +335,12 @@ describe("Task 4: Non-gated clean-join via step_result_json fallback", () => {
     expect(parentRun.status).toBe("blocked");
   });
 
-  it("absent step_result_json and absent step_complete evidence → conservative failed fallback", () => {
+  it("absent step_result_json and absent step_complete evidence → conservative failed fallback", async () => {
     seedFixtures("active");
     // No step_result_json written, no step_complete transition emitted.
 
     const deps = makeDeps();
-    const result = joinChildRun(deps, "r-child");
+    const result = await joinChildRun(deps, "r-child");
 
     // Conservative absent-verdict fallback → propagated_failure (documented limitation)
     expect(result.outcome).toBe("propagated_failure");

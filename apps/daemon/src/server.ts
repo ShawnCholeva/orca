@@ -216,6 +216,7 @@ import {
 } from './activities/store.js';
 import { resumeActiveRuns } from './workflows/orchestrator/resume.js';
 import { joinChildRun } from './workflows/composition/join.js';
+import { realVersionProbe } from './harness-state/workspace-version.js';
 import { registerWorkflowTemplateRoutes } from './workflows/templates/routes.js';
 import { registerWorkflowRunRoutes } from './workflows/runs/routes.js';
 import { registerWorkflowArtifactRoutes } from './workflows/artifacts/routes.js';
@@ -905,14 +906,15 @@ export function createServer(
         return rows.map((r) => ({ childRunId: r.child_run_id }));
       },
       propagateChildFailure: async (childRunId: string) => {
-        joinChildRun(
+        await joinChildRun(
           {
             db,
             bus: eventBus,
             now: daemonContext.now ?? (() => new Date().toISOString()),
             idFactory: daemonContext.idFactory,
           },
-          childRunId
+          childRunId,
+          realVersionProbe
         );
       },
     }).catch((err) => console.error("[resume] boot resume failed", err));

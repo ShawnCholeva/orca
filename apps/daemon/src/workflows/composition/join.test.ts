@@ -13,7 +13,8 @@ import { resetPreparedStatements as resetTemplateProjection } from "../templates
 import { resetPreparedStatements as resetHarnessProjection } from "../../harness-transitions/usecases.js";
 import { resetWorkflowStepProjectionPreparedStatements } from "../steps/projection.js";
 import { emitStepComplete } from "../../harness-transitions/emit.js";
-import { joinChildRun, type JoinDeps } from "./join.js";
+import { joinChildRun, type JoinDeps, type SensorRunner } from "./join.js";
+import type { VersionProbe } from "../../harness-state/workspace-version.js";
 
 const NOW = "2026-07-01T00:00:00.000Z";
 const dirs: string[] = [];
@@ -57,6 +58,16 @@ const PARENT_GRAPH_JSON = JSON.stringify({
   positions: { dn1: { x: 110, y: 20 }, ns1: { x: 110, y: 112 } },
 });
 
+// Parent template graph with validationRequired: true on dn1
+const PARENT_GRAPH_VALIDATION_REQUIRED_JSON = JSON.stringify({
+  nodes: [
+    { id: "dn1", type: "delegate", name: "Delegate", childTemplateId: "child-tpl", childTemplateVersion: 1, validationRequired: true },
+    { id: "ns1", type: "step", name: "Next Step", stepId: "s-next", terminal: true },
+  ],
+  edges: [{ from: "dn1", to: "ns1" }],
+  positions: { dn1: { x: 110, y: 20 }, ns1: { x: 110, y: 112 } },
+});
+
 // Parent template steps (only the step after the delegate)
 const PARENT_STEPS_JSON = JSON.stringify([{
   id: "s-next", ordinal: 0, name: "Next Step", instructions: "Do it",
@@ -88,14 +99,25 @@ afterEach(() => {
 
 /**
  * Seed the common fixtures used by both tests. Returns the composition id.
+ * @param parentGraphJson - optional override for the parent template graph JSON
+ * @param workspaceSnapshotJson - optional workspace snapshot to store on the composition row
  */
-function seedFixtures(deps: JoinDeps): string {
+function seedFixtures(
+  deps: JoinDeps,
+  {
+    parentGraphJson = PARENT_GRAPH_JSON,
+    workspaceSnapshotJson = null,
+  }: {
+    parentGraphJson?: string;
+    workspaceSnapshotJson?: string | null;
+  } = {}
+): string {
   // Templates
   db.prepare(
     `INSERT INTO workflow_templates
        (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, graph_json, created_at, updated_at)
      VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)`
-  ).run("parent-tpl", "Parent Tpl", "desc", 1, PARENT_STEPS_JSON, "[]", PARENT_GRAPH_JSON, NOW, NOW);
+  ).run("parent-tpl", "Parent Tpl", "desc", 1, PARENT_STEPS_JSON, "[]", parentGraphJson, NOW, NOW);
 
   db.prepare(
     `INSERT INTO workflow_templates
@@ -127,12 +149,14 @@ function seedFixtures(deps: JoinDeps): string {
   const compositionId = "comp-1";
   db.prepare(
     `INSERT INTO workflow_run_compositions
-       (id, goal_id, parent_run_id, child_run_id, delegate_node_id, spawn_seq, reads_json, writes_json, depth, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, goal_id, parent_run_id, child_run_id, delegate_node_id, spawn_seq, reads_json, writes_json,
+        parent_workspace_snapshot_json, depth, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     compositionId, "g1", "r-parent", "r-child", "dn1", 0,
     JSON.stringify({}),
     JSON.stringify({ review_findings: "findings" }),
+    workspaceSnapshotJson,
     1, "active", NOW
   );
 
@@ -164,8 +188,18 @@ function seedFixtures(deps: JoinDeps): string {
   return compositionId;
 }
 
+/** A probe that always returns the given version — used for I3 testing. */
+function makeProbe(branch: string | null, dirty: boolean | null): VersionProbe {
+  return () => ({ branch, dirty });
+}
+
+/** A sensor runner that always returns the given verdict — used for I4 testing. */
+function makeSensorRunner(verdict: "passed" | "failed" | "partial", reason?: string): SensorRunner {
+  return async () => ({ verdict, reason });
+}
+
 describe("joinChildRun", () => {
-  it("passed verdict → writes artifact, child completed, parent active, delegate_join emitted", () => {
+  it("passed verdict → writes artifact, child completed, parent active, delegate_join emitted", async () => {
     const deps = makeDeps();
     seedFixtures(deps);
 
@@ -188,7 +222,7 @@ describe("joinChildRun", () => {
       }
     );
 
-    const result = joinChildRun(deps, "r-child");
+    const result = await joinChildRun(deps, "r-child");
 
     // Outcome
     expect(result.outcome).toBe("joined");
@@ -233,11 +267,13 @@ describe("joinChildRun", () => {
     const compositionFacet = JSON.parse(transition!.composition_json as string) as Record<string, unknown>;
     expect(compositionFacet.childVerdict).toBe("passed");
     expect(compositionFacet.childRunId).toBe("r-child");
-    // beliefDivergence must be null (check deferred to Task 9, not "checked, no divergence")
-    expect(compositionFacet.beliefDivergence).toBeNull();
+    // I3: null snapshot → { diverged: false } (nothing to compare)
+    expect(compositionFacet.beliefDivergence).toEqual({ diverged: false });
+    // I4: no validationRequired → ran: false
+    expect(compositionFacet.verifyResult).toEqual({ ran: false, vetoed: false });
   });
 
-  it("failed verdict → propagated_failure, parent blocked, no writes artifact", () => {
+  it("failed verdict → propagated_failure, parent blocked, no writes artifact", async () => {
     const deps = makeDeps();
     seedFixtures(deps);
 
@@ -260,14 +296,14 @@ describe("joinChildRun", () => {
       }
     );
 
-    const result = joinChildRun(deps, "r-child");
+    const result = await joinChildRun(deps, "r-child");
 
     // Outcome
     expect(result.outcome).toBe("propagated_failure");
     expect(result.parentRunId).toBe("r-parent");
 
     // Parent run: blocked
-    const parentRun = db.prepare(`SELECT status FROM workflow_runs WHERE id = 'r-parent'`).get() as { status: string };
+    const parentRun = db.prepare(`SELECT status, blocked_reason FROM workflow_runs WHERE id = 'r-parent'`).get() as { status: string; blocked_reason: string | null };
     expect(parentRun.status).toBe("blocked");
 
     // Composition: failed
@@ -290,7 +326,288 @@ describe("joinChildRun", () => {
     expect(compositionFacet.childVerdict).toBe("failed");
   });
 
-  it("delegate re-entry: second join through same delegate node gets attempt=2 (no UNIQUE collision)", () => {
+  it("child-reason: parent blocked_reason carries the child's actual failure reason", async () => {
+    const deps = makeDeps();
+    seedFixtures(deps);
+
+    // Set a specific blocked_reason on the child run to simulate a previously
+    // blocked child that joinChildRun is now propagating.
+    db.prepare(`UPDATE workflow_runs SET blocked_reason = 'tests failed: 3 assertions' WHERE id = 'r-child'`).run();
+
+    emitStepComplete(
+      { db, bus: deps.bus, now: deps.now, idFactory: deps.idFactory },
+      {
+        goalId: "g1",
+        workflowRunId: "r-child",
+        workflowStepRunId: "sr-child-1",
+        evidence: {
+          sensorsRun: [],
+          verdict: "failed",
+          untestedRegions: [],
+          residualRisk: [],
+          oracleAdequacy: { sufficient: false, gaps: [] },
+        },
+        telemetry: null,
+        stateDeps: null,
+      }
+    );
+
+    await joinChildRun(deps, "r-child");
+
+    // Parent blocked_reason should carry the child's reason, not a generic string
+    const parentRun = db.prepare(`SELECT blocked_reason FROM workflow_runs WHERE id = 'r-parent'`).get() as { blocked_reason: string | null };
+    expect(parentRun.blocked_reason).not.toBe("child run failed");
+    expect(parentRun.blocked_reason).toContain("tests failed: 3 assertions");
+  });
+
+  it("child-reason fallback: when child has no blocked_reason, uses verdict-based message", async () => {
+    const deps = makeDeps();
+    seedFixtures(deps);
+
+    emitStepComplete(
+      { db, bus: deps.bus, now: deps.now, idFactory: deps.idFactory },
+      {
+        goalId: "g1",
+        workflowRunId: "r-child",
+        workflowStepRunId: "sr-child-1",
+        evidence: {
+          sensorsRun: [],
+          verdict: "failed",
+          untestedRegions: [],
+          residualRisk: [],
+          oracleAdequacy: { sufficient: false, gaps: [] },
+        },
+        telemetry: null,
+        stateDeps: null,
+      }
+    );
+
+    await joinChildRun(deps, "r-child");
+
+    const parentRun = db.prepare(`SELECT blocked_reason FROM workflow_runs WHERE id = 'r-parent'`).get() as { blocked_reason: string | null };
+    // Should be informative (not just "child run failed")
+    expect(parentRun.blocked_reason).toBeTruthy();
+    expect(parentRun.blocked_reason).not.toBe("child run failed");
+    // Should mention the verdict or child run failure in a clear way
+    expect(parentRun.blocked_reason).toMatch(/child|failed|verdict/i);
+  });
+
+  it("I3: workspace diverged → beliefDivergence.diverged = true on passed join", async () => {
+    const deps = makeDeps();
+    // Snapshot records branch = "main"; probe returns "feat/x" → diverged
+    const snapshotJson = JSON.stringify({ id: "ws-1", path: "/fake/ws", branch: "main", dirty: false });
+    seedFixtures(deps, { workspaceSnapshotJson: snapshotJson });
+
+    emitStepComplete(
+      { db, bus: deps.bus, now: deps.now, idFactory: deps.idFactory },
+      {
+        goalId: "g1",
+        workflowRunId: "r-child",
+        workflowStepRunId: "sr-child-1",
+        evidence: {
+          sensorsRun: [],
+          verdict: "passed",
+          untestedRegions: [],
+          residualRisk: [],
+          oracleAdequacy: { sufficient: true, gaps: [] },
+        },
+        telemetry: null,
+        stateDeps: null,
+      }
+    );
+
+    const divergedProbe = makeProbe("feat/x", false);
+    const result = await joinChildRun(deps, "r-child", divergedProbe);
+
+    expect(result.outcome).toBe("joined");
+
+    const transition = db.prepare(
+      `SELECT composition_json FROM harness_transitions WHERE goal_id = 'g1' AND boundary = 'delegate_join'`
+    ).get() as Record<string, unknown> | undefined;
+    expect(transition).toBeTruthy();
+    const facet = JSON.parse(transition!.composition_json as string) as Record<string, unknown>;
+    const bd = facet.beliefDivergence as { diverged: boolean; details?: string } | null;
+    expect(bd).not.toBeNull();
+    expect(bd!.diverged).toBe(true);
+    expect(bd!.details).toContain("main");
+    expect(bd!.details).toContain("feat/x");
+  });
+
+  it("I3: workspace not diverged → beliefDivergence.diverged = false on passed join", async () => {
+    const deps = makeDeps();
+    const snapshotJson = JSON.stringify({ id: "ws-1", path: "/fake/ws", branch: "main", dirty: false });
+    seedFixtures(deps, { workspaceSnapshotJson: snapshotJson });
+
+    emitStepComplete(
+      { db, bus: deps.bus, now: deps.now, idFactory: deps.idFactory },
+      {
+        goalId: "g1",
+        workflowRunId: "r-child",
+        workflowStepRunId: "sr-child-1",
+        evidence: {
+          sensorsRun: [],
+          verdict: "passed",
+          untestedRegions: [],
+          residualRisk: [],
+          oracleAdequacy: { sufficient: true, gaps: [] },
+        },
+        telemetry: null,
+        stateDeps: null,
+      }
+    );
+
+    const matchingProbe = makeProbe("main", false);
+    const result = await joinChildRun(deps, "r-child", matchingProbe);
+
+    expect(result.outcome).toBe("joined");
+
+    const transition = db.prepare(
+      `SELECT composition_json FROM harness_transitions WHERE goal_id = 'g1' AND boundary = 'delegate_join'`
+    ).get() as Record<string, unknown> | undefined;
+    const facet = JSON.parse(transition!.composition_json as string) as Record<string, unknown>;
+    const bd = facet.beliefDivergence as { diverged: boolean; details?: string };
+    expect(bd.diverged).toBe(false);
+  });
+
+  it("I4: validationRequired + vetoed sensor → parent blocked, outcome propagated_failure", async () => {
+    const deps = makeDeps();
+    // Fixture with validationRequired: true on dn1
+    seedFixtures(deps, { parentGraphJson: PARENT_GRAPH_VALIDATION_REQUIRED_JSON });
+
+    // Add a workspace so the sensor runner gets invoked
+    db.prepare(`INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`).run("ws-1", "test-ws", "/fake/workspace", NOW, NOW);
+    db.prepare(`INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`).run("g1", "ws-1", NOW);
+
+    emitStepComplete(
+      { db, bus: deps.bus, now: deps.now, idFactory: deps.idFactory },
+      {
+        goalId: "g1",
+        workflowRunId: "r-child",
+        workflowStepRunId: "sr-child-1",
+        evidence: {
+          sensorsRun: [],
+          verdict: "passed",
+          untestedRegions: [],
+          residualRisk: [],
+          oracleAdequacy: { sufficient: true, gaps: [] },
+        },
+        telemetry: null,
+        stateDeps: null,
+      }
+    );
+
+    const vetoingSensorRunner = makeSensorRunner("failed", "typecheck: type error in main.ts");
+    const result = await joinChildRun(deps, "r-child", undefined, vetoingSensorRunner);
+
+    // Vetoed → propagated_failure, parent blocked
+    expect(result.outcome).toBe("propagated_failure");
+
+    const parentRun = db.prepare(`SELECT status, blocked_reason FROM workflow_runs WHERE id = 'r-parent'`).get() as { status: string; blocked_reason: string | null };
+    expect(parentRun.status).toBe("blocked");
+    expect(parentRun.blocked_reason).toContain("typecheck: type error in main.ts");
+
+    // Child still completed (its verdict was passed; join veto is parent-side)
+    const childRun = db.prepare(`SELECT status FROM workflow_runs WHERE id = 'r-child'`).get() as { status: string };
+    expect(childRun.status).toBe("completed");
+
+    // delegate_join transition carries verifyResult with vetoed: true
+    const transition = db.prepare(
+      `SELECT composition_json FROM harness_transitions WHERE goal_id = 'g1' AND boundary = 'delegate_join'`
+    ).get() as Record<string, unknown> | undefined;
+    expect(transition).toBeTruthy();
+    const facet = JSON.parse(transition!.composition_json as string) as Record<string, unknown>;
+    const vr = facet.verifyResult as { ran: boolean; vetoed: boolean; reason?: string };
+    expect(vr.ran).toBe(true);
+    expect(vr.vetoed).toBe(true);
+    expect(vr.reason).toContain("typecheck: type error in main.ts");
+
+    // No writes artifact in parent namespace (veto prevents materialization)
+    const count = db.prepare(
+      `SELECT COUNT(*) AS c FROM workflow_artifacts WHERE workflow_run_id = 'r-parent' AND type = 'step_output'`
+    ).get() as { c: number };
+    expect(count.c).toBe(0);
+  });
+
+  it("I4: validationRequired + sensor passes → joined, verifyResult ran:true vetoed:false", async () => {
+    const deps = makeDeps();
+    seedFixtures(deps, { parentGraphJson: PARENT_GRAPH_VALIDATION_REQUIRED_JSON });
+
+    db.prepare(`INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`).run("ws-1", "test-ws", "/fake/workspace", NOW, NOW);
+    db.prepare(`INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`).run("g1", "ws-1", NOW);
+
+    emitStepComplete(
+      { db, bus: deps.bus, now: deps.now, idFactory: deps.idFactory },
+      {
+        goalId: "g1",
+        workflowRunId: "r-child",
+        workflowStepRunId: "sr-child-1",
+        evidence: {
+          sensorsRun: [],
+          verdict: "passed",
+          untestedRegions: [],
+          residualRisk: [],
+          oracleAdequacy: { sufficient: true, gaps: [] },
+        },
+        telemetry: null,
+        stateDeps: null,
+      }
+    );
+
+    const passingSensorRunner = makeSensorRunner("passed");
+    const result = await joinChildRun(deps, "r-child", undefined, passingSensorRunner);
+
+    expect(result.outcome).toBe("joined");
+
+    const transition = db.prepare(
+      `SELECT composition_json FROM harness_transitions WHERE goal_id = 'g1' AND boundary = 'delegate_join'`
+    ).get() as Record<string, unknown> | undefined;
+    const facet = JSON.parse(transition!.composition_json as string) as Record<string, unknown>;
+    const vr = facet.verifyResult as { ran: boolean; vetoed: boolean };
+    expect(vr.ran).toBe(true);
+    expect(vr.vetoed).toBe(false);
+  });
+
+  it("I4: validationRequired absent → verifyResult ran:false (sensor runner never called)", async () => {
+    const deps = makeDeps();
+    seedFixtures(deps); // uses PARENT_GRAPH_JSON which has no validationRequired
+
+    emitStepComplete(
+      { db, bus: deps.bus, now: deps.now, idFactory: deps.idFactory },
+      {
+        goalId: "g1",
+        workflowRunId: "r-child",
+        workflowStepRunId: "sr-child-1",
+        evidence: {
+          sensorsRun: [],
+          verdict: "passed",
+          untestedRegions: [],
+          residualRisk: [],
+          oracleAdequacy: { sufficient: true, gaps: [] },
+        },
+        telemetry: null,
+        stateDeps: null,
+      }
+    );
+
+    let sensorCalled = false;
+    const trackingSensorRunner: SensorRunner = async () => {
+      sensorCalled = true;
+      return { verdict: "failed", reason: "should not run" };
+    };
+
+    const result = await joinChildRun(deps, "r-child", undefined, trackingSensorRunner);
+
+    expect(result.outcome).toBe("joined");
+    expect(sensorCalled).toBe(false);
+
+    const transition = db.prepare(
+      `SELECT composition_json FROM harness_transitions WHERE goal_id = 'g1' AND boundary = 'delegate_join'`
+    ).get() as Record<string, unknown> | undefined;
+    const facet = JSON.parse(transition!.composition_json as string) as Record<string, unknown>;
+    expect(facet.verifyResult).toEqual({ ran: false, vetoed: false });
+  });
+
+  it("delegate re-entry: second join through same delegate node gets attempt=2 (no UNIQUE collision)", async () => {
     const deps = makeDeps();
     seedFixtures(deps);
 
@@ -312,7 +629,7 @@ describe("joinChildRun", () => {
         stateDeps: null,
       }
     );
-    const result1 = joinChildRun(deps, "r-child");
+    const result1 = await joinChildRun(deps, "r-child");
     expect(result1.outcome).toBe("joined");
 
     // Verify first surrogate has attempt=1
@@ -376,7 +693,7 @@ describe("joinChildRun", () => {
       }
     );
 
-    expect(() => joinChildRun(deps, "r-child2")).not.toThrow();
+    await expect(joinChildRun(deps, "r-child2")).resolves.not.toThrow();
 
     // Both surrogates exist with distinct attempt values
     const surrogates = db.prepare(
