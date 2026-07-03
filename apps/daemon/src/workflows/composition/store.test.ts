@@ -9,7 +9,7 @@ import { closeDatabase, openDatabase } from "../../db.js";
 import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
 import {
   insertComposition, getCompositionByChildRun, listChildCompositions, nextSpawnSeq,
-  updateCompositionStatus, descendantRunIds,
+  updateCompositionStatus, descendantRunIds, listCompositionsForGoal,
 } from "./store.js";
 
 const tempDirs: string[] = [];
@@ -67,5 +67,37 @@ describe("composition store", () => {
     updateCompositionStatus(db, "c1", { status: "completed", costRollupUsd: 0.5, finishedAt: "2026-07-01T01:00:00.000Z" });
     expect(getCompositionByChildRun(db, "r2")?.status).toBe("completed");
     expect(new Set(descendantRunIds(db, "r1"))).toEqual(new Set(["r1", "r2", "r3"]));
+  });
+  describe("listCompositionsForGoal", () => {
+    it("returns compositions for a goal in created_at ASC order", () => {
+      // Seed goal g2 for cross-goal test
+      db.prepare(`INSERT INTO goals (id, title, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
+        .run("g2", "Goal2", "desc", "active", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
+      // Seed runs for goal g2 to avoid FK constraint
+      db.prepare(`INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, started_at) VALUES (?,?,?,?,?,?)`)
+        .run("r4", "g2", "tpl", 1, "delegating", "2026-07-01T00:00:00.000Z");
+      db.prepare(`INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, started_at) VALUES (?,?,?,?,?,?)`)
+        .run("r5", "g2", "tpl", 1, "delegating", "2026-07-01T00:00:00.000Z");
+      // Insert 2 compositions for goal "g"
+      insertComposition(db, comp({ id: "c1", goalId: "g", createdAt: "2026-07-01T10:00:00.000Z" }));
+      insertComposition(db, comp({ id: "c2", goalId: "g", parentRunId: "r3", childRunId: "r4", createdAt: "2026-07-01T09:00:00.000Z" }));
+      // Insert 1 composition for goal "g2" (proves goal-scoping)
+      insertComposition(db, comp({ id: "c3", goalId: "g2", parentRunId: "r4", childRunId: "r5" }));
+
+      const result = listCompositionsForGoal(db, "g");
+      expect(result).toHaveLength(2);
+      expect(result[0].id).toBe("c2");
+      expect(result[1].id).toBe("c1");
+      expect(result[0].createdAt).toBe("2026-07-01T09:00:00.000Z");
+      expect(result[1].createdAt).toBe("2026-07-01T10:00:00.000Z");
+    });
+    it("returns empty array for goal with no compositions", () => {
+      // Seed another goal with no compositions
+      db.prepare(`INSERT INTO goals (id, title, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
+        .run("g_empty", "GoalEmpty", "desc", "active", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
+
+      const result = listCompositionsForGoal(db, "g_empty");
+      expect(result).toHaveLength(0);
+    });
   });
 });
