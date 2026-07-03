@@ -8,6 +8,7 @@ import type { OperatorDescriptor, WorkflowGraph } from "@orca/contracts";
 import type { WorkflowLaunchContext, WorkflowSessionLauncher } from "./session-launcher.js";
 import { DispatchEngine } from "./dispatch-engine.js";
 import { listGateDecisionsForRun } from "../gates/projection.js";
+import { recordGateDecision, nextTraversalSeq } from "../gates/usecases.js";
 import { listSplitDecisionsForRun } from "../splitters/projection.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import { setSupervisionMode } from "../../settings/store.js";
@@ -27,6 +28,7 @@ import { commitLedgerVersion } from "../ledger/usecases.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import type { ShadowAsk } from "./recover-step-scoring.js";
 import { latestRejectingGate } from "./repair-context.js";
+import { GATE_REJECT_CAP } from "./gate-evaluation.js";
 
 const AGENT_OPERATOR_ID = "agent:claude-code";
 
@@ -677,5 +679,49 @@ describe("OrchestratorService automated gate evaluation (L5)", () => {
     expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(0);
     const stash = db.prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'").get() as { pending_gate_route_json: string | null };
     expect(JSON.parse(stash.pending_gate_route_json!)).toMatchObject({ awaitingHumanDecision: true });
+  });
+
+  it("blocks the run after GATE_REJECT_CAP rejections (honest termination)", async () => {
+    db.prepare("UPDATE goals SET operating_mode = 'automated', orchestrator_provider = 'orca/anthropic' WHERE id = 'goal-1'").run();
+    // Pre-seed GATE_REJECT_CAP - 1 prior rejections on this gate so the next reject trips the cap.
+    for (let i = 0; i < GATE_REJECT_CAP - 1; i++) {
+      recordGateDecision(db, () => NOW, {
+        goalId: "goal-1", workflowRunId: "run-1", nodeId: "gate",
+        traversalSeq: nextTraversalSeq(db, "run-1"), outcome: "rejected",
+        reason: `prior reject ${i}`, selectedEdgeTo: "execution",
+        inputsConsidered: [], issueRefs: [`old-${i}`], ledgerVersion: 0,
+      });
+    }
+    const engine = makeEngineWithAsk(
+      fakeStepBroker(),
+      fakeGateAsk({ outcome: "rejected", reason: "Still failing.", issueRefs: ["missing-tests"] }),
+    );
+    await advanceRunToGate(engine);
+
+    const run = getWorkflowRunById(db, "run-1")!;
+    expect(run.status).toBe("blocked");
+    // The last recorded gate decision is still the pre-seeded set — the tripping reject does NOT re-route.
+    const rejects = listGateDecisionsForRun(db, "run-1").filter((d) => d.outcome === "rejected");
+    expect(rejects).toHaveLength(GATE_REJECT_CAP - 1);
+  });
+
+  it("blocks early on stagnation (identical unresolved issues recur) before the cap", async () => {
+    db.prepare("UPDATE goals SET operating_mode = 'automated', orchestrator_provider = 'orca/anthropic' WHERE id = 'goal-1'").run();
+    // ONE prior rejection (well under GATE_REJECT_CAP=3) with the SAME issue set the evaluator repeats.
+    recordGateDecision(db, () => NOW, {
+      goalId: "goal-1", workflowRunId: "run-1", nodeId: "gate",
+      traversalSeq: nextTraversalSeq(db, "run-1"), outcome: "rejected",
+      reason: "first pass", selectedEdgeTo: "execution",
+      inputsConsidered: [], issueRefs: ["missing-tests"], ledgerVersion: 0,
+    });
+    const engine = makeEngineWithAsk(
+      fakeStepBroker(),
+      fakeGateAsk({ outcome: "rejected", reason: "Same problem.", issueRefs: ["missing-tests"] }),
+    );
+    await advanceRunToGate(engine);
+
+    // Stagnation (same unresolved issue) trips the block even though the cap is not reached.
+    expect(getWorkflowRunById(db, "run-1")!.status).toBe("blocked");
+    expect(listGateDecisionsForRun(db, "run-1").filter((d) => d.outcome === "rejected")).toHaveLength(1);
   });
 });
