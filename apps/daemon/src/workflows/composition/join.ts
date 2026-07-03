@@ -204,16 +204,19 @@ export function joinChildRun(
     // 5b. Create surrogate step run for the delegate node in the parent run.
     //     step_template_id = delegateNodeId so collectPriorStepArtifacts can find
     //     the writes artifact under the delegate node's identity.
+    //     Use nextAttemptForStep so delegate re-entry (gate loop / backward edge)
+    //     produces attempt=2, 3, … and never hits the UNIQUE fingerprint index.
     const surrogateStepRunId = idFactory();
     const timestamp = now();
-    const fingerprint = stepFingerprint(parentRunId, delegateNodeId, 1);
+    const surrogateAttempt = nextAttemptForStep(db, parentRunId, delegateNodeId);
+    const fingerprint = stepFingerprint(parentRunId, delegateNodeId, surrogateAttempt);
     db.prepare(
       `INSERT INTO workflow_step_runs
          (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt,
           status, satisfied_exit_criteria_json, outstanding_exit_criteria_json,
           fingerprint, started_at, finished_at)
        VALUES (?, ?, ?, ?, ?, ?, 'passed', '[]', '[]', ?, NULL, ?)`
-    ).run(surrogateStepRunId, goalId, parentRunId, delegateNodeId, -1, 1, fingerprint, timestamp);
+    ).run(surrogateStepRunId, goalId, parentRunId, delegateNodeId, -1, surrogateAttempt, fingerprint, timestamp);
 
     // 5c. Writes artifact in parent namespace, attributed to the surrogate step run.
     //     (Nested SAVEPOINT via createArtifact's internal transaction.)
@@ -236,8 +239,10 @@ export function joinChildRun(
       []
     );
 
-    // 5d. Belief-divergence detection — deferred (Task 9 concern)
-    const beliefDivergence = { diverged: false };
+    // 5d. Belief-divergence detection — deferred (Task 9 concern).
+    //     null = "not checked yet"; { diverged: false } would dishonestly claim the
+    //     check ran and found no divergence. Keep null until Task 9 runs the check.
+    const beliefDivergence = null;
 
     // 5e. Validation sensor veto — deferred (Task 9 concern)
     const verifyResult = { ran: false, vetoed: false };

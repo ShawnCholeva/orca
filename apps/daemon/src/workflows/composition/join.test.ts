@@ -220,6 +220,10 @@ describe("joinChildRun", () => {
     const goal = db.prepare(`SELECT active_workflow_run_id FROM goals WHERE id = 'g1'`).get() as { active_workflow_run_id: string };
     expect(goal.active_workflow_run_id).toBe("r-parent");
 
+    // Cursor advanced to delegate's outgoing target (ns1)
+    const parentRunAfter = db.prepare(`SELECT current_node_id FROM workflow_runs WHERE id = 'r-parent'`).get() as { current_node_id: string };
+    expect(parentRunAfter.current_node_id).toBe("ns1");
+
     // delegate_join transition against parent run with passed verdict
     const transition = db.prepare(
       `SELECT * FROM harness_transitions WHERE goal_id = 'g1' AND boundary = 'delegate_join'`
@@ -229,6 +233,8 @@ describe("joinChildRun", () => {
     const compositionFacet = JSON.parse(transition!.composition_json as string) as Record<string, unknown>;
     expect(compositionFacet.childVerdict).toBe("passed");
     expect(compositionFacet.childRunId).toBe("r-child");
+    // beliefDivergence must be null (check deferred to Task 9, not "checked, no divergence")
+    expect(compositionFacet.beliefDivergence).toBeNull();
   });
 
   it("failed verdict → propagated_failure, parent blocked, no writes artifact", () => {
@@ -282,5 +288,102 @@ describe("joinChildRun", () => {
     expect(transition!.workflow_run_id).toBe("r-parent");
     const compositionFacet = JSON.parse(transition!.composition_json as string) as Record<string, unknown>;
     expect(compositionFacet.childVerdict).toBe("failed");
+  });
+
+  it("delegate re-entry: second join through same delegate node gets attempt=2 (no UNIQUE collision)", () => {
+    const deps = makeDeps();
+    seedFixtures(deps);
+
+    // First join: r-child through dn1 → surrogate attempt=1
+    emitStepComplete(
+      { db, bus: deps.bus, now: deps.now, idFactory: deps.idFactory },
+      {
+        goalId: "g1",
+        workflowRunId: "r-child",
+        workflowStepRunId: "sr-child-1",
+        evidence: {
+          sensorsRun: [],
+          verdict: "passed",
+          untestedRegions: [],
+          residualRisk: [],
+          oracleAdequacy: { sufficient: true, gaps: [] },
+        },
+        telemetry: null,
+        stateDeps: null,
+      }
+    );
+    const result1 = joinChildRun(deps, "r-child");
+    expect(result1.outcome).toBe("joined");
+
+    // Verify first surrogate has attempt=1
+    const surrogate1 = db.prepare(
+      `SELECT attempt FROM workflow_step_runs WHERE workflow_run_id = 'r-parent' AND step_template_id = 'dn1'`
+    ).get() as { attempt: number } | undefined;
+    expect(surrogate1?.attempt).toBe(1);
+
+    // Simulate re-entry: parent loops back to delegate node, a new child is spawned.
+    // Set parent back to delegating at dn1 (exits the active-per-goal unique index),
+    // then insert a second child run + composition for the same delegate node.
+    db.prepare(`UPDATE workflow_runs SET status = 'delegating', current_node_id = 'dn1', current_step_run_id = NULL WHERE id = 'r-parent'`).run();
+
+    db.prepare(
+      `INSERT INTO workflow_runs
+         (id, goal_id, template_id, template_version, status, started_at)
+       VALUES ('r-child2', 'g1', 'child-tpl', 1, 'active', ?)`
+    ).run(NOW);
+
+    db.prepare(
+      `INSERT INTO workflow_run_compositions
+         (id, goal_id, parent_run_id, child_run_id, delegate_node_id, spawn_seq, reads_json, writes_json, depth, status, created_at)
+       VALUES ('comp-2', 'g1', 'r-parent', 'r-child2', 'dn1', 1, '{}', ?, 1, 'active', ?)`
+    ).run(JSON.stringify({ review_findings: "findings" }), NOW);
+
+    db.prepare(`UPDATE workflow_runs SET parent_composition_id = 'comp-2' WHERE id = 'r-child2'`).run();
+    db.prepare(`UPDATE goals SET active_workflow_run_id = 'r-child2' WHERE id = 'g1'`).run();
+
+    db.prepare(
+      `INSERT INTO workflow_step_runs
+         (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt,
+          status, satisfied_exit_criteria_json, outstanding_exit_criteria_json,
+          fingerprint, started_at, finished_at)
+       VALUES ('sr-child2-1', 'g1', 'r-child2', 's-child-1', 0, 1, 'passed', '[]', '[]', 'fp-child2', ?, ?)`
+    ).run(NOW, NOW);
+
+    db.prepare(`UPDATE workflow_runs SET current_step_run_id = 'sr-child2-1' WHERE id = 'r-child2'`).run();
+
+    db.prepare(
+      `INSERT INTO workflow_artifacts
+         (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, created_at)
+       VALUES ('art-child2-1', 'g1', 'r-child2', 'sr-child2-1', 'step_output', 'child output', ?, 'orchestrator', ?)`
+    ).run(JSON.stringify({ findings: ["y"] }), NOW);
+
+    // Second join: r-child2 through dn1 → must not throw; surrogate gets attempt=2
+    emitStepComplete(
+      { db, bus: deps.bus, now: deps.now, idFactory: deps.idFactory },
+      {
+        goalId: "g1",
+        workflowRunId: "r-child2",
+        workflowStepRunId: "sr-child2-1",
+        evidence: {
+          sensorsRun: [],
+          verdict: "passed",
+          untestedRegions: [],
+          residualRisk: [],
+          oracleAdequacy: { sufficient: true, gaps: [] },
+        },
+        telemetry: null,
+        stateDeps: null,
+      }
+    );
+
+    expect(() => joinChildRun(deps, "r-child2")).not.toThrow();
+
+    // Both surrogates exist with distinct attempt values
+    const surrogates = db.prepare(
+      `SELECT attempt FROM workflow_step_runs WHERE workflow_run_id = 'r-parent' AND step_template_id = 'dn1' ORDER BY attempt`
+    ).all() as { attempt: number }[];
+    expect(surrogates).toHaveLength(2);
+    expect(surrogates[0].attempt).toBe(1);
+    expect(surrogates[1].attempt).toBe(2);
   });
 });
