@@ -97,7 +97,7 @@ describe("buildStepCompleteStateFacet belief-divergence", () => {
     seedLaunch(db, "g1", "sr1", [{ ref: "ws1", observed_version: "main:false" }]);
 
     // Workspace got dirty during the step: live probe now reports main:true.
-    const facet = buildStepCompleteStateFacet(db, input("g1", "sr1"), noFiles, () => ({ branch: "main", dirty: true }));
+    const facet = buildStepCompleteStateFacet(db, input("g1", "sr1"), noFiles, () => ({ branch: "main", dirty: true, commitHash: null }));
 
     const div = facet.conflicts.find((c) => c.kind === "belief_divergence");
     expect(div?.refs).toContain("ws1");
@@ -109,7 +109,7 @@ describe("buildStepCompleteStateFacet belief-divergence", () => {
     seedSession(db, "s1", "g1", "ws1");
     seedLaunch(db, "g1", "sr1", [{ ref: "ws1", observed_version: "main:false" }]);
 
-    const facet = buildStepCompleteStateFacet(db, input("g1", "sr1"), noFiles, () => ({ branch: "main", dirty: false }));
+    const facet = buildStepCompleteStateFacet(db, input("g1", "sr1"), noFiles, () => ({ branch: "main", dirty: false, commitHash: null }));
 
     expect(facet.conflicts.some((c) => c.kind === "belief_divergence")).toBe(false);
   });
@@ -120,7 +120,7 @@ describe("buildStepCompleteStateFacet belief-divergence", () => {
     seedSession(db, "s1", "g1", "ws1");
     // No step_launch transition seeded.
 
-    const facet = buildStepCompleteStateFacet(db, input("g1", "sr1"), noFiles, () => ({ branch: "main", dirty: true }));
+    const facet = buildStepCompleteStateFacet(db, input("g1", "sr1"), noFiles, () => ({ branch: "main", dirty: true, commitHash: null }));
 
     expect(facet.conflicts.some((c) => c.kind === "belief_divergence")).toBe(false);
   });
@@ -139,7 +139,7 @@ describe("buildStepCompleteStateFacet workspace selection (2.3)", () => {
       db,
       { goalId: "g1", sessionId: "s2", thisStepRunId: "sr1", assumptions: [], conflictPolicy: "escalate" },
       noFiles,
-      () => ({ branch: "feature", dirty: false })
+      () => ({ branch: "feature", dirty: false, commitHash: null })
     );
 
     const wsEntry = facet.read_set.find((e) => e.kind === "workspace_version");

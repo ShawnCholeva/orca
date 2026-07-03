@@ -66,27 +66,27 @@ describe("probeWorkspaceForSession", () => {
     seedWorkspace(db, "ws1", "g1", "/repo/one");
     seedSession(db, "s1", "g1", "ws1");
 
-    const result = probeWorkspaceForSession(db, "s1", () => ({ branch: "feature/x", dirty: true }));
+    const result = probeWorkspaceForSession(db, "s1", () => ({ branch: "feature/x", dirty: true, commitHash: "abc123" }));
 
-    expect(result).toEqual({ id: "ws1", path: "/repo/one", branch: "feature/x", dirty: true });
+    expect(result).toEqual({ id: "ws1", path: "/repo/one", branch: "feature/x", dirty: true, commitHash: "abc123" });
   });
 
   it("returns null when the session does not exist", () => {
     const db = setupDb();
-    expect(probeWorkspaceForSession(db, "s-none", () => ({ branch: "main", dirty: false }))).toBeNull();
+    expect(probeWorkspaceForSession(db, "s-none", () => ({ branch: "main", dirty: false, commitHash: null }))).toBeNull();
   });
 
   it("returns null when the session's workspace entity is absent", () => {
     const db = setupDb();
     seedSession(db, "s1", "g1", "ws-gone");
-    expect(probeWorkspaceForSession(db, "s1", () => ({ branch: "main", dirty: false }))).toBeNull();
+    expect(probeWorkspaceForSession(db, "s1", () => ({ branch: "main", dirty: false, commitHash: null }))).toBeNull();
   });
 });
 
 describe("realVersionProbe", () => {
-  it("fails safe to {branch:null, dirty:null} when the path is not a git repo", () => {
+  it("fails safe to {branch:null, dirty:null, commitHash:null} when the path is not a git repo", () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), "orca-not-a-repo-"));
     tempDirs.push(dir);
-    expect(realVersionProbe(dir)).toEqual({ branch: null, dirty: null });
+    expect(realVersionProbe(dir)).toEqual({ branch: null, dirty: null, commitHash: null });
   });
 });

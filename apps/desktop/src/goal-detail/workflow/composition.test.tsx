@@ -127,6 +127,7 @@ const apiMocks = vi.hoisted(() => ({
   listSessions: vi.fn(),
   listContextPackages: vi.fn(),
   listWorkflowRunCompositions: vi.fn(),
+  getWorkflowTemplate: vi.fn(),
   toErrorMessage: vi.fn((err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback,
   ),
@@ -142,6 +143,7 @@ function setupBaseApiMocks() {
   apiMocks.listContextPackages.mockResolvedValue({ packages: [], assemblies: [] });
   apiMocks.listOrchestrationAttempts.mockResolvedValue({ attempts: [] });
   apiMocks.getWorkflowRunLedger.mockResolvedValue(null);
+  apiMocks.getWorkflowTemplate.mockResolvedValue({ template: null });
 }
 
 describe("WorkflowRunPanel delegation breadcrumb", () => {
@@ -335,5 +337,91 @@ describe("WorkflowRunPanel delegation breadcrumb", () => {
       const calls = apiMocks.getWorkflowRun.mock.calls;
       expect(calls.some((call: string[]) => call[1] === "parent-run")).toBe(true);
     });
+  });
+
+  it("renders the selected run's graph with delegate-node status from compositions", async () => {
+    const parentRun = {
+      id: "parent-run",
+      goalId: "goal-1",
+      templateId: "orca/parent",
+      templateVersion: 1,
+      status: "delegating",
+      currentStepRunId: null,
+      startedAt: now,
+      finishedAt: null,
+      blockedReason: null,
+      currentNodeId: "del-1",
+      parentCompositionId: null,
+    };
+    const childRun = {
+      id: "child-run",
+      goalId: "goal-1",
+      templateId: "orca/child",
+      templateVersion: 1,
+      status: "active",
+      currentStepRunId: null,
+      startedAt: now,
+      finishedAt: null,
+      blockedReason: null,
+      parentCompositionId: "comp-1",
+    };
+
+    apiMocks.listWorkflowRuns.mockResolvedValue({ runs: [parentRun, childRun] });
+    apiMocks.getWorkflowRun.mockResolvedValue({ run: parentRun });
+    apiMocks.listWorkflowRunCompositions.mockResolvedValue({
+      compositions: [
+        {
+          id: "comp-1",
+          goalId: "goal-1",
+          parentRunId: "parent-run",
+          childRunId: "child-run",
+          delegateNodeId: "del-1",
+          spawnSeq: 0,
+          reads: {},
+          writes: {},
+          depth: 1,
+          status: "active",
+          costRollupUsd: null,
+          createdAt: now,
+          finishedAt: null,
+        },
+      ],
+    });
+    setupBaseApiMocks();
+    apiMocks.getWorkflowTemplate.mockResolvedValue({
+      template: {
+        id: "orca/parent",
+        graph: {
+          nodes: [
+            {
+              id: "del-1",
+              type: "delegate",
+              name: "Deploy",
+              childTemplateId: "orca/child",
+              childTemplateVersion: 1,
+              reads: {},
+              writes: {},
+            },
+          ],
+          edges: [],
+          positions: { "del-1": { x: 40, y: 40 } },
+        },
+      },
+    });
+
+    render(<WorkflowRunPanel goalId="goal-1" initialRunId="parent-run" />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Delegation")).toBeInTheDocument();
+    });
+
+    // The graph renders the delegate node (→ orca/child v1)
+    await waitFor(() => {
+      expect(screen.getByText(/→ orca\/child/)).toBeInTheDocument();
+    });
+    // The delegate node carries the active composition status
+    expect(screen.getByText("Delegating…")).toBeInTheDocument();
+    // getWorkflowTemplate was fetched for the selected run's template
+    expect(apiMocks.getWorkflowTemplate).toHaveBeenCalledWith("orca/parent");
   });
 });

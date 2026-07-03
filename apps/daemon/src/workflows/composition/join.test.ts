@@ -189,8 +189,12 @@ function seedFixtures(
 }
 
 /** A probe that always returns the given version — used for I3 testing. */
-function makeProbe(branch: string | null, dirty: boolean | null): VersionProbe {
-  return () => ({ branch, dirty });
+function makeProbe(
+  branch: string | null,
+  dirty: boolean | null,
+  commitHash: string | null = null,
+): VersionProbe {
+  return () => ({ branch, dirty, commitHash });
 }
 
 /** A sensor runner that always returns the given verdict — used for I4 testing. */
@@ -456,7 +460,7 @@ describe("joinChildRun", () => {
       }
     );
 
-    const matchingProbe = makeProbe("main", false);
+    const matchingProbe = makeProbe("main", false, "abc123");
     const result = await joinChildRun(deps, "r-child", matchingProbe);
 
     expect(result.outcome).toBe("joined");
@@ -467,6 +471,50 @@ describe("joinChildRun", () => {
     const facet = JSON.parse(transition!.composition_json as string) as Record<string, unknown>;
     const bd = facet.beliefDivergence as { diverged: boolean; details?: string };
     expect(bd.diverged).toBe(false);
+  });
+
+  it("I3: same-branch clean commit advance (HEAD moved) → beliefDivergence.diverged = true", async () => {
+    const deps = makeDeps();
+    // Same branch, same clean tree, but the child advanced HEAD with a commit —
+    // the branch+dirty signal alone would miss this; the commit hash catches it.
+    const snapshotJson = JSON.stringify({
+      id: "ws-1", path: "/fake/ws", branch: "main", dirty: false, commitHash: "aaa111",
+    });
+    seedFixtures(deps, { workspaceSnapshotJson: snapshotJson });
+
+    emitStepComplete(
+      { db, bus: deps.bus, now: deps.now, idFactory: deps.idFactory },
+      {
+        goalId: "g1",
+        workflowRunId: "r-child",
+        workflowStepRunId: "sr-child-1",
+        evidence: {
+          sensorsRun: [],
+          verdict: "passed",
+          untestedRegions: [],
+          residualRisk: [],
+          oracleAdequacy: { sufficient: true, gaps: [] },
+        },
+        telemetry: null,
+        stateDeps: null,
+      }
+    );
+
+    const advancedProbe = makeProbe("main", false, "bbb222");
+    const result = await joinChildRun(deps, "r-child", advancedProbe);
+
+    expect(result.outcome).toBe("joined");
+
+    const transition = db.prepare(
+      `SELECT composition_json FROM harness_transitions WHERE goal_id = 'g1' AND boundary = 'delegate_join'`
+    ).get() as Record<string, unknown> | undefined;
+    const facet = JSON.parse(transition!.composition_json as string) as Record<string, unknown>;
+    const bd = facet.beliefDivergence as { diverged: boolean; details?: string } | null;
+    expect(bd).not.toBeNull();
+    expect(bd!.diverged).toBe(true);
+    expect(bd!.details).toContain("commit");
+    expect(bd!.details).toContain("aaa111");
+    expect(bd!.details).toContain("bbb222");
   });
 
   it("I4: validationRequired + vetoed sensor → parent blocked, outcome propagated_failure", async () => {
