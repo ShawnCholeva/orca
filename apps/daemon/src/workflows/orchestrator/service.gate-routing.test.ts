@@ -608,6 +608,46 @@ describe("OrchestratorService gate routing", () => {
     expect(splitDecisions).toHaveLength(1);
     expect(splitDecisions[0]).toMatchObject({ nodeId: "route", selectedBranch: "go_a", selectedEdgeTo: "branch_a" });
   });
+
+  it("L5 automated: gate auto-approves into an unsupervised splitter and launches the branch step exactly once", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "unsupervised", NOW);
+    seedRunAtValidationForSplitter(db);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    // A real workspace so the launcher can record a `sessions` row per call, which
+    // makes commitAgentStepDecision's "running session linked?" no-op guard behave
+    // as it does in production (the fake launcher in makeLauncher() does not
+    // persist a session row, so that guard never fires and a benign, separately
+    // guarded recursion path would otherwise inflate the launch count).
+    db.prepare(
+      "INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES ('ws-1', '/tmp/ws-1', 'ws-1', '', ?, ?)"
+    ).run(NOW, NOW);
+    let sessionSeq = 0;
+    const launch = vi.fn(async (ctx: WorkflowLaunchContext) => {
+      const sessionId = `sess-${++sessionSeq}`;
+      db.prepare(
+        "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES (?, ?, 'ws-1', 'claude-code', 'Session', 'running', ?, ?)"
+      ).run(sessionId, ctx.goalId, NOW, ctx.workflowStepRunId);
+      return { sessionId };
+    });
+    const engine = makeEngineWithAsk(
+      fakeStepAndSplitBroker("go_a"),
+      fakeGateAsk({ outcome: "approved", reason: "ok" }),
+      makeLauncher(launch)
+    );
+
+    // Advance the run: scores validation, parks at the gate, auto-evaluates it
+    // (approved), routes into the splitter, which evaluates inline (unsupervised)
+    // and routes to branch_a — launching its agent. Must NOT also be launched a
+    // second time by the gate's own inline-route tail.
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    const after = getWorkflowRunById(db, "run-1")!;
+    expect(after.status).toBe("active");
+    expect(after.currentNodeId).toBe("branch_a");
+
+    expect(launch).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("OrchestratorService automated gate evaluation (L5)", () => {

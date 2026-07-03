@@ -1951,7 +1951,7 @@ export class DispatchEngine {
       options
     );
     const after = getWorkflowRunById(db, run.id);
-    if (after && after.status === "active" && after.currentStepRunId) {
+    if (dest.kind === "step" && after && after.status === "active" && after.currentStepRunId) {
       const nextStepRun = readStepRun(db, after.currentStepRunId);
       const nextTpl = template.steps.find((s) => s.id === nextStepRun.step_template_id);
       if (nextTpl) {
@@ -2105,8 +2105,9 @@ export class DispatchEngine {
     });
 
     // Route inline (automated => no Continue). Mirrors evaluateAndParkSplitter's
-    // unsupervised tail: route the cursor, then spawn the destination step (a
-    // gate/splitter destination re-parks inside routeGateDestination and no-ops here).
+    // unsupervised tail: route the cursor, then spawn only for a direct step
+    // destination — a gate/splitter destination is fully owned by (and, if
+    // unsupervised, already launched inside) routeGateDestination's recursion.
     await this.routeGateDestination(
       db,
       now,
@@ -2115,7 +2116,7 @@ export class DispatchEngine {
       options
     );
     const after = getWorkflowRunById(db, run.id);
-    if (after && after.status === "active" && after.currentStepRunId) {
+    if (dest.kind === "step" && after && after.status === "active" && after.currentStepRunId) {
       const nextStepRun = readStepRun(db, after.currentStepRunId);
       const nextTpl = template.steps.find((s) => s.id === nextStepRun.step_template_id);
       if (nextTpl) {
