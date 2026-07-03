@@ -1076,6 +1076,18 @@ export class DispatchEngine {
         .get(run.id) as { parent_composition_id: string | null } | undefined
     )?.parent_composition_id;
     if (parentCompositionId) {
+      // Write step_result_json for the child terminal step BEFORE joining so
+      // joinChildRun's step_result_json fallback can find a clean-pass signal
+      // even when no evidence-bearing step_complete was emitted (§4.5 non-gated
+      // clean-join). Without this write, skill/model-path child terminals that
+      // complete without an evidence gate hit the conservative absent-verdict →
+      // failed fallback and wrongly propagate failure to the parent.
+      const stepResult = options.stepResultByStepRunId?.[stepRun.id];
+      if (stepResult) {
+        const terminalFinishedAt = options.terminalFinishedAtByStepRunId?.[stepRun.id] ?? now();
+        db.prepare("UPDATE workflow_step_runs SET finished_at = ?, step_result_json = ? WHERE id = ?")
+          .run(terminalFinishedAt, JSON.stringify(stepResult), stepRun.id);
+      }
       return await this.joinChildToParentTerminal(db, now, { run, stepRun, stepTpl, goal }, options);
     }
 

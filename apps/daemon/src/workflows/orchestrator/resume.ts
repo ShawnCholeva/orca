@@ -1,3 +1,8 @@
+/** A composition row where the child run is failed but the composition is still active. */
+interface FailedChildCompositionRow {
+  childRunId: string;
+}
+
 interface ResumeRunRow {
   runId: string;
   goalId: string;
@@ -8,6 +13,17 @@ interface ResumeRunRow {
 
 export interface ResumeDeps {
   listActiveRuns(): Promise<ResumeRunRow[]>;
+  /**
+   * Optional: list compositions where status='active' but child run is 'failed'.
+   * These represent delegations where the child failed but joinChildRun never ran
+   * (e.g. daemon crash after child was set failed but before failure propagation).
+   */
+  listFailedChildCompositions?(): Promise<FailedChildCompositionRow[]>;
+  /**
+   * Optional: propagate a failed child run's failure to its parent (by calling
+   * joinChildRun or equivalent). One call per row from listFailedChildCompositions.
+   */
+  propagateChildFailure?(childRunId: string): Promise<void>;
   isSessionAlive(sessionId: string): Promise<boolean>;
   reattach(args: { runId: string; sessionId: string }): Promise<void>;
   respawn(args: { runId: string; stepRunId: string; goalId: string }): Promise<void>;
@@ -45,6 +61,27 @@ export async function resumeActiveRuns(deps: ResumeDeps): Promise<void> {
       }
     } catch (err) {
       console.error("[resume] failed for run", r.runId, err);
+    }
+  }
+
+  // Propagate failed child compositions: if the daemon crashed after a child run
+  // was set to 'failed' but before joinChildRun could propagate the failure to the
+  // parent, the composition remains 'active' with a 'failed' child. Re-run
+  // propagation here so the parent transitions to 'blocked' on restart.
+  if (deps.listFailedChildCompositions && deps.propagateChildFailure) {
+    let failedChildren: FailedChildCompositionRow[];
+    try {
+      failedChildren = await deps.listFailedChildCompositions();
+    } catch (err) {
+      console.error("[resume] listFailedChildCompositions failed", err);
+      return;
+    }
+    for (const fc of failedChildren) {
+      try {
+        await deps.propagateChildFailure(fc.childRunId);
+      } catch (err) {
+        console.error("[resume] propagateChildFailure failed for child run", fc.childRunId, err);
+      }
     }
   }
 }
