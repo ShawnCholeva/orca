@@ -159,6 +159,13 @@ describe("spawnChildRun", () => {
     expect(transition).toBeTruthy();
     expect(transition.workflow_run_id).toBe(PARENT_RUN);
     expect(transition.workflow_step_run_id).toBeNull();
+
+    // composition facet stored in composition_json with correct delegation metadata
+    const compositionFacet = JSON.parse(transition.composition_json as string) as Record<string, unknown>;
+    expect(compositionFacet.childRunId).toBe(childRunId);
+    expect(compositionFacet.readsKeys).toEqual(["diff_ref"]);
+    expect(compositionFacet.writesKeys).toEqual(["result"]);
+    expect(compositionFacet.depth).toBe(1);
   });
 
   it("throws DelegationDepthError when depth exceeds MAX_DELEGATION_DEPTH", () => {
