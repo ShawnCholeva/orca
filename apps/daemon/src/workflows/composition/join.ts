@@ -115,6 +115,12 @@ function readChildTerminalStepOutput(
  * Returns { diverged: false } when there is nothing to compare (null snapshot,
  * no path, or both sides unprobeable) — we never fabricate divergence without
  * a baseline. Returns { diverged: true, details } when branch or dirty changed.
+ *
+ * NOTE — granularity: belief-divergence uses the shared VersionProbe granularity
+ * (branch + dirty), consistent with the system's existing belief-divergence
+ * (read-set.ts encodes version as `${branch}:${dirty}`). A same-branch clean
+ * commit advance is NOT detected by the current probe. VersionProbe is injectable
+ * so a commit-hash-aware probe can be supplied later for finer detection.
  */
 function computeBeliefDivergence(
   snapshotJson: string | null,
@@ -304,7 +310,12 @@ export async function joinChildRun(
 
   if (validationRequired) {
     const workspacePath = listWorkspacesByGoal(db, goalId)[0]?.path ?? null;
-    if (workspacePath) {
+    // cannotRunReason is set when verification cannot be performed (fail-closed cases).
+    let cannotRunReason: string | null = null;
+
+    if (!workspacePath) {
+      cannotRunReason = "delegate validation could not run: no workspace attached";
+    } else {
       try {
         const sensorResult = await sensorRunner(workspacePath);
         const vetoed = sensorResult.verdict !== "passed";
@@ -353,10 +364,49 @@ export async function joinChildRun(
           return { parentRunId, outcome: "propagated_failure" };
         }
       } catch (err) {
-        console.error("[joinChildRun] sensor veto check failed — skipping veto (fail-safe)", err);
-        // On sensor infrastructure failure, don't block the join.
-        verifyResult = { ran: false, vetoed: false };
+        // FAIL CLOSED: sensor infra error → block parent (same as veto, per paper §3.4.3).
+        const cause = err instanceof Error ? err.message : String(err);
+        cannotRunReason = `delegate validation could not run: ${cause}`;
+        // verifyResult stays { ran: false, vetoed: false } — the check did not run
       }
+    }
+
+    // Fail-closed: if verification could not be performed, block the parent.
+    if (cannotRunReason !== null) {
+      db.transaction(() => {
+        updateCompositionStatus(db, compositionId, { status: "failed", finishedAt: now() });
+        // Child completed (its verdict passed; the block is join-side due to missing verification).
+        // Child must exit the active set before parent enters the blocked set.
+        db.prepare(`UPDATE workflow_runs SET status = 'completed', finished_at = ? WHERE id = ?`)
+          .run(now(), childRunId);
+        db.prepare(`UPDATE workflow_runs SET status = 'blocked', blocked_reason = ? WHERE id = ?`)
+          .run(cannotRunReason!, parentRunId);
+        db.prepare(`UPDATE goals SET active_workflow_run_id = ? WHERE id = ?`).run(parentRunId, goalId);
+
+        emitDelegateJoin(
+          { db, bus, now, idFactory },
+          {
+            goalId,
+            workflowRunId: parentRunId,
+            workflowStepRunId: null,
+            composition: {
+              childRunId,
+              childTemplateId: childRun.templateId,
+              childTemplateVersion: childRun.templateVersion,
+              readsKeys: Object.keys(reads),
+              writesKeys: Object.keys(writes),
+              depth,
+              costRollupUsd: null,
+              childVerdict: "passed",
+              childUntestedRegions,
+              childResidualRisk,
+              beliefDivergence,
+              verifyResult,
+            },
+          }
+        );
+      })();
+      return { parentRunId, outcome: "propagated_failure" };
     }
   }
 

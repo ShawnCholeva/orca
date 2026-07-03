@@ -274,22 +274,31 @@ describe("Task 3: Child-terminal-FAILURE propagation on resume", () => {
     expect(rows[0].child_run_id).toBe("r-child");
   });
 
-  it("propagation is idempotent: calling joinChildRun twice does not throw", () => {
+  it("propagation is idempotent: calling joinChildRun twice does not throw", async () => {
     seedFixtures("failed");
     const deps = makeDeps();
 
-    expect(() => joinChildRun(deps, "r-child")).not.toThrow();
+    // First call: propagates failure (child verdict → failed conservative fallback)
+    const result1 = await joinChildRun(deps, "r-child");
+    expect(result1.outcome).toBe("propagated_failure");
 
     const parentRun = db.prepare(`SELECT status FROM workflow_runs WHERE id = 'r-parent'`).get() as { status: string };
     expect(parentRun.status).toBe("blocked");
 
-    // Second call — composition is now 'failed'; joinChildRun will throw "no composition found"
-    // because getCompositionByChildRun returns a failed composition but the code
-    // already propagated. Verify it doesn't corrupt state.
-    // (The second call IS expected to throw "no composition found" since getCompositionByChildRun
-    // uses a WHERE with no status filter — and it still returns the comp — but parent is already
-    // blocked and child already failed, so the transaction is effectively a no-op.)
-    expect(() => joinChildRun(deps, "r-child")).not.toThrow();
+    const comp = db.prepare(`SELECT status FROM workflow_run_compositions WHERE id = 'comp-1'`).get() as { status: string };
+    expect(comp.status).toBe("failed");
+
+    // Second call: already propagated — must not throw and must not corrupt state.
+    // getCompositionByChildRun has no status filter so it returns the failed comp;
+    // the transaction re-applies the same terminal states, which is safe.
+    await expect(joinChildRun(deps, "r-child")).resolves.toBeDefined();
+
+    // State remains correct after double-join
+    const parentRunAfter = db.prepare(`SELECT status FROM workflow_runs WHERE id = 'r-parent'`).get() as { status: string };
+    expect(parentRunAfter.status).toBe("blocked");
+
+    const compAfter = db.prepare(`SELECT status FROM workflow_run_compositions WHERE id = 'comp-1'`).get() as { status: string };
+    expect(compAfter.status).toBe("failed");
   });
 });
 

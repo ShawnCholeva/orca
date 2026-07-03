@@ -607,6 +607,111 @@ describe("joinChildRun", () => {
     expect(facet.verifyResult).toEqual({ ran: false, vetoed: false });
   });
 
+  it("I4 fail-closed: validationRequired + sensor runner throws → parent blocked, outcome propagated_failure", async () => {
+    const deps = makeDeps();
+    seedFixtures(deps, { parentGraphJson: PARENT_GRAPH_VALIDATION_REQUIRED_JSON });
+
+    // Add a workspace so the sensor-infra path is reached
+    db.prepare(`INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`).run("ws-1", "test-ws", "/fake/workspace", NOW, NOW);
+    db.prepare(`INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`).run("g1", "ws-1", NOW);
+
+    emitStepComplete(
+      { db, bus: deps.bus, now: deps.now, idFactory: deps.idFactory },
+      {
+        goalId: "g1",
+        workflowRunId: "r-child",
+        workflowStepRunId: "sr-child-1",
+        evidence: {
+          sensorsRun: [],
+          verdict: "passed",
+          untestedRegions: [],
+          residualRisk: [],
+          oracleAdequacy: { sufficient: true, gaps: [] },
+        },
+        telemetry: null,
+        stateDeps: null,
+      }
+    );
+
+    const throwingSensorRunner: SensorRunner = async () => {
+      throw new Error("sensor infra failure: disk read error");
+    };
+
+    const result = await joinChildRun(deps, "r-child", undefined, throwingSensorRunner);
+
+    // Fail-closed: sensor infra error → propagated_failure, NOT joined
+    expect(result.outcome).toBe("propagated_failure");
+
+    const parentRun = db.prepare(`SELECT status, blocked_reason FROM workflow_runs WHERE id = 'r-parent'`).get() as { status: string; blocked_reason: string | null };
+    expect(parentRun.status).toBe("blocked");
+    expect(parentRun.blocked_reason).toContain("delegate validation could not run");
+    expect(parentRun.blocked_reason).toContain("sensor infra failure: disk read error");
+
+    // Child completed (its verdict passed; the block is join-side)
+    const childRun = db.prepare(`SELECT status FROM workflow_runs WHERE id = 'r-child'`).get() as { status: string };
+    expect(childRun.status).toBe("completed");
+
+    const comp = db.prepare(`SELECT status FROM workflow_run_compositions WHERE id = 'comp-1'`).get() as { status: string };
+    expect(comp.status).toBe("failed");
+
+    // verifyResult: ran:false, vetoed:false — the check didn't run (not a veto)
+    const transition = db.prepare(
+      `SELECT composition_json FROM harness_transitions WHERE goal_id = 'g1' AND boundary = 'delegate_join'`
+    ).get() as Record<string, unknown> | undefined;
+    expect(transition).toBeTruthy();
+    const facet = JSON.parse(transition!.composition_json as string) as Record<string, unknown>;
+    const vr = facet.verifyResult as { ran: boolean; vetoed: boolean };
+    expect(vr.ran).toBe(false);
+    expect(vr.vetoed).toBe(false);
+  });
+
+  it("I4 fail-closed: validationRequired + no workspace → parent blocked, outcome propagated_failure", async () => {
+    const deps = makeDeps();
+    seedFixtures(deps, { parentGraphJson: PARENT_GRAPH_VALIDATION_REQUIRED_JSON });
+    // No workspace inserted — goal has no attached workspace
+
+    emitStepComplete(
+      { db, bus: deps.bus, now: deps.now, idFactory: deps.idFactory },
+      {
+        goalId: "g1",
+        workflowRunId: "r-child",
+        workflowStepRunId: "sr-child-1",
+        evidence: {
+          sensorsRun: [],
+          verdict: "passed",
+          untestedRegions: [],
+          residualRisk: [],
+          oracleAdequacy: { sufficient: true, gaps: [] },
+        },
+        telemetry: null,
+        stateDeps: null,
+      }
+    );
+
+    let sensorCalled = false;
+    const trackingSensorRunner: SensorRunner = async () => {
+      sensorCalled = true;
+      return { verdict: "passed" };
+    };
+
+    const result = await joinChildRun(deps, "r-child", undefined, trackingSensorRunner);
+
+    // Fail-closed: no workspace → propagated_failure, NOT joined
+    expect(result.outcome).toBe("propagated_failure");
+    expect(sensorCalled).toBe(false); // sensor never reached
+
+    const parentRun = db.prepare(`SELECT status, blocked_reason FROM workflow_runs WHERE id = 'r-parent'`).get() as { status: string; blocked_reason: string | null };
+    expect(parentRun.status).toBe("blocked");
+    expect(parentRun.blocked_reason).toContain("delegate validation could not run");
+    expect(parentRun.blocked_reason).toContain("no workspace attached");
+
+    const childRun = db.prepare(`SELECT status FROM workflow_runs WHERE id = 'r-child'`).get() as { status: string };
+    expect(childRun.status).toBe("completed");
+
+    const comp = db.prepare(`SELECT status FROM workflow_run_compositions WHERE id = 'comp-1'`).get() as { status: string };
+    expect(comp.status).toBe("failed");
+  });
+
   it("delegate re-entry: second join through same delegate node gets attempt=2 (no UNIQUE collision)", async () => {
     const deps = makeDeps();
     seedFixtures(deps);
