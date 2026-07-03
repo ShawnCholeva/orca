@@ -11,10 +11,12 @@ const EXPECTED_IDS = [
   "orca/code-review",
   "orca/refactor",
   "orca/quality-coverage",
+  "orca/scope-brief",
+  "orca/scoped-delivery",
 ];
 
 describe("built-in template catalog", () => {
-  it("contains exactly the 5 expected ids, all orca/-prefixed and unique", () => {
+  it("contains exactly the 7 expected ids, all orca/-prefixed and unique", () => {
     const ids = BUILTIN_TEMPLATE_CATALOG.map((d) => d.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.every((id) => id.startsWith("orca/"))).toBe(true);
@@ -57,7 +59,7 @@ describe("built-in template catalog", () => {
 
   it("summaries derive stepCount from graph node count or step count", () => {
     const summaries = builtInCatalogSummaries();
-    expect(summaries).toHaveLength(5);
+    expect(summaries).toHaveLength(7);
     const byId = (id: string) => summaries.find((s) => s.id === id);
     expect(byId("orca/adaptive-delivery")?.stepCount).toBe(12); // 9 steps + splitter + 2 gates
     expect(byId("orca/code-review")?.stepCount).toBe(4);

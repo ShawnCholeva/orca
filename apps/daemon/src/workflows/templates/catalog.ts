@@ -3,6 +3,7 @@ import type {
   StepAgentChoice,
   WorkflowGraph,
   WorkflowGuardrailConfig,
+  WorkflowStepOutputField,
   WorkflowStepTemplate,
 } from "@orca/contracts";
 
@@ -17,6 +18,9 @@ export interface BuiltInTemplateDefinition {
   steps: WorkflowStepTemplate[];
   guardrails: WorkflowGuardrailConfig[];
   graph: WorkflowGraph | null;
+  // Typed entry inputs (I5): the child-facing half of the composable interface a
+  // parent `delegate` node's `reads` map against. Optional; defaults to none.
+  inputs?: WorkflowStepOutputField[];
 }
 
 const CATEGORY = "Engineering";
@@ -693,6 +697,102 @@ const QUALITY_COVERAGE_GRAPH: WorkflowGraph = {
 };
 
 // ---------------------------------------------------------------------------
+// Scope Brief (composition child) — a reusable sub-workflow another template
+// delegates to. It declares a typed `inputs` interface (`goal_area`) and a
+// terminal step producing one output (`brief`); together those are the two
+// halves of the composable unit a parent `delegate` node maps `reads`/`writes`
+// against.
+// ---------------------------------------------------------------------------
+
+const SCOPE_BRIEF_INPUTS: WorkflowStepOutputField[] = [
+  { key: "goal_area", type: "string", required: true },
+];
+
+const SCOPE_BRIEF_STEPS: WorkflowStepTemplate[] = [
+  {
+    id: "draft", ordinal: 0, name: "Draft Scope",
+    instructions:
+      "Turn the delegated goal area into a concise scope brief: the problem in one line, the smallest set of files or modules likely in scope, and the known risks. Explore only enough to ground the brief. Make no code changes.",
+    outputSchema: [
+      { key: "notes", type: "string", required: true },
+      { key: "risks", type: "array", itemType: "string", required: false },
+    ],
+    agentPreference: LIGHT,
+  },
+  {
+    id: "done", ordinal: 1, name: "Done",
+    completionPolicy: "handoff",
+    instructions:
+      "Finalize the scope brief for the calling workflow: a single paragraph the parent can act on directly. Make no code changes. Present the brief plainly to close out — do not finish silently.",
+    outputSchema: [
+      { key: "brief", type: "string", required: true },
+    ],
+    agentPreference: LIGHT,
+  },
+];
+
+const SCOPE_BRIEF_GRAPH: WorkflowGraph = {
+  nodes: [
+    { id: "draft", type: "step", name: "Draft Scope", stepId: "draft" },
+    { id: "done", type: "step", name: "Done", stepId: "done", terminal: true },
+  ],
+  edges: [{ from: "draft", to: "done" }],
+  positions: {
+    draft: { x: 110, y: 20 }, done: { x: 110, y: 112 },
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Scoped Delivery (composition parent) — the end-to-end dogfood of the delegate
+// seam: an Intake step produces `goal_area`, a `delegate` node runs the
+// Scope Brief child (isolated child state; `reads` maps `goal_area` in, `writes`
+// maps the child's terminal `brief` back out as `scope_brief`), and a Deliver
+// step acts within that scope.
+// ---------------------------------------------------------------------------
+
+const SCOPED_DELIVERY_STEPS: WorkflowStepTemplate[] = [
+  {
+    id: "intake", ordinal: 0, name: "Intake",
+    instructions:
+      "Read the goal and name the single area the delegated scope brief should cover. Do not design the solution or change any code; the child produces the brief and the Deliver step does the work.",
+    outputSchema: [
+      { key: "goal_area", type: "string", required: true },
+    ],
+    agentPreference: LIGHT,
+  },
+  {
+    id: "deliver", ordinal: 1, name: "Deliver",
+    instructions:
+      "Carry out the goal within the scope brief returned by the delegated child, following existing codebase patterns and staying inside that scope. Add or update tests and run the relevant checks. Do not expand scope beyond the brief; record what was delivered.",
+    outputSchema: [
+      { key: "summary", type: "string", required: true },
+      { key: "outcome", type: "string", required: true },
+    ],
+    agentPreference: EXECUTION,
+  },
+];
+
+const SCOPED_DELIVERY_GRAPH: WorkflowGraph = {
+  nodes: [
+    { id: "intake", type: "step", name: "Intake", stepId: "intake" },
+    {
+      id: "scope", type: "delegate", name: "Scope Brief",
+      childTemplateId: "orca/scope-brief", childTemplateVersion: 1,
+      reads: { goal_area: "goal_area" },   // childInputKey: parentKeyName
+      writes: { scope_brief: "brief" },     // parentOutputKey: childOutputKey
+    },
+    { id: "deliver", type: "step", name: "Deliver", stepId: "deliver", terminal: true },
+  ],
+  edges: [
+    { from: "intake", to: "scope" },
+    { from: "scope", to: "deliver" },
+  ],
+  positions: {
+    intake: { x: 110, y: 20 }, scope: { x: 110, y: 112 }, deliver: { x: 110, y: 204 },
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Catalog
 // ---------------------------------------------------------------------------
 
@@ -733,6 +833,20 @@ export const BUILTIN_TEMPLATE_CATALOG: BuiltInTemplateDefinition[] = [
     bestFor: "Closing gaps in tests, types, and checks on existing code.",
     version: 3, category: CATEGORY, recommended: false,
     steps: QUALITY_COVERAGE_STEPS, guardrails: [validationRule(["generate_checks", "confirm_green"])], graph: QUALITY_COVERAGE_GRAPH,
+  },
+  {
+    id: "orca/scope-brief", name: "Scope Brief",
+    description: "A minimal reusable sub-workflow: turn a delegated goal area into a concise scope brief the calling workflow can act on. Declares a typed input (goal_area) and returns one output (brief).",
+    bestFor: "A reusable child sub-workflow other templates delegate to for a scoped brief.",
+    version: 1, category: CATEGORY, recommended: false,
+    steps: SCOPE_BRIEF_STEPS, guardrails: [CONTEXT_RULE], graph: SCOPE_BRIEF_GRAPH, inputs: SCOPE_BRIEF_INPUTS,
+  },
+  {
+    id: "orca/scoped-delivery", name: "Scoped Delivery",
+    description: "Demonstrates workflow composition end-to-end: an Intake step feeds a delegated Scope Brief child (isolated state, mapped reads/writes), whose result flows back into a Deliver step.",
+    bestFor: "Seeing sub-workflow composition end-to-end — a parent that delegates a scoped brief to a child template.",
+    version: 1, category: CATEGORY, recommended: false,
+    steps: SCOPED_DELIVERY_STEPS, guardrails: [APPROVAL_MARK_DONE, CONTEXT_RULE], graph: SCOPED_DELIVERY_GRAPH,
   },
 ];
 
