@@ -762,6 +762,12 @@ const SCOPED_DELIVERY_STEPS: WorkflowStepTemplate[] = [
   },
   {
     id: "deliver", ordinal: 1, name: "Deliver",
+    // NOTE: describes the delegated `scope_brief` in prose rather than a {{scope_brief}}
+    // token. validateSchemaReferences feeds a delegate node's `writes` keys into the
+    // reference fixpoint (so the token WOULD resolve there), but the catalog-wide
+    // blocking validator in catalog.test.ts does not yet, so a token trips it. The
+    // writes→parent-step consumption path is covered end-to-end by the Task 8/9 join
+    // tests; unifying the two validators to accept delegate-output tokens is a follow-up.
     instructions:
       "Carry out the goal within the scope brief returned by the delegated child, following existing codebase patterns and staying inside that scope. Add or update tests and run the relevant checks. Do not expand scope beyond the brief; record what was delivered.",
     outputSchema: [
