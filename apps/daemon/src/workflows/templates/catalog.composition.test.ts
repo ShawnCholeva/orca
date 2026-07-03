@@ -5,6 +5,7 @@ import type { WorkflowTemplate } from "@orca/contracts";
 import { runMigrations, defaultMigrationsDir } from "../../migrations.js";
 import { EventBus } from "../../events.js";
 import { installBuiltInTemplates } from "./usecases.js";
+import { getTemplateById, resetPreparedStatements } from "./projection.js";
 import { BUILTIN_TEMPLATE_CATALOG } from "./catalog.js";
 import {
   validateGraph,
@@ -22,6 +23,7 @@ function ctx() {
   return { db, bus: new EventBus(), now: () => "2026-01-01T00:00:00.000Z" };
 }
 beforeEach(() => {
+  resetPreparedStatements();
   db = new DatabaseCtor(":memory:");
   runMigrations(db, defaultMigrationsDir());
 });
@@ -71,6 +73,24 @@ describe("composed built-in pair (workflow composition dogfood)", () => {
     const parent = catalogDef(PARENT_ID)!;
     expect(
       validateDelegationAcyclic(resolveChild, { id: parent.id, graph: parent.graph })
+    ).toEqual([]);
+  });
+
+  it("(d) the child's typed inputs survive a DB round-trip (authoring-time validation reads them)", () => {
+    installBuiltInTemplates(ctx(), [CHILD_ID]);
+    const persisted = getTemplateById(db, CHILD_ID)!;
+    // The child declares a non-empty `inputs` interface; it must NOT come back [].
+    expect(persisted.inputs.length).toBeGreaterThan(0);
+    expect(persisted.inputs).toEqual(catalogDef(CHILD_ID)!.inputs);
+
+    // The parent's reads/writes validate when the child is resolved FROM THE DB
+    // (routes.ts uses getTemplateById as the resolver at author/install time).
+    installBuiltInTemplates(ctx(), [PARENT_ID]);
+    const parent = catalogDef(PARENT_ID)!;
+    const dbResolveChild = (id: string) => getTemplateById(db, id);
+    expect(validateGraph(parent.graph!, parent.steps, { resolveChild: dbResolveChild })).toEqual([]);
+    expect(
+      validateDelegationAcyclic(dbResolveChild, { id: parent.id, graph: parent.graph })
     ).toEqual([]);
   });
 });

@@ -1098,6 +1098,7 @@ export const CreateWorkflowTemplateRequest = z
     scope: WorkflowScope.default("global"),
     scopeName: z.string().max(WORKFLOW_TEMPLATE_MAX_SCOPE_NAME_CHARS).default(""),
     graph: WorkflowGraph.nullable().default(null),
+    inputs: z.array(WorkflowStepOutputField).max(32).optional(), // typed entry inputs (I5)
   })
   .strict();
 export type CreateWorkflowTemplateRequest = z.infer<

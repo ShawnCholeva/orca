@@ -174,6 +174,9 @@ describe("runMigrations", () => {
       "0046_step_run_pending_revision.sql",
       "0047_activity_steps_tool_use_id.sql",
       "0048_step_run_prior_claims.sql",
+      "0049_learning_proposals.sql",
+      "0050_workflow_compositions.sql",
+      "0051_workflow_template_inputs.sql",
     ]);
   });
 
@@ -314,6 +317,9 @@ describe("runMigrations", () => {
       "0046_step_run_pending_revision.sql",
       "0047_activity_steps_tool_use_id.sql",
       "0048_step_run_prior_claims.sql",
+      "0049_learning_proposals.sql",
+      "0050_workflow_compositions.sql",
+      "0051_workflow_template_inputs.sql",
     ]);
 
     const goalCount = (
@@ -607,6 +613,9 @@ describe("session tables migration", () => {
       "0046_step_run_pending_revision.sql",
       "0047_activity_steps_tool_use_id.sql",
       "0048_step_run_prior_claims.sql",
+      "0049_learning_proposals.sql",
+      "0050_workflow_compositions.sql",
+      "0051_workflow_template_inputs.sql",
     ]);
 
     const tables = (
@@ -1133,6 +1142,9 @@ describe("migration 0010 workflows", () => {
       "0046_step_run_pending_revision.sql",
       "0047_activity_steps_tool_use_id.sql",
       "0048_step_run_prior_claims.sql",
+      "0049_learning_proposals.sql",
+      "0050_workflow_compositions.sql",
+      "0051_workflow_template_inputs.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1736,6 +1748,9 @@ describe("migration 0012 orchestration transport", () => {
       "0046_step_run_pending_revision.sql",
       "0047_activity_steps_tool_use_id.sql",
       "0048_step_run_prior_claims.sql",
+      "0049_learning_proposals.sql",
+      "0050_workflow_compositions.sql",
+      "0051_workflow_template_inputs.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
