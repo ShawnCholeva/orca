@@ -219,11 +219,6 @@ export function cancelWorkflowRun(
         "UPDATE workflow_runs SET status = 'cancelled', finished_at = ? WHERE id = ?"
       )
       .run(now, runId);
-    ctx.db
-      .prepare(
-        "UPDATE goals SET active_workflow_run_id = NULL WHERE id = ? AND active_workflow_run_id = ?"
-      )
-      .run(run.goalId, runId);
 
     // Composition cancel cascade (I2/§4.5): cancel every descendant child run and
     // mark its composition row cancelled. Terminal descendants are left untouched.
@@ -246,6 +241,14 @@ export function cancelWorkflowRun(
         )
         .run(now, ...cancelledSet);
     }
+    // Clear the goal's active pointer if it points at any run in the cancelled set
+    // (for delegating parents, the pointer is on the leaf child, not the parent).
+    const goalPlaceholders = cancelledSet.map(() => "?").join(",");
+    ctx.db
+      .prepare(
+        `UPDATE goals SET active_workflow_run_id = NULL WHERE id = ? AND active_workflow_run_id IN (${goalPlaceholders})`
+      )
+      .run(run.goalId, ...cancelledSet);
 
     const event = appendWorkflowEvent(
       ctx.db,

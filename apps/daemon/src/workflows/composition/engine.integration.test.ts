@@ -235,6 +235,9 @@ describe("composition engine wiring", () => {
     expect(getWorkflowRunById(db, childRunId)!.status).toBe("cancelled");
     const comp = db.prepare("SELECT status FROM workflow_run_compositions WHERE parent_run_id=?").get(parentRunId) as { status: string };
     expect(comp.status).toBe("cancelled");
+    // Goal pointer must be cleared — the leaf child was the active run, not the parent.
+    const goalPtr = (db.prepare("SELECT active_workflow_run_id AS a FROM goals WHERE id='g1'").get() as { a: string | null }).a;
+    expect(goalPtr).toBeNull();
   });
 
   it("(governance B) human_review + requiresLaunchApproval parks before spawning; confirm spawns", async () => {
