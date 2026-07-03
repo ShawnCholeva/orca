@@ -23,8 +23,13 @@ export function buildStepExecutionInput(args: {
   transcript: InterviewTurn[];
   stepRunByStepId: Record<string, string>; // stepTemplateId -> stepRunId
   workspaceContext?: WorkspaceContextOutput;
+  // Composition (I2/Task 8 deferral): delegate `writes` materialized on a surrogate
+  // delegate step-run are NOT template steps, so the `steps` loop above never surfaces
+  // them. Thread them here so the parent's next step sees delegate outputs on the
+  // skill/model path too (the AGENT prior-output path already reads the surrogate).
+  delegatePriorOutputs?: Array<{ stepId: string; stepName: string; output: unknown }>;
 }): StepExecutionInput {
-  const { goal, steps, currentStep, artifacts, transcript, stepRunByStepId, workspaceContext } = args;
+  const { goal, steps, currentStep, artifacts, transcript, stepRunByStepId, workspaceContext, delegatePriorOutputs } = args;
   const outputByStepRunId = new Map<string, unknown>();
   for (const a of artifacts) {
     if (a.type === "step_output" && a.stepRunId) outputByStepRunId.set(a.stepRunId, parseOutput(a.body));
@@ -37,6 +42,7 @@ export function buildStepExecutionInput(args: {
       priorStepOutputs.push({ stepId: s.id, stepName: s.name, output: outputByStepRunId.get(sr) ?? null });
     }
   }
+  for (const d of delegatePriorOutputs ?? []) priorStepOutputs.push(d);
   const previousStepOutput =
     priorStepOutputs.length > 0 ? priorStepOutputs[priorStepOutputs.length - 1].output : null;
   return {

@@ -60,6 +60,24 @@ export function updateCompositionStatus(
       patch.finishedAt !== undefined ? patch.finishedAt : cur.finished_at, id);
 }
 
+// Walk UP the delegation stack: the top-of-stack run (the run with no parent
+// composition) for a given run. Used to scope a composition's budget/cost to the
+// whole tree from its root. Returns runId itself when it is already a root.
+export function rootRunId(db: Database.Database, runId: string): string {
+  let cur = runId;
+  const seen = new Set<string>();
+  while (!seen.has(cur)) {
+    seen.add(cur);
+    const row = db.prepare(`SELECT parent_composition_id FROM workflow_runs WHERE id = ?`).get(cur) as { parent_composition_id: string | null } | undefined;
+    const pcid = row?.parent_composition_id ?? null;
+    if (!pcid) break;
+    const comp = db.prepare(`SELECT parent_run_id FROM workflow_run_compositions WHERE id = ?`).get(pcid) as { parent_run_id: string } | undefined;
+    if (!comp) break;
+    cur = comp.parent_run_id;
+  }
+  return cur;
+}
+
 // root + all transitive child runs (for cost roll-up + cancel cascade).
 export function descendantRunIds(db: Database.Database, rootRunId: string): string[] {
   const out = new Set<string>([rootRunId]);

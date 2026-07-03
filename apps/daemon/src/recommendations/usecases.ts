@@ -66,7 +66,8 @@ import {
 import { emitMarkDone } from "../harness-transitions/emit.js";
 import { resolveMarkDoneActivity } from "../activities/store.js";
 import { buildGoalWriteSetRollup } from "../harness-state/write-set-rollup.js";
-import { buildGoalCostRollup } from "../harness-state/cost-rollup.js";
+import { buildGoalCostRollupAcross } from "../harness-state/cost-rollup.js";
+import { descendantRunIds } from "../workflows/composition/store.js";
 import type { TelemetryFacet } from "@orca/contracts";
 
 export {
@@ -562,7 +563,13 @@ function recordTerminalFeedback(
   if (action === "accept" && rec.proposedAction.kind === "complete_workflow_run") {
     try {
       const telemetry: TelemetryFacet = {
-        cost: buildGoalCostRollup(db, rec.goalId, rec.proposedAction.workflowRunId),
+        // I2: the goal-total cost spans this run + all descendant child runs of the
+        // composition, so delegated child-step costs count in the mark_done roll-up.
+        cost: buildGoalCostRollupAcross(
+          db,
+          rec.goalId,
+          descendantRunIds(db, rec.proposedAction.workflowRunId)
+        ),
         latency_ms: null, model: null,
         provider_id: null, provider_version: null,
         prompt_ref: null, raw_output_ref: null,

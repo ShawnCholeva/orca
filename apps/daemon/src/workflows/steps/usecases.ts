@@ -299,6 +299,7 @@ export type AdvanceResult =
   | { kind: "step"; stepRun: WorkflowStepRunT }
   | { kind: "gate"; nodeId: string }
   | { kind: "splitter"; nodeId: string }
+  | { kind: "delegate"; nodeId: string }
   | { kind: "completed-terminal"; stepRun: WorkflowStepRunT };
 
 function graphStepTemplateId(graph: WorkflowGraph, nodeId: string): string {
@@ -383,6 +384,15 @@ export function advanceToNextStepOrGate(
         "UPDATE workflow_runs SET current_step_run_id = NULL, current_node_id = ?, current_node_kind = 'splitter' WHERE id = ?"
       ).run(dest.nodeId, current.workflowRunId);
       return { kind: "splitter", nodeId: dest.nodeId };
+    }
+
+    if (dest.kind === "delegate") {
+      // Park the cursor on the delegate node; the engine spawns the child run and
+      // parks the parent to 'delegating' (composition entry). Mirrors gate/splitter.
+      db.prepare(
+        "UPDATE workflow_runs SET current_step_run_id = NULL, current_node_id = ?, current_node_kind = 'delegate' WHERE id = ?"
+      ).run(dest.nodeId, current.workflowRunId);
+      return { kind: "delegate", nodeId: dest.nodeId };
     }
 
     // dest.kind === "step"

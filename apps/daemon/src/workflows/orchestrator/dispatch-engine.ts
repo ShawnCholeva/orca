@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import {
   OrchestrationRequest,
@@ -87,7 +88,11 @@ import {
   evaluateGuardrailRequiresApproval,
   parseBudgetRuleConfig,
 } from "../guardrails/evaluator.js";
-import { buildGoalCostRollup } from "../../harness-state/cost-rollup.js";
+import { buildGoalCostRollup, buildGoalCostRollupAcross } from "../../harness-state/cost-rollup.js";
+import { spawnChildRun, DelegationDepthError } from "../composition/spawn.js";
+import { joinChildRun } from "../composition/join.js";
+import { rootRunId, descendantRunIds } from "../composition/store.js";
+import { createDecision } from "../../decisions/usecases.js";
 import { buildAgentObjective } from "./agent-objective.js";
 import { buildStepExecutionInput } from "./step-input.js";
 import { assembleWorkspaceContext } from "./workspace-context.js";
@@ -528,6 +533,7 @@ export class DispatchEngine {
       transcript,
       stepRunByStepId,
       workspaceContext: workspaceContext.workspaces.length > 0 ? workspaceContext : undefined,
+      delegatePriorOutputs: this.collectDelegatePriorOutputs(db, run.id, template, artifacts),
     });
 
     const validate = (raw: unknown) => {
@@ -1044,8 +1050,33 @@ export class DispatchEngine {
         }
       }
 
+      if (result.kind === "delegate") {
+        // Composition entry: spawn a child run (or park for a launch confirm). The
+        // parent parks to 'delegating' and the child becomes the active leaf, so the
+        // parent run is no longer active — never recurse into requestNextDecision here.
+        return await this.enterDelegateNode(
+          db,
+          now,
+          { run, stepRun, stepTpl, template, goal, delegateNodeId: result.nodeId },
+          options
+        );
+      }
+
       // recursion depth is bounded by the number of consecutive auto-completing intermediate steps (template step count).
       return this.requestNextDecision(db, now, run.id, options);
+    }
+
+    // Composition terminal interception (§4.3): a CHILD run reaching its terminal
+    // step does NOT yield a goal-level mark_done — it joins back into its parent.
+    // joinChildRun maps `writes`, flips parent→active, advances the parent cursor;
+    // we then spawn the resumed parent step's session.
+    const parentCompositionId = (
+      db
+        .prepare("SELECT parent_composition_id FROM workflow_runs WHERE id = ?")
+        .get(run.id) as { parent_composition_id: string | null } | undefined
+    )?.parent_composition_id;
+    if (parentCompositionId) {
+      return await this.joinChildToParentTerminal(db, now, { run, stepRun, stepTpl, goal }, options);
     }
 
     const stagedEvents: DomainEvent[] = [];
@@ -1146,6 +1177,398 @@ export class DispatchEngine {
       }
     }
     return output;
+  }
+
+  // ── Workflow composition (delegate node) ──────────────────────────────────
+
+  /** Merge every prior step_output artifact of the run into one blackboard record. */
+  private collectParentOutputs(db: Database.Database, runId: string): Record<string, unknown> {
+    const merged: Record<string, unknown> = {};
+    const rows = db
+      .prepare(
+        "SELECT body FROM workflow_artifacts WHERE workflow_run_id = ? AND type = 'step_output' ORDER BY created_at ASC"
+      )
+      .all(runId) as Array<{ body: string }>;
+    for (const r of rows) {
+      try {
+        const obj = JSON.parse(r.body);
+        if (obj && typeof obj === "object") Object.assign(merged, obj);
+      } catch {
+        // skip unparseable bodies
+      }
+    }
+    return merged;
+  }
+
+  /** I3 baseline: snapshot the parent's active workspace via its most recent step session. */
+  private parentWorkspaceSnapshotJson(db: Database.Database, runId: string): string | null {
+    const row = db
+      .prepare(
+        "SELECT s.id AS id FROM sessions s JOIN workflow_step_runs sr ON s.workflow_step_run_id = sr.id WHERE sr.workflow_run_id = ? ORDER BY s.created_at DESC LIMIT 1"
+      )
+      .get(runId) as { id: string } | undefined;
+    if (!row) return null;
+    const ws = probeWorkspaceForSession(db, row.id);
+    return ws ? JSON.stringify(ws) : null;
+  }
+
+  /**
+   * Delegate `writes` are materialized on a surrogate delegate step-run (step_template_id
+   * = the delegate node id), which is NOT a template step — so the skill/model prior-output
+   * loop skips it. Surface those outputs so the parent's next step sees delegate results.
+   */
+  private collectDelegatePriorOutputs(
+    db: Database.Database,
+    runId: string,
+    template: WorkflowTemplateT,
+    artifacts: ReturnType<typeof listArtifactsForRun>
+  ): Array<{ stepId: string; stepName: string; output: unknown }> {
+    const graph = effectiveGraph(template.graph, template.steps);
+    const delegateNames = new Map<string, string>();
+    for (const n of graph.nodes) if (n.type === "delegate") delegateNames.set(n.id, n.name ?? n.id);
+    if (delegateNames.size === 0) return [];
+    const stepRuns = db
+      .prepare("SELECT id, step_template_id FROM workflow_step_runs WHERE workflow_run_id = ?")
+      .all(runId) as Array<{ id: string; step_template_id: string }>;
+    const surrogateNode = new Map<string, string>();
+    for (const sr of stepRuns) if (delegateNames.has(sr.step_template_id)) surrogateNode.set(sr.id, sr.step_template_id);
+    if (surrogateNode.size === 0) return [];
+    const out: Array<{ stepId: string; stepName: string; output: unknown }> = [];
+    for (const a of artifacts) {
+      if (a.type !== "step_output" || !a.stepRunId) continue;
+      const nodeId = surrogateNode.get(a.stepRunId);
+      if (!nodeId) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(a.body);
+      } catch {
+        parsed = a.body;
+      }
+      out.push({ stepId: nodeId, stepName: delegateNames.get(nodeId)!, output: parsed });
+    }
+    return out;
+  }
+
+  /**
+   * The run cursor reached a `delegate` node (§4.1). Gather the parent blackboard +
+   * a workspace snapshot, record an auditable GoalDecision, then either park for a
+   * human launch confirm (human_review + requiresLaunchApproval) or spawn the child.
+   */
+  private async enterDelegateNode(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+      delegateNodeId: string;
+    },
+    options: RequestNextDecisionOptions
+  ): Promise<{ decision: WorkflowDecisionTrace; recommendationIds: string[] }> {
+    const { run, stepRun, stepTpl, template, goal, delegateNodeId } = ctx;
+    const graph = effectiveGraph(template.graph, template.steps);
+    const node = graph.nodes.find((n) => n.id === delegateNodeId && n.type === "delegate");
+    if (!node || !node.childTemplateId || node.childTemplateVersion == null) {
+      return this.blockRun(db, now, { run, stepRun, stepTpl, goal }, `delegate node missing child template: ${delegateNodeId}`, options);
+    }
+    const reads = node.reads ?? {};
+    const writes = node.writes ?? {};
+    const parentOutputs = this.collectParentOutputs(db, run.id);
+    const workspaceSnapshotJson = this.parentWorkspaceSnapshotJson(db, run.id);
+
+    // Auditable GoalDecision (HITL-as-durable-state, B/§5.2.5).
+    try {
+      createDecision(
+        { db, bus: options.bus ?? new EventBus(), now },
+        {
+          goalId: goal.id,
+          title: `Delegate to ${node.childTemplateId} v${node.childTemplateVersion}`,
+          decisionText: `Spawn child workflow ${node.childTemplateId} v${node.childTemplateVersion} from delegate node ${node.id}. Resolved reads: ${JSON.stringify(reads)}.`,
+          rationale: "Workflow composition delegate-node entry.",
+        }
+      );
+    } catch (err) {
+      console.error("delegate GoalDecision failed", err);
+    }
+
+    // Governed launch: opt-in human confirm before spawning (default off).
+    if (node.requiresLaunchApproval && goalRequiresHumanReview(db, goal.id)) {
+      return this.parkForDelegateLaunch(db, now, { run, stepRun, stepTpl, goal, node }, options);
+    }
+
+    return this.performDelegateSpawn(
+      db,
+      now,
+      { run, sourceStepRun: stepRun, sourceStepTpl: stepTpl, goal, node, reads, writes, parentOutputs, workspaceSnapshotJson },
+      options
+    );
+  }
+
+  /**
+   * Park a delegate node for a human launch confirm. The run stays active with the
+   * cursor on the delegate node (current_node_kind='delegate'); confirmDelegateLaunch
+   * re-enters the spawn. No child is spawned until then.
+   */
+  private parkForDelegateLaunch(
+    db: Database.Database,
+    now: () => string,
+    ctx: { run: WorkflowRunT; stepRun: StepRunRow; stepTpl: WorkflowStepTemplate; goal: GoalRow; node: WorkflowGraphNode },
+    options: RequestNextDecisionOptions
+  ): { decision: WorkflowDecisionTrace; recommendationIds: string[] } {
+    const { run, stepRun, stepTpl, goal, node } = ctx;
+    const stagedEvents: DomainEvent[] = [];
+    const decision = db.transaction(() => {
+      this.appendDecisionRequested(db, now, goal.id, run.id, stepRun.id, stepTpl.id, options, stagedEvents);
+      return recordDecisionInTx(
+        db,
+        now,
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          stepRunId: stepRun.id,
+          decisionType: "advance_step",
+          selectedAction: `delegate:${node.id}:await_launch`,
+          reason: `Delegate to ${node.childTemplateId} awaiting human launch confirm`,
+          influencedBy: [{ kind: "workflow_step", id: stepTpl.id, label: stepTpl.name, effect: "satisfied" }],
+          inputFingerprint: decisionFingerprint({
+            runId: run.id,
+            stepRunId: stepRun.id,
+            decisionType: "advance_step",
+            payload: `${node.id}:await_launch`,
+          }),
+        },
+        { idFactory: options.idFactory, stagedEvents }
+      );
+    })();
+    publishStaged(options.bus, stagedEvents);
+    pauseForConfirmation(
+      { db, bus: options.bus ?? new EventBus() },
+      { goalId: goal.id, workflowRunId: run.id, stepRunId: stepRun.id, summary: `Approve delegating to ${node.childTemplateId} v${node.childTemplateVersion}?` }
+    );
+    return { decision, recommendationIds: [] };
+  }
+
+  /**
+   * Resolve a parked delegate launch confirm: re-enter the spawn from the run's
+   * delegate cursor. Idempotent — a no-op unless the run is active on a delegate node.
+   */
+  async confirmDelegateLaunch(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run || run.status !== "active" || run.currentNodeKind !== "delegate" || !run.currentNodeId) return;
+    const template = loadRunTemplate(db, run);
+    if (!template) return;
+    const goal = readGoal(db, run.goalId);
+    const graph = effectiveGraph(template.graph, template.steps);
+    const node = graph.nodes.find((n) => n.id === run.currentNodeId && n.type === "delegate");
+    if (!node || !node.childTemplateId || node.childTemplateVersion == null) return;
+
+    const sourceRow = db
+      .prepare("SELECT id, step_template_id FROM workflow_step_runs WHERE workflow_run_id = ? ORDER BY started_at DESC LIMIT 1")
+      .get(run.id) as { id: string; step_template_id: string } | undefined;
+    if (!sourceRow) return;
+    const sourceStepRun = readStepRun(db, sourceRow.id);
+    const sourceStepTpl = template.steps.find((s) => s.id === sourceRow.step_template_id) ?? template.steps[0]!;
+
+    expireConfirmation({ db, bus: options.bus ?? new EventBus() }, { stepRunId: sourceRow.id });
+
+    await this.performDelegateSpawn(
+      db,
+      now,
+      {
+        run,
+        sourceStepRun,
+        sourceStepTpl,
+        goal,
+        node,
+        reads: node.reads ?? {},
+        writes: node.writes ?? {},
+        parentOutputs: this.collectParentOutputs(db, run.id),
+        workspaceSnapshotJson: this.parentWorkspaceSnapshotJson(db, run.id),
+      },
+      options
+    );
+  }
+
+  /** Spawn the child run, launch its initial step, and record the delegate decision. */
+  private async performDelegateSpawn(
+    db: Database.Database,
+    now: () => string,
+    args: {
+      run: WorkflowRunT;
+      sourceStepRun: StepRunRow;
+      sourceStepTpl: WorkflowStepTemplate;
+      goal: GoalRow;
+      node: WorkflowGraphNode;
+      reads: Record<string, string>;
+      writes: Record<string, string>;
+      parentOutputs: Record<string, unknown>;
+      workspaceSnapshotJson: string | null;
+    },
+    options: RequestNextDecisionOptions
+  ): Promise<{ decision: WorkflowDecisionTrace; recommendationIds: string[] }> {
+    const { run, sourceStepRun, sourceStepTpl, goal, node, reads, writes, parentOutputs, workspaceSnapshotJson } = args;
+    const idFactory = options.idFactory ?? randomUUID;
+
+    let childRunId: string;
+    try {
+      const spawn = spawnChildRun(
+        { db, bus: options.bus ?? new EventBus(), now, idFactory },
+        {
+          goalId: goal.id,
+          parentRun: { id: run.id },
+          delegateNode: {
+            id: node.id,
+            childTemplateId: node.childTemplateId!,
+            childTemplateVersion: node.childTemplateVersion!,
+            reads,
+            writes,
+          },
+          parentOutputs,
+          workspaceSnapshotJson,
+        }
+      );
+      childRunId = spawn.childRunId;
+    } catch (err) {
+      // Depth guard / spawn failure: spawnChildRun's whole transaction rolls back on
+      // throw, so the parent is still active at the delegate cursor — block it.
+      return this.blockRun(
+        db,
+        now,
+        { run, stepRun: sourceStepRun, stepTpl: sourceStepTpl, goal },
+        err instanceof DelegationDepthError ? err.message : `delegate spawn failed: ${(err as Error).message}`,
+        options
+      );
+    }
+
+    await this.spawnChildInitialStep(db, now, childRunId, options);
+
+    const stagedEvents: DomainEvent[] = [];
+    const decision = db.transaction(() => {
+      this.appendDecisionRequested(db, now, goal.id, run.id, sourceStepRun.id, sourceStepTpl.id, options, stagedEvents);
+      return recordDecisionInTx(
+        db,
+        now,
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          stepRunId: sourceStepRun.id,
+          decisionType: "advance_step",
+          selectedAction: `delegate:${node.childTemplateId}:v${node.childTemplateVersion}`,
+          reason: `Delegated to child workflow ${node.childTemplateId} (run ${childRunId}).`,
+          influencedBy: [{ kind: "workflow_step", id: sourceStepTpl.id, label: sourceStepTpl.name, effect: "satisfied" }],
+          inputFingerprint: decisionFingerprint({
+            runId: run.id,
+            stepRunId: sourceStepRun.id,
+            decisionType: "advance_step",
+            payload: `delegate:${node.id}:${childRunId}`,
+          }),
+        },
+        { idFactory: options.idFactory, stagedEvents }
+      );
+    })();
+    publishStaged(options.bus, stagedEvents);
+    return { decision, recommendationIds: [] };
+  }
+
+  /** Launch the child run's initial step session (same path a normal advance uses). */
+  private async spawnChildInitialStep(
+    db: Database.Database,
+    now: () => string,
+    childRunId: string,
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    const child = getWorkflowRunById(db, childRunId);
+    if (!child || child.status !== "active" || !child.currentStepRunId) return;
+    const stepRun = readStepRun(db, child.currentStepRunId);
+    const template = loadRunTemplate(db, child);
+    if (!template) return;
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) return;
+    const goal = readGoal(db, child.goalId);
+    try {
+      await this.spawnStepAgent(db, now, { run: child, stepRun, stepTpl, template, goal }, options);
+    } catch (err) {
+      console.error("spawnChildInitialStep failed", err);
+    }
+  }
+
+  /**
+   * A child run reached its terminal step (§4.3): join it back into the parent
+   * instead of yielding a goal-level mark_done. On a clean join, resume the parent
+   * by spawning its now-active step; on propagated failure the parent is already
+   * blocked. Returns a decision trace for the child's terminal step.
+   */
+  private async joinChildToParentTerminal(
+    db: Database.Database,
+    now: () => string,
+    ctx: { run: WorkflowRunT; stepRun: StepRunRow; stepTpl: WorkflowStepTemplate; goal: GoalRow },
+    options: RequestNextDecisionOptions
+  ): Promise<{ decision: WorkflowDecisionTrace; recommendationIds: string[] }> {
+    const { run, stepRun, stepTpl, goal } = ctx;
+    const idFactory = options.idFactory ?? randomUUID;
+    const join = joinChildRun({ db, bus: options.bus ?? new EventBus(), now, idFactory }, run.id);
+    if (join.outcome === "joined") {
+      await this.resumeParentAfterJoin(db, now, join.parentRunId, options);
+    }
+
+    const stagedEvents: DomainEvent[] = [];
+    const decision = db.transaction(() => {
+      this.appendDecisionRequested(db, now, goal.id, run.id, stepRun.id, stepTpl.id, options, stagedEvents);
+      return recordDecisionInTx(
+        db,
+        now,
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          stepRunId: stepRun.id,
+          decisionType: "advance_step",
+          selectedAction: join.outcome === "joined" ? `join:${join.parentRunId}` : `join_failed:${join.parentRunId}`,
+          reason:
+            join.outcome === "joined"
+              ? "Child workflow terminal joined back to parent."
+              : "Child workflow terminal failed; parent blocked.",
+          influencedBy: [{ kind: "workflow_step", id: stepTpl.id, label: stepTpl.name, effect: "satisfied" }],
+          inputFingerprint: decisionFingerprint({
+            runId: run.id,
+            stepRunId: stepRun.id,
+            decisionType: "advance_step",
+            payload: `join:${join.outcome}:${join.parentRunId}`,
+          }),
+        },
+        { idFactory: options.idFactory, stagedEvents }
+      );
+    })();
+    publishStaged(options.bus, stagedEvents);
+    return { decision, recommendationIds: [] };
+  }
+
+  /** After a clean join, spawn the parent's resumed (now-active) step session. */
+  private async resumeParentAfterJoin(
+    db: Database.Database,
+    now: () => string,
+    parentRunId: string,
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    const parent = getWorkflowRunById(db, parentRunId);
+    if (!parent || parent.status !== "active" || !parent.currentStepRunId) return;
+    const stepRun = readStepRun(db, parent.currentStepRunId);
+    const template = loadRunTemplate(db, parent);
+    if (!template) return;
+    const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
+    if (!stepTpl) return;
+    const goal = readGoal(db, parent.goalId);
+    try {
+      await this.spawnStepAgent(db, now, { run: parent, stepRun, stepTpl, template, goal }, options);
+    } catch (err) {
+      console.error("resumeParentAfterJoin failed", err);
+    }
   }
 
   /**
@@ -2021,12 +2444,19 @@ export class DispatchEngine {
     for (const g of guardrails) {
       if (g.kind !== "budget_rule") continue;
       const cfg = parseBudgetRuleConfig(g.configJson);
+      // I2 — a composition's workflow-scope budget spans the whole delegation tree:
+      // sum spend across the root run + all descendant child runs, so a child step's
+      // cost counts against the parent's cap. The step_type scope stays per-run.
       const rollup =
         cfg.scope === "step_type"
           ? buildGoalCostRollup(db, scope.goalId, scope.workflowRunId, {
               stepTemplateId: scope.stepTemplateId,
             })
-          : buildGoalCostRollup(db, scope.goalId, scope.workflowRunId);
+          : buildGoalCostRollupAcross(
+              db,
+              scope.goalId,
+              descendantRunIds(db, rootRunId(db, scope.workflowRunId))
+            );
       const result = evaluateGuardrail(g, {
         goalId: scope.goalId,
         workflowRunId: scope.workflowRunId,
