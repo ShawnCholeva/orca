@@ -302,6 +302,7 @@ export class DispatchEngine {
             workflowRunId: run.id,
             workflowStepRunId: stepRun.id,
             stateDeps: options.stateDepsByStepRunId?.[stepRun.id] ?? undefined,
+            refute: options.refuteByStepRunId?.[stepRun.id] ?? undefined,
             telemetry: buildTelemetry(
               this.otlpAccumulator,
               sessionRow?.id,

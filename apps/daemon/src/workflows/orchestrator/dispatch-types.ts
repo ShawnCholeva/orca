@@ -1,6 +1,7 @@
 import { EventBus } from "../../events.js";
 import type { ResolvedMode } from "../../adapters/dispatcher.js";
 import type {
+  RefuteFacet,
   StateDepsFacet,
   WorkflowStepResult,
 } from "@orca/contracts";
@@ -18,6 +19,10 @@ export interface RequestNextDecisionOptions {
   terminalFinishedAtByStepRunId?: Record<string, string>;
   /** StateDepsFacet to attach to the step's eventual step_complete transition. */
   stateDepsByStepRunId?: Record<string, StateDepsFacet>;
+  /** RefuteFacet to attach to a non-gated step's step_complete transition,
+   *  recorded downstream at advanceToNextStep (gated steps thread it directly
+   *  onto their own evidence-gate emit instead). */
+  refuteByStepRunId?: Record<string, RefuteFacet>;
 }
 
 export class OrchestratorRunNotFoundError extends Error {

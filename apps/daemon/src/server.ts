@@ -931,6 +931,7 @@ export function createServer(
   eventBus.subscribe((event) => {
     if (TERMINAL_RUN_EVENTS.has(event.type) && event.goalId) {
       void shadowSessions.terminate(event.goalId).catch(() => {});
+      void shadowSessions.terminate(`${event.goalId}::refute`).catch(() => {});
     }
   });
 
@@ -1314,6 +1315,7 @@ export function createServer(
     try {
       const goal = archiveGoal(id);
       void shadowSessions.terminate(id).catch(() => {});
+      void shadowSessions.terminate(`${id}::refute`).catch(() => {});
       return { goal };
     } catch (error) {
       if (error instanceof NotFoundError) {

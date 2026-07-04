@@ -2,11 +2,15 @@ import type Database from "better-sqlite3";
 import {
   AdapterId,
   ProviderRecoveryCheckpoint,
+  RefuteCompletionRequest,
   StepResultScoringProposal,
   validateStepOutput,
   type DomainEvent,
   type OrchestratorAction,
   type PendingQuestion as PendingQuestionT,
+  type RefuteCompletionProposal,
+  type RefuteFacet,
+  type RefuteOutcome,
   type WorkflowRun as WorkflowRunT,
   type WorkflowStepTemplate,
   type WorkflowTemplate as WorkflowTemplateT,
@@ -35,6 +39,8 @@ import { probeWorkspaceForSession } from "../../harness-state/workspace-version.
 import { extractFileClaims, verifyCorrectionClaims } from "../../harness-state/claim-verification.js";
 import { emitStepComplete } from "../../harness-transitions/emit.js";
 import { runSensors } from "../../harness-sensors/runner.js";
+import { refuteStepCompletion } from "./refute-completion.js";
+import { stepToolRiskClass, shouldRefute } from "./refute-gate.js";
 import { stepRequiresExecution } from "./requires-execution.js";
 import { judgeAgentResponse } from "./judgement.js";
 import { sanitizeNarration } from "./sanitize-narration.js";
@@ -176,6 +182,13 @@ export class OrchestratorProviderRecoveryInvalidTransitionError extends Error {
     super(message);
     this.name = "OrchestratorProviderRecoveryInvalidTransitionError";
   }
+}
+
+/** True when `v` is a plain (non-array) object — used to structurally narrow
+ *  loosely-typed inputs (the step's `orca:step-complete` block, the mediator's
+ *  self-reported `scoring`) before handing them to the refute request schema. */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 /** Pull the step's free-text `assumptions[]` out of its completion block, if present. */
@@ -1191,9 +1204,10 @@ export class OrchestratorService {
         // verdict is not "passed". Runs before the supervision branch so it
         // applies to both supervised and unsupervised completions.
         const execReq = stepRequiresExecution(ctx.template.guardrails, ctx.stepTpl.id);
+        let evidence: Awaited<ReturnType<typeof runSensors>> | null = null;
+        let refute: Awaited<ReturnType<typeof this.maybeRefute>> = { ran: false };
         if (execReq) {
           const workspacePath = listWorkspacesByGoal(db, ctx.run.goalId)[0]?.path ?? null;
-          let evidence: Awaited<ReturnType<typeof runSensors>> | null = null;
           if (workspacePath) {
             try {
               evidence = await runSensors({ workspacePath, required: execReq.required });
@@ -1224,6 +1238,14 @@ export class OrchestratorService {
               ? "escalated"
               : "failed"
             : "succeeded";
+          // A step the evidence gate already vetoed never reaches the refute.
+          // Compute it (once) here, BEFORE this gate's single step_complete emit,
+          // so a passing step's refute outcome rides that SAME transition —
+          // never a second one — and a refuted verdict's failure_code composes
+          // with (never overrides) an evidence veto.
+          if (!vetoed) {
+            refute = await this.maybeRefute(db, ctx, block, action.scoring, evidence);
+          }
           emitStepComplete(
             { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
             {
@@ -1231,12 +1253,13 @@ export class OrchestratorService {
               workflowRunId: ctx.run.id,
               workflowStepRunId: ctx.stepRun.id,
               evidence: evidence ?? undefined,
+              refute: refute.ran ? refute.facet : undefined,
               stateDeps: options.stateDepsByStepRunId?.[ctx.stepRun.id] ?? undefined,
               telemetry: buildTelemetry(
                 this.otlpAccumulator,
                 sessionId,
                 evidenceStatus,
-                vetoed ? "evidence_veto" : null,
+                vetoed ? "evidence_veto" : refute.ran && refute.outcome === "refuted" ? "refute_veto" : null,
                 null,
                 recommendationFeedbackInterventions(db, ctx.run.goalId)
               ),
@@ -1281,11 +1304,57 @@ export class OrchestratorService {
             )
           );
           publishStaged(options.bus, evStaged);
+        } else {
+          // No deterministic execution oracle for this step — the refute is the
+          // only independent check (p.62). Computed once here; this step type has
+          // no evidence-gate emit, so nothing has recorded a transition for it yet.
+          refute = await this.maybeRefute(db, ctx, block, action.scoring, null);
         }
+        const refuteFacet = refute.ran ? refute.facet : undefined;
 
         const finishedAt = now();
 
-        if (conflictPause || goalRequiresHumanReview(db, ctx.run.goalId) || ctx.stepTpl.completionPolicy === "handoff") {
+        const pausing =
+          conflictPause || goalRequiresHumanReview(db, ctx.run.goalId) || ctx.stepTpl.completionPolicy === "handoff";
+        // L5 automated gate on the refute's tri-state verdict. Never runs when the
+        // step is already pausing for the human's own decision path (the refute
+        // was still computed once above, and its facet rides that pause below).
+        let escalateForRefute = false;
+        if (!pausing && refute.ran) {
+          if (refute.outcome === "refuted" && refute.proposal) {
+            // Exec steps already recorded this veto on the evidence-gate's single
+            // emit above; a non-exec step has no prior emit, so this is its only one.
+            if (!execReq) {
+              emitStepComplete(
+                { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
+                {
+                  goalId: ctx.run.goalId,
+                  workflowRunId: ctx.run.id,
+                  workflowStepRunId: ctx.stepRun.id,
+                  refute: refuteFacet,
+                  stateDeps: options.stateDepsByStepRunId?.[ctx.stepRun.id] ?? undefined,
+                  telemetry: buildTelemetry(
+                    this.otlpAccumulator,
+                    sessionId,
+                    "failed",
+                    "refute_veto",
+                    null,
+                    recommendationFeedbackInterventions(db, ctx.run.goalId)
+                  ),
+                }
+              );
+            }
+            return this.reviseStep(db, now, ctx, sessionId, this.formatRefuteFeedback(refute.proposal), options);
+          }
+          if (refute.outcome === "uncertain" || refute.outcome === "unavailable") {
+            // High-risk / unverified step we could not independently clear ->
+            // escalate to a human, do not auto-approve.
+            escalateForRefute = true;
+          }
+          // "upheld" -> fall through to commit.
+        }
+
+        if (pausing || escalateForRefute) {
           const scoringParse = StepResultScoringProposal.safeParse(action.scoring);
           const scoring = scoringParse.success ? scoringParse.data : undefined;
           const proposal = extractProposal(responseText);
@@ -1293,7 +1362,15 @@ export class OrchestratorService {
           db.prepare(
             "UPDATE workflow_step_runs SET pending_completion_json = ?, confirmed_lead = ? WHERE id = ?"
           ).run(
-            JSON.stringify({ block: block ?? {}, scoring: scoring ?? null, finishedAt, proposal }),
+            JSON.stringify({
+              block: block ?? {},
+              scoring: scoring ?? null,
+              finishedAt,
+              proposal,
+              refute: refute.ran
+                ? { verdict: refute.outcome, reason: refute.facet.reason, issueRefs: refute.facet.issue_refs }
+                : null,
+            }),
             confirmedLead,
             ctx.stepRun.id
           );
@@ -1311,6 +1388,7 @@ export class OrchestratorService {
                   workflowRunId: ctx.run.id,
                   workflowStepRunId: ctx.stepRun.id,
                   stateDeps: stateFacet,
+                  refute: refuteFacet,
                 }
               );
             } catch (err) {
@@ -1348,14 +1426,23 @@ export class OrchestratorService {
           void this.workerTerminate?.(sessionId);
         }
         const stepResult = buildApprovalStepResult(buildStepResultBuilderDeps(this.broker), db, ctx, action.scoring, finishedAt);
+        // Non-exec steps have no evidence-gate emit: their step_complete
+        // transition is recorded downstream at advanceToNextStep's non-gated
+        // emit site — thread the refute facet through so that single emit
+        // carries it (exec steps already carry it on the evidence-gate emit
+        // above; advanceToNextStep skips its own emit for exec steps).
+        const advanceOptions: RequestNextDecisionOptions =
+          refuteFacet && !execReq
+            ? { ...options, refuteByStepRunId: { ...options.refuteByStepRunId, [ctx.stepRun.id]: refuteFacet } }
+            : options;
         await this.engine.advanceToNextStep(db, nowWithFirstTimestamp(now, finishedAt), ctx.run.id, {
-          ...options,
+          ...advanceOptions,
           stepResultByStepRunId: {
-            ...options.stepResultByStepRunId,
+            ...advanceOptions.stepResultByStepRunId,
             [ctx.stepRun.id]: stepResult,
           },
           terminalFinishedAtByStepRunId: {
-            ...options.terminalFinishedAtByStepRunId,
+            ...advanceOptions.terminalFinishedAtByStepRunId,
             [ctx.stepRun.id]: finishedAt,
           },
         });
@@ -1365,6 +1452,81 @@ export class OrchestratorService {
         return this.reviseStep(db, now, ctx, sessionId, action.feedback, options);
       }
     }
+  }
+
+  /**
+   * Independent, adversarial refute pass (5.4 / Verify lane). Runs after the
+   * deterministic evidence gate passes (never for a step it already vetoed),
+   * only when the step is risky OR under-verified (`shouldRefute` — p.47/p.62).
+   * Uses a distinct, goal-scoped shadow session (`${goalId}::refute`) so the
+   * refute NEVER runs inside the approving orchestrator's own session (p.37
+   * anti-circularity). Returns `{ ran: false }` when the gate skips it or the
+   * goal has no shadow adapter (the deterministic gates already ran either way).
+   */
+  private async maybeRefute(
+    db: Database.Database,
+    ctx: { run: WorkflowRunT; stepRun: StepRunRow; stepTpl: WorkflowStepTemplate },
+    block: unknown,
+    scoring: unknown,
+    evidence: Awaited<ReturnType<typeof runSensors>> | null
+  ): Promise<
+    | { ran: false }
+    | { ran: true; outcome: RefuteOutcome; facet: RefuteFacet; proposal: RefuteCompletionProposal | null }
+  > {
+    if (!this.shadowAsk) return { ran: false };
+    const riskClass = stepToolRiskClass(db, ctx.stepRun.id);
+    const gate = shouldRefute(riskClass, evidence ? { oracleAdequacy: evidence.oracleAdequacy } : null);
+    if (!gate.refute) return { ran: false };
+    const goal = readGoal(db, ctx.run.goalId);
+    let adapterId: ShadowAdapterId | null = null;
+    try {
+      adapterId = resolveShadowAdapterId(goal);
+    } catch {
+      adapterId = null;
+    }
+    if (!adapterId) return { ran: false }; // no shadow adapter -> cannot refute; deterministic gates already ran
+
+    const request = RefuteCompletionRequest.parse({
+      step: { name: ctx.stepTpl.name, instructions: ctx.stepTpl.instructions ?? "" },
+      goal: { id: goal.id, description: goal.description },
+      stepOutput: isRecord(block) ? block : null,
+      selfReportedScoring: isRecord(scoring) ? scoring : null,
+      oracle: evidence
+        ? {
+            ran: true,
+            verdict: evidence.verdict,
+            sensorsRun: evidence.sensorsRun
+              .map((s) => ({ kind: s.kind, summary: s.summary.slice(0, 600) }))
+              .slice(0, 50),
+            gaps: evidence.oracleAdequacy.gaps.slice(0, 50),
+          }
+        : { ran: false, verdict: null, sensorsRun: [], gaps: [] },
+    });
+    const proposal = await refuteStepCompletion(this.shadowAsk, {
+      refuteSessionKey: `${goal.id}::refute`,
+      adapterId,
+      request,
+      timeoutMs: SHADOW_LLM_TIMEOUT_MS,
+    });
+    const outcome: RefuteOutcome = proposal ? proposal.verdict : "unavailable";
+    const facet: RefuteFacet = {
+      verdict: outcome,
+      triggered_by: gate.triggers,
+      risk_class: riskClass,
+      reason: proposal?.reason ?? null,
+      issue_refs: proposal?.issueRefs ?? [],
+    };
+    return { ran: true, outcome, facet, proposal };
+  }
+
+  /** Bounded revise feedback for a refuted completion — mirrors 5.3's gate
+   *  "fix only these" discipline so the agent addresses the enumerated issues
+   *  instead of re-litigating the whole step. */
+  private formatRefuteFeedback(proposal: RefuteCompletionProposal): string {
+    const issues = proposal.issueRefs.length
+      ? `\nFix only these:\n- ${proposal.issueRefs.join("\n- ")}`
+      : "";
+    return `An independent review refuted this completion: ${proposal.reason}${issues}\nAddress these and re-emit completion.`;
   }
 
   /**
