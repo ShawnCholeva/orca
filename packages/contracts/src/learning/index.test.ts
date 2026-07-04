@@ -89,3 +89,15 @@ describe("Counterfactual judge contracts", () => {
     expect(TemplateInstructionProposal.parse(base).judgment?.verdict).toBe("pass");
   });
 });
+
+describe("reasoning field (learning)", () => {
+  it("JudgeInstructionEditProposal accepts leading reasoning (optional)", () => {
+    expect(JudgeInstructionEditProposal.parse({ reasoning: "solved cases hold", verdict: "pass", regressionRisk: "none", addressesFailureMode: "yes", regressionCases: [], reason: "ok", inputsConsidered: [] }).reasoning).toBe("solved cases hold");
+    expect(JudgeInstructionEditProposal.safeParse({ verdict: "pass", regressionRisk: "none", addressesFailureMode: "yes", regressionCases: [], reason: "ok", inputsConsidered: [] }).success).toBe(true);
+  });
+  it("CounterfactualJudgment carries optional reasoning", () => {
+    const j = { verdict: "unavailable", regressionRisk: null, addressesFailureMode: null, regressionCases: [], reason: null, solvedCaseIds: [], failureCaseIds: [], solvedSampleSize: 0, failureSampleSize: 0, judgedAt: "2026-07-04T00:00:00.000Z", judgedAgainstVersion: 1 };
+    expect(CounterfactualJudgment.parse(j).reasoning ?? null).toBeNull();
+    expect(CounterfactualJudgment.parse({ ...j, reasoning: "why" }).reasoning).toBe("why");
+  });
+});

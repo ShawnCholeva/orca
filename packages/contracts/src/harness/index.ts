@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { REASONING_MAX } from "../workflows/index.js";
 
 export const HarnessTransitionBoundary = z.enum([
   "step_launch",
@@ -234,6 +235,7 @@ export const RefuteFacet = z
     triggered_by: z.array(z.enum(["high_risk", "no_oracle", "weak_oracle"])).max(3),
     risk_class: RiskClass,
     reason: z.string().max(1024).nullable(),
+    reasoning: z.string().max(REASONING_MAX).nullable().optional(),
     issue_refs: z.array(z.string().max(128)).max(50),
   })
   .strict();

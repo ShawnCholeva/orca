@@ -50,6 +50,7 @@ export const ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES = 65536;
 export const ORCHESTRATION_DIAGNOSTICS_MAX_BYTES = 4096;
 export const ORCHESTRATION_HUMAN_REVIEW_MAX_SUMMARY_BYTES = 4096;
 export const ORCHESTRATION_WORKER_OUTPUT_TAIL_MAX_BYTES = 4096;
+export const REASONING_MAX = 2000;
 
 const Id100 = z.string().min(1).max(100);
 const Id = z.string().min(1);
@@ -491,6 +492,7 @@ export const WorkflowStepResult = z
       .object({ reference: z.string().max(1024), description: z.string().max(512) })
       .strict()
       .optional(),
+    reasoning: z.string().max(REASONING_MAX).nullable().optional(),
   })
   .strict();
 export type WorkflowStepResult = z.infer<typeof WorkflowStepResult>;
@@ -818,6 +820,7 @@ export type StepResultScoringRequest = z.infer<typeof StepResultScoringRequest>;
 
 export const StepResultScoringProposal = z
   .object({
+    reasoning: z.string().max(REASONING_MAX).optional(),
     successScore: Score01,
     quality: WorkflowStepResultQuality,
     // The model's free-text justification. Kept generous (matching rationale
@@ -832,6 +835,7 @@ export type StepResultScoringProposal = z.infer<typeof StepResultScoringProposal
 
 export const GateEvaluationProposal = z
   .object({
+    reasoning: z.string().max(REASONING_MAX).optional(),
     outcome: z.enum(["approved", "rejected"]),
     reason: z.string().min(1).max(1024),
     issueRefs: z.array(z.string().min(1).max(128)).max(50).optional(),
@@ -865,6 +869,7 @@ export type RefuteVerdict = z.infer<typeof RefuteVerdict>;
 
 export const RefuteCompletionProposal = z
   .object({
+    reasoning: z.string().max(REASONING_MAX).optional(),
     verdict: RefuteVerdict,
     // No min length: an `upheld` verdict legitimately carries an empty reason, and
     // requiring one would fail parse → null → "unavailable" → a needless human
@@ -910,6 +915,7 @@ export type RefuteCompletionRequest = z.infer<typeof RefuteCompletionRequest>;
 
 export const SplitEvaluationProposal = z
   .object({
+    reasoning: z.string().max(REASONING_MAX).optional(),
     selectedBranch: z.string().min(1).max(WORKFLOW_SPLITTER_MAX_BRANCH_LABEL_CHARS),
     reason: z.string().min(1).max(1024),
     inputsConsidered: z.array(z.string().min(1).max(128)).max(50),

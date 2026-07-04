@@ -212,4 +212,9 @@ describe("RefuteFacet", () => {
     expect(HARNESS_FACETS.some((s) => s.key === "refute" && s.column === "refute_json")).toBe(true);
   });
   it("FailureCode includes refute_veto", () => { expect(FailureCode.parse("refute_veto")).toBe("refute_veto"); });
+  it("RefuteFacet carries optional reasoning", () => {
+    const f = { verdict: "refuted", triggered_by: ["no_oracle"], risk_class: "high", reason: "bad", issue_refs: ["x"] };
+    expect(RefuteFacet.parse(f).reasoning ?? null).toBeNull();
+    expect(RefuteFacet.parse({ ...f, reasoning: "why" }).reasoning).toBe("why");
+  });
 });

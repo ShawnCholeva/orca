@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES, hasMaxSerializedBytes } from "../workflows/index.js";
+import { ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES, hasMaxSerializedBytes, REASONING_MAX } from "../workflows/index.js";
 
 export const DimensionKey = z.enum([
   "trajectoryEfficiency", "verificationStrength", "recovery",
@@ -43,6 +43,7 @@ export const JudgeVerdict = z.enum(["pass", "regression_risk", "uncertain"]);
 export type JudgeVerdict = z.infer<typeof JudgeVerdict>;
 
 export const JudgeInstructionEditProposal = z.object({
+  reasoning: z.string().max(REASONING_MAX).optional(),
   verdict: JudgeVerdict,
   regressionRisk: z.enum(["none", "possible", "likely"]),
   addressesFailureMode: z.enum(["yes", "partial", "no", "unclear"]),
@@ -79,6 +80,7 @@ export const CounterfactualJudgment = z.object({
   addressesFailureMode: z.enum(["yes", "partial", "no", "unclear"]).nullable(),
   regressionCases: z.array(z.string().max(256)),
   reason: z.string().max(1024).nullable(),
+  reasoning: z.string().max(REASONING_MAX).nullable().optional(),
   solvedCaseIds: z.array(z.string()),
   failureCaseIds: z.array(z.string()),
   solvedSampleSize: z.number().int(),
