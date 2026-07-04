@@ -153,6 +153,20 @@ describe("buildConfirmationSummary", () => {
       expect(lead).toContain("can't tell");
     });
 
+    it("uses the could-not-be-completed phrase for unavailable with no reason clause and no literal null", () => {
+      const lead = confirmationLead("Looks good", null, { verdict: "unavailable", reason: null, issueRefs: [] });
+      expect(lead).toContain("could not be completed");
+      expect(lead).not.toContain("null");
+      expect(lead.endsWith("Looks good")).toBe(true);
+    });
+
+    it("never interpolates a null reason for a non-upheld verdict", () => {
+      const lead = confirmationLead("Looks good", null, { verdict: "refuted", reason: null, issueRefs: [] });
+      expect(lead).toContain("Independent review disputes this completion");
+      expect(lead).not.toContain("null");
+      expect(lead).not.toContain(": null");
+    });
+
     it("does not prepend an advisory when the verdict is upheld", () => {
       const lead = confirmationLead("Looks good", null, { verdict: "upheld", reason: null, issueRefs: [] });
       expect(lead).toBe("Looks good");

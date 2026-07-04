@@ -1,5 +1,6 @@
 import type {
   ConfirmationSummary as ConfirmationSummaryT,
+  ConfirmationSummaryRefute,
   StepResultScoringProposal,
   WorkflowStepOutputField,
   WorkflowStepOutputSchema,
@@ -90,14 +91,20 @@ function flattenField(
 export function confirmationLead(
   scoringReason: string | undefined,
   proposal: string | null,
-  refute?: { verdict: string; reason: string | null; issueRefs: string[] } | null
+  refute?: ConfirmationSummaryRefute | null
 ): string {
   const lead = scoringReason?.trim() || proposal?.trim() || "Step complete.";
-  if (refute && refute.verdict !== "upheld") {
-    const verb = refute.verdict === "refuted" ? "disputes" : "is uncertain about";
-    return `⚠️ Independent review ${verb} this completion: ${refute.reason}\n${lead}`;
+  if (!refute || refute.verdict === "upheld") return lead;
+  // "unavailable" means the refute call itself failed (reason is always null),
+  // so it gets its own phrasing and NO reason clause. For refuted/uncertain the
+  // reason clause is appended only when a reason is present — never interpolate
+  // a null (which would render the literal string "null").
+  if (refute.verdict === "unavailable") {
+    return `⚠️ Independent review could not be completed for this step.\n${lead}`;
   }
-  return lead;
+  const verb = refute.verdict === "refuted" ? "disputes" : "is uncertain about";
+  const reasonClause = refute.reason ? `: ${refute.reason}` : "";
+  return `⚠️ Independent review ${verb} this completion${reasonClause}\n${lead}`;
 }
 
 /** Builds the structured confirmation-card payload from a step's recorded output
