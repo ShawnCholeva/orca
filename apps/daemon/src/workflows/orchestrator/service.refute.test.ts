@@ -393,6 +393,51 @@ describe("OrchestratorService L5 refute gate", () => {
     expect(t?.refute).toBeNull();
   });
 
+  it("exec step whose sensors PASS reaches the refute: refuted rides the SINGLE gate emit as {failed, refute_veto}", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const guardrailsJson = JSON.stringify([
+      {
+        id: "validation_required",
+        kind: "validation_rule",
+        label: "x",
+        configJson: { appliesToSteps: ["implement"], required: ["typecheck"] },
+      },
+    ]);
+    setupAgentStepRun(db, { guardrailsJson });
+    seedWorkspaceWithTypecheck(db, 0); // sensors pass -> step reaches the refute
+    seedAgentSession(db);
+    seedToolGate(db, "step-1", "high");
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+
+    const ask = fakeRefuteAsk("refuted", { issueRefs: ["fix-y"], reason: "Semantically wrong." });
+    const service = makeRefuteService(ask);
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+    await flushDeferred();
+
+    // Did NOT advance/commit; a revise was taken.
+    expect(stepOutputCount(db)).toBe(0);
+    expect(reviseAttempts(db)).toBe(1);
+
+    // Exactly ONE step_complete transition for the step, and it carries BOTH the
+    // evidence (passed) and the refute (refuted) facets, with a coherent failed
+    // status + refute_veto failure code — not the self-contradictory
+    // {succeeded, refute_veto} the pre-fix code emitted.
+    const stepComplete = listTransitionsByGoal(db, "goal-1").filter(
+      (t) => t.boundary === "step_complete" && t.workflowStepRunId === "step-1"
+    );
+    expect(stepComplete).toHaveLength(1);
+    const t = stepComplete[0];
+    expect(t.evidence?.verdict).toBe("passed");
+    expect(t.refute).toMatchObject({ verdict: "refuted", issue_refs: ["fix-y"] });
+    expect(t.telemetry?.outcome).toMatchObject({ status: "failed", failure_code: "refute_veto" });
+  });
+
   it("gate: no-oracle step -> refute called with the independent '<goalId>::refute' session key", async () => {
     const { db, bus, idFactory } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" }); // non-exec: no oracle at all

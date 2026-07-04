@@ -1246,6 +1246,13 @@ export class OrchestratorService {
           if (!vetoed) {
             refute = await this.maybeRefute(db, ctx, block, action.scoring, evidence);
           }
+          // A refuted completion is a first-class FAILURE (spec §5), so coerce the
+          // transition status to "failed" — otherwise the sensor-derived
+          // "succeeded" would contradict the refute_veto failure_code (and mislead
+          // 5.2's counterfactual judge, which reads `status`). Keep this in lockstep
+          // with the non-exec refuted path, which emits {failed, refute_veto} too.
+          const refuteVetoed = !vetoed && refute.ran && refute.outcome === "refuted";
+          const transitionStatus: TransitionStatus = refuteVetoed ? "failed" : evidenceStatus;
           emitStepComplete(
             { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
             {
@@ -1258,8 +1265,8 @@ export class OrchestratorService {
               telemetry: buildTelemetry(
                 this.otlpAccumulator,
                 sessionId,
-                evidenceStatus,
-                vetoed ? "evidence_veto" : refute.ran && refute.outcome === "refuted" ? "refute_veto" : null,
+                transitionStatus,
+                vetoed ? "evidence_veto" : refuteVetoed ? "refute_veto" : null,
                 null,
                 recommendationFeedbackInterventions(db, ctx.run.goalId)
               ),
