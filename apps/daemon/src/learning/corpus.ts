@@ -7,6 +7,15 @@ export const OUTPUT_BUDGET = 2000; // chars per compacted output
 export interface JudgeCase { stepRunId: string; output: string }
 export interface JudgeCorpus { solved: JudgeCase[]; failure: JudgeCase[] }
 
+// Never throw on a malformed facet blob — treat non-JSON as unparseable.
+function safeJsonParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 function compact(body: string): string {
   let text = body;
   try {
@@ -38,11 +47,19 @@ function buildSolved(db: Database.Database, templateId: string, stepTemplateId: 
     if (seen.has(r.step_run_id)) continue;
     seen.add(r.step_run_id);
     if (exclude.has(r.step_run_id)) continue;
-    const refute = r.refute_json ? RefuteFacet.safeParse(JSON.parse(r.refute_json)) : null;
-    const evidence = r.evidence_json ? EvidenceFacet.safeParse(JSON.parse(r.evidence_json)) : null;
-    let solved = false;
-    if (refute && refute.success) solved = refute.data.verdict === "upheld";      // refute primary
-    else if (evidence && evidence.success) solved = evidence.data.verdict === "passed"; // evidence fallback
+    let solved: boolean;
+    if (r.refute_json != null) {
+      // Refute facet present: authoritative. Only "upheld" (parsed correctly) counts as solved;
+      // never fall through to the evidence fallback, even if refute_json is corrupt/legacy shape.
+      const parsed = safeJsonParse(r.refute_json);
+      const refute = parsed === undefined ? null : RefuteFacet.safeParse(parsed);
+      solved = !!refute && refute.success && refute.data.verdict === "upheld";
+    } else {
+      // No refute facet ran: fall back to evidence.
+      const parsed = r.evidence_json ? safeJsonParse(r.evidence_json) : undefined;
+      const evidence = parsed === undefined ? null : EvidenceFacet.safeParse(parsed);
+      solved = !!evidence && evidence.success && evidence.data.verdict === "passed";
+    }
     if (!solved) continue;
     out.push({ stepRunId: r.step_run_id, output: compact(r.body) });
     if (out.length >= K_PER_BUCKET) break;

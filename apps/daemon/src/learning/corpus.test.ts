@@ -24,6 +24,11 @@ function stepComplete(db: Database.Database, srId: string, evidence: unknown, re
   db.prepare("INSERT INTO harness_transitions (id, workflow_step_run_id, boundary, evidence_json, refute_json, created_at) VALUES (?,?,?,?,?,?)")
     .run(`ht-${srId}`, srId, "step_complete", evidence ? JSON.stringify(evidence) : null, refute ? JSON.stringify(refute) : null, "2026-07-01T00:00:00.000Z");
 }
+// Like stepComplete, but writes the raw refute_json string verbatim (for malformed/corrupt-shape fixtures).
+function stepCompleteRawRefute(db: Database.Database, srId: string, evidence: unknown, rawRefuteJson: string) {
+  db.prepare("INSERT INTO harness_transitions (id, workflow_step_run_id, boundary, evidence_json, refute_json, created_at) VALUES (?,?,?,?,?,?)")
+    .run(`ht-${srId}`, srId, "step_complete", evidence ? JSON.stringify(evidence) : null, rawRefuteJson, "2026-07-01T00:00:00.000Z");
+}
 const passedEvidence = { sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: true, gaps: [] } };
 const upheldRefute = { verdict: "upheld", triggered_by: ["no_oracle"], risk_class: "low", reason: null, issue_refs: [] };
 const refutedRefute = { verdict: "refuted", triggered_by: ["no_oracle"], risk_class: "low", reason: "bad", issue_refs: ["x"] };
@@ -66,6 +71,31 @@ describe("buildJudgeCorpus", () => {
     db.prepare("INSERT INTO step_revision_signals (id, step_run_id) VALUES (?,?)").run("sig1", "sr-rev");
     const c = buildJudgeCorpus(db, proposal({ evidence: { sampleTransitionIds: [], revisionSignalIds: ["sig1"], metricSnapshot: { score: 50, verdictPassRate: 0.5, oracleSufficientRate: 0.5, versionDelta: null } } }));
     expect(c.failure.map((f) => f.stepRunId)).toEqual(["sr-rev"]);
+  });
+
+  it("excludes a step run whose refute_json is present but malformed (non-JSON), even when evidence passed", () => {
+    stepRun(db, "r1", "sr-malformed", "t1", "st1");
+    artifact(db, "r1", "sr-malformed", "{\"ok\":1}", "2026-07-02T00:00:00.000Z");
+    stepCompleteRawRefute(db, "sr-malformed", passedEvidence, "{not json");
+    const c = buildJudgeCorpus(db, proposal());
+    // must not throw, and must NOT fall through to the evidence-passed fallback: refute is present, so it's authoritative.
+    expect(c.solved.some((s) => s.stepRunId === "sr-malformed")).toBe(false);
+  });
+
+  it("excludes a step run whose refute_json fails RefuteFacet shape validation, even when evidence passed", () => {
+    stepRun(db, "r1", "sr-badshape", "t1", "st1");
+    artifact(db, "r1", "sr-badshape", "{\"ok\":1}", "2026-07-02T00:00:00.000Z");
+    stepCompleteRawRefute(db, "sr-badshape", passedEvidence, JSON.stringify({ triggered_by: ["x"] })); // missing required "verdict"
+    const c = buildJudgeCorpus(db, proposal());
+    expect(c.solved.some((s) => s.stepRunId === "sr-badshape")).toBe(false);
+  });
+
+  it("includes a step run with NULL refute_json and evidence.verdict='passed' (evidence fallback only applies when refute is absent)", () => {
+    stepRun(db, "r1", "sr-passed-only", "t1", "st1");
+    artifact(db, "r1", "sr-passed-only", "{\"ok\":1}", "2026-07-02T00:00:00.000Z");
+    stepComplete(db, "sr-passed-only", passedEvidence, null);
+    const c = buildJudgeCorpus(db, proposal());
+    expect(c.solved.some((s) => s.stepRunId === "sr-passed-only")).toBe(true);
   });
 
   it("caps each bucket at K and clamps output length", () => {
