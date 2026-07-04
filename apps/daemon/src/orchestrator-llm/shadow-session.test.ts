@@ -2,7 +2,21 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ShadowSessionManager } from "./shadow-session.js";
+import { ShadowSessionManager, tmuxSessionName } from "./shadow-session.js";
+
+describe("tmuxSessionName", () => {
+  it("passes a plain goal key through unchanged", () => {
+    expect(tmuxSessionName("g1")).toBe("orca-shadow-g1");
+  });
+  it("sanitizes the ':' in a '::refute' key so tmux -t targets the right session", () => {
+    // tmux treats ':' as a session:window separator, so the raw name would mis-target.
+    expect(tmuxSessionName("g1::refute")).toBe("orca-shadow-g1__refute");
+    expect(tmuxSessionName("g1::refute")).not.toContain(":");
+  });
+  it("sanitizes '.' too (also illegal in a tmux session name)", () => {
+    expect(tmuxSessionName("a.b")).toBe("orca-shadow-a_b");
+  });
+});
 
 function fakeTmux(paneScript: string[] = ["❯ \n auto mode on"]) {
   const calls: Array<{ args: string[]; input?: string }> = [];

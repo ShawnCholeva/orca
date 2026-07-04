@@ -100,7 +100,7 @@ export class ShadowSessionManager {
 
   has(goalId: string): boolean { return this.sessions.has(goalId); }
 
-  private tmuxName(goalId: string): string { return `orca-shadow-${goalId}`; }
+  private tmuxName(goalId: string): string { return tmuxSessionName(goalId); }
 
   /** Spawns the goal's shadow tmux+CLI session (idempotent per adapter). */
   async spawn(goalId: string, adapterId: ShadowAdapterId = "claude-code"): Promise<string> {
@@ -366,6 +366,16 @@ export class ShadowSessionManager {
 export interface AskInput { adapterId?: ShadowAdapterId; systemPrompt: string; userPrompt: string; timeoutMs: number; }
 
 export function shadowSessionId(goalId: string): string { return `orchsess-${goalId}`; }
+
+// Derive the tmux session name from a shadow session key. tmux session names may
+// not contain ':' or '.' — tmux silently rewrites them on create, but uses them as
+// `session:window.pane` target syntax on capture-pane/send-keys. An isolated key
+// like `${goalId}::refute` would therefore be CREATED as `…__refute` but TARGETED as
+// session `orca-shadow-${goalId}` window `refute`, so its trust prompt is never
+// answered (startup times out). Sanitize once here so create/capture/send/kill agree.
+export function tmuxSessionName(sessionKey: string): string {
+  return `orca-shadow-${sessionKey}`.replace(/[:.]/g, "_");
+}
 
 function textAfterTurnMarker(output: string, marker: string): string | null {
   const idx = output.lastIndexOf(marker);
