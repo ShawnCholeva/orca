@@ -1365,7 +1365,10 @@ export class OrchestratorService {
           const scoringParse = StepResultScoringProposal.safeParse(action.scoring);
           const scoring = scoringParse.success ? scoringParse.data : undefined;
           const proposal = extractProposal(responseText);
-          const confirmedLead = confirmationLead(scoring?.reason, proposal);
+          const refuteForCard = refute.ran
+            ? { verdict: refute.outcome, reason: refute.facet.reason, issueRefs: refute.facet.issue_refs }
+            : null;
+          const confirmedLead = confirmationLead(scoring?.reason, proposal, refuteForCard);
           db.prepare(
             "UPDATE workflow_step_runs SET pending_completion_json = ?, confirmed_lead = ? WHERE id = ?"
           ).run(
@@ -1374,9 +1377,7 @@ export class OrchestratorService {
               scoring: scoring ?? null,
               finishedAt,
               proposal,
-              refute: refute.ran
-                ? { verdict: refute.outcome, reason: refute.facet.reason, issueRefs: refute.facet.issue_refs }
-                : null,
+              refute: refuteForCard,
             }),
             confirmedLead,
             ctx.stepRun.id

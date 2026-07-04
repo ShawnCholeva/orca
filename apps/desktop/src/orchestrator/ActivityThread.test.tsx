@@ -188,6 +188,63 @@ it("renders lead, fields, a collapsed scores dropdown, and Continue + Revise", (
   expect(onContinue).toHaveBeenCalledWith("r1");
 });
 
+describe("refute advisory (5.4 L4)", () => {
+  it("renders the disputed chip, reason, and issue list when the verdict is refuted", () => {
+    render(
+      <LiveActivity
+        activity={{
+          ...confirmActivity,
+          confirmationSummary: {
+            ...confirmActivity.confirmationSummary,
+            refute: { verdict: "refuted", reason: "misses error paths", issueRefs: ["handle timeout"] },
+          },
+        }}
+      />,
+    );
+    const chip = screen.getByTestId("step-confirm-refute");
+    expect(chip).toHaveAttribute("data-verdict", "refuted");
+    expect(screen.getByText(/Independent review disputes this/)).toBeInTheDocument();
+    expect(screen.getByText("misses error paths")).toBeInTheDocument();
+    expect(screen.getByText("handle timeout")).toBeInTheDocument();
+  });
+
+  it("renders the uncertain chip with its own wording", () => {
+    render(
+      <LiveActivity
+        activity={{
+          ...confirmActivity,
+          confirmationSummary: {
+            ...confirmActivity.confirmationSummary,
+            refute: { verdict: "uncertain", reason: "can't tell", issueRefs: [] },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText(/Independent review is uncertain/)).toBeInTheDocument();
+    expect(screen.getByText("can't tell")).toBeInTheDocument();
+  });
+
+  it("renders no advisory when the verdict is upheld", () => {
+    render(
+      <LiveActivity
+        activity={{
+          ...confirmActivity,
+          confirmationSummary: {
+            ...confirmActivity.confirmationSummary,
+            refute: { verdict: "upheld", reason: null, issueRefs: [] },
+          },
+        }}
+      />,
+    );
+    expect(screen.queryByTestId("step-confirm-refute")).not.toBeInTheDocument();
+  });
+
+  it("renders no advisory when refute is absent", () => {
+    render(<LiveActivity activity={confirmActivity} />);
+    expect(screen.queryByTestId("step-confirm-refute")).not.toBeInTheDocument();
+  });
+});
+
 describe("pickLiveActivity", () => {
   it("returns pause-interaction activities and null for active tool_use or plain paused", () => {
     // step_confirmation_pending → shown

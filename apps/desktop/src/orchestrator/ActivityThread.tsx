@@ -56,6 +56,15 @@ export function pickLiveActivity(activities: Activity[]): Activity | null {
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
+// A verdict label for the refute advisory chip (5.4 L4 advisory). "unavailable"
+// (the refute call itself failed) is a defensive case — the engine still
+// escalates to a human pause for it, so the card should not stay silent.
+const REFUTE_VERDICT_LABEL: Record<string, string> = {
+  refuted: "Independent review disputes this",
+  uncertain: "Independent review is uncertain",
+  unavailable: "Independent review unavailable",
+};
+
 // The synthesized frame body (lead + fields) shared by the live confirmation
 // card and the persisted step-result card.
 export function ConfirmationFrame({
@@ -63,9 +72,30 @@ export function ConfirmationFrame({
 }: {
   summary: NonNullable<Activity["confirmationSummary"]>;
 }) {
+  const refute = summary.refute;
+  const showRefute = !!refute && refute.verdict !== "upheld";
   return (
     <>
       <div className="step-confirm-lead">{summary.lead}</div>
+      {showRefute && refute ? (
+        <div
+          className="step-confirm-refute"
+          data-testid="step-confirm-refute"
+          data-verdict={refute.verdict}
+        >
+          <span className="step-confirm-refute-chip">
+            {REFUTE_VERDICT_LABEL[refute.verdict] ?? "Independent review flagged this"}
+          </span>
+          {refute.reason ? <p className="step-confirm-refute-reason">{refute.reason}</p> : null}
+          {refute.issueRefs.length > 0 ? (
+            <ul className="step-confirm-refute-issues">
+              {refute.issueRefs.map((ref, i) => (
+                <li key={i}>{ref}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
       {summary.fields.length > 0 ? (
         <dl className="step-confirm-fields">
           {summary.fields.map((f, i) => (

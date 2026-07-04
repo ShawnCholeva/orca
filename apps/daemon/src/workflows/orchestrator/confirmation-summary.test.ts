@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { WorkflowStepOutputSchema } from "@orca/contracts";
-import { buildConfirmationSummary } from "./confirmation-summary.js";
+import { buildConfirmationSummary, confirmationLead } from "./confirmation-summary.js";
 
 const schema: WorkflowStepOutputSchema = [
   { key: "problem", type: "string", required: true },
@@ -100,6 +100,70 @@ describe("buildConfirmationSummary", () => {
     it("renders the raw value when no routing is supplied", () => {
       const out = buildConfirmationSummary(tierSchema, { recommended_tier: "approach_only" }, null, null);
       expect(out.fields).toEqual([{ label: "Recommended tier", value: "approach_only" }]);
+    });
+  });
+
+  describe("buildConfirmationSummary refute threading", () => {
+    it("threads a non-upheld refute into the lead and the returned payload", () => {
+      const out = buildConfirmationSummary(schema, { problem: "x" }, null, "Proposed", null, {
+        verdict: "refuted",
+        reason: "misses error paths",
+        issueRefs: ["x"],
+      });
+      expect(out.lead).toContain("Independent review disputes");
+      expect(out.refute).toEqual({ verdict: "refuted", reason: "misses error paths", issueRefs: ["x"] });
+    });
+
+    it("carries a null refute through untouched when the verdict is upheld", () => {
+      const out = buildConfirmationSummary(schema, { problem: "x" }, null, "Proposed", null, {
+        verdict: "upheld",
+        reason: null,
+        issueRefs: [],
+      });
+      expect(out.lead).toBe("Proposed");
+      expect(out.refute).toEqual({ verdict: "upheld", reason: null, issueRefs: [] });
+    });
+
+    it("defaults refute to null when omitted", () => {
+      const out = buildConfirmationSummary(schema, { problem: "x" }, null, "Proposed");
+      expect(out.refute ?? null).toBeNull();
+    });
+  });
+
+  describe("confirmationLead refute advisory", () => {
+    it("prepends a refute advisory when the verdict is refuted", () => {
+      const lead = confirmationLead("Looks good", null, {
+        verdict: "refuted",
+        reason: "misses error paths",
+        issueRefs: ["x"],
+      });
+      expect(lead).toContain("Independent review");
+      expect(lead).toContain("disputes");
+      expect(lead).toContain("misses error paths");
+      expect(lead.endsWith("Looks good")).toBe(true);
+    });
+
+    it("prepends an uncertain advisory with different wording", () => {
+      const lead = confirmationLead("Looks good", null, {
+        verdict: "uncertain",
+        reason: "can't tell",
+        issueRefs: [],
+      });
+      expect(lead).toContain("is uncertain about");
+      expect(lead).toContain("can't tell");
+    });
+
+    it("does not prepend an advisory when the verdict is upheld", () => {
+      const lead = confirmationLead("Looks good", null, { verdict: "upheld", reason: null, issueRefs: [] });
+      expect(lead).toBe("Looks good");
+    });
+
+    it("does not prepend an advisory when refute is null", () => {
+      expect(confirmationLead("Looks good", null, null)).toBe("Looks good");
+    });
+
+    it("does not prepend an advisory when refute is omitted", () => {
+      expect(confirmationLead("Looks good", null)).toBe("Looks good");
     });
   });
 });

@@ -233,6 +233,49 @@ describe("enrichConfirmationSummary", () => {
     expect(confirm?.confirmationSummary?.fields).toEqual([{ label: "Problem", value: "Can't rename" }]);
     expect(confirm?.confirmationSummary?.scoring?.successScore).toBe(0.9);
   });
+
+  it("carries a null refute through when the stash has none (5.4)", () => {
+    const activities = listActivitiesByGoal(db, "g1");
+    const confirm = activities.find((a) => a.sourceKind === "step_confirmation_pending");
+    expect(confirm?.confirmationSummary?.refute ?? null).toBeNull();
+  });
+
+  it("threads a non-upheld refute verdict from the stash into the advisory lead + payload (5.4)", () => {
+    db.prepare(
+      `INSERT INTO workflow_step_runs (
+         id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status,
+         satisfied_exit_criteria_json, outstanding_exit_criteria_json,
+         blocked_reason, started_at, finished_at, fingerprint, pending_completion_json
+       ) VALUES ('sr2', 'g1', 'r1', 'frame', 1, 2, 'active', '[]', '[]',
+                 NULL, '2026-06-09', NULL, 'fp2', ?)`
+    ).run(
+      JSON.stringify({
+        block: { problem: "Can't rename" },
+        scoring: null,
+        finishedAt: "2026-06-09T00:00:00.000Z",
+        proposal: "Proposed",
+        refute: { verdict: "refuted", reason: "misses error paths", issueRefs: ["x"] },
+      })
+    );
+    db.prepare(
+      `INSERT INTO activities (
+         id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+         status, current_text, final_summary, source_kind, work_category, confidence,
+         pending_question, created_at, updated_at, completed_at
+       ) VALUES ('a-conf2', 'g1', 'r1', 'sr2', NULL, 0, 'paused_for_input', 'Awaiting confirmation', NULL,
+                 'step_confirmation_pending', NULL, NULL, NULL,
+                 '2026-06-09T00:00:00.000Z', '2026-06-09T00:00:00.000Z', NULL)`
+    ).run();
+
+    const activities = listActivitiesByGoal(db, "g1");
+    const confirm = activities.find((a) => a.id === "a-conf2");
+    expect(confirm?.confirmationSummary?.lead).toContain("Independent review disputes");
+    expect(confirm?.confirmationSummary?.refute).toEqual({
+      verdict: "refuted",
+      reason: "misses error paths",
+      issueRefs: ["x"],
+    });
+  });
 });
 
 describe("step_result confirmed-frame enrichment", () => {

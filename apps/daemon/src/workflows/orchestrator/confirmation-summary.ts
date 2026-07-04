@@ -83,12 +83,21 @@ function flattenField(
 }
 
 /** Returns the lead text for a confirmation card — the same formula used in both
- *  the live card and the confirm-pause snapshot so neither site can drift. */
+ *  the live card and the confirm-pause snapshot so neither site can drift. When an
+ *  independent refute ran and did not uphold the completion, its verdict is
+ *  prepended as an advisory (5.4 L4 — human stays authoritative; see design doc
+ *  §6) so the human reviewer sees the second opinion before the base lead. */
 export function confirmationLead(
   scoringReason: string | undefined,
-  proposal: string | null
+  proposal: string | null,
+  refute?: { verdict: string; reason: string | null; issueRefs: string[] } | null
 ): string {
-  return scoringReason?.trim() || proposal?.trim() || "Step complete.";
+  const lead = scoringReason?.trim() || proposal?.trim() || "Step complete.";
+  if (refute && refute.verdict !== "upheld") {
+    const verb = refute.verdict === "refuted" ? "disputes" : "is uncertain about";
+    return `⚠️ Independent review ${verb} this completion: ${refute.reason}\n${lead}`;
+  }
+  return lead;
 }
 
 /** Builds the structured confirmation-card payload from a step's recorded output
@@ -99,7 +108,8 @@ export function buildConfirmationSummary(
   block: unknown,
   scoring: StepResultScoringProposal | null,
   proposal: string | null,
-  routing: StepSplitterRouting | null = null
+  routing: StepSplitterRouting | null = null,
+  refute: ConfirmationSummaryT["refute"] = null
 ): ConfirmationSummaryT {
   const obj = (block ?? {}) as Record<string, unknown>;
   const fields: CardField[] = [];
@@ -118,6 +128,6 @@ export function buildConfirmationSummary(
     }
     flattenField(field, obj[field.key], "", 1, fields);
   }
-  const lead = confirmationLead(scoring?.reason, proposal);
-  return { lead, fields: fields.slice(0, 32), scoring };
+  const lead = confirmationLead(scoring?.reason, proposal, refute ?? null);
+  return { lead, fields: fields.slice(0, 32), scoring, refute: refute ?? null };
 }

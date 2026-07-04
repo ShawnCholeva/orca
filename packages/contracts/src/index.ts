@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { OperatingMode } from "./harness/index.js";
+import { OperatingMode, RefuteOutcome } from "./harness/index.js";
 import {
   ModelProviderId,
   OperatorKind,
@@ -1284,6 +1284,19 @@ export const ActivityStep = z
   .strict();
 export type ActivityStep = z.infer<typeof ActivityStep>;
 
+// The independent refute's verdict (5.4 L4 advisory) as it rides the confirmation
+// card — present whenever the refute ran, regardless of verdict; the card renders
+// an advisory only when it's not "upheld". Computed entirely by the daemon — the
+// desktop card renders it as-is (thin client).
+export const ConfirmationSummaryRefute = z
+  .object({
+    verdict: RefuteOutcome,
+    reason: z.string().max(1024).nullable(),
+    issueRefs: z.array(z.string().max(128)).max(50),
+  })
+  .strict();
+export type ConfirmationSummaryRefute = z.infer<typeof ConfirmationSummaryRefute>;
+
 export const ConfirmationSummary = z
   .object({
     lead: z.string().max(4000),
@@ -1296,6 +1309,7 @@ export const ConfirmationSummary = z
       )
       .max(32),
     scoring: StepResultScoringProposal.nullable(),
+    refute: ConfirmationSummaryRefute.nullable().optional(),
   })
   .strict();
 export type ConfirmationSummary = z.infer<typeof ConfirmationSummary>;

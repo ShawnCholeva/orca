@@ -1067,6 +1067,28 @@
   border-bottom: 1px solid var(--hairline);
 }
 .step-confirm-lead { font-weight: 600; margin-bottom: 16px; color: var(--text); }
+
+/* Refute advisory (5.4 L4) — an independent second opinion that disputes or is
+   uncertain about the completion. Advisory only: the human stays authoritative. */
+.step-confirm-refute {
+  padding: 10px 12px;
+  margin: -6px 0 16px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  background: var(--panel-2);
+}
+.step-confirm-refute-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--warn);
+}
+.step-confirm-refute-reason { margin: 6px 0 0; color: var(--text-2); }
+.step-confirm-refute-issues { margin: 6px 0 0; padding-left: 16px; color: var(--text-2); }
+
 .step-confirm-fields { display: grid; gap: 18px; margin: 0 0 16px; }
 .step-confirm-field dt { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); margin-bottom: 6px; }
 .step-confirm-field dd { margin: 0; color: var(--text-2); }

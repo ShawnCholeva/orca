@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import {
   Activity,
   ActivityStep,
+  ConfirmationSummaryRefute,
   PendingQuestion,
   ProviderRecoveryCheckpoint,
   StepResultScoringProposal,
@@ -219,7 +220,7 @@ function enrichConfirmationSummary(db: Database.Database, activity: ActivityT): 
     } | undefined;
   if (!row?.stash || !row.steps_json) return activity;
 
-  let stash: { block?: unknown; scoring?: unknown; proposal?: unknown };
+  let stash: { block?: unknown; scoring?: unknown; proposal?: unknown; refute?: unknown };
   try { stash = JSON.parse(row.stash); } catch { return activity; }
 
   const steps = JSON.parse(row.steps_json) as Array<{ id: string; name?: string; outputSchema?: unknown }>;
@@ -228,12 +229,14 @@ function enrichConfirmationSummary(db: Database.Database, activity: ActivityT): 
   if (!schemaParse.success) return activity;
 
   const scoringParse = StepResultScoringProposal.safeParse(stash.scoring);
+  const refuteParse = ConfirmationSummaryRefute.nullable().safeParse(stash.refute ?? null);
   const confirmationSummary = buildConfirmationSummary(
     schemaParse.data,
     stash.block,
     scoringParse.success ? scoringParse.data : null,
     typeof stash.proposal === "string" ? stash.proposal : null,
     routingForStep(row.graph_json, row.step_template_id),
+    refuteParse.success ? refuteParse.data : null,
   );
   return Activity.parse({
     ...activity,
