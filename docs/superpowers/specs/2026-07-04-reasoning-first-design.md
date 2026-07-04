@@ -38,13 +38,13 @@ Apply reasoning-first to exactly the **five judgment/verdict/score schemas** abo
 A new field added as the **first key** of each of the five schemas:
 
 ```ts
-reasoning: z.string().min(1).max(REASONING_MAX)   // REASONING_MAX = 4000 (set in plan)
+reasoning: z.string().min(1).max(REASONING_MAX)   // REASONING_MAX = 2000 (set in plan)
 ```
 
 - **Required** (`min(1)`) — so the CoT is enforced, not optional like today's `rationale`.
 - **Distinct** from the existing `reason`/verdict/score fields, which stay exactly as they are. `reasoning` is the model's pre-commitment working-out; `reason` remains the crisp, downstream-consumed conclusion. Keeping them separate is why no consumer changes and why the ≤240-char `scoring.reason` card field is not overloaded.
 - **First** in the object (self-documenting contract order). The load-bearing change is the prompt (§3); the key reorder keeps schema and prompt consistent.
-- **Bounded** (`max`) so it cannot blow the request/response payload caps (`ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES` etc.).
+- **Bounded** (`max`) so it cannot blow the request/response payload caps (`ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES` etc.). The bound is set **deliberately tight** (a verdict-level CoT is a short paragraph, not an essay): `REASONING_MAX = 2000` chars (~500 tokens) balances quality against the **cost spine** (FUTURE_ARCHITECTURE line 95 — "the LLM is invoked only where judgment is needed"). Reasoning-first spends output tokens on *every* judgment call; confining it to the five judgment schemas (§Scope, not the hot narration path) and bounding it tightly is what keeps that spend proportionate to the reliability it buys. The plan may tune the bound per-schema if one genuinely needs more.
 
 None of the five targets is a discriminated union, so there is no discriminator-ordering constraint — `reasoning` can be the literal first key.
 
@@ -80,6 +80,8 @@ Each proposal's `reasoning` is threaded into the record its verdict already writ
 
 **One additive migration** adds the two decision-table columns (nullable, so pre-existing rows are fine); the other three ride existing serialized-object JSON blobs with no migration. The `reasoning` fields on the persistence records are `.optional()`/nullable so historical records (written before this change) still parse.
 
+**Engine-constructed verdicts carry null `reasoning`.** Some persisted verdicts have no LLM proposal behind them — `RefuteFacet.verdict === "unavailable"` and `CounterfactualJudgment.verdict ∈ {"unavailable","insufficient_evidence"}` are engine-added when the shadow call failed or the corpus was too thin. There is no model reasoning to record in those cases, so `reasoning` is `null` there (this is why the *record* field is optional even though the *proposal* field is required). The persisted `reasoning` is present exactly when a model verdict was actually produced.
+
 ---
 
 ## 5. Validation & degradation
@@ -100,6 +102,7 @@ Per schema (contracts + the owning daemon module):
 - **Persistence:** `reasoning` round-trips into its sink — `WorkflowStepResult`/`RefuteFacet`/`CounterfactualJudgment` serialize+hydrate it; `recordGateDecision`/`recordSplitDecision` write+read the new column; migration adds both columns.
 - **Degradation (one representative, e.g. refute):** a proposal missing `reasoning` → `safeParse` fails → retry → the existing fallback (asserted no new terminus).
 - **Historical-parse:** a persistence record without `reasoning` still parses (`.optional()`/nullable), so old `step_result_json`/`refute_json`/`judge_json`/decision rows are safe.
+- **Engine-constructed verdict:** a `RefuteFacet`/`CounterfactualJudgment` built for an `unavailable`/`insufficient_evidence` verdict (no proposal) validates with `reasoning` null — the record field stays optional even though the proposal field is required.
 
 ---
 
@@ -118,6 +121,11 @@ Per schema (contracts + the owning daemon module):
 - **§2.1 / §3.1 — externalize reasoning, planning-as-reasoning.** Reasoning becomes a first-class structural element that precedes and conditions the verdict, rather than a trailing paragraph.
 - **p.10 — reasoning trajectories.** Persisting `reasoning` makes the trajectory an auditable, replayable artifact.
 - **p.33 — deep telemetry → comparative diagnosis.** The stored reasoning is exactly the kind of decision-trace signal the Evolution Agent / learning loop consumes; it lands on the same records (`RefuteFacet`, `CounterfactualJudgment`, decisions) the Inspectable axis already exposes.
+
+### Honesty caveats (what reasoning-first is NOT)
+
+- **Not a substitute for independent verification (p.37, mode-collapse / AgentCoder Test-Designer).** Self-generated reasoning is the *same* model justifying its *own* verdict — it improves the quality of a single judgment but adds **no independence**. The anti-circularity guarantee still comes from 5.4's isolated adversarial refute and the deterministic sensors, which reasoning-first composes with and never replaces. This spec must not be read as "the judge now reasons, so it no longer needs the independent pass."
+- **A stated rationale, not a verified signal.** A CoT trace need not faithfully reflect the model's actual computation. The persisted `reasoning` is therefore useful for **audit, replay, and diagnosis**, but downstream consumers (the learning loop especially) must treat it as a *claim* to be corroborated against the independent evidence (facet verdicts, sensor results) — the same discipline 5.4 applies to self-reported scoring — never as ground truth. This is why `reasoning` is persisted alongside, not in place of, the independently-derived verdict fields.
 
 ---
 
