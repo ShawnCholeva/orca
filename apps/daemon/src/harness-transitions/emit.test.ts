@@ -59,7 +59,7 @@ describe("emit factory", () => {
     const byKey = Object.fromEntries(HARNESS_BOUNDARIES.map((b) => [b.key, b.facets]));
     expect(byKey).toEqual({
       tool_gate: ["risk"],
-      step_complete: ["evidence", "stateDeps", "telemetry"],
+      step_complete: ["evidence", "stateDeps", "telemetry", "refute"],
       step_launch: ["stateDeps"],
       mark_done: ["telemetry", "stateDeps"],
       delegate_spawn: ["composition"],

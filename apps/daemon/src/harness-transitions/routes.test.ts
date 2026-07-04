@@ -28,7 +28,7 @@ describe("GET /v1/harness/registry", () => {
     const res = await server.inject({ method: "GET", url: "/v1/harness/registry" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.facets.map((f: { key: string }) => f.key).sort()).toEqual(["composition", "evidence", "risk", "stateDeps", "telemetry"]);
+    expect(body.facets.map((f: { key: string }) => f.key).sort()).toEqual(["composition", "evidence", "refute", "risk", "stateDeps", "telemetry"]);
     expect(body.boundaries.map((b: { key: string }) => b.key).sort()).toEqual(["delegate_join", "delegate_spawn", "mark_done", "step_complete", "step_launch", "tool_gate"]);
     const sensorByKind = Object.fromEntries(body.sensors.map((s: { kind: string; status: string }) => [s.kind, s.status]));
     expect(sensorByKind.typecheck).toBe("implemented");
