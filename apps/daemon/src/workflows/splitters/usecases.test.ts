@@ -37,6 +37,7 @@ describe("recordSplitDecision", () => {
       traversalSeq: seq,
       selectedBranch: "ground_and_design",
       reason: "intent clear",
+      reasoning: null,
       selectedEdgeTo: "research",
       inputsConsidered: ["triage"],
       ledgerVersion: 2,
@@ -60,6 +61,7 @@ describe("recordSplitDecision", () => {
       traversalSeq: 1,
       selectedBranch: "approach_only",
       reason: "obvious",
+      reasoning: null,
       selectedEdgeTo: "proposal",
       inputsConsidered: [],
       ledgerVersion: 0,
@@ -68,5 +70,25 @@ describe("recordSplitDecision", () => {
     expect(() =>
       recordSplitDecision(db, () => "2026-06-22T00:00:02.000Z", { ...args, id: "sd2" })
     ).toThrow();
+  });
+
+  it("persists reasoning on the split decision", () => {
+    const seq = nextTraversalSeq(db, "r");
+    const id = recordSplitDecision(db, () => "2026-07-04T00:00:00.000Z", {
+      goalId: "g",
+      workflowRunId: "r",
+      nodeId: "route",
+      traversalSeq: seq,
+      selectedBranch: "ground_and_design",
+      reason: "intent clear",
+      reasoning: "criteria met",
+      selectedEdgeTo: "research",
+      inputsConsidered: [],
+      ledgerVersion: 0,
+    });
+    const row = db.prepare("SELECT reasoning FROM workflow_split_decisions WHERE id = ?").get(id) as {
+      reasoning: string | null;
+    };
+    expect(row.reasoning).toBe("criteria met");
   });
 });

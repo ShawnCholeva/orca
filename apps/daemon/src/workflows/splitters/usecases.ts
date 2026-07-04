@@ -9,6 +9,7 @@ export interface SplitDecisionInput {
   traversalSeq: number;
   selectedBranch: string;
   reason: string;
+  reasoning: string | null;
   selectedEdgeTo: string;
   inputsConsidered: string[];
   ledgerVersion: number;
@@ -22,9 +23,9 @@ export function recordSplitDecision(
   const id = input.id ?? randomUUID();
   db.prepare(
     `INSERT INTO workflow_split_decisions
-       (id, goal_id, workflow_run_id, node_id, traversal_seq, selected_branch, reason,
+       (id, goal_id, workflow_run_id, node_id, traversal_seq, selected_branch, reason, reasoning,
         selected_edge_to, inputs_considered_json, ledger_version, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     input.goalId,
@@ -33,6 +34,7 @@ export function recordSplitDecision(
     input.traversalSeq,
     input.selectedBranch,
     input.reason.slice(0, 1024),
+    input.reasoning,
     input.selectedEdgeTo,
     JSON.stringify(input.inputsConsidered),
     input.ledgerVersion,

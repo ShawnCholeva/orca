@@ -179,6 +179,7 @@ describe("runMigrations", () => {
       "0051_workflow_template_inputs.sql",
       "0052_harness_transitions_refute.sql",
       "0053_learning_proposal_judgment.sql",
+      "0054_decision_reasoning.sql",
     ]);
   });
 
@@ -324,6 +325,7 @@ describe("runMigrations", () => {
       "0051_workflow_template_inputs.sql",
       "0052_harness_transitions_refute.sql",
       "0053_learning_proposal_judgment.sql",
+      "0054_decision_reasoning.sql",
     ]);
 
     const goalCount = (
@@ -622,6 +624,7 @@ describe("session tables migration", () => {
       "0051_workflow_template_inputs.sql",
       "0052_harness_transitions_refute.sql",
       "0053_learning_proposal_judgment.sql",
+      "0054_decision_reasoning.sql",
     ]);
 
     const tables = (
@@ -1153,6 +1156,7 @@ describe("migration 0010 workflows", () => {
       "0051_workflow_template_inputs.sql",
       "0052_harness_transitions_refute.sql",
       "0053_learning_proposal_judgment.sql",
+      "0054_decision_reasoning.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1761,6 +1765,7 @@ describe("migration 0012 orchestration transport", () => {
       "0051_workflow_template_inputs.sql",
       "0052_harness_transitions_refute.sql",
       "0053_learning_proposal_judgment.sql",
+      "0054_decision_reasoning.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1779,6 +1784,15 @@ describe("migration 0012 orchestration transport", () => {
     runMigrations(db, defaultMigrationsDir());
     const cols = db.prepare("PRAGMA table_info(template_instruction_proposals)").all() as { name: string }[];
     expect(cols.some((c) => c.name === "judge_json")).toBe(true);
+  });
+
+  it("0054 adds reasoning to gate + split decisions", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+    const g = db.prepare("PRAGMA table_info(workflow_gate_decisions)").all() as { name: string }[];
+    const s = db.prepare("PRAGMA table_info(workflow_split_decisions)").all() as { name: string }[];
+    expect(g.some((c) => c.name === "reasoning")).toBe(true);
+    expect(s.some((c) => c.name === "reasoning")).toBe(true);
   });
 });
 

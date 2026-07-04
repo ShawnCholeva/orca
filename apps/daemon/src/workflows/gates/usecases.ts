@@ -9,6 +9,7 @@ export interface GateDecisionInput {
   traversalSeq: number;
   outcome: "approved" | "rejected";
   reason: string;
+  reasoning: string | null;
   selectedEdgeTo: string;
   inputsConsidered: string[];
   issueRefs: string[];
@@ -35,9 +36,9 @@ export function recordGateDecision(
   const id = input.id ?? randomUUID();
   db.prepare(
     `INSERT INTO workflow_gate_decisions
-       (id, goal_id, workflow_run_id, node_id, traversal_seq, outcome, reason,
+       (id, goal_id, workflow_run_id, node_id, traversal_seq, outcome, reason, reasoning,
         selected_edge_to, inputs_considered_json, issue_refs_json, ledger_version, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     input.goalId,
@@ -46,6 +47,7 @@ export function recordGateDecision(
     input.traversalSeq,
     input.outcome,
     input.reason.slice(0, 1024),
+    input.reasoning,
     input.selectedEdgeTo,
     JSON.stringify(input.inputsConsidered),
     JSON.stringify(input.issueRefs),

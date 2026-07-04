@@ -43,6 +43,7 @@ describe("recordGateDecision", () => {
       traversalSeq: seq,
       outcome: "rejected",
       reason: "validation failed",
+      reasoning: null,
       selectedEdgeTo: "execution",
       inputsConsidered: ["validation"],
       issueRefs: ["issue-1"],
@@ -63,6 +64,7 @@ describe("recordGateDecision", () => {
       traversalSeq: seq,
       outcome: "approved",
       reason: "all good",
+      reasoning: null,
       selectedEdgeTo: "next-step",
       inputsConsidered: [],
       issueRefs: [],
@@ -82,6 +84,7 @@ describe("recordGateDecision", () => {
       traversalSeq: 1,
       outcome: "approved" as const,
       reason: "ok",
+      reasoning: null,
       selectedEdgeTo: "done",
       inputsConsidered: [],
       issueRefs: [],
@@ -89,5 +92,25 @@ describe("recordGateDecision", () => {
     };
     recordGateDecision(db, () => "2026-06-12T00:00:01.000Z", args);
     expect(() => recordGateDecision(db, () => "2026-06-12T00:00:02.000Z", { ...args, id: "gd2" })).toThrow();
+  });
+
+  it("persists reasoning on the gate decision", () => {
+    const id = recordGateDecision(db, () => "2026-07-04T00:00:00.000Z", {
+      goalId: "g",
+      workflowRunId: "r",
+      nodeId: "n",
+      traversalSeq: 1,
+      outcome: "approved",
+      reason: "ok",
+      reasoning: "criteria met",
+      selectedEdgeTo: "next",
+      inputsConsidered: [],
+      issueRefs: [],
+      ledgerVersion: 1,
+    });
+    const row = db.prepare("SELECT reasoning FROM workflow_gate_decisions WHERE id = ?").get(id) as {
+      reasoning: string | null;
+    };
+    expect(row.reasoning).toBe("criteria met");
   });
 });

@@ -733,7 +733,7 @@ describe("OrchestratorService automated gate evaluation (L5)", () => {
       recordGateDecision(db, () => NOW, {
         goalId: "goal-1", workflowRunId: "run-1", nodeId: "gate",
         traversalSeq: nextTraversalSeq(db, "run-1"), outcome: "rejected",
-        reason: `prior reject ${i}`, selectedEdgeTo: "execution",
+        reason: `prior reject ${i}`, reasoning: null, selectedEdgeTo: "execution",
         inputsConsidered: [], issueRefs: [`old-${i}`], ledgerVersion: 0,
       });
     }
@@ -756,7 +756,7 @@ describe("OrchestratorService automated gate evaluation (L5)", () => {
     recordGateDecision(db, () => NOW, {
       goalId: "goal-1", workflowRunId: "run-1", nodeId: "gate",
       traversalSeq: nextTraversalSeq(db, "run-1"), outcome: "rejected",
-      reason: "first pass", selectedEdgeTo: "execution",
+      reason: "first pass", reasoning: null, selectedEdgeTo: "execution",
       inputsConsidered: [], issueRefs: ["missing-tests"], ledgerVersion: 0,
     });
     const engine = makeEngineWithAsk(
