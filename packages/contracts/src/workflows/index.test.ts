@@ -9,6 +9,10 @@ describe("Refute contracts", () => {
   it("rejects an unknown verdict", () => {
     expect(RefuteCompletionProposal.safeParse({ verdict: "maybe", reason: "x", issueRefs: [], inputsConsidered: [] }).success).toBe(false);
   });
+  it("accepts an upheld verdict with an empty reason (no over-escalation to unavailable)", () => {
+    const p = { verdict: "upheld", reason: "", issueRefs: [], inputsConsidered: [] };
+    expect(RefuteCompletionProposal.parse(p)).toEqual(p);
+  });
   it("accepts a well-formed request with oracle scope", () => {
     const r = { step: { name: "Analyze", instructions: "do X" }, goal: { id: "goal-1", description: "ship" },
       stepOutput: { summary: "done" }, selfReportedScoring: { successScore: 0.9 },

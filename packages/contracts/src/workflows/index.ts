@@ -866,7 +866,11 @@ export type RefuteVerdict = z.infer<typeof RefuteVerdict>;
 export const RefuteCompletionProposal = z
   .object({
     verdict: RefuteVerdict,
-    reason: z.string().min(1).max(1024),
+    // No min length: an `upheld` verdict legitimately carries an empty reason, and
+    // requiring one would fail parse → null → "unavailable" → a needless human
+    // pause. Downstream renders (confirmationLead, RefuteFacet) already treat an
+    // empty/absent reason as "no reason clause".
+    reason: z.string().max(1024),
     issueRefs: z.array(z.string().min(1).max(128)).max(50),
     inputsConsidered: z.array(z.string().min(1).max(128)).max(50),
   })
