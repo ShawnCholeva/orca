@@ -51,4 +51,9 @@ describe("judgeInstructionEdit", () => {
     expect(systemPrompt.indexOf('"reasoning"')).toBeGreaterThan(-1);
     expect(systemPrompt.indexOf('"reasoning"')).toBeLessThan(systemPrompt.indexOf('"verdict"'));
   });
+  it("directs the judge to judge only from the provided data and use no tools", () => {
+    const { systemPrompt } = composeJudgePrompt(REQ);
+    expect(systemPrompt).toMatch(/do NOT use any tools/i);
+    expect(systemPrompt.toLowerCase()).toContain("provided");
+  });
 });

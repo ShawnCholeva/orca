@@ -50,6 +50,11 @@ describe("refuteStepCompletion", () => {
     expect(systemPrompt.indexOf('"reasoning"')).toBeGreaterThan(-1);
     expect(systemPrompt.indexOf('"reasoning"')).toBeLessThan(systemPrompt.indexOf('"verdict"'));
   });
+  it("directs the reviewer to judge only from the provided data and use no tools", () => {
+    const { systemPrompt } = composeRefutePrompt(REQ);
+    expect(systemPrompt).toMatch(/do NOT use any tools/i);
+    expect(systemPrompt.toLowerCase()).toContain("provided");
+  });
   it("returns null when the model omits the now-required reasoning", async () => {
     const bad = JSON.stringify({ verdict: "upheld", reason: "", issueRefs: [], inputsConsidered: [] });
     expect(await refuteStepCompletion(ask(bad), { refuteSessionKey: "k", adapterId: "claude-code", request: REQ, timeoutMs: 1000 })).toBeNull();
