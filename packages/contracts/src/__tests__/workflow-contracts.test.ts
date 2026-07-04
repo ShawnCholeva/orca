@@ -141,7 +141,8 @@ const run = {
   blockedReason: null,
   currentNodeId: null,
   currentNodeKind: null,
-  traversalSeq: 0
+  traversalSeq: 0,
+  parentCompositionId: null
 };
 
 const stepRun = {
