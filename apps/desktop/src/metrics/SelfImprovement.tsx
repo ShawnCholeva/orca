@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { TemplateInstructionProposal, TemplateMetricsDetail } from "@orca/contracts";
-import { analyzeTemplate, applyProposal, dismissProposal, listProposals, restoreTemplateDefault, rollbackProposal, toErrorMessage } from "../api";
+import { analyzeTemplate, applyProposal, dismissProposal, judgeProposal, listProposals, restoreTemplateDefault, rollbackProposal, toErrorMessage } from "../api";
 import { Panel } from "./metrics-charts";
 import { statusForScore } from "./metrics-data";
 import { Sparkle } from "./metrics-icons";
@@ -13,10 +13,19 @@ type Props = {
   onMutated: () => void;
 };
 
+const VERDICT_META: Record<string, { label: string; icon: string }> = {
+  pass: { label: "pass", icon: "✓" },
+  regression_risk: { label: "regression risk", icon: "⚠" },
+  uncertain: { label: "uncertain", icon: "?" },
+  insufficient_evidence: { label: "insufficient evidence", icon: "—" },
+  unavailable: { label: "unavailable", icon: "—" },
+};
+
 export function SelfImprovementRail({ detail, workflowName, templateId, period, onMutated }: Props) {
   const [proposals, setProposals] = useState<TemplateInstructionProposal[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [editing, setEditing] = useState<Record<string, string>>({});
+  const [judging, setJudging] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -42,6 +51,12 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
   const onApply = async (p: TemplateInstructionProposal) => {
     try { setError(null); await applyProposal(p.id, editing[p.id]); await refresh(); onMutated(); }
     catch (err) { setError(toErrorMessage(err, "Failed to apply proposal.")); }
+  };
+  const onJudge = async (p: TemplateInstructionProposal) => {
+    setJudging((s) => ({ ...s, [p.id]: true }));
+    try { setError(null); await judgeProposal(p.id); await refresh(); }
+    catch (err) { setError(toErrorMessage(err, "Failed to evaluate proposal.")); }
+    finally { setJudging((s) => ({ ...s, [p.id]: false })); }
   };
   const onDismiss = async (p: TemplateInstructionProposal) => {
     try { setError(null); await dismissProposal(p.id); await refresh(); }
@@ -103,6 +118,34 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
             <button type="button" onClick={() => onApply(p)}>Apply</button>
             <button type="button" onClick={() => onDismiss(p)}>Dismiss</button>
           </div>
+
+          {p.judgment ? (
+            <div style={{ marginTop: 8, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+              <div style={{ fontWeight: 600 }}>
+                {VERDICT_META[p.judgment.verdict]?.label ?? p.judgment.verdict} {VERDICT_META[p.judgment.verdict]?.icon ?? ""}
+              </div>
+              {p.judgment.reason && <div style={{ color: "var(--text-2)" }}>{p.judgment.reason}</div>}
+              {p.judgment.regressionCases.length > 0 && (
+                <ul style={{ margin: "4px 0", paddingLeft: 16 }}>
+                  {p.judgment.regressionCases.map((c) => <li key={c}>{c}</li>)}
+                </ul>
+              )}
+              <div style={{ color: "var(--text-3)" }}>
+                judged {p.judgment.solvedSampleSize} solved · {p.judgment.failureSampleSize} failure cases
+              </div>
+              {(p.judgment.solvedCaseIds.length > 0 || p.judgment.failureCaseIds.length > 0) && (
+                <div style={{ color: "var(--text-3)" }}>
+                  {p.judgment.solvedCaseIds.length > 0 && <>solved: {p.judgment.solvedCaseIds.join(", ")}</>}
+                  {p.judgment.solvedCaseIds.length > 0 && p.judgment.failureCaseIds.length > 0 ? " · " : ""}
+                  {p.judgment.failureCaseIds.length > 0 && <>failed: {p.judgment.failureCaseIds.join(", ")}</>}
+                </div>
+              )}
+            </div>
+          ) : (
+            <button type="button" onClick={() => onJudge(p)} disabled={!!judging[p.id]} style={{ marginTop: 8 }}>
+              {judging[p.id] ? "Evaluating…" : "Evaluate this edit"}
+            </button>
+          )}
         </div>
       ))}
 

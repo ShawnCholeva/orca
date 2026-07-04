@@ -44,4 +44,26 @@ describe("SelfImprovementRail", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^apply$/i }));
     expect(await screen.findByText(/Stale proposal — template was modified\./i)).toBeTruthy();
   });
+
+  it("shows the judge verdict and keeps Apply enabled (informs, never gates)", async () => {
+    const judged = {
+      ...pending,
+      judgment: {
+        verdict: "regression_risk", regressionRisk: "likely", addressesFailureMode: "partial",
+        regressionCases: ["s1"], reason: "would drop the error-path check", solvedCaseIds: ["s1"], failureCaseIds: ["s2"],
+        solvedSampleSize: 1, failureSampleSize: 1, judgedAt: "2026-07-04T00:00:00.000Z", judgedAgainstVersion: 3,
+      },
+    };
+    vi.spyOn(api, "listProposals").mockResolvedValue([judged as never]);
+    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    expect(await screen.findByText(/regression risk/i)).toBeTruthy();
+    expect(screen.getByText(/would drop the error-path check/i)).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^apply$/i })).toBeEnabled();
+  });
+
+  it("shows the Evaluate action when unjudged", async () => {
+    vi.spyOn(api, "listProposals").mockResolvedValue([pending as never]);
+    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    expect(await screen.findByRole("button", { name: /evaluate this edit/i })).toBeTruthy();
+  });
 });

@@ -976,6 +976,12 @@ export async function dismissProposal(id: string): Promise<TemplateInstructionPr
   return body.proposal;
 }
 
+export async function judgeProposal(id: string): Promise<{ proposal: TemplateInstructionProposal }> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/learning/proposals/${encodeURIComponent(id)}/judge`, { method: "POST", headers: authHeaders(token) });
+  return await parseResponse(res, z.object({ proposal: TemplateInstructionProposal }));
+}
+
 export async function rollbackProposal(id: string): Promise<TemplateInstructionProposal> {
   const { baseUrl, token } = await loadConfig();
   const res = await fetch(`${baseUrl}/v1/learning/proposals/${encodeURIComponent(id)}/rollback`, { method: "POST", headers: authHeaders(token) });
