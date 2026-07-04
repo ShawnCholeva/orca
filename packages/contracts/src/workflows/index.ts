@@ -15,7 +15,7 @@ function utf8ByteLength(value: string): number {
   return UTF8_ENCODER.encode(value).length;
 }
 
-function hasMaxSerializedBytes(value: unknown, maxBytes: number): boolean {
+export function hasMaxSerializedBytes(value: unknown, maxBytes: number): boolean {
   try {
     const serialized = JSON.stringify(value);
     return typeof serialized === "string" && utf8ByteLength(serialized) <= maxBytes;

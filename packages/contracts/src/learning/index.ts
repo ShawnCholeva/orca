@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES, hasMaxSerializedBytes } from "../workflows/index.js";
 
 export const DimensionKey = z.enum([
   "trajectoryEfficiency", "verificationStrength", "recovery",
@@ -38,6 +39,55 @@ const EvidenceSnapshot = z.object({
   }).strict(),
 }).strict();
 
+export const JudgeVerdict = z.enum(["pass", "regression_risk", "uncertain"]);
+export type JudgeVerdict = z.infer<typeof JudgeVerdict>;
+
+export const JudgeInstructionEditProposal = z.object({
+  verdict: JudgeVerdict,
+  regressionRisk: z.enum(["none", "possible", "likely"]),
+  addressesFailureMode: z.enum(["yes", "partial", "no", "unclear"]),
+  regressionCases: z.array(z.string().max(256)).max(50),
+  reason: z.string().min(1).max(1024),
+  inputsConsidered: z.array(z.string().max(256)).max(50),
+}).strict();
+export type JudgeInstructionEditProposal = z.infer<typeof JudgeInstructionEditProposal>;
+
+const JudgeCase = z.object({ stepRunId: z.string(), output: z.string() }).strict();
+
+export const JudgeInstructionEditRequest = z.object({
+  step: z.object({
+    name: z.string().max(200),
+    currentInstructions: z.string().max(8192),
+    proposedInstructions: z.string().max(8192),
+  }).strict(),
+  targetedFailureMode: TargetedFailureMode,
+  solvedCases: z.array(JudgeCase).max(5),
+  failureCases: z.array(JudgeCase).max(5),
+}).strict().superRefine((value, ctx) => {
+  if (!hasMaxSerializedBytes(value, ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "JudgeInstructionEditRequest too large" });
+  }
+});
+export type JudgeInstructionEditRequest = z.infer<typeof JudgeInstructionEditRequest>;
+
+export const JudgeOutcome = z.enum(["pass", "regression_risk", "uncertain", "unavailable", "insufficient_evidence"]);
+export type JudgeOutcome = z.infer<typeof JudgeOutcome>;
+
+export const CounterfactualJudgment = z.object({
+  verdict: JudgeOutcome,
+  regressionRisk: z.enum(["none", "possible", "likely"]).nullable(),
+  addressesFailureMode: z.enum(["yes", "partial", "no", "unclear"]).nullable(),
+  regressionCases: z.array(z.string().max(256)),
+  reason: z.string().max(1024).nullable(),
+  solvedCaseIds: z.array(z.string()),
+  failureCaseIds: z.array(z.string()),
+  solvedSampleSize: z.number().int(),
+  failureSampleSize: z.number().int(),
+  judgedAt: z.string(),
+  judgedAgainstVersion: z.number().int(),
+}).strict();
+export type CounterfactualJudgment = z.infer<typeof CounterfactualJudgment>;
+
 export const TemplateInstructionProposal = z.object({
   id: z.string(),
   templateId: z.string(),
@@ -62,5 +112,6 @@ export const TemplateInstructionProposal = z.object({
   // server-enriched on GET (not stored) — F4:
   regressionDetected: z.boolean().optional(),
   watchedDeltas: z.record(z.string(), z.number().nullable()).optional(),
+  judgment: CounterfactualJudgment.nullable().optional(),
 }).strict();
 export type TemplateInstructionProposal = z.infer<typeof TemplateInstructionProposal>;
