@@ -89,6 +89,29 @@ function fakeSplitBroker(selectedBranch: string): Pick<OrchestrationTransportBro
 }
 
 /**
+ * Wraps fakeSplitBroker to also record every request it is asked to propose,
+ * so a test can inspect the exact payload the model-facing broker path would
+ * see (there is no local composeSplitPrompt — see dispatch-engine.ts
+ * buildSplitEvaluationRequest's SPLIT_REASONING_FIRST_DIRECTIVE).
+ */
+function capturingSplitBroker(selectedBranch: string): {
+  broker: Pick<OrchestrationTransportBroker, "propose">;
+  requests: unknown[];
+} {
+  const inner = fakeSplitBroker(selectedBranch);
+  const requests: unknown[] = [];
+  return {
+    requests,
+    broker: {
+      async propose(request: unknown, options?: BrokerCompatibilityOptions) {
+        requests.push(request);
+        return inner.propose(request as never, options);
+      },
+    },
+  };
+}
+
+/**
  * Broker whose automated transports always fail (mirrors production, where no
  * LLM transport runner is wired into the broker). Any `evaluate_split` that
  * reaches this broker blocks the run — so a passing deterministic-routing test
@@ -480,5 +503,25 @@ describe("OrchestratorService splitter routing", () => {
       .all() as Array<{ id: string }>;
     expect(aRuns).toHaveLength(1);
     expect(listSplitDecisionsForRun(db, "run-1")).toHaveLength(1);
+  });
+
+  it("evaluate_split request carries a reasoning-first directive naming reasoning before selectedBranch", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "supervised", NOW);
+    seedRunAtSource(db);
+    const { broker, requests } = capturingSplitBroker("go_a");
+    const engine = makeEngine(broker);
+
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    expect(requests).toHaveLength(1);
+    const req = requests[0] as {
+      kind: string;
+      payload: { splitter: { instructions: string } };
+    };
+    expect(req.kind).toBe("evaluate_split");
+    const instructions = req.payload.splitter.instructions;
+    expect(instructions.indexOf("reasoning")).toBeGreaterThan(-1);
+    expect(instructions.indexOf("reasoning")).toBeLessThan(instructions.indexOf("selectedBranch"));
   });
 });

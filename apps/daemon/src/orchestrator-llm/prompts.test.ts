@@ -149,6 +149,16 @@ describe("composeOrchestratorPrompt", () => {
     expect(out.systemPrompt).toMatch(/revise_step[^]*"feedback"/);
   });
 
+  it("scoring literal lists reasoning before successScore", () => {
+    const { systemPrompt } = composeOrchestratorPrompt({
+      triggerKind: "agent_response",
+      context: {} as never,
+      triggerPayload: {} as never,
+    });
+    expect(systemPrompt.indexOf('"reasoning"')).toBeGreaterThan(-1);
+    expect(systemPrompt.indexOf('"reasoning"')).toBeLessThan(systemPrompt.indexOf('"successScore"'));
+  });
+
   it("instructs the mediator to honor completionPolicy", () => {
     const { systemPrompt } = composeOrchestratorPrompt({
       triggerKind: "agent_response",

@@ -26,9 +26,10 @@ export function composeRefutePrompt(
     "tell — do NOT guess 'refuted'). On 'refuted', issueRefs is a short enumerated list of",
     "the specific, addressable failures ('fix only these'); on 'upheld'/'uncertain' it is [].",
     "List in inputsConsidered exactly which evidence you used.",
+    "Work through the evidence in `reasoning` FIRST, THEN commit to the verdict — do not restate the verdict as the reasoning.",
     "Emit exactly one RefuteCompletionProposal JSON object in one fenced block, nothing after:",
     "```orca:action",
-    '{ "verdict": "...", "reason": "...", "issueRefs": [...], "inputsConsidered": [...] }',
+    '{ "reasoning": "...", "verdict": "...", "reason": "...", "issueRefs": [...], "inputsConsidered": [...] }',
     "```",
   ].join("\n");
   return { systemPrompt, userPrompt: JSON.stringify(request) };

@@ -19,9 +19,10 @@ export function composeJudgePrompt(
     "Return 'pass' ONLY if you find no concrete regression AND the edit addresses the failure mode;",
     "'regression_risk' if a previously-solved case would concretely break; 'uncertain' if plausible but you",
     "genuinely cannot tell — do NOT guess. List in inputsConsidered exactly which cases you used.",
+    "Fill `reasoning` FIRST (work through solved + failure cases), THEN commit the verdict conditioned on it.",
     "Emit exactly one JudgeInstructionEditProposal JSON object in one fenced block, nothing after:",
     "```orca:action",
-    '{ "verdict": "...", "regressionRisk": "...", "addressesFailureMode": "...", "regressionCases": [...], "reason": "...", "inputsConsidered": [...] }',
+    '{ "reasoning": "...", "verdict": "...", "regressionRisk": "...", "addressesFailureMode": "...", "regressionCases": [...], "reason": "...", "inputsConsidered": [...] }',
     "```",
   ].join("\n");
   return { systemPrompt, userPrompt: JSON.stringify(request) };

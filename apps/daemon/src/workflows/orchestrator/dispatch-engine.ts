@@ -7,6 +7,7 @@ import {
   SplitEvaluationRequest,
   StepSkillProposal,
   ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES,
+  WORKFLOW_GATE_MAX_INSTRUCTIONS_CHARS,
   validateStepOutput,
   type DomainEvent,
   type OperatorDescriptor,
@@ -1700,6 +1701,17 @@ export class DispatchEngine {
   }
 
   /**
+   * Reasoning-first directive for the split evaluator. There is no local
+   * composeXPrompt for `evaluate_split` (its model-facing prompt is composed by
+   * the orchestration-transport broker, not yet wired to an automated transport
+   * in production — see service.splitter-routing.test.ts `unwiredBroker`), so
+   * this directive is carried on the splitter instructions surfaced in the
+   * request payload rather than a hand-written prompt literal.
+   */
+  private static readonly SPLIT_REASONING_FIRST_DIRECTIVE =
+    "Fill `reasoning` first — work through the branches and evidence — then select `selectedBranch`.";
+
+  /**
    * Builds the broker request payload for a splitter evaluation: the splitter's
    * declared branches/instructions, the goal, the source step output, prior split
    * decisions, and the committed ledger (capped to the contract's serialized-size
@@ -1730,11 +1742,18 @@ export class DispatchEngine {
         status: r.status.slice(0, 64),
         note: r.note.slice(0, 500),
       }));
+    const baseInstructions = (splitterNode.instructions ?? "").slice(
+      0,
+      WORKFLOW_GATE_MAX_INSTRUCTIONS_CHARS - DispatchEngine.SPLIT_REASONING_FIRST_DIRECTIVE.length - 1
+    );
+    const instructions = baseInstructions
+      ? `${baseInstructions}\n${DispatchEngine.SPLIT_REASONING_FIRST_DIRECTIVE}`
+      : DispatchEngine.SPLIT_REASONING_FIRST_DIRECTIVE;
     return SplitEvaluationRequest.parse({
       splitter: {
         nodeId: splitterNode.id,
         name: splitterNode.name,
-        instructions: splitterNode.instructions ?? "",
+        instructions,
         branches: splitterNode.branches ?? [],
       },
       goal: { id: goal.id, description: goal.description },

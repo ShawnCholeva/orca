@@ -45,4 +45,9 @@ describe("refuteStepCompletion", () => {
     expect(systemPrompt).toContain("refute");
     expect(userPrompt).toContain("integration");
   });
+  it("emits reasoning before the verdict in the prompt literal", () => {
+    const { systemPrompt } = composeRefutePrompt(REQ);
+    expect(systemPrompt.indexOf('"reasoning"')).toBeGreaterThan(-1);
+    expect(systemPrompt.indexOf('"reasoning"')).toBeLessThan(systemPrompt.indexOf('"verdict"'));
+  });
 });

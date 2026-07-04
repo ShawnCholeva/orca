@@ -97,6 +97,12 @@ describe("evaluateGate", () => {
     expect(systemPrompt).toContain("do NOT override");
     expect(userPrompt).toContain("Review Gate");
   });
+
+  it("emits reasoning before the outcome in the prompt literal", () => {
+    const { systemPrompt } = composeGateEvaluationPrompt(REQUEST);
+    expect(systemPrompt.indexOf('"reasoning"')).toBeGreaterThan(-1);
+    expect(systemPrompt.indexOf('"reasoning"')).toBeLessThan(systemPrompt.indexOf('"outcome"'));
+  });
 });
 
 describe("issueRefsEqual", () => {

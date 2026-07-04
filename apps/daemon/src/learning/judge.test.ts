@@ -46,4 +46,9 @@ describe("judgeInstructionEdit", () => {
     expect(systemPrompt).toContain("regress");
     expect(userPrompt).toContain("proposedInstructions");
   });
+  it("emits reasoning before the verdict", () => {
+    const { systemPrompt } = composeJudgePrompt(REQ);
+    expect(systemPrompt.indexOf('"reasoning"')).toBeGreaterThan(-1);
+    expect(systemPrompt.indexOf('"reasoning"')).toBeLessThan(systemPrompt.indexOf('"verdict"'));
+  });
 });

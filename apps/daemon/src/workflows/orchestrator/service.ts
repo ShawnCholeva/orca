@@ -127,7 +127,8 @@ function composeRecoveryScoringPrompt(
   return {
     systemPrompt: [
       "Score a recovered Orca workflow step result.",
-      "The JSON object has successScore, quality, reason, and handoffReady.",
+      "The JSON object has reasoning FIRST, then successScore, quality, reason, and handoffReady.",
+      "Fill reasoning first — work through the evidence before choosing the numbers.",
       "All numeric values must be between 0 and 1.",
       "quality must contain outputCompleteness, outputCorrectness, instructionAdherence, downstreamReadiness, and riskLevel.",
       "For riskLevel, 0 means no risk and 1 means severe risk.",
