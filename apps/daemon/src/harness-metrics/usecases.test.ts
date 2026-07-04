@@ -203,3 +203,44 @@ it("computeHarnessMetricsFromTransitions computes verification_strength from ste
   const metrics = computeHarnessMetricsFromTransitions(ts);
   expect(metrics.verification_strength.value).toBe(1);
 });
+
+describe("verification_strength credits the 5.4 RefuteFacet for no-oracle steps", () => {
+  const complete = (over: Partial<HarnessTransition>): HarnessTransition => ({
+    id: `t-${Math.random()}`, goalId: "g", workflowRunId: "r", workflowStepRunId: "s",
+    boundary: "step_complete", risk: null, evidence: null, stateDeps: null, telemetry: null,
+    refute: null, createdAt: "2026-05-01T00:00:00.000Z", ...over,
+  }) as HarnessTransition;
+  const refute = (verdict: "upheld" | "refuted" | "uncertain" | "unavailable") => ({
+    verdict, triggered_by: ["no_oracle" as const], risk_class: "low" as const, reason: null, issue_refs: [],
+  });
+  const passedEvidence = {
+    sensorsRun: [], verdict: "passed" as const, untestedRegions: [], residualRisk: [],
+    oracleAdequacy: { sufficient: true, gaps: [] },
+  };
+
+  it("credits refute 'upheld' as a verified pass when there is no evidence facet", () => {
+    const m = computeHarnessMetricsFromTransitions([complete({ evidence: null, refute: refute("upheld") })]);
+    expect(m.verification_strength.value).toBe(1);
+  });
+  it("counts refute 'refuted' as a verified fail", () => {
+    const m = computeHarnessMetricsFromTransitions([complete({ evidence: null, refute: refute("refuted") })]);
+    expect(m.verification_strength.value).toBe(0);
+  });
+  it("excludes an UNVERIFIED completion (no evidence + refute unavailable/uncertain/absent) → null, not 0", () => {
+    expect(computeHarnessMetricsFromTransitions([complete({ evidence: null, refute: refute("unavailable") })]).verification_strength.value).toBeNull();
+    expect(computeHarnessMetricsFromTransitions([complete({ evidence: null, refute: refute("uncertain") })]).verification_strength.value).toBeNull();
+    expect(computeHarnessMetricsFromTransitions([complete({ evidence: null, refute: null })]).verification_strength.value).toBeNull();
+  });
+  it("mixes evidence-passed and refute-upheld (no evidence) → both count as pass → 1", () => {
+    const m = computeHarnessMetricsFromTransitions([
+      complete({ evidence: passedEvidence, refute: null }),
+      complete({ evidence: null, refute: refute("upheld") }),
+    ]);
+    expect(m.verification_strength.value).toBe(1);
+  });
+  it("evidence is primary: evidence-failed still fails even if a refute upheld is present", () => {
+    const failedEvidence = { ...passedEvidence, verdict: "failed" as const, oracleAdequacy: { sufficient: false, gaps: [] } };
+    const m = computeHarnessMetricsFromTransitions([complete({ evidence: failedEvidence, refute: refute("upheld") })]);
+    expect(m.verification_strength.value).toBe(0);
+  });
+});

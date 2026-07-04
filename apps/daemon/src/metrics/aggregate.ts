@@ -209,17 +209,29 @@ export function computeStepMetrics(input: {
   for (const [stepTemplateId, ts] of byStep) {
     const meta = input.stepNames.get(stepTemplateId) ?? { name: stepTemplateId, ordinal: 999 };
     const stepRuns = runsByStep.get(stepTemplateId) ?? [];
-    const completes = ts.filter((t) => t.transition.boundary === "step_complete" && t.transition.evidence);
+    const stepCompletes = ts.filter((t) => t.transition.boundary === "step_complete");
+    const evidenceCompletes = stepCompletes.filter((t) => t.transition.evidence);
     const verification = dimsFromTransitions(ts).verification_strength.value ?? 0;
 
-    // CHANNEL 1 — quality / scope.
-    const verdictPassRate = completes.length === 0 ? 0 :
-      completes.filter((t) => t.transition.evidence!.verdict === "passed").length / completes.length;
-    const allSensors = completes.flatMap((t) => t.transition.evidence!.sensorsRun);
+    // CHANNEL 1 — quality / scope. verdictPassRate credits the independent refute
+    // (RefuteFacet, 5.4) for no-oracle completions and scores over VERIFIED completes
+    // (evidence OR conclusive refute); unverified completions are excluded — mirrors
+    // verification_strength. sensor/oracle rates stay evidence-only.
+    const vPass = (t: (typeof stepCompletes)[number]) =>
+      t.transition.evidence?.verdict === "passed" ||
+      (t.transition.evidence == null && t.transition.refute?.verdict === "upheld");
+    const vFail = (t: (typeof stepCompletes)[number]) =>
+      t.transition.evidence?.verdict === "failed" ||
+      t.transition.evidence?.verdict === "partial" ||
+      (t.transition.evidence == null && t.transition.refute?.verdict === "refuted");
+    const verifiedCompletes = stepCompletes.filter((t) => vPass(t) || vFail(t));
+    const verdictPassRate = verifiedCompletes.length === 0 ? 0 :
+      verifiedCompletes.filter(vPass).length / verifiedCompletes.length;
+    const allSensors = evidenceCompletes.flatMap((t) => t.transition.evidence!.sensorsRun);
     const sensorPassRate = allSensors.length === 0 ? 1 :
       allSensors.filter((s) => s.result === "passed").length / allSensors.length;
-    const oracleSufficientRate = completes.length === 0 ? 0 :
-      completes.filter((t) => t.transition.evidence!.oracleAdequacy.sufficient).length / completes.length;
+    const oracleSufficientRate = evidenceCompletes.length === 0 ? 0 :
+      evidenceCompletes.filter((t) => t.transition.evidence!.oracleAdequacy.sufficient).length / evidenceCompletes.length;
 
     // CHANNEL 2 — cost / trajectory.
     const latencies = ts.map((t) => t.transition.telemetry?.latency_ms).filter((x): x is number => typeof x === "number");
@@ -262,7 +274,7 @@ export function computeStepMetrics(input: {
     const passedFirstTry = finals.filter((r) => r.attempt === 1 && r.status === "passed").length;
     const recovered = finals.filter((r) => r.attempt > 1 && r.status === "passed").length;
     const failed = finals.filter((r) => FAILED_STATUSES.has(r.status)).length;
-    const sampleSize = Math.max(finals.length, completes.length);
+    const sampleSize = Math.max(finals.length, stepCompletes.length);
 
     // Trend (bucketed verification strength) + version boundaries.
     const trend: number[] = [];
@@ -272,7 +284,7 @@ export function computeStepMetrics(input: {
       for (let i = 0; i < TREND_BUCKETS; i++) {
         const lo = sinceMs + (spanMs * i) / TREND_BUCKETS;
         const hi = sinceMs + (spanMs * (i + 1)) / TREND_BUCKETS;
-        const bucket = completes.filter((t) => {
+        const bucket = stepCompletes.filter((t) => {
           const at = new Date(t.transition.createdAt).getTime();
           return at >= lo && at < hi;
         });
@@ -300,9 +312,9 @@ export function computeStepMetrics(input: {
       runs: finals.length, passedFirstTry, recovered, failed,
       quality: {
         verdictPassRate, sensorPassRate, oracleSufficientRate,
-        untestedRegions: uniqueCapped(completes.flatMap((t) => t.transition.evidence!.untestedRegions)),
-        residualRisk: uniqueCapped(completes.flatMap((t) => t.transition.evidence!.residualRisk)),
-        oracleGaps: uniqueCapped(completes.flatMap((t) => t.transition.evidence!.oracleAdequacy.gaps)),
+        untestedRegions: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.untestedRegions)),
+        residualRisk: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.residualRisk)),
+        oracleGaps: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.oracleAdequacy.gaps)),
         limitingDimension: null,
       },
       cost: { p50LatencyMs: p50(latencies), meanTokens: mean(tokens), meanUsd: mean(usds), meanRetries },

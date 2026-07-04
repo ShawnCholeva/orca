@@ -29,17 +29,30 @@ export function computeHarnessMetricsFromTransitions(ts: HarnessTransition[]): H
   const trajectory_efficiency: Metric =
     n === 0 ? { value: null, reason: "no transitions" } : { value: tokens / n };
 
-  // Verification strength (EvidenceFacet): fraction of step_complete transitions
-  // carrying a passing evidence verdict.
+  // Verification strength: fraction of VERIFIED step_complete transitions that passed.
+  // The execution oracle (EvidenceFacet) is primary; for a no-oracle step (no
+  // EvidenceFacet) the independent refute (RefuteFacet, 5.4) is the oracle — p.62
+  // oracle-adequacy. A completion with neither a conclusive evidence verdict nor a
+  // conclusive refute is genuinely UNVERIFIED and is excluded from the denominator
+  // (insufficient signal → null, not a failure) rather than dragging the score to 0.
   const stepCompletes = ts.filter((t) => t.boundary === "step_complete");
+  const verifiedPass = (t: HarnessTransition): boolean =>
+    t.evidence?.verdict === "passed" || (t.evidence == null && t.refute?.verdict === "upheld");
+  const verifiedFail = (t: HarnessTransition): boolean =>
+    t.evidence?.verdict === "failed" ||
+    t.evidence?.verdict === "partial" ||
+    (t.evidence == null && t.refute?.verdict === "refuted");
+  const verified = stepCompletes.filter((t) => verifiedPass(t) || verifiedFail(t));
   const verification_strength: Metric =
-    stepCompletes.length === 0
-      ? { value: null, reason: "no step_complete transitions" }
-      : {
-          value:
-            stepCompletes.filter((t) => t.evidence?.verdict === "passed").length /
-            stepCompletes.length,
-        };
+    verified.length === 0
+      ? {
+          value: null,
+          reason:
+            stepCompletes.length === 0
+              ? "no step_complete transitions"
+              : "no verified step_complete transitions",
+        }
+      : { value: verified.filter(verifiedPass).length / verified.length };
 
   // Recovery (TelemetryFacet): whether failed/escalated outcomes were eventually
   // followed by a succeeded transition.
