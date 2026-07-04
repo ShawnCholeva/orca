@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { TemplateInstructionProposal, type ProposalStatus } from "@orca/contracts";
+import { TemplateInstructionProposal, type ProposalStatus, type CounterfactualJudgment } from "@orca/contracts";
 
 interface Row {
   id: string; template_id: string; template_version_at_proposal: number; step_template_id: string;
@@ -7,6 +7,7 @@ interface Row {
   predicted_improvement: string; invariants_preserved_json: string; evidence_json: string;
   rationale: string; human_edited: number; status: string; created_at: string;
   decided_at: string | null; decided_by: string | null; applied_as_version: number | null;
+  judge_json: string | null;
 }
 
 function rowToProposal(r: Row): TemplateInstructionProposal {
@@ -22,6 +23,7 @@ function rowToProposal(r: Row): TemplateInstructionProposal {
     humanEdited: r.human_edited === 1, status: r.status,
     createdAt: r.created_at, decidedAt: r.decided_at, decidedBy: r.decided_by,
     appliedAsVersion: r.applied_as_version,
+    judgment: r.judge_json ? (JSON.parse(r.judge_json) as CounterfactualJudgment) : null,
   });
 }
 
@@ -109,4 +111,9 @@ export function captureBaseline(db: Database.Database, templateId: string, steps
 
 export function markBaselineRestored(db: Database.Database, templateId: string, now: string): void {
   db.prepare(`UPDATE learning_template_baselines SET restored_at = ? WHERE template_id = ?`).run(now, templateId);
+}
+
+export function setProposalJudgment(db: Database.Database, proposalId: string, judgment: CounterfactualJudgment): void {
+  db.prepare(`UPDATE template_instruction_proposals SET judge_json = ? WHERE id = ?`)
+    .run(JSON.stringify(judgment), proposalId);
 }

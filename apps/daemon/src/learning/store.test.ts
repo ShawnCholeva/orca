@@ -3,13 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
-import type { TemplateInstructionProposal } from "@orca/contracts";
+import type { TemplateInstructionProposal, CounterfactualJudgment } from "@orca/contracts";
 import type { Config } from "../config.js";
 import { closeDatabase, openDatabase } from "../db.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import {
   insertProposal, getProposal, listProposalsByTemplate, pendingProposalForStep,
   updateProposalDecision, supersedeOtherPending, captureBaseline, getBaseline, markBaselineRestored,
+  setProposalJudgment,
 } from "./store.js";
 
 const tempDirs: string[] = [];
@@ -66,5 +67,29 @@ describe("learning store", () => {
     expect(getBaseline(db, "tpl")?.baselineStepsJson).toBe('[{"id":"s1"}]');
     markBaselineRestored(db, "tpl", "2026-06-30T03:00:00.000Z");
     expect(getBaseline(db, "tpl")?.restoredAt).toBe("2026-06-30T03:00:00.000Z");
+  });
+
+  it("hydrates null judgment before it is set", () => {
+    insertProposal(db, proposal());
+    expect(getProposal(db, "p1")?.judgment ?? null).toBeNull();
+  });
+
+  it("persists and hydrates a judgment", () => {
+    insertProposal(db, proposal());
+    const j: CounterfactualJudgment = {
+      verdict: "pass",
+      regressionRisk: "none",
+      addressesFailureMode: "yes",
+      regressionCases: [],
+      reason: "ok",
+      solvedCaseIds: ["s1"],
+      failureCaseIds: ["s2"],
+      solvedSampleSize: 1,
+      failureSampleSize: 1,
+      judgedAt: "2026-07-04T00:00:00.000Z",
+      judgedAgainstVersion: 2,
+    };
+    setProposalJudgment(db, "p1", j);
+    expect(getProposal(db, "p1")?.judgment).toEqual(j);
   });
 });
