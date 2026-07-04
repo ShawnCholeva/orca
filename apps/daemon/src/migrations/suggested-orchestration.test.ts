@@ -180,7 +180,8 @@ describe("suggested orchestration migration schema", () => {
       "0049_learning_proposals.sql",
       "0050_workflow_compositions.sql",
       "0051_workflow_template_inputs.sql",
-      "0052_harness_transitions_refute.sql"
+      "0052_harness_transitions_refute.sql",
+      "0053_learning_proposal_judgment.sql"
     ]);
 
     const postCounts = {

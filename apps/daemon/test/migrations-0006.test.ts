@@ -190,6 +190,7 @@ describe('context migration 0006_context.sql', () => {
       '0050_workflow_compositions.sql',
       '0051_workflow_template_inputs.sql',
       '0052_harness_transitions_refute.sql',
+      '0053_learning_proposal_judgment.sql',
     ]);
 
     const tables = (
@@ -306,6 +307,7 @@ describe('context migration 0006_context.sql', () => {
       '0050_workflow_compositions.sql',
       '0051_workflow_template_inputs.sql',
       '0052_harness_transitions_refute.sql',
+      '0053_learning_proposal_judgment.sql',
     ]);
 
     const counts = {
