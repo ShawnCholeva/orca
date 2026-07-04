@@ -1811,15 +1811,29 @@ export class DispatchEngine {
         return;
       }
 
-      const request = OrchestrationRequest.parse({
-        kind: "evaluate_split",
-        goalId: goal.id,
-        workflowRunId: run.id,
-        stepRunId: stepRun.id,
-        providerId: goal.orchestrator_provider,
-        modelId: goal.orchestrator_model,
-        payload: this.buildSplitEvaluationRequest(db, { run, stepRun, goal, splitterNode }),
-      });
+      // An oversized source output/ledger can exceed the request payload cap. Rather
+      // than throw out of the dispatch flow, degrade to a human branch choice (the
+      // same terminus as an undecidable split below).
+      let request: ReturnType<typeof OrchestrationRequest.parse>;
+      try {
+        request = OrchestrationRequest.parse({
+          kind: "evaluate_split",
+          goalId: goal.id,
+          workflowRunId: run.id,
+          stepRunId: stepRun.id,
+          providerId: goal.orchestrator_provider,
+          modelId: goal.orchestrator_model,
+          payload: this.buildSplitEvaluationRequest(db, { run, stepRun, goal, splitterNode }),
+        });
+      } catch {
+        this.parkForHumanSplitChoice(
+          db,
+          now,
+          { run, stepRun, stepTpl, goal, graph, splitterNode, branches },
+          options
+        );
+        return;
+      }
       const validate = (raw: unknown) => {
         const parsed = SplitEvaluationProposal.safeParse(raw);
         if (!parsed.success) {
@@ -2044,10 +2058,20 @@ export class DispatchEngine {
       return;
     }
 
+    // An oversized source output/ledger can exceed the request payload cap. Rather
+    // than throw out of the dispatch flow, degrade to the human park (the same
+    // safety terminus as a failed evaluation below).
+    let gateRequest: GateEvaluationRequest;
+    try {
+      gateRequest = this.buildGateEvaluationRequest(db, { run, stepRun, goal, gateNode, graph });
+    } catch {
+      this.parkForGateApproval(db, now, { run, stepRun, stepTpl, template, goal, gateNodeId }, options);
+      return;
+    }
     const proposal = await evaluateGate(this.shadowAsk, {
       goalId: goal.id,
       adapterId,
-      request: this.buildGateEvaluationRequest(db, { run, stepRun, goal, gateNode, graph }),
+      request: gateRequest,
       timeoutMs: SHADOW_LLM_TIMEOUT_MS,
     });
     if (!proposal) {

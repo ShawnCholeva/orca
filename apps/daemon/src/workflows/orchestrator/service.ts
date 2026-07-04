@@ -1500,7 +1500,7 @@ export class OrchestratorService {
     }
     if (!adapterId) return { ran: false }; // no shadow adapter -> cannot refute; deterministic gates already ran
 
-    const request = RefuteCompletionRequest.parse({
+    const parsedRequest = RefuteCompletionRequest.safeParse({
       step: { name: ctx.stepTpl.name, instructions: ctx.stepTpl.instructions ?? "" },
       goal: { id: goal.id, description: goal.description },
       stepOutput: isRecord(block) ? block : null,
@@ -1516,6 +1516,11 @@ export class OrchestratorService {
           }
         : { ran: false, verdict: null, sensorsRun: [], gaps: [] },
     });
+    // An author-controlled step output can exceed the request payload cap. Degrade
+    // to a no-op rather than throwing out of the approve handler — the deterministic
+    // gates have already run; the refute is additive assurance, not a hard gate.
+    if (!parsedRequest.success) return { ran: false };
+    const request = parsedRequest.data;
     const proposal = await refuteStepCompletion(this.shadowAsk, {
       refuteSessionKey: `${goal.id}::refute`,
       adapterId,

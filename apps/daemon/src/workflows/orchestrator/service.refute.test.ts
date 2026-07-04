@@ -447,6 +447,43 @@ describe("OrchestratorService L5 refute gate", () => {
     expect(validationTypes).not.toContain("workflow.validation.passed");
   });
 
+  it("degrades to no-refute (does not throw) when the step output is too large to fit the refute request", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" }); // non-exec -> no_oracle triggers the refute gate
+    seedWorkspace(db);
+    seedAgentSession(db);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+
+    let askCalls = 0;
+    const ask: ShadowAsk = {
+      async ask() {
+        askCalls += 1;
+        return { text: JSON.stringify({ verdict: "upheld", reason: "", issueRefs: [], inputsConsidered: [] }) };
+      },
+    };
+    const service = makeRefuteService(ask);
+    // A step-complete block whose serialized size blows the refute request payload
+    // cap. Without the degrade, building the refute request throws FIRST
+    // ("RefuteCompletionRequest too large") — a refute-introduced crash. With it, the
+    // refute is skipped and control reaches the commit, where the same oversized
+    // output legitimately trips the pre-existing artifact-body cap instead. So the
+    // observable proof of the degrade is that the propagated error is the artifact
+    // cap, not the refute request — and the refute was never asked.
+    const oversized =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "x".repeat(80000) }) + "\n```";
+
+    await expect(
+      service.onAgentResponseDone(
+        db,
+        () => NOW,
+        { sessionId: "sess-judge", adapterId: "claude-code", responseText: oversized },
+        { bus, idFactory }
+      )
+    ).rejects.toThrow("artifact_body_too_large");
+
+    expect(askCalls).toBe(0); // refute request build degraded to no-op before the ask
+  });
+
   it("gate: no-oracle step -> refute called with the independent '<goalId>::refute' session key", async () => {
     const { db, bus, idFactory } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" }); // non-exec: no oracle at all
