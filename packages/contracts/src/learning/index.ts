@@ -49,7 +49,7 @@ export const JudgeInstructionEditProposal = z.object({
   addressesFailureMode: z.enum(["yes", "partial", "no", "unclear"]),
   regressionCases: z.array(z.string().max(256)).max(50),
   reason: z.string().min(1).max(1024),
-  inputsConsidered: z.array(z.string().max(256)).max(50),
+  inputsConsidered: z.array(z.string().max(512)).max(50),
 }).strict();
 export type JudgeInstructionEditProposal = z.infer<typeof JudgeInstructionEditProposal>;
 

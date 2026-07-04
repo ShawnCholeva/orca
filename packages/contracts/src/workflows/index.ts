@@ -848,7 +848,7 @@ export const GateEvaluationProposal = z
     outcome: z.enum(["approved", "rejected"]),
     reason: z.string().min(1).max(1024),
     issueRefs: z.array(z.string().min(1).max(128)).max(50).optional(),
-    inputsConsidered: z.array(z.string().min(1).max(128)).max(50),
+    inputsConsidered: z.array(z.string().min(1).max(512)).max(50),
   })
   .strict();
 export type GateEvaluationProposal = z.infer<typeof GateEvaluationProposal>;
@@ -886,7 +886,7 @@ export const RefuteCompletionProposal = z
     // empty/absent reason as "no reason clause".
     reason: z.string().max(1024),
     issueRefs: z.array(z.string().min(1).max(128)).max(50),
-    inputsConsidered: z.array(z.string().min(1).max(128)).max(50),
+    inputsConsidered: z.array(z.string().min(1).max(512)).max(50),
   })
   .strict();
 export type RefuteCompletionProposal = z.infer<typeof RefuteCompletionProposal>;
@@ -927,7 +927,7 @@ export const SplitEvaluationProposal = z
     reasoning: z.string().min(1).max(REASONING_MAX),
     selectedBranch: z.string().min(1).max(WORKFLOW_SPLITTER_MAX_BRANCH_LABEL_CHARS),
     reason: z.string().min(1).max(1024),
-    inputsConsidered: z.array(z.string().min(1).max(128)).max(50),
+    inputsConsidered: z.array(z.string().min(1).max(512)).max(50),
   })
   .strict();
 export type SplitEvaluationProposal = z.infer<typeof SplitEvaluationProposal>;

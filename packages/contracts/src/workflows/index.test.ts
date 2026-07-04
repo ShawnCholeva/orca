@@ -68,3 +68,11 @@ describe("StoredStepResultScoring (re-parsing persisted scoring stashes)", () =>
     expect(StepResultScoringProposal.safeParse(withoutReasoning).success).toBe(false);
   });
 });
+
+describe("inputsConsidered relaxed bound (dev-loop layer-4 fix)", () => {
+  it("RefuteCompletionProposal accepts a >128-char inputsConsidered entry", () => {
+    const p = { reasoning: "checked the output against the step", verdict: "upheld", reason: "",
+      issueRefs: [], inputsConsidered: ["x".repeat(300)] };
+    expect(RefuteCompletionProposal.safeParse(p).success).toBe(true);
+  });
+});
