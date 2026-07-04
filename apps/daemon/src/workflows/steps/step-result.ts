@@ -118,6 +118,7 @@ export function buildScoredStepResult(
     successScore: proposal.successScore,
     quality: proposal.quality,
     performance: facts.performance,
+    reasoning: proposal.reasoning ?? null,
     outcome: {
       reason: sanitizeStepResultReason(proposal.reason),
       producedArtifactsCount: facts.outcome.producedArtifactsCount,

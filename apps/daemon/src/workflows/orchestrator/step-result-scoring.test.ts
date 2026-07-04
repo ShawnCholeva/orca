@@ -70,6 +70,38 @@ describe("scoreStepResult", () => {
     });
   });
 
+  it("threads proposal.reasoning onto the scored result", async () => {
+    const propose = vi.fn(async (_req, options) => {
+      const proposal = {
+        successScore: 0.8,
+        quality: {
+          outputCompleteness: 0.8,
+          outputCorrectness: 0.75,
+          instructionAdherence: 0.9,
+          downstreamReadiness: 0.85,
+          riskLevel: 0.2,
+        },
+        reason: "Ready for handoff.",
+        handoffReady: true,
+        reasoning: "worked it through",
+      };
+      const validated = await options.validateProposal(proposal);
+      return {
+        status: "proposed" as const,
+        attemptId: "attempt-1",
+        transport: "one_shot" as const,
+        parsed: validated.accepted ? validated.parsed : proposal,
+        rawTextLength: 10,
+        latencyMs: 1,
+      };
+    });
+
+    const result = await scoreStepResult({ broker: { propose } }, input);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok === true && result.stepResult.reasoning).toBe("worked it through");
+  });
+
   it("returns failure for invalid proposals", async () => {
     const propose = vi.fn(async (_req, options) => {
       await options.validateProposal({ successScore: 2 });

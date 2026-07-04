@@ -81,6 +81,7 @@ export async function scoreStepResult(
           successScore: proposal.data.successScore,
           quality: proposal.data.quality,
           performance: input.facts.performance,
+          reasoning: proposal.data.reasoning ?? null,
           outcome: {
             reason: proposal.data.reason,
             producedArtifactsCount: input.facts.outcome.producedArtifactsCount,

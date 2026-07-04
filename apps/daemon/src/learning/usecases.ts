@@ -137,7 +137,7 @@ export async function judgeProposal(
   };
 
   if (corpus.solved.length < SOLVED_MIN || corpus.failure.length < FAILURE_MIN) {
-    return persist({ verdict: "insufficient_evidence", regressionRisk: null, addressesFailureMode: null, reason: null, ...base });
+    return persist({ verdict: "insufficient_evidence", regressionRisk: null, addressesFailureMode: null, reason: null, reasoning: null, ...base });
   }
 
   // Resolve the shadow adapter from the anchor run's goal (per-template; no goal of our own).
@@ -178,8 +178,8 @@ export async function judgeProposal(
 
   return persist(fill
     ? { verdict: fill.verdict, regressionRisk: fill.regressionRisk, addressesFailureMode: fill.addressesFailureMode,
-        regressionCases: fill.regressionCases, reason: fill.reason, solvedCaseIds: base.solvedCaseIds,
+        regressionCases: fill.regressionCases, reason: fill.reason, reasoning: fill.reasoning ?? null, solvedCaseIds: base.solvedCaseIds,
         failureCaseIds: base.failureCaseIds, solvedSampleSize: base.solvedSampleSize,
         failureSampleSize: base.failureSampleSize, judgedAt: now, judgedAgainstVersion: base.judgedAgainstVersion }
-    : { verdict: "unavailable", regressionRisk: null, addressesFailureMode: null, reason: null, ...base });
+    : { verdict: "unavailable", regressionRisk: null, addressesFailureMode: null, reason: null, reasoning: null, ...base });
 }

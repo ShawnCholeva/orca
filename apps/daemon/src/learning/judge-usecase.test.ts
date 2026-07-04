@@ -77,7 +77,7 @@ function proposalFixture(over: Partial<TemplateInstructionProposal> = {}): Templ
 function fakeAsk(text: string, seen: string[] = []): ShadowAsk {
   return { async ask(key) { seen.push(key); return { text }; } };
 }
-const PASS = JSON.stringify({ verdict: "pass", regressionRisk: "none", addressesFailureMode: "yes", regressionCases: [], reason: "ok", inputsConsidered: ["s1"] });
+const PASS = JSON.stringify({ verdict: "pass", regressionRisk: "none", addressesFailureMode: "yes", regressionCases: [], reason: "ok", inputsConsidered: ["s1"], reasoning: "solved cases hold; failure case addressed" });
 
 describe("judgeProposal", () => {
   let db: Database.Database;
@@ -107,6 +107,7 @@ describe("judgeProposal", () => {
     expect(p.judgment?.solvedCaseIds.length).toBeGreaterThanOrEqual(1);
     expect(p.judgment?.failureCaseIds.length).toBeGreaterThanOrEqual(1);
     expect(p.judgment?.judgedAgainstVersion).toBe(p.templateVersionAtProposal);
+    expect(p.judgment?.reasoning).toBe("solved cases hold; failure case addressed");
     expect(terminated).toEqual(["tpl::judge"]); // teardown per call
   });
 
@@ -138,6 +139,7 @@ describe("judgeProposal", () => {
     const deps: JudgeDeps = { shadowAsk: fakeAsk(PASS, seen), terminateShadow: () => {} };
     const p = await judgeProposal(deps, db, "p2");
     expect(p.judgment?.verdict).toBe("insufficient_evidence");
+    expect(p.judgment?.reasoning ?? null).toBeNull();
     expect(seen.length).toBe(0);
   });
 
@@ -146,6 +148,7 @@ describe("judgeProposal", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const p = await judgeProposal(deps, db, "p1");
     expect(p.judgment?.verdict).toBe("unavailable");
+    expect(p.judgment?.reasoning ?? null).toBeNull();
   });
 
   // Controller decision (aligned with commit 04d1b09 "degrade instead of throw when a request

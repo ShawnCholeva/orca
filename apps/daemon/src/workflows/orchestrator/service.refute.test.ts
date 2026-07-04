@@ -169,7 +169,7 @@ function seedToolGate(db: Database.Database, stepRunId: string, riskClass: "low"
  *  records every session key it was asked with (independence assertions). */
 function fakeRefuteAsk(
   verdict: "upheld" | "refuted" | "uncertain",
-  opts: { reason?: string; issueRefs?: string[] } = {}
+  opts: { reason?: string; issueRefs?: string[]; reasoning?: string } = {}
 ): ShadowAsk & { calls: string[] } {
   const calls: string[] = [];
   return {
@@ -182,6 +182,7 @@ function fakeRefuteAsk(
           reason: opts.reason ?? "An independent reason.",
           issueRefs: opts.issueRefs ?? [],
           inputsConsidered: ["stepOutput"],
+          ...(opts.reasoning !== undefined ? { reasoning: opts.reasoning } : {}),
         }),
       };
     },
@@ -267,7 +268,11 @@ describe("OrchestratorService L5 refute gate", () => {
     seedToolGate(db, "step-1", "high");
     db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
 
-    const ask = fakeRefuteAsk("refuted", { issueRefs: ["fix-x"], reason: "The output is wrong." });
+    const ask = fakeRefuteAsk("refuted", {
+      issueRefs: ["fix-x"],
+      reason: "The output is wrong.",
+      reasoning: "checked the diff against the spec; found a mismatch",
+    });
     const service = makeRefuteService(ask);
 
     await service.onAgentResponseDone(
@@ -281,7 +286,11 @@ describe("OrchestratorService L5 refute gate", () => {
     expect(stepOutputCount(db)).toBe(0);
     expect(reviseAttempts(db)).toBe(1);
     const t = listTransitionsByGoal(db, "goal-1").find((x) => x.boundary === "step_complete");
-    expect(t?.refute).toMatchObject({ verdict: "refuted", issue_refs: ["fix-x"] });
+    expect(t?.refute).toMatchObject({
+      verdict: "refuted",
+      issue_refs: ["fix-x"],
+      reasoning: "checked the diff against the spec; found a mismatch",
+    });
     expect(t?.telemetry?.outcome).toMatchObject({ status: "failed", failure_code: "refute_veto" });
   });
 

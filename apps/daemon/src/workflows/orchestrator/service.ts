@@ -1535,6 +1535,7 @@ export class OrchestratorService {
       risk_class: riskClass,
       reason: proposal?.reason ?? null,
       issue_refs: proposal?.issueRefs ?? [],
+      reasoning: proposal?.reasoning ?? null,
     };
     return { ran: true, outcome, facet, proposal };
   }

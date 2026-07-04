@@ -33,4 +33,9 @@ describe("buildScoredStepResult", () => {
     expect(result.outcome.handoffReady).toBe(true);
     expect(result.outcome.reason).toBe("Output complete and correct.");
   });
+
+  it("threads proposal.reasoning onto the scored result", () => {
+    const result = buildScoredStepResult(facts, { ...proposal, reasoning: "worked it through" });
+    expect(result.reasoning).toBe("worked it through");
+  });
 });
