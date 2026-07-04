@@ -96,7 +96,7 @@ export type TransitionStatus = z.infer<typeof TransitionStatus>;
 export const FailureCode = z.enum([
   "invalid_output", "timeout", "session_not_terminal", "output_unavailable",
   "source_truncated", "goal_archived", "session_archived", "daemon_restart",
-  "guardrail_denied", "evidence_veto", "provider_error", "internal_error",
+  "guardrail_denied", "evidence_veto", "refute_veto", "provider_error", "internal_error",
 ]);
 export type FailureCode = z.infer<typeof FailureCode>;
 
@@ -190,7 +190,7 @@ export type StateDepsFacet = z.infer<typeof StateDepsFacet>;
 // this instead of hand-listing each facet. `HarnessTransition` below stays
 // hand-written (no codegen); a conformance guard (daemon) asserts they agree.
 export type FacetSpec = {
-  key: "risk" | "evidence" | "stateDeps" | "telemetry" | "composition";
+  key: "risk" | "evidence" | "stateDeps" | "telemetry" | "composition" | "refute";
   column: string;
   schema: z.ZodTypeAny;
 };
@@ -225,6 +225,22 @@ export type CompositionFacet = z.infer<typeof CompositionFacet>;
 
 defineFacet({ key: "composition", column: "composition_json", schema: CompositionFacet });
 
+export const RefuteOutcome = z.enum(["upheld", "refuted", "uncertain", "unavailable"]);
+export type RefuteOutcome = z.infer<typeof RefuteOutcome>;
+
+export const RefuteFacet = z
+  .object({
+    verdict: RefuteOutcome,
+    triggered_by: z.array(z.enum(["high_risk", "no_oracle", "weak_oracle"])).max(3),
+    risk_class: RiskClass,
+    reason: z.string().max(1024).nullable(),
+    issue_refs: z.array(z.string().max(128)).max(50),
+  })
+  .strict();
+export type RefuteFacet = z.infer<typeof RefuteFacet>;
+
+defineFacet({ key: "refute", column: "refute_json", schema: RefuteFacet });
+
 export const HARNESS_FACETS: readonly FacetSpec[] = FACET_REGISTRY;
 
 // `risk` (RiskFacet), `evidence` (EvidenceFacet), `telemetry` (TelemetryFacet), and
@@ -241,6 +257,7 @@ export const HarnessTransition = z
     stateDeps: StateDepsFacet.nullable(),
     telemetry: TelemetryFacet.nullable(),
     composition: CompositionFacet.nullable().optional(),
+    refute: RefuteFacet.nullable().optional(),
     createdAt: z.string().datetime(),
   })
   .strict();

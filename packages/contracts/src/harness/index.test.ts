@@ -17,6 +17,7 @@ describe("HARNESS_FACETS registry", () => {
       ["stateDeps", "state_deps_json"],
       ["telemetry", "telemetry_json"],
       ["composition", "composition_json"],
+      ["refute", "refute_json"],
     ]);
   });
 });
@@ -200,4 +201,15 @@ describe("StateDepsFacet", () => {
     });
     expect(t.stateDeps?.conflict_policy).toBe("escalate");
   });
+});
+
+import { RefuteFacet } from "./index.js";
+
+describe("RefuteFacet", () => {
+  it("RefuteFacet round-trips and is registered", () => {
+    const f = { verdict: "refuted", triggered_by: ["no_oracle"], risk_class: "high", reason: "bad", issue_refs: ["x"] };
+    expect(RefuteFacet.parse(f)).toEqual(f);
+    expect(HARNESS_FACETS.some((s) => s.key === "refute" && s.column === "refute_json")).toBe(true);
+  });
+  it("FailureCode includes refute_veto", () => { expect(FailureCode.parse("refute_veto")).toBe("refute_veto"); });
 });

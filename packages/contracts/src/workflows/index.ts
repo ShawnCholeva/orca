@@ -860,6 +860,50 @@ export const GateEvaluationRequest = z
   });
 export type GateEvaluationRequest = z.infer<typeof GateEvaluationRequest>;
 
+export const RefuteVerdict = z.enum(["upheld", "refuted", "uncertain"]);
+export type RefuteVerdict = z.infer<typeof RefuteVerdict>;
+
+export const RefuteCompletionProposal = z
+  .object({
+    verdict: RefuteVerdict,
+    reason: z.string().min(1).max(1024),
+    issueRefs: z.array(z.string().min(1).max(128)).max(50),
+    inputsConsidered: z.array(z.string().min(1).max(128)).max(50),
+  })
+  .strict();
+export type RefuteCompletionProposal = z.infer<typeof RefuteCompletionProposal>;
+
+export const RefuteCompletionRequest = z
+  .object({
+    step: z
+      .object({
+        name: z.string().max(100),
+        instructions: BoundedString(WORKFLOW_STEP_MAX_INSTRUCTIONS_BYTES, "instructions"),
+      })
+      .strict(),
+    goal: z.object({ id: Id, description: z.string().max(4000) }).strict(),
+    stepOutput: z.record(z.string(), z.unknown()).nullable(),
+    selfReportedScoring: z.record(z.string(), z.unknown()).nullable(),
+    oracle: z
+      .object({
+        ran: z.boolean(),
+        verdict: z.enum(["passed", "partial", "failed"]).nullable().default(null),
+        sensorsRun: z
+          .array(z.object({ kind: z.string().max(64), summary: z.string().max(600) }).strict())
+          .max(50)
+          .default([]),
+        gaps: z.array(z.string().max(200)).max(50).default([]),
+      })
+      .strict(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!hasMaxSerializedBytes(value, ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "RefuteCompletionRequest too large" });
+    }
+  });
+export type RefuteCompletionRequest = z.infer<typeof RefuteCompletionRequest>;
+
 export const SplitEvaluationProposal = z
   .object({
     selectedBranch: z.string().min(1).max(WORKFLOW_SPLITTER_MAX_BRANCH_LABEL_CHARS),
