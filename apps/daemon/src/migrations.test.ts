@@ -178,6 +178,7 @@ describe("runMigrations", () => {
       "0050_workflow_compositions.sql",
       "0051_workflow_template_inputs.sql",
       "0052_harness_transitions_refute.sql",
+      "0053_learning_proposal_judgment.sql",
     ]);
   });
 
@@ -322,6 +323,7 @@ describe("runMigrations", () => {
       "0050_workflow_compositions.sql",
       "0051_workflow_template_inputs.sql",
       "0052_harness_transitions_refute.sql",
+      "0053_learning_proposal_judgment.sql",
     ]);
 
     const goalCount = (
@@ -619,6 +621,7 @@ describe("session tables migration", () => {
       "0050_workflow_compositions.sql",
       "0051_workflow_template_inputs.sql",
       "0052_harness_transitions_refute.sql",
+      "0053_learning_proposal_judgment.sql",
     ]);
 
     const tables = (
@@ -1149,6 +1152,7 @@ describe("migration 0010 workflows", () => {
       "0050_workflow_compositions.sql",
       "0051_workflow_template_inputs.sql",
       "0052_harness_transitions_refute.sql",
+      "0053_learning_proposal_judgment.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1756,6 +1760,7 @@ describe("migration 0012 orchestration transport", () => {
       "0050_workflow_compositions.sql",
       "0051_workflow_template_inputs.sql",
       "0052_harness_transitions_refute.sql",
+      "0053_learning_proposal_judgment.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1767,6 +1772,13 @@ describe("migration 0012 orchestration transport", () => {
     runMigrations(db, defaultMigrationsDir());
     const cols = db.prepare("PRAGMA table_info(harness_transitions)").all() as { name: string }[];
     expect(cols.some((c) => c.name === "refute_json")).toBe(true);
+  });
+
+  it("0053 adds template_instruction_proposals.judge_json", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+    const cols = db.prepare("PRAGMA table_info(template_instruction_proposals)").all() as { name: string }[];
+    expect(cols.some((c) => c.name === "judge_json")).toBe(true);
   });
 });
 

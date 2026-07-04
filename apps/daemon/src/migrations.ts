@@ -65,6 +65,7 @@ export const migrationFiles = [
   WORKFLOW_COMPOSITIONS_MIGRATION,
   "0051_workflow_template_inputs.sql",
   "0052_harness_transitions_refute.sql",
+  "0053_learning_proposal_judgment.sql",
 ] as const;
 
 export function runMigrations(
