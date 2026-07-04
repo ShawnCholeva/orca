@@ -32,6 +32,7 @@ describe("scoreStepResult", () => {
   it("returns a strict scored step result", async () => {
     const propose = vi.fn(async (_req, options) => {
       const proposal = {
+        reasoning: "output meets the plan's requirements and is ready to hand off",
         successScore: 0.8,
         quality: {
           outputCompleteness: 0.8,

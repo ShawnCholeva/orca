@@ -1065,6 +1065,7 @@ describe("step result scoring contracts", () => {
     expect(StepResultScoringRequest.parse(request)).toEqual(request);
 
     const proposal = {
+      reasoning: "output implements the approved plan with no blocking issues",
       successScore: 0.9,
       quality: {
         outputCompleteness: 0.9,
@@ -1085,6 +1086,7 @@ describe("step result scoring contracts", () => {
     // be discarded just because the prose reason exceeds the 256-char failure
     // cap; the persisted WorkflowStepResult truncates it later.
     const proposal = {
+      reasoning: "output covers all acceptance criteria; ready for downstream QA",
       successScore: 0.88,
       quality: {
         outputCompleteness: 0.9,

@@ -138,6 +138,7 @@ function fakeGateAsk(proposal: {
     async ask() {
       return {
         text: JSON.stringify({
+          reasoning: `gate evaluated to ${proposal.outcome} on the source step output`,
           outcome: proposal.outcome,
           reason: proposal.reason,
           issueRefs: proposal.issueRefs ?? [],

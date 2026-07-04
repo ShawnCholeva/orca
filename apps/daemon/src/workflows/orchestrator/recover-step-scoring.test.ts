@@ -9,6 +9,7 @@ const facts = {
 };
 
 const validText = JSON.stringify({
+  reasoning: "recovered output covers the step's stated goal adequately",
   successScore: 0.7,
   quality: {
     outputCompleteness: 0.7,

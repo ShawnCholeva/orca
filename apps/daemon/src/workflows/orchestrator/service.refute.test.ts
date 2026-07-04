@@ -178,11 +178,11 @@ function fakeRefuteAsk(
       calls.push(sessionKey);
       return {
         text: JSON.stringify({
+          reasoning: opts.reasoning ?? "independent review of the step output",
           verdict,
           reason: opts.reason ?? "An independent reason.",
           issueRefs: opts.issueRefs ?? [],
           inputsConsidered: ["stepOutput"],
-          ...(opts.reasoning !== undefined ? { reasoning: opts.reasoning } : {}),
         }),
       };
     },
@@ -212,6 +212,7 @@ function reviseAttempts(db: Database.Database): number {
 }
 
 const approveScoring = {
+  reasoning: "output is complete and meets the step's instructions",
   successScore: 0.82,
   quality: {
     outputCompleteness: 0.8,

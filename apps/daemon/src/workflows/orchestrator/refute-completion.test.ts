@@ -18,12 +18,12 @@ describe("refuteStepCompletion", () => {
   afterEach(() => { warn.mockRestore(); });
 
   it("parses each tri-state verdict and preserves issueRefs", async () => {
-    const p = { verdict: "refuted", reason: "misses error paths", issueRefs: ["no-error-path"], inputsConsidered: ["stepOutput"] };
+    const p = { reasoning: "no error-path handling in the step output", verdict: "refuted", reason: "misses error paths", issueRefs: ["no-error-path"], inputsConsidered: ["stepOutput"] };
     const r = await refuteStepCompletion(ask(JSON.stringify(p)), { refuteSessionKey: "goal-1::refute", adapterId: "claude-code", request: REQ, timeoutMs: 1000 });
     expect(r).toEqual(p);
   });
   it("respects an uncertain verdict (not coerced to refuted)", async () => {
-    const p = { verdict: "uncertain", reason: "cannot tell", issueRefs: [], inputsConsidered: [] };
+    const p = { reasoning: "evidence is ambiguous either way", verdict: "uncertain", reason: "cannot tell", issueRefs: [], inputsConsidered: [] };
     const r = await refuteStepCompletion(ask(JSON.stringify(p)), { refuteSessionKey: "goal-1::refute", adapterId: "claude-code", request: REQ, timeoutMs: 1000 });
     expect(r?.verdict).toBe("uncertain");
   });
@@ -35,7 +35,7 @@ describe("refuteStepCompletion", () => {
   });
   it("uses the isolated refute session key (not the bare goalId)", async () => {
     const seen: string[] = [];
-    const spy: ShadowAsk = { async ask(key: string) { seen.push(key); return { text: JSON.stringify({ verdict: "upheld", reason: "ok", issueRefs: [], inputsConsidered: [] }) }; } };
+    const spy: ShadowAsk = { async ask(key: string) { seen.push(key); return { text: JSON.stringify({ reasoning: "no concrete failure found", verdict: "upheld", reason: "ok", issueRefs: [], inputsConsidered: [] }) }; } };
     await refuteStepCompletion(spy, { refuteSessionKey: "goal-1::refute", adapterId: "claude-code", request: REQ, timeoutMs: 1000 });
     expect(seen).toEqual(["goal-1::refute"]);
   });
@@ -49,5 +49,9 @@ describe("refuteStepCompletion", () => {
     const { systemPrompt } = composeRefutePrompt(REQ);
     expect(systemPrompt.indexOf('"reasoning"')).toBeGreaterThan(-1);
     expect(systemPrompt.indexOf('"reasoning"')).toBeLessThan(systemPrompt.indexOf('"verdict"'));
+  });
+  it("returns null when the model omits the now-required reasoning", async () => {
+    const bad = JSON.stringify({ verdict: "upheld", reason: "", issueRefs: [], inputsConsidered: [] });
+    expect(await refuteStepCompletion(ask(bad), { refuteSessionKey: "k", adapterId: "claude-code", request: REQ, timeoutMs: 1000 })).toBeNull();
   });
 });

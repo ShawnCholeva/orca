@@ -1694,6 +1694,7 @@ export class DispatchEngine {
     const raw = output?.[branchKey];
     if (typeof raw !== "string" || !branches.includes(raw)) return undefined;
     return {
+      reasoning: `source step's structured output field "${branchKey}" already names a valid branch`,
       selectedBranch: raw,
       reason: `Routed deterministically from ${stepRun.step_template_id}.${branchKey} = "${raw}".`,
       inputsConsidered: [branchKey],

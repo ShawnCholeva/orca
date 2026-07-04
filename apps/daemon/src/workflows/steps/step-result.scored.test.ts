@@ -10,6 +10,7 @@ const facts: StepResultScoringFacts = {
 };
 
 const proposal: StepResultScoringProposal = {
+  reasoning: "output is complete, correct, and ready for downstream steps",
   successScore: 0.82,
   quality: {
     outputCompleteness: 0.8,

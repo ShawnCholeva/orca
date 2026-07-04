@@ -14,7 +14,7 @@ describe("buildConfirmationSummary", () => {
     const out = buildConfirmationSummary(
       schema,
       { problem: "Can't rename workspaces", success_outcome: "  ", constraints: ["unique names", " "], open_questions: [] },
-      { successScore: 0.9, quality: { outputCompleteness: 0.95, outputCorrectness: 0.95, instructionAdherence: 0.9, downstreamReadiness: 0.9, riskLevel: 0.1 }, reason: "Frame is complete and unambiguous.", handoffReady: true },
+      { reasoning: "problem, outcome, and constraints are all filled in", successScore: 0.9, quality: { outputCompleteness: 0.95, outputCorrectness: 0.95, instructionAdherence: 0.9, downstreamReadiness: 0.9, riskLevel: 0.1 }, reason: "Frame is complete and unambiguous.", handoffReady: true },
       "ignored when scoring.reason present"
     );
     expect(out.lead).toBe("Frame is complete and unambiguous.");

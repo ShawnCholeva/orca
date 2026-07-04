@@ -70,6 +70,7 @@ function fakeBrokerNoop(): Pick<import("../orchestration-transport/broker.js").O
     async propose(request: unknown, options?: import("../orchestration-transport/broker.js").BrokerCompatibilityOptions) {
       if ((request as { kind?: string }).kind === "score_step_result") {
         const proposal = {
+          reasoning: "output is complete and ready for the next step",
           successScore: 0.82,
           quality: {
             outputCompleteness: 0.8,
@@ -531,6 +532,7 @@ describe("OrchestratorService agent step", () => {
     const { sessionId } = seedWorkerExitRecovery(db);
     const ask = vi.fn<ShadowAsk["ask"]>().mockResolvedValue({
       text: JSON.stringify({
+        reasoning: "recovered output is usable despite the worker exit",
         successScore: 0.73,
         quality: {
           outputCompleteness: 0.75,
@@ -649,6 +651,7 @@ describe("OrchestratorService agent step", () => {
     const propose = vi.fn(async (request: unknown, options?: import("../orchestration-transport/broker.js").BrokerCompatibilityOptions) => {
       if ((request as { kind?: string }).kind === "score_step_result") {
         const proposal = {
+          reasoning: "output is complete and ready for the next step",
           successScore: 0.82,
           quality: {
             outputCompleteness: 0.8,
@@ -1061,6 +1064,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       fakeMediator({
         kind: "approve_step_complete",
         scoring: {
+          reasoning: "output satisfies the step instructions",
           successScore: 0.82,
           quality: {
             outputCompleteness: 0.8,
@@ -1169,6 +1173,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       fakeMediator({
         kind: "approve_step_complete",
         scoring: {
+          reasoning: "output satisfies the step instructions",
           successScore: 0.82,
           quality: {
             outputCompleteness: 0.8,
@@ -1221,6 +1226,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       fakeMediator({
         kind: "approve_step_complete",
         scoring: {
+          reasoning: "output satisfies the step instructions",
           successScore: 0.82,
           quality: {
             outputCompleteness: 0.8,
@@ -1339,6 +1345,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       fakeMediator({
         kind: "approve_step_complete",
         scoring: {
+          reasoning: "output satisfies the step instructions",
           successScore: 0.82,
           quality: {
             outputCompleteness: 0.8, outputCorrectness: 0.85,
@@ -1712,6 +1719,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       fakeMediator({
         kind: "approve_step_complete",
         scoring: {
+          reasoning: "output satisfies the step instructions",
           successScore: 0.9,
           quality: {
             outputCompleteness: 0.9,
@@ -1775,6 +1783,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       fakeMediator({
         kind: "approve_step_complete",
         scoring: {
+          reasoning: "output satisfies the step instructions",
           successScore: 0.82,
           quality: {
             outputCompleteness: 0.8,
@@ -1858,6 +1867,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       fakeMediator({
         kind: "approve_step_complete",
         scoring: {
+          reasoning: "output satisfies the step instructions",
           successScore: 0.9,
           quality: {
             outputCompleteness: 0.9,
@@ -1911,6 +1921,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       fakeMediator({
         kind: "approve_step_complete",
         scoring: {
+          reasoning: "output satisfies the step instructions",
           successScore: 0.9,
           quality: {
             outputCompleteness: 0.9,
@@ -1972,6 +1983,7 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
       fakeMediator({
         kind: "approve_step_complete",
         scoring: {
+          reasoning: "output satisfies the step instructions",
           successScore: 0.9,
           quality: {
             outputCompleteness: 0.9,
@@ -2510,6 +2522,7 @@ describe("OrchestratorService.confirmStep", () => {
       fakeMediator({
         kind: "approve_step_complete",
         scoring: {
+          reasoning: "output satisfies the step instructions",
           successScore: 0.82,
           quality: {
             outputCompleteness: 0.8,
@@ -2669,7 +2682,7 @@ describe("OrchestratorService.continueAllPausedSteps", () => {
     setSupervisionMode(db, "supervised", NOW);
 
     const service = makeJudgeService(
-      fakeMediator({ kind: "approve_step_complete", scoring: { successScore: 0.82, quality: { outputCompleteness: 0.8, outputCorrectness: 0.85, instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2 }, reason: "ok", handoffReady: true } }),
+      fakeMediator({ kind: "approve_step_complete", scoring: { reasoning: "output satisfies the step instructions", successScore: 0.82, quality: { outputCompleteness: 0.8, outputCorrectness: 0.85, instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2 }, reason: "ok", handoffReady: true } }),
       vi.fn(async () => "delivered" as const)
     );
     const responseText = "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
@@ -2707,7 +2720,7 @@ describe("OrchestratorService.continueAllPausedSteps", () => {
     seedAgentSession(db);
     db.prepare("UPDATE goals SET operating_mode = 'human_review' WHERE id = 'goal-1'").run();
     const service = makeJudgeService(
-      fakeMediator({ kind: "approve_step_complete", scoring: { successScore: 0.82, quality: { outputCompleteness: 0.8, outputCorrectness: 0.85, instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2 }, reason: "ok", handoffReady: true } }),
+      fakeMediator({ kind: "approve_step_complete", scoring: { reasoning: "output satisfies the step instructions", successScore: 0.82, quality: { outputCompleteness: 0.8, outputCorrectness: 0.85, instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2 }, reason: "ok", handoffReady: true } }),
       vi.fn(async () => "delivered" as const)
     );
     const responseText = "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
@@ -2766,6 +2779,7 @@ describe("OrchestratorService.requestStepRevision / submitStepRevision", () => {
       fakeMediator({
         kind: "approve_step_complete",
         scoring: {
+          reasoning: "output satisfies the step instructions",
           successScore: 0.82,
           quality: {
             outputCompleteness: 0.8,
@@ -2798,6 +2812,7 @@ describe("OrchestratorService.requestStepRevision / submitStepRevision", () => {
       fakeMediator({
         kind: "approve_step_complete",
         scoring: {
+          reasoning: "output satisfies the step instructions",
           successScore: 0.82,
           quality: {
             outputCompleteness: 0.8,
@@ -2843,7 +2858,7 @@ describe("OrchestratorService.onUserMessage (refine path)", () => {
 
     // 1) Approve → step holds at the confirmation checkpoint.
     const approveService = makeJudgeService(
-      fakeMediator({ kind: "approve_step_complete", scoring: { successScore: 0.82, quality: { outputCompleteness: 0.8, outputCorrectness: 0.85, instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2 }, reason: "ok", handoffReady: true } }),
+      fakeMediator({ kind: "approve_step_complete", scoring: { reasoning: "output satisfies the step instructions", successScore: 0.82, quality: { outputCompleteness: 0.8, outputCorrectness: 0.85, instructionAdherence: 0.9, downstreamReadiness: 0.8, riskLevel: 0.2 }, reason: "ok", handoffReady: true } }),
       vi.fn(async () => "delivered" as const)
     );
     const responseText = "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
@@ -3856,6 +3871,7 @@ describe("OrchestratorService evidence veto (deterministic)", () => {
   ]);
 
   const approveScoring = {
+    reasoning: "output passes validation with no blocking issues",
     successScore: 0.8,
     quality: {
       outputCompleteness: 0.8,

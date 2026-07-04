@@ -820,7 +820,7 @@ export type StepResultScoringRequest = z.infer<typeof StepResultScoringRequest>;
 
 export const StepResultScoringProposal = z
   .object({
-    reasoning: z.string().max(REASONING_MAX).optional(),
+    reasoning: z.string().min(1).max(REASONING_MAX),
     successScore: Score01,
     quality: WorkflowStepResultQuality,
     // The model's free-text justification. Kept generous (matching rationale
@@ -835,7 +835,7 @@ export type StepResultScoringProposal = z.infer<typeof StepResultScoringProposal
 
 export const GateEvaluationProposal = z
   .object({
-    reasoning: z.string().max(REASONING_MAX).optional(),
+    reasoning: z.string().min(1).max(REASONING_MAX),
     outcome: z.enum(["approved", "rejected"]),
     reason: z.string().min(1).max(1024),
     issueRefs: z.array(z.string().min(1).max(128)).max(50).optional(),
@@ -869,7 +869,7 @@ export type RefuteVerdict = z.infer<typeof RefuteVerdict>;
 
 export const RefuteCompletionProposal = z
   .object({
-    reasoning: z.string().max(REASONING_MAX).optional(),
+    reasoning: z.string().min(1).max(REASONING_MAX),
     verdict: RefuteVerdict,
     // No min length: an `upheld` verdict legitimately carries an empty reason, and
     // requiring one would fail parse → null → "unavailable" → a needless human
@@ -915,7 +915,7 @@ export type RefuteCompletionRequest = z.infer<typeof RefuteCompletionRequest>;
 
 export const SplitEvaluationProposal = z
   .object({
-    reasoning: z.string().max(REASONING_MAX).optional(),
+    reasoning: z.string().min(1).max(REASONING_MAX),
     selectedBranch: z.string().min(1).max(WORKFLOW_SPLITTER_MAX_BRANCH_LABEL_CHARS),
     reason: z.string().min(1).max(1024),
     inputsConsidered: z.array(z.string().min(1).max(128)).max(50),

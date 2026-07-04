@@ -3,14 +3,14 @@ import { REASONING_MAX, RefuteCompletionProposal, GateEvaluationProposal, StepRe
 
 describe("Refute contracts", () => {
   it("round-trips a refuted proposal", () => {
-    const p = { verdict: "refuted", reason: "output ignores the acceptance criteria", issueRefs: ["missing-error-path"], inputsConsidered: ["stepOutput"] };
+    const p = { reasoning: "the acceptance criteria's error path is untested", verdict: "refuted", reason: "output ignores the acceptance criteria", issueRefs: ["missing-error-path"], inputsConsidered: ["stepOutput"] };
     expect(RefuteCompletionProposal.parse(p)).toEqual(p);
   });
   it("rejects an unknown verdict", () => {
-    expect(RefuteCompletionProposal.safeParse({ verdict: "maybe", reason: "x", issueRefs: [], inputsConsidered: [] }).success).toBe(false);
+    expect(RefuteCompletionProposal.safeParse({ reasoning: "checked the output", verdict: "maybe", reason: "x", issueRefs: [], inputsConsidered: [] }).success).toBe(false);
   });
   it("accepts an upheld verdict with an empty reason (no over-escalation to unavailable)", () => {
-    const p = { verdict: "upheld", reason: "", issueRefs: [], inputsConsidered: [] };
+    const p = { reasoning: "no concrete failure found", verdict: "upheld", reason: "", issueRefs: [], inputsConsidered: [] };
     expect(RefuteCompletionProposal.parse(p)).toEqual(p);
   });
   it("accepts a well-formed request with oracle scope", () => {
@@ -29,8 +29,14 @@ describe("reasoning field (workflows)", () => {
     expect(StepResultScoringProposal.parse({ reasoning: "output complete", successScore: 0.9, quality: { outputCompleteness: 1, outputCorrectness: 1, instructionAdherence: 1, downstreamReadiness: 1, riskLevel: 0 }, reason: "done", handoffReady: true }).reasoning).toBe("output complete");
     expect(SplitEvaluationProposal.parse({ reasoning: "branch A fits", selectedBranch: "a", reason: "a", inputsConsidered: [] }).reasoning).toBe("branch A fits");
   });
-  it("still parses proposals WITHOUT reasoning (optional in Task 1)", () => {
-    expect(GateEvaluationProposal.safeParse({ outcome: "approved", reason: "ok", inputsConsidered: [] }).success).toBe(true);
+  it("rejects a proposal missing reasoning (now required)", () => {
+    expect(GateEvaluationProposal.safeParse({ outcome: "approved", reason: "ok", inputsConsidered: [] }).success).toBe(false);
+    expect(RefuteCompletionProposal.safeParse({ verdict: "upheld", reason: "", issueRefs: [], inputsConsidered: [] }).success).toBe(false);
+    expect(StepResultScoringProposal.safeParse({ successScore: 0.9, quality: { outputCompleteness: 1, outputCorrectness: 1, instructionAdherence: 1, downstreamReadiness: 1, riskLevel: 0 }, reason: "done", handoffReady: true }).success).toBe(false);
+    expect(SplitEvaluationProposal.safeParse({ selectedBranch: "a", reason: "a", inputsConsidered: [] }).success).toBe(false);
+  });
+  it("rejects an empty-string reasoning (min length 1)", () => {
+    expect(GateEvaluationProposal.safeParse({ reasoning: "", outcome: "approved", reason: "ok", inputsConsidered: [] }).success).toBe(false);
   });
   it("rejects reasoning over REASONING_MAX", () => {
     expect(RefuteCompletionProposal.safeParse({ reasoning: "x".repeat(2001), verdict: "upheld", reason: "", issueRefs: [], inputsConsidered: [] }).success).toBe(false);

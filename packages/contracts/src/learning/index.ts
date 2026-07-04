@@ -43,7 +43,7 @@ export const JudgeVerdict = z.enum(["pass", "regression_risk", "uncertain"]);
 export type JudgeVerdict = z.infer<typeof JudgeVerdict>;
 
 export const JudgeInstructionEditProposal = z.object({
-  reasoning: z.string().max(REASONING_MAX).optional(),
+  reasoning: z.string().min(1).max(REASONING_MAX),
   verdict: JudgeVerdict,
   regressionRisk: z.enum(["none", "possible", "likely"]),
   addressesFailureMode: z.enum(["yes", "partial", "no", "unclear"]),

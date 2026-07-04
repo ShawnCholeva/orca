@@ -24,6 +24,7 @@ describe("summarizeScoring", () => {
   it("leads with the agent's proposal when one is provided", () => {
     const summary = summarizeScoring(
       {
+        reasoning: "all required sections and fields are present",
         successScore: 0.92,
         quality: {
           outputCompleteness: 0.95,
@@ -52,6 +53,7 @@ describe("summarizeScoring", () => {
         downstreamReadiness: 0.9,
         riskLevel: 0.05,
       },
+      reasoning: "traced the scoring paths and located the test seam",
       reason: "The agent traced the scoring paths and identified the test seam.",
       handoffReady: true,
     });

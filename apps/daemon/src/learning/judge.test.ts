@@ -18,12 +18,12 @@ describe("judgeInstructionEdit", () => {
   afterEach(() => { warn.mockRestore(); });
 
   it("parses a regression_risk verdict and preserves regressionCases", async () => {
-    const p = { verdict: "regression_risk", regressionRisk: "likely", addressesFailureMode: "partial", regressionCases: ["s1"], reason: "would drop error check", inputsConsidered: ["s1", "s2"] };
+    const p = { reasoning: "solved case s1 regresses under the proposed instructions", verdict: "regression_risk", regressionRisk: "likely", addressesFailureMode: "partial", regressionCases: ["s1"], reason: "would drop error check", inputsConsidered: ["s1", "s2"] };
     const r = await judgeInstructionEdit(ask(JSON.stringify(p)), { judgeSessionKey: "t1::judge", adapterId: "claude-code", request: REQ, timeoutMs: 1000 });
     expect(r).toEqual(p);
   });
   it("respects an uncertain verdict", async () => {
-    const p = { verdict: "uncertain", regressionRisk: "possible", addressesFailureMode: "unclear", regressionCases: [], reason: "cannot tell", inputsConsidered: [] };
+    const p = { reasoning: "evidence is mixed across the failure cases", verdict: "uncertain", regressionRisk: "possible", addressesFailureMode: "unclear", regressionCases: [], reason: "cannot tell", inputsConsidered: [] };
     const r = await judgeInstructionEdit(ask(JSON.stringify(p)), { judgeSessionKey: "t1::judge", adapterId: "claude-code", request: REQ, timeoutMs: 1000 });
     expect(r?.verdict).toBe("uncertain");
   });
@@ -35,7 +35,7 @@ describe("judgeInstructionEdit", () => {
   });
   it("asks the isolated ${templateId}::judge key", async () => {
     const seen: string[] = [];
-    const spy: ShadowAsk = { async ask(key: string) { seen.push(key); return { text: JSON.stringify({ verdict: "pass", regressionRisk: "none", addressesFailureMode: "yes", regressionCases: [], reason: "ok", inputsConsidered: [] }) }; } };
+    const spy: ShadowAsk = { async ask(key: string) { seen.push(key); return { text: JSON.stringify({ reasoning: "all solved cases still pass", verdict: "pass", regressionRisk: "none", addressesFailureMode: "yes", regressionCases: [], reason: "ok", inputsConsidered: [] }) }; } };
     await judgeInstructionEdit(spy, { judgeSessionKey: "t1::judge", adapterId: "claude-code", request: REQ, timeoutMs: 1000 });
     expect(seen).toEqual(["t1::judge"]);
   });

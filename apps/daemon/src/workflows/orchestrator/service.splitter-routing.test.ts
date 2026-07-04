@@ -49,8 +49,9 @@ function fakeSplitBroker(selectedBranch: string): Pick<OrchestrationTransportBro
       const kind = (request as { kind?: string } | undefined)?.kind;
       const proposal =
         kind === "evaluate_split"
-          ? { selectedBranch, reason: `Picked ${selectedBranch}.`, inputsConsidered: [] }
+          ? { reasoning: `source step output points to branch ${selectedBranch}`, selectedBranch, reason: `Picked ${selectedBranch}.`, inputsConsidered: [] }
           : {
+              reasoning: "output is complete and ready for the next step",
               successScore: 0.82,
               quality: {
                 outputCompleteness: 0.8,

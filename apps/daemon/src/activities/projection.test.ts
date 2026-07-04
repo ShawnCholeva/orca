@@ -195,6 +195,7 @@ describe("enrichConfirmationSummary", () => {
       JSON.stringify({
         block: { problem: "Can't rename" },
         scoring: {
+          reasoning: "renaming is now correctly scoped to workspaces",
           successScore: 0.9,
           quality: {
             outputCompleteness: 0.9,

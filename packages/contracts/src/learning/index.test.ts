@@ -52,7 +52,7 @@ describe("learning contracts", () => {
 
 describe("Counterfactual judge contracts", () => {
   it("round-trips a regression_risk proposal", () => {
-    const p = { verdict: "regression_risk", regressionRisk: "likely", addressesFailureMode: "partial",
+    const p = { reasoning: "solved cases still pass but the failure case now drops its check", verdict: "regression_risk", regressionRisk: "likely", addressesFailureMode: "partial",
       regressionCases: ["case-1"], reason: "would drop the error-path check", inputsConsidered: ["solved:s1"] };
     expect(JudgeInstructionEditProposal.parse(p)).toEqual(p);
   });
@@ -91,9 +91,11 @@ describe("Counterfactual judge contracts", () => {
 });
 
 describe("reasoning field (learning)", () => {
-  it("JudgeInstructionEditProposal accepts leading reasoning (optional)", () => {
+  it("JudgeInstructionEditProposal accepts leading reasoning", () => {
     expect(JudgeInstructionEditProposal.parse({ reasoning: "solved cases hold", verdict: "pass", regressionRisk: "none", addressesFailureMode: "yes", regressionCases: [], reason: "ok", inputsConsidered: [] }).reasoning).toBe("solved cases hold");
-    expect(JudgeInstructionEditProposal.safeParse({ verdict: "pass", regressionRisk: "none", addressesFailureMode: "yes", regressionCases: [], reason: "ok", inputsConsidered: [] }).success).toBe(true);
+  });
+  it("rejects a proposal missing reasoning (now required)", () => {
+    expect(JudgeInstructionEditProposal.safeParse({ verdict: "pass", regressionRisk: "none", addressesFailureMode: "yes", regressionCases: [], reason: "ok", inputsConsidered: [] }).success).toBe(false);
   });
   it("CounterfactualJudgment carries optional reasoning", () => {
     const j = { verdict: "unavailable", regressionRisk: null, addressesFailureMode: null, regressionCases: [], reason: null, solvedCaseIds: [], failureCaseIds: [], solvedSampleSize: 0, failureSampleSize: 0, judgedAt: "2026-07-04T00:00:00.000Z", judgedAgainstVersion: 1 };

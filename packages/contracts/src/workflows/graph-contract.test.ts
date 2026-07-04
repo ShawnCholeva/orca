@@ -115,6 +115,7 @@ describe("gate evaluation contract", () => {
 
   it("parses a valid gate proposal", () => {
     const p = GateEvaluationProposal.parse({
+      reasoning: "validation step reported failing tests",
       outcome: "rejected",
       reason: "tests failed",
       issueRefs: ["i1"],
@@ -218,6 +219,7 @@ describe("SplitEvaluation schemas", () => {
 
   it("parses a split proposal", () => {
     const p = SplitEvaluationProposal.parse({
+      reasoning: "triage output clearly maps to the ground-and-design branch",
       selectedBranch: "ground_and_design",
       reason: "intent is clear; ground in code before designing",
       inputsConsidered: ["triage"],

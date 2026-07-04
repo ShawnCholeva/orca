@@ -9,6 +9,7 @@ describe("StepRevisionSignal", () => {
       goalId: "g1",
       revisionIndex: 0,
       supersededScoring: {
+        reasoning: "output covers the acceptance criteria with no gaps",
         successScore: 0.9,
         quality: {
           outputCompleteness: 0.9,
@@ -34,6 +35,7 @@ describe("StepRevisionSignal", () => {
       goalId: "g1",
       revisionIndex: 1,
       supersededScoring: {
+        reasoning: "output partially addresses the goal, missing the edge cases",
         successScore: 0.5,
         quality: {
           outputCompleteness: 0.5,

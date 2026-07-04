@@ -4,6 +4,7 @@ import { runMigrations, defaultMigrationsDir } from "../../migrations.js";
 import { recordRevisionSignal, listRevisionSignals } from "./store.js";
 
 const scoring = {
+  reasoning: "output meets the step's stated instructions",
   successScore: 0.9,
   quality: {
     outputCompleteness: 0.9,
