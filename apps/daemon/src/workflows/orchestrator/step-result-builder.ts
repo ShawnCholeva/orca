@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import {
-  StepResultScoringProposal,
+  StoredStepResultScoring,
   type StepResultScoringFacts,
   type WorkflowRun as WorkflowRunT,
   type WorkflowStepResult,
@@ -65,7 +65,7 @@ export function buildApprovalStepResult(
   finishedAt: string
 ): WorkflowStepResult {
   const facts = scoringFacts(deps, db, ctx.stepRun, "passed", finishedAt);
-  const proposal = StepResultScoringProposal.safeParse(scoring);
+  const proposal = StoredStepResultScoring.safeParse(scoring);
   if (proposal.success) {
     const result = buildScoredStepResult(facts, proposal.data);
     return withResultSummary(deps, db, ctx.stepRun, result);

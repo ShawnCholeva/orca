@@ -1,7 +1,7 @@
 import type {
   ConfirmationSummary as ConfirmationSummaryT,
   ConfirmationSummaryRefute,
-  StepResultScoringProposal,
+  StoredStepResultScoring,
   WorkflowStepOutputField,
   WorkflowStepOutputSchema,
 } from "@orca/contracts";
@@ -113,7 +113,7 @@ export function confirmationLead(
 export function buildConfirmationSummary(
   outputSchema: WorkflowStepOutputSchema,
   block: unknown,
-  scoring: StepResultScoringProposal | null,
+  scoring: StoredStepResultScoring | null,
   proposal: string | null,
   routing: StepSplitterRouting | null = null,
   refute: ConfirmationSummaryT["refute"] = null

@@ -6,7 +6,8 @@ import {
   OrchestratorModelChoice,
   WorkflowArtifactType,
   WorkflowStepResult,
-  StepResultScoringProposal
+  StepResultScoringProposal,
+  StoredStepResultScoring
 } from "./workflows/index.js";
 import { AdapterId } from "./adapters/ids.js";
 
@@ -1308,7 +1309,10 @@ export const ConfirmationSummary = z
         }).strict()
       )
       .max(32),
-    scoring: StepResultScoringProposal.nullable(),
+    // Built only from null (no scoring) or a re-parsed persisted stash
+    // (pending_completion_json.scoring) — never fresh model output directly — so
+    // this tolerates a pre-5.5 stash missing `reasoning`, like StoredStepResultScoring.
+    scoring: StoredStepResultScoring.nullable(),
     refute: ConfirmationSummaryRefute.nullable().optional(),
   })
   .strict();

@@ -5,7 +5,7 @@ import {
   ConfirmationSummaryRefute,
   PendingQuestion,
   ProviderRecoveryCheckpoint,
-  StepResultScoringProposal,
+  StoredStepResultScoring,
   WorkflowStepOutputSchema,
   WorkflowStepResult,
   type Activity as ActivityT,
@@ -228,7 +228,7 @@ function enrichConfirmationSummary(db: Database.Database, activity: ActivityT): 
   const schemaParse = WorkflowStepOutputSchema.safeParse(step?.outputSchema);
   if (!schemaParse.success) return activity;
 
-  const scoringParse = StepResultScoringProposal.safeParse(stash.scoring);
+  const scoringParse = StoredStepResultScoring.safeParse(stash.scoring);
   const refuteParse = ConfirmationSummaryRefute.nullable().safeParse(stash.refute ?? null);
   const confirmationSummary = buildConfirmationSummary(
     schemaParse.data,

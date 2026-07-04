@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REASONING_MAX, RefuteCompletionProposal, GateEvaluationProposal, StepResultScoringProposal, SplitEvaluationProposal, WorkflowStepResult, RefuteCompletionRequest } from "./index.js";
+import { REASONING_MAX, RefuteCompletionProposal, GateEvaluationProposal, StepResultScoringProposal, StoredStepResultScoring, SplitEvaluationProposal, WorkflowStepResult, RefuteCompletionRequest } from "./index.js";
 
 describe("Refute contracts", () => {
   it("round-trips a refuted proposal", () => {
@@ -45,5 +45,26 @@ describe("reasoning field (workflows)", () => {
     const base = { stepId: "s1", stepStatus: "completed", evaluationStatus: "scored", successScore: 1, quality: { outputCompleteness: 1, outputCorrectness: 1, instructionAdherence: 1, downstreamReadiness: 1, riskLevel: 0 }, performance: { durationSeconds: 1, retries: 0 }, outcome: { reason: "ok", producedArtifactsCount: 0, blockingIssuesCount: 0, warningsCount: 0, handoffReady: true } };
     expect(WorkflowStepResult.parse({ ...base, reasoning: "why" }).reasoning).toBe("why");
     expect(WorkflowStepResult.parse(base).reasoning ?? null).toBeNull();
+  });
+});
+
+describe("StoredStepResultScoring (re-parsing persisted scoring stashes)", () => {
+  const withoutReasoning = {
+    successScore: 1,
+    quality: { outputCompleteness: 1, outputCorrectness: 1, instructionAdherence: 1, downstreamReadiness: 1, riskLevel: 0 },
+    reason: "ok",
+    handoffReady: true,
+  };
+
+  it("accepts a pre-5.5 persisted stash missing reasoning", () => {
+    expect(StoredStepResultScoring.safeParse(withoutReasoning).success).toBe(true);
+  });
+
+  it("still accepts a stash that does carry reasoning", () => {
+    expect(StoredStepResultScoring.safeParse({ ...withoutReasoning, reasoning: "output complete" }).success).toBe(true);
+  });
+
+  it("the fresh-output schema stays strict (reasoning required) — unaffected by the stored variant", () => {
+    expect(StepResultScoringProposal.safeParse(withoutReasoning).success).toBe(false);
   });
 });

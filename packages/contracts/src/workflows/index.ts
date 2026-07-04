@@ -833,6 +833,15 @@ export const StepResultScoringProposal = z
   .strict();
 export type StepResultScoringProposal = z.infer<typeof StepResultScoringProposal>;
 
+// Re-parsing a PERSISTED scoring stash (pending_completion_json.scoring) written
+// before reasoning-first (5.5) landed: reasoning is a generation-time field, so a
+// historical stash legitimately lacks it. Fresh model output still uses the strict
+// StepResultScoringProposal (reasoning required).
+export const StoredStepResultScoring = StepResultScoringProposal.extend({
+  reasoning: z.string().max(REASONING_MAX).optional(),
+});
+export type StoredStepResultScoring = z.infer<typeof StoredStepResultScoring>;
+
 export const GateEvaluationProposal = z
   .object({
     reasoning: z.string().min(1).max(REASONING_MAX),

@@ -2,7 +2,7 @@ import {
   WORKFLOW_FAILURE_MAX_MESSAGE_CHARS,
   WorkflowStepResult,
   type StepResultScoringFacts,
-  type StepResultScoringProposal,
+  type StoredStepResultScoring,
   type WorkflowStepResult as WorkflowStepResultT,
   type WorkflowStepResultStatus,
 } from "@orca/contracts";
@@ -109,7 +109,7 @@ export function serializeStepResult(result: WorkflowStepResultT): string {
 
 export function buildScoredStepResult(
   facts: StepResultScoringFacts,
-  proposal: StepResultScoringProposal
+  proposal: StoredStepResultScoring
 ): WorkflowStepResultT {
   return WorkflowStepResult.parse({
     stepId: facts.stepId,

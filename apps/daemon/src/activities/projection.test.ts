@@ -235,6 +235,51 @@ describe("enrichConfirmationSummary", () => {
     expect(confirm?.confirmationSummary?.scoring?.successScore).toBe(0.9);
   });
 
+  it("re-parses a pre-5.5 stash whose scoring lacks reasoning (backward compat)", () => {
+    db.prepare(
+      `INSERT INTO workflow_step_runs (
+         id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status,
+         satisfied_exit_criteria_json, outstanding_exit_criteria_json,
+         blocked_reason, started_at, finished_at, fingerprint, pending_completion_json
+       ) VALUES ('sr3', 'g1', 'r1', 'frame', 2, 3, 'active', '[]', '[]',
+                 NULL, '2026-06-09', NULL, 'fp3', ?)`
+    ).run(
+      JSON.stringify({
+        block: { problem: "Can't rename" },
+        // Pre-5.5 stash: no `reasoning` on the scoring proposal (a generation-time
+        // field that didn't exist when this step was parked).
+        scoring: {
+          successScore: 0.7,
+          quality: {
+            outputCompleteness: 0.7,
+            outputCorrectness: 0.7,
+            instructionAdherence: 0.7,
+            downstreamReadiness: 0.7,
+            riskLevel: 0.3,
+          },
+          reason: "Pre-5.5 completion.",
+          handoffReady: true,
+        },
+        finishedAt: "2026-06-09T00:00:00.000Z",
+        proposal: "p",
+      })
+    );
+    db.prepare(
+      `INSERT INTO activities (
+         id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+         status, current_text, final_summary, source_kind, work_category, confidence,
+         pending_question, created_at, updated_at, completed_at
+       ) VALUES ('a-conf3', 'g1', 'r1', 'sr3', NULL, 0, 'paused_for_input', 'Awaiting confirmation', NULL,
+                 'step_confirmation_pending', NULL, NULL, NULL,
+                 '2026-06-09T00:00:00.000Z', '2026-06-09T00:00:00.000Z', NULL)`
+    ).run();
+
+    const activities = listActivitiesByGoal(db, "g1");
+    const confirm = activities.find((a) => a.id === "a-conf3");
+    expect(confirm?.confirmationSummary?.scoring).not.toBeNull();
+    expect(confirm?.confirmationSummary?.scoring?.successScore).toBe(0.7);
+  });
+
   it("carries a null refute through when the stash has none (5.4)", () => {
     const activities = listActivitiesByGoal(db, "g1");
     const confirm = activities.find((a) => a.sourceKind === "step_confirmation_pending");
