@@ -18,7 +18,7 @@ This sub-project fills that stage: a **cheap, pre-promotion, control-plane** sig
 
 1. **Evaluate is its own stage between propose and promote (Fig. 9 / §3.5.2).** "Proposed changes must be executed, verified, and made auditable before adoption." → the judge is a discrete `evaluate` step (its own route), downstream of propose, upstream of the governed apply — **not** folded into either.
 2. **The promotion criterion is spelled out (§3.5.2):** "improve reliability … without regressing previously solved cases." → the two-bucket corpus: a **regression check** over previously-solved outputs and an **improvement check** over the targeted-failure outputs.
-3. **Independent verification / anti-circularity (p.37; the AgentCoder Test-Designer / mode-collapse principle).** The judge runs in a **context-isolated** shadow session, adversarially framed to find regressions — never the approving orchestrator's session.
+3. **Independent verification / anti-circularity (p.37 AgentCoder Test-Designer; p.46 CANDOR Panelists "audit against the specification, not the implementation, to avoid contamination").** The judge runs in a **context-isolated** shadow session, adversarially framed to find regressions — never the approving orchestrator's session — and judges outputs **against the step instructions (the spec)**. It is **not** shown the orchestrator's self-reported scoring, and the solved/failure bucket labels derive **only** from independent signals (deterministic sensors + 5.4's refute), never the approver's self-score. That grounding on an *objective* substrate is also what avoids the field's "implicit convergence / no objective quality criterion" gap (p.46).
 4. **Calibrated evidence, not a binary (p.31/p.65).** Tri-state calibrated verdict (`pass`/`regression_risk`/`uncertain`) plus engine-added `unavailable`/`insufficient_evidence`; the human stays authoritative.
 5. **Deep telemetry → comparative diagnosis (p.33).** The judgment is grounded in concrete past outputs bucketed by their persisted `RefuteFacet`/`EvidenceFacet` verdicts, and is itself persisted as an auditable record on the proposal ledger.
 6. **Governed Harness Mutation (§3.5.3).** The judge *precedes and informs* the HITL-gated, privileged apply; it never activates a change itself.
@@ -57,14 +57,14 @@ analyze ─▶ [pending proposal card]
 ```
 
 - Runs **only** on a `pending` proposal (409 otherwise — a decided proposal has no promotion left to inform).
-- Re-judgeable: a second call re-runs and overwrites the persisted judgment (the human may re-evaluate after editing the corpus window or the instructions). Idempotent-by-overwrite; no accumulation.
+- **Write-once + idempotent** (append-only / auditable-rationale invariant, FUTURE_ARCH line 98; paper §3.5.3 "recorded with auditable rationales"): a proposal's instructions and its diagnosed evidence are fixed, and the corpus window is a fixed constant (§3), so the judge's inputs don't vary between calls — a second call **returns the existing judgment unchanged** rather than re-running and clobbering the audit record (mirroring `analyze`'s pending-proposal dedupe idiom). A human who wants a fresh look dismisses and re-analyzes.
 - **The apply route (`apply.ts` / `POST .../apply`) is not modified.** The verdict is a surfaced signal the human weighs; the deterministic apply guards (staleness, pending, baseline) are unchanged.
 
 ---
 
 ## 3. The corpus (observe → bucket — deterministic, the engine)
 
-`buildJudgeCorpus(db, proposal, period)` in a new `learning/corpus.ts`. Sources the step's real past outputs and buckets them by **independently-verified ground truth**.
+`buildJudgeCorpus(db, proposal)` in a new `learning/corpus.ts`. Sources the step's real past outputs over a **fixed corpus window** (`JUDGE_WINDOW`, a constant set in the plan — not the caller's viewing period, so the judge's inputs are stable and the write-once judgment stays reproducible/auditable) and buckets them by **independently-verified ground truth**.
 
 ### 3.1 Source — full historical join (not the diagnose sample)
 
@@ -113,8 +113,9 @@ export async function judgeInstructionEdit(
 
 ### 4.2 Prompt (corpus-scoped)
 
-Given `currentInstructions`, `proposedInstructions`, the compacted **solved** cases (labeled "previously PASSED — must not regress"), the compacted **failure** cases (labeled "targeted failure mode — should improve"), and the `targetedFailureMode`:
-- "For each previously-passing case, would the PROPOSED instructions still produce a passing output? Name any that would now regress (`regressionCases`)."
+Given `currentInstructions`, `proposedInstructions`, the compacted **solved** cases (labeled "previously PASSED independent verification — must not regress"), the compacted **failure** cases (labeled "targeted failure mode — should improve"), and the `targetedFailureMode`:
+- "Judge each output against the step **instructions** (the spec), not against any prior scoring — you are given none. Ground your judgment in the outputs themselves."
+- "For each previously-passing case, would the PROPOSED instructions still produce an output that satisfies the instructions? Name any that would now regress (`regressionCases`)."
 - "For the targeted-failure cases, would the PROPOSED instructions plausibly fix the failure?"
 - "Return `pass` only if you find no concrete regression AND the edit addresses the failure mode; `regression_risk` if a previously-solved case would concretely break; `uncertain` if plausible but you genuinely cannot tell — do NOT guess. List in `inputsConsidered` exactly which cases you used."
 
@@ -146,6 +147,11 @@ JudgeInstructionEditRequest {      // the engine assembles this (LLM never sees 
   solvedCases: { stepRunId: string; output: string }[]     // compacted, K<=5
   failureCases: { stepRunId: string; output: string }[]    // compacted, K<=5
 }  // superRefine size-bound to ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES
+// Anti-contamination (CANDOR p.46 / AgentCoder Test-Designer p.37): the request
+// deliberately EXCLUDES the orchestrator's self-reported scoring. The judge evaluates
+// the outputs against the step instructions (the spec), and the bucket labels derive
+// only from INDEPENDENT signals — deterministic sensors (EvidenceFacet) + 5.4's refute
+// (RefuteFacet) — never the approver's self-score. That is what makes it non-circular.
 ```
 
 **The persisted judgment (engine-wrapped; server enrichment on the proposal):**
@@ -156,12 +162,14 @@ CounterfactualJudgment {
   verdict: JudgeOutcome
   regressionRisk: "none" | "possible" | "likely" | null
   addressesFailureMode: "yes" | "partial" | "no" | "unclear" | null
-  regressionCases: string[]
+  regressionCases: string[]        // the LLM's free-text subset it flagged
   reason: string | null
+  solvedCaseIds: string[]           // engine-recorded stepRunIds actually judged (drill-through, p.33)
+  failureCaseIds: string[]          // engine-recorded stepRunIds actually judged (drill-through, p.33)
   solvedSampleSize: number
   failureSampleSize: number
   judgedAt: string
-  judgedAgainstVersion: number     // templateVersionAtProposal at judge time (staleness honesty)
+  judgedAgainstVersion: number     // templateVersionAtProposal at judge time (staleness/version honesty)
 }
 ```
 `TemplateInstructionProposal` gains an optional `judgment?: CounterfactualJudgment | null` field (additive/optional on the public spine).
@@ -183,10 +191,10 @@ Persisted when the judge runs (not derived-on-read like `regressionDetected` —
 
 | Route | Purpose | Errors |
 |---|---|---|
-| `POST /v1/learning/proposals/:id/judge?period=` | build corpus → isolated judge → persist + return `{ proposal }` (judgment attached) | 404 unknown proposal, 409 not pending, 400 bad period |
+| `POST /v1/learning/proposals/:id/judge` | build corpus → isolated judge → persist (write-once) + return `{ proposal }` (judgment attached); **idempotent** — returns the existing judgment if already judged | 404 unknown proposal, 409 not pending |
 
-- Registered in `registerLearningRoutes` (`learning/routes.ts`) beside the existing proposal routes; deps gain `shadowAsk`.
-- `learning/usecases.ts` gains `judgeProposal(deps, db, proposalId, period, nowIso?)`: load proposal → 409 if not pending → resolve adapter → `buildJudgeCorpus` → (either bucket below its MIN short-circuits to `insufficient_evidence`, no shadow call) → `judgeInstructionEdit` → wrap into `CounterfactualJudgment` (`unavailable` on null) → `setProposalJudgment` → return the hydrated proposal.
+- Registered in `registerLearningRoutes` (`learning/routes.ts`) beside the existing proposal routes; deps gain `shadowAsk`. No `period` query param (fixed `JUDGE_WINDOW`).
+- `learning/usecases.ts` gains `judgeProposal(deps, db, proposalId, nowIso?)`: load proposal → 404 if unknown → 409 if not pending → **if already judged, return the hydrated proposal unchanged (idempotent, no clobber)** → resolve adapter → `buildJudgeCorpus` → (either bucket below its MIN short-circuits to `insufficient_evidence`, no shadow call) → `judgeInstructionEdit` → wrap into `CounterfactualJudgment` (`unavailable` on null) → `setProposalJudgment` → return the hydrated proposal.
 
 ---
 
@@ -197,7 +205,7 @@ Persisted when the judge runs (not derived-on-read like `regressionDetected` —
 **Card judgment states:**
 1. **Not yet judged** — "Evaluate this edit" button (pre-promotion, opt-in).
 2. **Evaluating** — pending spinner on the card.
-3. **Judged** — verdict chip (`pass` ✓ / `regression_risk` ⚠ / `uncertain` ? / `insufficient_evidence` — / `unavailable` —), `reason`, the `regressionCases` list, and `"judged N solved · M failure cases"` for evidence honesty. The Apply / Edit&Apply / Dismiss buttons are **unchanged and unblocked** — the verdict sits beside them as advice.
+3. **Judged** — verdict chip (`pass` ✓ / `regression_risk` ⚠ / `uncertain` ? / `insufficient_evidence` — / `unavailable` —), `reason`, the `regressionCases` list, and `"judged N solved · M failure cases"` for evidence honesty. The engine-recorded `solvedCaseIds`/`failureCaseIds` **drill through** to the concrete past outputs (reuse A's transition→provenance/replay links — p.33 "linked to concrete artifacts"). The Apply / Edit&Apply / Dismiss buttons are **unchanged and unblocked** — the verdict sits beside them as advice.
 
 ---
 
@@ -221,10 +229,10 @@ This omission is documented, not hidden, per the binding design constraints.
 ## 11. Testing (TDD — tests before implementation)
 
 - **`corpus.ts`:** the template join returns the step's `step_output` bodies; solved bucket keyed `RefuteFacet.upheld` primary / `EvidenceFacet.passed` fallback; failure bucket resolves the proposal's `sampleTransitionIds`/`revisionSignalIds` (superseded attempt preferred for revision cases); K-cap per bucket; failure ⊄ solved; empty solved bucket flagged; size-bound compaction.
-- **`judge.ts`:** parses each verdict; `uncertain` respected (not coerced); preserves `regressionCases` on `regression_risk`; ask-throws/non-JSON/invalid → `null` + one `[judge]` log (mocked); retry-once then succeed; prompt embeds current+proposed instructions and both labeled buckets; asks the `${templateId}::judge` key (never a bare goalId); spawn+teardown per call (asserted via the fake session manager).
-- **`usecases.judgeProposal`:** happy path persists a `CounterfactualJudgment` and returns the hydrated proposal; 409 on a non-pending proposal (no shadow call); empty solved bucket short-circuits to `insufficient_evidence` (no shadow call); null shadow → `unavailable`; **apply route unaffected** (a judged proposal applies exactly as an unjudged one — assert apply reads nothing from `judge_json`).
+- **`judge.ts`:** parses each verdict; `uncertain` respected (not coerced); preserves `regressionCases` on `regression_risk`; ask-throws/non-JSON/invalid → `null` + one `[judge]` log (mocked); retry-once then succeed; prompt embeds current+proposed instructions and both labeled buckets; **the request carries no self-reported scoring** (anti-contamination — assert the assembled `JudgeInstructionEditRequest` has no scoring field); asks the `${templateId}::judge` key (never a bare goalId); spawn+teardown per call (asserted via the fake session manager).
+- **`usecases.judgeProposal`:** happy path persists a `CounterfactualJudgment` (with engine-recorded `solvedCaseIds`/`failureCaseIds` matching the corpus) and returns the hydrated proposal; **idempotent** — a second call returns the existing judgment and makes **no** second shadow call (no clobber); 409 on a non-pending proposal (no shadow call); either-bucket-below-MIN short-circuits to `insufficient_evidence` (no shadow call); null shadow → `unavailable`; **apply route unaffected** (a judged proposal applies exactly as an unjudged one — assert apply reads nothing from `judge_json`).
 - **contracts:** zod round-trip for `JudgeInstructionEditProposal`, `JudgeInstructionEditRequest`, `CounterfactualJudgment`; the optional `judgment` field on `TemplateInstructionProposal`.
-- **routes:** 200 shape (judgment attached); 404 unknown proposal; 409 not pending; 400 bad period.
+- **routes:** 200 shape (judgment attached); 200 idempotent re-call returns the same judgment; 404 unknown proposal; 409 not pending.
 - **desktop:** card renders each verdict chip + reason + regressionCases + sample sizes; Apply/Dismiss present and enabled regardless of verdict (informs, never overrides).
 
 ---
@@ -248,7 +256,7 @@ This omission is documented, not hidden, per the binding design constraints.
 1. On a **pending** proposal, "Evaluate this edit" runs a deterministic corpus build (real past `step_output`s, bucketed by persisted `RefuteFacet`/`EvidenceFacet` verdict) + **one** isolated, adversarial shadow judgment, and surfaces a calibrated `CounterfactualJudgment` on the card **before** the human promotes.
 2. The judgment reports regression risk over previously-solved cases and whether the edit addresses the targeted failure mode, grounded in concrete `regressionCases`, with honest `solvedSampleSize`/`failureSampleSize` (and `insufficient_evidence` when the solved bucket is empty; `unavailable` when the shadow call fails).
 3. The judge runs in a **context-isolated** `${templateId}::judge` session (spawn + teardown per call), never the approving orchestrator's session.
-4. The judgment is an **auditable row** (persisted `judge_json` on the proposal ledger) and rendered on the card.
+4. The judgment is an **auditable, write-once row** (persisted `judge_json` on the proposal ledger; idempotent re-call, no clobber), grounded in engine-recorded `solvedCaseIds`/`failureCaseIds` that **drill through** to the concrete past outputs, and rendered on the card.
 5. **The apply route is unchanged** — the verdict informs, never gates: Apply / Edit&Apply / Dismiss stay enabled for every verdict; the deterministic apply guards are untouched.
 6. The judge touches **no execution-plane code** (imagined execution over persisted outputs via the `ShadowAsk` seam); one additive contract module, one additive nullable column, one additive route.
 7. The imagined-vs-real-replay approximation and the still-deferred replay-re-run path are **documented** (§9), not hidden.
