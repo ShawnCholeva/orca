@@ -1,16 +1,19 @@
 import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import { MetricPeriod } from "@orca/contracts";
-import { analyzeTemplate, listProposalsEnriched, type AnalyzeDeps } from "./usecases.js";
+import { analyzeTemplate, listProposalsEnriched, judgeProposal, type AnalyzeDeps } from "./usecases.js";
 import { getProposal, updateProposalDecision } from "./store.js";
 import {
   applyLearnedInstructionEdit, rollbackAppliedProposal, restoreTemplateDefault,
   StaleProposalError, ProposalNotPendingError, ProposalNotAppliedError, NoBaselineError, StepNotFoundError,
 } from "./apply.js";
+import type { ShadowAsk } from "../workflows/orchestrator/recover-step-scoring.js";
 
 export interface LearningRouteDeps extends AnalyzeDeps {
   db: Database.Database;
   actor: () => string;   // resolves the acting owner id for decidedBy (single-owner today)
+  shadowAsk: ShadowAsk;
+  terminateShadow: (key: string) => Promise<void> | void;
 }
 
 function templateExists(db: Database.Database, id: string): boolean {
@@ -58,6 +61,18 @@ export function registerLearningRoutes(server: FastifyInstance, deps: LearningRo
     if (p.status !== "pending") { reply.status(409); return { error: { code: "not_pending" } }; }
     updateProposalDecision(db, id, { status: "dismissed", decidedAt: now(), decidedBy: deps.actor() });
     return { proposal: getProposal(db, id) };
+  });
+
+  server.post("/v1/learning/proposals/:id/judge", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      const proposal = await judgeProposal({ shadowAsk: deps.shadowAsk, terminateShadow: deps.terminateShadow }, db, id);
+      return { proposal };
+    } catch (e) {
+      if (e instanceof StepNotFoundError) { reply.status(404); return { error: { code: "not_found" } }; }
+      if (e instanceof ProposalNotPendingError) { reply.status(409); return { error: { code: "not_pending" } }; }
+      throw e;
+    }
   });
 
   server.post("/v1/learning/proposals/:id/rollback", async (req, reply) => {

@@ -2232,6 +2232,13 @@ export function createServer(
     db,
     broker: daemonContext.orchestrationTransportBroker,  // the broker the orchestrator uses
     actor: () => "owner",                                // single-owner today; tenancy replaces this
+    shadowAsk: {
+      ask: async (goalId, input) => {
+        await shadowSessions.spawn(goalId, input.adapterId);
+        return shadowSessions.ask(goalId, input);
+      },
+    },
+    terminateShadow: (key) => shadowSessions.terminate(key),
   });
 
   // OTLP/JSON ingest (loopback worker telemetry). Auth via the global Bearer hook

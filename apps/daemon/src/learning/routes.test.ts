@@ -58,7 +58,11 @@ function seed(db: Database.Database) {
 function deps() {
   const parsed = { proposedInstructions: "Generate a proposal, then validate it against the output schema.", predictedImprovement: "fewer invalid", invariantsPreserved: ["safetyCompliance"], rationale: "r" };
   const broker: BrokerLike = { propose: vi.fn(async () => ({ status: "proposed" as const, parsed })) };
-  return { broker, actor: () => "owner" };
+  return {
+    broker, actor: () => "owner",
+    shadowAsk: { ask: vi.fn(async () => ({ text: "" })) },
+    terminateShadow: vi.fn(() => {}),
+  };
 }
 
 function proposalFixture(over: Partial<TemplateInstructionProposal> = {}): TemplateInstructionProposal {
