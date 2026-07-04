@@ -37,7 +37,7 @@ export interface ShadowSessionDeps {
   tmux?: TmuxRunner;                  // injectable for tests; default shells out to tmux
   trustPattern?: RegExp;              // matches the folder-trust prompt
   pollMs?: number;                    // capture-pane poll interval (default 300)
-  startupTimeoutMs?: number;          // max wait for trust+ready (default 20000)
+  startupTimeoutMs?: number;          // max wait for trust+ready (default 45000; env ORCA_SHADOW_STARTUP_TIMEOUT_MS)
   readyQuietMs?: number;              // settle delay after trust before "ready" (default 1500)
   submitSettleMs?: number;            // delay after paste before Enter, so a bracketed paste is ingested (default 200)
   submitConfirmMs?: number;           // max wait for the turn to start before re-sending Enter (default 2000)
@@ -70,6 +70,25 @@ const HOOK_TRUST_PROMPT = /hook needs review|hooks need review|press t to trust|
 // not a real ready input prompt — must NOT satisfy the ready branch.
 const BLOCKING_INTERSTITIAL = /update available|press enter to continue|\b\d+\.\s*(update now|skip)\b/i;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Cold-starting an interactive Claude Code session (trust prompt -> hook trust ->
+// ready input box) routinely needs well over 20s, especially a SECOND concurrent
+// session (e.g. the refute's `${goalId}::refute`) on a busy machine. A too-tight
+// budget makes the refute time out -> "unavailable" -> a needless human pause and a
+// no-verification metrics hit. Default 45s; tunable per-deps or via env.
+export const DEFAULT_STARTUP_TIMEOUT_MS = 45_000;
+export function resolveStartupTimeoutMs(
+  depsValue: number | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  if (typeof depsValue === "number" && Number.isFinite(depsValue) && depsValue > 0) return depsValue;
+  const raw = env.ORCA_SHADOW_STARTUP_TIMEOUT_MS;
+  if (raw != null) {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_STARTUP_TIMEOUT_MS;
+}
 
 export class ShadowSessionManager {
   private readonly sessions = new Map<string, Session>();
@@ -113,7 +132,7 @@ export class ShadowSessionManager {
   private async startup(goalId: string, name: string, provider: AgentProvider): Promise<void> {
     const pattern = this.deps.trustPattern ?? TRUST_DEFAULT;
     const poll = this.deps.pollMs ?? 300;
-    const timeoutMs = this.deps.startupTimeoutMs ?? 20_000;
+    const timeoutMs = resolveStartupTimeoutMs(this.deps.startupTimeoutMs);
     const deadline = Date.now() + timeoutMs;
     let trustAnswered = false;
     let hookTrustAnswered = false;
