@@ -1,6 +1,6 @@
 import type {
   CompositionFacet, EvidenceFacet, FacetKey, HarnessTransition, HarnessTransitionBoundary,
-  RiskFacet, StateDepsFacet, TelemetryFacet,
+  RefuteFacet, RiskFacet, StateDepsFacet, TelemetryFacet,
 } from "@orca/contracts";
 import { recordHarnessTransition, type HarnessTransitionCtx } from "./usecases.js";
 
@@ -10,6 +10,7 @@ type FacetValues = {
   stateDeps: StateDepsFacet;
   telemetry: TelemetryFacet;
   composition: CompositionFacet;
+  refute: RefuteFacet;
 };
 
 type EmitInput<F extends FacetKey> = {

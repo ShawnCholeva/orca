@@ -177,6 +177,7 @@ describe("runMigrations", () => {
       "0049_learning_proposals.sql",
       "0050_workflow_compositions.sql",
       "0051_workflow_template_inputs.sql",
+      "0052_harness_transitions_refute.sql",
     ]);
   });
 
@@ -320,6 +321,7 @@ describe("runMigrations", () => {
       "0049_learning_proposals.sql",
       "0050_workflow_compositions.sql",
       "0051_workflow_template_inputs.sql",
+      "0052_harness_transitions_refute.sql",
     ]);
 
     const goalCount = (
@@ -616,6 +618,7 @@ describe("session tables migration", () => {
       "0049_learning_proposals.sql",
       "0050_workflow_compositions.sql",
       "0051_workflow_template_inputs.sql",
+      "0052_harness_transitions_refute.sql",
     ]);
 
     const tables = (
@@ -1145,6 +1148,7 @@ describe("migration 0010 workflows", () => {
       "0049_learning_proposals.sql",
       "0050_workflow_compositions.sql",
       "0051_workflow_template_inputs.sql",
+      "0052_harness_transitions_refute.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1751,10 +1755,18 @@ describe("migration 0012 orchestration transport", () => {
       "0049_learning_proposals.sql",
       "0050_workflow_compositions.sql",
       "0051_workflow_template_inputs.sql",
+      "0052_harness_transitions_refute.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
     expect(rerun.applied).toEqual([]);
+  });
+
+  it("0052 adds harness_transitions.refute_json", () => {
+    const db = freshDb();
+    runMigrations(db, defaultMigrationsDir());
+    const cols = db.prepare("PRAGMA table_info(harness_transitions)").all() as { name: string }[];
+    expect(cols.some((c) => c.name === "refute_json")).toBe(true);
   });
 });
 
