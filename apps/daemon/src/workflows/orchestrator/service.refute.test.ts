@@ -436,6 +436,15 @@ describe("OrchestratorService L5 refute gate", () => {
     expect(t.evidence?.verdict).toBe("passed");
     expect(t.refute).toMatchObject({ verdict: "refuted", issue_refs: ["fix-y"] });
     expect(t.telemetry?.outcome).toMatchObject({ status: "failed", failure_code: "refute_veto" });
+
+    // The step is being revised because the refute vetoed it, so the workflow
+    // event stream must NOT claim validation.passed (the sensors ran — validation.run
+    // is present — but the step did not pass as a whole).
+    const validationTypes = (
+      db.prepare("SELECT type FROM events WHERE type LIKE 'workflow.validation%'").all() as { type: string }[]
+    ).map((e) => e.type);
+    expect(validationTypes).toContain("workflow.validation.run");
+    expect(validationTypes).not.toContain("workflow.validation.passed");
   });
 
   it("gate: no-oracle step -> refute called with the independent '<goalId>::refute' session key", async () => {

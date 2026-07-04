@@ -1301,15 +1301,21 @@ export class OrchestratorService {
               options
             );
           }
-          evStaged.push(
-            appendWorkflowEvent(
-              db,
-              "workflow.validation.passed",
-              { goalId: ctx.run.goalId, workflowRunId: ctx.run.id, stepRunId: ctx.stepRun.id },
-              now(),
-              options.idFactory
-            )
-          );
+          // Sensors passed — but if the refute vetoed the completion, the step is
+          // about to be revised, so it did NOT pass validation as a whole. Emit
+          // validation.passed only when the refute did not veto (the refute_veto is
+          // still recorded on the step_complete transition above either way).
+          if (!refuteVetoed) {
+            evStaged.push(
+              appendWorkflowEvent(
+                db,
+                "workflow.validation.passed",
+                { goalId: ctx.run.goalId, workflowRunId: ctx.run.id, stepRunId: ctx.stepRun.id },
+                now(),
+                options.idFactory
+              )
+            );
+          }
           publishStaged(options.bus, evStaged);
         } else {
           // No deterministic execution oracle for this step — the refute is the
