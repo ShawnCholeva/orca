@@ -215,6 +215,7 @@ import {
   pauseForProviderRecovery as pauseForProviderRecoveryActivity,
 } from './activities/store.js';
 import { resumeActiveRuns } from './workflows/orchestrator/resume.js';
+import { buildLivenessWatchdogDeps, livenessWatchdogTick } from './workflows/orchestrator/liveness-watchdog.js';
 import { joinChildRun } from './workflows/composition/join.js';
 import { realVersionProbe } from './harness-state/workspace-version.js';
 import { registerWorkflowTemplateRoutes } from './workflows/templates/routes.js';
@@ -957,6 +958,33 @@ export function createServer(
       )
       .catch((err) => console.error("[workflow] onWorkflowSessionCompleted error", err));
   });
+
+  // Liveness watchdog: a tmux worker can die mid-turn (crash/kill/tmux death)
+  // without firing its Stop hook, so no session terminal event is emitted and the
+  // run stalls forever on its step node behind a spinner. This periodic tick reaps
+  // such dead workers — emitting the same session.failed signal the boot path uses,
+  // which the subscriber above routes into onWorkflowSessionCompleted → crash-retry
+  // (respawn under cap, escalate to a human at cap). Production-gated (same as boot
+  // resume) so createServer stays inert in tests. A grace window protects a
+  // just-spawned worker whose tmux session does not exist yet.
+  if (deps?.resumeActiveRunsOnBoot) {
+    const watchdogMs = Number(process.env["ORCA_LIVENESS_WATCHDOG_MS"] ?? 5000);
+    const watchdogGraceMs = Number(process.env["ORCA_LIVENESS_GRACE_MS"] ?? 15000);
+    const watchdogDeps = buildLivenessWatchdogDeps(db, eventBus, {
+      isTmuxAlive: (sessionId) => workerSessions.isTmuxAlive(sessionId),
+      now: daemonContext.now ?? (() => new Date().toISOString()),
+      graceMs: watchdogGraceMs,
+    });
+    const watchdogTimer = setInterval(() => {
+      void livenessWatchdogTick(watchdogDeps).catch((err) =>
+        console.error("[liveness-watchdog] tick error", err)
+      );
+    }, watchdogMs);
+    watchdogTimer.unref?.();
+    server.addHook("onClose", async () => {
+      clearInterval(watchdogTimer);
+    });
+  }
 
   const unsubscribeActivityEvents = eventBus.subscribe((event) => {
     if (event.type !== "workflow.step.started") return;
