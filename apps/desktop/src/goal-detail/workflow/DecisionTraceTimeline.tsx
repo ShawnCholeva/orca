@@ -56,7 +56,7 @@ export function DecisionTraceTimeline({ decisions, attempts, onOpenTransportDebu
                 <ul className="workflow-decision-influences" aria-label="Influenced by">
                   {decision.influencedBy.map((influence) => (
                     <li key={`${decision.decisionId}:${influence.kind}:${influence.id}`}>
-                      {influence.kind}:{influence.label} ({influence.effect})
+                      {summarizeInfluence(influence)}
                     </li>
                   ))}
                 </ul>
@@ -73,6 +73,22 @@ export function DecisionTraceTimeline({ decisions, attempts, onOpenTransportDebu
       )}
     </section>
   );
+}
+
+// Humanize the raw influence kind so the decision trace reads for a person, not an
+// engineer: `workflow_step:Verify (satisfied)` -> `Step: Verify — satisfied`. (#4)
+const INFLUENCE_KIND_LABELS: Record<string, string> = {
+  workflow_step: "Step",
+  operator_readiness: "Operator readiness",
+  step_output: "Step output",
+  artifact: "Artifact",
+};
+
+function summarizeInfluence(influence: { kind: string; label: string; effect: string }): string {
+  const kind =
+    INFLUENCE_KIND_LABELS[influence.kind] ??
+    influence.kind.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+  return `${kind}: ${influence.label} — ${influence.effect}`;
 }
 
 function summarizeAction(value: string): string {

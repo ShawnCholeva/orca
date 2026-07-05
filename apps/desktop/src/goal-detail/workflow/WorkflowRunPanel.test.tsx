@@ -194,8 +194,8 @@ describe("WorkflowRunPanel", () => {
     });
 
     expect(screen.getAllByText("advance: execution")).toHaveLength(2);
-    expect(screen.getByText("workflow_step:Issue Breakdown (satisfied)")).toBeInTheDocument();
-    expect(screen.getByText("artifact:Issue DAG (required)")).toBeInTheDocument();
+    expect(screen.getByText("Step: Issue Breakdown — satisfied")).toBeInTheDocument();
+    expect(screen.getByText("Artifact: Issue DAG — required")).toBeInTheDocument();
     expect(screen.getByText("Implement workflow panel")).toBeInTheDocument();
   });
 

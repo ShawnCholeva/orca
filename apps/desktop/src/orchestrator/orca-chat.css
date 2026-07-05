@@ -661,6 +661,22 @@
   gap: 6px 14px;
 }
 
+/* Clarifies that the drawer's numbers are the orchestrator's self-assessment,
+   distinct from the independently-verified score on the Metrics tab. (#1) */
+.step-confirm-scores-note {
+  grid-column: 1 / -1;
+  margin: 0 0 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+.step-result-metrics-note {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+
 .step-result-metrics > div {
   display: flex;
   justify-content: space-between;

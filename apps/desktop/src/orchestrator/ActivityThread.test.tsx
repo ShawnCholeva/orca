@@ -182,6 +182,10 @@ it("renders lead, fields, a collapsed scores dropdown, and Continue + Revise", (
   expect(screen.queryByText(/Output completeness/i)).not.toBeInTheDocument();
   fireEvent.click(screen.getByTestId("confirm-scores-toggle"));
   expect(screen.getByText(/Output completeness/i)).toBeInTheDocument();
+  // #1: the drawer is the orchestrator's SELF-assessment, distinct from the
+  // independently-verified Metrics score — labeled so a human can't conflate them.
+  expect(screen.getByText(/Self-reported success/i)).toBeInTheDocument();
+  expect(screen.getByText(/orchestrator's own assessment/i)).toBeInTheDocument();
   fireEvent.click(screen.getByTestId("step-confirm-revise"));
   expect(onRevise).toHaveBeenCalledWith("r1");
   fireEvent.click(screen.getByTestId("step-confirm-continue"));

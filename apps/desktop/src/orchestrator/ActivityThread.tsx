@@ -202,7 +202,8 @@ export function ConfirmationCard({
         </div>
         {scoresOpen && scores ? (
           <dl ref={metricsRef} className="step-result-metrics step-confirm-metrics">
-            <div><dt>Success</dt><dd>{pct(scores.successScore)}</dd></div>
+            <p className="step-confirm-scores-note">The orchestrator's own assessment of this step — not the independently-verified score shown on the Metrics tab.</p>
+            <div><dt>Self-reported success</dt><dd>{pct(scores.successScore)}</dd></div>
             <div><dt>Output completeness</dt><dd>{pct(scores.quality.outputCompleteness)}</dd></div>
             <div><dt>Output correctness</dt><dd>{pct(scores.quality.outputCorrectness)}</dd></div>
             <div><dt>Instruction adherence</dt><dd>{pct(scores.quality.instructionAdherence)}</dd></div>
@@ -299,6 +300,7 @@ export function StepResultCard({ activity }: { activity: Activity }) {
           <div className="step-result-counts">
             {r.outcome.producedArtifactsCount} artifacts · {r.outcome.blockingIssuesCount} blockers · {r.outcome.warningsCount} warnings
           </div>
+          {scored ? <p className="step-result-metrics-note">Orchestrator self-assessment — see the Metrics tab for independently-verified strength.</p> : null}
           <dl className="step-result-metrics">
             {scored ? (
               <>
