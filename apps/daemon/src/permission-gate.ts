@@ -34,7 +34,13 @@ export function resolvePermissionDecision(
   sessionId: string,
   payload: { toolName: string; toolInput: unknown; toolUseId: string }
 ): GateDecision {
-  const sessionRow = ctx.db.prepare("SELECT goal_id FROM sessions WHERE id = ?").get(sessionId) as { goal_id: string } | undefined;
+  const sessionRow = ctx.db
+    .prepare(
+      `SELECT s.goal_id AS goal_id, s.workflow_step_run_id AS step_run_id, sr.workflow_run_id AS run_id
+       FROM sessions s LEFT JOIN workflow_step_runs sr ON sr.id = s.workflow_step_run_id
+       WHERE s.id = ?`
+    )
+    .get(sessionId) as { goal_id: string; step_run_id: string | null; run_id: string | null } | undefined;
   if (!sessionRow) return "deny";
   const goalRow = ctx.db
     .prepare("SELECT operating_mode, worker_permission_mode FROM goals WHERE id = ?")
@@ -54,6 +60,11 @@ export function resolvePermissionDecision(
       { db: ctx.db, bus: ctx.bus, now: ctx.now, idFactory: ctx.idFactory },
       {
         goalId: sessionRow.goal_id,
+        // Thread the worker session's run/step ids so the tool_gate transition
+        // joins into per-template metrics (safetyCompliance) and is visible to
+        // the 5.4 refute risk-gate (stepToolRiskClass queries by step_run_id).
+        workflowRunId: sessionRow.run_id ?? null,
+        workflowStepRunId: sessionRow.step_run_id ?? null,
         risk: {
           risk_class: classification.riskClass,
           permission_tier: classification.permissionTier,
