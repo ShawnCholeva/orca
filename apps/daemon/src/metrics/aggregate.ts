@@ -211,7 +211,21 @@ export function computeStepMetrics(input: {
     const stepRuns = runsByStep.get(stepTemplateId) ?? [];
     const stepCompletes = ts.filter((t) => t.transition.boundary === "step_complete");
     const evidenceCompletes = stepCompletes.filter((t) => t.transition.evidence);
-    const verification = dimsFromTransitions(ts).verification_strength.value ?? 0;
+    // The delivered result of a step is its FINAL attempt. A veto-then-pass step
+    // emits two step_completes for one (run, step); scoring over both double-counts
+    // the recovered veto and drags the headline to 50 even though the run delivered
+    // (the recovered/failed counters already dedup to finals). Reduce to the final
+    // attempt per run — the latest step_complete by createdAt — so the score reflects
+    // the verified END state (p.62 oracle-adequacy: score the delivered state). (#1/#7)
+    const finalStepCompletes = (() => {
+      const byRun = new Map<string, (typeof stepCompletes)[number]>();
+      for (const t of stepCompletes) {
+        const key = t.transition.workflowRunId ?? t.transition.id;
+        const prev = byRun.get(key);
+        if (!prev || t.transition.createdAt > prev.transition.createdAt) byRun.set(key, t);
+      }
+      return [...byRun.values()];
+    })();
 
     // CHANNEL 1 — quality / scope. verdictPassRate credits the independent refute
     // (RefuteFacet, 5.4) for no-oracle completions and scores over VERIFIED completes
@@ -224,9 +238,12 @@ export function computeStepMetrics(input: {
       t.transition.evidence?.verdict === "failed" ||
       t.transition.evidence?.verdict === "partial" ||
       (t.transition.evidence == null && t.transition.refute?.verdict === "refuted");
-    const verifiedCompletes = stepCompletes.filter((t) => vPass(t) || vFail(t));
-    const verdictPassRate = verifiedCompletes.length === 0 ? 0 :
+    const verifiedCompletes = finalStepCompletes.filter((t) => vPass(t) || vFail(t));
+    // null when nothing is verified (insufficient signal), distinct from 0 (all failed).
+    const verificationValue = verifiedCompletes.length === 0 ? null :
       verifiedCompletes.filter(vPass).length / verifiedCompletes.length;
+    const verdictPassRate = verificationValue ?? 0;
+    const verification = verificationValue ?? 0;
     const allSensors = evidenceCompletes.flatMap((t) => t.transition.evidence!.sensorsRun);
     const sensorPassRate = allSensors.length === 0 ? 1 :
       allSensors.filter((s) => s.result === "passed").length / allSensors.length;

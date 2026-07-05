@@ -42,6 +42,25 @@ describe("computeStepMetrics", () => {
     ]);
     expect(step.recentReasons.map((r) => r.reason)).toContain("fail 2");
   });
+
+  it("scores the FINAL attempt per run: a veto-then-pass step is 100, not 50 (#1/#7)", () => {
+    // Same run+step emits two step_completes: a vetoed attempt then a revised pass.
+    const ts = [
+      sc("v1", "r1", "s", "failed", true, "2026-05-01T00:00:00.000Z"),
+      sc("p1", "r1", "s", "passed", true, "2026-05-01T00:10:00.000Z"),
+    ];
+    const runs: TemplateStepRun[] = [
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "vetoed", templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "passed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: "2026-05-01T00:10:00.000Z", blockedReason: null, templateVersion: 1 },
+    ];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    // The delivered state is the final (passed) attempt; the intermediate veto is
+    // credited as a recovery, not double-counted against the score.
+    expect(step.score).toBe(100);
+    expect(step.quality.verdictPassRate).toBe(1);
+    expect(step.recovered).toBe(1);
+    expect(step.failed).toBe(0);
+  });
 });
 
 describe("deriveInsights", () => {
