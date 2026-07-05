@@ -9,7 +9,16 @@ import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
 import { insertRecommendation } from "../../recommendations/projection.js";
 import { insertFeedback, resetFeedbackStatements } from "../../recommendations/feedback.js";
 import { recommendationFingerprint } from "../../recommendations/fingerprint.js";
-import { recommendationFeedbackInterventions } from "./dispatch-engine.js";
+import { recommendationFeedbackInterventions, stepEvaluationFailed } from "./dispatch-engine.js";
+
+describe("stepEvaluationFailed", () => {
+  it("is true only when the persisted step result's evaluationStatus is failed", () => {
+    expect(stepEvaluationFailed(JSON.stringify({ evaluationStatus: "failed" }))).toBe(true);
+    expect(stepEvaluationFailed(JSON.stringify({ evaluationStatus: "scored" }))).toBe(false);
+    expect(stepEvaluationFailed(null)).toBe(false);
+    expect(stepEvaluationFailed("not json")).toBe(false);
+  });
+});
 
 const tempDirs: string[] = [];
 const PROPOSED = JSON.stringify({ kind: "ask_user", question: "Proceed?" });

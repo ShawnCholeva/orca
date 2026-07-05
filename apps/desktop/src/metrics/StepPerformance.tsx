@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { StepMetrics, TemplateMetricsDetail, TemplateMetricsSummary } from "@orca/contracts";
 import { Pill } from "../workspaces/primitives";
-import { gradeFor, latencyLabel, statusForScore, statusMeta } from "./metrics-data";
+import { gradeFor, latencyLabel, statusForStep, statusMeta } from "./metrics-data";
 import { OutcomeBar, Panel, SectionLabel, Sparkline } from "./metrics-charts";
 import { ChevronDown, ChevronRight, Sparkle, Workflow } from "./metrics-icons";
 
@@ -59,7 +59,7 @@ function Chips({ label, items }: { label: string; items: string[] }) {
 }
 
 export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMetrics; index: number; isLast: boolean; open: boolean; onToggle: () => void }) {
-  const status = statusForScore(step.score);
+  const status = statusForStep(step);
   const m = statusMeta[status];
   const low = step.confidence === "low";
   return (
@@ -74,7 +74,7 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{step.name}</span>
             <Pill tone={m.tone} size="xs">{m.label}</Pill>
-            {low && <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }}>n={step.sampleSize}</span>}
+            {low && <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }} title={`Based on only ${step.sampleSize} run${step.sampleSize === 1 ? "" : "s"} — low confidence (fewer than 5). Scores here can swing as more runs accrue.`}>n={step.sampleSize}</span>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 7 }}>
             <div style={{ flex: 1, maxWidth: 220 }}><OutcomeBar passed={step.passedFirstTry} recovered={step.recovered} failed={step.failed} /></div>
@@ -83,8 +83,15 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
         </div>
         {step.trend.length > 0 ? <Sparkline data={step.trend} color={m.color} w={84} h={26} /> : <span className="mono" style={{ fontSize: 10, color: "var(--text-4)", textAlign: "center" }}>—</span>}
         <div style={{ textAlign: "right" }}>
-          <span style={{ fontSize: 20, fontWeight: 600, color: m.color, letterSpacing: -0.5 }}>{step.score}</span>
-          <span className="mono" style={{ fontSize: 11, color: "var(--text-4)" }}>/100 {gradeFor(step.score)}</span>
+          {status === "unverified" ? (
+            // No conclusive verdict — show the coverage gap, not a failing grade it didn't earn.
+            <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: m.color }} title="No conclusive verdict was produced for this step — its delivery was never independently verified. This reflects low verification coverage, not low quality.">not verified</span>
+          ) : (
+            <>
+              <span style={{ fontSize: 20, fontWeight: 600, color: m.color, letterSpacing: -0.5 }}>{step.score}</span>
+              <span className="mono" style={{ fontSize: 11, color: "var(--text-4)" }}>/100 {gradeFor(step.score)}</span>
+            </>
+          )}
         </div>
         <ChevronRight size={13} color="var(--text-3)" style={{ transform: open ? "rotate(90deg)" : "none", justifySelf: "center" }} />
       </div>
@@ -140,7 +147,8 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
 
 export function StepPerformancePanel({ detail, loading, openStep, onToggleStep }: { detail: TemplateMetricsDetail | null; loading: boolean; openStep: string | null; onToggleStep: (name: string) => void }) {
   const steps = detail?.steps ?? [];
-  const attention = steps.filter((s) => statusForScore(s.score) !== "healthy").length;
+  // "Need attention" = genuine quality issues (watch/degraded), not unverified coverage.
+  const attention = steps.filter((s) => { const st = statusForStep(s); return st === "watch" || st === "degraded"; }).length;
   return (
     <Panel title="Step performance" kicker={(detail?.summary.name ?? "").toUpperCase()}
       right={<span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{attention > 0 ? `${attention} need attention` : "all healthy"}</span>}

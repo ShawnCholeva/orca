@@ -238,7 +238,11 @@ export function computeStepMetrics(input: {
       t.transition.evidence?.verdict === "failed" ||
       t.transition.evidence?.verdict === "partial" ||
       (t.transition.evidence == null && t.transition.refute?.verdict === "refuted");
-    const verifiedCompletes = finalStepCompletes.filter((t) => vPass(t) || vFail(t));
+    // An evaluation-failed completion (e.g. no scoring supplied) carries no
+    // trustworthy verdict — exclude it so it is UNVERIFIED, never a verified pass. (#8)
+    const isUnverifiedEval = (t: (typeof stepCompletes)[number]) =>
+      t.transition.telemetry?.outcome.failure_code === "evaluation_failed";
+    const verifiedCompletes = finalStepCompletes.filter((t) => !isUnverifiedEval(t) && (vPass(t) || vFail(t)));
     // null when nothing is verified (insufficient signal), distinct from 0 (all failed).
     const verificationValue = verifiedCompletes.length === 0 ? null :
       verifiedCompletes.filter(vPass).length / verifiedCompletes.length;
@@ -328,7 +332,7 @@ export function computeStepMetrics(input: {
       score: Math.round(verification * 100), sampleSize, confidence: sampleSize < SAMPLE_MIN ? "low" : "ok",
       runs: finals.length, passedFirstTry, recovered, failed,
       quality: {
-        verdictPassRate, sensorPassRate, oracleSufficientRate,
+        verdictPassRate, verifiedSampleSize: verifiedCompletes.length, sensorPassRate, oracleSufficientRate,
         untestedRegions: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.untestedRegions)),
         residualRisk: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.residualRisk)),
         oracleGaps: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.oracleAdequacy.gaps)),

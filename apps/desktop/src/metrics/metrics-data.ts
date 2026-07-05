@@ -4,12 +4,15 @@ import type { Metric, StepMetrics, TemplateMetricsSummary } from "@orca/contract
 
 export type { StepMetrics, TemplateMetricsSummary } from "@orca/contracts";
 
-export type StepStatus = "healthy" | "watch" | "degraded";
+export type StepStatus = "healthy" | "watch" | "degraded" | "unverified";
 
 export const statusMeta: Record<StepStatus, { tone: "run" | "warn" | "err"; color: string; label: string }> = {
   healthy: { tone: "run", color: "var(--run)", label: "Healthy" },
   watch: { tone: "warn", color: "var(--warn)", label: "Watch" },
   degraded: { tone: "err", color: "var(--err)", label: "Degraded" },
+  // No conclusive verdict was ever produced — low verification COVERAGE, not low
+  // quality. Neutral/muted, never alarming: the step may be fine, we just can't say.
+  unverified: { tone: "warn", color: "var(--text-3)", label: "Unverified" },
 };
 
 export function gradeFor(score: number): "A" | "B" | "C" | "D" | "F" {
@@ -18,6 +21,13 @@ export function gradeFor(score: number): "A" | "B" | "C" | "D" | "F" {
 
 export function statusForScore(score: number): StepStatus {
   return score >= 80 ? "healthy" : score >= 70 ? "watch" : "degraded";
+}
+
+// The score reflects verification STRENGTH; a step whose delivery was never
+// independently verified (zero conclusive verdicts) is UNVERIFIED, not degraded —
+// so it must not wear a failing grade it didn't earn. (#2)
+export function statusForStep(step: StepMetrics): StepStatus {
+  return step.quality.verifiedSampleSize === 0 ? "unverified" : statusForScore(step.score);
 }
 
 export function healthOf(summary: TemplateMetricsSummary): number | null {

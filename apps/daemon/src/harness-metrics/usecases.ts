@@ -35,7 +35,11 @@ export function computeHarnessMetricsFromTransitions(ts: HarnessTransition[]): H
   // oracle-adequacy. A completion with neither a conclusive evidence verdict nor a
   // conclusive refute is genuinely UNVERIFIED and is excluded from the denominator
   // (insufficient signal → null, not a failure) rather than dragging the score to 0.
-  const stepCompletes = ts.filter((t) => t.boundary === "step_complete");
+  // An evaluation-failed completion carries no trustworthy verdict (e.g. no scoring
+  // supplied); exclude it so it is UNVERIFIED, never credited as a verified pass. (#8)
+  const isUnverifiedEval = (t: HarnessTransition): boolean =>
+    t.telemetry?.outcome.failure_code === "evaluation_failed";
+  const stepCompletes = ts.filter((t) => t.boundary === "step_complete" && !isUnverifiedEval(t));
   const verifiedPass = (t: HarnessTransition): boolean =>
     t.evidence?.verdict === "passed" || (t.evidence == null && t.refute?.verdict === "upheld");
   const verifiedFail = (t: HarnessTransition): boolean =>

@@ -7,7 +7,7 @@ function step(over: Partial<StepMetrics> = {}): StepMetrics {
     stepTemplateId: "s1", name: "Generate", ordinal: 0,
     score: 60, sampleSize: 12, confidence: "ok",
     runs: 12, passedFirstTry: 6, recovered: 2, failed: 4,
-    quality: { verdictPassRate: 0.57, sensorPassRate: 0.9, oracleSufficientRate: 0.8, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+    quality: { verdictPassRate: 0.57, verifiedSampleSize: 8, sensorPassRate: 0.9, oracleSufficientRate: 0.8, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
     cost: { p50LatencyMs: 100, meanTokens: 1000, meanUsd: 0.01, meanRetries: 0.2 },
     risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
     failureClusters: [{ failureCode: "invalid_output", boundary: "step_complete", count: 8, sampleTransitionIds: ["t1", "t2"] }],

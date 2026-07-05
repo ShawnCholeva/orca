@@ -98,6 +98,7 @@ export const FailureCode = z.enum([
   "invalid_output", "timeout", "session_not_terminal", "output_unavailable",
   "source_truncated", "goal_archived", "session_archived", "daemon_restart",
   "guardrail_denied", "evidence_veto", "refute_veto", "provider_error", "internal_error",
+  "evaluation_failed",
 ]);
 export type FailureCode = z.infer<typeof FailureCode>;
 

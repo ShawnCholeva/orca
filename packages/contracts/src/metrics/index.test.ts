@@ -48,7 +48,7 @@ describe("metrics contracts", () => {
         stepTemplateId: "s1", name: "Define Intent", ordinal: 0,
         score: 94, sampleSize: 12, confidence: "ok" as const,
         runs: 12, passedFirstTry: 10, recovered: 1, failed: 1,
-        quality: { verdictPassRate: 0.9, sensorPassRate: 0.95, oracleSufficientRate: 0.8,
+        quality: { verdictPassRate: 0.9, verifiedSampleSize: 11, sensorPassRate: 0.95, oracleSufficientRate: 0.8,
                    untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
         cost: { p50LatencyMs: 1100, meanTokens: 2000, meanUsd: 0.03, meanRetries: 0.2 },
         risk: { riskClassDist: { low: 10 }, gateDecisionDist: { allow: 10 },

@@ -71,6 +71,11 @@ export const StepMetrics = z.object({
   failed: z.number().int().nonnegative(),
   quality: z.object({
     verdictPassRate: z.number(), sensorPassRate: z.number(), oracleSufficientRate: z.number(),
+    // Count of completions that produced a CONCLUSIVE verdict (evidence or refute).
+    // 0 means the step's delivery was never independently verified — low verification
+    // COVERAGE, distinct from low quality. The score reflects verification strength, so
+    // a 0-coverage step must render "unverified", not a failing grade.
+    verifiedSampleSize: z.number().int().nonnegative(),
     untestedRegions: z.array(z.string()), residualRisk: z.array(z.string()),
     oracleGaps: z.array(z.string()), limitingDimension: z.string().nullable(),
   }).strict(),

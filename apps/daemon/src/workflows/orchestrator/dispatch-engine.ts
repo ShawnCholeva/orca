@@ -194,6 +194,23 @@ export function buildTelemetry(
 }
 
 /**
+ * True when the step's persisted result is an evaluation FAILURE (e.g. the
+ * orchestrator supplied no scoring). Such a completion has no trustworthy verdict,
+ * so its step_complete transition is stamped failed/evaluation_failed and the
+ * metrics layer treats it as UNVERIFIED — never a verified pass. Kept a pure read
+ * of the step-result the control plane just wrote, so the transition stream stays
+ * self-describing (no reach-back from metrics into step-result storage). (#8)
+ */
+export function stepEvaluationFailed(stepResultJson: string | null): boolean {
+  if (!stepResultJson) return false;
+  try {
+    return (JSON.parse(stepResultJson) as { evaluationStatus?: string }).evaluationStatus === "failed";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Maps the recommendation feedback that arrived *during the current step* to
  * `recommendation_feedback` human-intervention entries for the step_complete
  * transition. Scoped to feedback created since the previous step_complete (the
@@ -307,8 +324,8 @@ export class DispatchEngine {
             telemetry: buildTelemetry(
               this.otlpAccumulator,
               sessionRow?.id,
-              "succeeded",
-              null,
+              stepEvaluationFailed(stepRun.step_result_json) ? "failed" : "succeeded",
+              stepEvaluationFailed(stepRun.step_result_json) ? "evaluation_failed" : null,
               null,
               recommendationFeedbackInterventions(db, run.goalId)
             ),

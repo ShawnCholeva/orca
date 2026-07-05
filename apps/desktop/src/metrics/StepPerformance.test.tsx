@@ -7,7 +7,7 @@ const step: StepMetrics = {
   stepTemplateId: "verify", name: "Verify Proposal", ordinal: 3,
   score: 61, sampleSize: 20, confidence: "ok",
   runs: 20, passedFirstTry: 8, recovered: 6, failed: 6,
-  quality: { verdictPassRate: 0.6, sensorPassRate: 0.7, oracleSufficientRate: 0.3,
+  quality: { verdictPassRate: 0.6, verifiedSampleSize: 20, sensorPassRate: 0.7, oracleSufficientRate: 0.3,
     untestedRegions: ["proration edge"], residualRisk: ["rounding drift"], oracleGaps: ["no e2e"], limitingDimension: null },
   cost: { p50LatencyMs: 3000, meanTokens: 5000, meanUsd: 0.05, meanRetries: 1.6 },
   risk: { riskClassDist: { medium: 12 }, gateDecisionDist: { allow: 18, require_approval: 2 },
@@ -27,6 +27,17 @@ describe("StepPerformancePanel", () => {
     expect(screen.getByText(/invalid_output/)).toBeInTheDocument();
     expect(screen.getByText(/proration edge/)).toBeInTheDocument(); // untested region scope
     expect(screen.getByText(/Loops between failed strategies/)).toBeInTheDocument(); // insight
+  });
+
+  it("renders an unverified step as 'not verified' (neutral), never a failing grade", () => {
+    const unverified: StepMetrics = {
+      ...step, stepTemplateId: "critique", name: "Critique", score: 0,
+      quality: { ...step.quality, verdictPassRate: 0, verifiedSampleSize: 0 },
+    };
+    render(<StepPerformancePanel detail={{ summary: { name: "X" }, steps: [unverified] } as unknown as TemplateMetricsDetail} loading={false} openStep={null} onToggleStep={() => {}} />);
+    expect(screen.getByText(/not verified/i)).toBeInTheDocument();
+    expect(screen.getByText("Unverified")).toBeInTheDocument();
+    expect(screen.queryByText("/100 F")).not.toBeInTheDocument();
   });
 
   it("renders an empty step state when there are no steps", () => {
