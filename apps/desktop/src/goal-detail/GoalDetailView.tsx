@@ -241,10 +241,16 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
       onStatus(status) {
         if (status === "open") {
           if (hasConnectedRef.current) {
+            // A RE-connect: events emitted while disconnected are not replayed, so
+            // reconcile by re-reading projections. Refresh the child panels AND the
+            // top-level goal/run projection — otherwise the header (workflow run
+            // status, completion recommendation) can stay stale after a daemon
+            // restart, yielding a card that silently no-ops on click.
             setMemoryRefreshKey((k) => k + 1);
             setDecisionsRefreshKey((k) => k + 1);
             setLiveTaskGeneration(null);
             setLiveRecommendationGeneration(null);
+            void loadDetail();
             scheduleTasksRefresh();
             scheduleRecommendationsRefresh();
             scheduleConflictsRefresh();
@@ -258,6 +264,7 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
   }, [
     goalId,
     handleOrchestrationEvent,
+    loadDetail,
     scheduleConflictsRefresh,
     scheduleRecommendationsRefresh,
     scheduleTasksRefresh,

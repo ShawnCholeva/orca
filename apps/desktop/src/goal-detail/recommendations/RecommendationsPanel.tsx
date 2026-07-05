@@ -246,15 +246,29 @@ export function RecommendationsPanel({
       case "pause_work":
         showPauseToast();
         break;
+      case "complete_workflow_run":
+        showToast("Workflow run completed.");
+        break;
+      default:
+        // Every other accepted action still needs honest feedback — a handled kind
+        // above navigates or opens a dialog; anything without a UI destination (e.g.
+        // advance_workflow_step, launch_workflow_session, mark_artifact_satisfied)
+        // must confirm rather than silently no-op.
+        showToast("Recommendation accepted.");
+        break;
     }
   }
 
-  function showPauseToast() {
+  function showToast(message: string) {
     if (pauseToastTimerRef.current !== null) {
       clearTimeout(pauseToastTimerRef.current);
     }
-    setPauseToast("Work paused. Review open tasks and sessions before continuing.");
+    setPauseToast(message);
     pauseToastTimerRef.current = setTimeout(() => setPauseToast(null), 5000);
+  }
+
+  function showPauseToast() {
+    showToast("Work paused. Review open tasks and sessions before continuing.");
   }
 
   useEffect(() => {

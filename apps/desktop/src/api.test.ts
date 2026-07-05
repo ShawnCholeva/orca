@@ -375,6 +375,37 @@ describe("desktop api client", () => {
     api = await import("./api");
   });
 
+  it("openEventStream reconnects after the socket closes (re-reading daemon config)", async () => {
+    vi.useFakeTimers();
+    const sockets: FakeWs[] = [];
+    class FakeWs {
+      listeners: Record<string, ((ev?: unknown) => void)[]> = {};
+      constructor(public url: string) { sockets.push(this); }
+      addEventListener(type: string, cb: (ev?: unknown) => void) {
+        (this.listeners[type] ??= []).push(cb);
+      }
+      fire(type: string) { (this.listeners[type] ?? []).forEach((cb) => cb()); }
+      close() {}
+    }
+    vi.stubGlobal("WebSocket", FakeWs as unknown as typeof WebSocket);
+
+    // resetDaemonConfig is exported so the reconnect path can drop the stale endpoint.
+    expect(typeof api.resetDaemonConfig).toBe("function");
+
+    const statuses: string[] = [];
+    api.openEventStream({ onEvent: () => {}, onStatus: (s) => statuses.push(s) });
+
+    await vi.runAllTimersAsync();
+    expect(sockets).toHaveLength(1); // initial connect
+
+    sockets[0]!.fire("close"); // socket drops (e.g. daemon restart)
+    await vi.runAllTimersAsync();
+    expect(sockets).toHaveLength(2); // reconnected
+    expect(statuses).toContain("closed");
+
+    vi.useRealTimers();
+  });
+
   it("createGoal accepts refined + workspaces and returns CreateGoalResponse", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(201, { goal }));
 

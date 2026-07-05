@@ -869,6 +869,38 @@ describe("RecommendationsPanel", () => {
     expect(createSession).not.toHaveBeenCalled();
   });
 
+  it("prefill: complete_workflow_run → shows a confirmation toast (not a silent no-op)", async () => {
+    const acceptRecommendation = vi.fn().mockResolvedValue({
+      recommendation: makeRecommendation({ status: "accepted" }),
+      proposedAction: {
+        kind: "complete_workflow_run",
+        workflowRunId: "run-1",
+        workflowStepRunId: "step-1",
+      } as ProposedAction,
+      feedback: makeFeedback(),
+    });
+    const rec = makeRecommendation({
+      type: "complete_workflow_run",
+      proposedAction: { kind: "complete_workflow_run", workflowRunId: "run-1", workflowStepRunId: "step-1" },
+    });
+    mockApi({
+      listRecommendations: vi.fn().mockResolvedValue({ recommendations: [rec], generations: [] }),
+      acceptRecommendation,
+    });
+    const { RecommendationsPanel } = await import("./RecommendationsPanel");
+
+    await act(async () => {
+      createRoot(container).render(<RecommendationsPanel goalId="goal-1" />);
+    });
+
+    const acceptButton = container.querySelector<HTMLButtonElement>(".recommendation-accept-button");
+    await act(async () => { acceptButton?.click(); });
+
+    expect(acceptRecommendation).toHaveBeenCalledWith("rec-1", {});
+    expect(container.querySelector(".recommendations-pause-toast")).toBeTruthy();
+    expect(container.textContent).toContain("Workflow run completed");
+  });
+
   // === Modify dialog field cap tests ===
 
   it("modify dialog enforces title cap", async () => {

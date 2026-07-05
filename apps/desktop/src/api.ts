@@ -213,6 +213,14 @@ type CreateWorkflowTemplateInput = Parameters<typeof CreateWorkflowTemplateReque
 type DuplicateWorkflowTemplateInput = Parameters<typeof DuplicateWorkflowTemplateRequest.parse>[0];
 type UpdateWorkflowTemplateInput = Parameters<typeof UpdateWorkflowTemplateRequest.parse>[0];
 
+// Drop the memoized daemon config so the next loadConfig() re-reads it. The daemon's
+// port + token change on every restart; in the packaged Tauri app the memoized promise
+// would otherwise pin a dead endpoint forever, so a reconnect must reset it first. (In
+// browser/proxy mode the endpoint is stable, so this is a harmless no-op.)
+export function resetDaemonConfig(): void {
+  configPromise = null;
+}
+
 function loadConfig(): Promise<Config> {
   if (configPromise) return configPromise;
 
@@ -2028,6 +2036,10 @@ export function openEventStream(handlers: EventStreamHandlers): {
     ws.addEventListener("close", () => {
       if (!stopped) {
         onStatus("closed");
+        // Re-read the daemon config before reconnecting: a drop is often a daemon
+        // restart, which mints a new port + token. Without this the reconnect would
+        // dial the dead endpoint forever (Tauri) and never re-sync projections.
+        resetDaemonConfig();
         setTimeout(() => {
           void connect();
         }, 1000);

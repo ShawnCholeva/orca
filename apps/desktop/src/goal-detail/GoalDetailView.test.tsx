@@ -214,9 +214,10 @@ function setupOrchestrationEventCapture() {
     feedback: [],
   });
   const listConflictsMock = vi.fn().mockResolvedValue({ conflicts: [] });
+  const getGoalDetailMock = vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [] });
 
   vi.doMock("../api", () => ({
-    getGoalDetail: vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [] }),
+    getGoalDetail: getGoalDetailMock,
     ...makeBaseApiMock({
       listTasks: listTasksMock,
       listRecommendations: listRecommendationsMock,
@@ -251,6 +252,7 @@ function setupOrchestrationEventCapture() {
     listWorkflowRunsMock,
     getRecommendationMock,
     listConflictsMock,
+    getGoalDetailMock,
   };
 }
 
@@ -703,5 +705,25 @@ describe("GoalDetailView orchestration live-refresh", () => {
     expect(listTasksMock).toHaveBeenCalledTimes(taskCallsAfterFirstOpen + 1);
     expect(listRecommendationsMock).toHaveBeenCalledTimes(recommendationCallsAfterFirstOpen + 1);
     expect(listConflictsMock).toHaveBeenCalledTimes(conflictCallsAfterFirstOpen + 1);
+  });
+
+  it("reconnect also re-reads the top-level goal/run projection (loadDetail)", async () => {
+    const { getOnStatus, getGoalDetailMock } = setupOrchestrationEventCapture();
+    await renderView();
+
+    await act(async () => {
+      getOnStatus()("open");
+    });
+    const detailCallsAfterFirstOpen = getGoalDetailMock.mock.calls.length;
+
+    // A second "open" is a RE-connect: the header projection (workflow run status,
+    // completion recommendation) can have moved on while disconnected, so it must
+    // re-read, not just the child panels.
+    await act(async () => {
+      getOnStatus()("open");
+    });
+    await advanceRefresh(200);
+
+    expect(getGoalDetailMock).toHaveBeenCalledTimes(detailCallsAfterFirstOpen + 1);
   });
 });
