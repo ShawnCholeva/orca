@@ -60,5 +60,8 @@ describe("ArtifactsList", () => {
     expect(screen.getByText("Run-level")).toBeInTheDocument();
     expect(screen.getByText("Research notes")).toBeInTheDocument();
     expect(screen.getByText("Final wrap-up")).toBeInTheDocument();
+    // #4: the artifact type badge is humanized, not the raw snake_case token.
+    expect(screen.getByText("Research summary")).toBeInTheDocument();
+    expect(screen.queryByText("research_summary")).not.toBeInTheDocument();
   });
 });

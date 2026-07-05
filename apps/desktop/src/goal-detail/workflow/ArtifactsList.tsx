@@ -57,7 +57,7 @@ function ArtifactGroup(props: {
           <li key={artifact.id} className="workflow-artifact-item">
             <details>
               <summary>
-                <span className="workflow-artifact-type">{artifact.type}</span>
+                <span className="workflow-artifact-type">{humanizeArtifactType(artifact.type)}</span>
                 <span className="workflow-artifact-title">{artifact.title}</span>
               </summary>
               <p className="workflow-artifact-links">
@@ -74,6 +74,11 @@ function ArtifactGroup(props: {
       </ul>
     </section>
   );
+}
+
+// Humanize the raw artifact type token for display: step_output -> "Step output". (#4)
+function humanizeArtifactType(type: string): string {
+  return type.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
 
 function formatStepLabel(stepTemplateId: string): string {
