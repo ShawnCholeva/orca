@@ -257,7 +257,16 @@ export class ClaudeAgentProvider implements AgentProvider {
     return {
       parseAction: (turnText) => extractActionBlock(turnText),
       detectError: (turnText, detectedAt) => parseClaudeSessionLimit(turnText, detectedAt ?? new Date()),
-      detectTurnStarted: (text) => /esc to interrupt/i.test(text),
+      // Older CLIs render "esc to interrupt" while a turn runs; the current CLI
+      // renders only a cycling spinner glyph + gerund + ellipsis (e.g.
+      // "✳ Newspapering…"). Keying on the legacy phrase alone was a permanent
+      // false-negative: submits were never confirmed, Enters were re-sent into
+      // live turns, and slow refute turns were abandoned as `unavailable` after
+      // the model had actually completed them. Match either signal; the spinner
+      // is line-anchored to the glyph so ellipsis words inside response text
+      // (indented / after ⏺) cannot false-positive, and completed-turn lines
+      // ("✻ Cooked for 4s") carry no ellipsis.
+      detectTurnStarted: (text) => /esc to interrupt/i.test(text) || /^[✳✢✽✻·∗+*x]\s+\S+…/mu.test(text),
     };
   }
 
