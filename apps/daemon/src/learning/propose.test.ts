@@ -38,16 +38,31 @@ describe("validateRevisionProposal", () => {
 });
 
 describe("proposeInstructionRevision", () => {
-  it("returns the parsed fill on a proposed result", async () => {
+  it("returns ok with the parsed proposal on a proposed result", async () => {
     const parsed = { proposedInstructions: "New, schema-aware instruction.", predictedImprovement: "fewer invalid", invariantsPreserved: ["safetyCompliance"], rationale: "r" };
     const broker: BrokerLike = { propose: vi.fn(async (_req, opts) => { opts.validateProposal(parsed); return { status: "proposed" as const, parsed }; }) };
     const out = await proposeInstructionRevision({ broker, providerId: "orca/anthropic", modelId: "m" }, { goalId: "g", workflowRunId: "r", stepRunId: "sr" }, bundle);
-    expect(out && "proposedInstructions" in out ? out.proposedInstructions : undefined).toBe("New, schema-aware instruction.");
+    expect(out.ok).toBe(true);
+    expect(out.ok && "proposedInstructions" in out.proposal ? out.proposal.proposedInstructions : undefined).toBe("New, schema-aware instruction.");
   });
-  it("returns null when the broker escalates to human review", async () => {
-    const broker: BrokerLike = { propose: vi.fn(async () => ({ status: "needs_human_review" as const, reviewPayloadId: "x" })) };
+  it("returns a plain reason when the broker escalates to human review after a rejected candidate", async () => {
+    // Broker tries a no-op candidate, gets rejected, then gives up to human review —
+    // the reason must be preserved, not lost to null.
+    const noop = { proposedInstructions: "Generate a proposal.", predictedImprovement: "x", invariantsPreserved: [], rationale: "r" };
+    const broker: BrokerLike = { propose: vi.fn(async (_req, opts) => { opts.validateProposal(noop); return { status: "needs_human_review" as const, reviewPayloadId: "x" }; }) };
     const out = await proposeInstructionRevision({ broker, providerId: "p", modelId: "m" }, { goalId: "g", workflowRunId: "r", stepRunId: "sr" }, bundle);
-    expect(out).toBeNull();
+    expect(out.ok).toBe(false);
+    expect(out.ok ? "" : out.reason).toMatch(/already adequate|no change/i);
+    expect(out.ok ? "" : out.reason).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
+  });
+  it("final-gate: catches a no-op the broker proposed without honoring validateProposal", async () => {
+    // Broker ignores validateProposal and returns a no-op proposal — the final re-validation
+    // in proposeInstructionRevision still refuses it with an honest reason.
+    const noop = { proposedInstructions: "Generate a proposal.", predictedImprovement: "x", invariantsPreserved: [], rationale: "r" };
+    const broker: BrokerLike = { propose: vi.fn(async () => ({ status: "proposed" as const, parsed: noop })) };
+    const out = await proposeInstructionRevision({ broker, providerId: "p", modelId: "m" }, { goalId: "g", workflowRunId: "r", stepRunId: "sr" }, bundle);
+    expect(out.ok).toBe(false);
+    expect(out.ok ? "" : out.reason).toMatch(/already adequate|no change/i);
   });
 });
 

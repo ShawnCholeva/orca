@@ -8,6 +8,7 @@ import { closeDatabase, openDatabase } from "../db.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import type { DiagnosisBundle } from "./diagnose.js";
 import type { BrokerLike } from "./propose.js";
+import { serializeSchema } from "./schema-mutation.js";
 import { listProposalsByTemplate } from "./store.js";
 import { listEventsByTemplate } from "./events.js";
 
@@ -141,6 +142,51 @@ describe("analyzeTemplate structural net", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain("s1");
     warn.mockRestore();
+  });
+
+  it("records an honest skip reason (not a silent drop) when the review declines to change a step", async () => {
+    // A diagnosed R4 schema bundle for s1 with a REAL current schema; the broker proposes
+    // an identical schema (a no-op). The step yields no proposal — but the reason must be
+    // recorded in the analyzed event, never silently dropped.
+    const currentSchema = serializeSchema([{ key: "summary", type: "string", required: true }]);
+    const schemaBundle: DiagnosisBundle = {
+      ...badBundle, component: "step_output_schema", currentOutputSchemaJson: currentSchema,
+    };
+    vi.mocked(diagnoseTemplate).mockReturnValue({ bundles: [schemaBundle], skips: [] });
+    const noopBroker: BrokerLike = { propose: vi.fn(async () => ({
+      status: "proposed" as const,
+      parsed: { proposedOutputSchema: [{ key: "summary", type: "string", required: true }], predictedImprovement: "x", invariantsPreserved: [], rationale: "r" },
+    })) };
+
+    const created = await analyzeTemplate({ broker: noopBroker }, db, "tpl", "30d");
+    expect(created).toEqual([]);
+    expect(listProposalsByTemplate(db, "tpl")).toEqual([]);
+
+    const analyzed = listEventsByTemplate(db, "tpl").find((e) => e.eventType === "analyzed")!;
+    const payload = analyzed.payload as { stepsDiagnosed: number; proposalsCreated: number; skips: { stepTemplateId: string; reason: string }[] };
+    expect(payload.proposalsCreated).toBe(0);
+    expect(payload.stepsDiagnosed).toBe(1);
+    expect(payload.skips).toHaveLength(1);
+    expect(payload.skips[0].stepTemplateId).toBe("s1");
+    expect(payload.skips[0].reason).toMatch(/already adequate|nothing to tighten/i);
+    expect(payload.skips[0].reason).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
+    // no created event for a declined bundle
+    expect(listEventsByTemplate(db, "tpl").some((e) => e.eventType === "created")).toBe(false);
+  });
+
+  it("records a skip when the review escalates to human review instead of proposing", async () => {
+    vi.mocked(diagnoseTemplate).mockReturnValue({ bundles: [goodBundle], skips: [] });
+    const escalateBroker: BrokerLike = { propose: vi.fn(async (_req, opts) => {
+      opts.validateProposal({ proposedInstructions: "Generate a proposal.", predictedImprovement: "x", invariantsPreserved: [], rationale: "r" });
+      return { status: "needs_human_review" as const, reviewPayloadId: "x" };
+    }) };
+    const created = await analyzeTemplate({ broker: escalateBroker }, db, "tpl", "30d");
+    expect(created).toEqual([]);
+    const analyzed = listEventsByTemplate(db, "tpl").find((e) => e.eventType === "analyzed")!;
+    const payload = analyzed.payload as { proposalsCreated: number; skips: { reason: string }[] };
+    expect(payload.proposalsCreated).toBe(0);
+    expect(payload.skips).toHaveLength(1);
+    expect(payload.skips[0].reason).toMatch(/already adequate|no change/i);
   });
 
   it("analyze emits created + analyzed events; skipped proposals appear in the analyzed payload", async () => {

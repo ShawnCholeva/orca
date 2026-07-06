@@ -67,11 +67,35 @@ export function validateRevisionProposal(bundle: DiagnosisBundle) {
   };
 }
 
+// A propose attempt either yields a valid revision, or does not — with an honest,
+// human-plain reason. Surfacing the reason (rather than collapsing every non-result
+// to null) is what lets the analyze stage record WHY a diagnosed step produced no
+// proposal, instead of silently dropping it (inspectability, paper §5.2 / §3.5).
+export type ProposeResult =
+  | { ok: true; proposal: ProposeInstructionRevisionProposal | ProposeSchemaRevisionProposal }
+  | { ok: false; reason: string };
+
+// Map a validator's technical failure message to plain, jargon-free language for the
+// learning log. Never leaks the five banned terms (oracle/sensor/verdict/refute/veto).
+function plainProposeReason(raw: string | null, component: DiagnosisBundle["component"]): string {
+  if (!raw) return "the automated review didn't produce a change to apply";
+  const r = raw.toLowerCase();
+  if (r.includes("no-op") || r.includes("identical")) {
+    return component === "step_output_schema"
+      ? "the current output checks are already adequate — nothing to tighten"
+      : "the current instructions are already adequate — no change was suggested";
+  }
+  if (r.includes("tightening") || r.includes("removed")) {
+    return "the suggested change would remove or weaken a field, so it wasn't a valid tightening";
+  }
+  return "the suggested change didn't match the required shape";
+}
+
 export async function proposeInstructionRevision(
   deps: { broker: BrokerLike; providerId: string; modelId: string },
   ctx: { goalId: string; workflowRunId: string; stepRunId: string },
   bundle: DiagnosisBundle,
-): Promise<ProposeInstructionRevisionProposal | ProposeSchemaRevisionProposal | null> {
+): Promise<ProposeResult> {
   const request: OrchestrationRequest = {
     kind: "propose_instruction_revision",
     goalId: ctx.goalId, workflowRunId: ctx.workflowRunId, stepRunId: ctx.stepRunId,
@@ -79,12 +103,27 @@ export async function proposeInstructionRevision(
     payload: buildProposePayload(bundle),
   } as OrchestrationRequest;
 
-  const result = await deps.broker.propose(request, { validateProposal: validateRevisionProposal(bundle) });
-  if (result.status !== "proposed") return null;
-  if (bundle.component === "step_output_schema") {
-    const parsed = ProposeSchemaRevisionProposal.safeParse(result.parsed);
-    return parsed.success ? parsed.data : null;
+  // Wrap the validator so the LAST concrete rejection is captured even when the broker
+  // ultimately escalates to human review (it retries on rejection and, on giving up,
+  // returns needs_human_review — losing the reason otherwise).
+  const validate = validateRevisionProposal(bundle);
+  let lastRejection: string | null = null;
+  const result = await deps.broker.propose(request, {
+    validateProposal: (raw) => {
+      const r = validate(raw);
+      if (!r.accepted) lastRejection = r.failureMessage;
+      return r;
+    },
+  });
+  if (result.status !== "proposed") {
+    return { ok: false, reason: plainProposeReason(lastRejection, bundle.component) };
   }
-  const parsed = ProposeInstructionRevisionProposal.safeParse(result.parsed);
-  return parsed.success ? parsed.data : null;
+  // Final gate: re-validate the accepted proposal here too — defence-in-depth (a broker
+  // that ignores validateProposal can't sneak a no-op or whitelist-violating change past
+  // us) and the honest reason when it does.
+  const check = validate(result.parsed);
+  if (!check.accepted) {
+    return { ok: false, reason: plainProposeReason(check.failureMessage, bundle.component) };
+  }
+  return { ok: true, proposal: check.parsed };
 }

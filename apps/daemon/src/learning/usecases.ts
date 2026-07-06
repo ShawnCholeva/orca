@@ -80,27 +80,30 @@ export async function analyzeTemplate(
   const { bundles, skips: diagnoseSkips } = diagnoseTemplate({ detail, signals, stepMeta: stepMeta(db, templateId) });
 
   const created: TemplateInstructionProposal[] = [];
-  const netSkips: { stepTemplateId: string; reason: string }[] = [];
+  // Every diagnosed bundle that does NOT become a proposal contributes a skip with an
+  // honest reason, so the analyzed event records WHY (never a silent drop — SP3).
+  const proposeSkips: { stepTemplateId: string; reason: string }[] = [];
   for (const bundle of bundles) {
     // Dedupe: keep an existing pending proposal for the step.
     const existing = pendingProposalForStep(db, templateId, bundle.stepTemplateId);
     if (existing) { created.push(existing); continue; }
     const anchor = anchorForStep(db, templateId, bundle.stepTemplateId);
-    if (!anchor) continue;
+    if (!anchor) { proposeSkips.push({ stepTemplateId: bundle.stepTemplateId, reason: "no completed run to base the change on" }); continue; }
     const model = orchestratorModelForGoal(db, anchor.goalId);
-    if (!model) continue; // can't propose without a provider/model
+    if (!model) { proposeSkips.push({ stepTemplateId: bundle.stepTemplateId, reason: "no model is configured to draft the change" }); continue; }
     const fill = await proposeInstructionRevision({ broker: deps.broker, ...model }, anchor, bundle);
-    if (!fill) continue;
+    if (!fill.ok) { proposeSkips.push({ stepTemplateId: bundle.stepTemplateId, reason: fill.reason }); continue; }
+    const revision = fill.proposal;
     const proposal: TemplateInstructionProposal = {
       id: uuid(), templateId, templateVersionAtProposal: detail.summary.latestVersion,
       stepTemplateId: bundle.stepTemplateId, component: bundle.component,
-      beforeInstructions: "proposedOutputSchema" in fill ? bundle.currentOutputSchemaJson : bundle.currentInstructions,
-      afterInstructions: "proposedOutputSchema" in fill ? serializeSchema(fill.proposedOutputSchema) : fill.proposedInstructions,
+      beforeInstructions: "proposedOutputSchema" in revision ? bundle.currentOutputSchemaJson : bundle.currentInstructions,
+      afterInstructions: "proposedOutputSchema" in revision ? serializeSchema(revision.proposedOutputSchema) : revision.proposedInstructions,
       targetedFailureMode: bundle.targetedFailureMode,
-      predictedImprovement: fill.predictedImprovement, invariantsPreserved: fill.invariantsPreserved,
+      predictedImprovement: revision.predictedImprovement, invariantsPreserved: revision.invariantsPreserved,
       falsifier: "version_comparison", rollbackPlan: "revert_to_before",
       evidence: { sampleTransitionIds: bundle.evidence.sampleTransitionIds, revisionSignalIds: bundle.evidence.revisionSignalIds, metricSnapshot: bundle.evidence.metricSnapshot },
-      rationale: fill.rationale, humanEdited: false, status: "pending",
+      rationale: revision.rationale, humanEdited: false, status: "pending",
       createdAt: now, decidedAt: null, decidedBy: null, appliedAsVersion: null,
     };
     // Structural net: a contract-invalid proposal must never reach the store, regardless
@@ -110,7 +113,7 @@ export async function analyzeTemplate(
     if (!validated.success) {
       const reason = (validated.error.issues[0]?.message ?? "invalid proposal").slice(0, 300);
       console.warn(`[learning] skipping unpersistable proposal for step ${bundle.stepTemplateId}: ${validated.error.issues[0]?.message}`);
-      netSkips.push({ stepTemplateId: bundle.stepTemplateId, reason });
+      proposeSkips.push({ stepTemplateId: bundle.stepTemplateId, reason });
       continue;
     }
     db.transaction(() => {
@@ -123,11 +126,15 @@ export async function analyzeTemplate(
     })();
     created.push(validated.data);
   }
-  const skips = [...diagnoseSkips, ...netSkips].slice(0, 20).map((s) => ({ stepTemplateId: s.stepTemplateId, reason: s.reason.slice(0, 300) }));
+  const skips = [...diagnoseSkips, ...proposeSkips].slice(0, 20).map((s) => ({ stepTemplateId: s.stepTemplateId, reason: s.reason.slice(0, 300) }));
+  // stepsDiagnosed = every step that matched a rule: the bundles produced PLUS the
+  // steps skipped at diagnosis (diagnoseSkips are disjoint from bundles). proposeSkips
+  // are bundles that failed downstream — already counted in bundles.length, so they must
+  // NOT be added again (this was the M-P2a double-count; now correct).
   recordEvent(db, {
     templateId, proposalId: null, stepTemplateId: null,
     eventType: "analyzed", templateVersion: currentTemplateVersion(db, templateId),
-    payload: { kind: "analyzed", stepsDiagnosed: bundles.length + skips.length, proposalsCreated: created.length, skips },
+    payload: { kind: "analyzed", stepsDiagnosed: bundles.length + diagnoseSkips.length, proposalsCreated: created.length, skips },
   }, now);
   return created;
 }
