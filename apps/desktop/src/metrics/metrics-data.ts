@@ -1,6 +1,6 @@
 // Presentation-only helpers for the Metrics tab. All numbers are computed server-side
 // (F4); this module only formats them. Re-exports the contract types the views consume.
-import type { Metric, StepMetrics, TemplateMetricsSummary } from "@orca/contracts";
+import type { Metric, StepMetrics, TemplateMetricsSummary, VerificationTier } from "@orca/contracts";
 
 export type { StepMetrics, TemplateMetricsSummary } from "@orca/contracts";
 
@@ -11,9 +11,25 @@ export const statusMeta: Record<StepStatus, { tone: "run" | "warn" | "err"; colo
   watch: { tone: "warn", color: "var(--warn)", label: "Watch" },
   degraded: { tone: "err", color: "var(--err)", label: "Degraded" },
   // No conclusive verdict was ever produced — low verification COVERAGE, not low
-  // quality. Neutral/muted, never alarming: the step may be fine, we just can't say.
-  unverified: { tone: "warn", color: "var(--text-3)", label: "Unverified" },
+  // quality. Actionable, not alarming: the step may be fine, we just haven't checked.
+  unverified: { tone: "warn", color: "var(--accent)", label: "No check yet" },
 };
+
+export const verificationMeta: Record<VerificationTier, { label: string; color: string }> = {
+  verified_executed: { label: "Run & tested", color: "var(--run)" },
+  partially_verified: { label: "Partly verified", color: "var(--warn)" },
+  ai_reviewed: { label: "Reviewed, not proven", color: "var(--warn)" },
+  self_reported: { label: "Self-reported only", color: "var(--warn)" },
+  unverified: { label: "No check yet", color: "var(--accent)" },
+};
+
+// Sample-weighted mean of conclusive step scores (unverified steps excluded).
+export function workflowHealthFromSteps(steps: StepMetrics[]): number | null {
+  const scored = steps.filter((s) => s.quality.verifiedSampleSize > 0);
+  const wsum = scored.reduce((n, s) => n + s.sampleSize, 0);
+  if (wsum === 0) return null;
+  return Math.round(scored.reduce((n, s) => n + s.score * s.sampleSize, 0) / wsum);
+}
 
 export function gradeFor(score: number): "A" | "B" | "C" | "D" | "F" {
   return score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : "F";

@@ -1,18 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { gradeFor, healthOf, pctLabel, statusForStep } from "./metrics-data";
+import { gradeFor, healthOf, pctLabel, statusMeta, statusForStep, workflowHealthFromSteps } from "./metrics-data";
 import type { StepMetrics, TemplateMetricsSummary } from "@orca/contracts";
 
-function step(partial: { score: number; verifiedSampleSize: number }): StepMetrics {
-  return {
-    stepTemplateId: "s", name: "S", ordinal: 0, score: partial.score, sampleSize: 6,
-    confidence: "ok", runs: 6, passedFirstTry: 6, recovered: 0, failed: 0,
-    quality: { verdictPassRate: partial.score / 100, verifiedSampleSize: partial.verifiedSampleSize,
-      sensorPassRate: 1, oracleSufficientRate: 1, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
-    cost: { p50LatencyMs: null, meanTokens: null, meanUsd: null, meanRetries: null },
-    risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
-    failureClusters: [], trend: [], versionBoundaries: [], insights: [], recentReasons: [],
-  };
-}
+const step = (over: Partial<StepMetrics>): StepMetrics => ({
+  stepTemplateId: "s", name: "X", ordinal: 0, score: 62, sampleSize: 3, confidence: "ok",
+  runs: 3, passedFirstTry: 3, recovered: 0, failed: 0,
+  quality: { verdictPassRate: 1, sensorPassRate: null, oracleSufficientRate: 0, verifiedSampleSize: 3, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+  cost: { p50LatencyMs: 1, meanTokens: 1, meanUsd: 0, meanRetries: 0 },
+  risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
+  failureClusters: [], trend: [], versionBoundaries: [], insights: [], recentReasons: [],
+  verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.62, falseAcceptanceRate: 0, artifacts: [] },
+  failureModes: [], reconciliation: null, ...over,
+});
 
 describe("metrics-data formatting helpers", () => {
   it("gradeFor maps scores to letters", () => {
@@ -31,12 +30,24 @@ describe("metrics-data formatting helpers", () => {
     expect(pctLabel({ value: null })).toBe("—");
   });
 
+  it("labels the unverified state 'No check yet'", () => {
+    expect(statusMeta.unverified.label).toBe("No check yet");
+  });
+
   it("statusForStep distinguishes UNVERIFIED (no coverage) from a genuinely-degraded step", () => {
     // Zero verified coverage → low VERIFICATION, not low quality: never a failing grade.
-    expect(statusForStep(step({ score: 0, verifiedSampleSize: 0 }))).toBe("unverified");
+    expect(statusForStep(step({ score: 0, quality: { ...step({}).quality, verifiedSampleSize: 0 } }))).toBe("unverified");
     // Verified but low → genuinely degraded quality.
-    expect(statusForStep(step({ score: 30, verifiedSampleSize: 4 }))).toBe("degraded");
+    expect(statusForStep(step({ score: 30, quality: { ...step({}).quality, verifiedSampleSize: 4 } }))).toBe("degraded");
     // Verified and high → healthy.
-    expect(statusForStep(step({ score: 100, verifiedSampleSize: 4 }))).toBe("healthy");
+    expect(statusForStep(step({ score: 100, quality: { ...step({}).quality, verifiedSampleSize: 4 } }))).toBe("healthy");
+  });
+
+  it("workflow health is the sample-weighted mean of conclusive step scores", () => {
+    const h = workflowHealthFromSteps([
+      step({ score: 90, sampleSize: 2 }),
+      step({ score: 60, sampleSize: 2 }),
+    ]);
+    expect(h).toBe(75);
   });
 });
