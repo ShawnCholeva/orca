@@ -8,13 +8,20 @@ export function composeJudgePrompt(
   // Anti-circularity (p.37 AgentCoder Test-Designer / p.46 CANDOR): judge each output
   // against the step INSTRUCTIONS (the spec), NOT any prior scoring (none is given).
   // Criterion (p.33/§3.5.2): improve the targeted failure WITHOUT regressing solved cases.
+  const isSchema = request.step.component === "step_output_schema";
   const systemPrompt = [
-    "You are an INDEPENDENT reviewer evaluating a PROPOSED edit to one workflow step's instruction text.",
+    isSchema
+      ? "You are an INDEPENDENT reviewer evaluating a PROPOSED edit to one workflow step's REQUIRED OUTPUT STRUCTURE (its output schema)."
+      : "You are an INDEPENDENT reviewer evaluating a PROPOSED edit to one workflow step's instruction text.",
     "Judge each past output against the step INSTRUCTIONS (the spec). You are given NO prior scoring —",
     "ground your judgment in the outputs themselves; do not defer to the author.",
     "Judge ONLY from the instructions and the solvedCases/failureCases provided in THIS message.",
     "Do NOT use any tools — do not read files, run commands, or search the workspace; you already",
     "have everything you need. Reason from the provided data and emit the verdict directly.",
+    ...(isSchema ? [
+      "The currentInstructions/proposedInstructions fields contain the BEFORE/AFTER output schema (a JSON field list the engine enforces at completion).",
+      "For each failure case: would the failing output have been caught or improved by the tighter required structure?",
+    ] : []),
     "solvedCases PREVIOUSLY PASSED independent verification and MUST NOT regress under the proposed edit.",
     "failureCases exhibit the targeted failure mode and SHOULD improve under the proposed edit.",
     "For each solved case, would the PROPOSED instructions still yield an output that satisfies the instructions?",

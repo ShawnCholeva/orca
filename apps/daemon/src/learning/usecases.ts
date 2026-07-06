@@ -171,6 +171,7 @@ export async function judgeProposal(
         name: p.stepTemplateId,
         currentInstructions: p.beforeInstructions.slice(0, 8192),
         proposedInstructions: p.afterInstructions.slice(0, 8192),
+        component: p.component,
       },
       targetedFailureMode: p.targetedFailureMode,
       solvedCases: corpus.solved,

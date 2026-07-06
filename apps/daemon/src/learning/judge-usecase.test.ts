@@ -113,6 +113,34 @@ describe("judgeProposal", () => {
     expect(terminated).toEqual(["tpl::judge"]); // teardown per call
   });
 
+  it("passes component field in judge request for schema proposals", async () => {
+    const seen: { key: string; userPrompt: string }[] = [];
+    const deps: JudgeDeps = {
+      shadowAsk: {
+        async ask(key: string, opts: any) {
+          seen.push({ key, userPrompt: opts.userPrompt });
+          return { text: PASS };
+        },
+      },
+      terminateShadow: () => {},
+    };
+    const beforeSchema = JSON.stringify([{ key: "status", type: "string", required: true }], null, 2);
+    const afterSchema = JSON.stringify([{ key: "status", type: "string", required: true }, { key: "code", type: "number", required: false }], null, 2);
+    const schemaProposal = proposalFixture({
+      id: "p-schema",
+      stepTemplateId: "st1",
+      component: "step_output_schema",
+      beforeInstructions: beforeSchema,
+      afterInstructions: afterSchema,
+      evidence: { sampleTransitionIds: ["ht-sr-fail", "ht-sr-fail2"], revisionSignalIds: [], metricSnapshot: { score: 50, verdictPassRate: 0.5, oracleSufficientRate: 0.5, versionDelta: null } },
+    });
+    insertProposal(db, schemaProposal);
+    await judgeProposal(deps, db, "p-schema");
+    expect(seen.length).toBe(1);
+    const userPromptObj = JSON.parse(seen[0]!.userPrompt);
+    expect(userPromptObj.step.component).toBe("step_output_schema");
+  });
+
   it("is idempotent — a second call makes no second shadow ask and returns the same judgment", async () => {
     const seen: string[] = [];
     const deps: JudgeDeps = { shadowAsk: fakeAsk(PASS, seen), terminateShadow: () => {} };

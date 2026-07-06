@@ -3,12 +3,13 @@ import type { JudgeInstructionEditRequest } from "@orca/contracts";
 import type { ShadowAsk } from "../workflows/orchestrator/recover-step-scoring.js";
 import { judgeInstructionEdit, composeJudgePrompt } from "./judge.js";
 
-const REQ: JudgeInstructionEditRequest = {
+const baseRequest: JudgeInstructionEditRequest = {
   step: { name: "analyze", currentInstructions: "Cover the error paths.", proposedInstructions: "Cover error paths and log them." },
   targetedFailureMode: { rule: "R2", failureCode: "invalid_output", clusterCount: 4, signalCount: null },
   solvedCases: [{ stepRunId: "s1", output: "{\"ok\":1}" }],
   failureCases: [{ stepRunId: "s2", output: "{\"bad\":1}" }],
 };
+const REQ = baseRequest;
 const ask = (text: string): ShadowAsk => ({ async ask() { return { text }; } });
 const askThrows = (): ShadowAsk => ({ async ask() { throw new Error("shadow down"); } });
 
@@ -55,5 +56,16 @@ describe("judgeInstructionEdit", () => {
     const { systemPrompt } = composeJudgePrompt(REQ);
     expect(systemPrompt).toMatch(/do NOT use any tools/i);
     expect(systemPrompt.toLowerCase()).toContain("provided");
+  });
+  it("frames schema proposals as output-structure evaluation", () => {
+    const req = { ...baseRequest, step: { ...baseRequest.step, component: "step_output_schema" as const } };
+    const { systemPrompt } = composeJudgePrompt(req);
+    expect(systemPrompt).toContain("REQUIRED OUTPUT STRUCTURE");
+    expect(systemPrompt).toContain("caught or improved by the tighter required structure");
+    expect(systemPrompt).not.toContain("instruction text");
+  });
+  it("instructions proposals keep the existing framing", () => {
+    const { systemPrompt } = composeJudgePrompt(baseRequest);
+    expect(systemPrompt).toContain("instruction text");
   });
 });
