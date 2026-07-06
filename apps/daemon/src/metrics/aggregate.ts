@@ -289,6 +289,7 @@ export function computeStepMetrics(input: {
     // falsifier's "did the TARGETED step improve" signal (0..1 scale).
     let versionScoreDelta: number | null = null;
     let versionScoreDeltaVersions: { latest: number; prior: number } | null = null;
+    let versionInvalidOutputRateDelta: number | null = null;
     // Union of completed AND hard-failed version identity: a version whose runs of
     // this step ALL hard-failed (no step_complete) must still be visible here — an
     // all-hard-fail applied version is exactly the regression the falsifier must catch.
@@ -307,6 +308,18 @@ export function computeStepMetrics(input: {
         versionScoreDelta = a.value - b.value;
         versionScoreDeltaVersions = { latest: latestV, prior: priorV };
       }
+
+      // Schema-canary signal: invalid-output completion rate per version, completions-only
+      // basis (an invalid_output failure implies a step_complete happened), same floor.
+      // Unlike versionScoreDelta, a version present only via hard-fails yields null here
+      // (below VERSION_MIN on completions) — intended, since invalid_output requires a completion.
+      const invalidRateFor = (v: number): number | null => {
+        const completes = finalStepCompletes.filter((t) => t.templateVersion === v);
+        if (completes.length < VERSION_MIN) return null;
+        return completes.filter((t) => t.transition.telemetry?.outcome.failure_code === "invalid_output").length / completes.length;
+      };
+      const ia = invalidRateFor(latestV), ib = invalidRateFor(priorV);
+      if (ia != null && ib != null) versionInvalidOutputRateDelta = ia - ib;
     }
 
     const allSensors = evidenceCompletes.flatMap((t) => t.transition.evidence!.sensorsRun);
@@ -440,7 +453,7 @@ export function computeStepMetrics(input: {
       failureModes,
       reconciliation,
       trend, versionBoundaries, versionScoreDelta, versionScoreDeltaVersions,
-      versionInvalidOutputRateDelta: null, insights: [], recentReasons,
+      versionInvalidOutputRateDelta, insights: [], recentReasons,
     };
     step.insights = deriveInsights(step);
     steps.push(step);

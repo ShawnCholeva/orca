@@ -76,4 +76,28 @@ describe("enrichWithRegression", () => {
     expect(p.targetDelta).toBeNull();
     expect(p.targetImproved).toBeNull();
   });
+
+  it("schema canary: invalid-output spike on the applied version flags regression", () => {
+    const steps = [step({ stepTemplateId: "s1", versionScoreDelta: 0.1,
+      versionScoreDeltaVersions: { latest: 2, prior: 1 }, versionInvalidOutputRateDelta: 0.5 })];
+    const [p] = enrichWithRegression([applied({ component: "step_output_schema" })], summary(), steps);
+    expect(p.invalidOutputRateDelta).toBeCloseTo(0.5);
+    expect(p.regressionDetected).toBe(true);
+  });
+
+  it("instruction proposals ignore the invalid-output canary; pair still gates it", () => {
+    const steps = [step({ stepTemplateId: "s1", versionScoreDeltaVersions: { latest: 2, prior: 1 }, versionInvalidOutputRateDelta: 0.5 })];
+    const [pi] = enrichWithRegression([applied({ invariantsPreserved: [] })], summary(), steps); // step_instructions
+    expect(pi.regressionDetected).toBe(false);
+    const stale = [step({ stepTemplateId: "s1", versionScoreDeltaVersions: { latest: 1, prior: 0 }, versionInvalidOutputRateDelta: 0.5 })];
+    const [ps] = enrichWithRegression([applied({ component: "step_output_schema", invariantsPreserved: [] })], summary(), stale);
+    expect(ps.invalidOutputRateDelta).toBeNull();
+    expect(ps.regressionDetected).toBe(false);
+  });
+
+  it("enriched proposals carry targetDeltaVersions for UI display", () => {
+    const steps = [step({ stepTemplateId: "s1", versionScoreDelta: 0.2, versionScoreDeltaVersions: { latest: 2, prior: 1 } })];
+    const [p] = enrichWithRegression([applied()], summary(), steps);
+    expect(p.targetDeltaVersions).toEqual({ latest: 2, prior: 1 });
+  });
 });

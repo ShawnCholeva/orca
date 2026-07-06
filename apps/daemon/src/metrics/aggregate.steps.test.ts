@@ -316,6 +316,25 @@ describe("computeStepMetrics", () => {
     expect(step.versionScoreDelta!).toBeLessThan(0);
     expect(step.versionScoreDeltaVersions).toEqual({ latest: 2, prior: 1 });
   });
+
+  it("versionInvalidOutputRateDelta: invalid-output completion rate, latest minus prior, VERSION_MIN-gated", () => {
+    const mk = (id: string, run: string, code: string | null, v: number, at: string) => {
+      const t = sc(id, run, "s", code ? "failed" : "passed", true, at);
+      t.templateVersion = v;
+      t.transition.telemetry!.outcome = { status: code ? "failed" : "succeeded", failure_code: code as never };
+      return t;
+    };
+    const ts = [
+      mk("a", "r1", null, 1, "2026-05-01T00:00:00.000Z"), mk("b", "r2", null, 1, "2026-05-01T01:00:00.000Z"),
+      mk("c", "r3", "invalid_output", 2, "2026-05-02T00:00:00.000Z"), mk("d", "r4", null, 2, "2026-05-02T01:00:00.000Z"),
+    ];
+    const runs: TemplateStepRun[] = ts.map((t) => ({
+      workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "passed",
+      startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: t.templateVersion,
+    }));
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.versionInvalidOutputRateDelta).toBeCloseTo(0.5); // v2: 1/2, v1: 0/2
+  });
 });
 
 describe("deriveInsights", () => {

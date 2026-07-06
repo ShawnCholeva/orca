@@ -2,6 +2,7 @@ import type { StepMetrics, TemplateInstructionProposal, TemplateMetricsSummary }
 
 export const REGRESSION_THRESHOLD = 0.1;
 export const SAMPLE_MIN = 5;
+export const SCHEMA_INVALID_OUTPUT_THRESHOLD = 0.2;
 
 export function enrichWithRegression(
   proposals: TemplateInstructionProposal[], summary: TemplateMetricsSummary, steps: StepMetrics[] = [],
@@ -12,7 +13,8 @@ export function enrichWithRegression(
     // Only judge once the applied version has accrued enough runs.
     const versionRuns = summary.versions.find((v) => v.version === p.appliedAsVersion)?.runs ?? 0;
     if (versionRuns < SAMPLE_MIN || !vc || vc.latest !== p.appliedAsVersion) {
-      return { ...p, regressionDetected: false, watchedDeltas: {}, targetDelta: null, targetImproved: null };
+      return { ...p, regressionDetected: false, watchedDeltas: {}, targetDelta: null, targetImproved: null,
+        targetDeltaVersions: null, invalidOutputRateDelta: null };
     }
     const watchedDeltas: Record<string, number | null> = {};
     let regressed = false;
@@ -30,6 +32,13 @@ export function enrichWithRegression(
     // would masquerade as this proposal's outcome.
     const spansApplied = step?.versionScoreDeltaVersions?.latest === p.appliedAsVersion;
     const targetDelta = spansApplied ? step?.versionScoreDelta ?? null : null;
-    return { ...p, regressionDetected: regressed, watchedDeltas, targetDelta, targetImproved: targetDelta == null ? null : targetDelta > 0 };
+    const invalidOutputRateDelta = spansApplied ? step?.versionInvalidOutputRateDelta ?? null : null;
+    // A learned tightening's specific failure shape: the new checks reject output.
+    const schemaCanaryTripped = p.component === "step_output_schema"
+      && invalidOutputRateDelta != null && invalidOutputRateDelta > SCHEMA_INVALID_OUTPUT_THRESHOLD;
+    return { ...p, regressionDetected: regressed || schemaCanaryTripped, watchedDeltas,
+      targetDelta, targetImproved: targetDelta == null ? null : targetDelta > 0,
+      targetDeltaVersions: spansApplied ? step?.versionScoreDeltaVersions ?? null : null,
+      invalidOutputRateDelta };
   });
 }
