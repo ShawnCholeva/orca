@@ -1,5 +1,6 @@
 import type { ProposalComponent, StepMetrics, TargetedFailureMode, TemplateMetricsDetail } from "@orca/contracts";
 import type { TemplateRevisionSignal } from "./fetch.js";
+import { parseSchema } from "./schema-mutation.js";
 
 export const SAMPLE_MIN = 5;
 const K = 3; // R2 min cluster count
@@ -90,6 +91,14 @@ export function diagnoseTemplate(input: {
     if (!mode) continue;
     const sampleTransitionIds = step.failureClusters.flatMap((c) => c.sampleTransitionIds).slice(0, 6);
     const meta = input.stepMeta.get(step.stepTemplateId) ?? { instructions: "", outputSchemaJson: "[]" };
+    // R4 targets the step's current output schema. If the step is missing from the
+    // current template (removed/renamed), the fallback above has no real schema to
+    // tighten — outputSchemaJson is "[]", which parseSchema rejects because
+    // WorkflowStepOutputSchema requires .min(1). A schema-tightening proposal with
+    // no valid current schema is meaningless, so skip this step's bundle entirely
+    // (spec §5 skip-with-reason policy) rather than let an unparseable "[]" ride
+    // through as beforeInstructions.
+    if (mode.rule === "R4" && parseSchema(meta.outputSchemaJson) === null) continue;
     // Deterministic routing (spec §3.2): R4 names a verification deficiency — the
     // lever is the deterministic completion validator, not the prompt. The core
     // owns which lever is pulled; the LLM only fills the content.

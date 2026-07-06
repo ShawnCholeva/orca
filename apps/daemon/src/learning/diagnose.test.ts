@@ -117,4 +117,14 @@ describe("diagnoseTemplate", () => {
     const out = diagnoseTemplate({ detail: detail([r2]), signals: [], stepMeta: meta });
     expect(out[0].component).toBe("step_instructions");
   });
+
+  it("R4 skips steps whose current schema is missing or empty (removed/renamed steps)", () => {
+    const r4 = step({ score: 70, failureClusters: [], quality: { ...step().quality, verdictPassRate: 0.9, oracleSufficientRate: null } });
+    // stepMeta has NO entry for s1 → fallback "[]"
+    expect(diagnoseTemplate({ detail: detail([r4]), signals: [], stepMeta: new Map() })).toHaveLength(0);
+
+    // R1 for the same missing step still diagnoses (instructions path tolerates empty)
+    const r1 = step({ score: 40, failureClusters: [{ failureCode: "invalid_output", boundary: "step_complete", count: 2, sampleTransitionIds: ["t"] }] });
+    expect(diagnoseTemplate({ detail: detail([r1]), signals: [], stepMeta: new Map() })).toHaveLength(1);
+  });
 });

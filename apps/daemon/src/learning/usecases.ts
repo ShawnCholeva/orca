@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
-import type { MetricPeriod, TemplateInstructionProposal, CounterfactualJudgment, JudgeInstructionEditProposal, ModelProviderId } from "@orca/contracts";
-import { JudgeInstructionEditRequest } from "@orca/contracts";
+import type { MetricPeriod, CounterfactualJudgment, JudgeInstructionEditProposal, ModelProviderId } from "@orca/contracts";
+import { JudgeInstructionEditRequest, TemplateInstructionProposal } from "@orca/contracts";
 import { getTemplateMetricsDetail } from "../metrics/usecases.js";
 import { windowStart } from "../metrics/aggregate.js";
 import { listRevisionSignalsByTemplate } from "./fetch.js";
@@ -101,8 +101,16 @@ export async function analyzeTemplate(
       rationale: fill.rationale, humanEdited: false, status: "pending",
       createdAt: now, decidedAt: null, decidedBy: null, appliedAsVersion: null,
     };
-    insertProposal(db, proposal);
-    created.push(proposal);
+    // Structural net: a contract-invalid proposal must never reach the store, regardless
+    // of which upstream path produced it (insertProposal is a raw SQL write with no zod
+    // gate, and every read uses a hard .parse — a bad row bricks all subsequent reads).
+    const validated = TemplateInstructionProposal.safeParse(proposal);
+    if (!validated.success) {
+      console.warn(`[learning] skipping unpersistable proposal for step ${bundle.stepTemplateId}: ${validated.error.issues[0]?.message}`);
+      continue;
+    }
+    insertProposal(db, validated.data);
+    created.push(validated.data);
   }
   return created;
 }
