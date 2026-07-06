@@ -163,5 +163,10 @@ describe("learning routes", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as { events: unknown[] };
     expect(body.events).toHaveLength(6);
+
+    // Non-integral limit must floor, not crash (non-integral SQL LIMIT bindings throw).
+    const float = await f.inject({ method: "GET", url: "/v1/learning/templates/tpl/events?limit=2.5" });
+    expect(float.statusCode).toBe(200);
+    expect((float.json() as { events: unknown[] }).events).toHaveLength(2);
   });
 });

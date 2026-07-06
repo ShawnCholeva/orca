@@ -35,7 +35,8 @@ export function recordEvent(db: Database.Database, e: Omit<LearningEvent, "id" |
 }
 
 export function listEventsByTemplate(db: Database.Database, templateId: string, limit = 50): LearningEvent[] {
-  const clamped = Math.max(1, Math.min(100, Number.isFinite(limit) ? limit : 50));
+  // Math.floor: a non-integral LIMIT binding throws SqliteError datatype mismatch.
+  const clamped = Math.max(1, Math.min(100, Math.floor(Number.isFinite(limit) ? limit : 50)));
   const rows = db.prepare(
     `SELECT * FROM learning_events WHERE template_id = ? ORDER BY seq DESC LIMIT ?`
   ).all(templateId, clamped) as Row[];
