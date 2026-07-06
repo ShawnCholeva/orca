@@ -6,6 +6,7 @@ import { getProposal, updateProposalDecision } from "./store.js";
 import {
   applyLearnedInstructionEdit, rollbackAppliedProposal, restoreTemplateDefault,
   StaleProposalError, ProposalNotPendingError, ProposalNotAppliedError, NoBaselineError, StepNotFoundError,
+  InvalidSchemaEditError,
 } from "./apply.js";
 import type { ShadowAsk } from "../workflows/orchestrator/recover-step-scoring.js";
 
@@ -50,6 +51,7 @@ export function registerLearningRoutes(server: FastifyInstance, deps: LearningRo
       if (e instanceof StepNotFoundError) { reply.status(404); return { error: { code: "not_found" } }; }
       if (e instanceof StaleProposalError) { reply.status(409); return { error: { code: "stale_proposal" } }; }
       if (e instanceof ProposalNotPendingError) { reply.status(409); return { error: { code: "not_pending" } }; }
+      if (e instanceof InvalidSchemaEditError) { reply.status(422); return { error: { code: "invalid_schema_edit", message: e.message } }; }
       throw e;
     }
   });

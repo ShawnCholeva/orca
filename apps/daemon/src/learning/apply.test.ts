@@ -7,7 +7,11 @@ import type { Config } from "../config.js";
 import { closeDatabase, openDatabase } from "../db.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import { insertProposal, getProposal, getBaseline } from "./store.js";
-import { applyLearnedInstructionEdit, rollbackAppliedProposal, restoreTemplateDefault, StaleProposalError, NoBaselineError } from "./apply.js";
+import {
+  applyLearnedInstructionEdit, rollbackAppliedProposal, restoreTemplateDefault,
+  StaleProposalError, NoBaselineError, InvalidSchemaEditError,
+} from "./apply.js";
+import { serializeSchema } from "./schema-mutation.js";
 import type { TemplateInstructionProposal } from "@orca/contracts";
 
 const tempDirs: string[] = [];
@@ -81,6 +85,44 @@ describe("applyLearnedInstructionEdit", () => {
     applyLearnedInstructionEdit(db, "p1", { decidedBy: "owner", now: "2026-06-30T01:00:00.000Z" });
     expect(getProposal(db, "p1")?.status).toBe("applied");
     expect(getProposal(db, "p2")?.status).toBe("superseded");
+  });
+});
+
+describe("schema proposals", () => {
+  const beforeSchema = [{ key: "summary", type: "string" as const, required: true }];
+  const afterSchema = [
+    { key: "summary", type: "string" as const, required: true },
+    { key: "evidence_refs", type: "array" as const, required: true, itemType: "string" as const },
+  ];
+
+  it("applies a schema proposal: outputSchema replaced, version bumped, rollback restores", () => {
+    insertProposal(db, proposal({
+      id: "p-schema", component: "step_output_schema",
+      beforeInstructions: serializeSchema(beforeSchema), afterInstructions: serializeSchema(afterSchema),
+    }));
+    const { newVersion } = applyLearnedInstructionEdit(db, "p-schema", { decidedBy: "owner", now: "2026-06-30T01:00:00.000Z" });
+    const steps = JSON.parse(stepsJson(db)) as { id: string; instructions?: string; outputSchema?: { key: string }[] }[];
+    const step = steps.find((s) => s.id === "s1")!;
+    expect(step.outputSchema?.map((f) => f.key)).toEqual(["summary", "evidence_refs"]);
+    expect(step.instructions).toBe("old"); // untouched
+    const rolled = rollbackAppliedProposal(db, "p-schema", { decidedBy: "owner", now: "2026-06-30T02:00:00.000Z" });
+    expect(rolled.newVersion).toBe(newVersion + 1);
+    const stepsAfter = JSON.parse(stepsJson(db)) as { id: string; outputSchema?: { key: string }[] }[];
+    expect(stepsAfter.find((s) => s.id === "s1")?.outputSchema?.map((f) => f.key)).toEqual(["summary"]);
+  });
+
+  it("refuses an edited schema that is invalid JSON or violates the whitelist", () => {
+    insertProposal(db, proposal({
+      id: "p-schema-2", component: "step_output_schema",
+      beforeInstructions: serializeSchema(beforeSchema), afterInstructions: serializeSchema(afterSchema),
+    }));
+    expect(() => applyLearnedInstructionEdit(db, "p-schema-2", { editedInstructions: "not json", decidedBy: "owner", now: "2026-06-30T01:00:00.000Z" }))
+      .toThrow(InvalidSchemaEditError);
+    const weakened = JSON.stringify([{ key: "summary", type: "string", required: false }], null, 2); // required→optional
+    expect(() => applyLearnedInstructionEdit(db, "p-schema-2", { editedInstructions: weakened, decidedBy: "owner", now: "2026-06-30T01:00:00.000Z" }))
+      .toThrow(InvalidSchemaEditError);
+    // proposal untouched:
+    expect(getProposal(db, "p-schema-2")?.status).toBe("pending");
   });
 });
 

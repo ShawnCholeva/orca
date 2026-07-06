@@ -3,12 +3,15 @@ import {
   getProposal, updateProposalDecision, supersedeOtherPending, supersedeAppliedForTemplate,
   captureBaseline, getBaseline, markBaselineRestored,
 } from "./store.js";
+import { parseSchema, validateSchemaTightening } from "./schema-mutation.js";
+import type { TemplateInstructionProposal, WorkflowStepOutputSchema } from "@orca/contracts";
 
 export class StaleProposalError extends Error {}
 export class ProposalNotPendingError extends Error {}
 export class ProposalNotAppliedError extends Error {}
 export class NoBaselineError extends Error {}
 export class StepNotFoundError extends Error {}
+export class InvalidSchemaEditError extends Error {}
 
 interface TemplateRow { version: number; steps_json: string; is_built_in: number }
 
@@ -32,6 +35,45 @@ function setStepInstructionsInPlace(db: Database.Database, templateId: string, s
   return newVersion;
 }
 
+// Sibling of setStepInstructionsInPlace — same privileged-write discipline and caveats.
+function setStepOutputSchemaInPlace(db: Database.Database, templateId: string, stepTemplateId: string, schema: WorkflowStepOutputSchema, now: string): number {
+  const tpl = readTemplate(db, templateId);
+  if (!tpl) throw new StepNotFoundError(`template ${templateId} not found`);
+  const steps = JSON.parse(tpl.steps_json) as { id: string; outputSchema?: unknown }[];
+  const step = steps.find((s) => s.id === stepTemplateId);
+  if (!step) throw new StepNotFoundError(`step ${stepTemplateId} not in template ${templateId}`);
+  step.outputSchema = schema;
+  const newVersion = tpl.version + 1;
+  db.prepare(`UPDATE workflow_templates SET steps_json = ?, version = ?, updated_at = ? WHERE id = ?`)
+    .run(JSON.stringify(steps), newVersion, now, templateId);
+  return newVersion;
+}
+
+// Resolve + validate the final text for a proposal per its component. For schema
+// proposals a human edit must still be a valid, pure tightening of the BEFORE
+// schema — an invalid edit can never be written. MUST be called before the staleness
+// guard so a bad edit never triggers supersede-on-throw either.
+function resolveFinalWrite(p: TemplateInstructionProposal, editedText: string | undefined): { finalText: string; write: (db: Database.Database, now: string) => number } {
+  const finalText = editedText ?? p.afterInstructions;
+  if (p.component === "step_output_schema") {
+    const before = parseSchema(p.beforeInstructions) ?? [];
+    const after = parseSchema(finalText);
+    if (!after) throw new InvalidSchemaEditError("edited schema is not a valid output schema (must be the JSON field list)");
+    const t = validateSchemaTightening(before, after);
+    if (!t.ok) throw new InvalidSchemaEditError(`edited schema is not a pure tightening: ${t.errors.join("; ")}`);
+    return { finalText, write: (db, now) => setStepOutputSchemaInPlace(db, p.templateId, p.stepTemplateId, after, now) };
+  }
+  return { finalText, write: (db, now) => setStepInstructionsInPlace(db, p.templateId, p.stepTemplateId, finalText, now) };
+}
+
+// The contract's superRefine on TemplateInstructionProposal makes an unparseable stored
+// beforeInstructions impossible for step_output_schema rows; this is a defensive hard-stop.
+function mustParseStoredSchema(proposalId: string, text: string): WorkflowStepOutputSchema {
+  const parsed = parseSchema(text);
+  if (!parsed) throw new StepNotFoundError(`proposal ${proposalId} has an unparseable stored schema`);
+  return parsed;
+}
+
 // Overwrite all steps (restore path).
 function setStepsJsonInPlace(db: Database.Database, templateId: string, stepsJson: string, now: string): number {
   const tpl = readTemplate(db, templateId);
@@ -51,6 +93,9 @@ export function applyLearnedInstructionEdit(
   if (p.status !== "pending") throw new ProposalNotPendingError(`proposal ${proposalId} is ${p.status}`);
   const tpl = readTemplate(db, p.templateId);
   if (!tpl) throw new StepNotFoundError(`template ${p.templateId} not found`);
+  // Resolve + validate the final write BEFORE the staleness guard: an invalid edit must
+  // leave the proposal fully untouched — it must never trigger supersede-on-throw either.
+  const resolved = resolveFinalWrite(p, opts.editedInstructions);
   // Staleness guard — MUST stay outside the transaction so the supersede write persists on throw.
   if (tpl.version !== p.templateVersionAtProposal) {
     updateProposalDecision(db, proposalId, { status: "superseded" });
@@ -59,11 +104,10 @@ export function applyLearnedInstructionEdit(
   return db.transaction(() => {
     // First learned edit on a built-in -> capture pristine baseline.
     if (tpl.is_built_in === 1) captureBaseline(db, p.templateId, tpl.steps_json, opts.now);
-    const finalText = opts.editedInstructions ?? p.afterInstructions;
-    const newVersion = setStepInstructionsInPlace(db, p.templateId, p.stepTemplateId, finalText, opts.now);
+    const newVersion = resolved.write(db, opts.now);
     updateProposalDecision(db, proposalId, {
       status: "applied", decidedAt: opts.now, decidedBy: opts.decidedBy, appliedAsVersion: newVersion,
-      afterInstructions: finalText, humanEdited: opts.editedInstructions !== undefined,
+      afterInstructions: resolved.finalText, humanEdited: opts.editedInstructions !== undefined,
     });
     supersedeOtherPending(db, p.templateId, p.stepTemplateId, proposalId);
     return { newVersion };
@@ -75,7 +119,9 @@ export function rollbackAppliedProposal(db: Database.Database, proposalId: strin
   if (!p) throw new StepNotFoundError(`proposal ${proposalId} not found`);
   if (p.status !== "applied") throw new ProposalNotAppliedError(`proposal ${proposalId} is ${p.status}`);
   return db.transaction(() => {
-    const newVersion = setStepInstructionsInPlace(db, p.templateId, p.stepTemplateId, p.beforeInstructions, opts.now);
+    const newVersion = p.component === "step_output_schema"
+      ? setStepOutputSchemaInPlace(db, p.templateId, p.stepTemplateId, mustParseStoredSchema(proposalId, p.beforeInstructions), opts.now)
+      : setStepInstructionsInPlace(db, p.templateId, p.stepTemplateId, p.beforeInstructions, opts.now);
     updateProposalDecision(db, proposalId, { status: "rolled_back", decidedAt: opts.now, decidedBy: opts.decidedBy });
     return { newVersion };
   })();
