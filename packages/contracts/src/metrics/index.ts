@@ -58,6 +58,25 @@ export const FailureCluster = z.object({
 }).strict();
 export type FailureCluster = z.infer<typeof FailureCluster>;
 
+export const VerificationTier = z.enum([
+  "verified_executed", "partially_verified", "ai_reviewed", "self_reported", "unverified",
+]);
+export type VerificationTier = z.infer<typeof VerificationTier>;
+
+export const EvidenceArtifact = z.object({
+  source: z.enum(["executable", "independent_review", "self_report"]),
+  verifies: z.string(),
+  cannotVerify: z.string(),
+  confidence: z.number(),
+  verdict: z.enum(["pass", "fail", "partial", "inconclusive"]),
+}).strict();
+export type EvidenceArtifact = z.infer<typeof EvidenceArtifact>;
+
+export const FailureMode = z.object({
+  label: z.string(), count: z.number().int().nonnegative(), pct: z.number(),
+}).strict();
+export type FailureMode = z.infer<typeof FailureMode>;
+
 export const StepMetrics = z.object({
   stepTemplateId: z.string(),
   name: z.string(),
@@ -70,7 +89,7 @@ export const StepMetrics = z.object({
   recovered: z.number().int().nonnegative(),
   failed: z.number().int().nonnegative(),
   quality: z.object({
-    verdictPassRate: z.number(), sensorPassRate: z.number(), oracleSufficientRate: z.number(),
+    verdictPassRate: z.number(), sensorPassRate: z.number().nullable(), oracleSufficientRate: z.number(),
     // Count of completions that produced a CONCLUSIVE verdict (evidence or refute).
     // 0 means the step's delivery was never independently verified — low verification
     // COVERAGE, distinct from low quality. The score reflects verification strength, so
@@ -90,6 +109,14 @@ export const StepMetrics = z.object({
     approvals: z.object({ count: z.number().int().nonnegative(), sampleTransitionIds: z.array(z.string()) }).strict(),
   }).strict(),
   failureClusters: z.array(FailureCluster),
+  verification: z.object({
+    tier: VerificationTier, tierLabel: z.string(), confidence: z.number(),
+    falseAcceptanceRate: z.number(), artifacts: z.array(EvidenceArtifact),
+  }).strict(),
+  failureModes: z.array(FailureMode),
+  reconciliation: z.object({
+    claimedComplete: z.boolean(), verifiedTierLabel: z.string(), refuted: z.boolean(),
+  }).strict().nullable(),
   trend: z.array(z.number()),
   versionBoundaries: z.array(z.number().int()),
   insights: z.array(z.string()),

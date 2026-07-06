@@ -55,6 +55,12 @@ describe("metrics contracts", () => {
                 hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
         failureClusters: [{ failureCode: "invalid_output", boundary: "step_complete",
                             count: 1, sampleTransitionIds: ["t9"] }],
+        verification: {
+          tier: "ai_reviewed" as const, tierLabel: "Reviewed, not proven", confidence: 0.8,
+          falseAcceptanceRate: 0.05, artifacts: [],
+        },
+        failureModes: [],
+        reconciliation: null,
         trend: [90, 92, 94], versionBoundaries: [],
         insights: ["Weakest step"], recentReasons: [],
       }],
