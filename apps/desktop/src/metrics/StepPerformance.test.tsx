@@ -69,7 +69,7 @@ describe("StepRow expanded", () => {
     render(<StepRow step={reconciledStep} index={1} isLast open onToggle={() => {}} />);
     expect(screen.getByText(/Checks run/i)).toBeTruthy();
     expect(screen.getByText(/a second model reviewed/i)).toBeTruthy();
-    expect(screen.queryByText(/oracle|sensor|verdict/i)).toBeNull();
+    expect(screen.queryByText(/\b(oracle|sensor|verdict|refute|veto)\b/i)).toBeNull();
   });
 
   it("renders the reviewer's reason when a claim was overturned", () => {
