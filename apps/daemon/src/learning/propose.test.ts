@@ -5,7 +5,11 @@ import { buildProposePayload, validateRevisionProposal, proposeInstructionRevisi
 const bundle: DiagnosisBundle = {
   stepTemplateId: "s1", currentInstructions: "Generate a proposal.",
   targetedFailureMode: { rule: "R2", failureCode: "invalid_output", clusterCount: 8, signalCount: null },
-  evidence: { sampleTransitionIds: ["t1"], revisionSignalIds: ["rs1"], revisionFeedbackTexts: ["follow the schema"], metricSnapshot: { score: 60, verdictPassRate: 0.57, oracleSufficientRate: 0.8, versionDelta: -0.05 } },
+  evidence: {
+    sampleTransitionIds: ["t1"], revisionSignalIds: ["rs1"], revisionFeedbackTexts: ["follow the schema"],
+    refuteReasons: ["claimed tests ran but none exist"], supersededReasons: ["output missed the acceptance list"],
+    metricSnapshot: { score: 60, verdictPassRate: 0.57, oracleSufficientRate: 0.8, versionDelta: -0.05 },
+  },
 };
 
 describe("buildProposePayload", () => {
@@ -13,6 +17,8 @@ describe("buildProposePayload", () => {
     const payload = buildProposePayload(bundle);
     expect(payload).toMatchObject({ currentInstructions: "Generate a proposal.", targetedFailureMode: { rule: "R2" } });
     expect(JSON.stringify(payload).length).toBeLessThan(65536);
+    expect(payload.refuteReasons).toEqual(bundle.evidence.refuteReasons);
+    expect(payload.supersededReasons).toEqual(bundle.evidence.supersededReasons);
   });
 });
 

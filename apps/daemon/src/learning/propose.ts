@@ -19,6 +19,8 @@ export function buildProposePayload(bundle: DiagnosisBundle): Record<string, unk
     currentInstructions: bundle.currentInstructions,
     targetedFailureMode: bundle.targetedFailureMode,
     revisionFeedbackTexts: bundle.evidence.revisionFeedbackTexts,
+    refuteReasons: bundle.evidence.refuteReasons,
+    supersededReasons: bundle.evidence.supersededReasons,
     metricSnapshot: bundle.evidence.metricSnapshot,
   };
 }

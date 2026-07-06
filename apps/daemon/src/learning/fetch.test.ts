@@ -36,6 +36,11 @@ function seed(db: Database.Database) {
               VALUES ('rs1','sr1','g',0,?,'follow the output schema','2026-05-01T00:05:00.000Z')`).run(scoring);
   db.prepare(`INSERT INTO step_revision_signals (id,step_run_id,goal_id,revision_index,superseded_scoring_json,feedback_text,created_at)
               VALUES ('rs2','sr1','g',1,?,NULL,'2026-05-01T00:06:00.000Z')`).run(scoring);
+  const reasonScoring = JSON.stringify({ successScore: 0.9, reason: "output missed the acceptance list" });
+  db.prepare(`INSERT INTO step_revision_signals (id,step_run_id,goal_id,revision_index,superseded_scoring_json,feedback_text,created_at)
+              VALUES ('rs3','sr1','g',2,?,'still off','2026-05-01T00:07:00.000Z')`).run(reasonScoring);
+  db.prepare(`INSERT INTO step_revision_signals (id,step_run_id,goal_id,revision_index,superseded_scoring_json,feedback_text,created_at)
+              VALUES ('rs4','sr1','g',3,'not json','again','2026-05-01T00:08:00.000Z')`).run();
 }
 
 let db: Database.Database;
@@ -45,12 +50,19 @@ afterEach(() => { closeDatabase(); for (const d of tempDirs.splice(0)) rmSync(d,
 describe("listRevisionSignalsByTemplate", () => {
   it("joins signals to step_template_id within the window", () => {
     const rows = listRevisionSignalsByTemplate(db, "tpl", "2026-05-01T00:00:00.000Z", "2026-05-02T00:00:00.000Z");
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(4);
     expect(rows[0].stepTemplateId).toBe("s1");
     expect(rows.map((r) => r.feedbackText)).toContain("follow the output schema");
   });
   it("excludes signals outside the window", () => {
     const rows = listRevisionSignalsByTemplate(db, "tpl", "2026-06-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
     expect(rows).toHaveLength(0);
+  });
+  it("parses supersededReason from superseded_scoring_json, and is null on malformed JSON", () => {
+    const rows = listRevisionSignalsByTemplate(db, "tpl", "2026-05-01T00:00:00.000Z", "2026-05-02T00:00:00.000Z");
+    const withReason = rows.find((r) => r.id === "rs3");
+    expect(withReason?.supersededReason).toBe("output missed the acceptance list");
+    const malformed = rows.find((r) => r.id === "rs4");
+    expect(malformed?.supersededReason).toBeNull();
   });
 });

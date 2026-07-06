@@ -10,6 +10,13 @@ export const INSTRUCTION_ADDRESSABLE: ReadonlySet<string> = new Set([
   "invalid_output", "output_unavailable", "source_truncated", "evidence_veto", "guardrail_denied",
 ]);
 
+// Failure codes whose cause is the environment/provider, not the step's
+// instructions — an instruction edit cannot fix these.
+export const INFRA_CODES: ReadonlySet<string> = new Set([
+  "provider_error", "internal_error", "daemon_restart", "timeout",
+  "session_not_terminal", "goal_archived", "session_archived",
+]);
+
 export type DiagnosisBundle = {
   stepTemplateId: string;
   currentInstructions: string;
@@ -18,9 +25,25 @@ export type DiagnosisBundle = {
     sampleTransitionIds: string[];
     revisionSignalIds: string[];
     revisionFeedbackTexts: string[];
+    // The independent reviewer's stated reasons for overturning claims (Task 3).
+    refuteReasons: string[];
+    // The superseded scorings' own `reason` — the claim the user then corrected.
+    supersededReasons: string[];
     metricSnapshot: { score: number | null; verdictPassRate: number; oracleSufficientRate: number | null; versionDelta: number | null };
   };
 };
+
+// R1 is cause-agnostic, so gate it: when the step's clustered failures are mostly
+// infrastructure, a low score is not an instructions problem — proposing an
+// instruction edit would optimize against the wrong signal.
+function infraDominated(step: StepMetrics): boolean {
+  let infra = 0, other = 0;
+  for (const c of step.failureClusters) {
+    if (c.failureCode != null && INFRA_CODES.has(c.failureCode)) infra += c.count;
+    else other += c.count;
+  }
+  return infra > other;
+}
 
 function chooseRule(step: StepMetrics, feedbackSignals: TemplateRevisionSignal[]): TargetedFailureMode | null {
   // R3 — revision-signal density (highest signal; instruction-related regardless of code).
@@ -34,12 +57,13 @@ function chooseRule(step: StepMetrics, feedbackSignals: TemplateRevisionSignal[]
   if (cluster) {
     return { rule: "R2", failureCode: cluster.failureCode, clusterCount: cluster.count, signalCount: null };
   }
-  // R4 — false confidence (high pass, low oracle).
+  // R4 — false confidence (high pass, low/absent oracle).
   if (step.quality.verdictPassRate >= 0.8 && (step.quality.oracleSufficientRate ?? 0) < 0.5) {
     return { rule: "R4", failureCode: null, clusterCount: null, signalCount: null };
   }
-  // R1 — underperforming headline (degraded/watch ~ score < 80).
-  if (step.score != null && step.score < 80) {
+  // R1 — underperforming headline (degraded/watch ~ score < 80). Needs a real score
+  // (null = no gradient to act on) and a non-infra failure picture.
+  if (step.score != null && step.score < 80 && !infraDominated(step)) {
     return { rule: "R1", failureCode: null, clusterCount: null, signalCount: null };
   }
   return null;
@@ -50,7 +74,6 @@ export function diagnoseTemplate(input: {
   signals: TemplateRevisionSignal[];
   stepInstructions: Map<string, string>;
 }): DiagnosisBundle[] {
-  const versionDelta = input.detail.summary.versionComparison?.byDimension.verificationStrength ?? null;
   const signalsByStep = new Map<string, TemplateRevisionSignal[]>();
   for (const s of input.signals) {
     if (s.feedbackText == null) continue;
@@ -72,10 +95,14 @@ export function diagnoseTemplate(input: {
         sampleTransitionIds,
         revisionSignalIds: feedback.map((f) => f.id),
         revisionFeedbackTexts: feedback.map((f) => f.feedbackText!).slice(0, 5),
-        metricSnapshot: { score: step.score, verdictPassRate: step.quality.verdictPassRate, oracleSufficientRate: step.quality.oracleSufficientRate, versionDelta },
+        refuteReasons: step.verification.recentRefuteReasons.slice(0, 3),
+        supersededReasons: feedback.map((f) => f.supersededReason).filter((r): r is string => r != null).slice(0, 5),
+        // The step's OWN honest-score delta across versions — not the template-level
+        // verificationStrength delta the old code hardcoded regardless of diagnosis.
+        metricSnapshot: { score: step.score, verdictPassRate: step.quality.verdictPassRate, oracleSufficientRate: step.quality.oracleSufficientRate, versionDelta: step.versionScoreDelta },
       },
     });
   }
-  // Worst-first, capped.
+  // Worst-first (null scores last — they carry no gradient), capped.
   return bundles.sort((a, b) => (a.evidence.metricSnapshot.score ?? 101) - (b.evidence.metricSnapshot.score ?? 101)).slice(0, TOP_N);
 }

@@ -51,9 +51,9 @@ describe("diagnoseTemplate", () => {
   it("excludes infra-coded clusters but keeps revision-signal density (R3)", () => {
     const infra = step({ score: 95, failureClusters: [{ failureCode: "daemon_restart", boundary: "step_complete", count: 9, sampleTransitionIds: ["t9"] }] });
     const signals = [
-      { id: "rs1", stepTemplateId: "s1", feedbackText: "fix the schema", createdAt: "2026-05-01T00:00:00.000Z" },
-      { id: "rs2", stepTemplateId: "s1", feedbackText: "still wrong", createdAt: "2026-05-01T00:01:00.000Z" },
-      { id: "rs3", stepTemplateId: "s1", feedbackText: "again", createdAt: "2026-05-01T00:02:00.000Z" },
+      { id: "rs1", stepTemplateId: "s1", feedbackText: "fix the schema", supersededReason: null, createdAt: "2026-05-01T00:00:00.000Z" },
+      { id: "rs2", stepTemplateId: "s1", feedbackText: "still wrong", supersededReason: null, createdAt: "2026-05-01T00:01:00.000Z" },
+      { id: "rs3", stepTemplateId: "s1", feedbackText: "again", supersededReason: null, createdAt: "2026-05-01T00:02:00.000Z" },
     ];
     const out = diagnoseTemplate({ detail: detail([infra]), signals, stepInstructions: instr });
     expect(out).toHaveLength(1);
@@ -65,5 +65,41 @@ describe("diagnoseTemplate", () => {
   it("INSTRUCTION_ADDRESSABLE excludes infra codes", () => {
     expect(INSTRUCTION_ADDRESSABLE.has("invalid_output")).toBe(true);
     expect(INSTRUCTION_ADDRESSABLE.has("daemon_restart")).toBe(false);
+  });
+
+  it("R1 does not fire on a null score (no gradient) nor on infra-dominated failures", () => {
+    const nullScore = step({ score: null, failureClusters: [] });
+    expect(diagnoseTemplate({ detail: detail([nullScore]), signals: [], stepInstructions: instr })).toHaveLength(0);
+
+    const infra = step({
+      score: 40,
+      failureClusters: [
+        { failureCode: "provider_error", boundary: "step_complete", count: 6, sampleTransitionIds: ["t1"] },
+        { failureCode: "invalid_output", boundary: "step_complete", count: 2, sampleTransitionIds: ["t2"] },
+      ],
+    });
+    // invalid_output count (2) < K, so R2 can't fire; R1 must refuse: infra majority.
+    expect(diagnoseTemplate({ detail: detail([infra]), signals: [], stepInstructions: instr })).toHaveLength(0);
+
+    const addressable = step({ score: 40, failureClusters: [{ failureCode: "invalid_output", boundary: "step_complete", count: 2, sampleTransitionIds: ["t2"] }] });
+    const out = diagnoseTemplate({ detail: detail([addressable]), signals: [], stepInstructions: instr });
+    expect(out).toHaveLength(1);
+    expect(out[0].targetedFailureMode.rule).toBe("R1");
+  });
+
+  it("bundle carries refute reasons, superseded reasons, and the step's own version delta", () => {
+    const s = step({
+      verification: { ...step().verification, recentRefuteReasons: ["claimed tests ran but none exist"] },
+      versionScoreDelta: 0.25,
+    });
+    const signals = [
+      { id: "rs1", stepTemplateId: "s1", feedbackText: "fix the schema", supersededReason: "output missed the acceptance list", createdAt: "2026-05-01T00:00:00.000Z" },
+      { id: "rs2", stepTemplateId: "s1", feedbackText: "still wrong", supersededReason: null, createdAt: "2026-05-01T00:01:00.000Z" },
+      { id: "rs3", stepTemplateId: "s1", feedbackText: "again", supersededReason: null, createdAt: "2026-05-01T00:02:00.000Z" },
+    ];
+    const out = diagnoseTemplate({ detail: detail([s]), signals, stepInstructions: instr });
+    expect(out[0].evidence.refuteReasons).toEqual(["claimed tests ran but none exist"]);
+    expect(out[0].evidence.supersededReasons).toEqual(["output missed the acceptance list"]);
+    expect(out[0].evidence.metricSnapshot.versionDelta).toBe(0.25);
   });
 });
