@@ -73,7 +73,7 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{step.name}</span>
-            <Pill tone={m.tone} size="xs">{m.label}</Pill>
+            <Pill tone={status === "unverified" ? "accent" : m.tone} size="xs">{status === "unverified" ? "No check yet" : step.verification.tierLabel}</Pill>
             {low && <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }} title={`Based on only ${step.sampleSize} run${step.sampleSize === 1 ? "" : "s"} — low confidence (fewer than 5). Scores here can swing as more runs accrue.`}>n={step.sampleSize}</span>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 7 }}>
@@ -85,7 +85,7 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
         <div style={{ textAlign: "right" }}>
           {status === "unverified" ? (
             // No conclusive verdict — show the coverage gap, not a failing grade it didn't earn.
-            <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: m.color }} title="No conclusive verdict was produced for this step — its delivery was never independently verified. This reflects low verification coverage, not low quality.">not verified</span>
+            <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: m.color }} title="No independent check ran for this step yet — it's an opportunity to strengthen, not a failing grade.">needs a check</span>
           ) : (
             <>
               <span style={{ fontSize: 20, fontWeight: 600, color: m.color, letterSpacing: -0.5 }}>{step.score}</span>
@@ -107,13 +107,8 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
               </div>
             ))}
 
-            <SectionLabel>Verification scope</SectionLabel>
-            <div style={{ fontSize: 12, color: "var(--text-2)" }}>
-              Verdict pass {Math.round(step.quality.verdictPassRate * 100)}% · sensors {Math.round(step.quality.sensorPassRate * 100)}% · oracle adequate {Math.round(step.quality.oracleSufficientRate * 100)}%
-            </div>
             <Chips label="Untested regions" items={step.quality.untestedRegions} />
             <Chips label="Residual risk" items={step.quality.residualRisk} />
-            <Chips label="Oracle gaps" items={step.quality.oracleGaps} />
 
             {step.risk.approvals.count > 0 && (
               <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-2)" }}>
@@ -147,8 +142,7 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
 
 export function StepPerformancePanel({ detail, loading, openStep, onToggleStep }: { detail: TemplateMetricsDetail | null; loading: boolean; openStep: string | null; onToggleStep: (name: string) => void }) {
   const steps = detail?.steps ?? [];
-  // "Need attention" = genuine quality issues (watch/degraded), not unverified coverage.
-  const attention = steps.filter((s) => { const st = statusForStep(s); return st === "watch" || st === "degraded"; }).length;
+  const attention = steps.filter((s) => { const st = statusForStep(s); return st === "watch" || st === "degraded" || st === "unverified"; }).length;
   return (
     <Panel title="Step performance" kicker={(detail?.summary.name ?? "").toUpperCase()}
       right={<span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{attention > 0 ? `${attention} need attention` : "all healthy"}</span>}
