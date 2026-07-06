@@ -329,7 +329,7 @@ describe("deriveInsights", () => {
       failureClusters: [],
       verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.55, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
       failureModes: [], reconciliation: null,
-      trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
+      trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /never independently proven|independently proven/i.test(i))).toBe(true);
     expect(insights.join(" ")).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
@@ -345,7 +345,7 @@ describe("deriveInsights", () => {
       failureClusters: [],
       verification: { tier: "self_reported", tierLabel: "Reported success, no check", confidence: 0.3, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
       failureModes: [], reconciliation: null,
-      trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
+      trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /never independently proven|independently proven/i.test(i))).toBe(true);
     expect(insights.join(" ")).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
@@ -361,7 +361,7 @@ describe("deriveInsights", () => {
       failureClusters: [],
       verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0.3, artifacts: [], recentRefuteReasons: [] },
       failureModes: [], reconciliation: null,
-      trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
+      trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /approves work without proof/i.test(i))).toBe(true);
     expect(insights.join(" ")).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
@@ -377,7 +377,7 @@ describe("deriveInsights", () => {
       failureClusters: [],
       verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
       failureModes: [{ label: "Timeout", count: 3, pct: 1 }], reconciliation: null,
-      trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
+      trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /most common problem: timeout \(3×\)/i.test(i))).toBe(true);
     expect(insights.join(" ")).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
@@ -393,7 +393,7 @@ describe("deriveInsights", () => {
       failureClusters: [],
       verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
       failureModes: [], reconciliation: null,
-      trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
+      trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /retry|loop|churn/i.test(i))).toBe(true);
   });
@@ -408,7 +408,7 @@ describe("deriveInsights", () => {
       failureClusters: [],
       verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
       failureModes: [], reconciliation: null,
-      trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
+      trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
     });
     expect(insights).toEqual([]);
   });

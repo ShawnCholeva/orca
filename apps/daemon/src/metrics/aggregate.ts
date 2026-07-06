@@ -439,7 +439,8 @@ export function computeStepMetrics(input: {
       },
       failureModes,
       reconciliation,
-      trend, versionBoundaries, versionScoreDelta, versionScoreDeltaVersions, insights: [], recentReasons,
+      trend, versionBoundaries, versionScoreDelta, versionScoreDeltaVersions,
+      versionInvalidOutputRateDelta: null, insights: [], recentReasons,
     };
     step.insights = deriveInsights(step);
     steps.push(step);

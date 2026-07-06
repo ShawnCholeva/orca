@@ -14,7 +14,7 @@ function step(over: Partial<StepMetrics> = {}): StepMetrics {
     verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.55, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
     failureModes: [{ label: "Produced output that didn't match what the step asked for", count: 8, pct: 1 }],
     reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false, refuteReason: null },
-    trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [], ...over,
+    trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [], ...over,
   };
 }
 

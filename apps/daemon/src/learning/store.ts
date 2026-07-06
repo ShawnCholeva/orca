@@ -3,6 +3,7 @@ import { TemplateInstructionProposal, type ProposalStatus, type CounterfactualJu
 
 interface Row {
   id: string; template_id: string; template_version_at_proposal: number; step_template_id: string;
+  component: string;
   before_instructions: string; after_instructions: string; targeted_failure_mode_json: string;
   predicted_improvement: string; invariants_preserved_json: string; evidence_json: string;
   rationale: string; human_edited: number; status: string; created_at: string;
@@ -13,7 +14,7 @@ interface Row {
 function rowToProposal(r: Row): TemplateInstructionProposal {
   return TemplateInstructionProposal.parse({
     id: r.id, templateId: r.template_id, templateVersionAtProposal: r.template_version_at_proposal,
-    stepTemplateId: r.step_template_id, component: "step_instructions",
+    stepTemplateId: r.step_template_id, component: r.component,
     beforeInstructions: r.before_instructions, afterInstructions: r.after_instructions,
     targetedFailureMode: JSON.parse(r.targeted_failure_mode_json),
     predictedImprovement: r.predicted_improvement,
@@ -30,12 +31,12 @@ function rowToProposal(r: Row): TemplateInstructionProposal {
 export function insertProposal(db: Database.Database, p: TemplateInstructionProposal): void {
   db.prepare(
     `INSERT INTO template_instruction_proposals
-      (id, template_id, template_version_at_proposal, step_template_id, before_instructions,
+      (id, template_id, template_version_at_proposal, step_template_id, component, before_instructions,
        after_instructions, targeted_failure_mode_json, predicted_improvement, invariants_preserved_json,
        evidence_json, rationale, human_edited, status, created_at, decided_at, decided_by, applied_as_version)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).run(
-    p.id, p.templateId, p.templateVersionAtProposal, p.stepTemplateId, p.beforeInstructions,
+    p.id, p.templateId, p.templateVersionAtProposal, p.stepTemplateId, p.component, p.beforeInstructions,
     p.afterInstructions, JSON.stringify(p.targetedFailureMode), p.predictedImprovement,
     JSON.stringify(p.invariantsPreserved), JSON.stringify(p.evidence), p.rationale,
     p.humanEdited ? 1 : 0, p.status, p.createdAt, p.decidedAt, p.decidedBy, p.appliedAsVersion,

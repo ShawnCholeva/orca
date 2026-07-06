@@ -180,6 +180,7 @@ describe("runMigrations", () => {
       "0052_harness_transitions_refute.sql",
       "0053_learning_proposal_judgment.sql",
       "0054_decision_reasoning.sql",
+      "0055_proposal_component.sql",
     ]);
   });
 
@@ -326,6 +327,7 @@ describe("runMigrations", () => {
       "0052_harness_transitions_refute.sql",
       "0053_learning_proposal_judgment.sql",
       "0054_decision_reasoning.sql",
+      "0055_proposal_component.sql",
     ]);
 
     const goalCount = (
@@ -625,6 +627,7 @@ describe("session tables migration", () => {
       "0052_harness_transitions_refute.sql",
       "0053_learning_proposal_judgment.sql",
       "0054_decision_reasoning.sql",
+      "0055_proposal_component.sql",
     ]);
 
     const tables = (
@@ -1157,6 +1160,7 @@ describe("migration 0010 workflows", () => {
       "0052_harness_transitions_refute.sql",
       "0053_learning_proposal_judgment.sql",
       "0054_decision_reasoning.sql",
+      "0055_proposal_component.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1766,6 +1770,7 @@ describe("migration 0012 orchestration transport", () => {
       "0052_harness_transitions_refute.sql",
       "0053_learning_proposal_judgment.sql",
       "0054_decision_reasoning.sql",
+      "0055_proposal_component.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

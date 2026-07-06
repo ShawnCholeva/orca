@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES, hasMaxSerializedBytes, REASONING_MAX } from "../workflows/index.js";
+import { WorkflowStepOutputSchema } from "../workflows/output-schema.js";
 
 export const DimensionKey = z.enum([
   "trajectoryEfficiency", "verificationStrength", "recovery",
@@ -9,6 +10,21 @@ export type DimensionKey = z.infer<typeof DimensionKey>;
 
 export const ProposalStatus = z.enum(["pending", "applied", "dismissed", "rolled_back", "superseded"]);
 export type ProposalStatus = z.infer<typeof ProposalStatus>;
+
+export const ProposalComponent = z.enum(["step_instructions", "step_output_schema"]);
+export type ProposalComponent = z.infer<typeof ProposalComponent>;
+
+export const ProposeSchemaRevisionProposal = z.object({
+  proposedOutputSchema: WorkflowStepOutputSchema,
+  predictedImprovement: z.string().min(1),
+  invariantsPreserved: z.array(DimensionKey),
+  rationale: z.string().min(1).max(2000),
+}).strict();
+export type ProposeSchemaRevisionProposal = z.infer<typeof ProposeSchemaRevisionProposal>;
+
+function parsesAsSchema(text: string): boolean {
+  try { return WorkflowStepOutputSchema.safeParse(JSON.parse(text)).success; } catch { return false; }
+}
 
 export const TargetedFailureMode = z.object({
   rule: z.enum(["R1", "R2", "R3", "R4"]),
@@ -60,6 +76,7 @@ export const JudgeInstructionEditRequest = z.object({
     name: z.string().max(200),
     currentInstructions: z.string().max(8192),
     proposedInstructions: z.string().max(8192),
+    component: ProposalComponent.optional(),
   }).strict(),
   targetedFailureMode: TargetedFailureMode,
   solvedCases: z.array(JudgeCase).max(5),
@@ -95,7 +112,7 @@ export const TemplateInstructionProposal = z.object({
   templateId: z.string(),
   templateVersionAtProposal: z.number().int(),
   stepTemplateId: z.string(),
-  component: z.literal("step_instructions"),
+  component: ProposalComponent,
   beforeInstructions: z.string(),
   afterInstructions: z.string(),
   targetedFailureMode: TargetedFailureMode,
@@ -119,6 +136,14 @@ export const TemplateInstructionProposal = z.object({
   // this guards against a proposal that fails its own purpose.
   targetDelta: z.number().nullable().optional(),
   targetImproved: z.boolean().nullable().optional(),
+  // server-enriched (F4, schema-canary): latest-vs-prior delta of the step's
+  // invalid-output completion rate. A too-tight learned schema shows up here first.
+  invalidOutputRateDelta: z.number().nullable().optional(),
+  targetDeltaVersions: z.object({ latest: z.number().int(), prior: z.number().int() }).strict().nullable().optional(),
   judgment: CounterfactualJudgment.nullable().optional(),
-}).strict();
+}).strict().superRefine((p, ctx) => {
+  if (p.component !== "step_output_schema") return;
+  if (!parsesAsSchema(p.beforeInstructions)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["beforeInstructions"], message: "step_output_schema proposal: beforeInstructions must be a serialized output schema" });
+  if (!parsesAsSchema(p.afterInstructions)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["afterInstructions"], message: "step_output_schema proposal: afterInstructions must be a serialized output schema" });
+});
 export type TemplateInstructionProposal = z.infer<typeof TemplateInstructionProposal>;

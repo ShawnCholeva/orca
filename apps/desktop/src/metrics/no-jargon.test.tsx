@@ -18,7 +18,7 @@ const step: StepMetrics = {
     recentRefuteReasons: [] },
   failureModes: [{ label: "invalid_output", count: 4, pct: 0.2 }],
   reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false, refuteReason: null },
-  trend: [], versionBoundaries: [], versionScoreDelta: null, insights: ["Loops between failed strategies — high retry churn."],
+  trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: ["Loops between failed strategies — high retry churn."],
   recentReasons: [{ at: "2026-05-01T00:00:00.000Z", reason: "constraint X violated" }],
 };
 

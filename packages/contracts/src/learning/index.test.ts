@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ProposeInstructionRevisionProposal,
-  TemplateInstructionProposal,
+  TemplateInstructionProposal, ProposeSchemaRevisionProposal,
   JudgeInstructionEditProposal, JudgeInstructionEditRequest, CounterfactualJudgment,
 } from "./index.js";
 import { OrchestrationDecisionKind } from "../workflows/index.js";
@@ -47,6 +47,53 @@ describe("learning contracts", () => {
 
   it("includes propose_instruction_revision in OrchestrationDecisionKind", () => {
     expect(OrchestrationDecisionKind.safeParse("propose_instruction_revision").success).toBe(true);
+  });
+});
+
+describe("step_output_schema proposal component", () => {
+  const baseProposal = {
+    id: "p1", templateId: "tpl", templateVersionAtProposal: 2, stepTemplateId: "s1",
+    beforeInstructions: "old", afterInstructions: "new",
+    targetedFailureMode: { rule: "R2" as const, failureCode: "invalid_output", clusterCount: 8, signalCount: null },
+    predictedImprovement: "fewer invalid outputs",
+    invariantsPreserved: ["safetyCompliance" as const],
+    falsifier: "version_comparison" as const,
+    rollbackPlan: "revert_to_before" as const,
+    evidence: { sampleTransitionIds: ["t1"], revisionSignalIds: [], metricSnapshot: { score: 62, verdictPassRate: 0.57, oracleSufficientRate: 0.8, versionDelta: null } },
+    rationale: "because",
+    humanEdited: false,
+    status: "pending" as const,
+    createdAt: "2026-06-30T00:00:00.000Z",
+    decidedAt: null, decidedBy: null, appliedAsVersion: null,
+  };
+
+  it("accepts a step_output_schema proposal whose before/after parse as schemas", () => {
+    const schema = JSON.stringify([{ key: "summary", type: "string", required: true }], null, 2);
+    const tighter = JSON.stringify([
+      { key: "summary", type: "string", required: true },
+      { key: "evidence_refs", type: "array", itemType: "string", required: true },
+    ], null, 2);
+    const p = TemplateInstructionProposal.parse({ ...baseProposal, component: "step_output_schema", beforeInstructions: schema, afterInstructions: tighter });
+    expect(p.component).toBe("step_output_schema");
+  });
+
+  it("rejects a step_output_schema proposal whose afterInstructions is not a schema", () => {
+    const schema = JSON.stringify([{ key: "summary", type: "string", required: true }], null, 2);
+    const r = TemplateInstructionProposal.safeParse({ ...baseProposal, component: "step_output_schema", beforeInstructions: schema, afterInstructions: "just prose" });
+    expect(r.success).toBe(false);
+  });
+
+  it("step_instructions proposals do not schema-validate their text", () => {
+    const p = TemplateInstructionProposal.parse({ ...baseProposal, component: "step_instructions" });
+    expect(p.component).toBe("step_instructions");
+  });
+
+  it("ProposeSchemaRevisionProposal round-trips", () => {
+    const r = ProposeSchemaRevisionProposal.parse({
+      proposedOutputSchema: [{ key: "risks", type: "array", itemType: "string", required: true }],
+      predictedImprovement: "forces risk disclosure", invariantsPreserved: ["verificationStrength"], rationale: "weak-oracle step",
+    });
+    expect(r.proposedOutputSchema).toHaveLength(1);
   });
 });
 

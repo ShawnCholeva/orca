@@ -69,6 +69,16 @@ describe("learning store", () => {
     expect(getBaseline(db, "tpl")?.restoredAt).toBe("2026-06-30T03:00:00.000Z");
   });
 
+  it("round-trips a step_output_schema proposal (component persists)", () => {
+    const schema = JSON.stringify([{ key: "summary", type: "string", required: true }], null, 2);
+    const tighter = JSON.stringify([
+      { key: "summary", type: "string", required: true },
+      { key: "evidence_refs", type: "array", itemType: "string", required: true },
+    ], null, 2);
+    insertProposal(db, proposal({ id: "p-schema", component: "step_output_schema", beforeInstructions: schema, afterInstructions: tighter }));
+    expect(getProposal(db, "p-schema")?.component).toBe("step_output_schema");
+  });
+
   it("hydrates null judgment before it is set", () => {
     insertProposal(db, proposal());
     expect(getProposal(db, "p1")?.judgment ?? null).toBeNull();

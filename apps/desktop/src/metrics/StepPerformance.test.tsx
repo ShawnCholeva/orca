@@ -18,7 +18,7 @@ const step: StepMetrics = {
     recentRefuteReasons: [] },
   failureModes: [{ label: "invalid_output", count: 4, pct: 0.2 }],
   reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false, refuteReason: null },
-  trend: [], versionBoundaries: [], versionScoreDelta: null, insights: ["Loops between failed strategies — high retry churn."],
+  trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: ["Loops between failed strategies — high retry churn."],
   recentReasons: [{ at: "2026-05-01T00:00:00.000Z", reason: "constraint X violated" }],
 };
 
@@ -57,7 +57,7 @@ const reconciledStep: StepMetrics = {
   quality: { verdictPassRate: 1, sensorPassRate: null, oracleSufficientRate: 0, scoredSampleSize: 3, verifiedSampleSize: 3, untestedRegions: ["whether the plan works"], residualRisk: [], oracleGaps: [], limitingDimension: null },
   cost: { p50LatencyMs: 1, meanTokens: 1, meanUsd: 0, meanRetries: 0 },
   risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
-  failureClusters: [], trend: [], versionBoundaries: [], versionScoreDelta: null, insights: ["Consistently passes but is never independently proven."], recentReasons: [],
+  failureClusters: [], trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: ["Consistently passes but is never independently proven."], recentReasons: [],
   verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.62, falseAcceptanceRate: 0,
     artifacts: [{ source: "independent_review", verifies: "a second model reviewed the result", cannotVerify: "anything not executed", confidence: 0.55, verdict: "pass" }],
     recentRefuteReasons: [] },

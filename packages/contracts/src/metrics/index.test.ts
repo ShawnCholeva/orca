@@ -63,7 +63,7 @@ describe("metrics contracts", () => {
         reconciliation: null,
         trend: [90, 92, 94], versionBoundaries: [],
         insights: ["Weakest step"], recentReasons: [],
-        versionScoreDelta: null,
+        versionScoreDelta: null, versionInvalidOutputRateDelta: null,
       }],
     };
     expect(TemplateMetricsDetail.parse(detail)).toEqual(detail);

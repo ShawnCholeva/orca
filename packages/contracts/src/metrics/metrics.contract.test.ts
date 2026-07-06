@@ -16,7 +16,7 @@ const base = {
   },
   failureModes: [{ label: "Reported success without an independent check", count: 3, pct: 1 }],
   reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false, refuteReason: null },
-  versionScoreDelta: null,
+  versionScoreDelta: null, versionInvalidOutputRateDelta: null,
 };
 
 describe("StepMetrics contract", () => {

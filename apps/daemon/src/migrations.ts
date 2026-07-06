@@ -67,6 +67,7 @@ export const migrationFiles = [
   "0052_harness_transitions_refute.sql",
   "0053_learning_proposal_judgment.sql",
   "0054_decision_reasoning.sql",
+  "0055_proposal_component.sql",
 ] as const;
 
 export function runMigrations(

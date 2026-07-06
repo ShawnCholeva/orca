@@ -131,6 +131,9 @@ export const StepMetrics = z.object({
   // The version pair versionScoreDelta compares (latest vs prior with enough scored
   // samples). Lets the falsifier verify the delta actually spans the applied version.
   versionScoreDeltaVersions: z.object({ latest: z.number().int(), prior: z.number().int() }).strict().nullable().optional(),
+  // Latest-vs-prior version delta of the step's invalid-output completion rate.
+  // The schema-canary signal: a too-tight learned schema shows up here first.
+  versionInvalidOutputRateDelta: z.number().nullable(),
   insights: z.array(z.string()),
   recentReasons: z.array(z.object({ at: z.string(), reason: z.string() }).strict()),
 }).strict();
