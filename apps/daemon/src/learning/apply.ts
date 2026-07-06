@@ -56,7 +56,11 @@ function setStepOutputSchemaInPlace(db: Database.Database, templateId: string, s
 function resolveFinalWrite(p: TemplateInstructionProposal, editedText: string | undefined): { finalText: string; write: (db: Database.Database, now: string) => number } {
   const finalText = editedText ?? p.afterInstructions;
   if (p.component === "step_output_schema") {
-    const before = parseSchema(p.beforeInstructions) ?? [];
+    const before = parseSchema(p.beforeInstructions);
+    // Unreachable for stored rows (contract superRefine guarantees a parseable
+    // before), but a permissive [] here would let ANY edit pass the whitelist —
+    // throw instead, symmetric with rollback's mustParseStoredSchema.
+    if (!before) throw new InvalidSchemaEditError("stored before-schema is unparseable — refusing to validate an edit against nothing");
     const after = parseSchema(finalText);
     if (!after) throw new InvalidSchemaEditError("edited schema is not a valid output schema (must be the JSON field list)");
     const t = validateSchemaTightening(before, after);
