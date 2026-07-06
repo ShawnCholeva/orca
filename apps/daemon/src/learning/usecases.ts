@@ -6,6 +6,7 @@ import { windowStart } from "../metrics/aggregate.js";
 import { listRevisionSignalsByTemplate } from "./fetch.js";
 import { diagnoseTemplate } from "./diagnose.js";
 import { proposeInstructionRevision, type BrokerLike } from "./propose.js";
+import { serializeSchema } from "./schema-mutation.js";
 import { enrichWithRegression } from "./canary.js";
 import { buildJudgeCorpus } from "./corpus.js";
 import { judgeInstructionEdit } from "./judge.js";
@@ -38,12 +39,14 @@ function orchestratorModelForGoal(db: Database.Database, goalId: string): { prov
   return { providerId: row.orchestrator_provider, modelId: row.orchestrator_model };
 }
 
-function stepInstructions(db: Database.Database, templateId: string): Map<string, string> {
+function stepMeta(db: Database.Database, templateId: string): Map<string, { instructions: string; outputSchemaJson: string }> {
   const row = db.prepare(`SELECT steps_json FROM workflow_templates WHERE id = ?`).get(templateId) as { steps_json: string } | undefined;
-  const map = new Map<string, string>();
+  const map = new Map<string, { instructions: string; outputSchemaJson: string }>();
   if (!row) return map;
-  const steps = JSON.parse(row.steps_json) as { id: string; instructions?: string }[];
-  for (const s of steps) map.set(s.id, s.instructions ?? "");
+  const steps = JSON.parse(row.steps_json) as { id: string; instructions?: string; outputSchema?: unknown }[];
+  for (const s of steps) {
+    map.set(s.id, { instructions: s.instructions ?? "", outputSchemaJson: JSON.stringify(s.outputSchema ?? [], null, 2) });
+  }
   return map;
 }
 
@@ -73,7 +76,7 @@ export async function analyzeTemplate(
   if (!detail) return []; // caller maps null template to 404 before this
   const since = windowStart(now, period);
   const signals = listRevisionSignalsByTemplate(db, templateId, since, now);
-  const bundles = diagnoseTemplate({ detail, signals, stepInstructions: stepInstructions(db, templateId) });
+  const bundles = diagnoseTemplate({ detail, signals, stepMeta: stepMeta(db, templateId) });
 
   const created: TemplateInstructionProposal[] = [];
   for (const bundle of bundles) {
@@ -88,8 +91,9 @@ export async function analyzeTemplate(
     if (!fill) continue;
     const proposal: TemplateInstructionProposal = {
       id: uuid(), templateId, templateVersionAtProposal: detail.summary.latestVersion,
-      stepTemplateId: bundle.stepTemplateId, component: "step_instructions",
-      beforeInstructions: bundle.currentInstructions, afterInstructions: fill.proposedInstructions,
+      stepTemplateId: bundle.stepTemplateId, component: bundle.component,
+      beforeInstructions: "proposedOutputSchema" in fill ? bundle.currentOutputSchemaJson : bundle.currentInstructions,
+      afterInstructions: "proposedOutputSchema" in fill ? serializeSchema(fill.proposedOutputSchema) : fill.proposedInstructions,
       targetedFailureMode: bundle.targetedFailureMode,
       predictedImprovement: fill.predictedImprovement, invariantsPreserved: fill.invariantsPreserved,
       falsifier: "version_comparison", rollbackPlan: "revert_to_before",

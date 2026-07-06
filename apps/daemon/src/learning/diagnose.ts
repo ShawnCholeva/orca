@@ -1,4 +1,4 @@
-import type { StepMetrics, TargetedFailureMode, TemplateMetricsDetail } from "@orca/contracts";
+import type { ProposalComponent, StepMetrics, TargetedFailureMode, TemplateMetricsDetail } from "@orca/contracts";
 import type { TemplateRevisionSignal } from "./fetch.js";
 
 export const SAMPLE_MIN = 5;
@@ -20,6 +20,8 @@ export const INFRA_CODES: ReadonlySet<string> = new Set([
 export type DiagnosisBundle = {
   stepTemplateId: string;
   currentInstructions: string;
+  component: ProposalComponent;
+  currentOutputSchemaJson: string;
   targetedFailureMode: TargetedFailureMode;
   evidence: {
     sampleTransitionIds: string[];
@@ -72,7 +74,7 @@ function chooseRule(step: StepMetrics, feedbackSignals: TemplateRevisionSignal[]
 export function diagnoseTemplate(input: {
   detail: TemplateMetricsDetail;
   signals: TemplateRevisionSignal[];
-  stepInstructions: Map<string, string>;
+  stepMeta: Map<string, { instructions: string; outputSchemaJson: string }>;
 }): DiagnosisBundle[] {
   const signalsByStep = new Map<string, TemplateRevisionSignal[]>();
   for (const s of input.signals) {
@@ -87,9 +89,16 @@ export function diagnoseTemplate(input: {
     const mode = chooseRule(step, feedback);
     if (!mode) continue;
     const sampleTransitionIds = step.failureClusters.flatMap((c) => c.sampleTransitionIds).slice(0, 6);
+    const meta = input.stepMeta.get(step.stepTemplateId) ?? { instructions: "", outputSchemaJson: "[]" };
+    // Deterministic routing (spec §3.2): R4 names a verification deficiency — the
+    // lever is the deterministic completion validator, not the prompt. The core
+    // owns which lever is pulled; the LLM only fills the content.
+    const component: ProposalComponent = mode.rule === "R4" ? "step_output_schema" : "step_instructions";
     bundles.push({
       stepTemplateId: step.stepTemplateId,
-      currentInstructions: input.stepInstructions.get(step.stepTemplateId) ?? "",
+      currentInstructions: meta.instructions,
+      component,
+      currentOutputSchemaJson: meta.outputSchemaJson,
       targetedFailureMode: mode,
       evidence: {
         sampleTransitionIds,
