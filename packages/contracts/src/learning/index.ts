@@ -114,6 +114,11 @@ export const TemplateInstructionProposal = z.object({
   // server-enriched on GET (not stored) — F4:
   regressionDetected: z.boolean().optional(),
   watchedDeltas: z.record(z.string(), z.number().nullable()).optional(),
+  // server-enriched (F4): the applied version's effect on the TARGETED step's own
+  // honest score (0..1 delta). The invariants check above guards against regression;
+  // this guards against a proposal that fails its own purpose.
+  targetDelta: z.number().nullable().optional(),
+  targetImproved: z.boolean().nullable().optional(),
   judgment: CounterfactualJudgment.nullable().optional(),
 }).strict();
 export type TemplateInstructionProposal = z.infer<typeof TemplateInstructionProposal>;

@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
-import type { TemplateInstructionProposal, TemplateMetricsSummary } from "@orca/contracts";
+import type { StepMetrics, TemplateInstructionProposal, TemplateMetricsSummary } from "@orca/contracts";
 import { enrichWithRegression } from "./canary.js";
+
+function step(over: Partial<StepMetrics> = {}): StepMetrics {
+  return {
+    stepTemplateId: "s1", name: "Generate", ordinal: 0,
+    score: 60, sampleSize: 12, confidence: "ok",
+    runs: 12, passedFirstTry: 6, recovered: 2, failed: 4,
+    quality: { verdictPassRate: 0.57, verifiedSampleSize: 8, scoredSampleSize: 8, sensorPassRate: 0.9, oracleSufficientRate: 0.8, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+    cost: { p50LatencyMs: 100, meanTokens: 1000, meanUsd: 0.01, meanRetries: 0.2 },
+    risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
+    failureClusters: [{ failureCode: "invalid_output", boundary: "step_complete", count: 8, sampleTransitionIds: ["t1", "t2"] }],
+    verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.55, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
+    failureModes: [{ label: "Produced output that didn't match what the step asked for", count: 8, pct: 1 }],
+    reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false, refuteReason: null },
+    trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [], ...over,
+  };
+}
 
 function summary(over: Partial<TemplateMetricsSummary> = {}): TemplateMetricsSummary {
   return {
@@ -37,5 +53,20 @@ describe("enrichWithRegression", () => {
   it("leaves non-applied proposals untouched", () => {
     const [p] = enrichWithRegression([applied({ status: "pending", appliedAsVersion: null })], summary());
     expect(p.regressionDetected).toBeUndefined();
+  });
+  it("enriches with targetDelta/targetImproved from the targeted step's versionScoreDelta", () => {
+    const steps = [
+      step({ stepTemplateId: "s1", versionScoreDelta: 0.2 }),
+      step({ stepTemplateId: "other", versionScoreDelta: -0.4 }),
+    ];
+    const [p] = enrichWithRegression([applied()], summary(), steps);
+    expect(p.targetDelta).toBeCloseTo(0.2);
+    expect(p.targetImproved).toBe(true);
+  });
+  it("targetImproved is null when the step has no version delta yet", () => {
+    const steps = [step({ stepTemplateId: "s1", versionScoreDelta: null })];
+    const [p] = enrichWithRegression([applied()], summary(), steps);
+    expect(p.targetDelta).toBeNull();
+    expect(p.targetImproved).toBeNull();
   });
 });

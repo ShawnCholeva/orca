@@ -105,7 +105,7 @@ export async function analyzeTemplate(
 export function listProposalsEnriched(db: Database.Database, templateId: string, period: MetricPeriod, nowIso?: string): TemplateInstructionProposal[] {
   const detail = getTemplateMetricsDetail(db, templateId, period, nowOr(nowIso));
   const proposals = listProposalsByTemplate(db, templateId);
-  return detail ? enrichWithRegression(proposals, detail.summary) : proposals;
+  return detail ? enrichWithRegression(proposals, detail.summary, detail.steps) : proposals;
 }
 
 // The evaluate stage (5.2): counterfactual-judge a proposal against its own solved/failure
