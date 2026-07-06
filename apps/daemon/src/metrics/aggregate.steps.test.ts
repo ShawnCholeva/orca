@@ -89,7 +89,7 @@ describe("computeStepMetrics", () => {
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.quality.verifiedSampleSize).toBe(0);
-    expect(step.score).not.toBe(100);
+    expect(step.score).toBeNull();
   });
 
   it("scores a passing AI-reviewed step in the mid-range, not 100", () => {
@@ -152,6 +152,122 @@ describe("computeStepMetrics", () => {
     expect(step.failureModes.some((f) => /overturned|independent check/i.test(f.label))).toBe(true);
     expect(step.reconciliation?.refuted).toBe(true);
   });
+
+  it("hard failures drag the score: a run that dies without a step_complete counts as 0", () => {
+    // One verified pass (conf 1.0 via sensors+sufficient oracle) + one hard-failed run.
+    const p1 = sc("p1", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z");
+    p1.transition.evidence!.sensorsRun = [
+      { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
+    ];
+    const runs: TemplateStepRun[] = [
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 },
+      { workflowRunId: "r2", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T01:00:00.000Z", finishedAt: "2026-05-01T01:05:00.000Z", blockedReason: "provider crashed", templateVersion: 1 },
+    ];
+    const [step] = computeStepMetrics({ transitions: [p1], stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.score).toBe(50); // (1.0 + 0) / 2 — not 100
+    expect(step.quality.scoredSampleSize).toBe(2);
+  });
+
+  it("score is null (not 0) when nothing is scoreable", () => {
+    // Only an evaluation_failed completion on a passed run: unverified, no hard fail.
+    const ts: TemplateTransition[] = [{
+      templateVersion: 1, stepTemplateId: "s",
+      transition: {
+        id: "e1", goalId: "g", workflowRunId: "r1", workflowStepRunId: "r1-s",
+        boundary: "step_complete", risk: null, stateDeps: null, evidence: null, refute: null,
+        telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "failed", failure_code: "evaluation_failed" } },
+        createdAt: "2026-05-01T00:00:00.000Z",
+      },
+    }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:01:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.score).toBeNull();
+    expect(step.quality.scoredSampleSize).toBe(0);
+  });
+
+  it("a self_reported completion (inconclusive refute) scores 0.3, not dropped", () => {
+    const ts: TemplateTransition[] = [{
+      templateVersion: 1, stepTemplateId: "s",
+      transition: {
+        id: "u1", goalId: "g", workflowRunId: "r1", workflowStepRunId: "r1-s",
+        boundary: "step_complete", risk: null, stateDeps: null, evidence: null,
+        refute: { verdict: "unavailable", triggered_by: ["no_oracle"], risk_class: "low", reason: null, issue_refs: [] },
+        telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
+        createdAt: "2026-05-01T00:00:00.000Z",
+      },
+    }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.score).toBe(30);
+    expect(step.verification.tier).toBe("self_reported");
+  });
+
+  it("oracleSufficientRate is null (not 0) when no evidence completions exist", () => {
+    const ts: TemplateTransition[] = [{
+      templateVersion: 1, stepTemplateId: "s",
+      transition: {
+        id: "n1", goalId: "g", workflowRunId: "r1", workflowStepRunId: "r1-s",
+        boundary: "step_complete", risk: null, stateDeps: null, evidence: null,
+        refute: { verdict: "upheld", triggered_by: ["no_oracle"], risk_class: "low", reason: null, issue_refs: [] },
+        telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
+        createdAt: "2026-05-01T00:00:00.000Z",
+      },
+    }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.quality.oracleSufficientRate).toBeNull();
+  });
+
+  it("failure clusters dedupe step_complete failures to the FINAL attempt (recovered veto not double-counted)", () => {
+    const p1 = sc("p1", "r1", "s", "passed", true, "2026-05-01T00:10:00.000Z");
+    const ts = [sc("v1", "r1", "s", "failed", true, "2026-05-01T00:00:00.000Z"), p1];
+    const runs: TemplateStepRun[] = [
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "vetoed", templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "passed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: "2026-05-01T00:10:00.000Z", blockedReason: null, templateVersion: 1 },
+    ];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    // The vetoed attempt "v1" was recovered; it must not survive as a failure cluster.
+    expect(step.failureClusters).toEqual([]);
+  });
+
+  it("surfaces refute reasons: recentRefuteReasons + reconciliation.refuteReason", () => {
+    const ts: TemplateTransition[] = [{
+      templateVersion: 1, stepTemplateId: "s",
+      transition: {
+        id: "x", goalId: "g", workflowRunId: "r1", workflowStepRunId: "r1-s",
+        boundary: "step_complete", risk: null, stateDeps: null, evidence: null,
+        refute: { verdict: "refuted", triggered_by: [], risk_class: "high", reason: "claimed tests ran but none exist", issue_refs: [] },
+        telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
+        createdAt: "2026-05-01T00:00:00.000Z",
+      },
+    }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.verification.recentRefuteReasons).toEqual(["claimed tests ran but none exist"]);
+    expect(step.reconciliation?.refuteReason).toBe("claimed tests ran but none exist");
+  });
+
+  it("versionScoreDelta: per-step latest-vs-prior version score delta with VERSION_MIN gating", () => {
+    const mk = (id: string, run: string, verdict: "passed" | "failed", v: number, at: string) => {
+      const t = sc(id, run, "s", verdict, true, at);
+      t.templateVersion = v;
+      return t;
+    };
+    // v1: two failed evidence completions (score 0); v2: two passed (conf 1.0 needs sensors — sc() has none, so ai-tier? no: evidence present, no sensors → ai_reviewed 0.55).
+    const ts = [
+      mk("a", "r1", "failed", 1, "2026-05-01T00:00:00.000Z"), mk("b", "r2", "failed", 1, "2026-05-01T01:00:00.000Z"),
+      mk("c", "r3", "passed", 2, "2026-05-02T00:00:00.000Z"), mk("d", "r4", "passed", 2, "2026-05-02T01:00:00.000Z"),
+    ];
+    const runs: TemplateStepRun[] = ts.map((t) => ({
+      workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1,
+      status: t.transition.evidence!.verdict === "passed" ? "passed" : "failed",
+      startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z",
+      blockedReason: null, templateVersion: t.templateVersion,
+    }));
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    // v2 mean = 0.55 (ai_reviewed passes), v1 mean = 0 → delta 0.55
+    expect(step.versionScoreDelta).toBeCloseTo(0.55);
+  });
 });
 
 describe("deriveInsights", () => {
@@ -159,13 +275,13 @@ describe("deriveInsights", () => {
     const insights = deriveInsights({
       stepTemplateId: "s", name: "X", ordinal: 0, score: 95, sampleSize: 10, confidence: "ok",
       runs: 10, passedFirstTry: 9, recovered: 1, failed: 0,
-      quality: { verdictPassRate: 0.95, verifiedSampleSize: 10, sensorPassRate: 1, oracleSufficientRate: 0.2, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+      quality: { verdictPassRate: 0.95, verifiedSampleSize: 10, scoredSampleSize: 10, sensorPassRate: 1, oracleSufficientRate: 0.2, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
       cost: { p50LatencyMs: 100, meanTokens: 100, meanUsd: 0.01, meanRetries: 0 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.55, falseAcceptanceRate: 0, artifacts: [] },
+      verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.55, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
       failureModes: [], reconciliation: null,
-      trend: [], versionBoundaries: [], insights: [], recentReasons: [],
+      trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /never independently proven|independently proven/i.test(i))).toBe(true);
     expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict/i);
@@ -175,13 +291,13 @@ describe("deriveInsights", () => {
     const insights = deriveInsights({
       stepTemplateId: "s", name: "X", ordinal: 0, score: 30, sampleSize: 10, confidence: "ok",
       runs: 10, passedFirstTry: 10, recovered: 0, failed: 0,
-      quality: { verdictPassRate: 1, verifiedSampleSize: 10, sensorPassRate: null, oracleSufficientRate: 0, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+      quality: { verdictPassRate: 1, verifiedSampleSize: 10, scoredSampleSize: 10, sensorPassRate: null, oracleSufficientRate: 0, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
       cost: { p50LatencyMs: 100, meanTokens: 100, meanUsd: 0.01, meanRetries: 0 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "self_reported", tierLabel: "Reported success, no check", confidence: 0.3, falseAcceptanceRate: 0, artifacts: [] },
+      verification: { tier: "self_reported", tierLabel: "Reported success, no check", confidence: 0.3, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
       failureModes: [], reconciliation: null,
-      trend: [], versionBoundaries: [], insights: [], recentReasons: [],
+      trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /never independently proven|independently proven/i.test(i))).toBe(true);
     expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict/i);
@@ -191,13 +307,13 @@ describe("deriveInsights", () => {
     const insights = deriveInsights({
       stepTemplateId: "s", name: "X", ordinal: 0, score: 40, sampleSize: 10, confidence: "ok",
       runs: 10, passedFirstTry: 7, recovered: 0, failed: 3,
-      quality: { verdictPassRate: 0.7, verifiedSampleSize: 10, sensorPassRate: 1, oracleSufficientRate: 0.9, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+      quality: { verdictPassRate: 0.7, verifiedSampleSize: 10, scoredSampleSize: 10, sensorPassRate: 1, oracleSufficientRate: 0.9, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
       cost: { p50LatencyMs: 100, meanTokens: 100, meanUsd: 0.01, meanRetries: 0 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0.3, artifacts: [] },
+      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0.3, artifacts: [], recentRefuteReasons: [] },
       failureModes: [], reconciliation: null,
-      trend: [], versionBoundaries: [], insights: [], recentReasons: [],
+      trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /approves work without proof/i.test(i))).toBe(true);
     expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict|refute/i);
@@ -207,13 +323,13 @@ describe("deriveInsights", () => {
     const insights = deriveInsights({
       stepTemplateId: "s", name: "X", ordinal: 0, score: 60, sampleSize: 10, confidence: "ok",
       runs: 10, passedFirstTry: 7, recovered: 0, failed: 3,
-      quality: { verdictPassRate: 0.7, verifiedSampleSize: 10, sensorPassRate: 1, oracleSufficientRate: 0.9, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+      quality: { verdictPassRate: 0.7, verifiedSampleSize: 10, scoredSampleSize: 10, sensorPassRate: 1, oracleSufficientRate: 0.9, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
       cost: { p50LatencyMs: 100, meanTokens: 100, meanUsd: 0.01, meanRetries: 0 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [] },
+      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
       failureModes: [{ label: "Timeout", count: 3, pct: 1 }], reconciliation: null,
-      trend: [], versionBoundaries: [], insights: [], recentReasons: [],
+      trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /most common problem: timeout \(3×\)/i.test(i))).toBe(true);
     expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict|refute/i);
@@ -223,13 +339,13 @@ describe("deriveInsights", () => {
     const insights = deriveInsights({
       stepTemplateId: "s", name: "X", ordinal: 0, score: 80, sampleSize: 10, confidence: "ok",
       runs: 10, passedFirstTry: 3, recovered: 7, failed: 0,
-      quality: { verdictPassRate: 0.8, verifiedSampleSize: 10, sensorPassRate: 1, oracleSufficientRate: 0.9, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+      quality: { verdictPassRate: 0.8, verifiedSampleSize: 10, scoredSampleSize: 10, sensorPassRate: 1, oracleSufficientRate: 0.9, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
       cost: { p50LatencyMs: 150, meanTokens: 500, meanUsd: 0.02, meanRetries: 2.0 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [] },
+      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
       failureModes: [], reconciliation: null,
-      trend: [], versionBoundaries: [], insights: [], recentReasons: [],
+      trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /retry|loop|churn/i.test(i))).toBe(true);
   });
@@ -238,13 +354,13 @@ describe("deriveInsights", () => {
     const insights = deriveInsights({
       stepTemplateId: "s", name: "X", ordinal: 0, score: 90, sampleSize: 10, confidence: "ok",
       runs: 10, passedFirstTry: 9, recovered: 1, failed: 0,
-      quality: { verdictPassRate: 0.9, verifiedSampleSize: 10, sensorPassRate: 1, oracleSufficientRate: 0.95, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+      quality: { verdictPassRate: 0.9, verifiedSampleSize: 10, scoredSampleSize: 10, sensorPassRate: 1, oracleSufficientRate: 0.95, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
       cost: { p50LatencyMs: 100, meanTokens: 500, meanUsd: 0.01, meanRetries: 0.3 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [] },
+      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
       failureModes: [], reconciliation: null,
-      trend: [], versionBoundaries: [], insights: [], recentReasons: [],
+      trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
     });
     expect(insights).toEqual([]);
   });

@@ -18,7 +18,7 @@ export type DiagnosisBundle = {
     sampleTransitionIds: string[];
     revisionSignalIds: string[];
     revisionFeedbackTexts: string[];
-    metricSnapshot: { score: number; verdictPassRate: number; oracleSufficientRate: number; versionDelta: number | null };
+    metricSnapshot: { score: number | null; verdictPassRate: number; oracleSufficientRate: number | null; versionDelta: number | null };
   };
 };
 
@@ -35,11 +35,11 @@ function chooseRule(step: StepMetrics, feedbackSignals: TemplateRevisionSignal[]
     return { rule: "R2", failureCode: cluster.failureCode, clusterCount: cluster.count, signalCount: null };
   }
   // R4 — false confidence (high pass, low oracle).
-  if (step.quality.verdictPassRate >= 0.8 && step.quality.oracleSufficientRate < 0.5) {
+  if (step.quality.verdictPassRate >= 0.8 && (step.quality.oracleSufficientRate ?? 0) < 0.5) {
     return { rule: "R4", failureCode: null, clusterCount: null, signalCount: null };
   }
   // R1 — underperforming headline (degraded/watch ~ score < 80).
-  if (step.score < 80) {
+  if (step.score != null && step.score < 80) {
     return { rule: "R1", failureCode: null, clusterCount: null, signalCount: null };
   }
   return null;
@@ -77,5 +77,5 @@ export function diagnoseTemplate(input: {
     });
   }
   // Worst-first, capped.
-  return bundles.sort((a, b) => a.evidence.metricSnapshot.score - b.evidence.metricSnapshot.score).slice(0, TOP_N);
+  return bundles.sort((a, b) => (a.evidence.metricSnapshot.score ?? 101) - (b.evidence.metricSnapshot.score ?? 101)).slice(0, TOP_N);
 }

@@ -32,9 +32,9 @@ const EvidenceSnapshot = z.object({
   sampleTransitionIds: z.array(z.string()),
   revisionSignalIds: z.array(z.string()),
   metricSnapshot: z.object({
-    score: z.number(),
+    score: z.number().nullable(),
     verdictPassRate: z.number(),
-    oracleSufficientRate: z.number(),
+    oracleSufficientRate: z.number().nullable(),
     versionDelta: z.number().nullable(),
   }).strict(),
 }).strict();

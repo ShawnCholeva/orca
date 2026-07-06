@@ -7,14 +7,14 @@ function step(over: Partial<StepMetrics> = {}): StepMetrics {
     stepTemplateId: "s1", name: "Generate", ordinal: 0,
     score: 60, sampleSize: 12, confidence: "ok",
     runs: 12, passedFirstTry: 6, recovered: 2, failed: 4,
-    quality: { verdictPassRate: 0.57, verifiedSampleSize: 8, sensorPassRate: 0.9, oracleSufficientRate: 0.8, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+    quality: { verdictPassRate: 0.57, verifiedSampleSize: 8, scoredSampleSize: 8, sensorPassRate: 0.9, oracleSufficientRate: 0.8, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
     cost: { p50LatencyMs: 100, meanTokens: 1000, meanUsd: 0.01, meanRetries: 0.2 },
     risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
     failureClusters: [{ failureCode: "invalid_output", boundary: "step_complete", count: 8, sampleTransitionIds: ["t1", "t2"] }],
-    verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.55, falseAcceptanceRate: 0, artifacts: [] },
+    verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.55, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
     failureModes: [{ label: "Produced output that didn't match what the step asked for", count: 8, pct: 1 }],
-    reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false },
-    trend: [], versionBoundaries: [], insights: [], recentReasons: [], ...over,
+    reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false, refuteReason: null },
+    trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [], ...over,
   };
 }
 function detail(steps: StepMetrics[]): TemplateMetricsDetail {

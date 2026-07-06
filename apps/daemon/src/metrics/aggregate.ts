@@ -6,6 +6,9 @@ import { classifyTier, strongestTier, TIER_CONFIDENCE, TIER_LABEL, buildArtifact
 import { labelForFailure } from "./failure-labels.js";
 
 export const SAMPLE_MIN = 5;
+// Per-side minimum of SCORED samples before a per-step version delta is emitted.
+// A designed floor (not a significance test) — same spirit as SAMPLE_MIN.
+export const VERSION_MIN = 2;
 
 const PERIOD_MS: Record<MetricPeriod, number> = {
   "24h": 24 * 60 * 60 * 1000,
@@ -227,6 +230,16 @@ export function computeStepMetrics(input: {
       return [...byRun.values()];
     })();
 
+    // Final attempt per run (step-run rows) — used by scoring (hard failures) and cost.
+    const finals = (() => {
+      const byKey = new Map<string, TemplateStepRun>();
+      for (const r of stepRuns) {
+        const k = r.workflowRunId; const prev = byKey.get(k);
+        if (!prev || r.attempt > prev.attempt) byKey.set(k, r);
+      }
+      return [...byKey.values()];
+    })();
+
     // CHANNEL 1 — quality / scope. verdictPassRate credits the independent refute
     // (RefuteFacet, 5.4) for no-oracle completions and scores over VERIFIED completes
     // (evidence OR conclusive refute); unverified completions are excluded — mirrors
@@ -249,20 +262,50 @@ export function computeStepMetrics(input: {
     const verdictPassRate = verificationValue ?? 0;
 
     // Verification-weighted score (SP1): each conclusive completion contributes its
-    // tier confidence when it passed, 0 when it failed. Pure function of evidence.
+    // tier confidence when it passed, 0 when it failed; a self_reported completion
+    // (claim stands, nothing independent) contributes the self_reported confidence.
+    // Hard failures — runs that died without ever emitting a step_complete — count
+    // as 0 in the denominator: a step that fails often must not keep a high score
+    // just because its failures never reached scoring. Pure function of evidence.
     const tierByCompletion = new Map(finalStepCompletes.map((t) => [t, classifyTier(t)] as const));
     const conclusive = finalStepCompletes.filter((t) => tierByCompletion.get(t) !== "unverified");
-    const scoreValue = conclusive.length === 0 ? null :
-      conclusive.reduce((acc, t) => acc + (vPass(t) ? TIER_CONFIDENCE[tierByCompletion.get(t)!] : 0), 0) / conclusive.length;
+    const completeRunIds = new Set(finalStepCompletes.map((t) => t.transition.workflowRunId).filter((x): x is string => x != null));
+    const hardFailedFinals = finals.filter((r) => FAILED_STATUSES.has(r.status) && !completeRunIds.has(r.workflowRunId));
+    const contribution = (t: (typeof stepCompletes)[number]) =>
+      vFail(t) ? 0 : TIER_CONFIDENCE[tierByCompletion.get(t)!];
+    const scoreOver = (completes: typeof finalStepCompletes, hardFails: number): { n: number; value: number | null } => {
+      const conc = completes.filter((t) => tierByCompletion.get(t) !== "unverified");
+      const n = conc.length + hardFails;
+      return n === 0 ? { n, value: null } : { n, value: conc.reduce((acc, t) => acc + contribution(t), 0) / n };
+    };
+    const headline = scoreOver(finalStepCompletes, hardFailedFinals.length);
+    const scoreValue = headline.value;
+    const scoredSampleSize = headline.n;
     const stepTier = strongestTier(conclusive.map((t) => tierByCompletion.get(t)!));
     const falseAccept = conclusive.filter((t) => t.transition.refute?.verdict === "refuted").length;
     const falseAcceptanceRate = conclusive.length === 0 ? 0 : falseAccept / conclusive.length;
+
+    // Per-step, per-version score delta (latest vs prior version in the window): the
+    // falsifier's "did the TARGETED step improve" signal (0..1 scale).
+    let versionScoreDelta: number | null = null;
+    const versionsPresent = [...new Set(finalStepCompletes.map((t) => t.templateVersion))].sort((a, b) => b - a);
+    if (versionsPresent.length >= 2) {
+      const [latestV, priorV] = versionsPresent;
+      const forVersion = (v: number) => scoreOver(
+        finalStepCompletes.filter((t) => t.templateVersion === v),
+        hardFailedFinals.filter((r) => r.templateVersion === v).length,
+      );
+      const a = forVersion(latestV), b = forVersion(priorV);
+      if (a.n >= VERSION_MIN && b.n >= VERSION_MIN && a.value != null && b.value != null) versionScoreDelta = a.value - b.value;
+    }
 
     const allSensors = evidenceCompletes.flatMap((t) => t.transition.evidence!.sensorsRun);
     // No sensors ran → null (unknown), NEVER 1. Absence of a check is not a perfect check.
     const sensorPassRate = allSensors.length === 0 ? null :
       allSensors.filter((s) => s.result === "passed").length / allSensors.length;
-    const oracleSufficientRate = evidenceCompletes.length === 0 ? 0 :
+    // No evidence completions → null (unknown), NEVER 0: absence of an oracle is
+    // not the same fact as an inadequate oracle. (Mirrors sensorPassRate.)
+    const oracleSufficientRate = evidenceCompletes.length === 0 ? null :
       evidenceCompletes.filter((t) => t.transition.evidence!.oracleAdequacy.sufficient).length / evidenceCompletes.length;
 
     // CHANNEL 2 — cost / trajectory.
@@ -270,14 +313,6 @@ export function computeStepMetrics(input: {
     const tokens = ts.map((t) => t.transition.telemetry?.cost).filter((c): c is NonNullable<typeof c> => c != null)
       .map((c) => c.tokens_in + c.tokens_out);
     const usds = ts.map((t) => t.transition.telemetry?.cost?.usd).filter((x): x is number => typeof x === "number");
-    const finals = (() => {
-      const byKey = new Map<string, TemplateStepRun>();
-      for (const r of stepRuns) {
-        const k = r.workflowRunId; const prev = byKey.get(k);
-        if (!prev || r.attempt > prev.attempt) byKey.set(k, r);
-      }
-      return [...byKey.values()];
-    })();
     const meanRetries = finals.length === 0 ? null : mean(finals.map((r) => r.attempt - 1));
 
     // CHANNEL 3 — risk / boundary.
@@ -288,8 +323,13 @@ export function computeStepMetrics(input: {
     const approvalTs = riskTs.filter((t) => t.transition.risk!.approval);
     const approvals = { count: approvalTs.length, sampleTransitionIds: approvalTs.slice(0, 3).map((t) => t.transition.id) };
 
-    // Failure clusters (categorical, deterministic).
-    const failedTs = ts.filter((t) => FAILED_OUTCOME.has(t.transition.telemetry?.outcome.status ?? ""));
+    // Failure clusters (categorical, deterministic). step_complete failures dedupe
+    // to FINAL attempts — a recovered veto is not an outstanding failure — while
+    // other boundaries (tool_gate etc.) keep every occurrence.
+    const finalCompleteIds = new Set(finalStepCompletes.map((t) => t.transition.id));
+    const failedTs = ts.filter((t) =>
+      FAILED_OUTCOME.has(t.transition.telemetry?.outcome.status ?? "") &&
+      (t.transition.boundary !== "step_complete" || finalCompleteIds.has(t.transition.id)));
     const clusterMap = new Map<string, { failureCode: string | null; boundary: string; ids: string[] }>();
     for (const t of failedTs) {
       const fc = t.transition.telemetry!.outcome.failure_code;
@@ -314,8 +354,17 @@ export function computeStepMetrics(input: {
       .map((m) => ({ label: m.label, count: m.count, pct: m.count / modeTotal }))
       .sort((a, b) => b.count - a.count);
 
+    // The independent reviewer's own words for the most recent overturned claims —
+    // the WHY behind falseAcceptanceRate, surfaced to humans and mined by diagnosis.
+    const recentRefuteReasons = [...finalStepCompletes]
+      .filter((t) => t.transition.refute?.verdict === "refuted" && t.transition.refute.reason)
+      .sort((x, y) => y.transition.createdAt.localeCompare(x.transition.createdAt))
+      .slice(0, 3)
+      .map((t) => t.transition.refute!.reason!);
+
     const reconciliation = conclusive.length === 0 ? null : {
       claimedComplete: true, verifiedTierLabel: TIER_LABEL[stepTier], refuted: falseAccept > 0,
+      refuteReason: recentRefuteReasons[0] ?? null,
     };
 
     // Counts.
@@ -356,10 +405,11 @@ export function computeStepMetrics(input: {
 
     const step: StepMetrics = {
       stepTemplateId, name: meta.name, ordinal: meta.ordinal,
-      score: scoreValue == null ? 0 : Math.round(scoreValue * 100), sampleSize, confidence: sampleSize < SAMPLE_MIN ? "low" : "ok",
+      score: scoreValue == null ? null : Math.round(scoreValue * 100), sampleSize, confidence: sampleSize < SAMPLE_MIN ? "low" : "ok",
       runs: finals.length, passedFirstTry, recovered, failed,
       quality: {
         verdictPassRate, verifiedSampleSize: verifiedCompletes.length, sensorPassRate, oracleSufficientRate,
+        scoredSampleSize,
         untestedRegions: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.untestedRegions)),
         residualRisk: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.residualRisk)),
         oracleGaps: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.oracleAdequacy.gaps)),
@@ -372,13 +422,14 @@ export function computeStepMetrics(input: {
         tier: stepTier, tierLabel: TIER_LABEL[stepTier], confidence: scoreValue ?? 0, falseAcceptanceRate,
         artifacts: buildArtifacts({
           hasEvidence: evidenceCompletes.length > 0, anySensors: allSensors.length > 0,
-          oracleSufficientRate, oracleGaps: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.oracleAdequacy.gaps)),
+          oracleSufficientRate: oracleSufficientRate ?? 0, oracleGaps: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.oracleAdequacy.gaps)),
           hasRefute: finalStepCompletes.some((t) => t.transition.refute != null), falseAccept,
         }),
+        recentRefuteReasons,
       },
       failureModes,
       reconciliation,
-      trend, versionBoundaries, insights: [], recentReasons,
+      trend, versionBoundaries, versionScoreDelta, insights: [], recentReasons,
     };
     step.insights = deriveInsights(step);
     steps.push(step);

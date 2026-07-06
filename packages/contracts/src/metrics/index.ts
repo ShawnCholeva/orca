@@ -81,7 +81,7 @@ export const StepMetrics = z.object({
   stepTemplateId: z.string(),
   name: z.string(),
   ordinal: z.number().int(),
-  score: z.number(),
+  score: z.number().nullable(),
   sampleSize: z.number().int().nonnegative(),
   confidence: z.enum(["low", "ok"]),
   runs: z.number().int().nonnegative(),
@@ -89,7 +89,10 @@ export const StepMetrics = z.object({
   recovered: z.number().int().nonnegative(),
   failed: z.number().int().nonnegative(),
   quality: z.object({
-    verdictPassRate: z.number(), sensorPassRate: z.number().nullable(), oracleSufficientRate: z.number(),
+    verdictPassRate: z.number(), sensorPassRate: z.number().nullable(), oracleSufficientRate: z.number().nullable(),
+    // Denominator of `score`: conclusive completions + hard-failed runs. Workflow
+    // health must weight by THIS, not sampleSize — the score was computed over it.
+    scoredSampleSize: z.number().int().nonnegative(),
     // Count of completions that produced a CONCLUSIVE verdict (evidence or refute).
     // 0 means the step's delivery was never independently verified — low verification
     // COVERAGE, distinct from low quality. The score reflects verification strength, so
@@ -112,13 +115,19 @@ export const StepMetrics = z.object({
   verification: z.object({
     tier: VerificationTier, tierLabel: z.string(), confidence: z.number(),
     falseAcceptanceRate: z.number(), artifacts: z.array(EvidenceArtifact),
+    // The independent reviewer's own words for recently overturned claims (≤3).
+    recentRefuteReasons: z.array(z.string()),
   }).strict(),
   failureModes: z.array(FailureMode),
   reconciliation: z.object({
     claimedComplete: z.boolean(), verifiedTierLabel: z.string(), refuted: z.boolean(),
+    refuteReason: z.string().nullable(),
   }).strict().nullable(),
   trend: z.array(z.number()),
   versionBoundaries: z.array(z.number().int()),
+  // Latest-vs-prior template version delta of THIS step's honest score (0..1 scale);
+  // null unless both versions have enough scored samples in the window.
+  versionScoreDelta: z.number().nullable(),
   insights: z.array(z.string()),
   recentReasons: z.array(z.object({ at: z.string(), reason: z.string() }).strict()),
 }).strict();
