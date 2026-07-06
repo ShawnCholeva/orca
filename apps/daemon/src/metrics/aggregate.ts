@@ -2,6 +2,7 @@ import type { HarnessMetrics } from "../harness-metrics/usecases.js";
 import { computeHarnessMetricsFromTransitions } from "../harness-metrics/usecases.js";
 import type { MetricPeriod, TemplateMetricsSummary, StepMetrics } from "@orca/contracts";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
+import { classifyTier, strongestTier, TIER_CONFIDENCE, TIER_LABEL, buildArtifacts } from "./verification.js";
 
 export const SAMPLE_MIN = 5;
 
@@ -247,9 +248,20 @@ export function computeStepMetrics(input: {
     const verificationValue = verifiedCompletes.length === 0 ? null :
       verifiedCompletes.filter(vPass).length / verifiedCompletes.length;
     const verdictPassRate = verificationValue ?? 0;
-    const verification = verificationValue ?? 0;
+
+    // Verification-weighted score (SP1): each conclusive completion contributes its
+    // tier confidence when it passed, 0 when it failed. Pure function of evidence.
+    const tierByCompletion = new Map(finalStepCompletes.map((t) => [t, classifyTier(t)] as const));
+    const conclusive = finalStepCompletes.filter((t) => tierByCompletion.get(t) !== "unverified");
+    const scoreValue = conclusive.length === 0 ? null :
+      conclusive.reduce((acc, t) => acc + (vPass(t) ? TIER_CONFIDENCE[tierByCompletion.get(t)!] : 0), 0) / conclusive.length;
+    const stepTier = strongestTier(conclusive.map((t) => tierByCompletion.get(t)!));
+    const falseAccept = conclusive.filter((t) => t.transition.refute?.verdict === "refuted").length;
+    const falseAcceptanceRate = conclusive.length === 0 ? 0 : falseAccept / conclusive.length;
+
     const allSensors = evidenceCompletes.flatMap((t) => t.transition.evidence!.sensorsRun);
-    const sensorPassRate = allSensors.length === 0 ? 1 :
+    // No sensors ran → null (unknown), NEVER 1. Absence of a check is not a perfect check.
+    const sensorPassRate = allSensors.length === 0 ? null :
       allSensors.filter((s) => s.result === "passed").length / allSensors.length;
     const oracleSufficientRate = evidenceCompletes.length === 0 ? 0 :
       evidenceCompletes.filter((t) => t.transition.evidence!.oracleAdequacy.sufficient).length / evidenceCompletes.length;
@@ -329,7 +341,7 @@ export function computeStepMetrics(input: {
 
     const step: StepMetrics = {
       stepTemplateId, name: meta.name, ordinal: meta.ordinal,
-      score: Math.round(verification * 100), sampleSize, confidence: sampleSize < SAMPLE_MIN ? "low" : "ok",
+      score: scoreValue == null ? 0 : Math.round(scoreValue * 100), sampleSize, confidence: sampleSize < SAMPLE_MIN ? "low" : "ok",
       runs: finals.length, passedFirstTry, recovered, failed,
       quality: {
         verdictPassRate, verifiedSampleSize: verifiedCompletes.length, sensorPassRate, oracleSufficientRate,
@@ -340,7 +352,18 @@ export function computeStepMetrics(input: {
       },
       cost: { p50LatencyMs: p50(latencies), meanTokens: mean(tokens), meanUsd: mean(usds), meanRetries },
       risk: { riskClassDist, gateDecisionDist, hardConstraintViolations, approvals },
-      failureClusters, trend, versionBoundaries, insights: [], recentReasons,
+      failureClusters,
+      verification: {
+        tier: stepTier, tierLabel: TIER_LABEL[stepTier], confidence: scoreValue ?? 0, falseAcceptanceRate,
+        artifacts: buildArtifacts({
+          hasEvidence: evidenceCompletes.length > 0, anySensors: allSensors.length > 0,
+          oracleSufficientRate, oracleGaps: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.oracleAdequacy.gaps)),
+          hasRefute: finalStepCompletes.some((t) => t.transition.refute != null), falseAccept,
+        }),
+      },
+      failureModes: [],
+      reconciliation: null,
+      trend, versionBoundaries, insights: [], recentReasons,
     };
     step.insights = deriveInsights(step);
     steps.push(step);
