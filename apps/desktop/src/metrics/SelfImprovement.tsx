@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { TemplateInstructionProposal, TemplateMetricsDetail } from "@orca/contracts";
+import type { LearningEvent, TemplateInstructionProposal, TemplateMetricsDetail } from "@orca/contracts";
 import { labelForFailure } from "@orca/contracts";
-import { analyzeTemplate, applyProposal, dismissProposal, judgeProposal, listProposals, restoreTemplateDefault, rollbackProposal, toErrorMessage } from "../api";
+import { analyzeTemplate, applyProposal, dismissProposal, judgeProposal, listLearningEvents, listProposals, restoreTemplateDefault, rollbackProposal, toErrorMessage } from "../api";
+import { eventLine, synthesizedLine, VERDICT_META } from "./learning-log";
 import { Panel } from "./metrics-charts";
-import { statusForStep } from "./metrics-data";
+import { statusForStep, verificationMeta } from "./metrics-data";
 import { Sparkle } from "./metrics-icons";
 import { diffLines, schemaChips, type DiffLine, type SchemaChip } from "./proposal-diff";
 
@@ -40,16 +41,9 @@ type Props = {
   onMutated: () => void;
 };
 
-const VERDICT_META: Record<string, { label: string; icon: string }> = {
-  pass: { label: "pass", icon: "✓" },
-  regression_risk: { label: "regression risk", icon: "⚠" },
-  uncertain: { label: "uncertain", icon: "?" },
-  insufficient_evidence: { label: "insufficient evidence", icon: "—" },
-  unavailable: { label: "unavailable", icon: "—" },
-};
-
 export function SelfImprovementRail({ detail, workflowName, templateId, period, onMutated }: Props) {
   const [proposals, setProposals] = useState<TemplateInstructionProposal[]>([]);
+  const [events, setEvents] = useState<LearningEvent[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [editing, setEditing] = useState<Record<string, string>>({});
   const [judging, setJudging] = useState<Record<string, boolean>>({});
@@ -60,7 +54,10 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
 
   useEffect(() => {
     let live = true;
-    if (templateId) listProposals(templateId, period).then((p) => { if (live) setProposals(p); }).catch(() => {});
+    if (templateId) {
+      listProposals(templateId, period).then((p) => { if (live) setProposals(p); }).catch(() => {});
+      listLearningEvents(templateId).then((e) => { if (live) setEvents(e); }).catch(() => {});
+    }
     return () => { live = false; };
   }, [templateId, period]);
 
@@ -69,6 +66,10 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
     const capturedId = templateId;
     const ps = await listProposals(capturedId, period);
     if (mountedRef.current && capturedId === templateId) setProposals(ps);
+    try {
+      const evs = await listLearningEvents(capturedId);
+      if (mountedRef.current && capturedId === templateId) setEvents(evs);
+    } catch { /* best-effort — proposals remain the source of truth for this refresh */ }
   };
 
   const onAnalyze = async () => {
@@ -102,9 +103,15 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
 
   const pending = proposals.filter((p) => p.status === "pending");
   const applied = proposals.filter((p) => p.status === "applied");
-  const history = proposals.filter((p) => ["dismissed", "rolled_back", "superseded"].includes(p.status));
   const steps = detail?.steps ?? [];
   const attention = steps.filter((s) => statusForStep(s) !== "healthy").length;
+  const stepName = (id: string | null) => (id ? steps.find((s) => s.stepTemplateId === id)?.name ?? id : "the template");
+  const eventedProposalIds = new Set(events.map((e) => e.proposalId).filter((id): id is string => id != null));
+  // Only decided proposals fall back to a synthesized row — a still-pending/applied
+  // proposal already has its own card above, so there's nothing "misleadingly empty"
+  // about it missing from the log (this fallback is for pre-SP3 backlog rows).
+  const unevented = proposals.filter((p) => !eventedProposalIds.has(p.id) && ["dismissed", "rolled_back", "superseded"].includes(p.status));
+  const calibration = detail?.summary.calibration ?? [];
 
   return (
     <Panel title="Self-improvement" kicker="ORCA LEARNS" style={{ flex: 1, minHeight: 0 }}
@@ -245,14 +252,36 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
         </div>
       ))}
 
-      {history.length > 0 && (
+      {(events.length > 0 || unevented.length > 0) && (
         <details>
-          <summary style={{ fontSize: 11.5, color: "var(--text-3)", cursor: "pointer" }}>Activity log ({history.length})</summary>
-          {history.map((p) => (
-            <div key={p.id} style={{ fontSize: 11, color: "var(--text-3)", padding: "4px 0" }}>
-              {p.stepTemplateId} — {p.status}{p.decidedBy ? ` by ${p.decidedBy}` : ""}{p.decidedAt ? ` · ${p.decidedAt.slice(0, 10)}` : ""}
+          <summary style={{ fontSize: 11.5, color: "var(--text-3)", cursor: "pointer" }}>Learning log ({events.length + unevented.length})</summary>
+          {events.map((e) => (
+            <div key={e.id} style={{ fontSize: 11, color: "var(--text-3)", padding: "4px 0" }}>
+              <span style={{ color: "var(--text-4)" }}>{e.createdAt.slice(0, 16).replace("T", " ")}</span> {eventLine(e, stepName)}
             </div>
           ))}
+          {unevented.map((p) => (
+            <div key={p.id} style={{ fontSize: 11, color: "var(--text-3)", padding: "4px 0" }}>
+              {synthesizedLine(p, stepName)}
+            </div>
+          ))}
+        </details>
+      )}
+
+      {calibration.length > 0 && (
+        <details>
+          <summary style={{ fontSize: 11.5, color: "var(--text-3)", cursor: "pointer" }}>How well-calibrated are the scores?</summary>
+          {calibration.map((c) => (
+            <div key={c.tier} style={{ fontSize: 11, color: "var(--text-3)", padding: "4px 0" }}>
+              {verificationMeta[c.tier].label} — assumed {Math.round(c.assumed * 100)}%
+              {c.state === "measured" && ` · measured ${Math.round((c.measured ?? 0) * 100)}% (n=${c.sampleSize})`}
+              {c.state === "insufficient" && ` · — (n=${c.sampleSize}, too few)`}
+              {c.state === "unmeasurable" && ` · unmeasurable — ${c.tier === "self_reported" ? "no independent check exists" : "checks rarely run at this tier"}`}
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: "var(--text-4)", paddingTop: 4 }}>
+            Coefficients are fixed constants; this panel shows whether they match reality as runs accrue.
+          </div>
         </details>
       )}
 

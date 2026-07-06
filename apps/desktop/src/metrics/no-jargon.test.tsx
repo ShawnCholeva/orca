@@ -101,4 +101,34 @@ describe("no jargon in the self-improvement rail", () => {
     expect(await screen.findByText(/Automated checks failed, so the completion was rejected/i)).toBeTruthy();
     expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
+
+  it("renders no 'oracle', 'sensor', 'verdict', 'refute', or 'veto' across every learning-log event type and the calibration panel", async () => {
+    const events = [
+      { id: "e1", templateId: "tpl", proposalId: "p1", stepTemplateId: "s1", eventType: "created", templateVersion: 1, createdAt: "2026-07-01T00:00:00.000Z", payload: { kind: "created", component: "step_output_schema", rule: "R2", failureCode: "evidence_veto" } },
+      { id: "e2", templateId: "tpl", proposalId: "p1", stepTemplateId: "s1", eventType: "judged", templateVersion: 1, createdAt: "2026-07-01T01:00:00.000Z", payload: { kind: "judged", verdict: "regression_risk", solvedSampleSize: 1, failureSampleSize: 2 } },
+      { id: "e3", templateId: "tpl", proposalId: "p1", stepTemplateId: "s1", eventType: "applied", templateVersion: 2, createdAt: "2026-07-01T02:00:00.000Z", payload: { kind: "applied", appliedAsVersion: 2, humanEdited: true } },
+      { id: "e4", templateId: "tpl", proposalId: "p2", stepTemplateId: "s2", eventType: "dismissed", templateVersion: 1, createdAt: "2026-07-01T03:00:00.000Z", payload: { kind: "dismissed" } },
+      { id: "e5", templateId: "tpl", proposalId: "p3", stepTemplateId: "s3", eventType: "superseded", templateVersion: 2, createdAt: "2026-07-01T04:00:00.000Z", payload: { kind: "superseded", by: "restore" } },
+      { id: "e6", templateId: "tpl", proposalId: "p1", stepTemplateId: "s1", eventType: "rolled_back", templateVersion: 3, createdAt: "2026-07-01T05:00:00.000Z", payload: { kind: "rolled_back", outcome: { targetDelta: -0.05, targetDeltaVersions: { latest: 3, prior: 2 }, invalidOutputRateDelta: 0.6, regressionDetected: true } } },
+      { id: "e7", templateId: "tpl", proposalId: null, stepTemplateId: null, eventType: "baseline_restored", templateVersion: 3, createdAt: "2026-07-01T06:00:00.000Z", payload: { kind: "baseline_restored", supersededCount: 1 } },
+      { id: "e8", templateId: "tpl", proposalId: null, stepTemplateId: "s1", eventType: "analyzed", templateVersion: 3, createdAt: "2026-07-01T07:00:00.000Z", payload: { kind: "analyzed", stepsDiagnosed: 2, proposalsCreated: 0, skips: [{ stepTemplateId: "s1", reason: "below the sample threshold" }] } },
+    ];
+    vi.spyOn(api, "listProposals").mockResolvedValue([]);
+    vi.spyOn(api, "listLearningEvents").mockResolvedValue(events as never);
+    const detail = {
+      summary: {
+        templateId: "tpl", name: "Brainstorm",
+        calibration: [
+          { tier: "ai_reviewed", assumed: 0.55, measured: 0.62, sampleSize: 41, state: "measured" },
+          { tier: "verified_executed", assumed: 1.0, measured: null, sampleSize: 2, state: "insufficient" },
+          { tier: "self_reported", assumed: 0.3, measured: null, sampleSize: 0, state: "unmeasurable" },
+        ],
+      },
+    } as never;
+    const { container } = render(
+      <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />
+    );
+    await screen.findByText(/how well-calibrated are the scores/i);
+    expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
+  });
 });

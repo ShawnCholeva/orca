@@ -196,4 +196,39 @@ describe("SelfImprovementRail", () => {
     await screen.findByText(/awaiting data/i);
     expect(screen.queryByText(/new checks are rejecting output/i)).toBeNull();
   });
+
+  it("learning log renders events newest-first plus a synthesized row for an event-less proposal", async () => {
+    const oldEvent = { id: "ev1", templateId: "tpl", proposalId: "a1", stepTemplateId: "s1", eventType: "applied", templateVersion: 3, createdAt: "2026-07-01T10:00:00.000Z", payload: { kind: "applied", appliedAsVersion: 3, humanEdited: false } };
+    const newEvent = { id: "ev2", templateId: "tpl", proposalId: "a1", stepTemplateId: "s1", eventType: "rolled_back", templateVersion: 4, createdAt: "2026-07-03T09:00:00.000Z", payload: { kind: "rolled_back", outcome: { targetDelta: -0.1, targetDeltaVersions: { latest: 4, prior: 3 }, invalidOutputRateDelta: null, regressionDetected: true } } };
+    const orphan = { ...appliedNotImproved, id: "old-proposal", status: "dismissed" };
+    vi.spyOn(api, "listProposals").mockResolvedValue([orphan] as never);
+    vi.spyOn(api, "listLearningEvents").mockResolvedValue([newEvent, oldEvent] as never);
+    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    const summary = await screen.findByText(/Learning log \(3\)/i);
+    const text = (summary.closest("details") as HTMLElement).textContent ?? "";
+    expect(text.indexOf("didn't improve")).toBeLessThan(text.indexOf("Applied as v3"));
+    expect(text).toContain("(before the learning log existed)");
+  });
+
+  it("calibration panel renders measured, insufficient, and unmeasurable states", async () => {
+    vi.spyOn(api, "listProposals").mockResolvedValue([]);
+    vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
+    const calibrationDetail = {
+      summary: {
+        templateId: "tpl", name: "Brainstorm",
+        calibration: [
+          { tier: "ai_reviewed", assumed: 0.55, measured: 0.62, sampleSize: 41, state: "measured" },
+          { tier: "verified_executed", assumed: 1.0, measured: null, sampleSize: 2, state: "insufficient" },
+          { tier: "self_reported", assumed: 0.3, measured: null, sampleSize: 0, state: "unmeasurable" },
+        ],
+      },
+    } as never;
+    render(<SelfImprovementRail detail={calibrationDetail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    const summary = await screen.findByText(/how well-calibrated are the scores/i);
+    const panel = summary.closest("details") as HTMLElement;
+    expect(within(panel).getByText(/measured 62% \(n=41\)/i)).toBeTruthy();
+    expect(within(panel).getByText(/— \(n=2, too few\)/i)).toBeTruthy();
+    expect(within(panel).getByText(/unmeasurable — no independent check exists/i)).toBeTruthy();
+    expect(within(panel).getByText(/Coefficients are fixed constants/i)).toBeTruthy();
+  });
 });
