@@ -26,12 +26,25 @@ describe("classifyTier", () => {
   it("ai_reviewed: no evidence, refute upheld", () => {
     expect(classifyTier(tx({ evidence: null, refute: { verdict: "upheld", triggered_by: [], risk_class: "low", reason: null, issue_refs: [] } }))).toBe("ai_reviewed");
   });
-  it("unverified: no evidence and refute inconclusive (a bare self-claim)", () => {
-    // No executable evidence and no conclusive independent review → nothing to score.
-    // (self_reported stays in the enum for the self-report ARTIFACT + future producer
-    // enrichment, but classifyTier does not emit it in SP1 — a bare claim has no pass/
-    // fail signal without joining the self-report numbers, which SP1 defers.)
-    expect(classifyTier(tx({ evidence: null, refute: { verdict: "uncertain", triggered_by: [], risk_class: "low", reason: null, issue_refs: [] } }))).toBe("unverified");
+  it("no evidence + inconclusive refute → self_reported, not unverified (spec §6)", () => {
+    const base = {
+      id: "t1", goalId: "g", workflowRunId: "r1", workflowStepRunId: "r1-s",
+      boundary: "step_complete", risk: null, stateDeps: null, evidence: null,
+      telemetry: null, createdAt: "2026-05-01T00:00:00.000Z",
+    };
+    for (const verdict of ["unavailable", "uncertain"] as const) {
+      const t = { templateVersion: 1, stepTemplateId: "s", transition: { ...base, refute: { verdict, triggered_by: ["no_oracle"], risk_class: "low", reason: null, issue_refs: [] } } };
+      expect(classifyTier(t as never)).toBe("self_reported");
+    }
+    // A bare claim with no refute attempted stays unverified.
+    const bare = { templateVersion: 1, stepTemplateId: "s", transition: { ...base, refute: null } };
+    expect(classifyTier(bare as never)).toBe("unverified");
+  });
+  it("self_reported: no evidence and refute inconclusive (spec §6)", () => {
+    // An inconclusive refute (uncertain/unavailable) means the self-report is the only
+    // signal left — record it at self_reported confidence per spec §6, rather than
+    // dropping the completion from the score entirely.
+    expect(classifyTier(tx({ evidence: null, refute: { verdict: "uncertain", triggered_by: [], risk_class: "low", reason: null, issue_refs: [] } }))).toBe("self_reported");
   });
   it("unverified: evaluation_failed", () => {
     expect(classifyTier(tx({ evidence: null, telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "failed", failure_code: "evaluation_failed" } } }))).toBe("unverified");

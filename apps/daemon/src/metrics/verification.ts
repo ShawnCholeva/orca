@@ -27,9 +27,11 @@ export function classifyTier(t: TemplateTransition): VerificationTier {
   }
   const rf = tr.refute;
   if (rf?.verdict === "upheld" || rf?.verdict === "refuted") return "ai_reviewed";
-  // No evidence and no conclusive independent review → nothing to score. (self_reported
-  // remains a valid tier for the self-report ARTIFACT, but is not emitted from a bare
-  // transition in SP1: a claim alone has no pass/fail signal without the self-report join.)
+  // A refute RAN but was inconclusive (uncertain/unavailable): the self-report is
+  // the only signal left — record it at self_reported confidence rather than
+  // dropping the completion from the score entirely (spec §6). A bare transition
+  // with no refute attempted has no pass/fail signal at all → unverified.
+  if (rf != null) return "self_reported";
   return "unverified";
 }
 
