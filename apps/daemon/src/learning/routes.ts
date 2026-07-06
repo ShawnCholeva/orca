@@ -46,7 +46,8 @@ export function registerLearningRoutes(server: FastifyInstance, deps: LearningRo
   server.get("/v1/learning/templates/:id/events", async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!templateExists(db, id)) { reply.status(404); return { error: { code: "template_not_found" } }; }
-    const limit = Number((req.query as { limit?: string }).limit ?? 50);
+    const raw = Number((req.query as { limit?: string }).limit ?? 50);
+    const limit = Number.isFinite(raw) ? raw : 50;
     return { events: listEventsByTemplate(db, id, limit) };
   });
 

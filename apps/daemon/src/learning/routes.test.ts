@@ -151,4 +151,17 @@ describe("learning routes", () => {
     expect(missing.statusCode).toBe(404);
     expect((missing.json() as { error: { code: string } }).error.code).toBe("template_not_found");
   });
+
+  it("GET events with non-numeric limit falls back to default", async () => {
+    const f = Fastify(); registerLearningRoutes(f, { db, ...deps() });
+    const now = new Date().toISOString();
+    for (let i = 0; i < 6; i++) {
+      recordEvent(db, { templateId: "tpl", proposalId: null, stepTemplateId: "s1", eventType: "created", templateVersion: 1, payload: { kind: "created", component: "step_instructions", rule: "R2", failureCode: "invalid_output" } }, now);
+    }
+
+    const res = await f.inject({ method: "GET", url: "/v1/learning/templates/tpl/events?limit=abc" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { events: unknown[] };
+    expect(body.events).toHaveLength(6);
+  });
 });
