@@ -217,6 +217,26 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
               ? " · " + Object.entries(p.watchedDeltas).map(([k, v]) => `${k} ${v == null ? "—" : v.toFixed(2)}`).join(", ")
               : " · awaiting runs"}
           </div>
+          {(() => {
+            const pair = p.targetDeltaVersions;
+            const versionText = pair ? `v${pair.prior}→v${pair.latest}` : null;
+            if (p.targetDelta == null) return (
+              <div style={{ color: "var(--text-3)", marginTop: 4 }}>Target step: awaiting data — needs 2 scored runs on each version.</div>
+            );
+            const pts = Math.round(p.targetDelta * 100);
+            return (
+              <div style={{ color: p.targetImproved ? "var(--run)" : "var(--warn)", marginTop: 4 }}>
+                Target step: {p.targetImproved
+                  ? `improved +${pts} points${versionText ? ` (${versionText})` : ""}`
+                  : `not improved (${pts} points${versionText ? `, ${versionText}` : ""})`}.
+              </div>
+            );
+          })()}
+          {p.component === "step_output_schema" && p.invalidOutputRateDelta != null && p.invalidOutputRateDelta > 0.2 && (
+            <div style={{ color: "var(--err)", marginTop: 4 }}>
+              New checks are rejecting output (+{Math.round(p.invalidOutputRateDelta * 100)}% of runs) — consider rollback.
+            </div>
+          )}
           {p.regressionDetected && <button type="button" onClick={() => onRollback(p)} style={{ marginTop: 8 }}>Rollback</button>}
         </div>
       ))}

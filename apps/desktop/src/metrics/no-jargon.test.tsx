@@ -65,6 +65,11 @@ const judgedProposal = {
   },
 };
 
+const appliedSchemaCanary = {
+  ...pendingSchemaProposal, id: "a1", status: "applied", appliedAsVersion: 4, regressionDetected: true,
+  invalidOutputRateDelta: 0.5, targetDelta: 0.2, targetImproved: true, targetDeltaVersions: { latest: 4, prior: 3 },
+};
+
 describe("no jargon in the self-improvement rail", () => {
   it("renders no 'oracle', 'sensor', 'verdict', 'refute', or 'veto' for a pending schema proposal or a judged proposal", async () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([pendingSchemaProposal, judgedProposal] as never);
@@ -73,6 +78,16 @@ describe("no jargon in the self-improvement rail", () => {
       <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />
     );
     await screen.findByText(/\+ evidence_refs/i);
+    expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
+  });
+
+  it("renders no 'oracle', 'sensor', 'verdict', 'refute', or 'veto' for an applied card with falsifier and canary lines", async () => {
+    vi.spyOn(api, "listProposals").mockResolvedValue([appliedSchemaCanary] as never);
+    const detail = { summary: { templateId: "tpl", name: "Brainstorm" } } as never;
+    const { container } = render(
+      <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />
+    );
+    await screen.findByText(/new checks are rejecting output/i);
     expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 });

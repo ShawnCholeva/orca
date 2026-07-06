@@ -27,6 +27,31 @@ const schemaPending = {
   ...pending, id: "p2", component: "step_output_schema", beforeInstructions: schemaBefore, afterInstructions: schemaAfter,
 };
 
+const appliedImproved = {
+  ...pending, id: "a1", status: "applied", appliedAsVersion: 4,
+  targetDelta: 0.2, targetImproved: true, targetDeltaVersions: { latest: 4, prior: 3 },
+};
+
+const appliedNotImproved = {
+  ...pending, id: "a2", status: "applied", appliedAsVersion: 4,
+  targetDelta: -0.08, targetImproved: false, targetDeltaVersions: { latest: 4, prior: 3 },
+};
+
+const appliedAwaiting = {
+  ...pending, id: "a3", status: "applied", appliedAsVersion: 4,
+  targetDelta: null, targetImproved: null, targetDeltaVersions: null,
+};
+
+const appliedSchemaCanary = {
+  ...schemaPending, id: "a4", status: "applied", appliedAsVersion: 4, regressionDetected: true,
+  invalidOutputRateDelta: 0.5, targetDelta: null, targetImproved: null, targetDeltaVersions: null,
+};
+
+const appliedInstructionsNoCanary = {
+  ...pending, id: "a5", status: "applied", appliedAsVersion: 4,
+  invalidOutputRateDelta: 0.5, targetDelta: null, targetImproved: null, targetDeltaVersions: null,
+};
+
 describe("SelfImprovementRail", () => {
   it("analyzes on click and renders a proposal card", async () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([]);
@@ -134,5 +159,28 @@ describe("SelfImprovementRail", () => {
     const dialogReopened = within(await screen.findByRole("dialog"));
     const textareaReopened = dialogReopened.getByRole("textbox") as HTMLTextAreaElement;
     expect(textareaReopened.value).toBe("edited text");
+  });
+
+  it("applied card renders the falsifier line in all three states", async () => {
+    vi.spyOn(api, "listProposals").mockResolvedValue([appliedImproved, appliedNotImproved, appliedAwaiting] as never);
+    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    expect(await screen.findByText(/improved \+20 points \(v3→v4\)/i)).toBeTruthy();
+    expect(await screen.findByText(/not improved \(-8 points, v3→v4\)/i)).toBeTruthy();
+    expect(await screen.findByText(/awaiting data — needs 2 scored runs on each version/i)).toBeTruthy();
+  });
+
+  it("schema canary line renders when invalidOutputRateDelta exceeds the threshold", async () => {
+    vi.spyOn(api, "listProposals").mockResolvedValue([appliedSchemaCanary] as never);
+    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    expect(await screen.findByText(/new checks are rejecting output/i)).toBeTruthy();
+    expect(screen.getByText(/\+50%/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /rollback/i })).toBeTruthy();
+  });
+
+  it("does not render the schema canary line for instructions proposals", async () => {
+    vi.spyOn(api, "listProposals").mockResolvedValue([appliedInstructionsNoCanary] as never);
+    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    await screen.findByText(/awaiting data/i);
+    expect(screen.queryByText(/new checks are rejecting output/i)).toBeNull();
   });
 });
