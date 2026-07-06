@@ -266,6 +266,25 @@ describe("refute advisory (5.4 L4)", () => {
     expect(screen.getByText(/independent check/i)).toBeTruthy();
     expect(screen.getByText(/reviewed it and agreed/i)).toBeTruthy();
   });
+
+  it("does not repeat the disputed verdict when the scores drawer is open (lead chip already shows it)", () => {
+    render(
+      <LiveActivity
+        activity={{
+          ...confirmActivity,
+          confirmationSummary: {
+            ...confirmActivity.confirmationSummary,
+            refute: { verdict: "refuted", reason: "misses error paths", issueRefs: ["handle timeout"] },
+          },
+        }}
+      />,
+    );
+    // The lead chip already surfaces the disputed verdict.
+    expect(screen.getByTestId("step-confirm-refute")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("confirm-scores-toggle"));
+    // Opening the Scores drawer must not restate the same verdict a second time.
+    expect(screen.getAllByText(/independent review disputes this/i)).toHaveLength(1);
+  });
 });
 
 describe("pickLiveActivity", () => {

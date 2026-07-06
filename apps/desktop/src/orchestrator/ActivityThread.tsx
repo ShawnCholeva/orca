@@ -216,13 +216,17 @@ export function ConfirmationCard({
               <div><dt>Risk level (higher = riskier)</dt><dd>{pct(scores.quality.riskLevel)}</dd></div>
               <div><dt>Handoff</dt><dd>{scores.handoffReady ? "Ready" : "Not ready"}</dd></div>
             </dl>
-            {summary?.refute ? (
+            {/* The lead chip in ConfirmationFrame already surfaces non-"upheld"
+                verdicts (step-confirm-refute), so only show this line for
+                "upheld" — the one verdict the chip suppresses — to avoid
+                restating the same verdict twice in one card. */}
+            {summary?.refute && summary.refute.verdict === "upheld" ? (
               <div
                 data-testid="step-confirm-independent"
                 style={{
                   marginTop: 8,
                   fontSize: 12,
-                  color: summary.refute.verdict === "refuted" ? "var(--err)" : "var(--text-2)",
+                  color: "var(--text-2)",
                 }}
               >
                 <span
