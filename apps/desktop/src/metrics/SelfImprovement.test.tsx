@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { SelfImprovementRail } from "./SelfImprovement";
 import * as api from "../api";
 
@@ -17,14 +17,45 @@ const pending = {
   createdAt: "2026-06-30T00:00:00.000Z", decidedAt: null, decidedBy: null, appliedAsVersion: null,
 };
 
+const schemaBefore = JSON.stringify([{ key: "summary", type: "string", required: true }, { key: "notes", type: "string", required: false }], null, 2);
+const schemaAfter = JSON.stringify([
+  { key: "summary", type: "string", required: true }, { key: "notes", type: "string", required: true },
+  { key: "evidence_refs", type: "array", itemType: "string", required: true },
+], null, 2);
+
+const schemaPending = {
+  ...pending, id: "p2", component: "step_output_schema", beforeInstructions: schemaBefore, afterInstructions: schemaAfter,
+};
+
 describe("SelfImprovementRail", () => {
-  it("analyzes on click and renders a proposal card with the diff", async () => {
+  it("analyzes on click and renders a proposal card", async () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([]);
-    vi.spyOn(api, "analyzeTemplate").mockResolvedValue([pending as never]);
+    const analyzeSpy = vi.spyOn(api, "analyzeTemplate").mockResolvedValue([pending as never]);
     render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
     fireEvent.click(await screen.findByRole("button", { name: /analyze this template/i }));
-    expect(await screen.findByText(/Generate and validate against schema/i)).toBeTruthy();
-    expect(screen.getByText(/invalid_output/i)).toBeTruthy();
+    await waitFor(() => expect(analyzeSpy).toHaveBeenCalled());
+    expect(await screen.findByText(/invalid_output/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /review change/i })).toBeTruthy();
+  });
+
+  it("pending card opens a review modal with the diff and keeps Apply/Dismiss", async () => {
+    vi.spyOn(api, "listProposals").mockResolvedValue([pending as never]);
+    const applySpy = vi.spyOn(api, "applyProposal").mockResolvedValue({ ...pending, status: "applied", appliedAsVersion: 2 } as never);
+    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    expect(await screen.findByText(/invalid_output/i)).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: /review change/i }));
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.getByText(/− Generate\./)).toBeTruthy();
+    expect(dialog.getAllByText(/Generate and validate against schema\./).length).toBeGreaterThan(0);
+    fireEvent.click(dialog.getByRole("button", { name: /^apply$/i }));
+    await waitFor(() => expect(applySpy).toHaveBeenCalledWith("p1", undefined));
+  });
+
+  it("schema proposals render field chips, not raw JSON, in the summary", async () => {
+    vi.spyOn(api, "listProposals").mockResolvedValue([schemaPending as never]);
+    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    expect(await screen.findByText(/\+ evidence_refs/i)).toBeTruthy();
+    expect(screen.queryByText(/"key": "summary"/)).toBeNull();
   });
 
   it("applies a proposal and calls onMutated", async () => {
@@ -59,6 +90,27 @@ describe("SelfImprovementRail", () => {
     expect(await screen.findByText(/regression risk/i)).toBeTruthy();
     expect(screen.getByText(/would drop the error-path check/i)).toBeTruthy();
     expect(await screen.findByRole("button", { name: /^apply$/i })).toBeEnabled();
+  });
+
+  it("judge block shows verdict, samples, and expandable reasoning — no invented percentage", async () => {
+    const judged = {
+      ...pending,
+      judgment: {
+        verdict: "pass", regressionRisk: "none", addressesFailureMode: "yes",
+        regressionCases: [], reason: "solved the targeted cases", reasoning: "because the schema check rules out the malformed shape early",
+        solvedCaseIds: ["s1", "s2"], failureCaseIds: [],
+        solvedSampleSize: 2, failureSampleSize: 2, judgedAt: "2026-07-04T00:00:00.000Z", judgedAgainstVersion: 3,
+      },
+    };
+    vi.spyOn(api, "listProposals").mockResolvedValue([judged as never]);
+    const { container } = render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    expect(await screen.findByText(/^pass/i)).toBeTruthy();
+    expect(screen.getByText(/2 solved/i)).toBeTruthy();
+    const summary = screen.getByText(/how the reviewer worked through it/i);
+    // reasoning sits under a <details>/<summary> toggle — collapsed by default, not a raw always-on paragraph.
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText(/because the schema check rules out the malformed shape early/i)).toBeTruthy();
+    expect(container.textContent).not.toMatch(/%\d/);
   });
 
   it("shows the Evaluate action when unjudged", async () => {
