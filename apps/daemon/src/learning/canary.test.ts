@@ -77,10 +77,11 @@ describe("enrichWithRegression", () => {
     expect(p.targetImproved).toBeNull();
   });
 
+  // Isolate schema canary from invariant path: with invariantsPreserved: [], regressionDetected can ONLY come from schemaCanaryTripped.
   it("schema canary: invalid-output spike on the applied version flags regression", () => {
     const steps = [step({ stepTemplateId: "s1", versionScoreDelta: 0.1,
       versionScoreDeltaVersions: { latest: 2, prior: 1 }, versionInvalidOutputRateDelta: 0.5 })];
-    const [p] = enrichWithRegression([applied({ component: "step_output_schema" })], summary(), steps);
+    const [p] = enrichWithRegression([applied({ component: "step_output_schema", invariantsPreserved: [] })], summary(), steps);
     expect(p.invalidOutputRateDelta).toBeCloseTo(0.5);
     expect(p.regressionDetected).toBe(true);
   });
