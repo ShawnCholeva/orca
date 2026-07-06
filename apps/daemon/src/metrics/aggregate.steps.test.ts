@@ -171,20 +171,52 @@ describe("deriveInsights", () => {
     expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict/i);
   });
 
-  it("flags cost without verification gain: high tokens, never independently proven", () => {
+  it("flags a self-reported pass as never independently proven (self_reported tier)", () => {
     const insights = deriveInsights({
-      stepTemplateId: "s", name: "X", ordinal: 0, score: 50, sampleSize: 10, confidence: "ok",
-      runs: 10, passedFirstTry: 4, recovered: 1, failed: 5,
-      quality: { verdictPassRate: 0.5, verifiedSampleSize: 10, sensorPassRate: 1, oracleSufficientRate: 0.9, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
-      cost: { p50LatencyMs: 200, meanTokens: 5000, meanUsd: 0.05, meanRetries: 0.2 },
+      stepTemplateId: "s", name: "X", ordinal: 0, score: 30, sampleSize: 10, confidence: "ok",
+      runs: 10, passedFirstTry: 10, recovered: 0, failed: 0,
+      quality: { verdictPassRate: 1, verifiedSampleSize: 10, sensorPassRate: null, oracleSufficientRate: 0, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+      cost: { p50LatencyMs: 100, meanTokens: 100, meanUsd: 0.01, meanRetries: 0 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
       verification: { tier: "self_reported", tierLabel: "Reported success, no check", confidence: 0.3, falseAcceptanceRate: 0, artifacts: [] },
       failureModes: [], reconciliation: null,
       trend: [], versionBoundaries: [], insights: [], recentReasons: [],
     });
-    expect(insights.some((i) => /independently proven/i.test(i))).toBe(true);
+    expect(insights.some((i) => /never independently proven|independently proven/i.test(i))).toBe(true);
     expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict/i);
+  });
+
+  it("flags a high false-acceptance rate as approving work without proof", () => {
+    const insights = deriveInsights({
+      stepTemplateId: "s", name: "X", ordinal: 0, score: 40, sampleSize: 10, confidence: "ok",
+      runs: 10, passedFirstTry: 7, recovered: 0, failed: 3,
+      quality: { verdictPassRate: 0.7, verifiedSampleSize: 10, sensorPassRate: 1, oracleSufficientRate: 0.9, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+      cost: { p50LatencyMs: 100, meanTokens: 100, meanUsd: 0.01, meanRetries: 0 },
+      risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
+      failureClusters: [],
+      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0.3, artifacts: [] },
+      failureModes: [], reconciliation: null,
+      trend: [], versionBoundaries: [], insights: [], recentReasons: [],
+    });
+    expect(insights.some((i) => /approves work without proof/i.test(i))).toBe(true);
+    expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict|refute/i);
+  });
+
+  it("flags the most common failure mode by label and count", () => {
+    const insights = deriveInsights({
+      stepTemplateId: "s", name: "X", ordinal: 0, score: 60, sampleSize: 10, confidence: "ok",
+      runs: 10, passedFirstTry: 7, recovered: 0, failed: 3,
+      quality: { verdictPassRate: 0.7, verifiedSampleSize: 10, sensorPassRate: 1, oracleSufficientRate: 0.9, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+      cost: { p50LatencyMs: 100, meanTokens: 100, meanUsd: 0.01, meanRetries: 0 },
+      risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
+      failureClusters: [],
+      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [] },
+      failureModes: [{ label: "Timeout", count: 3, pct: 1 }], reconciliation: null,
+      trend: [], versionBoundaries: [], insights: [], recentReasons: [],
+    });
+    expect(insights.some((i) => /most common problem: timeout \(3×\)/i.test(i))).toBe(true);
+    expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict|refute/i);
   });
 
   it("flags loop/churn: high mean retries", () => {
