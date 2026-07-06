@@ -152,4 +152,10 @@ describe("synthesizedLine", () => {
     expect(line).toContain("Verify Proposal");
     expect(line).toContain("(applied)");
   });
+
+  it("renders internal enum statuses as plain words, not snake_case", () => {
+    const line = synthesizedLine({ ...proposal, status: "rolled_back" }, stepName);
+    expect(line).toContain("(rolled back)");
+    expect(line).not.toContain("rolled_back");
+  });
 });

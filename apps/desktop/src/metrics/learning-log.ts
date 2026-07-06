@@ -83,5 +83,6 @@ export function synthesizedLine(p: TemplateInstructionProposal, stepName: (id: s
   const step = stepName(p.stepTemplateId);
   const what = p.component === "step_output_schema" ? "a tighter output check" : "an instruction edit";
   const target = targetText(p.targetedFailureMode.failureCode, p.targetedFailureMode.rule);
-  return `Proposed ${what} for ${step} — targets ${target} (${p.status}) — (before the learning log existed).`;
+  const status = p.status.replace(/_/g, " "); // "rolled_back" is an internal enum, not copy
+  return `Proposed ${what} for ${step} — targets ${target} (${status}) — (before the learning log existed).`;
 }
