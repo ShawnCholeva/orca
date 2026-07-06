@@ -3,7 +3,7 @@ import type { WorkflowStepOutputSchema } from "@orca/contracts";
 import { parseSchema, serializeSchema, validateSchemaTightening } from "./schema-mutation.js";
 
 const base: WorkflowStepOutputSchema = [
-  { key: "summary", type: "string", required: true },
+  { key: "summary", type: "string", required: true, description: "one paragraph" },
   { key: "tier", type: "string", required: true, enum: ["fast", "full"] },
   { key: "notes", type: "string", required: false },
 ];
@@ -24,7 +24,11 @@ describe("validateSchemaTightening", () => {
     ok(base.map((f) => f.key === "notes" ? { ...f, required: true } : f));
   });
   it("allows adding/extending a description", () => {
-    ok(base.map((f) => f.key === "summary" ? { ...f, description: "one paragraph" } : f));
+    ok(base.map((f) => f.key === "summary" ? { ...f, description: "one paragraph extended" } : f));
+  });
+  it("bans shrinking or replacing a description", () => {
+    bad(base.map((f) => f.key === "summary" ? { ...f, description: "shorter" } : f), "description");
+    bad(base.map((f) => f.key === "summary" ? { ...f, description: "" } : f), "description");
   });
   it("bans deleting a field", () => bad(base.filter((f) => f.key !== "notes"), "removed"));
   it("bans renaming (delete+add manifests as a removal)", () =>

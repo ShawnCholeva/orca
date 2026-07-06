@@ -36,6 +36,9 @@ function checkFields(before: readonly WorkflowStepOutputField[], after: readonly
     if ((a.itemType ?? null) !== (b.itemType ?? null)) errors.push(`field "${at}" changed its item type — not allowed`);
     if (JSON.stringify(a.enum ?? null) !== JSON.stringify(b.enum ?? null)) errors.push(`field "${at}" changed its enum — altering allowed values is not allowed`);
     if (b.required && !a.required) errors.push(`field "${at}" became optional — weakening a check is not allowed`);
+    const bDesc = b.description ?? "";
+    const aDesc = a.description ?? "";
+    if (bDesc && !aDesc.startsWith(bDesc)) errors.push(`field "${at}" shrank or replaced its description — only adding or extending is allowed`);
     if (b.fields || a.fields) checkFields(b.fields ?? [], a.fields ?? [], at, errors);
   }
   // New fields in `after` are always allowed; the contract schema bounds them.
