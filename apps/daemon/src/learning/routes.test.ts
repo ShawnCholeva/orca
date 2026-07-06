@@ -112,6 +112,18 @@ describe("learning routes", () => {
     expect((await f.inject({ method: "POST", url: "/v1/learning/proposals/missing/apply", payload: {} })).statusCode).toBe(404);
   });
 
+  it("422 applying a schema proposal with an edit that isn't valid JSON", async () => {
+    const f = Fastify(); registerLearningRoutes(f, { db, ...deps() });
+    const before = JSON.stringify([{ key: "summary", type: "string", required: true }], null, 2);
+    const after = JSON.stringify([{ key: "summary", type: "string", required: true }, { key: "notes", type: "string", required: false }], null, 2);
+    insertProposal(db, proposalFixture({
+      id: "p-schema", component: "step_output_schema", beforeInstructions: before, afterInstructions: after, status: "pending",
+    }));
+    const res = await f.inject({ method: "POST", url: "/v1/learning/proposals/p-schema/apply", payload: { editedInstructions: "not json" } });
+    expect(res.statusCode).toBe(422);
+    expect((res.json() as { error: { code: string } }).error.code).toBe("invalid_schema_edit");
+  });
+
   it("409 dismissing a non-pending proposal", async () => {
     const f = Fastify(); registerLearningRoutes(f, { db, ...deps() });
     insertProposal(db, proposalFixture({ id: "p-applied", status: "applied", appliedAsVersion: 2 }));

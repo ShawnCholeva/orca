@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { TemplateInstructionProposal, TemplateMetricsDetail } from "@orca/contracts";
+import { labelForFailure } from "@orca/contracts";
 import { analyzeTemplate, applyProposal, dismissProposal, judgeProposal, listProposals, restoreTemplateDefault, rollbackProposal, toErrorMessage } from "../api";
 import { Panel } from "./metrics-charts";
 import { statusForStep } from "./metrics-data";
@@ -135,13 +136,15 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
           <div key={p.id} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, fontSize: 12 }}>
             <div style={{ fontWeight: 600 }}>{p.stepTemplateId}</div>
             <div style={{ color: "var(--text-3)" }}>
-              targets {p.targetedFailureMode.failureCode ?? p.targetedFailureMode.rule}
+              targets {p.targetedFailureMode.failureCode ? labelForFailure(p.targetedFailureMode.failureCode) : p.targetedFailureMode.rule}
               {p.targetedFailureMode.clusterCount != null ? ` (${p.targetedFailureMode.clusterCount})` : ""}
               {p.targetedFailureMode.signalCount != null ? ` · ${p.targetedFailureMode.signalCount} re-steers` : ""}
             </div>
             <div style={{ marginTop: 6 }}>
               {p.component === "step_output_schema"
-                ? <ChipRow chips={chips} />
+                ? (chips.length > 0
+                  ? <ChipRow chips={chips} />
+                  : <div>Adds required structure — open Review change.</div>)
                 : <div style={{ color: "var(--text-2)" }}>{changedCount} line{changedCount === 1 ? "" : "s"} changed</div>}
               <button type="button" onClick={() => setReviewing(p.id)} style={{ marginTop: 6 }}>Review change</button>
             </div>
@@ -232,6 +235,7 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
               </div>
             );
           })()}
+          {/* mirrors SCHEMA_INVALID_OUTPUT_THRESHOLD (daemon canary.ts) — regressionDetected still gates the button */}
           {p.component === "step_output_schema" && p.invalidOutputRateDelta != null && p.invalidOutputRateDelta > 0.2 && (
             <div style={{ color: "var(--err)", marginTop: 4 }}>
               New checks are rejecting output (+{Math.round(p.invalidOutputRateDelta * 100)}% of runs) — consider rollback.

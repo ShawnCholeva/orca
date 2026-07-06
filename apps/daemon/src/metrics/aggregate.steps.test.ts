@@ -169,6 +169,74 @@ describe("computeStepMetrics", () => {
     expect(step.quality.scoredSampleSize).toBe(2);
   });
 
+  it("survivorship edge: a FINAL attempt that hard-fails AFTER an earlier passing completion scores the run as a hard fail, not a 1.0 pass", () => {
+    // attempt-1 emits a passing step_complete at T1; attempt-2 (the run's FINAL
+    // attempt) hard-fails later at T2 > T1 with no second step_complete. The stale
+    // pass from attempt-1 must not be credited — the run's delivered state is the
+    // later hard failure.
+    const p1 = sc("p1", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z"); // T1
+    p1.transition.evidence!.sensorsRun = [
+      { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
+    ];
+    const runs: TemplateStepRun[] = [
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "failed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: "2026-05-01T01:00:00.000Z", blockedReason: "regressed after the recorded pass", templateVersion: 1 }, // T2 > T1
+    ];
+    const [step] = computeStepMetrics({ transitions: [p1], stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.score).toBe(0);
+    expect(step.quality.scoredSampleSize).toBe(1);
+  });
+
+  it("veto-then-pass is unaffected by the survivorship edge fix (final attempt PASSED)", () => {
+    // Same shape as the #1/#7 test above but re-asserted here to guard the new
+    // supersededByHardFail logic doesn't touch runs whose final attempt passed.
+    const p1 = sc("p1", "r1", "s", "passed", true, "2026-05-01T00:10:00.000Z");
+    p1.transition.evidence!.sensorsRun = [
+      { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
+    ];
+    const ts = [
+      sc("v1", "r1", "s", "failed", true, "2026-05-01T00:00:00.000Z"),
+      p1,
+    ];
+    const runs: TemplateStepRun[] = [
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "vetoed", templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "passed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: "2026-05-01T00:10:00.000Z", blockedReason: null, templateVersion: 1 },
+    ];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.score).toBe(100);
+  });
+
+  it("pure hard-fail (no completion at all) is unaffected by the survivorship edge fix", () => {
+    const ts: TemplateTransition[] = [{
+      templateVersion: 1, stepTemplateId: "s",
+      transition: {
+        id: "launch1", goalId: "g", workflowRunId: "r1", workflowStepRunId: "r1-s",
+        boundary: "step_launch", risk: null, stateDeps: null, evidence: null,
+        telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
+        createdAt: "2026-05-01T00:00:00.000Z",
+      },
+    }];
+    const runs: TemplateStepRun[] = [
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "provider crashed", templateVersion: 1 },
+    ];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.score).toBe(0);
+    expect(step.quality.scoredSampleSize).toBe(1);
+  });
+
+  it("survivorship edge: no reclassification when the failed final attempt has no finishedAt (no ordering evidence)", () => {
+    const p1 = sc("p1", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z");
+    p1.transition.evidence!.sensorsRun = [
+      { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
+    ];
+    const runs: TemplateStepRun[] = [
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "failed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: null, blockedReason: "still running when sampled", templateVersion: 1 },
+    ];
+    const [step] = computeStepMetrics({ transitions: [p1], stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.score).toBe(100);
+  });
+
   it("score is 0 (not null) when EVERY final attempt hard-fails — no step_complete at all", () => {
     // Zero step_complete transitions for this step; both final attempts hard-fail
     // (one "failed", one "blocked"). computeStepMetrics buckets steps by transition,

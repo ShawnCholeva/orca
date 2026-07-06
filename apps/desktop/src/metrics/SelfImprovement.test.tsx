@@ -27,6 +27,13 @@ const schemaPending = {
   ...pending, id: "p2", component: "step_output_schema", beforeInstructions: schemaBefore, afterInstructions: schemaAfter,
 };
 
+const schemaDescriptionOnlyBefore = JSON.stringify([{ key: "summary", type: "string", required: true, description: "one paragraph" }], null, 2);
+const schemaDescriptionOnlyAfter = JSON.stringify([{ key: "summary", type: "string", required: true, description: "one paragraph, plain language" }], null, 2);
+const schemaDescriptionOnlyPending = {
+  ...pending, id: "p6", component: "step_output_schema",
+  beforeInstructions: schemaDescriptionOnlyBefore, afterInstructions: schemaDescriptionOnlyAfter,
+};
+
 const appliedImproved = {
   ...pending, id: "a1", status: "applied", appliedAsVersion: 4,
   targetDelta: 0.2, targetImproved: true, targetDeltaVersions: { latest: 4, prior: 3 },
@@ -59,7 +66,7 @@ describe("SelfImprovementRail", () => {
     render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
     fireEvent.click(await screen.findByRole("button", { name: /analyze this template/i }));
     await waitFor(() => expect(analyzeSpy).toHaveBeenCalled());
-    expect(await screen.findByText(/invalid_output/i)).toBeTruthy();
+    expect(await screen.findByText(/produced output that didn't match/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /review change/i })).toBeTruthy();
   });
 
@@ -67,7 +74,7 @@ describe("SelfImprovementRail", () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([pending as never]);
     const applySpy = vi.spyOn(api, "applyProposal").mockResolvedValue({ ...pending, status: "applied", appliedAsVersion: 2 } as never);
     render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
-    expect(await screen.findByText(/invalid_output/i)).toBeTruthy();
+    expect(await screen.findByText(/produced output that didn't match/i)).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: /review change/i }));
     const dialog = within(await screen.findByRole("dialog"));
     expect(dialog.getByText(/− Generate\./)).toBeTruthy();
@@ -81,6 +88,12 @@ describe("SelfImprovementRail", () => {
     render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
     expect(await screen.findByText(/\+ evidence_refs/i)).toBeTruthy();
     expect(screen.queryByText(/"key": "summary"/)).toBeNull();
+  });
+
+  it("schema proposal with no chips (description-only extension) shows a fallback line, not a blank summary", async () => {
+    vi.spyOn(api, "listProposals").mockResolvedValue([schemaDescriptionOnlyPending as never]);
+    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    expect(await screen.findByText(/Adds required structure — open Review change\./i)).toBeTruthy();
   });
 
   it("applies a proposal and calls onMutated", async () => {

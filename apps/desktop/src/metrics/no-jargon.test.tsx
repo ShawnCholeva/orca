@@ -90,4 +90,15 @@ describe("no jargon in the self-improvement rail", () => {
     await screen.findByText(/new checks are rejecting output/i);
     expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
+
+  it("renders the curated label for a targeted failureCode, never the raw code (e.g. 'evidence_veto' must not leak 'veto')", async () => {
+    const proposal = { ...judgedProposal, id: "p3", judgment: undefined, targetedFailureMode: { rule: "R1", failureCode: "evidence_veto", clusterCount: 5, signalCount: null } };
+    vi.spyOn(api, "listProposals").mockResolvedValue([proposal] as never);
+    const detail = { summary: { templateId: "tpl", name: "Brainstorm" } } as never;
+    const { container } = render(
+      <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />
+    );
+    expect(await screen.findByText(/Automated checks failed, so the completion was rejected/i)).toBeTruthy();
+    expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
+  });
 });

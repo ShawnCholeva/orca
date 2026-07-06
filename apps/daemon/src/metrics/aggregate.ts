@@ -275,14 +275,34 @@ export function computeStepMetrics(input: {
     // Hard failures — runs that died without ever emitting a step_complete — count
     // as 0 in the denominator: a step that fails often must not keep a high score
     // just because its failures never reached scoring. Pure function of evidence.
+    // A run's FINAL step-run attempt can hard-fail AFTER an earlier attempt already
+    // produced a passing step_complete (distinct from veto-then-pass, where the FINAL
+    // attempt is the pass). Left alone, `finalStepCompletes` keeps that earlier pass
+    // and credits it — a stale, superseded verdict. Reclassify the run as a hard fail
+    // ONLY when the failed final attempt's finishedAt is provably after the stale
+    // completion's createdAt; with no finishedAt there is no ordering evidence, so we
+    // fall back to current behavior rather than guess.
+    const completionByRunId = new Map(finalStepCompletes.map((t) => [t.transition.workflowRunId, t] as const));
+    const supersededByHardFail = new Set(
+      finals
+        .filter((r) => FAILED_STATUSES.has(r.status) && r.finishedAt != null)
+        .filter((r) => {
+          const completion = completionByRunId.get(r.workflowRunId);
+          return completion != null && r.finishedAt! > completion.transition.createdAt;
+        })
+        .map((r) => r.workflowRunId)
+    );
     const tierByCompletion = new Map(finalStepCompletes.map((t) => [t, classifyTier(t)] as const));
-    const conclusive = finalStepCompletes.filter((t) => tierByCompletion.get(t) !== "unverified");
+    const conclusive = finalStepCompletes.filter((t) =>
+      tierByCompletion.get(t) !== "unverified" && !supersededByHardFail.has(t.transition.workflowRunId ?? ""));
     const completeRunIds = new Set(finalStepCompletes.map((t) => t.transition.workflowRunId).filter((x): x is string => x != null));
-    const hardFailedFinals = finals.filter((r) => FAILED_STATUSES.has(r.status) && !completeRunIds.has(r.workflowRunId));
+    const hardFailedFinals = finals.filter((r) =>
+      FAILED_STATUSES.has(r.status) && (!completeRunIds.has(r.workflowRunId) || supersededByHardFail.has(r.workflowRunId)));
     const contribution = (t: (typeof stepCompletes)[number]) =>
       vFail(t) ? 0 : TIER_CONFIDENCE[tierByCompletion.get(t)!];
     const scoreOver = (completes: typeof finalStepCompletes, hardFails: number): { n: number; value: number | null } => {
-      const conc = completes.filter((t) => tierByCompletion.get(t) !== "unverified");
+      const conc = completes.filter((t) =>
+        tierByCompletion.get(t) !== "unverified" && !supersededByHardFail.has(t.transition.workflowRunId ?? ""));
       const n = conc.length + hardFails;
       return n === 0 ? { n, value: null } : { n, value: conc.reduce((acc, t) => acc + contribution(t), 0) / n };
     };
@@ -450,6 +470,7 @@ export function computeStepMetrics(input: {
       risk: { riskClassDist, gateDecisionDist, hardConstraintViolations, approvals },
       failureClusters,
       verification: {
+        // null score collapses to 0 here — UI gates on score==null first; widen if a consumer ever needs the distinction.
         tier: stepTier, tierLabel: TIER_LABEL[stepTier], confidence: scoreValue ?? 0, falseAcceptanceRate,
         artifacts: buildArtifacts({
           hasEvidence: evidenceCompletes.length > 0, anySensors: allSensors.length > 0,

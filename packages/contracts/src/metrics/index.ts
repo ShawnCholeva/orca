@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export { labelForFailure } from "./failure-labels.js";
+
 export const MetricPeriod = z.enum(["24h", "7d", "30d"]);
 export type MetricPeriod = z.infer<typeof MetricPeriod>;
 

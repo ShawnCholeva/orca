@@ -26,6 +26,9 @@ describe("validateSchemaTightening", () => {
   it("allows adding/extending a description", () => {
     ok(base.map((f) => f.key === "summary" ? { ...f, description: "one paragraph extended" } : f));
   });
+  it("allows adding a description to a field that never had one", () => {
+    ok(base.map((f) => f.key === "tier" ? { ...f, description: "which mode to run" } : f));
+  });
   it("bans shrinking or replacing a description", () => {
     bad(base.map((f) => f.key === "summary" ? { ...f, description: "shorter" } : f), "description");
     bad(base.map((f) => f.key === "summary" ? { ...f, description: "" } : f), "description");
