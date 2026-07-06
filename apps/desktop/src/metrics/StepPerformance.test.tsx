@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { StepPerformancePanel } from "./StepPerformance";
+import { StepPerformancePanel, StepRow } from "./StepPerformance";
 import type { TemplateMetricsDetail, StepMetrics } from "@orca/contracts";
 
 const step: StepMetrics = {
@@ -13,6 +13,10 @@ const step: StepMetrics = {
   risk: { riskClassDist: { medium: 12 }, gateDecisionDist: { allow: 18, require_approval: 2 },
     hardConstraintViolations: 3, approvals: { count: 2, sampleTransitionIds: ["t1", "t2"] } },
   failureClusters: [{ failureCode: "invalid_output", boundary: "step_complete", count: 4, sampleTransitionIds: ["a"] }],
+  verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.7, falseAcceptanceRate: 0.1,
+    artifacts: [{ source: "independent_review", verifies: "a second model reviewed the output", cannotVerify: "whether it executes correctly", confidence: 0.6, verdict: "pass" }] },
+  failureModes: [{ label: "invalid_output", count: 4, pct: 0.2 }],
+  reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false },
   trend: [], versionBoundaries: [], insights: ["Loops between failed strategies — high retry churn."],
   recentReasons: [{ at: "2026-05-01T00:00:00.000Z", reason: "constraint X violated" }],
 };
@@ -35,13 +39,34 @@ describe("StepPerformancePanel", () => {
       quality: { ...step.quality, verdictPassRate: 0, verifiedSampleSize: 0 },
     };
     render(<StepPerformancePanel detail={{ summary: { name: "X" }, steps: [unverified] } as unknown as TemplateMetricsDetail} loading={false} openStep={null} onToggleStep={() => {}} />);
-    expect(screen.getByText(/not verified/i)).toBeInTheDocument();
-    expect(screen.getByText("Unverified")).toBeInTheDocument();
+    expect(screen.getByText(/needs a check/i)).toBeInTheDocument();
+    expect(screen.getByText("No check yet")).toBeInTheDocument();
     expect(screen.queryByText("/100 F")).not.toBeInTheDocument();
   });
 
   it("renders an empty step state when there are no steps", () => {
     render(<StepPerformancePanel detail={{ summary: { name: "X" }, steps: [] } as unknown as TemplateMetricsDetail} loading={false} openStep={null} onToggleStep={() => {}} />);
     expect(screen.getByText(/No step activity/i)).toBeInTheDocument();
+  });
+});
+
+const reconciledStep: StepMetrics = {
+  stepTemplateId: "s", name: "Proposal", ordinal: 1, score: 62, sampleSize: 3, confidence: "ok",
+  runs: 3, passedFirstTry: 3, recovered: 0, failed: 0,
+  quality: { verdictPassRate: 1, sensorPassRate: null, oracleSufficientRate: 0, verifiedSampleSize: 3, untestedRegions: ["whether the plan works"], residualRisk: [], oracleGaps: [], limitingDimension: null },
+  cost: { p50LatencyMs: 1, meanTokens: 1, meanUsd: 0, meanRetries: 0 },
+  risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
+  failureClusters: [], trend: [], versionBoundaries: [], insights: ["Consistently passes but is never independently proven."], recentReasons: [],
+  verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.62, falseAcceptanceRate: 0,
+    artifacts: [{ source: "independent_review", verifies: "a second model reviewed the result", cannotVerify: "anything not executed", confidence: 0.55, verdict: "pass" }] },
+  failureModes: [], reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false },
+};
+
+describe("StepRow expanded", () => {
+  it("renders plain-language sections and no jargon", () => {
+    render(<StepRow step={reconciledStep} index={1} isLast open onToggle={() => {}} />);
+    expect(screen.getByText(/Checks run/i)).toBeTruthy();
+    expect(screen.getByText(/a second model reviewed/i)).toBeTruthy();
+    expect(screen.queryByText(/oracle|sensor|verdict/i)).toBeNull();
   });
 });

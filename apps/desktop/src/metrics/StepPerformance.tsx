@@ -98,17 +98,33 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
       {open && (
         <div style={{ padding: "2px 16px 16px 60px" }}>
           <div style={{ background: "var(--panel-2)", border: "1px solid var(--hairline)", borderRadius: 10, padding: 12 }}>
-            <SectionLabel style={{ paddingTop: 0 }}>Failure modes</SectionLabel>
-            {step.failureClusters.length === 0 && <div style={{ fontSize: 12, color: "var(--run)" }}>No failures recorded this period.</div>}
-            {step.failureClusters.map((c, i) => (
+            {(() => {
+              const rank = ["unverified", "self_reported", "ai_reviewed", "partially_verified", "verified_executed"].indexOf(step.verification.tier) + 1;
+              return (
+                <div style={{ display: "flex", gap: 3, marginBottom: 10 }}>
+                  {[0, 1, 2, 3, 4].map((i) => <div key={i} style={{ height: 6, flex: 1, borderRadius: 3, background: i < rank ? "var(--warn)" : "rgba(255,255,255,0.08)" }} />)}
+                </div>
+              );
+            })()}
+
+            <SectionLabel style={{ paddingTop: 0 }}>What's going wrong</SectionLabel>
+            {step.failureModes.length === 0 && <div style={{ fontSize: 12, color: "var(--run)" }}>No problems detected this period.</div>}
+            {step.failureModes.map((f, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, color: "var(--text-2)", padding: "3px 0" }}>
-                <span>{c.failureCode ?? "unclassified"} <span className="mono" style={{ color: "var(--text-4)" }}>· {c.boundary}</span></span>
-                <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>{c.count}×</span>
+                <span>{f.label}</span>
+                <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>{f.count}× · {Math.round(f.pct * 100)}%</span>
               </div>
             ))}
 
-            <Chips label="Untested regions" items={step.quality.untestedRegions} />
-            <Chips label="Residual risk" items={step.quality.residualRisk} />
+            <SectionLabel>Checks run</SectionLabel>
+            {step.verification.artifacts.map((a, i) => (
+              <div key={i} style={{ fontSize: 12, color: "var(--text-2)", padding: "2px 0" }}>
+                {a.verifies}{a.cannotVerify ? <span style={{ color: "var(--text-4)" }}> — couldn't check: {a.cannotVerify}</span> : null}
+              </div>
+            ))}
+
+            <Chips label="What we couldn't check" items={step.quality.untestedRegions} />
+            <Chips label="Remaining risks" items={step.quality.residualRisk} />
 
             {step.risk.approvals.count > 0 && (
               <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-2)" }}>
@@ -124,6 +140,12 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
                     <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>{t}</div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {step.reconciliation && (
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--hairline)", fontSize: 12, color: step.reconciliation.refuted ? "var(--err)" : "var(--text-2)" }}>
+                The AI <b>claimed</b> this step complete. Independently verified: <b>{step.reconciliation.verifiedTierLabel.toLowerCase()}</b>{step.reconciliation.refuted ? " — but the independent check overturned it." : "."}
               </div>
             )}
 
