@@ -3,6 +3,7 @@ import {
   ProposeInstructionRevisionProposal,
   TemplateInstructionProposal, ProposeSchemaRevisionProposal,
   JudgeInstructionEditProposal, JudgeInstructionEditRequest, CounterfactualJudgment,
+  LearningEvent, type LearningEventPayload,
 } from "./index.js";
 import { OrchestrationDecisionKind } from "../workflows/index.js";
 
@@ -148,5 +149,37 @@ describe("reasoning field (learning)", () => {
     const j = { verdict: "unavailable", regressionRisk: null, addressesFailureMode: null, regressionCases: [], reason: null, solvedCaseIds: [], failureCaseIds: [], solvedSampleSize: 0, failureSampleSize: 0, judgedAt: "2026-07-04T00:00:00.000Z", judgedAgainstVersion: 1 };
     expect(CounterfactualJudgment.parse(j).reasoning ?? null).toBeNull();
     expect(CounterfactualJudgment.parse({ ...j, reasoning: "why" }).reasoning).toBe("why");
+  });
+});
+
+describe("LearningEvent", () => {
+  const base = { id: "e1", templateId: "tpl", proposalId: "p1", stepTemplateId: "s1", templateVersion: 1, createdAt: "2026-07-06T00:00:00.000Z" };
+
+  const payloadByType: Record<string, LearningEventPayload> = {
+    created: { kind: "created", component: "step_instructions", rule: "R2", failureCode: "invalid_output" },
+    judged: { kind: "judged", verdict: "pass", solvedSampleSize: 2, failureSampleSize: 1 },
+    applied: { kind: "applied", appliedAsVersion: 3, humanEdited: false },
+    dismissed: { kind: "dismissed" },
+    rolled_back: { kind: "rolled_back", outcome: { targetDelta: -0.1, targetDeltaVersions: { latest: 3, prior: 2 }, invalidOutputRateDelta: null, regressionDetected: true } },
+    superseded: { kind: "superseded", by: "apply" },
+    baseline_restored: { kind: "baseline_restored", supersededCount: 2 },
+    analyzed: { kind: "analyzed", stepsDiagnosed: 5, proposalsCreated: 1, skips: [{ stepTemplateId: "s2", reason: "invalid schema" }] },
+  };
+
+  for (const [eventType, payload] of Object.entries(payloadByType)) {
+    it(`accepts a valid ${eventType} event`, () => {
+      const e = { ...base, eventType, payload };
+      expect(LearningEvent.parse(e).eventType).toBe(eventType);
+    });
+  }
+
+  it("rejects payload.kind not matching eventType", () => {
+    const e = { ...base, eventType: "created", payload: payloadByType.dismissed };
+    expect(LearningEvent.safeParse(e).success).toBe(false);
+  });
+
+  it("rejects an unknown eventType", () => {
+    const e = { ...base, eventType: "not_a_type", payload: payloadByType.dismissed };
+    expect(LearningEvent.safeParse(e).success).toBe(false);
   });
 });

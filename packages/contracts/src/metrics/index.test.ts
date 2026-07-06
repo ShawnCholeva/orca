@@ -25,6 +25,7 @@ describe("metrics contracts", () => {
       versionComparison: null,
       versions: [{ version: 2, runs: 6, firstSeenAt: "2026-05-01T00:00:00.000Z" }],
       confidence: "ok" as const,
+      calibration: [],
     };
     expect(TemplateMetricsSummary.parse(summary)).toEqual(summary);
   });
@@ -43,6 +44,7 @@ describe("metrics contracts", () => {
         deltas: { trajectoryEfficiency: null, verificationStrength: null, recovery: null,
                   stateConsistency: null, safetyCompliance: null, replayability: null, latencyP50Ms: null },
         versionComparison: null, versions: [], confidence: "low" as const,
+        calibration: [],
       }),
       steps: [{
         stepTemplateId: "s1", name: "Define Intent", ordinal: 0,

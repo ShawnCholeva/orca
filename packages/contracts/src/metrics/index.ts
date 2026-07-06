@@ -26,6 +26,11 @@ const SixDeltas = z.object({
   latencyP50Ms: z.number().nullable(),
 }).strict();
 
+export const VerificationTier = z.enum([
+  "verified_executed", "partially_verified", "ai_reviewed", "self_reported", "unverified",
+]);
+export type VerificationTier = z.infer<typeof VerificationTier>;
+
 export const TemplateMetricsSummary = z.object({
   templateId: z.string(),
   name: z.string(),
@@ -47,6 +52,11 @@ export const TemplateMetricsSummary = z.object({
     version: z.number().int(), runs: z.number().int().nonnegative(), firstSeenAt: z.string(),
   }).strict()),
   confidence: z.enum(["low", "ok"]),
+  calibration: z.array(z.object({
+    tier: VerificationTier, assumed: z.number(), measured: z.number().nullable(),
+    sampleSize: z.number().int().nonnegative(),
+    state: z.enum(["measured", "insufficient", "unmeasurable"]),
+  }).strict()),
 }).strict();
 export type TemplateMetricsSummary = z.infer<typeof TemplateMetricsSummary>;
 
@@ -57,11 +67,6 @@ export const FailureCluster = z.object({
   sampleTransitionIds: z.array(z.string()),
 }).strict();
 export type FailureCluster = z.infer<typeof FailureCluster>;
-
-export const VerificationTier = z.enum([
-  "verified_executed", "partially_verified", "ai_reviewed", "self_reported", "unverified",
-]);
-export type VerificationTier = z.infer<typeof VerificationTier>;
 
 export const EvidenceArtifact = z.object({
   source: z.enum(["executable", "independent_review", "self_report"]),

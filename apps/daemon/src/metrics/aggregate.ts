@@ -148,6 +148,7 @@ export function computeTemplateSummary(input: {
     versionComparison,
     versions: input.versions,
     confidence: input.runCount < SAMPLE_MIN ? "low" : "ok",
+    calibration: [], // placeholder — computed in SP3 Task 4
   };
 }
 

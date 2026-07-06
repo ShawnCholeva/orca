@@ -193,6 +193,7 @@ describe('context migration 0006_context.sql', () => {
       '0053_learning_proposal_judgment.sql',
       '0054_decision_reasoning.sql',
       '0055_proposal_component.sql',
+      '0056_learning_events.sql',
     ]);
 
     const tables = (
@@ -312,6 +313,7 @@ describe('context migration 0006_context.sql', () => {
       '0053_learning_proposal_judgment.sql',
       '0054_decision_reasoning.sql',
       '0055_proposal_component.sql',
+      '0056_learning_events.sql',
     ]);
 
     const counts = {

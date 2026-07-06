@@ -147,3 +147,38 @@ export const TemplateInstructionProposal = z.object({
   if (!parsesAsSchema(p.afterInstructions)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["afterInstructions"], message: "step_output_schema proposal: afterInstructions must be a serialized output schema" });
 });
 export type TemplateInstructionProposal = z.infer<typeof TemplateInstructionProposal>;
+
+export const LearningEventType = z.enum([
+  "created", "judged", "applied", "dismissed", "rolled_back", "superseded", "baseline_restored", "analyzed",
+]);
+export type LearningEventType = z.infer<typeof LearningEventType>;
+
+export const RollbackOutcomeSnapshot = z.object({
+  targetDelta: z.number().nullable(),
+  targetDeltaVersions: z.object({ latest: z.number().int(), prior: z.number().int() }).strict().nullable(),
+  invalidOutputRateDelta: z.number().nullable(),
+  regressionDetected: z.boolean(),
+}).strict();
+export type RollbackOutcomeSnapshot = z.infer<typeof RollbackOutcomeSnapshot>;
+
+export const LearningEventPayload = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("created"), component: ProposalComponent, rule: z.enum(["R1", "R2", "R3", "R4"]), failureCode: z.string().nullable() }).strict(),
+  z.object({ kind: z.literal("judged"), verdict: JudgeOutcome, solvedSampleSize: z.number().int(), failureSampleSize: z.number().int() }).strict(),
+  z.object({ kind: z.literal("applied"), appliedAsVersion: z.number().int(), humanEdited: z.boolean() }).strict(),
+  z.object({ kind: z.literal("dismissed") }).strict(),
+  z.object({ kind: z.literal("rolled_back"), outcome: RollbackOutcomeSnapshot }).strict(),
+  z.object({ kind: z.literal("superseded"), by: z.enum(["apply", "staleness", "restore"]) }).strict(),
+  z.object({ kind: z.literal("baseline_restored"), supersededCount: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("analyzed"), stepsDiagnosed: z.number().int().nonnegative(), proposalsCreated: z.number().int().nonnegative(), skips: z.array(z.object({ stepTemplateId: z.string(), reason: z.string().max(300) }).strict()).max(20) }).strict(),
+]);
+export type LearningEventPayload = z.infer<typeof LearningEventPayload>;
+
+export const LearningEvent = z.object({
+  id: z.string(), templateId: z.string(),
+  proposalId: z.string().nullable(), stepTemplateId: z.string().nullable(),
+  eventType: LearningEventType, templateVersion: z.number().int(),
+  payload: LearningEventPayload, createdAt: z.string(),
+}).strict().superRefine((e, ctx) => {
+  if (e.payload.kind !== e.eventType) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "payload.kind must equal eventType" });
+});
+export type LearningEvent = z.infer<typeof LearningEvent>;

@@ -14,6 +14,7 @@ const summary = {
   deltas: { trajectoryEfficiency: null, verificationStrength: 0.04, recovery: 0.05,
     stateConsistency: 0, safetyCompliance: -0.03, replayability: 0, latencyP50Ms: -300 },
   versionComparison: null, versions: [{ version: 1, runs: 12, firstSeenAt: "2026-05-01T00:00:00.000Z" }], confidence: "ok" as const,
+  calibration: [],
 };
 
 describe("MetricsPage", () => {

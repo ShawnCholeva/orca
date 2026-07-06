@@ -30,7 +30,7 @@ describe("getTemplateMetricsSummaries", () => {
       latencyP50Ms: null,
       deltas: { trajectoryEfficiency: null, verificationStrength: null, recovery: null,
                 stateConsistency: null, safetyCompliance: null, replayability: null, latencyP50Ms: null },
-      versionComparison: null, versions: [], confidence: "low",
+      versionComparison: null, versions: [], confidence: "low", calibration: [],
     }];
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ summaries }), { status: 200, headers: { "content-type": "application/json" } }));
 
@@ -64,7 +64,7 @@ describe("getTemplateMetricsDetail", () => {
       latencyP50Ms: null,
       deltas: { trajectoryEfficiency: null, verificationStrength: null, recovery: null,
                 stateConsistency: null, safetyCompliance: null, replayability: null, latencyP50Ms: null },
-      versionComparison: null, versions: [], confidence: "low",
+      versionComparison: null, versions: [], confidence: "low", calibration: [],
     };
     const detail = { summary, steps: [] };
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ detail }), { status: 200, headers: { "content-type": "application/json" } }));

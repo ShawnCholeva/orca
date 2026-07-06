@@ -25,7 +25,7 @@ function detail(steps: StepMetrics[]): TemplateMetricsDetail {
       firstPass: 0.5, recovered: 0.2, escalated: 0.05, latencyP50Ms: 100,
       deltas: { trajectoryEfficiency: null, verificationStrength: null, recovery: null, stateConsistency: null, safetyCompliance: null, replayability: null, latencyP50Ms: null },
       versionComparison: { latest: 2, prior: 1, byDimension: { verificationStrength: -0.05 } },
-      versions: [], confidence: "ok",
+      versions: [], confidence: "ok", calibration: [],
     },
     steps,
   };
