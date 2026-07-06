@@ -85,12 +85,14 @@ describe("judgeProposal", () => {
   beforeEach(() => {
     db = openTestDb();
     seedGoalAndRun(db);
-    // st1: one solved case + one failure case -> both buckets satisfy their MIN.
+    // st1: two solved cases + two diagnosed failure cases -> both buckets satisfy the 2+2 MIN.
     seedStepCase(db, { srId: "sr-solved", stepTemplateId: "st1", ordinal: 0, status: "passed", body: "{\"ok\":1}", at: "2026-07-01T00:10:00.000Z", refute: null, evidence: passedEvidence });
-    seedStepCase(db, { srId: "sr-fail", stepTemplateId: "st1", ordinal: 1, status: "failed", body: "{\"bad\":1}", at: "2026-07-01T00:20:00.000Z", refute: refutedRefute, evidence: null });
+    seedStepCase(db, { srId: "sr-solved2", stepTemplateId: "st1", ordinal: 1, status: "passed", body: "{\"ok\":2}", at: "2026-07-01T00:11:00.000Z", refute: null, evidence: passedEvidence });
+    seedStepCase(db, { srId: "sr-fail", stepTemplateId: "st1", ordinal: 2, status: "failed", body: "{\"bad\":1}", at: "2026-07-01T00:20:00.000Z", refute: refutedRefute, evidence: null });
+    seedStepCase(db, { srId: "sr-fail2", stepTemplateId: "st1", ordinal: 3, status: "failed", body: "{\"bad\":2}", at: "2026-07-01T00:21:00.000Z", refute: refutedRefute, evidence: null });
     insertProposal(db, proposalFixture({
       id: "p1", stepTemplateId: "st1",
-      evidence: { sampleTransitionIds: ["ht-sr-fail"], revisionSignalIds: [], metricSnapshot: { score: 50, verdictPassRate: 0.5, oracleSufficientRate: 0.5, versionDelta: null } },
+      evidence: { sampleTransitionIds: ["ht-sr-fail", "ht-sr-fail2"], revisionSignalIds: [], metricSnapshot: { score: 50, verdictPassRate: 0.5, oracleSufficientRate: 0.5, versionDelta: null } },
     }));
   });
 
@@ -143,6 +145,22 @@ describe("judgeProposal", () => {
     expect(seen.length).toBe(0);
   });
 
+  it("short-circuits to insufficient_evidence with only 1 solved + 1 failure case (below the 2+2 minimum)", async () => {
+    // st4: exactly one solved case and one diagnosed failure case -> below FAILURE_MIN/SOLVED_MIN of 2.
+    seedStepCase(db, { srId: "sr4-solved", stepTemplateId: "st4", ordinal: 0, status: "passed", body: "{\"ok\":1}", at: "2026-07-01T00:10:00.000Z", refute: null, evidence: passedEvidence });
+    seedStepCase(db, { srId: "sr4-fail", stepTemplateId: "st4", ordinal: 1, status: "failed", body: "{\"bad\":1}", at: "2026-07-01T00:20:00.000Z", refute: refutedRefute, evidence: null });
+    insertProposal(db, proposalFixture({
+      id: "p4", stepTemplateId: "st4",
+      evidence: { sampleTransitionIds: ["ht-sr4-fail"], revisionSignalIds: [], metricSnapshot: { score: 50, verdictPassRate: 0.5, oracleSufficientRate: 0.5, versionDelta: null } },
+    }));
+    const seen: string[] = [];
+    const deps: JudgeDeps = { shadowAsk: fakeAsk(PASS, seen), terminateShadow: () => {} };
+    const p = await judgeProposal(deps, db, "p4");
+    expect(p.judgment?.verdict).toBe("insufficient_evidence");
+    expect(p.judgment?.reasoning ?? null).toBeNull();
+    expect(seen.length).toBe(0);
+  });
+
   it("records unavailable when the shadow ask fails", async () => {
     const deps: JudgeDeps = { shadowAsk: { async ask() { throw new Error("down"); } }, terminateShadow: () => {} };
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -156,8 +174,8 @@ describe("judgeProposal", () => {
   // an oversized payload. Per repo convention, judgeProposal must degrade instead — this proves it.
   it("degrades to unavailable (no throw, no ask) when the judge request payload is oversized", async () => {
     // Each case body is 2000 chars of a 3-byte-UTF8 character (not valid JSON, so `compact()`
-    // keeps it raw and clamps at OUTPUT_BUDGET=2000 chars = 6000 bytes). 5 solved + 1 failure
-    // case, plus two 8192-char instruction fields (24576 bytes each), blow well past the
+    // keeps it raw and clamps at OUTPUT_BUDGET=2000 chars = 6000 bytes). 5 solved + 2 failure
+    // cases, plus two 8192-char instruction fields (24576 bytes each), blow well past the
     // 65536-byte ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES cap.
     const bigBody = "€".repeat(2000);
     const bigInstructions = "€".repeat(8192);
@@ -171,9 +189,13 @@ describe("judgeProposal", () => {
       srId: "sr-big-fail", stepTemplateId: "st3", ordinal: 9, status: "failed",
       body: bigBody, at: "2026-07-02T00:09:00.000Z", refute: refutedRefute, evidence: null,
     });
+    seedStepCase(db, {
+      srId: "sr-big-fail2", stepTemplateId: "st3", ordinal: 10, status: "failed",
+      body: bigBody, at: "2026-07-02T00:10:00.000Z", refute: refutedRefute, evidence: null,
+    });
     insertProposal(db, proposalFixture({
       id: "p3", stepTemplateId: "st3", beforeInstructions: bigInstructions, afterInstructions: bigInstructions,
-      evidence: { sampleTransitionIds: ["ht-sr-big-fail"], revisionSignalIds: [], metricSnapshot: { score: 50, verdictPassRate: 0.5, oracleSufficientRate: 0.5, versionDelta: null } },
+      evidence: { sampleTransitionIds: ["ht-sr-big-fail", "ht-sr-big-fail2"], revisionSignalIds: [], metricSnapshot: { score: 50, verdictPassRate: 0.5, oracleSufficientRate: 0.5, versionDelta: null } },
     }));
     const seen: string[] = [];
     const deps: JudgeDeps = { shadowAsk: fakeAsk(PASS, seen), terminateShadow: () => {} };

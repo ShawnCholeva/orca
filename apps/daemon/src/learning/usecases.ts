@@ -24,8 +24,9 @@ export interface JudgeDeps {
   shadowAsk: ShadowAsk;
   terminateShadow: (key: string) => Promise<void> | void;
 }
-export const SOLVED_MIN = 1;
-export const FAILURE_MIN = 1;
+// Paper §3.5.2: evaluate on held-out traces; 1-vs-1 corpora overfit the diagnosis.
+export const SOLVED_MIN = 2;
+export const FAILURE_MIN = 2;
 
 function nowOr(nowIso?: string): string { return nowIso ?? new Date().toISOString(); }
 

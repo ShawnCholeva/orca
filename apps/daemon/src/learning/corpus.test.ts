@@ -104,4 +104,43 @@ describe("buildJudgeCorpus", () => {
     expect(c.solved.length).toBe(5);
     expect(c.solved[0].output.length).toBe(2000);
   });
+
+  it("failure bucket tops up with held-out ground-truth failures beyond the diagnosed cases", () => {
+    // 2 diagnosed failing runs, referenced by the proposal's sampleTransitionIds.
+    stepRun(db, "r1", "sr-diag1", "t1", "st1"); artifact(db, "r1", "sr-diag1", "{\"d\":1}", "2026-07-02T00:00:00.000Z"); stepComplete(db, "sr-diag1", null, refutedRefute);
+    stepRun(db, "r2", "sr-diag2", "t1", "st1"); artifact(db, "r2", "sr-diag2", "{\"d\":2}", "2026-07-02T00:00:00.000Z"); stepComplete(db, "sr-diag2", null, refutedRefute);
+    // 2 additional refuted runs NOT referenced by the proposal — ground-truth failures held out of the diagnosis.
+    stepRun(db, "r3", "sr-held1", "t1", "st1"); artifact(db, "r3", "sr-held1", "{\"h\":1}", "2026-07-02T00:00:00.000Z"); stepComplete(db, "sr-held1", null, refutedRefute);
+    stepRun(db, "r4", "sr-held2", "t1", "st1"); artifact(db, "r4", "sr-held2", "{\"h\":2}", "2026-07-02T00:00:00.000Z"); stepComplete(db, "sr-held2", null, refutedRefute);
+    const diagnosedRun1 = "sr-diag1";
+    const diagnosedRun2 = "sr-diag2";
+    const heldOutRun1 = "sr-held1";
+    const heldOutRun2 = "sr-held2";
+    const p = proposal({ evidence: { sampleTransitionIds: ["ht-sr-diag1", "ht-sr-diag2"], revisionSignalIds: [], metricSnapshot: { score: 50, verdictPassRate: 0.5, oracleSufficientRate: 0.5, versionDelta: null } } });
+    const corpus = buildJudgeCorpus(db, p);
+    const ids = corpus.failure.map((c) => c.stepRunId);
+    expect(ids).toEqual(expect.arrayContaining([diagnosedRun1, diagnosedRun2, heldOutRun1, heldOutRun2]));
+    expect(corpus.failure.length).toBe(4);
+  });
+
+  it("caps diagnosed cases at 3 so held-out failures always get slots when they exist", () => {
+    // 5 diagnosed failing runs, all referenced by the proposal's sampleTransitionIds.
+    const diagIds: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const srId = `sr-diag${i}`;
+      stepRun(db, `r${i}`, srId, "t1", "st1");
+      artifact(db, `r${i}`, srId, `{"d":${i}}`, "2026-07-02T00:00:00.000Z");
+      stepComplete(db, srId, null, refutedRefute);
+      diagIds.push(srId);
+    }
+    // 2 held-out refuted runs NOT referenced by the proposal.
+    stepRun(db, "r10", "sr-held1", "t1", "st1"); artifact(db, "r10", "sr-held1", "{\"h\":1}", "2026-07-02T00:00:00.000Z"); stepComplete(db, "sr-held1", null, refutedRefute);
+    stepRun(db, "r11", "sr-held2", "t1", "st1"); artifact(db, "r11", "sr-held2", "{\"h\":2}", "2026-07-02T00:00:00.000Z"); stepComplete(db, "sr-held2", null, refutedRefute);
+    const heldOutIds = ["sr-held1", "sr-held2"];
+    const proposal5 = proposal({ evidence: { sampleTransitionIds: diagIds.map((id) => `ht-${id}`), revisionSignalIds: [], metricSnapshot: { score: 50, verdictPassRate: 0.5, oracleSufficientRate: 0.5, versionDelta: null } } });
+    const corpus = buildJudgeCorpus(db, proposal5);
+    const ids = corpus.failure.map((c) => c.stepRunId);
+    expect(ids.filter((id) => heldOutIds.includes(id)).length).toBe(2);
+    expect(corpus.failure.length).toBe(5);
+  });
 });
