@@ -179,13 +179,14 @@ it("renders lead, fields, a collapsed scores dropdown, and Continue + Revise", (
   expect(screen.getByText("Cannot rename workspaces")).toBeInTheDocument();
   expect(screen.getByText("unique names")).toBeInTheDocument();
   // scores hidden until expanded
-  expect(screen.queryByText(/Output completeness/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Followed instructions/i)).not.toBeInTheDocument();
   fireEvent.click(screen.getByTestId("confirm-scores-toggle"));
-  expect(screen.getByText(/Output completeness/i)).toBeInTheDocument();
-  // #1: the drawer is the orchestrator's SELF-assessment, distinct from the
-  // independently-verified Metrics score — labeled so a human can't conflate them.
+  expect(screen.getByText(/Followed instructions/i)).toBeInTheDocument();
+  // #1 / #9: the drawer is the orchestrator's SELF-assessment (a claim), distinct
+  // from the independently-verified Metrics score — labeled so a human can't
+  // conflate them.
   expect(screen.getByText(/Self-reported success/i)).toBeInTheDocument();
-  expect(screen.getByText(/orchestrator's own assessment/i)).toBeInTheDocument();
+  expect(screen.getByText(/its own claim/i)).toBeInTheDocument();
   fireEvent.click(screen.getByTestId("step-confirm-revise"));
   expect(onRevise).toHaveBeenCalledWith("r1");
   fireEvent.click(screen.getByTestId("step-confirm-continue"));
@@ -224,7 +225,7 @@ describe("refute advisory (5.4 L4)", () => {
         }}
       />,
     );
-    expect(screen.getByText(/Independent review is uncertain/)).toBeInTheDocument();
+    expect(screen.getByText(/Independent review was inconclusive/)).toBeInTheDocument();
     expect(screen.getByText("can't tell")).toBeInTheDocument();
   });
 
@@ -246,6 +247,24 @@ describe("refute advisory (5.4 L4)", () => {
   it("renders no advisory when refute is absent", () => {
     render(<LiveActivity activity={confirmActivity} />);
     expect(screen.queryByTestId("step-confirm-refute")).not.toBeInTheDocument();
+  });
+
+  it("frames the self-report as a claim and reconciles against the independent check", () => {
+    render(
+      <LiveActivity
+        activity={{
+          ...confirmActivity,
+          confirmationSummary: {
+            ...confirmActivity.confirmationSummary,
+            refute: { verdict: "upheld", reason: null, issueRefs: [] },
+          },
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("confirm-scores-toggle"));
+    expect(screen.getByText(/its own claim/i)).toBeTruthy();
+    expect(screen.getByText(/independent check/i)).toBeTruthy();
+    expect(screen.getByText(/reviewed it and agreed/i)).toBeTruthy();
   });
 });
 
@@ -372,7 +391,7 @@ describe("ActivityCard", () => {
     expect(screen.getByTestId("step-result-expand")).toHaveTextContent("Scores");
     fireEvent.click(screen.getByTestId("step-result-expand"));
     expect(card).toHaveTextContent("82%");
-    expect(card).toHaveTextContent("Instruction adherence");
+    expect(card).toHaveTextContent("Followed instructions");
   });
 
   it("leads a failed evaluation with a label, hides the raw reason and percentages in the drawer", () => {

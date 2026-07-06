@@ -60,9 +60,10 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 // (the refute call itself failed) is a defensive case — the engine still
 // escalates to a human pause for it, so the card should not stay silent.
 const REFUTE_VERDICT_LABEL: Record<string, string> = {
+  upheld: "A second AI reviewed it and agreed — but nothing was run or tested",
   refuted: "Independent review disputes this",
-  uncertain: "Independent review is uncertain",
-  unavailable: "Independent review unavailable",
+  uncertain: "Independent review was inconclusive",
+  unavailable: "No independent review ran",
 };
 
 // The synthesized frame body (lead + fields) shared by the live confirmation
@@ -201,16 +202,48 @@ export function ConfirmationCard({
           ) : null}
         </div>
         {scoresOpen && scores ? (
-          <dl ref={metricsRef} className="step-result-metrics step-confirm-metrics">
-            <p className="step-confirm-scores-note">The orchestrator's own assessment of this step — not the independently-verified score shown on the Metrics tab.</p>
-            <div><dt>Self-reported success</dt><dd>{pct(scores.successScore)}</dd></div>
-            <div><dt>Output completeness</dt><dd>{pct(scores.quality.outputCompleteness)}</dd></div>
-            <div><dt>Output correctness</dt><dd>{pct(scores.quality.outputCorrectness)}</dd></div>
-            <div><dt>Instruction adherence</dt><dd>{pct(scores.quality.instructionAdherence)}</dd></div>
-            <div><dt>Downstream readiness</dt><dd>{pct(scores.quality.downstreamReadiness)}</dd></div>
-            <div><dt>Risk level (higher = riskier)</dt><dd>{pct(scores.quality.riskLevel)}</dd></div>
-            <div><dt>Handoff</dt><dd>{scores.handoffReady ? "Ready" : "Not ready"}</dd></div>
-          </dl>
+          <>
+            <dl ref={metricsRef} className="step-result-metrics step-confirm-metrics">
+              <div className="step-confirm-scores-head">
+                <span className="step-confirm-scores-title">How this step scored itself</span>
+                <span className="step-confirm-scores-tag">its own claim — not proof</span>
+              </div>
+              <div><dt>Self-reported success</dt><dd>{pct(scores.successScore)}</dd></div>
+              <div><dt>Complete</dt><dd>{pct(scores.quality.outputCompleteness)}</dd></div>
+              <div><dt>Correct</dt><dd>{pct(scores.quality.outputCorrectness)}</dd></div>
+              <div><dt>Followed instructions</dt><dd>{pct(scores.quality.instructionAdherence)}</dd></div>
+              <div><dt>Downstream readiness</dt><dd>{pct(scores.quality.downstreamReadiness)}</dd></div>
+              <div><dt>Risk level (higher = riskier)</dt><dd>{pct(scores.quality.riskLevel)}</dd></div>
+              <div><dt>Handoff</dt><dd>{scores.handoffReady ? "Ready" : "Not ready"}</dd></div>
+            </dl>
+            {summary?.refute ? (
+              <div
+                data-testid="step-confirm-independent"
+                style={{
+                  marginTop: 8,
+                  fontSize: 12,
+                  color: summary.refute.verdict === "refuted" ? "var(--err)" : "var(--text-2)",
+                }}
+              >
+                <span
+                  className="mono"
+                  style={{ fontSize: 9.5, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--text-4)" }}
+                >
+                  Independent check
+                </span>
+                <div>{REFUTE_VERDICT_LABEL[summary.refute.verdict] ?? "No independent review ran"}</div>
+              </div>
+            ) : null}
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 12,
+                color: summary?.refute?.verdict === "refuted" ? "var(--err)" : "var(--text-3)",
+              }}
+            >
+              The AI <b>claimed</b> this step complete. See the Metrics tab for how it trends and how strongly it's verified.
+            </div>
+          </>
         ) : null}
       </div>
     </div>
@@ -300,13 +333,16 @@ export function StepResultCard({ activity }: { activity: Activity }) {
           <div className="step-result-counts">
             {r.outcome.producedArtifactsCount} artifacts · {r.outcome.blockingIssuesCount} blockers · {r.outcome.warningsCount} warnings
           </div>
-          {scored ? <p className="step-result-metrics-note">Orchestrator self-assessment — see the Metrics tab for independently-verified strength.</p> : null}
           <dl className="step-result-metrics">
             {scored ? (
               <>
-                <div><dt>Output completeness</dt><dd>{pct(r.quality.outputCompleteness)}</dd></div>
-                <div><dt>Output correctness</dt><dd>{pct(r.quality.outputCorrectness)}</dd></div>
-                <div><dt>Instruction adherence</dt><dd>{pct(r.quality.instructionAdherence)}</dd></div>
+                <div className="step-confirm-scores-head">
+                  <span className="step-confirm-scores-title">How this step scored itself</span>
+                  <span className="step-confirm-scores-tag">its own claim — not proof</span>
+                </div>
+                <div><dt>Complete</dt><dd>{pct(r.quality.outputCompleteness)}</dd></div>
+                <div><dt>Correct</dt><dd>{pct(r.quality.outputCorrectness)}</dd></div>
+                <div><dt>Followed instructions</dt><dd>{pct(r.quality.instructionAdherence)}</dd></div>
                 <div><dt>Downstream readiness</dt><dd>{pct(r.quality.downstreamReadiness)}</dd></div>
                 <div><dt>Risk level (higher = riskier)</dt><dd>{pct(r.quality.riskLevel)}</dd></div>
               </>
@@ -316,6 +352,11 @@ export function StepResultCard({ activity }: { activity: Activity }) {
             {r.performance.totalTurns !== undefined ? <div><dt>Total turns</dt><dd>{r.performance.totalTurns}</dd></div> : null}
             {r.performance.toolCalls !== undefined ? <div><dt>Tool calls</dt><dd>{r.performance.toolCalls}</dd></div> : null}
           </dl>
+          {scored ? (
+            <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-3)" }}>
+              The AI <b>claimed</b> this step complete. See the Metrics tab for how it trends and how strongly it's verified.
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
