@@ -24,7 +24,12 @@ export function enrichWithRegression(
     // The falsifier must also check the proposal's own goal: did the TARGETED step's
     // honest score move under the applied version? Invariants alone let a proposal
     // fail its purpose and still read as a success.
-    const targetDelta = steps.find((s) => s.stepTemplateId === p.stepTemplateId)?.versionScoreDelta ?? null;
+    const step = steps.find((s) => s.stepTemplateId === p.stepTemplateId);
+    // Attribute the step's version delta to this proposal only when the compared
+    // pair actually spans the applied version — otherwise a stale prior-pair delta
+    // would masquerade as this proposal's outcome.
+    const spansApplied = step?.versionScoreDeltaVersions?.latest === p.appliedAsVersion;
+    const targetDelta = spansApplied ? step?.versionScoreDelta ?? null : null;
     return { ...p, regressionDetected: regressed, watchedDeltas, targetDelta, targetImproved: targetDelta == null ? null : targetDelta > 0 };
   });
 }

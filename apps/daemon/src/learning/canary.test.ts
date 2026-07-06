@@ -56,8 +56,8 @@ describe("enrichWithRegression", () => {
   });
   it("enriches with targetDelta/targetImproved from the targeted step's versionScoreDelta", () => {
     const steps = [
-      step({ stepTemplateId: "s1", versionScoreDelta: 0.2 }),
-      step({ stepTemplateId: "other", versionScoreDelta: -0.4 }),
+      step({ stepTemplateId: "s1", versionScoreDelta: 0.2, versionScoreDeltaVersions: { latest: 2, prior: 1 } }),
+      step({ stepTemplateId: "other", versionScoreDelta: -0.4, versionScoreDeltaVersions: { latest: 2, prior: 1 } }),
     ];
     const [p] = enrichWithRegression([applied()], summary(), steps);
     expect(p.targetDelta).toBeCloseTo(0.2);
@@ -66,6 +66,13 @@ describe("enrichWithRegression", () => {
   it("targetImproved is null when the step has no version delta yet", () => {
     const steps = [step({ stepTemplateId: "s1", versionScoreDelta: null })];
     const [p] = enrichWithRegression([applied()], summary(), steps);
+    expect(p.targetDelta).toBeNull();
+    expect(p.targetImproved).toBeNull();
+  });
+  it("targetDelta is null when the step's compared pair does not span the applied version (stale prior-pair delta)", () => {
+    // Step has a versionScoreDelta, but it compares v1-vs-v0 — the applied version is 2.
+    const steps = [step({ stepTemplateId: "s1", versionScoreDelta: 0.2, versionScoreDeltaVersions: { latest: 1, prior: 0 } })];
+    const [p] = enrichWithRegression([applied({ appliedAsVersion: 2 })], summary(), steps);
     expect(p.targetDelta).toBeNull();
     expect(p.targetImproved).toBeNull();
   });

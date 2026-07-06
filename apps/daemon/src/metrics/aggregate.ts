@@ -288,7 +288,14 @@ export function computeStepMetrics(input: {
     // Per-step, per-version score delta (latest vs prior version in the window): the
     // falsifier's "did the TARGETED step improve" signal (0..1 scale).
     let versionScoreDelta: number | null = null;
-    const versionsPresent = [...new Set(finalStepCompletes.map((t) => t.templateVersion))].sort((a, b) => b - a);
+    let versionScoreDeltaVersions: { latest: number; prior: number } | null = null;
+    // Union of completed AND hard-failed version identity: a version whose runs of
+    // this step ALL hard-failed (no step_complete) must still be visible here — an
+    // all-hard-fail applied version is exactly the regression the falsifier must catch.
+    const versionsPresent = [...new Set([
+      ...finalStepCompletes.map((t) => t.templateVersion),
+      ...hardFailedFinals.map((r) => r.templateVersion),
+    ])].sort((a, b) => b - a);
     if (versionsPresent.length >= 2) {
       const [latestV, priorV] = versionsPresent;
       const forVersion = (v: number) => scoreOver(
@@ -296,7 +303,10 @@ export function computeStepMetrics(input: {
         hardFailedFinals.filter((r) => r.templateVersion === v).length,
       );
       const a = forVersion(latestV), b = forVersion(priorV);
-      if (a.n >= VERSION_MIN && b.n >= VERSION_MIN && a.value != null && b.value != null) versionScoreDelta = a.value - b.value;
+      if (a.n >= VERSION_MIN && b.n >= VERSION_MIN && a.value != null && b.value != null) {
+        versionScoreDelta = a.value - b.value;
+        versionScoreDeltaVersions = { latest: latestV, prior: priorV };
+      }
     }
 
     const allSensors = evidenceCompletes.flatMap((t) => t.transition.evidence!.sensorsRun);
@@ -429,7 +439,7 @@ export function computeStepMetrics(input: {
       },
       failureModes,
       reconciliation,
-      trend, versionBoundaries, versionScoreDelta, insights: [], recentReasons,
+      trend, versionBoundaries, versionScoreDelta, versionScoreDeltaVersions, insights: [], recentReasons,
     };
     step.insights = deriveInsights(step);
     steps.push(step);

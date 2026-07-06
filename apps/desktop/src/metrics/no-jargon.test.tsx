@@ -23,8 +23,8 @@ const step: StepMetrics = {
 };
 
 describe("no jargon in the metrics step detail", () => {
-  it("renders no 'oracle', 'sensor', or 'verdict'", () => {
+  it("renders no 'oracle', 'sensor', 'verdict', 'refute', or 'veto'", () => {
     const { container } = render(<StepRow step={step} index={0} isLast open onToggle={() => {}} />);
-    expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict)\b/i);
+    expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 });

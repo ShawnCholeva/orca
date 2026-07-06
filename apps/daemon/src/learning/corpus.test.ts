@@ -143,4 +143,25 @@ describe("buildJudgeCorpus", () => {
     expect(ids.filter((id) => heldOutIds.includes(id)).length).toBe(2);
     expect(corpus.failure.length).toBe(5);
   });
+
+  it("back-fills with extra diagnosed cases when there is exactly one held-out failure (3 capped + 1 back-filled + the held-out)", () => {
+    // 5 diagnosed failing runs, all referenced by the proposal's sampleTransitionIds.
+    const diagIds: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const srId = `sr-diag${i}`;
+      stepRun(db, `r${i}`, srId, "t1", "st1");
+      artifact(db, `r${i}`, srId, `{"d":${i}}`, "2026-07-02T00:00:00.000Z");
+      stepComplete(db, srId, null, refutedRefute);
+      diagIds.push(srId);
+    }
+    // Exactly one held-out refuted run NOT referenced by the proposal.
+    stepRun(db, "r10", "sr-held1", "t1", "st1"); artifact(db, "r10", "sr-held1", "{\"h\":1}", "2026-07-02T00:00:00.000Z"); stepComplete(db, "sr-held1", null, refutedRefute);
+    const proposal5 = proposal({ evidence: { sampleTransitionIds: diagIds.map((id) => `ht-${id}`), revisionSignalIds: [], metricSnapshot: { score: 50, verdictPassRate: 0.5, oracleSufficientRate: 0.5, versionDelta: null } } });
+    const corpus = buildJudgeCorpus(db, proposal5);
+    const ids = corpus.failure.map((c) => c.stepRunId);
+    expect(corpus.failure.length).toBe(5);
+    expect(ids).toContain("sr-held1");
+    expect(diagIds.filter((id) => ids.includes(id)).length).toBe(4); // 3 capped + 1 back-filled
+    expect(new Set(ids).size).toBe(ids.length); // no duplicates
+  });
 });

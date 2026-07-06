@@ -128,6 +128,9 @@ export const StepMetrics = z.object({
   // Latest-vs-prior template version delta of THIS step's honest score (0..1 scale);
   // null unless both versions have enough scored samples in the window.
   versionScoreDelta: z.number().nullable(),
+  // The version pair versionScoreDelta compares (latest vs prior with enough scored
+  // samples). Lets the falsifier verify the delta actually spans the applied version.
+  versionScoreDeltaVersions: z.object({ latest: z.number().int(), prior: z.number().int() }).strict().nullable().optional(),
   insights: z.array(z.string()),
   recentReasons: z.array(z.object({ at: z.string(), reason: z.string() }).strict()),
 }).strict();

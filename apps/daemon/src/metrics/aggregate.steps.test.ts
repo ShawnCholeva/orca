@@ -168,6 +168,30 @@ describe("computeStepMetrics", () => {
     expect(step.quality.scoredSampleSize).toBe(2);
   });
 
+  it("score is 0 (not null) when EVERY final attempt hard-fails — no step_complete at all", () => {
+    // Zero step_complete transitions for this step; both final attempts hard-fail
+    // (one "failed", one "blocked"). computeStepMetrics buckets steps by transition,
+    // so give the step ONE non-step_complete boundary transition to make it appear
+    // in byStep at all (a fully transition-less step remains invisible — known
+    // plan-level limitation, not fixed here).
+    const ts: TemplateTransition[] = [{
+      templateVersion: 1, stepTemplateId: "s",
+      transition: {
+        id: "launch1", goalId: "g", workflowRunId: "r1", workflowStepRunId: "r1-s",
+        boundary: "step_launch", risk: null, stateDeps: null, evidence: null,
+        telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
+        createdAt: "2026-05-01T00:00:00.000Z",
+      },
+    }];
+    const runs: TemplateStepRun[] = [
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "provider crashed", templateVersion: 1 },
+      { workflowRunId: "r2", stepTemplateId: "s", attempt: 1, status: "blocked", startedAt: "2026-05-01T01:00:00.000Z", finishedAt: "2026-05-01T01:05:00.000Z", blockedReason: "waiting on approval", templateVersion: 1 },
+    ];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.score).toBe(0);
+    expect(step.quality.scoredSampleSize).toBe(2);
+  });
+
   it("score is null (not 0) when nothing is scoreable", () => {
     // Only an evaluation_failed completion on a passed run: unverified, no hard fail.
     const ts: TemplateTransition[] = [{
@@ -268,6 +292,30 @@ describe("computeStepMetrics", () => {
     // v2 mean = 0.55 (ai_reviewed passes), v1 mean = 0 → delta 0.55
     expect(step.versionScoreDelta).toBeCloseTo(0.55);
   });
+
+  it("versionScoreDelta sees an all-hard-fail version even though it has no step_complete (I1)", () => {
+    // v1: two scored completions (ai_reviewed passes, evidence present, no sensors → 0.55 each).
+    const ts = [
+      sc("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z"),
+      sc("b", "r2", "s", "passed", true, "2026-05-01T01:00:00.000Z"),
+    ];
+    const runsV1: TemplateStepRun[] = ts.map((t) => ({
+      workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1,
+      status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z",
+      blockedReason: null, templateVersion: 1,
+    }));
+    // v2: two runs that hard-fail — never emit a step_complete at all.
+    const runsV2: TemplateStepRun[] = [
+      { workflowRunId: "r3", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-02T00:00:00.000Z", finishedAt: "2026-05-02T00:05:00.000Z", blockedReason: "provider crashed", templateVersion: 2 },
+      { workflowRunId: "r4", stepTemplateId: "s", attempt: 1, status: "blocked", startedAt: "2026-05-02T01:00:00.000Z", finishedAt: "2026-05-02T01:05:00.000Z", blockedReason: "timed out", templateVersion: 2 },
+    ];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: [...runsV1, ...runsV2], stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    // v2 (all hard-fail) scores 0, v1 scores 0.55 → delta is negative, and the pair
+    // must be visible even though v2 has zero finalStepCompletes.
+    expect(step.versionScoreDelta).not.toBeNull();
+    expect(step.versionScoreDelta!).toBeLessThan(0);
+    expect(step.versionScoreDeltaVersions).toEqual({ latest: 2, prior: 1 });
+  });
 });
 
 describe("deriveInsights", () => {
@@ -284,7 +332,7 @@ describe("deriveInsights", () => {
       trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /never independently proven|independently proven/i.test(i))).toBe(true);
-    expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict/i);
+    expect(insights.join(" ")).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 
   it("flags a self-reported pass as never independently proven (self_reported tier)", () => {
@@ -300,7 +348,7 @@ describe("deriveInsights", () => {
       trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /never independently proven|independently proven/i.test(i))).toBe(true);
-    expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict/i);
+    expect(insights.join(" ")).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 
   it("flags a high false-acceptance rate as approving work without proof", () => {
@@ -316,7 +364,7 @@ describe("deriveInsights", () => {
       trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /approves work without proof/i.test(i))).toBe(true);
-    expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict|refute/i);
+    expect(insights.join(" ")).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 
   it("flags the most common failure mode by label and count", () => {
@@ -332,7 +380,7 @@ describe("deriveInsights", () => {
       trend: [], versionBoundaries: [], versionScoreDelta: null, insights: [], recentReasons: [],
     });
     expect(insights.some((i) => /most common problem: timeout \(3×\)/i.test(i))).toBe(true);
-    expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict|refute/i);
+    expect(insights.join(" ")).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 
   it("flags loop/churn: high mean retries", () => {
