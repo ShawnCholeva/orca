@@ -83,7 +83,7 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
         </div>
         {step.trend.length > 0 ? <Sparkline data={step.trend} color={m.color} w={84} h={26} /> : <span className="mono" style={{ fontSize: 10, color: "var(--text-4)", textAlign: "center" }}>—</span>}
         <div style={{ textAlign: "right" }}>
-          {status === "unverified" ? (
+          {step.score == null ? (
             // No conclusive verdict — show the coverage gap, not a failing grade it didn't earn.
             <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: m.color }} title="No independent check ran for this step yet — it's an opportunity to strengthen, not a failing grade.">needs a check</span>
           ) : (
@@ -146,6 +146,9 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
             {step.reconciliation && (
               <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--hairline)", fontSize: 12, color: step.reconciliation.refuted ? "var(--err)" : "var(--text-2)" }}>
                 The AI <b>claimed</b> this step complete. Independently verified: <b>{step.reconciliation.verifiedTierLabel.toLowerCase()}</b>{step.reconciliation.refuted ? " — but the independent check overturned it." : "."}
+                {step.reconciliation.refuted && step.reconciliation.refuteReason && (
+                  <div style={{ marginTop: 4 }}>Why it was overturned: “{step.reconciliation.refuteReason}”</div>
+                )}
               </div>
             )}
 

@@ -23,12 +23,14 @@ export const verificationMeta: Record<VerificationTier, { label: string; color: 
   unverified: { label: "No check yet", color: "var(--accent)" },
 };
 
-// Sample-weighted mean of conclusive step scores (unverified steps excluded).
+// Sample-weighted mean of scored step scores. Weight by scoredSampleSize — the
+// denominator each score was actually computed over — not raw sampleSize, so a
+// step with 50 runs but 2 scored ones doesn't put weight-50 on a 2-sample score.
 export function workflowHealthFromSteps(steps: StepMetrics[]): number | null {
-  const scored = steps.filter((s) => s.quality.verifiedSampleSize > 0);
-  const wsum = scored.reduce((n, s) => n + s.sampleSize, 0);
+  const scored = steps.filter((s) => s.score != null);
+  const wsum = scored.reduce((n, s) => n + s.quality.scoredSampleSize, 0);
   if (wsum === 0) return null;
-  return Math.round(scored.reduce((n, s) => n + s.score * s.sampleSize, 0) / wsum);
+  return Math.round(scored.reduce((n, s) => n + s.score! * s.quality.scoredSampleSize, 0) / wsum);
 }
 
 export function gradeFor(score: number): "A" | "B" | "C" | "D" | "F" {
@@ -39,11 +41,10 @@ export function statusForScore(score: number): StepStatus {
   return score >= 80 ? "healthy" : score >= 70 ? "watch" : "degraded";
 }
 
-// The score reflects verification STRENGTH; a step whose delivery was never
-// independently verified (zero conclusive verdicts) is UNVERIFIED, not degraded —
-// so it must not wear a failing grade it didn't earn. (#2)
+// score === null ⇔ nothing was scoreable (no conclusive verdicts AND no hard
+// failures) — that's a coverage gap, not a grade. A numeric 0 is a real grade.
 export function statusForStep(step: StepMetrics): StepStatus {
-  return step.quality.verifiedSampleSize === 0 ? "unverified" : statusForScore(step.score);
+  return step.score == null ? "unverified" : statusForScore(step.score);
 }
 
 export function healthOf(summary: TemplateMetricsSummary): number | null {

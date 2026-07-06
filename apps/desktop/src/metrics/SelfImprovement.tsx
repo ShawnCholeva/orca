@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { TemplateInstructionProposal, TemplateMetricsDetail } from "@orca/contracts";
 import { analyzeTemplate, applyProposal, dismissProposal, judgeProposal, listProposals, restoreTemplateDefault, rollbackProposal, toErrorMessage } from "../api";
 import { Panel } from "./metrics-charts";
-import { statusForScore } from "./metrics-data";
+import { statusForStep } from "./metrics-data";
 import { Sparkle } from "./metrics-icons";
 
 type Props = {
@@ -76,7 +76,7 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
   const applied = proposals.filter((p) => p.status === "applied");
   const history = proposals.filter((p) => ["dismissed", "rolled_back", "superseded"].includes(p.status));
   const steps = detail?.steps ?? [];
-  const attention = steps.filter((s) => statusForScore(s.score) !== "healthy").length;
+  const attention = steps.filter((s) => statusForStep(s) !== "healthy").length;
 
   return (
     <Panel title="Self-improvement" kicker="ORCA LEARNS" style={{ flex: 1, minHeight: 0 }}
