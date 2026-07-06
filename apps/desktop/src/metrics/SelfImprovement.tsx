@@ -159,7 +159,7 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
                   <div style={{ fontWeight: 600, marginBottom: 8 }}>{p.stepTemplateId} — review change</div>
                   {p.component === "step_output_schema" && chips.length > 0 && <div style={{ marginBottom: 8 }}><ChipRow chips={chips} /></div>}
                   <DiffBlock lines={diff} />
-                  <textarea defaultValue={p.afterInstructions} onChange={(e) => setEditing((s) => ({ ...s, [p.id]: e.target.value }))} rows={6} style={{ width: "100%", marginTop: 8, fontFamily: "inherit", fontSize: 11.5 }} />
+                  <textarea value={editing[p.id] ?? p.afterInstructions} onChange={(e) => setEditing((s) => ({ ...s, [p.id]: e.target.value }))} rows={6} style={{ width: "100%", marginTop: 8, fontFamily: "inherit", fontSize: 11.5 }} />
                   <div style={{ marginTop: 8, color: "var(--text-2)" }}>Predicts: {p.predictedImprovement}</div>
                   <div style={{ color: "var(--text-3)" }}>Preserves: {p.invariantsPreserved.join(", ") || "—"}</div>
                   <div style={{ display: "flex", gap: 8, marginTop: 10 }}>

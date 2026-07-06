@@ -118,4 +118,21 @@ describe("SelfImprovementRail", () => {
     render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
     expect(await screen.findByRole("button", { name: /evaluate this edit/i })).toBeTruthy();
   });
+
+  it("review modal textarea is controlled — edits persist across close/reopen", async () => {
+    vi.spyOn(api, "listProposals").mockResolvedValue([pending as never]);
+    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: /review change/i }));
+    const dialog = within(await screen.findByRole("dialog"));
+    const textarea = dialog.getByRole("textbox") as HTMLTextAreaElement;
+    expect(textarea.value).toBe(pending.afterInstructions);
+    fireEvent.change(textarea, { target: { value: "edited text" } });
+    expect(textarea.value).toBe("edited text");
+    fireEvent.click(dialog.getByRole("button", { name: /^close$/i }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: /review change/i }));
+    const dialogReopened = within(await screen.findByRole("dialog"));
+    const textareaReopened = dialogReopened.getByRole("textbox") as HTMLTextAreaElement;
+    expect(textareaReopened.value).toBe("edited text");
+  });
 });
