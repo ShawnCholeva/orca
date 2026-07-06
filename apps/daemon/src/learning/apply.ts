@@ -3,8 +3,9 @@ import {
   getProposal, updateProposalDecision, supersedeOtherPending, supersedeAppliedForTemplate,
   captureBaseline, getBaseline, markBaselineRestored,
 } from "./store.js";
+import { recordEvent, currentTemplateVersion } from "./events.js";
 import { parseSchema, validateSchemaTightening } from "./schema-mutation.js";
-import type { TemplateInstructionProposal, WorkflowStepOutputSchema } from "@orca/contracts";
+import type { TemplateInstructionProposal, WorkflowStepOutputSchema, RollbackOutcomeSnapshot } from "@orca/contracts";
 
 export class StaleProposalError extends Error {}
 export class ProposalNotPendingError extends Error {}
@@ -102,7 +103,14 @@ export function applyLearnedInstructionEdit(
   const resolved = resolveFinalWrite(p, opts.editedInstructions);
   // Staleness guard — MUST stay outside the transaction so the supersede write persists on throw.
   if (tpl.version !== p.templateVersionAtProposal) {
-    updateProposalDecision(db, proposalId, { status: "superseded" });
+    db.transaction(() => {
+      updateProposalDecision(db, proposalId, { status: "superseded" });
+      recordEvent(db, {
+        templateId: p.templateId, proposalId, stepTemplateId: p.stepTemplateId,
+        eventType: "superseded", templateVersion: currentTemplateVersion(db, p.templateId),
+        payload: { kind: "superseded", by: "staleness" },
+      }, opts.now);
+    })();
     throw new StaleProposalError(`template moved from v${p.templateVersionAtProposal} to v${tpl.version}`);
   }
   return db.transaction(() => {
@@ -113,20 +121,41 @@ export function applyLearnedInstructionEdit(
       status: "applied", decidedAt: opts.now, decidedBy: opts.decidedBy, appliedAsVersion: newVersion,
       afterInstructions: resolved.finalText, humanEdited: opts.editedInstructions !== undefined,
     });
-    supersedeOtherPending(db, p.templateId, p.stepTemplateId, proposalId);
+    recordEvent(db, {
+      templateId: p.templateId, proposalId, stepTemplateId: p.stepTemplateId,
+      eventType: "applied", templateVersion: tpl.version, // pre-bump
+      payload: { kind: "applied", appliedAsVersion: newVersion, humanEdited: opts.editedInstructions !== undefined },
+    }, opts.now);
+    const supersededIds = supersedeOtherPending(db, p.templateId, p.stepTemplateId, proposalId);
+    for (const supersededId of supersededIds) {
+      recordEvent(db, {
+        templateId: p.templateId, proposalId: supersededId, stepTemplateId: p.stepTemplateId,
+        eventType: "superseded", templateVersion: currentTemplateVersion(db, p.templateId),
+        payload: { kind: "superseded", by: "apply" },
+      }, opts.now);
+    }
     return { newVersion };
   })();
 }
 
-export function rollbackAppliedProposal(db: Database.Database, proposalId: string, opts: { decidedBy: string; now: string }): { newVersion: number } {
+export function rollbackAppliedProposal(
+  db: Database.Database, proposalId: string,
+  opts: { decidedBy: string; now: string; outcome?: RollbackOutcomeSnapshot },
+): { newVersion: number } {
   const p = getProposal(db, proposalId);
   if (!p) throw new StepNotFoundError(`proposal ${proposalId} not found`);
   if (p.status !== "applied") throw new ProposalNotAppliedError(`proposal ${proposalId} is ${p.status}`);
   return db.transaction(() => {
+    const preBumpVersion = currentTemplateVersion(db, p.templateId);
     const newVersion = p.component === "step_output_schema"
       ? setStepOutputSchemaInPlace(db, p.templateId, p.stepTemplateId, mustParseStoredSchema(proposalId, p.beforeInstructions), opts.now)
       : setStepInstructionsInPlace(db, p.templateId, p.stepTemplateId, p.beforeInstructions, opts.now);
     updateProposalDecision(db, proposalId, { status: "rolled_back", decidedAt: opts.now, decidedBy: opts.decidedBy });
+    recordEvent(db, {
+      templateId: p.templateId, proposalId, stepTemplateId: p.stepTemplateId,
+      eventType: "rolled_back", templateVersion: preBumpVersion,
+      payload: { kind: "rolled_back", outcome: opts.outcome ?? { targetDelta: null, targetDeltaVersions: null, invalidOutputRateDelta: null, regressionDetected: false } },
+    }, opts.now);
     return { newVersion };
   })();
 }
@@ -135,9 +164,29 @@ export function restoreTemplateDefault(db: Database.Database, templateId: string
   const baseline = getBaseline(db, templateId);
   if (!baseline) throw new NoBaselineError(`no baseline for ${templateId}`);
   return db.transaction(() => {
+    const preRestoreVersion = currentTemplateVersion(db, templateId);
     const newVersion = setStepsJsonInPlace(db, templateId, baseline.baselineStepsJson, now);
-    supersedeAppliedForTemplate(db, templateId);
+    const supersededCount = supersedeAppliedForTemplate(db, templateId);
     markBaselineRestored(db, templateId, now);
+    recordEvent(db, {
+      templateId, proposalId: null, stepTemplateId: null,
+      eventType: "baseline_restored", templateVersion: preRestoreVersion,
+      payload: { kind: "baseline_restored", supersededCount },
+    }, now);
     return { newVersion };
+  })();
+}
+
+export function dismissProposal(db: Database.Database, id: string, opts: { decidedBy: string; now: string }): void {
+  const p = getProposal(db, id);
+  if (!p) throw new StepNotFoundError(`proposal ${id} not found`);
+  if (p.status !== "pending") throw new ProposalNotPendingError(`proposal ${id} is ${p.status}`);
+  db.transaction(() => {
+    updateProposalDecision(db, id, { status: "dismissed", decidedAt: opts.now, decidedBy: opts.decidedBy });
+    recordEvent(db, {
+      templateId: p.templateId, proposalId: id, stepTemplateId: p.stepTemplateId,
+      eventType: "dismissed", templateVersion: currentTemplateVersion(db, p.templateId),
+      payload: { kind: "dismissed" },
+    }, opts.now);
   })();
 }

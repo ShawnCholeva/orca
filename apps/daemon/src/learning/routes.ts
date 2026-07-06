@@ -2,12 +2,13 @@ import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import { MetricPeriod } from "@orca/contracts";
 import { analyzeTemplate, listProposalsEnriched, judgeProposal, type AnalyzeDeps } from "./usecases.js";
-import { getProposal, updateProposalDecision } from "./store.js";
+import { getProposal } from "./store.js";
 import {
-  applyLearnedInstructionEdit, rollbackAppliedProposal, restoreTemplateDefault,
+  applyLearnedInstructionEdit, rollbackAppliedProposal, restoreTemplateDefault, dismissProposal,
   StaleProposalError, ProposalNotPendingError, ProposalNotAppliedError, NoBaselineError, StepNotFoundError,
   InvalidSchemaEditError,
 } from "./apply.js";
+import type { RollbackOutcomeSnapshot } from "@orca/contracts";
 import type { ShadowAsk } from "../workflows/orchestrator/recover-step-scoring.js";
 
 export interface LearningRouteDeps extends AnalyzeDeps {
@@ -58,11 +59,14 @@ export function registerLearningRoutes(server: FastifyInstance, deps: LearningRo
 
   server.post("/v1/learning/proposals/:id/dismiss", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const p = getProposal(db, id);
-    if (!p) { reply.status(404); return { error: { code: "not_found" } }; }
-    if (p.status !== "pending") { reply.status(409); return { error: { code: "not_pending" } }; }
-    updateProposalDecision(db, id, { status: "dismissed", decidedAt: now(), decidedBy: deps.actor() });
-    return { proposal: getProposal(db, id) };
+    try {
+      dismissProposal(db, id, { decidedBy: deps.actor(), now: now() });
+      return { proposal: getProposal(db, id) };
+    } catch (e) {
+      if (e instanceof StepNotFoundError) { reply.status(404); return { error: { code: "not_found" } }; }
+      if (e instanceof ProposalNotPendingError) { reply.status(409); return { error: { code: "not_pending" } }; }
+      throw e;
+    }
   });
 
   server.post("/v1/learning/proposals/:id/judge", async (req, reply) => {
@@ -79,8 +83,20 @@ export function registerLearningRoutes(server: FastifyInstance, deps: LearningRo
 
   server.post("/v1/learning/proposals/:id/rollback", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const p = getProposal(db, id);
+    if (!p) { reply.status(404); return { error: { code: "not_found" } }; }
+    let outcome: RollbackOutcomeSnapshot | undefined;
+    if (p.status === "applied") {
+      const enriched = listProposalsEnriched(db, p.templateId, "30d").find((x) => x.id === id);
+      outcome = {
+        targetDelta: enriched?.targetDelta ?? null,
+        targetDeltaVersions: enriched?.targetDeltaVersions ?? null,
+        invalidOutputRateDelta: enriched?.invalidOutputRateDelta ?? null,
+        regressionDetected: enriched?.regressionDetected ?? false,
+      };
+    }
     try {
-      rollbackAppliedProposal(db, id, { decidedBy: deps.actor(), now: now() });
+      rollbackAppliedProposal(db, id, { decidedBy: deps.actor(), now: now(), outcome });
       return { proposal: getProposal(db, id) };
     } catch (e) {
       if (e instanceof StepNotFoundError) { reply.status(404); return { error: { code: "not_found" } }; }

@@ -34,7 +34,7 @@ const meta = new Map([["s1", { instructions: "Generate a proposal.", outputSchem
 
 describe("diagnoseTemplate", () => {
   it("flags an instruction-addressable cluster (R2) and carries evidence", () => {
-    const out = diagnoseTemplate({ detail: detail([step()]), signals: [], stepMeta: meta });
+    const { bundles: out } = diagnoseTemplate({ detail: detail([step()]), signals: [], stepMeta: meta });
     expect(out).toHaveLength(1);
     expect(out[0].stepTemplateId).toBe("s1");
     expect(out[0].targetedFailureMode.rule).toBe("R2");
@@ -44,7 +44,7 @@ describe("diagnoseTemplate", () => {
   });
 
   it("suppresses steps below the sample threshold", () => {
-    const out = diagnoseTemplate({ detail: detail([step({ sampleSize: 3, confidence: "low" })]), signals: [], stepMeta: meta });
+    const { bundles: out } = diagnoseTemplate({ detail: detail([step({ sampleSize: 3, confidence: "low" })]), signals: [], stepMeta: meta });
     expect(out).toHaveLength(0);
   });
 
@@ -55,7 +55,7 @@ describe("diagnoseTemplate", () => {
       { id: "rs2", stepTemplateId: "s1", feedbackText: "still wrong", supersededReason: null, createdAt: "2026-05-01T00:01:00.000Z" },
       { id: "rs3", stepTemplateId: "s1", feedbackText: "again", supersededReason: null, createdAt: "2026-05-01T00:02:00.000Z" },
     ];
-    const out = diagnoseTemplate({ detail: detail([infra]), signals, stepMeta: meta });
+    const { bundles: out } = diagnoseTemplate({ detail: detail([infra]), signals, stepMeta: meta });
     expect(out).toHaveLength(1);
     expect(out[0].targetedFailureMode.rule).toBe("R3");
     expect(out[0].targetedFailureMode.signalCount).toBe(3);
@@ -69,7 +69,7 @@ describe("diagnoseTemplate", () => {
 
   it("R1 does not fire on a null score (no gradient) nor on infra-dominated failures", () => {
     const nullScore = step({ score: null, failureClusters: [] });
-    expect(diagnoseTemplate({ detail: detail([nullScore]), signals: [], stepMeta: meta })).toHaveLength(0);
+    expect(diagnoseTemplate({ detail: detail([nullScore]), signals: [], stepMeta: meta }).bundles).toHaveLength(0);
 
     const infra = step({
       score: 40,
@@ -79,10 +79,10 @@ describe("diagnoseTemplate", () => {
       ],
     });
     // invalid_output count (2) < K, so R2 can't fire; R1 must refuse: infra majority.
-    expect(diagnoseTemplate({ detail: detail([infra]), signals: [], stepMeta: meta })).toHaveLength(0);
+    expect(diagnoseTemplate({ detail: detail([infra]), signals: [], stepMeta: meta }).bundles).toHaveLength(0);
 
     const addressable = step({ score: 40, failureClusters: [{ failureCode: "invalid_output", boundary: "step_complete", count: 2, sampleTransitionIds: ["t2"] }] });
-    const out = diagnoseTemplate({ detail: detail([addressable]), signals: [], stepMeta: meta });
+    const { bundles: out } = diagnoseTemplate({ detail: detail([addressable]), signals: [], stepMeta: meta });
     expect(out).toHaveLength(1);
     expect(out[0].targetedFailureMode.rule).toBe("R1");
   });
@@ -97,7 +97,7 @@ describe("diagnoseTemplate", () => {
       { id: "rs2", stepTemplateId: "s1", feedbackText: "still wrong", supersededReason: null, createdAt: "2026-05-01T00:01:00.000Z" },
       { id: "rs3", stepTemplateId: "s1", feedbackText: "again", supersededReason: null, createdAt: "2026-05-01T00:02:00.000Z" },
     ];
-    const out = diagnoseTemplate({ detail: detail([s]), signals, stepMeta: meta });
+    const { bundles: out } = diagnoseTemplate({ detail: detail([s]), signals, stepMeta: meta });
     expect(out[0].evidence.refuteReasons).toEqual(["claimed tests ran but none exist"]);
     expect(out[0].evidence.supersededReasons).toEqual(["output missed the acceptance list"]);
     expect(out[0].evidence.metricSnapshot.versionDelta).toBe(0.25);
@@ -105,7 +105,7 @@ describe("diagnoseTemplate", () => {
 
   it("R4 routes to step_output_schema and carries the current schema", () => {
     const r4 = step({ score: 70, failureClusters: [], quality: { ...step().quality, verdictPassRate: 0.9, oracleSufficientRate: null } });
-    const out = diagnoseTemplate({ detail: detail([r4]), signals: [], stepMeta: meta });
+    const { bundles: out } = diagnoseTemplate({ detail: detail([r4]), signals: [], stepMeta: meta });
     expect(out).toHaveLength(1);
     expect(out[0].targetedFailureMode.rule).toBe("R4");
     expect(out[0].component).toBe("step_output_schema");
@@ -114,17 +114,24 @@ describe("diagnoseTemplate", () => {
 
   it("R1/R2/R3 keep step_instructions", () => {
     const r2 = step(); // existing fixture: invalid_output cluster of 8 → R2
-    const out = diagnoseTemplate({ detail: detail([r2]), signals: [], stepMeta: meta });
+    const { bundles: out } = diagnoseTemplate({ detail: detail([r2]), signals: [], stepMeta: meta });
     expect(out[0].component).toBe("step_instructions");
   });
 
   it("R4 skips steps whose current schema is missing or empty (removed/renamed steps)", () => {
     const r4 = step({ score: 70, failureClusters: [], quality: { ...step().quality, verdictPassRate: 0.9, oracleSufficientRate: null } });
     // stepMeta has NO entry for s1 → fallback "[]"
-    expect(diagnoseTemplate({ detail: detail([r4]), signals: [], stepMeta: new Map() })).toHaveLength(0);
+    expect(diagnoseTemplate({ detail: detail([r4]), signals: [], stepMeta: new Map() }).bundles).toHaveLength(0);
 
     // R1 for the same missing step still diagnoses (instructions path tolerates empty)
     const r1 = step({ score: 40, failureClusters: [{ failureCode: "invalid_output", boundary: "step_complete", count: 2, sampleTransitionIds: ["t"] }] });
-    expect(diagnoseTemplate({ detail: detail([r1]), signals: [], stepMeta: new Map() })).toHaveLength(1);
+    expect(diagnoseTemplate({ detail: detail([r1]), signals: [], stepMeta: new Map() }).bundles).toHaveLength(1);
+  });
+
+  it("returns the R4 invalid-schema skip as a skip entry", () => {
+    const r4 = step({ score: 70, failureClusters: [], quality: { ...step().quality, verdictPassRate: 0.9, oracleSufficientRate: null } });
+    const { bundles, skips } = diagnoseTemplate({ detail: detail([r4]), signals: [], stepMeta: new Map() });
+    expect(bundles).toHaveLength(0);
+    expect(skips).toEqual([{ stepTemplateId: "s1", reason: expect.stringMatching(/schema/i) }]);
   });
 });

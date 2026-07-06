@@ -84,17 +84,22 @@ export function updateProposalDecision(
   );
 }
 
-export function supersedeOtherPending(db: Database.Database, templateId: string, stepTemplateId: string, exceptId: string): void {
+export function supersedeOtherPending(db: Database.Database, templateId: string, stepTemplateId: string, exceptId: string): string[] {
+  const rows = db.prepare(
+    `SELECT id FROM template_instruction_proposals
+     WHERE template_id = ? AND step_template_id = ? AND status = 'pending' AND id != ?`
+  ).all(templateId, stepTemplateId, exceptId) as { id: string }[];
   db.prepare(
     `UPDATE template_instruction_proposals SET status = 'superseded'
      WHERE template_id = ? AND step_template_id = ? AND status = 'pending' AND id != ?`
   ).run(templateId, stepTemplateId, exceptId);
+  return rows.map((r) => r.id);
 }
 
-export function supersedeAppliedForTemplate(db: Database.Database, templateId: string): void {
-  db.prepare(
+export function supersedeAppliedForTemplate(db: Database.Database, templateId: string): number {
+  return db.prepare(
     `UPDATE template_instruction_proposals SET status = 'superseded' WHERE template_id = ? AND status = 'applied'`
-  ).run(templateId);
+  ).run(templateId).changes;
 }
 
 export function getBaseline(db: Database.Database, templateId: string) {

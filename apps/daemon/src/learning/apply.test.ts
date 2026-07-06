@@ -8,10 +8,11 @@ import { closeDatabase, openDatabase } from "../db.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import { insertProposal, getProposal, getBaseline } from "./store.js";
 import {
-  applyLearnedInstructionEdit, rollbackAppliedProposal, restoreTemplateDefault,
+  applyLearnedInstructionEdit, rollbackAppliedProposal, restoreTemplateDefault, dismissProposal,
   StaleProposalError, NoBaselineError, InvalidSchemaEditError,
 } from "./apply.js";
 import { serializeSchema } from "./schema-mutation.js";
+import { listEventsByTemplate } from "./events.js";
 import type { TemplateInstructionProposal } from "@orca/contracts";
 
 const tempDirs: string[] = [];
@@ -86,6 +87,27 @@ describe("applyLearnedInstructionEdit", () => {
     expect(getProposal(db, "p1")?.status).toBe("applied");
     expect(getProposal(db, "p2")?.status).toBe("superseded");
   });
+
+  it("apply emits applied (pre-bump version) + superseded-by-apply; failed apply emits nothing", () => {
+    insertProposal(db, proposal({ id: "p1" }));
+    insertProposal(db, proposal({ id: "p2" })); // sibling pending proposal for the same step
+    applyLearnedInstructionEdit(db, "p1", { decidedBy: "owner", now: "2026-06-30T01:00:00.000Z" });
+    const events = listEventsByTemplate(db, "tpl");
+    const applied = events.find((e) => e.eventType === "applied")!;
+    expect(applied.templateVersion).toBe(1); // pre-bump
+    expect(applied.payload).toMatchObject({ appliedAsVersion: 2 });
+    expect(events.filter((e) => e.eventType === "superseded")).toHaveLength(1);
+
+    const beforeSchema = [{ key: "summary", type: "string" as const, required: true }];
+    insertProposal(db, proposal({
+      id: "p-schema-fail", component: "step_output_schema",
+      beforeInstructions: serializeSchema(beforeSchema), afterInstructions: serializeSchema(beforeSchema),
+    }));
+    const before = listEventsByTemplate(db, "tpl").length;
+    expect(() => applyLearnedInstructionEdit(db, "p-schema-fail", { editedInstructions: "not json", decidedBy: "owner", now: "2026-06-30T01:30:00.000Z" }))
+      .toThrow(InvalidSchemaEditError);
+    expect(listEventsByTemplate(db, "tpl")).toHaveLength(before); // nothing emitted
+  });
 });
 
 describe("schema proposals", () => {
@@ -144,5 +166,29 @@ describe("rollback + restore", () => {
     expect(stepsJson(db)).toContain('"instructions":"old"');
     expect(getProposal(db, "p1")?.status).toBe("superseded");
     expect(getBaseline(db, "tpl")?.restoredAt).toBe("2026-06-30T03:00:00.000Z");
+  });
+
+  it("rollback emits rolled_back with the provided frozen outcome", () => {
+    insertProposal(db, proposal({ id: "p-rollback" }));
+    applyLearnedInstructionEdit(db, "p-rollback", { decidedBy: "owner", now: "2026-06-30T01:00:00.000Z" });
+    rollbackAppliedProposal(db, "p-rollback", {
+      decidedBy: "owner", now: "2026-06-30T02:00:00.000Z",
+      outcome: { targetDelta: -0.08, targetDeltaVersions: { latest: 2, prior: 1 }, invalidOutputRateDelta: null, regressionDetected: true },
+    });
+    const e = listEventsByTemplate(db, "tpl").find((x) => x.eventType === "rolled_back")!;
+    expect(e.payload).toMatchObject({ outcome: { targetDelta: -0.08, regressionDetected: true } });
+  });
+
+  it("dismissProposal transitions + emits atomically; restore emits baseline_restored with count", () => {
+    insertProposal(db, proposal({ id: "p-pending" }));
+    dismissProposal(db, "p-pending", { decidedBy: "owner", now: "2026-06-30T00:30:00.000Z" });
+    expect(getProposal(db, "p-pending")!.status).toBe("dismissed");
+    expect(listEventsByTemplate(db, "tpl").some((e) => e.eventType === "dismissed" && e.proposalId === "p-pending")).toBe(true);
+
+    insertProposal(db, proposal({ id: "p-apply" }));
+    applyLearnedInstructionEdit(db, "p-apply", { decidedBy: "owner", now: "2026-06-30T01:00:00.000Z" }); // captures baseline earlier
+    restoreTemplateDefault(db, "tpl", "2026-06-30T02:00:00.000Z");
+    const r = listEventsByTemplate(db, "tpl").find((e) => e.eventType === "baseline_restored")!;
+    expect((r.payload as { supersededCount: number }).supersededCount).toBeGreaterThanOrEqual(0);
   });
 });

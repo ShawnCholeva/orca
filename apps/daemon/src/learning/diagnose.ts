@@ -76,7 +76,7 @@ export function diagnoseTemplate(input: {
   detail: TemplateMetricsDetail;
   signals: TemplateRevisionSignal[];
   stepMeta: Map<string, { instructions: string; outputSchemaJson: string }>;
-}): DiagnosisBundle[] {
+}): { bundles: DiagnosisBundle[]; skips: { stepTemplateId: string; reason: string }[] } {
   const signalsByStep = new Map<string, TemplateRevisionSignal[]>();
   for (const s of input.signals) {
     if (s.feedbackText == null) continue;
@@ -85,6 +85,7 @@ export function diagnoseTemplate(input: {
 
   const eligible = input.detail.steps.filter((s) => s.confidence === "ok" && s.sampleSize >= SAMPLE_MIN);
   const bundles: DiagnosisBundle[] = [];
+  const skips: { stepTemplateId: string; reason: string }[] = [];
   for (const step of eligible) {
     const feedback = signalsByStep.get(step.stepTemplateId) ?? [];
     const mode = chooseRule(step, feedback);
@@ -98,7 +99,10 @@ export function diagnoseTemplate(input: {
     // no valid current schema is meaningless, so skip this step's bundle entirely
     // (spec §5 skip-with-reason policy) rather than let an unparseable "[]" ride
     // through as beforeInstructions.
-    if (mode.rule === "R4" && parseSchema(meta.outputSchemaJson) === null) continue;
+    if (mode.rule === "R4" && parseSchema(meta.outputSchemaJson) === null) {
+      skips.push({ stepTemplateId: step.stepTemplateId, reason: "R4 schema-tightening skipped: current output schema is missing or invalid".slice(0, 300) });
+      continue;
+    }
     // Deterministic routing (spec §3.2): R4 names a verification deficiency — the
     // lever is the deterministic completion validator, not the prompt. The core
     // owns which lever is pulled; the LLM only fills the content.
@@ -122,5 +126,6 @@ export function diagnoseTemplate(input: {
     });
   }
   // Worst-first (null scores last — they carry no gradient), capped.
-  return bundles.sort((a, b) => (a.evidence.metricSnapshot.score ?? 101) - (b.evidence.metricSnapshot.score ?? 101)).slice(0, TOP_N);
+  const sorted = bundles.sort((a, b) => (a.evidence.metricSnapshot.score ?? 101) - (b.evidence.metricSnapshot.score ?? 101)).slice(0, TOP_N);
+  return { bundles: sorted, skips };
 }

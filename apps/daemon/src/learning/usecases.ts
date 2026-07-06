@@ -5,6 +5,7 @@ import { getTemplateMetricsDetail } from "../metrics/usecases.js";
 import { windowStart } from "../metrics/aggregate.js";
 import { listRevisionSignalsByTemplate } from "./fetch.js";
 import { diagnoseTemplate } from "./diagnose.js";
+import { recordEvent, currentTemplateVersion } from "./events.js";
 import { proposeInstructionRevision, type BrokerLike } from "./propose.js";
 import { serializeSchema } from "./schema-mutation.js";
 import { enrichWithRegression } from "./canary.js";
@@ -76,9 +77,10 @@ export async function analyzeTemplate(
   if (!detail) return []; // caller maps null template to 404 before this
   const since = windowStart(now, period);
   const signals = listRevisionSignalsByTemplate(db, templateId, since, now);
-  const bundles = diagnoseTemplate({ detail, signals, stepMeta: stepMeta(db, templateId) });
+  const { bundles, skips: diagnoseSkips } = diagnoseTemplate({ detail, signals, stepMeta: stepMeta(db, templateId) });
 
   const created: TemplateInstructionProposal[] = [];
+  const netSkips: { stepTemplateId: string; reason: string }[] = [];
   for (const bundle of bundles) {
     // Dedupe: keep an existing pending proposal for the step.
     const existing = pendingProposalForStep(db, templateId, bundle.stepTemplateId);
@@ -106,12 +108,27 @@ export async function analyzeTemplate(
     // gate, and every read uses a hard .parse — a bad row bricks all subsequent reads).
     const validated = TemplateInstructionProposal.safeParse(proposal);
     if (!validated.success) {
+      const reason = (validated.error.issues[0]?.message ?? "invalid proposal").slice(0, 300);
       console.warn(`[learning] skipping unpersistable proposal for step ${bundle.stepTemplateId}: ${validated.error.issues[0]?.message}`);
+      netSkips.push({ stepTemplateId: bundle.stepTemplateId, reason });
       continue;
     }
-    insertProposal(db, validated.data);
+    db.transaction(() => {
+      insertProposal(db, validated.data);
+      recordEvent(db, {
+        templateId, proposalId: validated.data.id, stepTemplateId: validated.data.stepTemplateId,
+        eventType: "created", templateVersion: currentTemplateVersion(db, templateId),
+        payload: { kind: "created", component: validated.data.component, rule: validated.data.targetedFailureMode.rule, failureCode: validated.data.targetedFailureMode.failureCode },
+      }, now);
+    })();
     created.push(validated.data);
   }
+  const skips = [...diagnoseSkips, ...netSkips].slice(0, 20).map((s) => ({ stepTemplateId: s.stepTemplateId, reason: s.reason.slice(0, 300) }));
+  recordEvent(db, {
+    templateId, proposalId: null, stepTemplateId: null,
+    eventType: "analyzed", templateVersion: currentTemplateVersion(db, templateId),
+    payload: { kind: "analyzed", stepsDiagnosed: bundles.length + skips.length, proposalsCreated: created.length, skips },
+  }, now);
   return created;
 }
 
@@ -145,8 +162,15 @@ export async function judgeProposal(
   };
 
   const persist = (j: CounterfactualJudgment): TemplateInstructionProposal => {
-    setProposalJudgment(db, proposalId, j);
-    return getProposal(db, proposalId)!;
+    return db.transaction(() => {
+      setProposalJudgment(db, proposalId, j);
+      recordEvent(db, {
+        templateId: p.templateId, proposalId, stepTemplateId: p.stepTemplateId,
+        eventType: "judged", templateVersion: currentTemplateVersion(db, p.templateId),
+        payload: { kind: "judged", verdict: j.verdict, solvedSampleSize: j.solvedSampleSize, failureSampleSize: j.failureSampleSize },
+      }, now);
+      return getProposal(db, proposalId)!;
+    })();
   };
 
   if (corpus.solved.length < SOLVED_MIN || corpus.failure.length < FAILURE_MIN) {

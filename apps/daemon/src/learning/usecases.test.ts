@@ -9,6 +9,7 @@ import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import type { DiagnosisBundle } from "./diagnose.js";
 import type { BrokerLike } from "./propose.js";
 import { listProposalsByTemplate } from "./store.js";
+import { listEventsByTemplate } from "./events.js";
 
 // diagnoseTemplate is mocked below so the test can force the exact bad state the structural
 // net guards against: an R4 bundle whose currentOutputSchemaJson is "[]" (unparseable). The
@@ -59,6 +60,20 @@ function seed(db: Database.Database) {
                 '${day}T00:10:00.000Z')`).run();
 }
 
+// A second anchored step ("s2"), so a bundle targeting it is independent of the "s1"
+// dedupe path (pendingProposalForStep) — needed to exercise the safeParse-net skip
+// alongside a real created proposal in the same analyzeTemplate call.
+function seedSecondStep(db: Database.Database) {
+  const day = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
+  db.prepare(`INSERT INTO workflow_step_runs (id,goal_id,workflow_run_id,step_template_id,ordinal,attempt,status,satisfied_exit_criteria_json,outstanding_exit_criteria_json,blocked_reason,started_at,finished_at,fingerprint)
+              VALUES ('sr1','g','run1','s2',1,1,'passed','[]','[]',NULL,'${day}T00:00:00.000Z','${day}T00:10:00.000Z','fp1')`).run();
+  db.prepare(`INSERT INTO harness_transitions (id,goal_id,workflow_run_id,workflow_step_run_id,boundary,risk_json,evidence_json,state_deps_json,telemetry_json,created_at)
+              VALUES ('ht1','g','run1','sr1','step_complete',NULL,
+                '{"sensorsRun":[],"verdict":"passed","untestedRegions":[],"residualRisk":[],"oracleAdequacy":{"sufficient":true,"gaps":[]}}',NULL,
+                '{"cost":null,"latency_ms":100,"model":null,"provider_id":null,"provider_version":null,"prompt_ref":null,"raw_output_ref":null,"rejected_alternatives":[],"human_interventions":[],"outcome":{"status":"succeeded","failure_code":null}}',
+                '${day}T00:10:00.000Z')`).run();
+}
+
 const badBundle: DiagnosisBundle = {
   stepTemplateId: "s1", currentInstructions: "Generate a proposal.",
   component: "step_output_schema", currentOutputSchemaJson: "[]", // the exact unparseable fallback the diagnose guard now prevents
@@ -66,6 +81,16 @@ const badBundle: DiagnosisBundle = {
   evidence: {
     sampleTransitionIds: [], revisionSignalIds: [], revisionFeedbackTexts: [], refuteReasons: [], supersededReasons: [],
     metricSnapshot: { score: 70, verdictPassRate: 0.9, oracleSufficientRate: null, versionDelta: null },
+  },
+};
+
+const goodBundle: DiagnosisBundle = {
+  stepTemplateId: "s1", currentInstructions: "Generate a proposal.",
+  component: "step_instructions", currentOutputSchemaJson: "[]",
+  targetedFailureMode: { rule: "R1", failureCode: null, clusterCount: null, signalCount: null },
+  evidence: {
+    sampleTransitionIds: [], revisionSignalIds: [], revisionFeedbackTexts: [], refuteReasons: [], supersededReasons: [],
+    metricSnapshot: { score: 60, verdictPassRate: 0.5, oracleSufficientRate: 0.5, versionDelta: null },
   },
 };
 
@@ -77,8 +102,34 @@ function brokerReturningSchemaFill(): BrokerLike {
   return { propose: vi.fn(async () => ({ status: "proposed" as const, parsed })) };
 }
 
+// Branches on the request payload shape so one broker can fill both an instructions
+// proposal (good bundle, "s1") and a schema proposal (bad bundle, "s2") in the same call.
+function brokerReturningInstructionsOrSchemaFill(): BrokerLike {
+  return {
+    propose: vi.fn(async (request) => {
+      const payload = request.payload as Record<string, unknown> | undefined;
+      if (payload && "currentOutputSchema" in payload) {
+        return {
+          status: "proposed" as const,
+          parsed: {
+            proposedOutputSchema: [{ key: "summary", type: "string", required: true }],
+            predictedImprovement: "verifies its own claim", invariantsPreserved: ["safetyCompliance"], rationale: "r",
+          },
+        };
+      }
+      return {
+        status: "proposed" as const,
+        parsed: {
+          proposedInstructions: "Generate a proposal, then validate it against the acceptance list.",
+          predictedImprovement: "fewer invalid outputs", invariantsPreserved: ["safetyCompliance"], rationale: "r",
+        },
+      };
+    }),
+  };
+}
+
 let db: Database.Database;
-beforeEach(() => { db = openTestDb(); seed(db); vi.mocked(diagnoseTemplate).mockReturnValue([badBundle]); });
+beforeEach(() => { db = openTestDb(); seed(db); vi.mocked(diagnoseTemplate).mockReturnValue({ bundles: [badBundle], skips: [] }); });
 afterEach(() => { closeDatabase(); vi.mocked(diagnoseTemplate).mockReset(); for (const d of tempDirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
 describe("analyzeTemplate structural net", () => {
@@ -90,5 +141,24 @@ describe("analyzeTemplate structural net", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain("s1");
     warn.mockRestore();
+  });
+
+  it("analyze emits created + analyzed events; skipped proposals appear in the analyzed payload", async () => {
+    seedSecondStep(db);
+    const badBundleS2: DiagnosisBundle = { ...badBundle, stepTemplateId: "s2" };
+    const diagnoseSkip = { stepTemplateId: "s3", reason: "R4 schema-tightening skipped: current output schema is missing or invalid" };
+    vi.mocked(diagnoseTemplate).mockReturnValue({ bundles: [goodBundle, badBundleS2], skips: [diagnoseSkip] });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const created = await analyzeTemplate({ broker: brokerReturningInstructionsOrSchemaFill() }, db, "tpl", "30d");
+    warn.mockRestore();
+
+    const events = listEventsByTemplate(db, "tpl");
+    const types = events.map((e) => e.eventType);
+    expect(types).toContain("created");
+    expect(types).toContain("analyzed");
+    const analyzed = events.find((e) => e.eventType === "analyzed")!;
+    expect(analyzed.payload).toMatchObject({ kind: "analyzed", proposalsCreated: created.length });
+    expect((analyzed.payload as { skips: unknown[] }).skips.length).toBeGreaterThanOrEqual(1);
   });
 });
