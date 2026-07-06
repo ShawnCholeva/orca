@@ -5,7 +5,7 @@ import { gradeFor, workflowHealthFromSteps } from "./metrics-data";
 import { StatTile } from "./metrics-charts";
 import { StepPerformancePanel, WorkflowDropdown } from "./StepPerformance";
 import { SelfImprovementRail } from "./SelfImprovement";
-import { Workflow } from "./metrics-icons";
+import { Workflow, Refresh } from "./metrics-icons";
 
 const PERIODS = ["24h", "7d", "30d"] as const;
 type Period = (typeof PERIODS)[number];
@@ -53,8 +53,10 @@ export function MetricsPage() {
           <Workflow size={14} color="var(--text-3)" />
           <span className="mono" style={{ fontSize: 10.5, letterSpacing: 1.1, textTransform: "uppercase", color: "var(--text-3)", marginRight: 2 }}>Workflow</span>
           <WorkflowDropdown summaries={summaries} value={wf.templateId} onChange={(id) => { setWfId(id); setOpenStep(null); }} />
+          <button type="button" onClick={() => setReloadKey((k) => k + 1)} title="Refresh data for this workflow" aria-label="Refresh data for this workflow" style={iconBtn}>
+            <Refresh size={13} color="var(--text-3)" />
+          </button>
           <div style={{ flex: 1 }} />
-          <button type="button" onClick={() => setReloadKey((k) => k + 1)} className="mono" style={linkBtn}>Refresh</button>
           <div style={{ display: "flex", background: "rgba(255,255,255,0.03)", border: "1px solid var(--hairline)", borderRadius: 8, padding: 2 }}>
             {PERIODS.map((p) => (
               <button key={p} type="button" onClick={() => setPeriod(p)} className="mono"
@@ -89,6 +91,7 @@ export function MetricsPage() {
 }
 
 const linkBtn: React.CSSProperties = { background: "transparent", color: "var(--accent)", border: "none", cursor: "pointer", fontSize: 11, padding: "4px 6px" };
+const iconBtn: React.CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", background: "transparent", border: "1px solid var(--hairline)", borderRadius: 8, cursor: "pointer", padding: 5, color: "var(--text-3)" };
 function rate(r: number | null): number | null { return r == null ? null : Math.round(r * 100); }
 function pctDelta(d: number | null): number { return d == null ? 0 : Math.round(d * 100); }
 function CenterNote({ children }: { children: React.ReactNode }) {

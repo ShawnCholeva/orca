@@ -36,6 +36,7 @@ export const Sparkle = svg(
   <><path d="M12 3v4" /><path d="M12 17v4" /><path d="M3 12h4" /><path d="M17 12h4" /><path d="M5.5 5.5l2.8 2.8" /><path d="M15.7 15.7l2.8 2.8" /><path d="M5.5 18.5l2.8-2.8" /><path d="M15.7 8.3l2.8-2.8" /></>
 );
 export const Spark = svg(<path d="M3 17l5-6 4 3 4-7 5 5" />);
+export const Refresh = svg(<><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v4h-4" /></>);
 export const Workflow = svg(
   <><rect x="3" y="3" width="6" height="6" rx="1" /><rect x="15" y="3" width="6" height="6" rx="1" /><rect x="9" y="15" width="6" height="6" rx="1" /><path d="M6 9v3h12V9" /><path d="M12 12v3" /></>
 );
