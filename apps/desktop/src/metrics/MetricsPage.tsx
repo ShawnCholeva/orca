@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { TemplateMetricsSummary, TemplateMetricsDetail } from "@orca/contracts";
 import { getTemplateMetricsSummaries, getTemplateMetricsDetail } from "../api";
-import { gradeFor, healthOf } from "./metrics-data";
+import { gradeFor, workflowHealthFromSteps } from "./metrics-data";
 import { StatTile } from "./metrics-charts";
 import { StepPerformancePanel, WorkflowDropdown } from "./StepPerformance";
 import { SelfImprovementRail } from "./SelfImprovement";
@@ -43,8 +43,8 @@ export function MetricsPage() {
   if (summaries.length === 0) return <CenterNote>Run a workflow to see metrics.</CenterNote>;
 
   const wf = summaries.find((s) => s.templateId === wfId) ?? summaries[0];
-  const health = healthOf(wf);
-  const healthColor = health == null ? "var(--text-3)" : health >= 80 ? "var(--run)" : health >= 70 ? "var(--warn)" : "var(--err)";
+  const health = workflowHealthFromSteps(detail?.steps ?? []);
+  const healthColor = health == null ? "var(--text-3)" : health >= 80 ? "var(--run)" : health >= 60 ? "var(--warn)" : "var(--err)";
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 340px", gap: 12, padding: 12, height: "100%", minHeight: 0, overflow: "hidden" }}>
