@@ -2478,6 +2478,32 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     expect(after?.status).toBe("completed");
   });
 
+  it("mark-done park is committed with the recommendation — a bus failure cannot strand the run without its affordance", async () => {
+    const { db } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" }); // single terminal step
+    db.prepare(
+      "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-final', 'goal-1', 'run-1', 'step-1', 'step_output', 'Implement', ?, 'orchestrator', NULL, NULL, NULL, ?)"
+    ).run(JSON.stringify({ result: "done", _completion: {} }), NOW);
+
+    const { engine } = makeAgentService(makeLauncher());
+    // A bus that dies on publish reproduces the live stall: the recommendation
+    // row committed but the mark_done_pending activity (the user's ONLY
+    // affordance to finish the run) was never surfaced.
+    const throwingBus = {
+      publish: () => { throw new Error("bus down"); },
+      subscribe: () => () => {},
+    } as unknown as import("../../events.js").EventBus;
+    await engine.advanceToNextStep(db, () => NOW, "run-1", { bus: throwingBus }).catch(() => {});
+
+    const recRow = db
+      .prepare("SELECT id FROM recommendations WHERE type = 'complete_workflow_run' LIMIT 1")
+      .get() as { id: string } | undefined;
+    expect(recRow).toBeDefined();
+    const pending = listActivitiesByGoal(db, "goal-1").find((a) => a.sourceKind === "mark_done_pending");
+    expect(pending).toBeDefined();
+    expect(pending?.recommendationId).toBe(recRow!.id);
+  });
+
   it("startWorkflowFirstStep includes attached workspaces in the step agent objective", async () => {
     const { db } = setupHarness();
     setupFirstStepRun(db);

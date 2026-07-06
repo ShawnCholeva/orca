@@ -58,7 +58,7 @@ import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import { createRecommendationForWorkflowInTx } from "./workflow-recommendations.js";
 import { appendWorkflowEvent } from "../events.js";
 import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
-import { resolveGateDecisionActivity, pauseForGateDecision, pauseForConfirmation, expireConfirmation, pauseForMarkDone } from "../../activities/store.js";
+import { resolveGateDecisionActivity, pauseForGateDecision, pauseForConfirmation, expireConfirmation, pauseForMarkDoneInTx } from "../../activities/store.js";
 import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import { createStepOutputArtifact } from "./ledger-commit.js";
@@ -1182,16 +1182,17 @@ export class DispatchEngine {
         },
         { idFactory: options.idFactory, stagedEvents }
       );
+      // The mark-done park commits ATOMICALLY with the recommendation: it is the
+      // user's only affordance to finish the run, and surfacing it post-commit
+      // left a crash window that stranded runs with an invisible park (live e2e).
+      const markDone = pauseForMarkDoneInTx(
+        { db, now, idFactory: options.idFactory },
+        { goalId: goal.id, workflowRunId: run.id, stepRunId: stepRun.id, recommendationId }
+      );
+      if (markDone.event) stagedEvents.push(markDone.event);
       return { decision, recommendationIds: [recommendationId] };
     })();
     publishStaged(options.bus, stagedEvents);
-    const markDoneRecId = output.recommendationIds[0];
-    if (markDoneRecId !== undefined) {
-      pauseForMarkDone(
-        { db, bus: options.bus ?? new EventBus() },
-        { goalId: goal.id, workflowRunId: run.id, stepRunId: stepRun.id, recommendationId: markDoneRecId }
-      );
-    }
     if (options.bus && options.stepResultByStepRunId?.[stepRun.id]) {
       try {
         materializeStepResultActivity(

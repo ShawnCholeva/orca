@@ -489,6 +489,38 @@ export function resolveGateDecisionActivity(
   return activity;
 }
 
+// In-transaction core of pauseForMarkDone: inserts (or reuses) the park WITHOUT
+// opening its own transaction or publishing. The terminal-advance path calls
+// this INSIDE the transaction that creates the complete_workflow_run
+// recommendation, so the user's only run-finishing affordance commits
+// atomically with it — a crash or bus failure after commit can no longer
+// strand a run with an invisible mark-done park (observed live: e2e multiply).
+// The caller publishes the returned event after its transaction commits.
+export function pauseForMarkDoneInTx(
+  ctx: Pick<ActivityStoreCtx, "db" | "now" | "idFactory">,
+  input: { goalId: string; workflowRunId: string; stepRunId: string; recommendationId: string }
+): { activity: ActivityT; event: DomainEvent | undefined } {
+  const now = currentTime(ctx as ActivityStoreCtx);
+  const existing = getLiveForStepRun(ctx.db, input.stepRunId);
+  if (existing?.sourceKind === "mark_done_pending") return { activity: existing, event: undefined }; // idempotent re-park
+  const id = nextActivityId(ctx as ActivityStoreCtx);
+  const turnOrdinal = nextTurnOrdinal(ctx.db, input.stepRunId);
+  const text = "Final step output produced — approve to complete the run.";
+  ctx.db
+    .prepare(
+      `INSERT INTO activities (
+         id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+         status, current_text, final_summary, source_kind, work_category, confidence,
+         pending_question, recommendation_id, created_at, updated_at, completed_at
+       ) VALUES (?, ?, ?, ?, NULL, ?, 'paused_for_input', ?, NULL, 'mark_done_pending', NULL, NULL, NULL, ?, ?, ?, NULL)`
+    )
+    .run(id, input.goalId, input.workflowRunId, input.stepRunId, turnOrdinal, text, input.recommendationId, now, now);
+  const inserted = getActivityById(ctx.db, id);
+  if (inserted === undefined) throw new Error(`Activity insert failed: ${id}`);
+  const event = insertActivityChangedEvent(ctx.db, inserted, now);
+  return { activity: inserted, event };
+}
+
 // Open (or reuse) a persisted mark-done activity awaiting the human's
 // approve-to-complete decision. Its own row (sourceKind mark_done_pending,
 // status paused_for_input) carries the complete_workflow_run recommendation id
@@ -497,28 +529,7 @@ export function pauseForMarkDone(
   ctx: ActivityStoreCtx,
   input: { goalId: string; workflowRunId: string; stepRunId: string; recommendationId: string }
 ): ActivityT {
-  let event: DomainEvent | undefined;
-  const activity = ctx.db.transaction(() => {
-    const now = currentTime(ctx);
-    const existing = getLiveForStepRun(ctx.db, input.stepRunId);
-    if (existing?.sourceKind === "mark_done_pending") return existing; // idempotent re-park
-    const id = nextActivityId(ctx);
-    const turnOrdinal = nextTurnOrdinal(ctx.db, input.stepRunId);
-    const text = "Final step output produced — approve to complete the run.";
-    ctx.db
-      .prepare(
-        `INSERT INTO activities (
-           id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
-           status, current_text, final_summary, source_kind, work_category, confidence,
-           pending_question, recommendation_id, created_at, updated_at, completed_at
-         ) VALUES (?, ?, ?, ?, NULL, ?, 'paused_for_input', ?, NULL, 'mark_done_pending', NULL, NULL, NULL, ?, ?, ?, NULL)`
-      )
-      .run(id, input.goalId, input.workflowRunId, input.stepRunId, turnOrdinal, text, input.recommendationId, now, now);
-    const inserted = getActivityById(ctx.db, id);
-    if (inserted === undefined) throw new Error(`Activity insert failed: ${id}`);
-    event = insertActivityChangedEvent(ctx.db, inserted, now);
-    return inserted;
-  })();
+  const { activity, event } = ctx.db.transaction(() => pauseForMarkDoneInTx(ctx, input))();
   publishActivityChanged(ctx, event);
   return activity;
 }
