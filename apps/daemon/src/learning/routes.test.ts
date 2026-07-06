@@ -11,6 +11,7 @@ import { registerLearningRoutes } from "./routes.js";
 import type { BrokerLike } from "./propose.js";
 import type { TemplateInstructionProposal } from "@orca/contracts";
 import { insertProposal } from "./store.js";
+import { recordEvent } from "./events.js";
 
 const tempDirs: string[] = [];
 function createConfig(dataDir: string): Config {
@@ -133,5 +134,21 @@ describe("learning routes", () => {
     const res = await f.inject({ method: "POST", url: "/v1/learning/templates/tpl/restore-default" });
     expect(res.statusCode).toBe(409);
     expect((res.json() as { error: { code: string } }).error.code).toBe("no_baseline");
+  });
+
+  it("GET events returns newest-first events; 404 on unknown template", async () => {
+    const f = Fastify(); registerLearningRoutes(f, { db, ...deps() });
+    const now = new Date().toISOString();
+    recordEvent(db, { templateId: "tpl", proposalId: null, stepTemplateId: "s1", eventType: "created", templateVersion: 1, payload: { kind: "created", component: "step_instructions", rule: "R2", failureCode: "invalid_output" } }, now);
+    recordEvent(db, { templateId: "tpl", proposalId: null, stepTemplateId: "s1", eventType: "created", templateVersion: 1, payload: { kind: "created", component: "step_instructions", rule: "R2", failureCode: "invalid_output" } }, now);
+
+    const res = await f.inject({ method: "GET", url: "/v1/learning/templates/tpl/events?limit=1" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { events: unknown[] };
+    expect(body.events).toHaveLength(1);
+
+    const missing = await f.inject({ method: "GET", url: "/v1/learning/templates/nope/events" });
+    expect(missing.statusCode).toBe(404);
+    expect((missing.json() as { error: { code: string } }).error.code).toBe("template_not_found");
   });
 });

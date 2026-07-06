@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { MetricPeriod } from "@orca/contracts";
 import { analyzeTemplate, listProposalsEnriched, judgeProposal, type AnalyzeDeps } from "./usecases.js";
 import { getProposal } from "./store.js";
+import { listEventsByTemplate } from "./events.js";
 import {
   applyLearnedInstructionEdit, rollbackAppliedProposal, restoreTemplateDefault, dismissProposal,
   StaleProposalError, ProposalNotPendingError, ProposalNotAppliedError, NoBaselineError, StepNotFoundError,
@@ -40,6 +41,13 @@ export function registerLearningRoutes(server: FastifyInstance, deps: LearningRo
     if (!templateExists(db, id)) { reply.status(404); return { error: { code: "template_not_found" } }; }
     const period = MetricPeriod.safeParse((req.query as { period?: string }).period ?? "7d");
     return { proposals: listProposalsEnriched(db, id, period.success ? period.data : "7d") };
+  });
+
+  server.get("/v1/learning/templates/:id/events", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!templateExists(db, id)) { reply.status(404); return { error: { code: "template_not_found" } }; }
+    const limit = Number((req.query as { limit?: string }).limit ?? 50);
+    return { events: listEventsByTemplate(db, id, limit) };
   });
 
   server.post("/v1/learning/proposals/:id/apply", async (req, reply) => {

@@ -143,6 +143,7 @@ import {
   TemplateMetricsDetail,
   type MetricPeriod,
   TemplateInstructionProposal,
+  LearningEvent,
 } from "@orca/contracts";
 
 export type {
@@ -965,6 +966,14 @@ export async function listProposals(templateId: string, period: MetricPeriod): P
     { headers: authHeaders(token) });
   const body = await parseResponse(res, z.object({ proposals: z.array(TemplateInstructionProposal) }));
   return body.proposals;
+}
+
+export async function listLearningEvents(templateId: string, limit = 50): Promise<LearningEvent[]> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/learning/templates/${encodeURIComponent(templateId)}/events?limit=${limit}`,
+    { headers: authHeaders(token) });
+  const body = await parseResponse(res, z.object({ events: z.array(LearningEvent) }));
+  return body.events;
 }
 
 export async function applyProposal(id: string, editedInstructions?: string): Promise<TemplateInstructionProposal> {
