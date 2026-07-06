@@ -138,10 +138,24 @@ describe("computeStepMetrics", () => {
     const args = { transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" as const };
     expect(computeStepMetrics(args)[0].score).toBe(computeStepMetrics(args)[0].score);
   });
+
+  it("surfaces a refuted pass as a readable failure mode", () => {
+    const ts: TemplateTransition[] = [{
+      templateVersion: 1, stepTemplateId: "s",
+      transition: { id: "x", goalId: "g", workflowRunId: "r1", workflowStepRunId: "r1-s", boundary: "step_complete", risk: null, stateDeps: null, evidence: null,
+        refute: { verdict: "refuted", triggered_by: [], risk_class: "high", reason: "broke a rule", issue_refs: [] },
+        telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
+        createdAt: "2026-05-01T00:00:00.000Z" },
+    }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.failureModes.some((f) => /overturned|independent check/i.test(f.label))).toBe(true);
+    expect(step.reconciliation?.refuted).toBe(true);
+  });
 });
 
 describe("deriveInsights", () => {
-  it("flags false confidence: high pass rate, low oracle adequacy", () => {
+  it("flags a passing-but-weakly-verified step in plain language (no jargon)", () => {
     const insights = deriveInsights({
       stepTemplateId: "s", name: "X", ordinal: 0, score: 95, sampleSize: 10, confidence: "ok",
       runs: 10, passedFirstTry: 9, recovered: 1, failed: 0,
@@ -149,14 +163,15 @@ describe("deriveInsights", () => {
       cost: { p50LatencyMs: 100, meanTokens: 100, meanUsd: 0.01, meanRetries: 0 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [] },
+      verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.55, falseAcceptanceRate: 0, artifacts: [] },
       failureModes: [], reconciliation: null,
       trend: [], versionBoundaries: [], insights: [], recentReasons: [],
     });
-    expect(insights.some((i) => /oracle/i.test(i))).toBe(true);
+    expect(insights.some((i) => /never independently proven|independently proven/i.test(i))).toBe(true);
+    expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict/i);
   });
 
-  it("flags cost without verification gain: high tokens + low score", () => {
+  it("flags cost without verification gain: high tokens, never independently proven", () => {
     const insights = deriveInsights({
       stepTemplateId: "s", name: "X", ordinal: 0, score: 50, sampleSize: 10, confidence: "ok",
       runs: 10, passedFirstTry: 4, recovered: 1, failed: 5,
@@ -164,11 +179,12 @@ describe("deriveInsights", () => {
       cost: { p50LatencyMs: 200, meanTokens: 5000, meanUsd: 0.05, meanRetries: 0.2 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [] },
+      verification: { tier: "self_reported", tierLabel: "Reported success, no check", confidence: 0.3, falseAcceptanceRate: 0, artifacts: [] },
       failureModes: [], reconciliation: null,
       trend: [], versionBoundaries: [], insights: [], recentReasons: [],
     });
-    expect(insights.some((i) => /token|cost|verification/i.test(i))).toBe(true);
+    expect(insights.some((i) => /independently proven/i.test(i))).toBe(true);
+    expect(insights.join(" ")).not.toMatch(/oracle|sensor|verdict/i);
   });
 
   it("flags loop/churn: high mean retries", () => {

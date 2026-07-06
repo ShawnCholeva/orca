@@ -3,6 +3,7 @@ import { computeHarnessMetricsFromTransitions } from "../harness-metrics/usecase
 import type { MetricPeriod, TemplateMetricsSummary, StepMetrics } from "@orca/contracts";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
 import { classifyTier, strongestTier, TIER_CONFIDENCE, TIER_LABEL, buildArtifacts } from "./verification.js";
+import { labelForFailure } from "./failure-labels.js";
 
 export const SAMPLE_MIN = 5;
 
@@ -170,18 +171,16 @@ function countBy<T>(items: T[], key: (t: T) => string | null | undefined): Recor
 
 export function deriveInsights(step: StepMetrics): string[] {
   const out: string[] = [];
-  // I4a — false confidence: passes but the oracle is inadequate.
-  if (step.quality.verdictPassRate >= 0.8 && step.quality.oracleSufficientRate < 0.5) {
-    out.push("Passes, but the oracle is inadequate — verified output may not be the full specification.");
+  const far = step.verification.falseAcceptanceRate;
+  if (far >= 0.2) {
+    out.push(`Approves work without proof ${Math.round(far * 100)}% of the time — bad output can slip through.`);
   }
-  // I4b — cost without verification gain.
-  if ((step.cost.meanTokens ?? 0) >= 4000 && step.score < 70) {
-    out.push("High token cost with low verification gain.");
+  if (step.verification.tier === "ai_reviewed" || step.verification.tier === "self_reported") {
+    out.push("Consistently passes but is never independently proven — if later steps fail on this output, that's the signal to strengthen it.");
   }
-  // I4c — loop / churn.
-  if ((step.cost.meanRetries ?? 0) >= 1.5) {
-    out.push("Loops between failed strategies — high retry churn.");
-  }
+  const top = step.failureModes[0];
+  if (top && top.count > 0) out.push(`Most common problem: ${top.label.toLowerCase()} (${top.count}×).`);
+  if ((step.cost.meanRetries ?? 0) >= 1.5) out.push("Loops between failed attempts — high retry churn.");
   return out;
 }
 
@@ -303,6 +302,22 @@ export function computeStepMetrics(input: {
       .map((c) => ({ failureCode: c.failureCode, boundary: c.boundary, count: c.ids.length, sampleTransitionIds: c.ids.slice(0, 3) }))
       .sort((a, b) => b.count - a.count);
 
+    // Readable taxonomy: categorical failures (mapped to plain labels) + verification weaknesses.
+    const verifWeaknesses: { label: string; count: number }[] = [];
+    if (falseAccept > 0) verifWeaknesses.push({ label: "Approved something the independent check overturned", count: falseAccept });
+    const rawModes = [
+      ...failureClusters.map((c) => ({ label: labelForFailure(c.failureCode), count: c.count })),
+      ...verifWeaknesses,
+    ].filter((m) => m.count > 0);
+    const modeTotal = rawModes.reduce((n, m) => n + m.count, 0) || 1;
+    const failureModes = rawModes
+      .map((m) => ({ label: m.label, count: m.count, pct: m.count / modeTotal }))
+      .sort((a, b) => b.count - a.count);
+
+    const reconciliation = conclusive.length === 0 ? null : {
+      claimedComplete: true, verifiedTierLabel: TIER_LABEL[stepTier], refuted: falseAccept > 0,
+    };
+
     // Counts.
     const passedFirstTry = finals.filter((r) => r.attempt === 1 && r.status === "passed").length;
     const recovered = finals.filter((r) => r.attempt > 1 && r.status === "passed").length;
@@ -361,8 +376,8 @@ export function computeStepMetrics(input: {
           hasRefute: finalStepCompletes.some((t) => t.transition.refute != null), falseAccept,
         }),
       },
-      failureModes: [],
-      reconciliation: null,
+      failureModes,
+      reconciliation,
       trend, versionBoundaries, insights: [], recentReasons,
     };
     step.insights = deriveInsights(step);
