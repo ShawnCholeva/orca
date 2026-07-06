@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
 import { computeStepMetrics, deriveInsights } from "./aggregate.js";
+import type { CalibrationEntry } from "./verification.js";
 
 function sc(id: string, runId: string, step: string, verdict: "passed" | "failed", oracleSufficient: boolean, at: string): TemplateTransition {
   return {
@@ -430,5 +431,40 @@ describe("deriveInsights", () => {
       trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
     });
     expect(insights).toEqual([]);
+  });
+});
+
+describe("computeStepMetrics: calibration divergence insight", () => {
+  // sc() always yields an ai_reviewed step (evidence present, no sensors run).
+  const ts = [sc("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z")];
+  const runs: TemplateStepRun[] = [{
+    workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed",
+    startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z",
+    blockedReason: null, templateVersion: 1,
+  }];
+
+  it("appends a divergence insight when the step's tier calibration diverges from the assumed confidence", () => {
+    const calibration: CalibrationEntry[] = [
+      { tier: "ai_reviewed", assumed: 0.55, measured: 0.87, sampleSize: 13, state: "measured" },
+    ];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
+    expect(step.verification.tier).toBe("ai_reviewed");
+    expect(step.insights.join(" ")).toMatch(/upholds 87%.*assumes 55%.*pessimistic/);
+  });
+
+  it("no divergence insight for a non-matching tier", () => {
+    const calibration: CalibrationEntry[] = [
+      { tier: "verified_executed", assumed: 1.0, measured: 0.6, sampleSize: 13, state: "measured" },
+    ];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
+    expect(step.insights.some((i) => i.includes("Independent review upholds"))).toBe(false);
+  });
+
+  it("no divergence insight when sampleSize is below 10", () => {
+    const calibration: CalibrationEntry[] = [
+      { tier: "ai_reviewed", assumed: 0.55, measured: 0.87, sampleSize: 9, state: "measured" },
+    ];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
+    expect(step.insights.some((i) => i.includes("Independent review upholds"))).toBe(false);
   });
 });

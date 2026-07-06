@@ -2,7 +2,8 @@ import type { HarnessMetrics } from "../harness-metrics/usecases.js";
 import { computeHarnessMetricsFromTransitions } from "../harness-metrics/usecases.js";
 import type { MetricPeriod, TemplateMetricsSummary, StepMetrics } from "@orca/contracts";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
-import { classifyTier, strongestTier, TIER_CONFIDENCE, TIER_LABEL, buildArtifacts } from "./verification.js";
+import { classifyTier, strongestTier, TIER_CONFIDENCE, TIER_LABEL, buildArtifacts, computeCalibration, CALIBRATION_DIVERGENCE } from "./verification.js";
+import type { CalibrationEntry } from "./verification.js";
 import { labelForFailure } from "./failure-labels.js";
 
 export const SAMPLE_MIN = 5;
@@ -148,7 +149,7 @@ export function computeTemplateSummary(input: {
     versionComparison,
     versions: input.versions,
     confidence: input.runCount < SAMPLE_MIN ? "low" : "ok",
-    calibration: [], // placeholder — computed in SP3 Task 4
+    calibration: computeCalibration(input.current.transitions),
   };
 }
 
@@ -173,7 +174,7 @@ function countBy<T>(items: T[], key: (t: T) => string | null | undefined): Recor
   return out;
 }
 
-export function deriveInsights(step: StepMetrics): string[] {
+export function deriveInsights(step: StepMetrics, calibration?: CalibrationEntry[]): string[] {
   const out: string[] = [];
   const far = step.verification.falseAcceptanceRate;
   if (far >= 0.2) {
@@ -185,6 +186,11 @@ export function deriveInsights(step: StepMetrics): string[] {
   const top = step.failureModes[0];
   if (top && top.count > 0) out.push(`Most common problem: ${top.label.toLowerCase()} (${top.count}×).`);
   if ((step.cost.meanRetries ?? 0) >= 1.5) out.push("Loops between failed attempts — high retry churn.");
+  const cal = calibration?.find((c) => c.tier === step.verification.tier);
+  if (cal && cal.state === "measured" && cal.sampleSize >= 10 && Math.abs(cal.measured! - cal.assumed) > CALIBRATION_DIVERGENCE) {
+    const measured = cal.measured!;
+    out.push(`Independent review upholds ${Math.round(measured * 100)}% of this step's passes; the score assumes ${Math.round(cal.assumed * 100)}% — scores here may be too ${measured > cal.assumed ? "pessimistic" : "optimistic"}.`);
+  }
   return out;
 }
 
@@ -194,6 +200,7 @@ export function computeStepMetrics(input: {
   stepNames: Map<string, { name: string; ordinal: number }>;
   nowIso: string;
   period: MetricPeriod;
+  calibration?: CalibrationEntry[];
 }): StepMetrics[] {
   const byStep = new Map<string, TemplateTransition[]>();
   for (const t of input.transitions) {
@@ -456,7 +463,7 @@ export function computeStepMetrics(input: {
       trend, versionBoundaries, versionScoreDelta, versionScoreDeltaVersions,
       versionInvalidOutputRateDelta, insights: [], recentReasons,
     };
-    step.insights = deriveInsights(step);
+    step.insights = deriveInsights(step, input.calibration);
     steps.push(step);
   }
   return steps.sort((a, b) => a.ordinal - b.ordinal);

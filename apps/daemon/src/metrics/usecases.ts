@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { MetricPeriod, TemplateMetricsDetail, TemplateMetricsSummary } from "@orca/contracts";
 import { listStepRunsByTemplate, listTemplatesWithRuns, listTransitionsByTemplate } from "./fetch.js";
 import { computeStepMetrics, computeTemplateSummary, windowStart } from "./aggregate.js";
+import { computeCalibration } from "./verification.js";
 
 function nowOr(nowIso?: string): string {
   return nowIso ?? new Date().toISOString();
@@ -63,13 +64,15 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
   const info = listTemplatesWithRuns(db).find((t) => t.templateId === templateId);
   if (!info) return null;
   const since = windowStart(now, period);
+  const transitions = listTransitionsByTemplate(db, templateId, since, now);
   return {
     summary: buildSummary(db, info, period, now),
     steps: computeStepMetrics({
-      transitions: listTransitionsByTemplate(db, templateId, since, now),
+      transitions,
       stepRuns: listStepRunsByTemplate(db, templateId, since, now),
       stepNames: stepNames(db, templateId),
       nowIso: now, period,
+      calibration: computeCalibration(transitions),
     }),
   };
 }
