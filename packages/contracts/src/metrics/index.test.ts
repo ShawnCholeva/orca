@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { MetricPeriod, TemplateMetricsSummary, TemplateMetricsDetail } from "./index.js";
+import { EvidenceArtifact, MetricPeriod, TemplateMetricsSummary, TemplateMetricsDetail } from "./index.js";
 
 describe("metrics contracts", () => {
+  it("accepts a grounding evidence artifact source", () => {
+    expect(EvidenceArtifact.safeParse({
+      source: "grounding", verifies: "checkable claims", cannotVerify: "semantics",
+      confidence: 0.7, verdict: "pass",
+    }).success).toBe(true);
+  });
+
   it("accepts the three period literals only", () => {
     expect(MetricPeriod.safeParse("7d").success).toBe(true);
     expect(MetricPeriod.safeParse("1y").success).toBe(false);

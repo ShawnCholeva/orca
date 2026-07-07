@@ -46,6 +46,29 @@ export const EvidenceFacet = z
         gaps: z.array(z.string().max(256)).max(32).default([]),
       })
       .strict(),
+    // Deterministic grounding-check results (engine-run claim verification —
+    // paths exist, references resolve, internal consistency). Kept apart from
+    // sensorsRun: sensor presence means an execution oracle ran; grounding
+    // never does, so tier/refute/oracle-adequacy semantics stay sensor-only.
+    grounding: z
+      .object({
+        checks: z
+          .array(
+            z
+              .object({
+                rule: z.string().max(32),
+                field: z.string().max(128),
+                mode: z.enum(["enforce", "observe"]),
+                result: z.enum(["passed", "failed", "skipped"]),
+                detail: z.string().max(512),
+              })
+              .strict()
+          )
+          .max(32),
+        verdict: z.enum(["passed", "failed", "skipped"]),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type EvidenceFacet = z.infer<typeof EvidenceFacet>;

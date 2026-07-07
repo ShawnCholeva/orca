@@ -71,7 +71,7 @@ export const FailureCluster = z.object({
 export type FailureCluster = z.infer<typeof FailureCluster>;
 
 export const EvidenceArtifact = z.object({
-  source: z.enum(["executable", "independent_review", "self_report"]),
+  source: z.enum(["executable", "grounding", "independent_review", "self_report"]),
   verifies: z.string(),
   cannotVerify: z.string(),
   confidence: z.number(),

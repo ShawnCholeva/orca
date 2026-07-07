@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AdapterId } from "../adapters/ids.js";
 import { WorkflowStepOutputSchema, WorkflowStepOutputField } from "./output-schema.js";
+import { GroundingCheck } from "./grounding.js";
 
 export {
   WorkflowStepOutputSchema,
@@ -8,6 +9,8 @@ export {
   validateStepOutput,
   type ValidateResult,
 } from "./output-schema.js";
+
+export { GroundingCheck } from "./grounding.js";
 
 const UTF8_ENCODER = new TextEncoder();
 
@@ -292,6 +295,7 @@ export const WorkflowStepTemplate = z
     outputSchema: WorkflowStepOutputSchema,
     agentPreference: z.array(StepAgentChoice).min(1).max(8),
     completionPolicy: StepCompletionPolicy.optional(),
+    grounding: z.array(GroundingCheck).max(16).optional(),
   })
   .strict();
 export type WorkflowStepTemplate = z.infer<typeof WorkflowStepTemplate>;

@@ -71,6 +71,25 @@ describe("EvidenceFacet", () => {
     expect(f.verdict).toBe("failed");
   });
 
+  it("accepts an optional grounding block and legacy facets without one", () => {
+    const legacy = EvidenceFacet.parse({
+      sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [],
+      oracleAdequacy: { sufficient: true, gaps: [] },
+    });
+    expect(legacy.grounding).toBeUndefined();
+
+    const grounded = EvidenceFacet.parse({
+      sensorsRun: [], verdict: "failed", untestedRegions: [], residualRisk: [],
+      oracleAdequacy: { sufficient: false, gaps: [] },
+      grounding: {
+        checks: [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce",
+          result: "failed", detail: "src/nope.ts does not exist" }],
+        verdict: "failed",
+      },
+    });
+    expect(grounded.grounding?.verdict).toBe("failed");
+  });
+
   it("is accepted as the evidence facet on a transition", () => {
     const t = HT.parse({
       id: "t", goalId: "g", workflowRunId: null, workflowStepRunId: "s",
