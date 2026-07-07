@@ -63,6 +63,10 @@ export interface WorkerSessionDeps {
   tmux?: TmuxRunner;
   captureSink: (sessionId: string, chunk: Buffer) => void; // appends pane bytes to the output store
   markRunning?: (sessionId: string) => void; // optional: flip DB session status to running
+  // Optional: flip the DB session row terminal when the manager reaps the
+  // worker. Without this, deliberately-terminated workers stay 'running' in
+  // the DB forever (dishonest status; observed live 2026-07-07).
+  markExited?: (sessionId: string) => void;
   trustPattern?: RegExp;
   readyPattern?: RegExp;
   pollMs?: number;
@@ -290,6 +294,7 @@ export class WorkerSessionManager {
     this.sessions.delete(sessionId);
     this.stopTail(sessionId);
     await killSession(this.tmux, s?.name ?? this.name(sessionId));
+    this.deps.markExited?.(sessionId);
   }
 
   /**

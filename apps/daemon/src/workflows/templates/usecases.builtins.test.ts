@@ -148,4 +148,38 @@ describe("upgradeInstalledBuiltInTemplates", () => {
       .get("orca/bug-triage-fix") as { version: number };
     expect(after.version).toBe(before.version);
   });
+
+  it("stamps catalog_version on install", () => {
+    installBuiltInTemplates(ctx(), ["orca/bug-triage-fix"]);
+    const row = db
+      .prepare("SELECT version, catalog_version FROM workflow_templates WHERE id = ?")
+      .get("orca/bug-triage-fix") as { version: number; catalog_version: number | null };
+    expect(row.catalog_version).toBe(row.version);
+  });
+
+  it("a learning-applied forward version no longer blocks a catalog upgrade", () => {
+    // Observed live (2026-07-07): an applied proposal occupied version 7, so the
+    // catalog's v7 silently never landed. The guard now compares the CATALOG
+    // counter, and the upgrade writes a forward-only row version.
+    insertOldBuiltIn("orca/bug-triage-fix", 10); // learned forward versions took the row to 10
+    db.prepare("UPDATE workflow_templates SET catalog_version = 3 WHERE id = 'orca/bug-triage-fix'").run();
+    upgradeInstalledBuiltInTemplates(ctx());
+    const row = db
+      .prepare("SELECT version, catalog_version, steps_json FROM workflow_templates WHERE id = ?")
+      .get("orca/bug-triage-fix") as { version: number; catalog_version: number; steps_json: string };
+    expect(row.catalog_version).toBe(4); // the catalog version that landed
+    expect(row.version).toBe(11); // append-only: forward of the learned 10, never backward to 4
+    expect(row.steps_json).toContain('"id":"done"'); // catalog content applied
+  });
+
+  it("is a no-op when the installed catalog version is current, even under learned forward versions", () => {
+    insertOldBuiltIn("orca/bug-triage-fix", 10); // learned content at version 10
+    db.prepare("UPDATE workflow_templates SET catalog_version = 4 WHERE id = 'orca/bug-triage-fix'").run();
+    upgradeInstalledBuiltInTemplates(ctx());
+    const row = db
+      .prepare("SELECT version, steps_json FROM workflow_templates WHERE id = ?")
+      .get("orca/bug-triage-fix") as { version: number; steps_json: string };
+    expect(row.version).toBe(10); // learned content preserved
+    expect(row.steps_json).toContain('"id":"old_step"');
+  });
 });

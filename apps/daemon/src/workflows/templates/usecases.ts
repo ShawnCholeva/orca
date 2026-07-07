@@ -178,14 +178,25 @@ export class UnknownBuiltInTemplateError extends Error {
   }
 }
 
-// Version-guarded upsert of one built-in definition. Emits created/updated.
+// Catalog-version-guarded upsert of one built-in definition. Emits created/updated.
+// The guard compares the CATALOG counter (catalog_version), not the row version:
+// learning-applied proposals write forward row versions, and comparing against
+// those silently blocked any catalog bump numbered at or below the learned
+// version (observed live: an applied proposal occupying v7 swallowed catalog v7).
+// An upgrade writes a forward-only row version (append-only — never backward
+// past learned versions); catalog content replacing learned edits on upgrade is
+// the documented catalog-wins behavior, unchanged.
 function upsertBuiltInTemplate(
   ctx: WorkflowTemplateUsecaseCtx,
   def: BuiltInTemplateDefinition,
 ): WorkflowTemplate {
   const now = ctx.now?.() ?? new Date().toISOString();
-  const existing = getTemplateById(ctx.db, def.id);
-  if (existing && existing.version >= def.version) return existing;
+  const existing = ctx.db
+    .prepare("SELECT version, catalog_version FROM workflow_templates WHERE id = ?")
+    .get(def.id) as { version: number; catalog_version: number | null } | undefined;
+  // Legacy rows (pre-0057) have no catalog stamp — fall back to the row version.
+  const installedCatalogVersion = existing ? (existing.catalog_version ?? existing.version) : null;
+  if (existing && installedCatalogVersion! >= def.version) return getTemplateById(ctx.db, def.id)!;
 
   const stepsJson = JSON.stringify(def.steps);
   const guardrailsJson = JSON.stringify(def.guardrails);
@@ -194,15 +205,16 @@ function upsertBuiltInTemplate(
 
   const staged = ctx.db.transaction(() => {
     if (existing) {
+      const newVersion = Math.max(existing.version + 1, def.version);
       ctx.db.prepare(
-        "UPDATE workflow_templates SET name = ?, description = ?, version = ?, is_built_in = 1, is_locked = 1, steps_json = ?, guardrails_json = ?, graph_json = ?, inputs_json = ?, scope = 'global', scope_name = '', category = ?, updated_at = ? WHERE id = ?"
-      ).run(def.name, def.description, def.version, stepsJson, guardrailsJson, graphJson, inputsJson, def.category, now, def.id);
-      const event = appendWorkflowEvent(ctx.db, "workflow.template.updated", { templateId: def.id, version: def.version }, now, ctx.idFactory);
+        "UPDATE workflow_templates SET name = ?, description = ?, version = ?, catalog_version = ?, is_built_in = 1, is_locked = 1, steps_json = ?, guardrails_json = ?, graph_json = ?, inputs_json = ?, scope = 'global', scope_name = '', category = ?, updated_at = ? WHERE id = ?"
+      ).run(def.name, def.description, newVersion, def.version, stepsJson, guardrailsJson, graphJson, inputsJson, def.category, now, def.id);
+      const event = appendWorkflowEvent(ctx.db, "workflow.template.updated", { templateId: def.id, version: newVersion }, now, ctx.idFactory);
       return [event];
     }
     ctx.db.prepare(
-      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at, scope, scope_name, category, graph_json, inputs_json) VALUES (?, ?, ?, ?, 1, 1, ?, ?, ?, ?, 'global', '', ?, ?, ?)"
-    ).run(def.id, def.name, def.description, def.version, stepsJson, guardrailsJson, now, now, def.category, graphJson, inputsJson);
+      "INSERT INTO workflow_templates (id, name, description, version, catalog_version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at, scope, scope_name, category, graph_json, inputs_json) VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?, 'global', '', ?, ?, ?)"
+    ).run(def.id, def.name, def.description, def.version, def.version, stepsJson, guardrailsJson, now, now, def.category, graphJson, inputsJson);
     const event = appendWorkflowEvent(ctx.db, "workflow.template.created", { templateId: def.id, version: def.version }, now, ctx.idFactory);
     return [event];
   })();

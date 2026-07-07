@@ -394,6 +394,27 @@ describe("WorkerSessionManager.deliver", () => {
   });
 });
 
+describe("WorkerSessionManager.terminate", () => {
+  it("marks the session exited when it reaps the worker", async () => {
+    // Live observation (2026-07-07 e2e): completed steps left their session
+    // rows 'running' forever — terminate killed the tmux pane but nothing
+    // owned the DB status flip. The manager reaps, so the manager reports.
+    const tmux = fakeTmux(["auto mode on"]);
+    const exited: string[] = [];
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      markExited: (id) => void exited.push(id),
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      resolveProvider,
+    });
+    await mgr.reattach("sess-1", "/repo");
+    await mgr.terminate("sess-1");
+    expect(exited).toEqual(["sess-1"]);
+  });
+});
+
 describe("WorkerSessionManager.reattach", () => {
   it("adopts a surviving tmux session without respawning, and re-pipes output", async () => {
     // fakeTmux: has-session returns code 0 (the helper returns code 0 for all calls)

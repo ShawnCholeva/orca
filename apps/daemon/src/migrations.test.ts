@@ -182,6 +182,7 @@ describe("runMigrations", () => {
       "0054_decision_reasoning.sql",
       "0055_proposal_component.sql",
       "0056_learning_events.sql",
+      "0057_template_catalog_version.sql",
     ]);
   });
 
@@ -330,6 +331,7 @@ describe("runMigrations", () => {
       "0054_decision_reasoning.sql",
       "0055_proposal_component.sql",
       "0056_learning_events.sql",
+      "0057_template_catalog_version.sql",
     ]);
 
     const goalCount = (
@@ -631,6 +633,7 @@ describe("session tables migration", () => {
       "0054_decision_reasoning.sql",
       "0055_proposal_component.sql",
       "0056_learning_events.sql",
+      "0057_template_catalog_version.sql",
     ]);
 
     const tables = (
@@ -1165,6 +1168,7 @@ describe("migration 0010 workflows", () => {
       "0054_decision_reasoning.sql",
       "0055_proposal_component.sql",
       "0056_learning_events.sql",
+      "0057_template_catalog_version.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1776,6 +1780,7 @@ describe("migration 0012 orchestration transport", () => {
       "0054_decision_reasoning.sql",
       "0055_proposal_component.sql",
       "0056_learning_events.sql",
+      "0057_template_catalog_version.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

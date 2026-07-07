@@ -640,6 +640,14 @@ export function createServer(
         "UPDATE sessions SET status = 'running', started_at = COALESCE(started_at, ?) WHERE id = ?"
       ).run(new Date().toISOString(), sessionId);
     },
+    // The manager reaps deliberately-terminated workers, so it reports the
+    // terminal status too — only flipping rows that are still live, so a
+    // failure path that already stamped 'failed'/'stopped' is not overwritten.
+    markExited: (sessionId) => {
+      db.prepare(
+        "UPDATE sessions SET status = 'exited', exited_at = COALESCE(exited_at, ?) WHERE id = ? AND status IN ('created','starting','running')"
+      ).run(new Date().toISOString(), sessionId);
+    },
   });
   const workerQuestions = new WorkerQuestionStore(daemonContext.idFactory);
   const ELICIT_ANSWER_TIMEOUT_MS = 590_000; // slightly under the 600s hook timeout
@@ -2033,7 +2041,7 @@ export function createServer(
         reply.status(400);
         return { error: "validation_failed", message: "outcome must be 'approved' or 'rejected'" };
       }
-      await dispatchEngine.decideGate(
+      const result = await dispatchEngine.decideGate(
         getDatabase(),
         daemonContext.now,
         request.params.id,
@@ -2044,7 +2052,20 @@ export function createServer(
           ...(typeof request.body?.reason === "string" ? { reason: request.body.reason } : {}),
         }
       );
-      return reply.code(202).send({ ok: true });
+      // Honest mapping: a decision that did not take effect must not read ok:true.
+      if (!result.applied && result.reason === "run_not_found") {
+        reply.status(404);
+        return apiError("run_not_found", "workflow run not found");
+      }
+      if (!result.applied && result.reason === "gate_evaluation_in_flight") {
+        reply.status(409);
+        return apiError(
+          "gate_evaluation_in_flight",
+          "the gate is still being evaluated — the decision did not take effect; retry once it parks"
+        );
+      }
+      // no_pending_gate is the idempotent re-decide (already decided) — still ok.
+      return reply.code(202).send({ ok: true, applied: result.applied });
     }
   );
 
