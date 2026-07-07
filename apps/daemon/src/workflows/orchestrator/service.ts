@@ -41,7 +41,7 @@ import { emitStepComplete } from "../../harness-transitions/emit.js";
 import { runSensors } from "../../harness-sensors/runner.js";
 import { refuteStepCompletion } from "./refute-completion.js";
 import { stepToolRiskClass, shouldRefute } from "./refute-gate.js";
-import { stepRequiresExecution } from "./requires-execution.js";
+import { stepCompletionGate } from "./requires-execution.js";
 import { judgeAgentResponse } from "./judgement.js";
 import { sanitizeNarration } from "./sanitize-narration.js";
 import { extractOrcaStepCompleteBlock } from "./orca-output.js";
@@ -83,7 +83,9 @@ import {
   hasActiveUnansweredQuestion,
   publishStaged,
   buildStepResultBuilderDeps,
+  readStepOutputAsRecord,
 } from "./queries.js";
+import { buildEvidenceFacet, evaluateGrounding, localWorkspaceProbe } from "../../harness-sensors/grounding.js";
 import { postOrchestratorMessage } from "./orchestrator-message.js";
 import { isHumanPromptOpen } from "./human-prompt-gate.js";
 import { recordPromptSuppressed } from "../../orchestrator-chat/usecases.js";
@@ -1200,23 +1202,47 @@ export class OrchestratorService {
           };
         }
 
-        // Deterministic evidence gate: for steps that require execution, run the
-        // sensor ladder in the workspace and veto the LLM's approval if the
+        // Deterministic evidence gate: run the sensor ladder (steps the
+        // validation_rule guardrail covers) and the step's declared grounding
+        // checks in the workspace, and veto the LLM's approval if the merged
         // verdict is not "passed". Runs before the supervision branch so it
         // applies to both supervised and unsupervised completions.
-        const execReq = stepRequiresExecution(ctx.template.guardrails, ctx.stepTpl.id);
+        const completionGate = stepCompletionGate(ctx.template.guardrails, ctx.stepTpl);
         let evidence: Awaited<ReturnType<typeof runSensors>> | null = null;
         let refute: Awaited<ReturnType<typeof this.maybeRefute>> = { ran: false };
-        if (execReq) {
+        if (completionGate.gated) {
           const workspacePath = listWorkspacesByGoal(db, ctx.run.goalId)[0]?.path ?? null;
-          if (workspacePath) {
+          let sensors: Awaited<ReturnType<typeof runSensors>> | null = null;
+          if (completionGate.sensors && workspacePath) {
             try {
-              evidence = await runSensors({ workspacePath, required: execReq.required });
+              sensors = await runSensors({ workspacePath, required: completionGate.sensors.required });
             } catch (err) {
               console.error("runSensors failed", err);
-              evidence = null;
+              sensors = null;
             }
           }
+          // Grounding is deterministic claim verification over the step's own
+          // output; an evaluator crash degrades to "no grounding" — it must
+          // never break completion.
+          let grounding: ReturnType<typeof evaluateGrounding> | null = null;
+          if (completionGate.grounding.length > 0) {
+            try {
+              const stepRunIds = stepRunIdsByTemplateId(db, ctx.run.id);
+              grounding = evaluateGrounding({
+                checks: completionGate.grounding,
+                output: block,
+                readPriorOutput: (stepTemplateId) => {
+                  const priorRunId = stepRunIds[stepTemplateId];
+                  return priorRunId ? readStepOutputAsRecord(db, ctx.run.id, priorRunId) : null;
+                },
+                probe: workspacePath ? localWorkspaceProbe(workspacePath) : null,
+              });
+            } catch (err) {
+              console.error("evaluateGrounding failed", err);
+              grounding = null;
+            }
+          }
+          evidence = buildEvidenceFacet({ sensors, grounding });
 
           const evStaged: DomainEvent[] = [];
           evStaged.push(
@@ -1285,10 +1311,13 @@ export class OrchestratorService {
               )
             );
             publishStaged(options.bus, evStaged);
-            const failingSummary = evidence.sensorsRun
+            const failingSensors = evidence.sensorsRun
               .filter((s) => s.result === "failed")
-              .map((s) => `- ${s.kind} (\`${s.command}\`): ${s.summary.slice(0, 600)}`)
-              .join("\n");
+              .map((s) => `- ${s.kind} (\`${s.command}\`): ${s.summary.slice(0, 600)}`);
+            const failingGrounding = (evidence.grounding?.checks ?? [])
+              .filter((c) => c.mode === "enforce" && c.result === "failed")
+              .map((c) => `- grounding ${c.rule} on ${c.field}: ${c.detail}`);
+            const failingSummary = [...failingSensors, ...failingGrounding].join("\n");
             const gapSummary =
               evidence.oracleAdequacy.gaps.length > 0
                 ? `\nMissing required checks: ${evidence.oracleAdequacy.gaps.join(", ")}`
@@ -1319,8 +1348,8 @@ export class OrchestratorService {
           }
           publishStaged(options.bus, evStaged);
         } else {
-          // No deterministic execution oracle for this step — the refute is the
-          // only independent check (p.62). Computed once here; this step type has
+          // No deterministic gate for this step — the refute is the only
+          // independent check (p.62). Computed once here; this step type has
           // no evidence-gate emit, so nothing has recorded a transition for it yet.
           refute = await this.maybeRefute(db, ctx, block, action.scoring, null);
         }
@@ -1336,9 +1365,9 @@ export class OrchestratorService {
         let escalateForRefute = false;
         if (!pausing && refute.ran) {
           if (refute.outcome === "refuted" && refute.proposal) {
-            // Exec steps already recorded this veto on the evidence-gate's single
-            // emit above; a non-exec step has no prior emit, so this is its only one.
-            if (!execReq) {
+            // Gated steps already recorded this veto on the evidence-gate's single
+            // emit above; a non-gated step has no prior emit, so this is its only one.
+            if (!completionGate.gated) {
               emitStepComplete(
                 { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
                 {
@@ -1394,7 +1423,7 @@ export class OrchestratorService {
           // facet-bearing transition here. Gated steps already recorded their
           // facet-bearing transition at the evidence gate above, so emitting
           // here would duplicate it — skip them to keep exactly one.
-          if (stateFacet && !execReq) {
+          if (stateFacet && !completionGate.gated) {
             try {
               emitStepComplete(
                 { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
@@ -1441,13 +1470,13 @@ export class OrchestratorService {
           void this.workerTerminate?.(sessionId);
         }
         const stepResult = buildApprovalStepResult(buildStepResultBuilderDeps(this.broker), db, ctx, action.scoring, finishedAt);
-        // Non-exec steps have no evidence-gate emit: their step_complete
+        // Non-gated steps have no evidence-gate emit: their step_complete
         // transition is recorded downstream at advanceToNextStep's non-gated
         // emit site — thread the refute facet through so that single emit
-        // carries it (exec steps already carry it on the evidence-gate emit
-        // above; advanceToNextStep skips its own emit for exec steps).
+        // carries it (gated steps already carry it on the evidence-gate emit
+        // above; advanceToNextStep skips its own emit for gated steps).
         const advanceOptions: RequestNextDecisionOptions =
-          refuteFacet && !execReq
+          refuteFacet && !completionGate.gated
             ? { ...options, refuteByStepRunId: { ...options.refuteByStepRunId, [ctx.stepRun.id]: refuteFacet } }
             : options;
         await this.engine.advanceToNextStep(db, nowWithFirstTimestamp(now, finishedAt), ctx.run.id, {
@@ -1490,7 +1519,10 @@ export class OrchestratorService {
   > {
     if (!this.shadowAsk) return { ran: false };
     const riskClass = stepToolRiskClass(db, ctx.stepRun.id);
-    const gate = shouldRefute(riskClass, evidence ? { oracleAdequacy: evidence.oracleAdequacy } : null);
+    const gate = shouldRefute(
+      riskClass,
+      evidence ? { sensorsRan: evidence.sensorsRun.length > 0, oracleAdequacy: evidence.oracleAdequacy } : null
+    );
     if (!gate.refute) return { ran: false };
     const goal = readGoal(db, ctx.run.goalId);
     let adapterId: ShadowAdapterId | null = null;
@@ -1506,7 +1538,10 @@ export class OrchestratorService {
       goal: { id: goal.id, description: goal.description },
       stepOutput: isRecord(block) ? block : null,
       selfReportedScoring: isRecord(scoring) ? scoring : null,
-      oracle: evidence
+      // `oracle.ran` means an EXECUTION oracle ran — grounding-only evidence
+      // (no sensors) reports ran:false so the refute prompt scopes itself
+      // to the fully unverified surface.
+      oracle: evidence && evidence.sensorsRun.length > 0
         ? {
             ran: true,
             verdict: evidence.verdict,
@@ -1881,7 +1916,9 @@ export class OrchestratorService {
       )
       .get(run.goalId) as GoalRow | undefined;
     if (!goal) return;
-    await this.engine.spawnStepAgent(db, now, { run, stepRun, stepTpl, template, goal }, options);
+    // Recovery-driven respawn: the crashed worker's session row may still read
+    // 'running', so bypass the live-session double-launch guard.
+    await this.engine.spawnStepAgent(db, now, { run, stepRun, stepTpl, template, goal }, options, { force: true });
   }
 
   /**

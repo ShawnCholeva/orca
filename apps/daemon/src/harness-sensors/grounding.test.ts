@@ -1,0 +1,195 @@
+// apps/daemon/src/harness-sensors/grounding.test.ts
+import { describe, expect, it } from "vitest";
+import type { EvidenceFacet, GroundingCheck } from "@orca/contracts";
+import { buildEvidenceFacet, evaluateGrounding, type WorkspaceProbe } from "./grounding.js";
+
+// A probe with a fixed set of existing paths and changed paths. `changed: null`
+// simulates git being unavailable.
+function probe(existing: string[], changed: string[] | null = []): WorkspaceProbe {
+  return {
+    pathExists: (p) => existing.includes(p),
+    changedPaths: () => changed,
+  };
+}
+
+const noPrior = () => null;
+
+function run(checks: GroundingCheck[], output: unknown, p: WorkspaceProbe | null = probe([])) {
+  return evaluateGrounding({ checks, output, readPriorOutput: noPrior, probe: p });
+}
+
+describe("evaluateGrounding — paths_exist", () => {
+  const check: GroundingCheck[] = [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce" }];
+
+  it("passes when every named path exists", () => {
+    const g = run(check, { files_in_scope: ["src/a.ts", "src/b.ts"] }, probe(["src/a.ts", "src/b.ts"]));
+    expect(g.checks[0]!.result).toBe("passed");
+    expect(g.verdict).toBe("passed");
+  });
+
+  it("fails and names the missing paths", () => {
+    const g = run(check, { files_in_scope: ["src/a.ts", "src/nope.ts"] }, probe(["src/a.ts"]));
+    expect(g.checks[0]!.result).toBe("failed");
+    expect(g.checks[0]!.detail).toContain("src/nope.ts");
+    expect(g.checks[0]!.detail).not.toContain("src/a.ts,");
+    expect(g.verdict).toBe("failed");
+  });
+
+  it("skips when the field is absent or there is no workspace", () => {
+    expect(run(check, {}, probe([])).checks[0]!.result).toBe("skipped");
+    expect(run(check, { files_in_scope: ["src/a.ts"] }, null).checks[0]!.result).toBe("skipped");
+  });
+});
+
+describe("evaluateGrounding — paths_changed", () => {
+  const check: GroundingCheck[] = [{ rule: "paths_changed", field: "changes[].file", mode: "enforce" }];
+  const output = { changes: [{ file: "src/edited.ts" }, { file: "src/deleted.ts" }] };
+
+  it("passes for paths in the change set or existing on disk", () => {
+    // edited.ts exists but is not in the diff (committed); deleted.ts is in the diff but gone from disk.
+    const g = run(check, output, probe(["src/edited.ts"], ["src/deleted.ts"]));
+    expect(g.checks[0]!.result).toBe("passed");
+  });
+
+  it("fails for a fabricated path that neither changed nor exists", () => {
+    const g = run(check, { changes: [{ file: "src/fabricated.ts" }] }, probe([], []));
+    expect(g.checks[0]!.result).toBe("failed");
+    expect(g.checks[0]!.detail).toContain("src/fabricated.ts");
+  });
+
+  it("skips when git is unavailable", () => {
+    const g = run(check, { changes: [{ file: "src/x.ts" }] }, probe([], null));
+    expect(g.checks[0]!.result).toBe("skipped");
+  });
+});
+
+describe("evaluateGrounding — member_of", () => {
+  const check: GroundingCheck[] = [
+    { rule: "member_of", field: "chosen_approach", set: "approaches[].name", mode: "enforce" },
+  ];
+
+  it("passes when the value is in the set and fails when it is not", () => {
+    const output = { chosen_approach: "B", approaches: [{ name: "A" }, { name: "B" }] };
+    expect(run(check, output).checks[0]!.result).toBe("passed");
+    const g = run(check, { chosen_approach: "C", approaches: [{ name: "A" }] });
+    expect(g.checks[0]!.result).toBe("failed");
+    expect(g.checks[0]!.detail).toContain("C");
+  });
+});
+
+describe("evaluateGrounding — implies", () => {
+  it("vacuously passes when the antecedent does not hold", () => {
+    const g = run(
+      [{ rule: "implies", when: { field: "verdict", equals: "needs_work" }, then: { field: "concerns", nonEmpty: true }, mode: "enforce" }],
+      { verdict: "sound", concerns: [] },
+    );
+    expect(g.checks[0]!.result).toBe("passed");
+  });
+
+  it("fails when the antecedent holds and the consequent is empty", () => {
+    const g = run(
+      [{ rule: "implies", when: { field: "verdict", equals: "needs_work" }, then: { field: "concerns", nonEmpty: true }, mode: "enforce" }],
+      { verdict: "needs_work", concerns: [] },
+    );
+    expect(g.checks[0]!.result).toBe("failed");
+  });
+
+  it("fails an excludes consequent when a forbidden value is present", () => {
+    const g = run(
+      [{ rule: "implies", when: { field: "verdict", equals: "passed" }, then: { field: "findings[].severity", excludes: ["critical", "high"] }, mode: "enforce" }],
+      { verdict: "passed", findings: [{ severity: "high" }, { severity: "low" }] },
+    );
+    expect(g.checks[0]!.result).toBe("failed");
+    expect(g.checks[0]!.detail).toContain("high");
+  });
+});
+
+describe("evaluateGrounding — subset_of_prior", () => {
+  const check: GroundingCheck[] = [{
+    rule: "subset_of_prior", field: "delivered_requirements",
+    prior: [{ stepId: "execution", field: "completed_requirements" }], mode: "observe",
+  }];
+
+  it("passes when every value appears in the prior step's output (case/space-insensitive)", () => {
+    const g = evaluateGrounding({
+      checks: check,
+      output: { delivered_requirements: ["Login works "] },
+      readPriorOutput: (id) => (id === "execution" ? { completed_requirements: ["login works"] } : null),
+      probe: probe([]),
+    });
+    expect(g.checks[0]!.result).toBe("passed");
+  });
+
+  it("skips when the prior step output is unavailable", () => {
+    const g = evaluateGrounding({
+      checks: check, output: { delivered_requirements: ["x"] },
+      readPriorOutput: () => null, probe: probe([]),
+    });
+    expect(g.checks[0]!.result).toBe("skipped");
+  });
+});
+
+describe("evaluateGrounding — verdict semantics", () => {
+  it("excludes observe-mode failures from the verdict", () => {
+    const g = run(
+      [{ rule: "paths_exist", field: "files_in_scope", mode: "observe" }],
+      { files_in_scope: ["src/nope.ts"] },
+      probe([]),
+    );
+    expect(g.checks[0]!.result).toBe("failed");
+    expect(g.verdict).toBe("passed");
+  });
+
+  it("is skipped when every check skipped", () => {
+    const g = run([{ rule: "paths_exist", field: "missing", mode: "enforce" }], {});
+    expect(g.verdict).toBe("skipped");
+  });
+});
+
+describe("buildEvidenceFacet", () => {
+  const sensors: EvidenceFacet = {
+    sensorsRun: [{ kind: "unit", command: "pnpm test", exitCode: 0, durationMs: 5,
+      result: "passed", summary: "", artifactRef: null }],
+    verdict: "passed", untestedRegions: [], residualRisk: [],
+    oracleAdequacy: { sufficient: true, gaps: [] },
+  };
+  const failedGrounding = {
+    checks: [{ rule: "paths_exist", field: "f", mode: "enforce" as const, result: "failed" as const, detail: "d" }],
+    verdict: "failed" as const,
+  };
+  const passedGrounding = {
+    checks: [{ rule: "paths_exist", field: "f", mode: "enforce" as const, result: "passed" as const, detail: "" }],
+    verdict: "passed" as const,
+  };
+  const skippedGrounding = {
+    checks: [{ rule: "paths_exist", field: "f", mode: "enforce" as const, result: "skipped" as const, detail: "" }],
+    verdict: "skipped" as const,
+  };
+
+  it("returns null when nothing ran", () => {
+    expect(buildEvidenceFacet({ sensors: null, grounding: null })).toBeNull();
+    expect(buildEvidenceFacet({ sensors: null, grounding: skippedGrounding })).toBeNull();
+  });
+
+  it("builds a grounding-only facet with a sensor-free oracle", () => {
+    const f = buildEvidenceFacet({ sensors: null, grounding: passedGrounding })!;
+    expect(f.sensorsRun).toHaveLength(0);
+    expect(f.verdict).toBe("passed");
+    expect(f.oracleAdequacy.sufficient).toBe(false);
+    expect(f.oracleAdequacy.gaps).toHaveLength(0);
+    expect(f.grounding?.verdict).toBe("passed");
+  });
+
+  it("a failed enforce grounding check fails the merged verdict", () => {
+    expect(buildEvidenceFacet({ sensors, grounding: failedGrounding })!.verdict).toBe("failed");
+    expect(buildEvidenceFacet({ sensors: null, grounding: failedGrounding })!.verdict).toBe("failed");
+  });
+
+  it("passing grounding never upgrades a sensor verdict or oracle adequacy", () => {
+    const partial: EvidenceFacet = { ...sensors, verdict: "partial", oracleAdequacy: { sufficient: false, gaps: ["unit_tests: no matching script"] } };
+    const merged = buildEvidenceFacet({ sensors: partial, grounding: passedGrounding })!;
+    expect(merged.verdict).toBe("partial");
+    expect(merged.oracleAdequacy.sufficient).toBe(false);
+    expect(merged.oracleAdequacy.gaps).toEqual(["unit_tests: no matching script"]);
+  });
+});

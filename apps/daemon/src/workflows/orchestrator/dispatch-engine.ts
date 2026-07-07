@@ -74,7 +74,7 @@ import {
 import { postOrchestratorMessage } from "./orchestrator-message.js";
 import { collectPriorStepArtifacts, latestRejectingGate } from "./repair-context.js";
 import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.js";
-import { stepRequiresExecution } from "./requires-execution.js";
+import { stepCompletionGate } from "./requires-execution.js";
 import { deriveReadSet } from "../../harness-state/read-set.js";
 import { probeWorkspaceForSession } from "../../harness-state/workspace-version.js";
 import { conflictPolicyForGoal } from "../../harness-state/conflict-policy.js";
@@ -258,6 +258,12 @@ export function stepDispatchEnablesOneShot(
   }
 }
 
+// decideGate outcome: applied, or an honest no-op reason the route can map
+// (404 run_not_found, 409 gate_evaluation_in_flight, idempotent no_pending_gate).
+export type GateDecisionResult =
+  | { applied: true }
+  | { applied: false; reason: "run_not_found" | "no_pending_gate" | "gate_evaluation_in_flight" };
+
 export class DispatchEngine {
   constructor(
     private readonly broker: Pick<OrchestrationTransportBroker, "propose">,
@@ -304,7 +310,7 @@ export class DispatchEngine {
     // Steps WITH an evidence gate emit their step_complete transition (with the
     // evidence facet) in the approve_step_complete veto block; emitting again
     // here would duplicate it. Only emit here for steps without a gate.
-    if (!stepRequiresExecution(template.guardrails, stepRun.step_template_id)) {
+    if (!stepCompletionGate(template.guardrails, stepTpl).gated) {
       try {
         // No agent session id is in scope here; map the worker session that
         // accrued tokens for this step via sessions.workflow_step_run_id.
@@ -361,6 +367,12 @@ export class DispatchEngine {
    * Resolves the deterministic per-step agent dispatch, persists the selection
    * (idempotent — skipped if the step is already operator-selected), then
    * launches a session for the step with a composed initial prompt.
+   *
+   * Guarded against double-launch at this single choke point: two "spawn
+   * exactly once" tails can reach the same step (a deterministic splitter's
+   * inline route followed by advanceToNextStep's own tail), so a live linked
+   * session means no-op. Provider recovery respawns over a possibly-stale
+   * 'running' row and passes `force` to bypass the guard.
    */
   async spawnStepAgent(
     db: Database.Database,
@@ -372,9 +384,18 @@ export class DispatchEngine {
       template: WorkflowTemplateT;
       goal: GoalRow;
     },
-    options: RequestNextDecisionOptions
+    options: RequestNextDecisionOptions,
+    opts: { force?: boolean } = {}
   ): Promise<void> {
     if (!this.stepDispatch) throw new Error("step dispatch capabilities not configured");
+    if (!opts.force) {
+      const linked = db
+        .prepare(
+          "SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('created','starting','running') LIMIT 1"
+        )
+        .get(ctx.stepRun.id) as { id: string } | undefined;
+      if (linked) return; // a live worker is already on this step — never double-launch
+    }
     const dispatch = await resolveStepDispatch({
       preferences: preferencesForGoal(ctx.stepTpl.agentPreference, ctx.goal.orchestrator_provider),
       isAdapterReady: (id) => this.stepDispatch!.isAdapterReady(id),
@@ -1189,7 +1210,7 @@ export class DispatchEngine {
         { db, now, idFactory: options.idFactory },
         { goalId: goal.id, workflowRunId: run.id, stepRunId: stepRun.id, recommendationId }
       );
-      if (markDone.event) stagedEvents.push(markDone.event);
+      stagedEvents.push(...markDone.events);
       return { decision, recommendationIds: [recommendationId] };
     })();
     publishStaged(options.bus, stagedEvents);
@@ -2291,37 +2312,48 @@ export class DispatchEngine {
    * routeGateDestination. Idempotent: a missing or non-human stash is a no-op so
    * a double-submit cannot double-route.
    */
+  /**
+   * Applies a human gate decision. Every no-op branch reports itself: an
+   * approval is an auditable state transition, and a decide that raced the
+   * in-flight L5 evaluation must tell the caller it did not take effect
+   * (observed live: ok:true masked exactly that race).
+   */
   async decideGate(
     db: Database.Database,
     now: () => string,
     runId: string,
     outcome: "approved" | "rejected",
     options: RequestNextDecisionOptions & { reason?: string } = {}
-  ): Promise<void> {
+  ): Promise<GateDecisionResult> {
     const run = getWorkflowRunById(db, runId);
-    if (!run) return;
+    if (!run) return { applied: false, reason: "run_not_found" };
     const stashRow = db
       .prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id = ?")
       .get(runId) as { pending_gate_route_json: string | null } | undefined;
-    if (!stashRow?.pending_gate_route_json) return; // idempotent no-op
+    // Idempotent no-op (already decided / gate never parked) — but SAY so:
+    // an approval that did not apply must be visible to the caller, not ok:true.
+    if (!stashRow?.pending_gate_route_json) return { applied: false, reason: "no_pending_gate" };
 
     let stash: { awaitingHumanDecision?: boolean; gateNodeId: string; sourceStepRunId: string };
     try {
       stash = JSON.parse(stashRow.pending_gate_route_json);
     } catch {
       db.prepare("UPDATE workflow_runs SET pending_gate_route_json = NULL WHERE id = ?").run(runId);
-      return;
+      return { applied: false, reason: "no_pending_gate" };
     }
-    if (!stash.awaitingHumanDecision) return; // not a human-gated park
+    // The L5 evaluation is still in flight — a human decision raced it and did
+    // NOT take effect; the caller should retry once the gate parks (or the
+    // evaluation routes on its own).
+    if (!stash.awaitingHumanDecision) return { applied: false, reason: "gate_evaluation_in_flight" };
 
     const template = loadRunTemplate(db, run);
-    if (!template) return;
+    if (!template) return { applied: false, reason: "no_pending_gate" };
     const goal = readGoal(db, run.goalId);
     const graph = effectiveGraph(template.graph, template.steps);
     const gateNode = graph.nodes.find((n) => n.id === stash.gateNodeId && n.type === "gate");
     if (!gateNode) {
       db.prepare("UPDATE workflow_runs SET pending_gate_route_json = NULL WHERE id = ?").run(runId);
-      return;
+      return { applied: false, reason: "no_pending_gate" };
     }
 
     const dest = resolveGateNext(graph, gateNode.id, outcome);
@@ -2336,7 +2368,8 @@ export class DispatchEngine {
         `gate ${gateNode.id} resolved to an unroutable destination`,
         options
       );
-      return;
+      // The decision was consumed (the run is now blocked because of it).
+      return { applied: true };
     }
 
     const ledger = latestCommittedLedger(db, run.id);
@@ -2385,6 +2418,7 @@ export class DispatchEngine {
         );
       }
     }
+    return { applied: true };
   }
 
   /**

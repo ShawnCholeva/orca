@@ -428,6 +428,21 @@ describe("ActivityStore", () => {
     expect(again.id).toBe(a.id);
   });
 
+  it("pauseForMarkDone finalizes a live worker turn instead of colliding on the live index", () => {
+    // Live failure (2026-07-07, grounding e2e run #2): the terminal step's
+    // worker tool_use activity was still live when the unsupervised commit
+    // parked mark-done — the insert hit idx_activities_one_live_per_step,
+    // the whole stop-hook transaction threw, and the run stranded silently.
+    // (Run #1 dodged it: an escalation had already finalized the live turn.)
+    const { ctx } = ctxFor(db);
+    openOrUpdateLive(ctx, { ...base, sourceKind: "tool_use", currentText: "Committing release notes", workCategory: null });
+    const a = pauseForMarkDone(ctx, { goalId: "g1", workflowRunId: "r1", stepRunId: "s1", recommendationId: "rec-9" });
+    expect(a.sourceKind).toBe("mark_done_pending");
+    // The worker turn survives as a durable completed card, not an overwrite.
+    const worker = db.prepare("SELECT status FROM activities WHERE step_run_id='s1' AND source_kind='turn_completed'").get() as { status: string };
+    expect(worker.status).toBe("completed");
+  });
+
   it("resolveMarkDoneActivity completes the parked mark-done row", () => {
     const { ctx } = ctxFor(db);
     pauseForMarkDone(ctx, { goalId: "g1", workflowRunId: "r1", stepRunId: "s1", recommendationId: "rec-9" });

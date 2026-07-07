@@ -311,6 +311,23 @@ describe("computeStepMetrics", () => {
     expect(step.quality.oracleSufficientRate).toBeNull();
   });
 
+  it("grounding-only evidence keeps oracleSufficientRate null and surfaces a grounding artifact", () => {
+    // A reasoning step whose completion carries only grounding checks: no
+    // execution oracle ran, so the rate must stay null (unknown), not become 0.
+    const t = sc("g1", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z");
+    t.transition.evidence!.oracleAdequacy = { sufficient: false, gaps: [] };
+    t.transition.evidence!.grounding = {
+      checks: [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce", result: "passed", detail: "" }],
+      verdict: "passed",
+    };
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const [step] = computeStepMetrics({ transitions: [t], stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.quality.oracleSufficientRate).toBeNull();
+    expect(step.verification.tier).toBe("partially_verified");
+    expect(step.verification.artifacts.some((a) => a.source === "grounding")).toBe(true);
+    expect(step.verification.artifacts.some((a) => a.source === "executable")).toBe(false);
+  });
+
   it("failure clusters dedupe step_complete failures to the FINAL attempt (recovered veto not double-counted)", () => {
     const p1 = sc("p1", "r1", "s", "passed", true, "2026-05-01T00:10:00.000Z");
     const ts = [sc("v1", "r1", "s", "failed", true, "2026-05-01T00:00:00.000Z"), p1];
@@ -511,13 +528,15 @@ describe("computeStepMetrics: calibration divergence insight", () => {
     blockedReason: null, templateVersion: 1,
   }];
 
-  it("appends a divergence insight when the step's tier calibration diverges from the assumed confidence", () => {
+  it("reports the adjusted weight when measured calibration diverges and feeds the score", () => {
     const calibration: CalibrationEntry[] = [
       { tier: "ai_reviewed", assumed: 0.55, measured: 0.87, sampleSize: 13, state: "measured" },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
     expect(step.verification.tier).toBe("ai_reviewed");
-    expect(step.insights.join(" ")).toMatch(/upholds 87%.*assumes 55%.*pessimistic/);
+    // measured 0.87 capped at the partly-verified prior (0.7) for a review-only tier.
+    expect(step.insights.join(" ")).toMatch(/upholds 87%.*count for 70%.*was 55%/);
+    expect(step.insights.join(" ")).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 
   it("no divergence insight for a non-matching tier", () => {
@@ -534,5 +553,54 @@ describe("computeStepMetrics: calibration divergence insight", () => {
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
     expect(step.insights.some((i) => i.includes("Independent review upholds"))).toBe(false);
+  });
+});
+
+describe("computeStepMetrics: calibration-aware scoring", () => {
+  // No evidence, refute upheld → ai_reviewed passes (prior 0.55 each).
+  const aiReviewedPasses: TemplateTransition[] = ["r1", "r2", "r3"].map((r, i) => ({
+    templateVersion: 1, stepTemplateId: "s",
+    transition: {
+      id: `a${i}`, goalId: "g", workflowRunId: r, workflowStepRunId: `${r}-s`,
+      boundary: "step_complete", risk: null, stateDeps: null, evidence: null,
+      refute: { verdict: "upheld", triggered_by: ["no_oracle"], risk_class: "low", reason: null, issue_refs: [] },
+      telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
+      createdAt: `2026-05-01T0${i}:00:00.000Z`,
+    },
+  }));
+  const runs: TemplateStepRun[] = aiReviewedPasses.map((t) => ({
+    workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "passed",
+    startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1,
+  }));
+
+  it("a fully-upheld ai_reviewed step scores the capped measured weight (70), not the 0.55 prior", () => {
+    const calibration: CalibrationEntry[] = [
+      { tier: "ai_reviewed", assumed: 0.55, measured: 1.0, sampleSize: 12, state: "measured" },
+    ];
+    const [step] = computeStepMetrics({ transitions: aiReviewedPasses, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
+    expect(step.score).toBe(70);
+    expect(step.verification.tier).toBe("ai_reviewed");
+    expect(step.verification.tierLabel).toBe("Reviewed, not proven");
+  });
+
+  it("without calibration the same step keeps the 0.55 prior (score 55)", () => {
+    const [step] = computeStepMetrics({ transitions: aiReviewedPasses, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.score).toBe(55);
+  });
+
+  it("a small measured sample (below CALIBRATION_SCORE_MIN) does not move the score", () => {
+    const calibration: CalibrationEntry[] = [
+      { tier: "ai_reviewed", assumed: 0.55, measured: 1.0, sampleSize: 6, state: "measured" },
+    ];
+    const [step] = computeStepMetrics({ transitions: aiReviewedPasses, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
+    expect(step.score).toBe(55);
+  });
+
+  it("a low measured rate lowers the score below the prior (too-optimistic case)", () => {
+    const calibration: CalibrationEntry[] = [
+      { tier: "ai_reviewed", assumed: 0.55, measured: 0.3, sampleSize: 12, state: "measured" },
+    ];
+    const [step] = computeStepMetrics({ transitions: aiReviewedPasses, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
+    expect(step.score).toBe(30);
   });
 });

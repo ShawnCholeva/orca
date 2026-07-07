@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { WorkflowGuardrailConfig } from "@orca/contracts";
+import type { GroundingCheck, WorkflowGuardrailConfig, WorkflowStepTemplate } from "@orca/contracts";
 
 const ValidationRuleConfig = z.object({
   appliesToSteps: z.array(z.string()).optional(),
@@ -20,4 +20,16 @@ export function stepRequiresExecution(
     }
   }
   return null;
+}
+
+// The full deterministic completion gate for a step: the sensor ladder (from
+// the validation_rule guardrail) plus the step's declared grounding checks.
+// `gated` decides whether the evidence gate runs at all for this completion.
+export function stepCompletionGate(
+  guardrails: WorkflowGuardrailConfig[],
+  stepTpl: WorkflowStepTemplate
+): { sensors: { required: string[] } | null; grounding: GroundingCheck[]; gated: boolean } {
+  const sensors = stepRequiresExecution(guardrails, stepTpl.id);
+  const grounding = stepTpl.grounding ?? [];
+  return { sensors, grounding, gated: sensors !== null || grounding.length > 0 };
 }

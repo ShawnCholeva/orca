@@ -82,6 +82,16 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       { key: "recommended_tier", type: "string", required: true, enum: ["clarify_first", "ground_and_design", "approach_only"] },
       { key: "rationale", type: "string", required: true },
     ],
+    // The recommended tier must be consistent with the step's OWN readiness
+    // booleans (the mapping its instructions define), and named files must exist.
+    grounding: [
+      { rule: "paths_exist", field: "known_files", mode: "enforce" },
+      { rule: "implies", when: { field: "recommended_tier", equals: "approach_only" }, then: { field: "has_product_intent", equals: true }, mode: "enforce" },
+      { rule: "implies", when: { field: "recommended_tier", equals: "approach_only" }, then: { field: "has_code_understanding", equals: true }, mode: "enforce" },
+      { rule: "implies", when: { field: "recommended_tier", equals: "ground_and_design" }, then: { field: "has_product_intent", equals: true }, mode: "enforce" },
+      { rule: "implies", when: { field: "recommended_tier", equals: "ground_and_design" }, then: { field: "has_code_understanding", equals: false }, mode: "enforce" },
+      { rule: "implies", when: { field: "recommended_tier", equals: "clarify_first" }, then: { field: "has_product_intent", equals: false }, mode: "enforce" },
+    ],
     agentPreference: LIGHT,
   },
   {
@@ -107,13 +117,14 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       { key: "files_in_scope", type: "array", itemType: "string", required: true },
       { key: "risks", type: "array", itemType: "string", required: false },
     ],
+    grounding: [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce" }],
     agentPreference: REASONING,
   },
   {
     id: "proposal", ordinal: 3, name: "Proposal",
     completionPolicy: "reasoning",
     instructions:
-      "Propose two or three genuinely different approaches grounded in the research, each with explicit tradeoffs, then lead with your recommended one and the reasoning behind it. Apply YAGNI ruthlessly — cut any scope, abstraction, or flexibility the goal does not require. Stay pre-implementation: make no code changes. When the choice between approaches is the user's to make (a product, scope, or UX fork), pause and ask with the options and your recommendation rather than selecting silently. Also produce an ordered task_plan that breaks the chosen approach into the steps needed to realize it — a single item for a small feature, several for a large initiative; the executing agent will work through it. If you are the entry step and no Research ran before you, do a quick targeted look at the files in the Triage brief to ground yourself before proposing.",
+      "Propose two or three genuinely different approaches grounded in the research, each with explicit tradeoffs, then lead with your recommended one and the reasoning behind it. Apply YAGNI ruthlessly — cut any scope, abstraction, or flexibility the goal does not require. Stay pre-implementation: make no code changes. When the choice between approaches is the user's to make (a product, scope, or UX fork), pause and ask with the options and your recommendation rather than selecting silently. Set chosen_approach to the exact name of the approach you chose — it must match one of your approaches' name values verbatim, not a description of it. Also produce an ordered task_plan that breaks the chosen approach into the steps needed to realize it — a single item for a small feature, several for a large initiative; the executing agent will work through it. If you are the entry step and no Research ran before you, do a quick targeted look at the files in the Triage brief to ground yourself before proposing.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       {
@@ -133,6 +144,7 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
         ],
       },
     ],
+    grounding: [{ rule: "member_of", field: "chosen_approach", set: "approaches[].name", mode: "enforce" }],
     agentPreference: REASONING,
   },
   {
@@ -144,6 +156,9 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       { key: "summary", type: "string", required: true },
       { key: "concerns", type: "array", itemType: "string", required: true },
       { key: "verdict", type: "string", required: true, enum: ["sound", "needs_work"] },
+    ],
+    grounding: [
+      { rule: "implies", when: { field: "verdict", equals: "needs_work" }, then: { field: "concerns", nonEmpty: true }, mode: "enforce" },
     ],
     agentPreference: REASONING,
   },
@@ -203,6 +218,8 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       { key: "assumptions", type: "array", itemType: "string", required: false },
       { key: "handoff", type: "string", required: true },
     ],
+    // Claimed change list must reconcile against actual workspace git state.
+    grounding: [{ rule: "paths_changed", field: "changes[].file", mode: "enforce" }],
     agentPreference: EXECUTION,
   },
   {
@@ -256,6 +273,12 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       { key: "blockers", type: "array", itemType: "string", required: false },
       { key: "handoff", type: "string", required: true },
     ],
+    grounding: [
+      // A "passed" verdict cannot coexist with unresolved critical/high issues.
+      { rule: "implies", when: { field: "verdict", equals: "passed" }, then: { field: "issues[].severity", excludes: ["critical", "high"] }, mode: "enforce" },
+      // Requirement refs are free text — observe the match discipline before enforcing.
+      { rule: "subset_of_prior", field: "requirement_results[].requirement_ref", prior: [{ stepId: "execution", field: "completed_requirements" }, { stepId: "execution", field: "changes[].requirement_refs" }], mode: "observe" },
+    ],
     agentPreference: REASONING,
   },
   {
@@ -284,6 +307,10 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       { key: "follow_up_work", type: "array", itemType: "string", required: false },
       { key: "blockers", type: "array", itemType: "string", required: false },
       { key: "handoff", type: "string", required: true },
+    ],
+    grounding: [
+      // Free-text requirement echoes — observe the match discipline before enforcing.
+      { rule: "subset_of_prior", field: "delivered_requirements", prior: [{ stepId: "execution", field: "completed_requirements" }], mode: "observe" },
     ],
     agentPreference: LIGHT,
   },
@@ -809,8 +836,17 @@ export const BUILTIN_TEMPLATE_CATALOG: BuiltInTemplateDefinition[] = [
     bestFor: "Most engineering goals: it adapts how much up-front design happens to how clear the goal already is.",
     // v6: route splitter routes deterministically from Triage's recommended_tier
     // (branchKey) instead of a second LLM evaluation.
-    version: 6, category: CATEGORY, recommended: true,
-    steps: ADAPTIVE_STEPS, guardrails: [APPROVAL_MARK_DONE, validationRule(["execution"]), CONTEXT_RULE], graph: ADAPTIVE_GRAPH,
+    // v8: validate_build joins the evidence gate (the sensor ladder runs at
+    // release validation too), and every step with a mechanical referent
+    // declares deterministic grounding checks. Published as 8, not 7: learning-
+    // applied proposals write forward versions on live installations, and the
+    // version-guarded boot upgrade only lands when the catalog version exceeds
+    // the installed one — 7 was already occupied by an applied proposal.
+    // v9: Proposal's instructions state the exact-name contract its member_of
+    // grounding check enforces (a live run showed a descriptive chosen_approach
+    // being falsely vetoed twice before the agent inferred the contract).
+    version: 9, category: CATEGORY, recommended: true,
+    steps: ADAPTIVE_STEPS, guardrails: [APPROVAL_MARK_DONE, validationRule(["execution", "validate_build"]), CONTEXT_RULE], graph: ADAPTIVE_GRAPH,
   },
   {
     id: "orca/bug-triage-fix", name: "Bug Triage & Fix",

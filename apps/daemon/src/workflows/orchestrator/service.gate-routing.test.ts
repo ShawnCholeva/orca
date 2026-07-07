@@ -403,15 +403,41 @@ describe("OrchestratorService gate routing", () => {
     const engine = makeEngine(fakeStepBroker());
 
     await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
-    await engine.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
-    // Second submit is a no-op (stash already cleared).
-    await engine.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
+    const first = await engine.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
+    // Second submit is a no-op (stash already cleared) — and SAYS so.
+    const second = await engine.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory });
 
+    expect(first).toEqual({ applied: true });
+    expect(second).toEqual({ applied: false, reason: "no_pending_gate" });
     const doneRuns = db
       .prepare("SELECT attempt FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = 'done'")
       .all() as Array<{ attempt: number }>;
     expect(doneRuns).toHaveLength(1);
     expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(1);
+  });
+
+  it("decideGate reports the truth instead of ok on every silent no-op branch", async () => {
+    // Live race (2026-07-07 e2e): a decide POSTed while the L5 gate evaluation
+    // was still in flight returned ok:true yet did nothing — the caller had no
+    // signal to retry. Approvals must be auditable state transitions.
+    const { db, bus, idFactory } = setupHarness();
+    setSupervisionMode(db, "unsupervised", NOW);
+    seedRunAtValidation(db);
+    const engine = makeEngine(fakeStepBroker());
+
+    expect(await engine.decideGate(db, () => NOW, "missing-run", "approved", { bus, idFactory }))
+      .toEqual({ applied: false, reason: "run_not_found" });
+
+    // No stash yet (gate not reached) → no pending gate.
+    expect(await engine.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory }))
+      .toEqual({ applied: false, reason: "no_pending_gate" });
+
+    // Simulate the in-flight L5 evaluation stash (not a human park).
+    db.prepare("UPDATE workflow_runs SET pending_gate_route_json = ? WHERE id = 'run-1'").run(
+      JSON.stringify({ awaitingHumanDecision: false, gateNodeId: "gate", sourceStepRunId: "step-validation" })
+    );
+    expect(await engine.decideGate(db, () => NOW, "run-1", "approved", { bus, idFactory }))
+      .toEqual({ applied: false, reason: "gate_evaluation_in_flight" });
   });
 
   it("confirmGate does not auto-route a human-gated park", async () => {

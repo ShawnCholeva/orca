@@ -33,6 +33,26 @@ describe("refuteStepCompletion", () => {
     expect(await refuteStepCompletion(ask(JSON.stringify({ verdict: "no" })), { refuteSessionKey: "k", adapterId: "claude-code", request: REQ, timeoutMs: 1000 })).toBeNull();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("[refute]"));
   });
+  it("clamps overlong free-text fields instead of discarding the verdict", async () => {
+    // Live failure mode (2026-07-07): the reviewer answered "upheld" with a
+    // >2000-char reasoning; the schema cap rejected the whole proposal → null →
+    // "unavailable" → a needless human pause. Reasoning/reason are audit trail,
+    // not gate inputs — truncate, keep the verdict.
+    const p = {
+      reasoning: "x".repeat(5000), verdict: "upheld", reason: "y".repeat(3000),
+      issueRefs: ["z".repeat(300)], inputsConsidered: ["w".repeat(900)],
+    };
+    const r = await refuteStepCompletion(ask(JSON.stringify(p)), { refuteSessionKey: "goal-1::refute", adapterId: "claude-code", request: REQ, timeoutMs: 1000 });
+    expect(r?.verdict).toBe("upheld");
+    expect(r!.reasoning.length).toBeLessThanOrEqual(2000);
+    expect(r!.reason.length).toBeLessThanOrEqual(1024);
+    expect(r!.issueRefs[0]!.length).toBeLessThanOrEqual(128);
+    expect(r!.inputsConsidered[0]!.length).toBeLessThanOrEqual(512);
+  });
+  it("still rejects a genuinely malformed proposal (bad verdict)", async () => {
+    const p = { reasoning: "r", verdict: "maybe", reason: "", issueRefs: [], inputsConsidered: [] };
+    expect(await refuteStepCompletion(ask(JSON.stringify(p)), { refuteSessionKey: "k", adapterId: "claude-code", request: REQ, timeoutMs: 1000 })).toBeNull();
+  });
   it("uses the isolated refute session key (not the bare goalId)", async () => {
     const seen: string[] = [];
     const spy: ShadowAsk = { async ask(key: string) { seen.push(key); return { text: JSON.stringify({ reasoning: "no concrete failure found", verdict: "upheld", reason: "ok", issueRefs: [], inputsConsidered: [] }) }; } };

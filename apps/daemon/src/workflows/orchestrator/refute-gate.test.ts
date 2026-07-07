@@ -29,9 +29,13 @@ describe("stepToolRiskClass", () => {
 
 describe("shouldRefute", () => {
   it("fires on high tool-risk, on null evidence, and on oracle gaps; skips a well-verified low-risk step", () => {
-    expect(shouldRefute("high", { oracleAdequacy: { gaps: [] } })).toEqual({ refute: true, triggers: ["high_risk"] });
+    expect(shouldRefute("high", { sensorsRan: true, oracleAdequacy: { gaps: [] } })).toEqual({ refute: true, triggers: ["high_risk"] });
     expect(shouldRefute("low", null)).toEqual({ refute: true, triggers: ["no_oracle"] });
-    expect(shouldRefute("low", { oracleAdequacy: { gaps: ["integration"] } })).toEqual({ refute: true, triggers: ["weak_oracle"] });
-    expect(shouldRefute("low", { oracleAdequacy: { gaps: [] } })).toEqual({ refute: false, triggers: [] });
+    expect(shouldRefute("low", { sensorsRan: true, oracleAdequacy: { gaps: ["integration"] } })).toEqual({ refute: true, triggers: ["weak_oracle"] });
+    expect(shouldRefute("low", { sensorsRan: true, oracleAdequacy: { gaps: [] } })).toEqual({ refute: false, triggers: [] });
+  });
+
+  it("treats grounding-only evidence (no sensors ran) as no execution oracle", () => {
+    expect(shouldRefute("low", { sensorsRan: false, oracleAdequacy: { gaps: [] } })).toEqual({ refute: true, triggers: ["no_oracle"] });
   });
 });

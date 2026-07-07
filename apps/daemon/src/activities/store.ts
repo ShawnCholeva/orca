@@ -499,10 +499,22 @@ export function resolveGateDecisionActivity(
 export function pauseForMarkDoneInTx(
   ctx: Pick<ActivityStoreCtx, "db" | "now" | "idFactory">,
   input: { goalId: string; workflowRunId: string; stepRunId: string; recommendationId: string }
-): { activity: ActivityT; event: DomainEvent | undefined } {
+): { activity: ActivityT; events: DomainEvent[] } {
   const now = currentTime(ctx as ActivityStoreCtx);
+  const events: DomainEvent[] = [];
   const existing = getLiveForStepRun(ctx.db, input.stepRunId);
-  if (existing?.sourceKind === "mark_done_pending") return { activity: existing, event: undefined }; // idempotent re-park
+  if (existing?.sourceKind === "mark_done_pending") return { activity: existing, events }; // idempotent re-park
+  // Finalize any other live turn BEFORE inserting the park (same discipline as
+  // pauseForConfirmation): on the unsupervised happy path the terminal step's
+  // worker tool_use activity is still live here, and inserting over it collides
+  // on the one-live-per-step index — which threw inside the advance transaction
+  // and stranded the run (live e2e, 2026-07-07).
+  if (existing !== undefined) {
+    finalizeTurnRow(ctx.db, existing.id, deriveTurnSummary(existing.currentText), null, now);
+    const finalized = getActivityById(ctx.db, existing.id);
+    if (finalized === undefined) throw new Error(`Activity disappeared: ${existing.id}`);
+    events.push(insertActivityChangedEvent(ctx.db, finalized, now));
+  }
   const id = nextActivityId(ctx as ActivityStoreCtx);
   const turnOrdinal = nextTurnOrdinal(ctx.db, input.stepRunId);
   const text = "Final step output produced — approve to complete the run.";
@@ -518,7 +530,8 @@ export function pauseForMarkDoneInTx(
   const inserted = getActivityById(ctx.db, id);
   if (inserted === undefined) throw new Error(`Activity insert failed: ${id}`);
   const event = insertActivityChangedEvent(ctx.db, inserted, now);
-  return { activity: inserted, event };
+  if (event) events.push(event);
+  return { activity: inserted, events };
 }
 
 // Open (or reuse) a persisted mark-done activity awaiting the human's
@@ -529,8 +542,8 @@ export function pauseForMarkDone(
   ctx: ActivityStoreCtx,
   input: { goalId: string; workflowRunId: string; stepRunId: string; recommendationId: string }
 ): ActivityT {
-  const { activity, event } = ctx.db.transaction(() => pauseForMarkDoneInTx(ctx, input))();
-  publishActivityChanged(ctx, event);
+  const { activity, events } = ctx.db.transaction(() => pauseForMarkDoneInTx(ctx, input))();
+  for (const event of events) publishActivityChanged(ctx, event);
   return activity;
 }
 

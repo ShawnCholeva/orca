@@ -12,9 +12,11 @@ export function stepRunIdsByTemplateId(
   db: Database.Database,
   workflowRunId: string
 ): Record<string, string> {
+  // Ascending by start so a re-run step (backward routing) resolves to its
+  // LATEST attempt — later rows overwrite earlier ones in the map.
   const rows = db
     .prepare(
-      "SELECT step_template_id, id FROM workflow_step_runs WHERE workflow_run_id = ?"
+      "SELECT step_template_id, id FROM workflow_step_runs WHERE workflow_run_id = ? ORDER BY started_at ASC, rowid ASC"
     )
     .all(workflowRunId) as Array<{ step_template_id: string; id: string }>;
   const out: Record<string, string> = {};

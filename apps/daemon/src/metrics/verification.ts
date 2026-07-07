@@ -6,10 +6,13 @@ export const TIER_CONFIDENCE: Record<VerificationTier, number> = {
 };
 
 // Calibration: how well the assumed confidences above (designed priors) match what
-// independent review actually finds. Pure, display-only — never feeds a score.
+// independent review actually finds. Pure. Below CALIBRATION_SCORE_MIN claims the
+// rate is display-only; at or above it, effectiveTierConfidence feeds the measured
+// rate into scoring in place of the prior.
 export const CALIBRATION_MIN = 5; // min independently-concluded claims per tier before we'll report a rate
 export const CALIBRATION_COVERAGE = 0.5; // evidence tiers: refutes-run / passes floor before we trust the rate
 export const CALIBRATION_DIVERGENCE = 0.2;
+export const CALIBRATION_SCORE_MIN = 10; // min measured claims before calibration adjusts scoring
 
 export type CalibrationEntry = {
   tier: VerificationTier;
@@ -36,6 +39,13 @@ export function classifyTier(t: TemplateTransition): VerificationTier {
     const anySensors = ev.sensorsRun.length > 0;
     if (anySensors && ev.oracleAdequacy.sufficient) return "verified_executed";
     if (anySensors) return "partially_verified";
+    // No execution — but a passed enforce-mode grounding check means part of
+    // the output was mechanically verified: partly verified, never run-and-
+    // tested (that branch requires sensors above).
+    const groundingRan = (ev.grounding?.checks ?? []).some(
+      (c) => c.mode === "enforce" && c.result !== "skipped"
+    );
+    if (groundingRan && ev.grounding!.verdict === "passed") return "partially_verified";
     // Evidence present but nothing executed → treat as a review-grade signal.
     return "ai_reviewed";
   }
@@ -58,15 +68,27 @@ export function strongestTier(tiers: VerificationTier[]): VerificationTier {
 export function buildArtifacts(input: {
   hasEvidence: boolean; anySensors: boolean; oracleSufficientRate: number;
   oracleGaps: string[]; hasRefute: boolean; falseAccept: number;
+  hasGrounding: boolean; groundingFailed: boolean;
 }): EvidenceArtifact[] {
   const out: EvidenceArtifact[] = [];
-  if (input.hasEvidence) {
+  // Grounding-only evidence replaces the old "nothing was executed" placeholder
+  // with its own artifact below; evidence with neither keeps the placeholder.
+  if (input.hasEvidence && (input.anySensors || !input.hasGrounding)) {
     out.push({
       source: "executable",
       verifies: input.anySensors ? "the checks that ran passed" : "nothing was executed",
       cannotVerify: input.oracleGaps.length ? input.oracleGaps.join("; ") : "untested regions",
       confidence: input.oracleSufficientRate,
       verdict: input.anySensors ? (input.oracleSufficientRate >= 1 ? "pass" : "partial") : "inconclusive",
+    });
+  }
+  if (input.hasGrounding) {
+    out.push({
+      source: "grounding",
+      verifies: "checkable claims in the output (paths, references, internal consistency) were mechanically verified",
+      cannotVerify: "semantic correctness — nothing was executed",
+      confidence: TIER_CONFIDENCE.partially_verified,
+      verdict: input.groundingFailed ? "fail" : "pass",
     });
   }
   if (input.hasRefute) {
@@ -111,10 +133,24 @@ function finalCompletions(ts: TemplateTransition[]): TemplateTransition[] {
 const CALIBRATION_TIERS: VerificationTier[] = ["verified_executed", "partially_verified", "ai_reviewed", "self_reported"];
 const EVIDENCE_TIERS = new Set<VerificationTier>(["verified_executed", "partially_verified"]);
 
+// Scoring weight for a tier: the designed prior until independent measurement is
+// strong enough (measured state, ≥ CALIBRATION_SCORE_MIN claims), then the measured
+// survival rate. Non-evidence tiers are capped at the partially_verified prior —
+// consistent independent review can raise trust toward partly-verified, but never
+// to run-and-tested, because nothing was executed. A low measured rate lowers the
+// weight below the prior symmetrically.
+export function effectiveTierConfidence(tier: VerificationTier, calibration?: CalibrationEntry[]): number {
+  const prior = TIER_CONFIDENCE[tier];
+  const cal = calibration?.find((c) => c.tier === tier);
+  if (!cal || cal.state !== "measured" || cal.measured == null || cal.sampleSize < CALIBRATION_SCORE_MIN) return prior;
+  return EVIDENCE_TIERS.has(tier) ? cal.measured : Math.min(cal.measured, TIER_CONFIDENCE.partially_verified);
+}
+
 // Per tier: how often does an independently-concluded claim actually survive, versus
 // the designed prior (TIER_CONFIDENCE) assumed for that tier? "Claims" excludes
 // completions with no independent conclusion at all (an evidence-failed completion
-// with no refute run is weak evidence, not a concluded overturn) — display-only, pure.
+// with no refute run is weak evidence, not a concluded overturn). Pure; consumed for
+// display and, once measured over enough claims, by effectiveTierConfidence scoring.
 export function computeCalibration(transitions: TemplateTransition[]): CalibrationEntry[] {
   const finals = finalCompletions(transitions);
   const byTier = new Map<VerificationTier, TemplateTransition[]>();

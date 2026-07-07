@@ -37,20 +37,23 @@ function seed(db: Database.Database) {
   db.prepare(`UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-opus-4-8' WHERE id = 'g'`).run();
   db.prepare(`INSERT INTO workflow_templates (id,name,description,version,is_built_in,is_locked,steps_json,guardrails_json,created_at,updated_at)
               VALUES ('tpl','Brainstorm','',1,1,1,'[{"id":"s1","name":"Generate","instructions":"Generate a proposal."}]','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')`).run();
-  db.prepare(`INSERT INTO workflow_runs (id,goal_id,template_id,template_version,status,current_step_run_id,blocked_reason,started_at,finished_at)
-              VALUES ('run1','g','tpl',1,'completed',NULL,NULL,'${anchorDay}T00:00:00.000Z','${anchorDay}T01:00:00.000Z')`).run();
+  // Six DISTINCT runs so each transition is a FINAL completion of its run: the
+  // four invalid_output failures form an R2 cluster (instruction-addressable),
+  // which is the rule this instruction-proposal lifecycle exercises.
   for (let i = 0; i < 6; i++) {
     const verdict = i < 2 ? "passed" : "failed";
     const status = verdict === "passed" ? "succeeded" : "failed";
     const fc = verdict === "passed" ? "null" : '"invalid_output"';
+    db.prepare(`INSERT INTO workflow_runs (id,goal_id,template_id,template_version,status,current_step_run_id,blocked_reason,started_at,finished_at)
+                VALUES (?,'g','tpl',1,'completed',NULL,NULL,'${anchorDay}T00:00:00.000Z','${anchorDay}T01:00:00.000Z')`).run(`run${i + 1}`);
     db.prepare(`INSERT INTO workflow_step_runs (id,goal_id,workflow_run_id,step_template_id,ordinal,attempt,status,satisfied_exit_criteria_json,outstanding_exit_criteria_json,blocked_reason,started_at,finished_at,fingerprint)
-                VALUES (?, 'g','run1','s1',0,?,?,'[]','[]',NULL,'${anchorDay}T00:00:00.000Z','${anchorDay}T00:10:00.000Z',?)`)
-      .run(`sr${i}`, i + 1, verdict === "passed" ? "passed" : "failed", `fp${i}`);
+                VALUES (?, 'g',?,'s1',0,1,?,'[]','[]',NULL,'${anchorDay}T00:00:00.000Z','${anchorDay}T00:10:00.000Z',?)`)
+      .run(`sr${i}`, `run${i + 1}`, verdict === "passed" ? "passed" : "failed", `fp${i}`);
     db.prepare(`INSERT INTO harness_transitions (id,goal_id,workflow_run_id,workflow_step_run_id,boundary,risk_json,evidence_json,state_deps_json,telemetry_json,created_at)
-                VALUES (?, 'g','run1',?, 'step_complete',NULL,
+                VALUES (?, 'g',?,?, 'step_complete',NULL,
                   ?, NULL,
                   ?, '${anchorDay}T00:10:00.000Z')`)
-      .run(`ht${i}`, `sr${i}`,
+      .run(`ht${i}`, `run${i + 1}`, `sr${i}`,
         `{"sensorsRun":[],"verdict":"${verdict}","untestedRegions":[],"residualRisk":[],"oracleAdequacy":{"sufficient":true,"gaps":[]}}`,
         `{"cost":null,"latency_ms":100,"model":null,"provider_id":null,"provider_version":null,"prompt_ref":null,"raw_output_ref":null,"rejected_alternatives":[],"human_interventions":[],"outcome":{"status":"${status}","failure_code":${fc}}}`);
   }

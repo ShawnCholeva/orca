@@ -2,7 +2,7 @@ import type { HarnessMetrics } from "../harness-metrics/usecases.js";
 import { computeHarnessMetricsFromTransitions } from "../harness-metrics/usecases.js";
 import type { MetricPeriod, TemplateMetricsSummary, StepMetrics } from "@orca/contracts";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
-import { classifyTier, strongestTier, TIER_CONFIDENCE, TIER_LABEL, buildArtifacts, computeCalibration, CALIBRATION_DIVERGENCE } from "./verification.js";
+import { classifyTier, strongestTier, TIER_LABEL, buildArtifacts, computeCalibration, CALIBRATION_DIVERGENCE, CALIBRATION_SCORE_MIN, effectiveTierConfidence } from "./verification.js";
 import type { CalibrationEntry } from "./verification.js";
 import { labelForFailure } from "./failure-labels.js";
 
@@ -187,9 +187,16 @@ export function deriveInsights(step: StepMetrics, calibration?: CalibrationEntry
   if (top && top.count > 0) out.push(`Most common problem: ${top.label.toLowerCase()} (${top.count}×).`);
   if ((step.cost.meanRetries ?? 0) >= 1.5) out.push("Loops between failed attempts — high retry churn.");
   const cal = calibration?.find((c) => c.tier === step.verification.tier);
-  if (cal && cal.state === "measured" && cal.sampleSize >= 10 && Math.abs(cal.measured! - cal.assumed) > CALIBRATION_DIVERGENCE) {
+  if (cal && cal.state === "measured" && cal.sampleSize >= CALIBRATION_SCORE_MIN && Math.abs(cal.measured! - cal.assumed) > CALIBRATION_DIVERGENCE) {
     const measured = cal.measured!;
-    out.push(`Independent review upholds ${Math.round(measured * 100)}% of this step's passes; the score assumes ${Math.round(cal.assumed * 100)}% — scores here may be too ${measured > cal.assumed ? "pessimistic" : "optimistic"}.`);
+    const effective = effectiveTierConfidence(step.verification.tier, calibration);
+    if (effective !== cal.assumed) {
+      // The measured rate feeds the score (effectiveTierConfidence) — say so instead
+      // of warning about a divergence that has already been corrected.
+      out.push(`Independent review upholds ${Math.round(measured * 100)}% of this step's passes, so passes here now count for ${Math.round(effective * 100)}% (built-in assumption was ${Math.round(cal.assumed * 100)}%).`);
+    } else {
+      out.push(`Independent review upholds ${Math.round(measured * 100)}% of this step's passes; the score assumes ${Math.round(cal.assumed * 100)}% — scores here may be too ${measured > cal.assumed ? "pessimistic" : "optimistic"}.`);
+    }
   }
   return out;
 }
@@ -299,7 +306,7 @@ export function computeStepMetrics(input: {
     const hardFailedFinals = finals.filter((r) =>
       FAILED_STATUSES.has(r.status) && (!completeRunIds.has(r.workflowRunId) || supersededByHardFail.has(r.workflowRunId)));
     const contribution = (t: (typeof stepCompletes)[number]) =>
-      vFail(t) ? 0 : TIER_CONFIDENCE[tierByCompletion.get(t)!];
+      vFail(t) ? 0 : effectiveTierConfidence(tierByCompletion.get(t)!, input.calibration);
     const scoreOver = (completes: typeof finalStepCompletes, hardFails: number): { n: number; value: number | null } => {
       const conc = completes.filter((t) =>
         tierByCompletion.get(t) !== "unverified" && !supersededByHardFail.has(t.transition.workflowRunId ?? ""));
@@ -354,10 +361,14 @@ export function computeStepMetrics(input: {
     // No sensors ran → null (unknown), NEVER 1. Absence of a check is not a perfect check.
     const sensorPassRate = allSensors.length === 0 ? null :
       allSensors.filter((s) => s.result === "passed").length / allSensors.length;
-    // No evidence completions → null (unknown), NEVER 0: absence of an oracle is
-    // not the same fact as an inadequate oracle. (Mirrors sensorPassRate.)
-    const oracleSufficientRate = evidenceCompletes.length === 0 ? null :
-      evidenceCompletes.filter((t) => t.transition.evidence!.oracleAdequacy.sufficient).length / evidenceCompletes.length;
+    // Oracle adequacy is an EXECUTION-oracle fact, so the denominator is the
+    // sensor-bearing completions only — grounding-only evidence (no sensors)
+    // must keep the rate null (unknown/inapplicable), NEVER an explicit 0.
+    const sensorCompletes = evidenceCompletes.filter((t) => t.transition.evidence!.sensorsRun.length > 0);
+    const oracleSufficientRate = sensorCompletes.length === 0 ? null :
+      sensorCompletes.filter((t) => t.transition.evidence!.oracleAdequacy.sufficient).length / sensorCompletes.length;
+    const groundingCompletes = evidenceCompletes.filter((t) =>
+      (t.transition.evidence!.grounding?.checks ?? []).some((c) => c.result !== "skipped"));
 
     // CHANNEL 2 — cost / trajectory.
     const latencies = ts.map((t) => t.transition.telemetry?.latency_ms).filter((x): x is number => typeof x === "number");
@@ -476,6 +487,8 @@ export function computeStepMetrics(input: {
           hasEvidence: evidenceCompletes.length > 0, anySensors: allSensors.length > 0,
           oracleSufficientRate: oracleSufficientRate ?? 0, oracleGaps: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.oracleAdequacy.gaps)),
           hasRefute: finalStepCompletes.some((t) => t.transition.refute != null), falseAccept,
+          hasGrounding: groundingCompletes.length > 0,
+          groundingFailed: groundingCompletes.some((t) => t.transition.evidence!.grounding!.verdict === "failed"),
         }),
         recentRefuteReasons,
       },

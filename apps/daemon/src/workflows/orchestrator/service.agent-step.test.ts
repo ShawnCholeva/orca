@@ -315,18 +315,21 @@ const flushDeferred = () =>
   new Promise<void>((resolve) => setImmediate(() => setImmediate(() => resolve())));
 
 /** Seed a workflow with an agent-capable template step */
-function setupAgentStepRun(db: Database.Database, opts: { guardrailsJson?: string } = {}) {
-  const step = makeStep({
-    id: "implement",
-    ordinal: 0,
-    name: "Implement",
-    instructions: "Write the implementation.",
-    outputSchema: [{ key: "result", type: "string", required: true }],
-    agentPreference: [
-      { adapterId: "claude-code", modelId: "claude-haiku-4-5" },
-      { adapterId: "codex", modelId: "gpt-5-codex" },
-    ],
-  });
+function setupAgentStepRun(db: Database.Database, opts: { guardrailsJson?: string; grounding?: unknown[] } = {}) {
+  const step = {
+    ...makeStep({
+      id: "implement",
+      ordinal: 0,
+      name: "Implement",
+      instructions: "Write the implementation.",
+      outputSchema: [{ key: "result", type: "string", required: true }],
+      agentPreference: [
+        { adapterId: "claude-code", modelId: "claude-haiku-4-5" },
+        { adapterId: "codex", modelId: "gpt-5-codex" },
+      ],
+    }),
+    ...(opts.grounding ? { grounding: opts.grounding } : {}),
+  };
 
   db.prepare(
     "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
@@ -1045,6 +1048,36 @@ describe("OrchestratorService agent step", () => {
     const result = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
     expect(result.recommendationIds).toHaveLength(0);
     expect(launchFn).not.toHaveBeenCalled();
+  });
+
+  it("spawnStepAgent itself no-ops when a live session is already linked to the step", async () => {
+    // Live double-spawn (2026-07-07): a deterministic splitter's inline-route
+    // tail launched the destination step's agent, then advanceToNextStep's
+    // "spawn exactly once" tail launched it AGAIN 7s later — two workers ran
+    // the same step. The guard belongs in spawnStepAgent (the single choke
+    // point), not in each caller pairing.
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-2" }));
+    const { engine } = makeAgentService(makeLauncher(launchFn));
+    db.prepare(
+      "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES ('sess-live', 'goal-1', 'ws-1', 'claude-code', 'Session', 'running', ?, 'step-1')"
+    ).run(NOW);
+
+    const run = { id: "run-1", goalId: "goal-1", templateId: "orca/engineering", templateVersion: 1, status: "active", currentStepRunId: "step-1" };
+    const stepRun = db.prepare("SELECT * FROM workflow_step_runs WHERE id = 'step-1'").get() as never;
+    const template = { id: "orca/engineering", steps: [db.prepare("SELECT steps_json FROM workflow_templates WHERE id='orca/engineering'").pluck().get()].flatMap((j) => JSON.parse(j as string)), guardrails: [] };
+    const goal = db.prepare("SELECT id, title, description, orchestrator_provider, orchestrator_model FROM goals WHERE id='goal-1'").get() as never;
+    const ctx = { run, stepRun, stepTpl: (template.steps as Array<{ id: string }>).find((s) => s.id === (stepRun as { step_template_id: string }).step_template_id), template, goal } as never;
+
+    await engine.spawnStepAgent(db, () => NOW, ctx, { bus, idFactory });
+    expect(launchFn).not.toHaveBeenCalled();
+
+    // Provider recovery legitimately respawns over a stale 'running' row: force bypasses the guard.
+    await engine.spawnStepAgent(db, () => NOW, ctx, { bus, idFactory }, { force: true });
+    expect(launchFn).toHaveBeenCalledOnce();
   });
 });
 
@@ -3991,6 +4024,102 @@ describe("OrchestratorService evidence veto (deterministic)", () => {
     // (c) de-dup: the advance emission is suppressed for this gated step, so the
     // step_complete transition for step-1 is recorded exactly once.
     expect(stepComplete).toHaveLength(1);
+  });
+});
+
+describe("OrchestratorService evidence gate (grounding checks)", () => {
+  const approveScoring = {
+    reasoning: "output passes validation with no blocking issues",
+    successScore: 0.8,
+    quality: {
+      outputCompleteness: 0.8,
+      outputCorrectness: 0.8,
+      instructionAdherence: 0.8,
+      downstreamReadiness: 0.8,
+      riskLevel: 0.2,
+    },
+    reason: "ok",
+    handoffReady: true,
+  };
+  const grounding = [{ rule: "paths_exist", field: "result", mode: "enforce" }];
+
+  it("vetoes a completion whose output names a nonexistent path and names it in the revise feedback", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { grounding }); // no validation_rule → grounding-only gate
+    seedWorkspaceWithTypecheck(db, 0); // real temp dir workspace
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+
+    const deliver = vi.fn(async (_sessionId: string, _text: string) => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete", scoring: approveScoring }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "src/definitely-missing.ts" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    expect(stepOutputCount(db)).toBe(0); // did not complete
+    await flushDeferred();
+    expect(deliver).toHaveBeenCalled();
+    const feedback = deliver.mock.calls[0]![1] as string;
+    expect(feedback).toContain("grounding paths_exist");
+    expect(feedback).toContain("src/definitely-missing.ts");
+
+    const transitions = listTransitionsByGoal(db, "goal-1");
+    const stepComplete = transitions.filter((t) => t.boundary === "step_complete");
+    expect(stepComplete.some((t) =>
+      t.evidence?.verdict === "failed" &&
+      t.evidence.sensorsRun.length === 0 &&
+      t.evidence.grounding?.verdict === "failed" &&
+      t.telemetry?.outcome.failure_code === "evidence_veto"
+    )).toBe(true);
+  });
+
+  it("completes a grounding-passing step with exactly one facet-bearing transition and no sensors", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { grounding });
+    seedWorkspaceWithTypecheck(db, 0); // temp dir contains package.json
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(
+      fakeMediator({ kind: "approve_step_complete", scoring: approveScoring }),
+      deliver
+    );
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "package.json" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    expect(stepOutputCount(db)).toBe(1); // completed
+    const transitions = listTransitionsByGoal(db, "goal-1");
+    const stepComplete = transitions.filter(
+      (t) => t.boundary === "step_complete" && t.workflowStepRunId === "step-1"
+    );
+    // Exactly one emit: the gate's; the advance-path emit is suppressed for gated steps.
+    expect(stepComplete).toHaveLength(1);
+    expect(stepComplete[0]!.evidence?.verdict).toBe("passed");
+    expect(stepComplete[0]!.evidence?.sensorsRun).toHaveLength(0);
+    expect(stepComplete[0]!.evidence?.grounding?.checks[0]).toMatchObject({
+      rule: "paths_exist", result: "passed", mode: "enforce",
+    });
+    // No execution oracle ran, so adequacy must not claim sufficiency.
+    expect(stepComplete[0]!.evidence?.oracleAdequacy.sufficient).toBe(false);
   });
 });
 

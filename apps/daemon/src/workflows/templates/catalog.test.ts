@@ -194,6 +194,46 @@ describe("honest/participatory rewrite of the secondary templates", () => {
   });
 });
 
+describe("Adaptive Delivery v9 completion gates", () => {
+  const def = BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === "orca/adaptive-delivery")!;
+  const grounding = (stepId: string) =>
+    (def.steps.find((s) => s.id === stepId)!.grounding ?? []) as NonNullable<WorkflowStepTemplate["grounding"]>;
+
+  it("is version 9 and runs the sensor ladder for execution AND validate_build", () => {
+    expect(def.version).toBe(9);
+    const rule = def.guardrails.find((g) => g.kind === "validation_rule")!;
+    expect((rule.configJson as { appliesToSteps: string[] }).appliesToSteps.sort())
+      .toEqual(["execution", "validate_build"]);
+  });
+
+  it("states the exact-name contract the member_of grounding check enforces", () => {
+    // Live false veto (2026-07-07): the agent filled chosen_approach with a
+    // descriptive sentence; the enforce-mode member_of check vetoed a healthy
+    // completion twice. A deterministic contract must be stated to the model.
+    const proposal = def.steps.find((s) => s.id === "proposal")!;
+    expect(proposal.instructions).toMatch(/chosen_approach.*exact(ly)?.*name/i);
+  });
+
+  it("declares grounding checks on every step with a mechanical referent", () => {
+    expect(grounding("triage").some((c) => c.rule === "paths_exist")).toBe(true);
+    expect(grounding("triage").filter((c) => c.rule === "implies")).toHaveLength(5);
+    expect(grounding("research").some((c) => c.rule === "paths_exist")).toBe(true);
+    expect(grounding("proposal").some((c) => c.rule === "member_of")).toBe(true);
+    expect(grounding("critique").some((c) => c.rule === "implies")).toBe(true);
+    expect(grounding("execution").some((c) => c.rule === "paths_changed")).toBe(true);
+    expect(grounding("validate_build").some((c) => c.rule === "implies")).toBe(true);
+    // Cross-step requirement checks ship observe-only (free-text, paraphrase-prone).
+    for (const stepId of ["validate_build", "done"]) {
+      const subset = grounding(stepId).filter((c) => c.rule === "subset_of_prior");
+      expect(subset.length).toBeGreaterThan(0);
+      expect(subset.every((c) => c.mode === "observe")).toBe(true);
+    }
+    // Interview prose / bare booleans: nothing mechanically checkable.
+    expect(grounding("clarify")).toHaveLength(0);
+    expect(grounding("verify")).toHaveLength(0);
+  });
+});
+
 describe("Adaptive Delivery splitter wiring", () => {
   const def = BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === "orca/adaptive-delivery")!;
   const g = def.graph!;

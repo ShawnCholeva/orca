@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TemplateTransition } from "./fetch.js";
-import { classifyTier, strongestTier, TIER_CONFIDENCE, buildArtifacts, computeCalibration } from "./verification.js";
+import { classifyTier, strongestTier, TIER_CONFIDENCE, buildArtifacts, computeCalibration, effectiveTierConfidence, CALIBRATION_SCORE_MIN, type CalibrationEntry } from "./verification.js";
 
 function tx(over: Partial<TemplateTransition["transition"]>): TemplateTransition {
   return {
@@ -46,6 +46,32 @@ describe("classifyTier", () => {
     // dropping the completion from the score entirely.
     expect(classifyTier(tx({ evidence: null, refute: { verdict: "uncertain", triggered_by: [], risk_class: "low", reason: null, issue_refs: [] } }))).toBe("self_reported");
   });
+  it("partially_verified: no sensors but a passed enforce-mode grounding check", () => {
+    expect(classifyTier(tx({ evidence: {
+      sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [],
+      oracleAdequacy: { sufficient: false, gaps: [] },
+      grounding: { checks: [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce", result: "passed", detail: "" }], verdict: "passed" },
+    } }))).toBe("partially_verified");
+  });
+  it("grounding alone never reaches verified_executed even when the facet passed", () => {
+    expect(classifyTier(tx({ evidence: {
+      sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [],
+      oracleAdequacy: { sufficient: true, gaps: [] },
+      grounding: { checks: [{ rule: "member_of", field: "chosen_approach", mode: "enforce", result: "passed", detail: "" }], verdict: "passed" },
+    } }))).not.toBe("verified_executed");
+  });
+  it("ai_reviewed: observe-only or skipped grounding gives no tier upgrade", () => {
+    expect(classifyTier(tx({ evidence: {
+      sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [],
+      oracleAdequacy: { sufficient: false, gaps: [] },
+      grounding: { checks: [{ rule: "subset_of_prior", field: "delivered_requirements", mode: "observe", result: "passed", detail: "" }], verdict: "passed" },
+    } }))).toBe("ai_reviewed");
+    expect(classifyTier(tx({ evidence: {
+      sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [],
+      oracleAdequacy: { sufficient: false, gaps: [] },
+      grounding: { checks: [{ rule: "paths_exist", field: "known_files", mode: "enforce", result: "skipped", detail: "" }], verdict: "skipped" },
+    } }))).toBe("ai_reviewed");
+  });
   it("unverified: evaluation_failed", () => {
     expect(classifyTier(tx({ evidence: null, telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "failed", failure_code: "evaluation_failed" } } }))).toBe("unverified");
   });
@@ -62,12 +88,20 @@ describe("strongestTier", () => {
 
 describe("buildArtifacts", () => {
   it("always includes a low-confidence self_report artifact", () => {
-    const a = buildArtifacts({ hasEvidence: false, anySensors: false, oracleSufficientRate: 0, oracleGaps: [], hasRefute: false, falseAccept: 0 });
+    const a = buildArtifacts({ hasEvidence: false, anySensors: false, oracleSufficientRate: 0, oracleGaps: [], hasRefute: false, falseAccept: 0, hasGrounding: false, groundingFailed: false });
     expect(a.some((x) => x.source === "self_report")).toBe(true);
   });
   it("marks the independent_review verdict fail when a pass was overturned", () => {
-    const a = buildArtifacts({ hasEvidence: false, anySensors: false, oracleSufficientRate: 0, oracleGaps: [], hasRefute: true, falseAccept: 2 });
+    const a = buildArtifacts({ hasEvidence: false, anySensors: false, oracleSufficientRate: 0, oracleGaps: [], hasRefute: true, falseAccept: 2, hasGrounding: false, groundingFailed: false });
     expect(a.find((x) => x.source === "independent_review")?.verdict).toBe("fail");
+  });
+  it("includes a grounding artifact when grounding checks ran", () => {
+    const a = buildArtifacts({ hasEvidence: true, anySensors: false, oracleSufficientRate: 0, oracleGaps: [], hasRefute: false, falseAccept: 0, hasGrounding: true, groundingFailed: false });
+    const g = a.find((x) => x.source === "grounding");
+    expect(g?.verdict).toBe("pass");
+    expect(g?.cannotVerify).toContain("nothing was executed");
+    const failed = buildArtifacts({ hasEvidence: true, anySensors: false, oracleSufficientRate: 0, oracleGaps: [], hasRefute: false, falseAccept: 0, hasGrounding: true, groundingFailed: true });
+    expect(failed.find((x) => x.source === "grounding")?.verdict).toBe("fail");
   });
 });
 
@@ -107,6 +141,44 @@ function selfReported(id: string, minute: number): TemplateTransition {
     createdAt: `2026-05-01T02:${String(minute).padStart(2, "0")}:00.000Z`,
   });
 }
+
+describe("effectiveTierConfidence", () => {
+  const measured = (tier: CalibrationEntry["tier"], value: number, sampleSize = CALIBRATION_SCORE_MIN + 2): CalibrationEntry[] => [
+    { tier, assumed: TIER_CONFIDENCE[tier], measured: value, sampleSize, state: "measured" },
+  ];
+
+  it("returns the prior when no calibration is provided", () => {
+    expect(effectiveTierConfidence("ai_reviewed")).toBe(TIER_CONFIDENCE.ai_reviewed);
+    expect(effectiveTierConfidence("ai_reviewed", [])).toBe(TIER_CONFIDENCE.ai_reviewed);
+  });
+
+  it("returns the prior for insufficient or unmeasurable entries", () => {
+    const entries: CalibrationEntry[] = [
+      { tier: "ai_reviewed", assumed: 0.55, measured: null, sampleSize: 3, state: "insufficient" },
+      { tier: "self_reported", assumed: 0.3, measured: null, sampleSize: 0, state: "unmeasurable" },
+    ];
+    expect(effectiveTierConfidence("ai_reviewed", entries)).toBe(TIER_CONFIDENCE.ai_reviewed);
+    expect(effectiveTierConfidence("self_reported", entries)).toBe(TIER_CONFIDENCE.self_reported);
+  });
+
+  it("returns the prior when the measured sample is below CALIBRATION_SCORE_MIN", () => {
+    expect(effectiveTierConfidence("ai_reviewed", measured("ai_reviewed", 1.0, CALIBRATION_SCORE_MIN - 1))).toBe(TIER_CONFIDENCE.ai_reviewed);
+  });
+
+  it("uses the measured rate directly for evidence tiers", () => {
+    expect(effectiveTierConfidence("verified_executed", measured("verified_executed", 0.8))).toBeCloseTo(0.8);
+    expect(effectiveTierConfidence("partially_verified", measured("partially_verified", 0.9))).toBeCloseTo(0.9);
+  });
+
+  it("caps a non-evidence tier at the partially_verified prior — review never certifies run-and-tested", () => {
+    expect(effectiveTierConfidence("ai_reviewed", measured("ai_reviewed", 1.0))).toBeCloseTo(TIER_CONFIDENCE.partially_verified);
+    expect(effectiveTierConfidence("self_reported", measured("self_reported", 0.95))).toBeCloseTo(TIER_CONFIDENCE.partially_verified);
+  });
+
+  it("lowers a non-evidence tier below its prior when review overturns claims often", () => {
+    expect(effectiveTierConfidence("ai_reviewed", measured("ai_reviewed", 0.4))).toBeCloseTo(0.4);
+  });
+});
 
 describe("computeCalibration", () => {
   it("measures ai_reviewed survival among independently-concluded claims", () => {

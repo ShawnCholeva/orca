@@ -1,6 +1,24 @@
-import { RefuteCompletionProposal, type RefuteCompletionRequest } from "@orca/contracts";
+import { REASONING_MAX, RefuteCompletionProposal, type RefuteCompletionRequest } from "@orca/contracts";
 import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
 import type { ShadowAsk } from "./recover-step-scoring.js";
+
+// Free-text fields are audit trail, not gate inputs: a reviewer who answered
+// with an overlong `reasoning` still delivered a verdict, and discarding it
+// (parse → null → "unavailable") forces a needless human pause. Clamp the
+// text to the schema caps before validation; genuinely malformed proposals
+// (wrong verdict, missing fields) still fail parse as they should.
+function clampFreeText(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const r = { ...(raw as Record<string, unknown>) };
+  const clampStr = (v: unknown, max: number) => (typeof v === "string" && v.length > max ? v.slice(0, max) : v);
+  const clampList = (v: unknown, itemMax: number) =>
+    Array.isArray(v) ? v.slice(0, 50).map((item) => clampStr(item, itemMax)) : v;
+  r.reasoning = clampStr(r.reasoning, REASONING_MAX);
+  r.reason = clampStr(r.reason, 1024);
+  r.issueRefs = clampList(r.issueRefs, 128);
+  r.inputsConsidered = clampList(r.inputsConsidered, 512);
+  return r;
+}
 
 export function composeRefutePrompt(
   request: RefuteCompletionRequest
@@ -56,7 +74,7 @@ export async function refuteStepCompletion(
     }
     let raw: unknown;
     try { raw = JSON.parse(text); } catch { lastFailure = "response was not JSON"; continue; }
-    const parsed = RefuteCompletionProposal.safeParse(raw);
+    const parsed = RefuteCompletionProposal.safeParse(clampFreeText(raw));
     if (parsed.success) return parsed.data;
     lastFailure = `invalid RefuteCompletionProposal: ${parsed.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ").slice(0, 200)}`;
   }
