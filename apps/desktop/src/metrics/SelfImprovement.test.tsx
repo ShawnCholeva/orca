@@ -197,6 +197,35 @@ describe("SelfImprovementRail", () => {
     expect(screen.queryByText(/new checks are rejecting output/i)).toBeNull();
   });
 
+  it("empty state is honest when the last review diagnosed steps but drafted nothing", async () => {
+    const analyzedWithSkips = {
+      id: "ev-an", templateId: "tpl", proposalId: null, stepTemplateId: null, eventType: "analyzed", templateVersion: 3,
+      createdAt: "2026-07-06T23:03:00.000Z",
+      payload: {
+        kind: "analyzed", stepsDiagnosed: 3, proposalsCreated: 0,
+        skips: [{ stepTemplateId: "s1", reason: "the model didn't return a usable draft" }],
+      },
+    };
+    vi.spyOn(api, "listProposals").mockResolvedValue([]);
+    vi.spyOn(api, "listLearningEvents").mockResolvedValue([analyzedWithSkips] as never);
+    const { container } = render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    expect(await screen.findByText(/The last review flagged 3 steps but couldn't draft a change/i)).toBeTruthy();
+    expect(screen.queryByText(/steps are healthy or below the sample threshold/i)).toBeNull();
+    expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
+  });
+
+  it("empty state keeps the healthy text when the last review had nothing to skip", async () => {
+    const analyzedClean = {
+      id: "ev-an2", templateId: "tpl", proposalId: null, stepTemplateId: null, eventType: "analyzed", templateVersion: 3,
+      createdAt: "2026-07-06T23:03:00.000Z",
+      payload: { kind: "analyzed", stepsDiagnosed: 0, proposalsCreated: 0, skips: [] },
+    };
+    vi.spyOn(api, "listProposals").mockResolvedValue([]);
+    vi.spyOn(api, "listLearningEvents").mockResolvedValue([analyzedClean] as never);
+    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    expect(await screen.findByText(/steps are healthy or below the sample threshold/i)).toBeTruthy();
+  });
+
   it("learning log renders events newest-first plus a synthesized row for an event-less proposal", async () => {
     const oldEvent = { id: "ev1", templateId: "tpl", proposalId: "a1", stepTemplateId: "s1", eventType: "applied", templateVersion: 3, createdAt: "2026-07-01T10:00:00.000Z", payload: { kind: "applied", appliedAsVersion: 3, humanEdited: false } };
     const newEvent = { id: "ev2", templateId: "tpl", proposalId: "a1", stepTemplateId: "s1", eventType: "rolled_back", templateVersion: 4, createdAt: "2026-07-03T09:00:00.000Z", payload: { kind: "rolled_back", outcome: { targetDelta: -0.1, targetDeltaVersions: { latest: 4, prior: 3 }, invalidOutputRateDelta: null, regressionDetected: true } } };
@@ -204,31 +233,36 @@ describe("SelfImprovementRail", () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([orphan] as never);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([newEvent, oldEvent] as never);
     render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
-    const summary = await screen.findByText(/Learning log \(3\)/i);
-    const text = (summary.closest("details") as HTMLElement).textContent ?? "";
+    const heading = await screen.findByText("Learning");
+    const section = heading.closest("section") as HTMLElement;
+    const text = section.textContent ?? "";
+    expect(text).toContain("3 events");
     expect(text.indexOf("didn't improve")).toBeLessThan(text.indexOf("Applied as v3"));
     expect(text).toContain("(before the learning log existed)");
   });
 
-  it("calibration panel renders measured, insufficient, and unmeasurable states", async () => {
+  it("collapses adjacent identical learning-log lines into one row with a repeat count", async () => {
+    const analyzed = (id: string, at: string) => ({
+      id, templateId: "tpl", proposalId: null, stepTemplateId: null, eventType: "analyzed", templateVersion: 3,
+      createdAt: at, payload: { kind: "analyzed", stepsDiagnosed: 3, proposalsCreated: 0, skips: [] },
+    });
+    const applied = { id: "ev-a", templateId: "tpl", proposalId: "a1", stepTemplateId: "s1", eventType: "applied", templateVersion: 3, createdAt: "2026-07-06T21:00:00.000Z", payload: { kind: "applied", appliedAsVersion: 3, humanEdited: false } };
     vi.spyOn(api, "listProposals").mockResolvedValue([]);
-    vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
-    const calibrationDetail = {
-      summary: {
-        templateId: "tpl", name: "Brainstorm",
-        calibration: [
-          { tier: "ai_reviewed", assumed: 0.55, measured: 0.62, sampleSize: 41, state: "measured" },
-          { tier: "verified_executed", assumed: 1.0, measured: null, sampleSize: 2, state: "insufficient" },
-          { tier: "self_reported", assumed: 0.3, measured: null, sampleSize: 0, state: "unmeasurable" },
-        ],
-      },
-    } as never;
-    render(<SelfImprovementRail detail={calibrationDetail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
-    const summary = await screen.findByText(/how well-calibrated are the scores/i);
-    const panel = summary.closest("details") as HTMLElement;
-    expect(within(panel).getByText(/measured 62% \(n=41\)/i)).toBeTruthy();
-    expect(within(panel).getByText(/— \(n=2, too few\)/i)).toBeTruthy();
-    expect(within(panel).getByText(/unmeasurable — no independent check exists/i)).toBeTruthy();
-    expect(within(panel).getByText(/Coefficients are fixed constants/i)).toBeTruthy();
+    vi.spyOn(api, "listLearningEvents").mockResolvedValue([
+      analyzed("ev-1", "2026-07-06T23:03:00.000Z"),
+      analyzed("ev-2", "2026-07-06T22:43:00.000Z"),
+      analyzed("ev-3", "2026-07-06T22:41:00.000Z"),
+      applied,
+    ] as never);
+    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    const heading = await screen.findByText("Learning");
+    const section = heading.closest("section") as HTMLElement;
+    // Three identical adjacent lines render once, with the repeat count; the header keeps the true event count.
+    expect(section.textContent).toContain("4 events");
+    const dupes = within(section).getAllByText(/Reviewed 3 steps — nothing to propose\./);
+    expect(dupes).toHaveLength(1);
+    expect(within(section).getByText(/×3/)).toBeTruthy();
+    expect(within(section).getByText(/Applied as v3\./)).toBeTruthy();
   });
+
 });

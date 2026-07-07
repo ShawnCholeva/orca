@@ -102,7 +102,7 @@ describe("no jargon in the self-improvement rail", () => {
     expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 
-  it("renders no 'oracle', 'sensor', 'verdict', 'refute', or 'veto' across every learning-log event type and the calibration panel", async () => {
+  it("renders no 'oracle', 'sensor', 'verdict', 'refute', or 'veto' across every learning-log event type", async () => {
     const events = [
       { id: "e1", templateId: "tpl", proposalId: "p1", stepTemplateId: "s1", eventType: "created", templateVersion: 1, createdAt: "2026-07-01T00:00:00.000Z", payload: { kind: "created", component: "step_output_schema", rule: "R2", failureCode: "evidence_veto" } },
       { id: "e2", templateId: "tpl", proposalId: "p1", stepTemplateId: "s1", eventType: "judged", templateVersion: 1, createdAt: "2026-07-01T01:00:00.000Z", payload: { kind: "judged", verdict: "regression_risk", solvedSampleSize: 1, failureSampleSize: 2 } },
@@ -128,7 +128,7 @@ describe("no jargon in the self-improvement rail", () => {
     const { container } = render(
       <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />
     );
-    await screen.findByText(/how well-calibrated are the scores/i);
+    await screen.findByText("Learning");
     expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 });

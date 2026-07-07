@@ -66,13 +66,15 @@ export function eventLine(e: LearningEvent, stepName: (id: string | null) => str
         : "Restored the default template.";
     case "analyzed": {
       const stepsS = payload.stepsDiagnosed === 1 ? "" : "s";
-      const created = payload.proposalsCreated > 0
-        ? `created ${payload.proposalsCreated} proposal${payload.proposalsCreated === 1 ? "" : "s"}`
-        : "nothing to propose";
+      const pending = payload.proposalsAlreadyPending ?? 0;
+      const parts: string[] = [];
+      if (payload.proposalsCreated > 0) parts.push(`created ${payload.proposalsCreated} proposal${payload.proposalsCreated === 1 ? "" : "s"}`);
+      if (pending > 0) parts.push(`${pending} change${pending === 1 ? "" : "s"} already awaiting review`);
+      const outcome = parts.length > 0 ? parts.join(", ") : "nothing to propose";
       const skipText = payload.skips.length
         ? `; skipped ${payload.skips.map((k) => `${stepName(k.stepTemplateId)}: ${k.reason}`).join("; ")}`
         : "";
-      return `Reviewed ${payload.stepsDiagnosed} step${stepsS} — ${created}${skipText}.`;
+      return `Reviewed ${payload.stepsDiagnosed} step${stepsS} — ${outcome}${skipText}.`;
     }
   }
 }

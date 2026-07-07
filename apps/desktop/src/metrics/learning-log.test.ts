@@ -133,6 +133,22 @@ describe("eventLine", () => {
     });
     expect(eventLine(e, stepName)).toBe("Reviewed 2 steps — nothing to propose.");
   });
+
+  it("analyzed — a re-run that found existing pending changes says so, not 'created'", () => {
+    const e = event({
+      eventType: "analyzed", proposalId: null,
+      payload: { kind: "analyzed", stepsDiagnosed: 3, proposalsCreated: 0, proposalsAlreadyPending: 3, skips: [] },
+    });
+    expect(eventLine(e, stepName)).toBe("Reviewed 3 steps — 3 changes already awaiting review.");
+  });
+
+  it("analyzed — mixes newly created with already-pending", () => {
+    const e = event({
+      eventType: "analyzed", proposalId: null,
+      payload: { kind: "analyzed", stepsDiagnosed: 3, proposalsCreated: 1, proposalsAlreadyPending: 2, skips: [] },
+    });
+    expect(eventLine(e, stepName)).toBe("Reviewed 3 steps — created 1 proposal, 2 changes already awaiting review.");
+  });
 });
 
 describe("synthesizedLine", () => {

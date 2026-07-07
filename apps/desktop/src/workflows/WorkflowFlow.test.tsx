@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkflowGraph } from "@orca/contracts";
-import { WorkflowFlow, edgePath } from "./WorkflowFlow";
+import { WorkflowFlow, edgePath, sourcePortFrac } from "./WorkflowFlow";
 
 function makeGraph(overrides: Partial<WorkflowGraph> = {}): WorkflowGraph {
   return {
@@ -67,6 +67,82 @@ describe("edgePath", () => {
 
     const cx = (d: string) => Number(d.match(/C (\d+(?:\.\d+)?) /)![1]);
     expect(cx(longD)).toBeGreaterThan(cx(shortD));
+  });
+
+  it("starts at the source-port x when a source fraction is given", () => {
+    const a = { x: 40, y: 40 };  // ay = 104
+    const b = { x: 40, y: 160 };
+    // splitter branch 1 of 2 → frac 1/3 → ax = 40 + 240/3 = 120
+    const d = edgePath(a, b, 1 / 3);
+    expect(d.startsWith("M 120 104 ")).toBe(true);
+  });
+});
+
+describe("sourcePortFrac", () => {
+  it("returns the branch-port fraction for a splitter edge", () => {
+    const splitter = {
+      id: "route", type: "splitter" as const, name: "Route",
+      branches: ["go_a", "go_b"],
+    };
+    // ports render at (bi+1)/(count+1): 1/3 and 2/3
+    expect(sourcePortFrac(splitter, "go_a")).toBeCloseTo(1 / 3);
+    expect(sourcePortFrac(splitter, "go_b")).toBeCloseTo(2 / 3);
+  });
+
+  it("returns the gate-port fractions for approved/rejected", () => {
+    const gate = { id: "g", type: "gate" as const, name: "Gate" };
+    expect(sourcePortFrac(gate, "approved")).toBeCloseTo(0.33);
+    expect(sourcePortFrac(gate, "rejected")).toBeCloseTo(0.67);
+  });
+
+  it("falls back to center for portless edges or unknown ports", () => {
+    const step = { id: "s", type: "step" as const, name: "Step" };
+    const splitter = {
+      id: "route", type: "splitter" as const, name: "Route",
+      branches: ["go_a", "go_b"],
+    };
+    expect(sourcePortFrac(step, undefined)).toBe(0.5);
+    expect(sourcePortFrac(splitter, undefined)).toBe(0.5);
+    expect(sourcePortFrac(splitter, "not_a_branch")).toBe(0.5);
+  });
+});
+
+describe("splitter edge rendering", () => {
+  it("renders splitter branch edges anchored at their branch ports, not the node center", () => {
+    const graph: WorkflowGraph = {
+      nodes: [
+        { id: "route", type: "splitter" as const, name: "Route", branches: ["go_a", "go_b"] },
+        { id: "a", type: "step" as const, name: "A" },
+        { id: "b", type: "step" as const, name: "B" },
+      ],
+      edges: [
+        { from: "route", to: "a", port: "go_a" },
+        { from: "route", to: "b", port: "go_b" },
+      ],
+      positions: {
+        route: { x: 40, y: 40 },
+        a: { x: 0, y: 200 },
+        b: { x: 300, y: 200 },
+      },
+    };
+    const { container } = render(
+      <WorkflowFlow
+        graph={graph}
+        onGraphChange={vi.fn()}
+        onOpenNode={vi.fn()}
+        onAddNode={vi.fn()}
+        onRemoveNode={vi.fn()}
+        onResetLayout={vi.fn()}
+      />,
+    );
+    // Splitter at x=40: go_a port at 40 + 240*(1/3) = 120, go_b at 40 + 240*(2/3) = 200.
+    // Both edges starting at "M 160" (center) is the bug.
+    const paths = Array.from(container.querySelectorAll("svg path"))
+      .map((p) => p.getAttribute("d") ?? "")
+      .filter((d) => d.startsWith("M "));
+    expect(paths.some((d) => d.startsWith("M 120 104"))).toBe(true);
+    expect(paths.some((d) => d.startsWith("M 200 104"))).toBe(true);
+    expect(paths.some((d) => d.startsWith("M 160 "))).toBe(false);
   });
 });
 

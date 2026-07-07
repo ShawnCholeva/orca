@@ -19,8 +19,31 @@ const NODE_H = 64;
 const VIEWPORT_H_MIN = 320;
 
 /**
+ * Pure function: fraction of the source node's width where an edge should
+ * anchor, matching where that node renders its out-port. Splitter branches
+ * sit at (i+1)/(count+1); gate ports at 33%/67%; everything else (and any
+ * unknown port) uses the center.
+ */
+export function sourcePortFrac(
+  node: { type: string; branches?: string[] },
+  port: string | undefined,
+): number {
+  if (!port) return 0.5;
+  if (node.type === "splitter" && node.branches) {
+    const i = node.branches.indexOf(port);
+    if (i >= 0) return (i + 1) / (node.branches.length + 1);
+  }
+  if (node.type === "gate") {
+    if (port === "approved") return 0.33;
+    if (port === "rejected") return 0.67;
+  }
+  return 0.5;
+}
+
+/**
  * Pure function: given two node top-left positions, return the SVG `d` string
- * for the edge path connecting source-center-bottom to target-center-top.
+ * for the edge path connecting the source's bottom out-port (at `sourceFrac`
+ * of its width, center by default) to target-center-top.
  *
  * Forward edges (target at or below source): symmetric cubic with no bow.
  * Backward edges (target above source): cubic bowed to the right to avoid
@@ -29,8 +52,9 @@ const VIEWPORT_H_MIN = 320;
 export function edgePath(
   a: { x: number; y: number },
   b: { x: number; y: number },
+  sourceFrac = 0.5,
 ): string {
-  const ax = a.x + NODE_W / 2;
+  const ax = a.x + NODE_W * sourceFrac;
   const ay = a.y + NODE_H;
   const bx = b.x + NODE_W / 2;
   const by = b.y;
@@ -211,11 +235,12 @@ export function WorkflowFlow({
     };
   }, [drag, linkDrag, pan, scale, graph, nodes, positions, onGraphChange, onOpenNode]);
 
-  function pathFor(fromId: string, toId: string): string {
+  function pathFor(fromId: string, toId: string, port?: string): string {
     const a = positions[fromId];
     const b = positions[toId];
     if (!a || !b) return "";
-    return edgePath(a, b);
+    const fromNode = nodes.find((n) => n.id === fromId);
+    return edgePath(a, b, fromNode ? sourcePortFrac(fromNode, port) : 0.5);
   }
 
   function removeEdge(i: number) {
@@ -409,9 +434,11 @@ export function WorkflowFlow({
                   const { from, to, port } = edge;
                   const edgeKey = `${from}-${to}`;
                   const isHot = hoverEdge === edgeKey;
-                  const d = pathFor(from, to);
+                  const d = pathFor(from, to, port);
                   if (!d) return null;
-                  const midX = (positions[from]!.x + NODE_W / 2 + positions[to]!.x + NODE_W / 2) / 2;
+                  const fromNode = nodes.find((n) => n.id === from);
+                  const fromFrac = fromNode ? sourcePortFrac(fromNode, port) : 0.5;
+                  const midX = (positions[from]!.x + NODE_W * fromFrac + positions[to]!.x + NODE_W / 2) / 2;
                   const midY = (positions[from]!.y + NODE_H + positions[to]!.y) / 2;
                   return (
                     <g

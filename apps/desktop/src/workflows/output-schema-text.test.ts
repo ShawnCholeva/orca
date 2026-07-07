@@ -60,6 +60,34 @@ describe("serializeOutputSchema", () => {
     ];
     expect(serializeOutputSchema(schema)).toBe('confidence: "low" | "medium" | "high"');
   });
+
+  it("never emits a lone-comma line after a described field — newline separates instead", () => {
+    // Commas are optional separators in the grammar; a comma orphaned on its own
+    // line after every described field renders as visual garbage in the editor.
+    const schema: WorkflowStepOutputSchema = [
+      { key: "tag", type: "string", required: true, description: "a label" },
+      { key: "count", type: "number", required: true },
+    ];
+    expect(serializeOutputSchema(schema)).toBe("tag  # a label\ncount: number");
+  });
+
+  it("described fields inside nested objects also separate by newline only", () => {
+    const schema: WorkflowStepOutputSchema = [
+      {
+        key: "items", type: "array", itemType: "object", required: true, description: "list of results",
+        fields: [
+          { key: "name", type: "string", required: true, description: "unique name" },
+          { key: "size", type: "number", required: true },
+        ],
+      },
+      { key: "total", type: "number", required: true },
+    ];
+    const text = serializeOutputSchema(schema);
+    expect(text).not.toMatch(/^\s*,\s*$/m);
+    const parsed = parseOutputSchemaText(text);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.schema).toEqual(schema);
+  });
 });
 
 describe("parseOutputSchemaText", () => {

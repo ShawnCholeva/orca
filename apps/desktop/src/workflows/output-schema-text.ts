@@ -34,9 +34,10 @@ function renderFields(fields: WorkflowStepOutputField[], depth: number): string 
     .map((f, i, arr) => {
       const s = renderField(f, depth);
       if (i === arr.length - 1) return s;
-      // If this field has an inline description, the comma must go on its own
-      // line so the tokenizer doesn't swallow it as part of the # comment.
-      return f.description ? s + "\n," : s + ",";
+      // A trailing comma after a # comment would be swallowed into the description,
+      // and commas are optional separators anyway — for described fields the newline
+      // alone separates (a comma orphaned on its own line renders as garbage).
+      return f.description ? s : s + ",";
     })
     .join("\n");
 }

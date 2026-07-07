@@ -1,12 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { LearningEvent, TemplateInstructionProposal, TemplateMetricsDetail } from "@orca/contracts";
 import { labelForFailure } from "@orca/contracts";
-import { analyzeTemplate, applyProposal, dismissProposal, judgeProposal, listLearningEvents, listProposals, restoreTemplateDefault, rollbackProposal, toErrorMessage } from "../api";
+import { analyzeTemplate, applyProposal, dismissProposal, judgeProposal, listLearningEvents, listProposals, rollbackProposal, toErrorMessage } from "../api";
+import { Btn, Pill } from "../workspaces/primitives";
 import { eventLine, synthesizedLine, VERDICT_META } from "./learning-log";
 import { Panel } from "./metrics-charts";
-import { statusForStep, verificationMeta } from "./metrics-data";
-import { Sparkle } from "./metrics-icons";
+import { statusForStep, statusMeta } from "./metrics-data";
+import { Check, Close, Sparkle } from "./metrics-icons";
 import { diffLines, schemaChips, type DiffLine, type SchemaChip } from "./proposal-diff";
+
+// mock card + modal chrome uses the app's token set (workspaces/primitives ported the same
+// Btn/Pill from the design prototype these panels were mocked in).
+const cardStyle: CSSProperties = { border: "1px solid var(--hairline)", borderRadius: 10, background: "var(--panel-2)", padding: 11, display: "flex", flexDirection: "column", gap: 8, fontSize: 12 };
+const componentLabel = (c: string) => (c === "step_output_schema" ? "output check" : c === "step_instructions" ? "instructions" : c.replace(/_/g, " "));
 
 function ChipRow({ chips }: { chips: SchemaChip[] }) {
   if (chips.length === 0) return null;
@@ -75,7 +81,12 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
   const onAnalyze = async () => {
     if (!templateId) return;
     setAnalyzing(true);
-    try { setProposals(await analyzeTemplate(templateId, period)); } finally { setAnalyzing(false); }
+    try {
+      setProposals(await analyzeTemplate(templateId, period));
+      // The run just wrote created/analyzed events — refetch or the log stays stale.
+      const evs = await listLearningEvents(templateId).catch(() => null);
+      if (evs && mountedRef.current) setEvents(evs);
+    } finally { setAnalyzing(false); }
   };
   const onApply = async (p: TemplateInstructionProposal) => {
     try { setError(null); await applyProposal(p.id, editing[p.id]); await refresh(); onMutated(); }
@@ -95,43 +106,56 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
     try { setError(null); await rollbackProposal(p.id); await refresh(); onMutated(); }
     catch (err) { setError(toErrorMessage(err, "Failed to rollback proposal.")); }
   };
-  const onRestore = async () => {
-    if (!templateId) return;
-    try { setError(null); await restoreTemplateDefault(templateId); await refresh(); onMutated(); }
-    catch { setError("No learned changes to restore."); }
-  };
 
   const pending = proposals.filter((p) => p.status === "pending");
   const applied = proposals.filter((p) => p.status === "applied");
   const steps = detail?.steps ?? [];
   const attention = steps.filter((s) => statusForStep(s) !== "healthy").length;
   const stepName = (id: string | null) => (id ? steps.find((s) => s.stepTemplateId === id)?.name ?? id : "the template");
+  const stepDotColor = (id: string) => {
+    const s = steps.find((x) => x.stepTemplateId === id);
+    return s ? statusMeta[statusForStep(s)].color : "var(--text-4)";
+  };
   const eventedProposalIds = new Set(events.map((e) => e.proposalId).filter((id): id is string => id != null));
   // Only decided proposals fall back to a synthesized row — a still-pending/applied
   // proposal already has its own card above, so there's nothing "misleadingly empty"
   // about it missing from the log (this fallback is for pre-SP3 backlog rows).
   const unevented = proposals.filter((p) => !eventedProposalIds.has(p.id) && ["dismissed", "rolled_back", "superseded"].includes(p.status));
-  const calibration = detail?.summary.calibration ?? [];
+  const logCount = events.length + unevented.length;
+  // Honest empty state: events arrive newest-first, so the first "analyzed" event is the
+  // latest review. If it diagnosed steps but drafted nothing, don't claim steps are healthy.
+  const lastAnalyzed = events.find((e) => e.payload.kind === "analyzed")?.payload;
+  const lastReviewStalled = lastAnalyzed?.kind === "analyzed" && lastAnalyzed.proposalsCreated === 0 && lastAnalyzed.skips.length > 0
+    ? lastAnalyzed : null;
 
   return (
+    <>
     <Panel title="Self-improvement" kicker="ORCA LEARNS" style={{ flex: 1, minHeight: 0 }}
       bodyStyle={{ padding: 12, display: "flex", flexDirection: "column", minHeight: 0, gap: 12, overflowY: "auto" }}>
       <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.55 }}>
         {attention > 0
-          ? <>Orca sees <strong style={{ color: "var(--text)" }}>{attention} step{attention !== 1 ? "s" : ""} underperforming</strong> in {workflowName}.</>
+          ? pending.length > 0
+            ? <>Orca flagged <strong style={{ color: "var(--text)" }}>{attention} underperforming step{attention !== 1 ? "s" : ""}</strong> in {workflowName} and drafted {pending.length} change{pending.length !== 1 ? "s" : ""}. Review each to let it improve itself.</>
+            : <>Orca sees <strong style={{ color: "var(--text)" }}>{attention} step{attention !== 1 ? "s" : ""} underperforming</strong> in {workflowName}. Analyze to draft fixes.</>
           : <>Every step in {workflowName} is healthy.</>}
       </div>
 
-      <button type="button" onClick={onAnalyze} disabled={analyzing || !templateId} style={{ alignSelf: "flex-start" }}>
-        {analyzing ? "Reviewing runs…" : "Analyze this template"}
-      </button>
+      <div style={{ display: "flex", justifyContent: "center" }}>
+        <Btn kind="primary" size="sm" onClick={onAnalyze} disabled={analyzing || !templateId}>
+          {analyzing ? "Reviewing runs…" : "Analyze this template"}
+        </Btn>
+      </div>
 
-      {error && <div style={{ fontSize: 12, color: "var(--danger)" }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--err)" }}>{error}</div>}
 
       {!analyzing && pending.length === 0 && applied.length === 0 && (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", color: "var(--text-3)", gap: 8, padding: "16px 12px" }}>
           <Sparkle size={20} color="var(--text-4)" />
-          <div style={{ fontSize: 12 }}>Nothing to propose — steps are healthy or below the sample threshold.</div>
+          <div style={{ fontSize: 12 }}>
+            {lastReviewStalled
+              ? `The last review flagged ${lastReviewStalled.stepsDiagnosed} step${lastReviewStalled.stepsDiagnosed === 1 ? "" : "s"} but couldn't draft a change — the Learning log below records why.`
+              : "Nothing to propose — steps are healthy or below the sample threshold."}
+          </div>
         </div>
       )}
 
@@ -140,50 +164,79 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
         const chips = p.component === "step_output_schema" ? schemaChips(p.beforeInstructions, p.afterInstructions) : [];
         const changedCount = diff.filter((d) => d.kind !== "kept").length;
         return (
-          <div key={p.id} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, fontSize: 12 }}>
-            <div style={{ fontWeight: 600 }}>{p.stepTemplateId}</div>
-            <div style={{ color: "var(--text-3)" }}>
+          <div key={p.id} style={cardStyle}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: stepDotColor(p.stepTemplateId), flexShrink: 0 }} />
+              <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{stepName(p.stepTemplateId)}</span>
+              <div style={{ flex: 1 }} />
+              <Pill tone="neutral" size="xs">{componentLabel(p.component)}</Pill>
+            </div>
+
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", lineHeight: 1.35 }}>{p.predictedImprovement}</div>
+
+            <div style={{ color: "var(--text-3)", fontSize: 11.5 }}>
               targets {p.targetedFailureMode.failureCode ? labelForFailure(p.targetedFailureMode.failureCode) : p.targetedFailureMode.rule}
               {p.targetedFailureMode.clusterCount != null ? ` (${p.targetedFailureMode.clusterCount})` : ""}
               {p.targetedFailureMode.signalCount != null ? ` · ${p.targetedFailureMode.signalCount} re-steers` : ""}
             </div>
-            <div style={{ marginTop: 6 }}>
-              {p.component === "step_output_schema"
-                ? (chips.length > 0
-                  ? <ChipRow chips={chips} />
-                  : <div>Adds required structure — open Review change.</div>)
-                : <div style={{ color: "var(--text-2)" }}>{changedCount} line{changedCount === 1 ? "" : "s"} changed</div>}
-              <button type="button" onClick={() => setReviewing(p.id)} style={{ marginTop: 6 }}>Review change</button>
-            </div>
-            <div style={{ marginTop: 6, color: "var(--text-2)" }}>Predicts: {p.predictedImprovement}</div>
-            <div style={{ color: "var(--text-3)" }}>Preserves: {p.invariantsPreserved.join(", ") || "—"}</div>
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <button type="button" onClick={() => onApply(p)}>Apply</button>
-              <button type="button" onClick={() => onDismiss(p)}>Dismiss</button>
+
+            {p.component === "step_output_schema"
+              ? (chips.length > 0
+                ? <ChipRow chips={chips} />
+                : <div style={{ color: "var(--text-2)" }}>Adds required structure — open Review change.</div>)
+              : <div style={{ color: "var(--text-2)" }}>{changedCount} line{changedCount === 1 ? "" : "s"} changed</div>}
+
+            <div style={{ color: "var(--text-3)", fontSize: 11.5 }}>Preserves: {p.invariantsPreserved.join(", ") || "—"}</div>
+
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <Btn kind="quiet" size="xs" onClick={() => setReviewing(p.id)}>Review change</Btn>
+              <Btn kind="primary" size="xs" icon={<Check />} onClick={() => onApply(p)}>Apply</Btn>
+              <Btn kind="ghost" size="xs" onClick={() => onDismiss(p)}>Dismiss</Btn>
             </div>
 
             {reviewing === p.id && (
-              <div style={{ position: "fixed", inset: 0, zIndex: 40, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <div role="dialog" aria-modal="true" aria-label={`Review change — ${p.stepTemplateId}`}
-                  style={{ width: "min(560px, 90vw)", maxHeight: "80vh", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--hairline-strong)", borderRadius: 10, boxShadow: "0 16px 48px rgba(0,0,0,0.5)", padding: 16 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 8 }}>{p.stepTemplateId} — review change</div>
-                  {p.component === "step_output_schema" && chips.length > 0 && <div style={{ marginBottom: 8 }}><ChipRow chips={chips} /></div>}
-                  <DiffBlock lines={diff} />
-                  <textarea value={editing[p.id] ?? p.afterInstructions} onChange={(e) => setEditing((s) => ({ ...s, [p.id]: e.target.value }))} rows={6} style={{ width: "100%", marginTop: 8, fontFamily: "inherit", fontSize: 11.5 }} />
-                  <div style={{ marginTop: 8, color: "var(--text-2)" }}>Predicts: {p.predictedImprovement}</div>
-                  <div style={{ color: "var(--text-3)" }}>Preserves: {p.invariantsPreserved.join(", ") || "—"}</div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                    <button type="button" onClick={() => onApply(p)}>Apply</button>
-                    <button type="button" onClick={() => onDismiss(p)}>Dismiss</button>
-                    <button type="button" onClick={() => setReviewing(null)}>Close</button>
+              <div style={{ position: "fixed", inset: 0, zIndex: 40, background: "rgba(5,8,14,0.55)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div role="dialog" aria-modal="true" aria-label={`Review change — ${stepName(p.stepTemplateId)}`}
+                  style={{ width: "min(560px, 90vw)", maxHeight: "85vh", background: "var(--panel)", border: "1px solid var(--hairline-strong)", borderRadius: 14, boxShadow: "0 24px 80px rgba(0,0,0,0.55)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                  <header style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: "1px solid var(--hairline)" }}>
+                    <div style={{ width: 30, height: 30, borderRadius: 7, background: "var(--accent-soft)", color: "var(--accent)", border: "1px solid var(--accent-line)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <Sparkle size={15} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="mono" style={{ fontSize: 10.5, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.2 }}>Orca proposes</div>
+                      <div className="mono" style={{ fontSize: 11.5, color: "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{stepName(p.stepTemplateId)}</div>
+                    </div>
+                    <Btn icon={<Close />} size="xs" title="Close" onClick={() => setReviewing(null)} />
+                  </header>
+
+                  <div className="scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", lineHeight: 1.35 }}>{p.predictedImprovement}</div>
+                    {p.component === "step_output_schema" && chips.length > 0 && <ChipRow chips={chips} />}
+                    <div>
+                      <div className="mono" style={{ fontSize: 9.5, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--text-4)", marginBottom: 6 }}>Proposed change</div>
+                      <div style={{ borderLeft: "2px solid var(--hairline-strong)", paddingLeft: 10 }}><DiffBlock lines={diff} /></div>
+                    </div>
+                    <div>
+                      <div className="mono" style={{ fontSize: 9.5, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--run)", marginBottom: 6 }}>Edit before applying</div>
+                      <textarea value={editing[p.id] ?? p.afterInstructions} onChange={(e) => setEditing((s) => ({ ...s, [p.id]: e.target.value }))} rows={6}
+                        style={{ width: "100%", background: "var(--bg)", color: "var(--text)", border: "1px solid var(--hairline)", borderRadius: 6, fontFamily: "inherit", fontSize: 11.5, padding: "7px 10px", boxSizing: "border-box" }} />
+                    </div>
+                    <div style={{ color: "var(--text-2)" }}>Predicts: {p.predictedImprovement}</div>
+                    <div style={{ color: "var(--text-3)" }}>Preserves: {p.invariantsPreserved.join(", ") || "—"}</div>
                   </div>
+
+                  <footer style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderTop: "1px solid var(--hairline)" }}>
+                    <div style={{ flex: 1 }} />
+                    <Btn kind="ghost" size="sm" onClick={() => onDismiss(p)}>Dismiss</Btn>
+                    <Btn kind="primary" size="sm" icon={<Check />} onClick={() => onApply(p)}>Apply</Btn>
+                  </footer>
                 </div>
               </div>
             )}
 
             {p.judgment ? (
-              <div style={{ marginTop: 8, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
-                <div style={{ fontWeight: 600 }}>
+              <div style={{ marginTop: 4, borderTop: "1px solid var(--hairline)", paddingTop: 8 }}>
+                <div style={{ fontWeight: 600, color: statusMeta.watch.color }}>
                   {VERDICT_META[p.judgment.verdict]?.label ?? p.judgment.verdict} {VERDICT_META[p.judgment.verdict]?.icon ?? ""}
                 </div>
                 {p.judgment.reason && <div style={{ color: "var(--text-2)" }}>{p.judgment.reason}</div>}
@@ -210,17 +263,23 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
                 )}
               </div>
             ) : (
-              <button type="button" onClick={() => onJudge(p)} disabled={!!judging[p.id]} style={{ marginTop: 8 }}>
-                {judging[p.id] ? "Evaluating…" : "Evaluate this edit"}
-              </button>
+              <div style={{ display: "flex" }}>
+                <Btn kind="quiet" size="xs" onClick={() => onJudge(p)} disabled={!!judging[p.id]}>
+                  {judging[p.id] ? "Evaluating…" : "Evaluate this edit"}
+                </Btn>
+              </div>
             )}
           </div>
         );
       })}
 
       {applied.map((p) => (
-        <div key={p.id} style={{ border: `1px solid ${p.regressionDetected ? "var(--danger)" : "var(--border)"}`, borderRadius: 8, padding: 10, fontSize: 12 }}>
-          <div style={{ fontWeight: 600 }}>{p.stepTemplateId} · applied as v{p.appliedAsVersion}</div>
+        <div key={p.id} style={{ ...cardStyle, border: `1px solid ${p.regressionDetected ? "var(--err)" : "var(--hairline)"}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{stepName(p.stepTemplateId)}</span>
+            <div style={{ flex: 1 }} />
+            <Pill tone={p.regressionDetected ? "err" : "run"} size="xs">v{p.appliedAsVersion}</Pill>
+          </div>
           <div style={{ color: "var(--text-3)" }}>
             {p.regressionDetected ? "Regression detected" : "Watching"}
             {p.watchedDeltas && Object.keys(p.watchedDeltas).length > 0
@@ -248,46 +307,48 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
               New checks are rejecting output (+{Math.round(p.invalidOutputRateDelta * 100)}% of runs) — consider rollback.
             </div>
           )}
-          {p.regressionDetected && <button type="button" onClick={() => onRollback(p)} style={{ marginTop: 8 }}>Rollback</button>}
+          {p.regressionDetected && (
+            <div style={{ display: "flex" }}>
+              <Btn kind="danger" size="xs" onClick={() => onRollback(p)}>Rollback</Btn>
+            </div>
+          )}
         </div>
       ))}
 
-      {(events.length > 0 || unevented.length > 0) && (
-        <details>
-          <summary style={{ fontSize: 11.5, color: "var(--text-3)", cursor: "pointer" }}>Learning log ({events.length + unevented.length})</summary>
-          {events.map((e) => (
-            <div key={e.id} style={{ fontSize: 11, color: "var(--text-3)", padding: "4px 0" }}>
-              <span style={{ color: "var(--text-4)" }}>{e.createdAt.slice(0, 16).replace("T", " ")}</span> {eventLine(e, stepName)}
-            </div>
-          ))}
-          {unevented.map((p) => (
-            <div key={p.id} style={{ fontSize: 11, color: "var(--text-3)", padding: "4px 0" }}>
-              {synthesizedLine(p, stepName)}
-            </div>
-          ))}
-        </details>
-      )}
-
-      {calibration.length > 0 && (
-        <details>
-          <summary style={{ fontSize: 11.5, color: "var(--text-3)", cursor: "pointer" }}>How well-calibrated are the scores?</summary>
-          {calibration.map((c) => (
-            <div key={c.tier} style={{ fontSize: 11, color: "var(--text-3)", padding: "4px 0" }}>
-              {verificationMeta[c.tier].label} — assumed {Math.round(c.assumed * 100)}%
-              {c.state === "measured" && ` · measured ${Math.round((c.measured ?? 0) * 100)}% (n=${c.sampleSize})`}
-              {c.state === "insufficient" && ` · — (n=${c.sampleSize}, too few)`}
-              {c.state === "unmeasurable" && ` · unmeasurable — ${c.tier === "self_reported" ? "no independent check exists" : "checks rarely run at this tier"}`}
-            </div>
-          ))}
-          <div style={{ fontSize: 11, color: "var(--text-4)", paddingTop: 4 }}>
-            Coefficients are fixed constants; this panel shows whether they match reality as runs accrue.
-          </div>
-        </details>
-      )}
-
-      <button type="button" onClick={onRestore} style={{ alignSelf: "flex-start", fontSize: 11, color: "var(--text-3)" }}>
-        Restore default built-in
-      </button>
     </Panel>
+
+    <Panel title="Learning" kicker="OVER TIME"
+      right={<span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{logCount} event{logCount !== 1 ? "s" : ""}</span>}
+      style={{ flex: 1, minHeight: 0 }}
+      bodyStyle={{ padding: "4px 12px 12px", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div className="scroll" style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        {logCount === 0 && (
+          <div style={{ color: "var(--text-3)", fontSize: 12, textAlign: "center", padding: "16px 0" }}>No learning events yet.</div>
+        )}
+        {(() => {
+          // Collapse adjacent identical lines (repeat analyze runs with the same outcome)
+          // into one row with a repeat count — every event is still counted in the header.
+          const rows: { key: string; at: string; text: string; count: number }[] = [];
+          for (const e of events) {
+            const text = eventLine(e, stepName);
+            const last = rows[rows.length - 1];
+            if (last && last.text === text) { last.count++; continue; }
+            rows.push({ key: e.id, at: e.createdAt, text, count: 1 });
+          }
+          return rows.map((r) => (
+            <div key={r.key} style={{ fontSize: 11.5, color: "var(--text-2)", padding: "7px 0", borderBottom: "1px solid var(--hairline)", lineHeight: 1.5 }}>
+              <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }}>{r.at.slice(0, 16).replace("T", " ")}</span> {r.text}
+              {r.count > 1 && <span className="mono" style={{ fontSize: 10, color: "var(--text-4)", marginLeft: 6 }}>×{r.count}</span>}
+            </div>
+          ));
+        })()}
+        {unevented.map((p) => (
+          <div key={p.id} style={{ fontSize: 11.5, color: "var(--text-3)", padding: "7px 0", borderBottom: "1px solid var(--hairline)", lineHeight: 1.5 }}>
+            {synthesizedLine(p, stepName)}
+          </div>
+        ))}
+      </div>
+    </Panel>
+    </>
   );
 }

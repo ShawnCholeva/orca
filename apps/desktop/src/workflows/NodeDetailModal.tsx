@@ -84,8 +84,8 @@ export function NodeDetailModal({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: 600,
-          maxHeight: "85%",
+          width: "min(980px, 92%)",
+          maxHeight: "90%",
           background: "var(--panel)",
           border: "1px solid var(--hairline-strong)",
           borderRadius: 14,
@@ -430,11 +430,11 @@ function StepBody({
           onChange={(e) => !readOnly && detail.onChange({ instructions: e.target.value })}
           readOnly={readOnly}
           placeholder="What this step should accomplish."
-          rows={5}
+          rows={9}
           style={{
             width: "100%",
             resize: "vertical",
-            minHeight: 96,
+            minHeight: 170,
             background: "var(--bg)",
             color: "var(--text)",
             border: "1px solid var(--hairline)",
@@ -454,6 +454,7 @@ function StepBody({
         onChange={(next) => !readOnly && detail.onChange({ outputSchema: next })}
         disabled={readOnly}
         onValidityChange={(valid) => onOutputSchemaValidityChange?.(!valid)}
+        minHeight={300}
       />
 
       <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
