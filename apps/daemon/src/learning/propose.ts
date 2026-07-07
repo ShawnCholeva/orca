@@ -1,11 +1,25 @@
-import { ProposeInstructionRevisionProposal, ProposeSchemaRevisionProposal, type OrchestrationRequest } from "@orca/contracts";
+import { DimensionKey, ProposeInstructionRevisionProposal, ProposeSchemaRevisionProposal, type OrchestrationRequest } from "@orca/contracts";
+import type { ShadowAdapterId } from "../orchestrator-llm/shadow-session.js";
+import type { ShadowAsk } from "../workflows/orchestrator/recover-step-scoring.js";
+import type { AutomatedTransportResult, ProposalValidationResult } from "../workflows/orchestration-transport/broker.js";
 import type { DiagnosisBundle } from "./diagnose.js";
 import { parseSchema, serializeSchema, validateSchemaTightening } from "./schema-mutation.js";
+
+// The hidden-interactive runner the broker executes for its hidden_interactive
+// transport — same shape as BrokerCompatibilityOptions.runHiddenInteractive.
+export type HiddenInteractiveRunner = (input: {
+  attemptId: string;
+  request: OrchestrationRequest;
+  validateProposal?: (proposal: unknown) => ProposalValidationResult | Promise<ProposalValidationResult>;
+}) => Promise<AutomatedTransportResult>;
 
 export type BrokerLike = {
   propose(
     request: OrchestrationRequest,
-    options: { validateProposal: (raw: unknown) => { accepted: true; parsed?: unknown } | { accepted: false; failureMessage?: string | null } },
+    options: {
+      validateProposal: (raw: unknown) => { accepted: true; parsed?: unknown } | { accepted: false; failureMessage?: string | null };
+      runHiddenInteractive?: HiddenInteractiveRunner;
+    },
   ): Promise<{ status: "proposed"; parsed: unknown } | { status: "needs_human_review"; reviewPayloadId: string }>;
 };
 
@@ -67,6 +81,69 @@ export function validateRevisionProposal(bundle: DiagnosisBundle) {
   };
 }
 
+// Prompt for the shadow session that drafts the revision. Mirrors composeJudgePrompt
+// (judge.ts): no tools, everything needed is in the message, one orca:action block out.
+export function composeProposePrompt(bundle: DiagnosisBundle): { systemPrompt: string; userPrompt: string } {
+  const isSchema = bundle.component === "step_output_schema";
+  const shape = isSchema
+    ? '{ "proposedOutputSchema": [ { "key": "...", "type": "...", "required": true } ], "predictedImprovement": "...", "invariantsPreserved": [...], "rationale": "..." }'
+    : '{ "proposedInstructions": "...", "predictedImprovement": "...", "invariantsPreserved": [...], "rationale": "..." }';
+  const systemPrompt = [
+    isSchema ? SCHEMA_INSTRUCTION : INSTRUCTION,
+    "Do NOT use any tools — do not read files, run commands, or search the workspace; you already",
+    "have everything you need in this message. Reason from the provided data and emit the proposal directly.",
+    `invariantsPreserved entries must be drawn from: ${DimensionKey.options.join(", ")}.`,
+    "Emit exactly one JSON object in one fenced block, nothing after:",
+    "```orca:action",
+    shape,
+    "```",
+  ].join("\n");
+  return { systemPrompt, userPrompt: JSON.stringify(buildProposePayload(bundle)) };
+}
+
+// The ShadowAsk-backed hidden_interactive transport for proposal drafting — the same
+// control-plane-pure seam the refute channel and the counterfactual judge already ride.
+// Validation happens inside the loop so a rejected draft is retried once WITH the
+// rejection fed back, instead of burning the whole transport on one bad fill.
+export function buildShadowProposeRunner(
+  deps: { shadowAsk: ShadowAsk; adapterId: ShadowAdapterId; sessionKey: string; timeoutMs: number },
+  bundle: DiagnosisBundle,
+): HiddenInteractiveRunner {
+  return async (input) => {
+    const { systemPrompt, userPrompt } = composeProposePrompt(bundle);
+    const started = Date.now();
+    let feedback: string | null = null;
+    let lastFailure = "no attempts made";
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let text: string;
+      try {
+        ({ text } = await deps.shadowAsk.ask(deps.sessionKey, {
+          adapterId: deps.adapterId, systemPrompt,
+          userPrompt: feedback == null ? userPrompt : `${userPrompt}\n\nYour previous draft was rejected: ${feedback}. Emit a corrected proposal.`,
+          timeoutMs: deps.timeoutMs,
+        }));
+      } catch (err) {
+        return {
+          status: "failed", failureReason: "interactive_spawn_failed",
+          failureMessage: err instanceof Error ? err.message : String(err),
+          latencyMs: Date.now() - started,
+        };
+      }
+      let raw: unknown;
+      try { raw = JSON.parse(text); } catch {
+        lastFailure = "response was not valid JSON";
+        feedback = lastFailure;
+        continue;
+      }
+      const v = input.validateProposal ? await input.validateProposal(raw) : { accepted: true as const };
+      if (v.accepted) return { status: "proposed", parsed: raw, rawTextLength: text.length, latencyMs: Date.now() - started };
+      lastFailure = v.failureMessage ?? "proposal rejected by validation";
+      feedback = lastFailure;
+    }
+    return { status: "rejected", failureMessage: lastFailure, latencyMs: Date.now() - started };
+  };
+}
+
 // A propose attempt either yields a valid revision, or does not — with an honest,
 // human-plain reason. Surfacing the reason (rather than collapsing every non-result
 // to null) is what lets the analyze stage record WHY a diagnosed step produced no
@@ -78,7 +155,10 @@ export type ProposeResult =
 // Map a validator's technical failure message to plain, jargon-free language for the
 // learning log. Never leaks the five banned terms (oracle/sensor/verdict/refute/veto).
 function plainProposeReason(raw: string | null, component: DiagnosisBundle["component"]): string {
-  if (!raw) return "the automated review didn't produce a change to apply";
+  // No validator rejection was ever captured: the model was never reached (or returned
+  // nothing usable) and the broker parked the request — say that, don't imply a model
+  // reviewed the step and declined.
+  if (!raw) return "no automated draft was produced — the request was set aside for human review";
   const r = raw.toLowerCase();
   if (r.includes("no-op") || r.includes("identical")) {
     return component === "step_output_schema"
@@ -92,7 +172,7 @@ function plainProposeReason(raw: string | null, component: DiagnosisBundle["comp
 }
 
 export async function proposeInstructionRevision(
-  deps: { broker: BrokerLike; providerId: string; modelId: string },
+  deps: { broker: BrokerLike; providerId: string; modelId: string; runHiddenInteractive?: HiddenInteractiveRunner },
   ctx: { goalId: string; workflowRunId: string; stepRunId: string },
   bundle: DiagnosisBundle,
 ): Promise<ProposeResult> {
@@ -114,6 +194,7 @@ export async function proposeInstructionRevision(
       if (!r.accepted) lastRejection = r.failureMessage;
       return r;
     },
+    runHiddenInteractive: deps.runHiddenInteractive,
   });
   if (result.status !== "proposed") {
     return { ok: false, reason: plainProposeReason(lastRejection, bundle.component) };

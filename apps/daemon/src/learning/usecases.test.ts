@@ -129,6 +129,9 @@ function brokerReturningInstructionsOrSchemaFill(): BrokerLike {
   };
 }
 
+// Inert shadow stubs for tests whose broker stub never invokes the runner.
+const idleShadow = () => ({ shadowAsk: { ask: vi.fn(async () => ({ text: "{}" })) }, terminateShadow: vi.fn() });
+
 let db: Database.Database;
 beforeEach(() => { db = openTestDb(); seed(db); vi.mocked(diagnoseTemplate).mockReturnValue({ bundles: [badBundle], skips: [] }); });
 afterEach(() => { closeDatabase(); vi.mocked(diagnoseTemplate).mockReset(); for (const d of tempDirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
@@ -136,7 +139,7 @@ afterEach(() => { closeDatabase(); vi.mocked(diagnoseTemplate).mockReset(); for 
 describe("analyzeTemplate structural net", () => {
   it("skips a bundle that would produce a contract-invalid proposal (empty beforeInstructions), warns, does not throw, and writes no row", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const created = await analyzeTemplate({ broker: brokerReturningSchemaFill() }, db, "tpl", "30d");
+    const created = await analyzeTemplate({ broker: brokerReturningSchemaFill(), ...idleShadow() }, db, "tpl", "30d");
     expect(created).toEqual([]);
     expect(listProposalsByTemplate(db, "tpl")).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -158,7 +161,7 @@ describe("analyzeTemplate structural net", () => {
       parsed: { proposedOutputSchema: [{ key: "summary", type: "string", required: true }], predictedImprovement: "x", invariantsPreserved: [], rationale: "r" },
     })) };
 
-    const created = await analyzeTemplate({ broker: noopBroker }, db, "tpl", "30d");
+    const created = await analyzeTemplate({ broker: noopBroker, ...idleShadow() }, db, "tpl", "30d");
     expect(created).toEqual([]);
     expect(listProposalsByTemplate(db, "tpl")).toEqual([]);
 
@@ -180,13 +183,63 @@ describe("analyzeTemplate structural net", () => {
       opts.validateProposal({ proposedInstructions: "Generate a proposal.", predictedImprovement: "x", invariantsPreserved: [], rationale: "r" });
       return { status: "needs_human_review" as const, reviewPayloadId: "x" };
     }) };
-    const created = await analyzeTemplate({ broker: escalateBroker }, db, "tpl", "30d");
+    const created = await analyzeTemplate({ broker: escalateBroker, ...idleShadow() }, db, "tpl", "30d");
     expect(created).toEqual([]);
     const analyzed = listEventsByTemplate(db, "tpl").find((e) => e.eventType === "analyzed")!;
     const payload = analyzed.payload as { proposalsCreated: number; skips: { reason: string }[] };
     expect(payload.proposalsCreated).toBe(0);
     expect(payload.skips).toHaveLength(1);
     expect(payload.skips[0].reason).toMatch(/already adequate|no change/i);
+  });
+
+  it("wires a shadow-backed hidden-interactive runner into the broker and tears the session down", async () => {
+    vi.mocked(diagnoseTemplate).mockReturnValue({ bundles: [goodBundle], skips: [] });
+    const ask = vi.fn<(key: string, input: { adapterId: string; systemPrompt: string; userPrompt: string; timeoutMs: number }) => Promise<{ text: string }>>(async () => ({ text: JSON.stringify({
+      proposedInstructions: "Generate a proposal, then validate it against the acceptance list.",
+      predictedImprovement: "fewer invalid outputs", invariantsPreserved: ["safetyCompliance"], rationale: "r",
+    }) }));
+    const terminateShadow = vi.fn();
+    // Broker that exercises the runner exactly like the real hidden_interactive transport:
+    // delegate to the runner, then validate its parsed result.
+    const broker: BrokerLike = { propose: vi.fn(async (req, opts) => {
+      const runner = opts.runHiddenInteractive;
+      expect(runner).toBeTypeOf("function");
+      const res = await runner!({ attemptId: "a1", request: req, validateProposal: opts.validateProposal });
+      if (res.status === "proposed" && opts.validateProposal(res.parsed).accepted) {
+        return { status: "proposed" as const, parsed: res.parsed };
+      }
+      return { status: "needs_human_review" as const, reviewPayloadId: "x" };
+    }) };
+
+    const created = await analyzeTemplate({ broker, shadowAsk: { ask }, terminateShadow }, db, "tpl", "30d");
+    expect(created).toHaveLength(1);
+    expect(created[0].afterInstructions).toContain("acceptance list");
+    // The shadow ask ran against a template-scoped propose session and was torn down after.
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(ask.mock.calls[0][0]).toBe("tpl::propose");
+    expect(ask.mock.calls[0][1]).toMatchObject({ adapterId: "claude-code" });
+    expect(terminateShadow).toHaveBeenCalledWith("tpl::propose");
+  });
+
+  it("a re-analyze that reuses a pending proposal records it as already-pending, not created", async () => {
+    vi.mocked(diagnoseTemplate).mockReturnValue({ bundles: [goodBundle], skips: [] });
+    const broker = brokerReturningInstructionsOrSchemaFill();
+    const first = await analyzeTemplate({ broker, ...idleShadow() }, db, "tpl", "30d");
+    expect(first).toHaveLength(1);
+
+    const second = await analyzeTemplate({ broker, ...idleShadow() }, db, "tpl", "30d");
+    expect(second).toHaveLength(1); // still returned so the UI can render the card
+    expect(second[0].id).toBe(first[0].id);
+
+    const analyzedEvents = listEventsByTemplate(db, "tpl").filter((e) => e.eventType === "analyzed");
+    expect(analyzedEvents).toHaveLength(2);
+    // newest first (seq DESC): the re-run created nothing — it found the pending one.
+    const rerun = analyzedEvents[0].payload as { proposalsCreated: number; proposalsAlreadyPending?: number };
+    expect(rerun.proposalsCreated).toBe(0);
+    expect(rerun.proposalsAlreadyPending).toBe(1);
+    const initial = analyzedEvents[1].payload as { proposalsCreated: number; proposalsAlreadyPending?: number };
+    expect(initial.proposalsCreated).toBe(1);
+    expect(initial.proposalsAlreadyPending ?? 0).toBe(0);
   });
 
   it("analyze emits created + analyzed events; skipped proposals appear in the analyzed payload", async () => {
@@ -196,7 +249,7 @@ describe("analyzeTemplate structural net", () => {
     vi.mocked(diagnoseTemplate).mockReturnValue({ bundles: [goodBundle, badBundleS2], skips: [diagnoseSkip] });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const created = await analyzeTemplate({ broker: brokerReturningInstructionsOrSchemaFill() }, db, "tpl", "30d");
+    const created = await analyzeTemplate({ broker: brokerReturningInstructionsOrSchemaFill(), ...idleShadow() }, db, "tpl", "30d");
     warn.mockRestore();
 
     const events = listEventsByTemplate(db, "tpl");

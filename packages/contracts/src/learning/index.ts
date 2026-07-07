@@ -169,7 +169,9 @@ export const LearningEventPayload = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("rolled_back"), outcome: RollbackOutcomeSnapshot }).strict(),
   z.object({ kind: z.literal("superseded"), by: z.enum(["apply", "staleness", "restore"]) }).strict(),
   z.object({ kind: z.literal("baseline_restored"), supersededCount: z.number().int().nonnegative() }).strict(),
-  z.object({ kind: z.literal("analyzed"), stepsDiagnosed: z.number().int().nonnegative(), proposalsCreated: z.number().int().nonnegative(), skips: z.array(z.object({ stepTemplateId: z.string(), reason: z.string().max(300) }).strict()).max(20) }).strict(),
+  // proposalsCreated counts NEW inserts only; a re-analyze that finds an existing pending
+  // proposal reports it in proposalsAlreadyPending (optional: pre-existing rows lack it).
+  z.object({ kind: z.literal("analyzed"), stepsDiagnosed: z.number().int().nonnegative(), proposalsCreated: z.number().int().nonnegative(), proposalsAlreadyPending: z.number().int().nonnegative().optional(), skips: z.array(z.object({ stepTemplateId: z.string(), reason: z.string().max(300) }).strict()).max(20) }).strict(),
 ]);
 export type LearningEventPayload = z.infer<typeof LearningEventPayload>;
 

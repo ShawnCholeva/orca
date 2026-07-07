@@ -232,13 +232,19 @@ export class OrchestrationTransportBroker {
         ? await this.runOneShot(request, attemptId, options)
         : await this.runHiddenInteractive(request, attemptId, options);
 
+    // one_shot attempts are always finalized here. A hidden_interactive runner may
+    // manage its own attempt lifecycle (worker sessions do); one that doesn't (e.g.
+    // the ShadowAsk-backed learning propose runner) must not leave the row pending
+    // forever — finalize whatever is still pending after the runner returns.
+    const shouldFinalize = transport === "one_shot" || this.attemptStillPending(attemptId);
+
     if (result.status === "proposed") {
       const validation = await validateProposal(result.parsed, options?.validateProposal);
       if (validation.accepted) {
         const parsed = Object.prototype.hasOwnProperty.call(validation, "parsed")
           ? validation.parsed
           : result.parsed;
-        if (transport === "one_shot") {
+        if (shouldFinalize) {
           markTransportAttemptSucceeded(this.attemptCtx(), {
             attemptId,
             rawTextLength: result.rawTextLength,
@@ -255,7 +261,7 @@ export class OrchestrationTransportBroker {
         };
       }
 
-      if (transport === "one_shot") {
+      if (shouldFinalize) {
         markTransportAttemptRejected(this.attemptCtx(), {
           attemptId,
           failureReason: "proposal_rejected",
@@ -268,7 +274,7 @@ export class OrchestrationTransportBroker {
     }
 
     if (result.status === "rejected") {
-      if (transport === "one_shot") {
+      if (shouldFinalize) {
         markTransportAttemptRejected(this.attemptCtx(), {
           attemptId,
           failureReason: "proposal_rejected",
@@ -280,7 +286,7 @@ export class OrchestrationTransportBroker {
       return { status: "not_proposed", failureReason: "proposal_rejected" };
     }
 
-    if (transport === "one_shot") {
+    if (shouldFinalize) {
       markTransportAttemptFailed(this.attemptCtx(), {
         attemptId,
         failureReason: result.failureReason,
@@ -290,6 +296,13 @@ export class OrchestrationTransportBroker {
       });
     }
     return { status: "not_proposed", failureReason: result.failureReason };
+  }
+
+  private attemptStillPending(attemptId: string): boolean {
+    const row = this.deps.db
+      .prepare("SELECT status FROM orchestration_transport_attempts WHERE id = ?")
+      .get(attemptId) as { status: string } | undefined;
+    return row?.status === "pending";
   }
 
   private async runOneShot(

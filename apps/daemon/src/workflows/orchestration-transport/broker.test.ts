@@ -347,6 +347,60 @@ describe("OrchestrationTransportBroker fallback", () => {
   });
 });
 
+describe("attempt finalization for lifecycle-unaware hidden interactive runners", () => {
+  // A runner that never touches markTransportAttempt* (e.g. the learning propose
+  // runner riding ShadowAsk) must still leave an honest attempt row — the broker
+  // finalizes any attempt the runner left pending. Runners that manage their own
+  // lifecycle (the tests above) are untouched: their rows are no longer pending.
+  it("marks a pending attempt succeeded when the runner proposes without marking", async () => {
+    const { broker, db } = setup();
+    const result = await broker.propose(request("orca/anthropic"), {
+      runHiddenInteractive: async () => ({
+        status: "proposed",
+        parsed: { operatorId: "agent:codex" },
+        rawTextLength: 42,
+        latencyMs: 9,
+      }),
+    });
+    expect(result.status).toBe("proposed");
+    expect(attemptRows(db)).toMatchObject([
+      { transport: "hidden_interactive", status: "succeeded", failure_reason: null },
+    ]);
+  });
+
+  it("marks a pending attempt rejected when the runner rejects without marking", async () => {
+    const { broker, db } = setup();
+    const result = await broker.propose(request("orca/anthropic"), {
+      runHiddenInteractive: async () => ({
+        status: "rejected",
+        failureMessage: "draft was a no-op",
+        latencyMs: 3,
+      }),
+    });
+    expect(result.status).toBe("needs_human_review");
+    expect(attemptRows(db)).toMatchObject([
+      { transport: "hidden_interactive", status: "rejected", failure_reason: "proposal_rejected" },
+      { transport: "human_review", status: "pending", failure_reason: null },
+    ]);
+  });
+
+  it("marks a pending attempt failed when the runner fails without marking", async () => {
+    const { broker, db } = setup();
+    const result = await broker.propose(request("orca/anthropic"), {
+      runHiddenInteractive: async () => ({
+        status: "failed",
+        failureReason: "interactive_spawn_failed",
+        failureMessage: "spawn timeout",
+      }),
+    });
+    expect(result.status).toBe("needs_human_review");
+    expect(attemptRows(db)).toMatchObject([
+      { transport: "hidden_interactive", status: "failed", failure_reason: "interactive_spawn_failed" },
+      { transport: "human_review", status: "pending", failure_reason: null },
+    ]);
+  });
+});
+
 describe("execModeToTransport", () => {
   it("maps shadow_session -> hidden_interactive", () => {
     expect(execModeToTransport("shadow_session")).toBe("hidden_interactive");

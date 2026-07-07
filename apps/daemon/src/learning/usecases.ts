@@ -6,7 +6,7 @@ import { windowStart } from "../metrics/aggregate.js";
 import { listRevisionSignalsByTemplate } from "./fetch.js";
 import { diagnoseTemplate } from "./diagnose.js";
 import { recordEvent, currentTemplateVersion } from "./events.js";
-import { proposeInstructionRevision, type BrokerLike } from "./propose.js";
+import { buildShadowProposeRunner, proposeInstructionRevision, type BrokerLike } from "./propose.js";
 import { serializeSchema } from "./schema-mutation.js";
 import { enrichWithRegression } from "./canary.js";
 import { buildJudgeCorpus } from "./corpus.js";
@@ -20,7 +20,14 @@ import {
   insertProposal, listProposalsByTemplate, pendingProposalForStep, getProposal, setProposalJudgment,
 } from "./store.js";
 
-export interface AnalyzeDeps { broker: BrokerLike }
+// shadowAsk/terminateShadow power the hidden_interactive transport for drafting —
+// the same control-plane-pure ShadowAsk seam the judge stage rides. Without them the
+// broker has no automated transport and every diagnosed step parks at human review.
+export interface AnalyzeDeps {
+  broker: BrokerLike;
+  shadowAsk: ShadowAsk;
+  terminateShadow: (key: string) => Promise<void> | void;
+}
 
 export interface JudgeDeps {
   shadowAsk: ShadowAsk;
@@ -83,15 +90,30 @@ export async function analyzeTemplate(
   // Every diagnosed bundle that does NOT become a proposal contributes a skip with an
   // honest reason, so the analyzed event records WHY (never a silent drop — SP3).
   const proposeSkips: { stepTemplateId: string; reason: string }[] = [];
+  // Reused pendings are returned (the UI renders their cards) but must not be counted
+  // as "created" in the analyzed event — a re-analyze that drafts nothing new says so.
+  let alreadyPending = 0;
   for (const bundle of bundles) {
     // Dedupe: keep an existing pending proposal for the step.
     const existing = pendingProposalForStep(db, templateId, bundle.stepTemplateId);
-    if (existing) { created.push(existing); continue; }
+    if (existing) { created.push(existing); alreadyPending++; continue; }
     const anchor = anchorForStep(db, templateId, bundle.stepTemplateId);
     if (!anchor) { proposeSkips.push({ stepTemplateId: bundle.stepTemplateId, reason: "no completed run to base the change on" }); continue; }
     const model = orchestratorModelForGoal(db, anchor.goalId);
     if (!model) { proposeSkips.push({ stepTemplateId: bundle.stepTemplateId, reason: "no model is configured to draft the change" }); continue; }
-    const fill = await proposeInstructionRevision({ broker: deps.broker, ...model }, anchor, bundle);
+    // Wire the shadow-backed hidden_interactive transport so drafting actually reaches a
+    // model (mirrors judgeProposal's adapter resolution + spawn/teardown per use).
+    const adapterId = adapterIdForProvider(model.providerId as ModelProviderId) as ShadowAdapterId | null;
+    const sessionKey = `${templateId}::propose`;
+    const runner = adapterId
+      ? buildShadowProposeRunner({ shadowAsk: deps.shadowAsk, adapterId, sessionKey, timeoutMs: SHADOW_LLM_TIMEOUT_MS }, bundle)
+      : undefined;
+    let fill;
+    try {
+      fill = await proposeInstructionRevision({ broker: deps.broker, ...model, runHiddenInteractive: runner }, anchor, bundle);
+    } finally {
+      if (runner) await deps.terminateShadow(sessionKey);
+    }
     if (!fill.ok) { proposeSkips.push({ stepTemplateId: bundle.stepTemplateId, reason: fill.reason }); continue; }
     const revision = fill.proposal;
     const proposal: TemplateInstructionProposal = {
@@ -134,7 +156,7 @@ export async function analyzeTemplate(
   recordEvent(db, {
     templateId, proposalId: null, stepTemplateId: null,
     eventType: "analyzed", templateVersion: currentTemplateVersion(db, templateId),
-    payload: { kind: "analyzed", stepsDiagnosed: bundles.length + diagnoseSkips.length, proposalsCreated: created.length, skips },
+    payload: { kind: "analyzed", stepsDiagnosed: bundles.length + diagnoseSkips.length, proposalsCreated: created.length - alreadyPending, proposalsAlreadyPending: alreadyPending, skips },
   }, now);
   return created;
 }

@@ -10,13 +10,10 @@ import {
   InvalidSchemaEditError,
 } from "./apply.js";
 import type { RollbackOutcomeSnapshot } from "@orca/contracts";
-import type { ShadowAsk } from "../workflows/orchestrator/recover-step-scoring.js";
 
 export interface LearningRouteDeps extends AnalyzeDeps {
   db: Database.Database;
   actor: () => string;   // resolves the acting owner id for decidedBy (single-owner today)
-  shadowAsk: ShadowAsk;
-  terminateShadow: (key: string) => Promise<void> | void;
 }
 
 function templateExists(db: Database.Database, id: string): boolean {
