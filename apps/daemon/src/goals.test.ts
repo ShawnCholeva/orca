@@ -559,6 +559,35 @@ describe("createGoal — refined goal path", () => {
     expect(row.intent).toBe("Refined desc");
   });
 
+  it("falls back to request intent when refined.intent is empty, preserving the min-1 floor", async () => {
+    const { db, ctx } = setup();
+    const refined = makeRefined({ intent: "" });
+
+    const goal = await createGoal({ title: "Rough Title", intent: "Rough desc", refined }, ctx);
+
+    expect(goal.intent).toBe("Rough desc");
+
+    const row = db.prepare("SELECT intent FROM goals WHERE id = ?").get(goal.id) as { intent: string };
+    expect(row.intent).toBe("Rough desc");
+
+    const createdRow = db
+      .prepare("SELECT payload FROM events WHERE goal_id = ? AND type = 'goal.created'")
+      .get(goal.id) as { payload: string };
+    expect((JSON.parse(createdRow.payload) as { intent: string }).intent).toBe("Rough desc");
+  });
+
+  it("keeps refined.intent when it is non-empty (unchanged behavior)", async () => {
+    const { db, ctx } = setup();
+    const refined = makeRefined({ intent: "Refined desc" });
+
+    const goal = await createGoal({ title: "Rough Title", intent: "Rough desc", refined }, ctx);
+
+    expect(goal.intent).toBe("Refined desc");
+
+    const row = db.prepare("SELECT intent FROM goals WHERE id = ?").get(goal.id) as { intent: string };
+    expect(row.intent).toBe("Refined desc");
+  });
+
   it("workspace.attached event payload includes workspaceId, path, name", async () => {
     const { db, ctx } = setup();
     const refined = makeRefined();

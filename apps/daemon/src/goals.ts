@@ -162,7 +162,7 @@ function resolveGoalOrigin(
   if (validatedRefined) {
     return {
       title: validatedRefined.title,
-      intent: validatedRefined.intent,
+      intent: validatedRefined.intent.trim().length > 0 ? validatedRefined.intent : (input.intent ?? ""),
       skillId: "guided-goal-refinement",
       extensionPoint: "goal.refine",
       durationMs: 0,
