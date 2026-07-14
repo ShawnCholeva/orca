@@ -281,8 +281,14 @@ describe("OrcaChat", () => {
     expect(screen.queryByPlaceholderText("Message Orca…")).toBeNull();
   });
 
-  it("shows the starting indicator while run and step are active and Orca has not spoken", async () => {
+  it("shows the starting indicator while the run's first step (ordinal 0) is starting", async () => {
     setupRunLoad();
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+        ordinal: 0, attempt: 1, status: "active", startedAt: now, finishedAt: null, blockedReason: null,
+      },
+    });
     const { OrcaChat } = await import("./OrcaChat");
 
     render(
@@ -378,11 +384,40 @@ describe("OrcaChat", () => {
 
   it("hides the orchestrator-review status when there is no phase (parked/idle)", async () => {
     setupRunLoad();
+    // A genuine first step (ordinal 0) so the starting row is expected.
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+        ordinal: 0, attempt: 1, status: "active", startedAt: now, finishedAt: null, blockedReason: null,
+      },
+    });
     const { OrcaChat } = await import("./OrcaChat");
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
     expect(await screen.findByTestId("step-starting")).toBeInTheDocument();
     expect(screen.queryByTestId("orchestrator-review")).toBeNull();
+  });
+
+  it("does not show 'Starting workflow' for a later step; shows 'Working on {step}' instead", async () => {
+    setupRunLoad(); // default stepRun is ordinal 4 — a mid-run step, not the first
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByTestId("step-working")).toHaveTextContent("Working on Build It…");
+    expect(screen.queryByTestId("step-starting")).toBeNull();
+  });
+
+  it("fills the between-turn gap: 'Working on {step}' shows while a step is active with only a completed (non-live) card", async () => {
+    setupRunLoad(); // active step, no live activity, no phase
+    listActivitiesMock.mockResolvedValue([
+      { ...activeActivity, id: "act-done", status: "completed", sourceKind: "turn_completed", finalSummary: "Ran a check." },
+    ]);
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    // The worker emitted a completed card and is thinking for its next turn: the
+    // status must not go dead — "Working on {step}" fills the gap.
+    expect(await screen.findByTestId("step-working")).toBeInTheDocument();
   });
 
   it("surfaces a blocked run with its reason and suppresses the working spinner", async () => {
@@ -643,6 +678,12 @@ describe("OrcaChat", () => {
 
   it("pins the starting indicator to the tail, after the latest message", async () => {
     setupRunLoad();
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+        ordinal: 0, attempt: 1, status: "active", startedAt: now, finishedAt: null, blockedReason: null,
+      },
+    });
     listOrchestratorMessagesMock.mockResolvedValue({
       messages: [{ ...userMessage, id: "m1", body: "User said something", createdAt: now }],
     });
@@ -760,16 +801,18 @@ describe("OrcaChat", () => {
     expect(screen.queryByTestId("step-starting")).toBeNull();
   });
 
-  it("retires the per-step working row once the step has emitted activity", async () => {
+  it("retires the per-step working row while a live activity thread is streaming", async () => {
     setupRunLoad();
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [orcaMessage] });
-    // The current step run (step-1) already produced a (finalized) activity — its
-    // own thread now carries the "working" signal, so the generic row must hide.
+    // The current step run (step-1) has a LIVE (streaming) activity — its own
+    // pulsing thread carries the "working" signal, so the generic row must hide.
+    // (A *completed* thread would leave a gap the working row must fill — see the
+    // between-turn-gap test above.)
     listActivitiesMock.mockResolvedValue([
       {
         ...activeActivity,
-        status: "completed",
-        steps: [{ id: "s1", text: "Read App.tsx", category: "reading", status: "done", createdAt: now }],
+        status: "active",
+        steps: [{ id: "s1", text: "Read App.tsx", category: "reading", status: "active", createdAt: now }],
       },
     ]);
     const { OrcaChat } = await import("./OrcaChat");

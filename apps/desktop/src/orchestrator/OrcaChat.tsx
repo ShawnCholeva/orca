@@ -464,10 +464,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
       workflowState.detail?.goal.orchestratorModel,
   );
 
-  // Show a "step is starting…" indicator during the agent's first-turn latency:
-  // the run and step are active but Orca has not posted anything into the chat
-  // yet. Clears automatically once the first turn lands.
-  const orcaHasSpoken = messages.some((message) => message.role === "orchestrator");
   const liveActivity = pickLiveActivity(activities);
   const hasLiveActivity = liveActivity !== null;
 
@@ -518,14 +514,20 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   // window is otherwise silent, so surface an honest status and let it take
   // precedence over the generic starting/working rows.
   const orchestratorPhase = workflowState.stepRun?.orchestratorPhase ?? null;
+  // "Starting workflow" is a first-moment-of-the-run affordance, so gate it on the
+  // run's FIRST step (ordinal 0). Every later step's start-latency uses the generic
+  // "Working on {step}…" row instead — otherwise "Starting workflow" wrongly
+  // re-fires on step 2+ (its old !orcaHasSpoken gate never flips, since step
+  // completions are cards, not orchestrator messages).
   const showStarting =
     workflowState.run?.status === "active" &&
     workflowState.stepRun?.status === "active" &&
     // The final step run stays "active" with finished_at set while the run waits
     // for completion approval; a finished step is done, not starting.
     workflowState.stepRun?.finishedAt == null &&
+    workflowState.stepRun?.ordinal === 0 &&
     orchestratorPhase == null &&
-    !orcaHasSpoken &&
+    answerPendingSince == null &&
     !hasLiveActivity &&
     !hasAgentActivityCard;
 
@@ -670,13 +672,19 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   // row must retire then, or it lingers redundantly below a streaming thread.
   const activeStepName =
     sortedSteps.find((step) => step.id === workflowState.stepRun?.stepTemplateId)?.name ?? null;
-  const currentStepHasActivity =
-    currentStepRunId != null && activities.some((a) => a.stepRunId === currentStepRunId);
+  // Suppress "Working on {step}…" only while the step is CURRENTLY streaming a
+  // tool thread (an active activity card carries the signal). Gating on whether
+  // the step *ever* produced activity is wrong: it leaves the status dead in the
+  // gap between a completed card and the worker's next turn (or between judge and
+  // refute) — exactly the flicker we must fill.
+  const currentStepStreaming =
+    currentStepRunId != null &&
+    activities.some((a) => a.stepRunId === currentStepRunId && a.status === "active");
   const showStepWorking =
     activeStepRunning &&
     orchestratorPhase == null &&
     !hasLiveActivity &&
-    !currentStepHasActivity &&
+    !currentStepStreaming &&
     answerPendingSince == null &&
     !sendingMessage &&
     !awaitingReply &&
@@ -1094,7 +1102,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
               </div>
             )}
 
-            {answerPendingSince != null && !runBlocked && (
+            {answerPendingSince != null && !runBlocked && !showOrchestratorReview && (
               <div data-testid="answer-thinking">
                 <ThinkingRow label="Thinking…" />
               </div>

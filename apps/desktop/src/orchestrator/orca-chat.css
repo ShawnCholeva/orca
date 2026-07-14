@@ -1064,7 +1064,6 @@
 .orca-chat-approval-always:disabled { opacity: 0.5; cursor: default; }
 /* "Deny" — quiet text button pushed to the far right. */
 .orca-chat-approval-deny {
-  margin-left: auto;
   padding: 8px 12px;
   font-size: 13px;
   color: var(--text-3);
