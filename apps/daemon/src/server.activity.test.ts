@@ -763,7 +763,7 @@ describe("daemon activity integration", () => {
     expect(afterMessages.some((m) => m.role === "user")).toBe(false);
   });
 
-  it("opens one live activity when a workflow step starts", async () => {
+  it("opens no live activity on a bare step start (the row is lazy until the first tool step)", async () => {
     const ids = {
       goalId: "goal-step-start",
       runId: "run-step-start",
@@ -793,57 +793,10 @@ describe("daemon activity integration", () => {
       headers: AUTH_HEADERS,
     });
     const activities = ListActivitiesResponse.parse(activitiesResponse.json());
-    expect(activities.items).toHaveLength(1);
-    expect(activities.items[0]).toMatchObject({
-      stepRunId: ids.stepRunId,
-      agentSessionId: ids.sessionId,
-      status: "active",
-      sourceKind: "step_started",
-      currentText: "Watching the step agent start Execution…",
-    });
-  });
-
-  it("uses the lexicographically greater session id when active sessions share created_at", async () => {
-    const ids = {
-      goalId: "goal-step-session-tie",
-      runId: "run-step-session-tie",
-      stepRunId: "step-step-session-tie",
-      sessionId: "session-a",
-    };
-    seedLiveWorkflowSession(db, ids);
-    const workspace = db
-      .prepare("SELECT workspace_id FROM sessions WHERE id = ?")
-      .get(ids.sessionId) as { workspace_id: string };
-    db.prepare(
-      `INSERT INTO sessions
-         (id, goal_id, workspace_id, adapter_id, title, status, created_at,
-          workflow_step_run_id)
-       VALUES ('session-z', ?, ?, 'claude-code', 'Tied session', 'running', ?, ?)`
-    ).run(ids.goalId, workspace.workspace_id, NOW, ids.stepRunId);
-
-    eventBus.publish({
-      seq: 1,
-      id: "event-step-session-tie",
-      type: "workflow.step.started",
-      goalId: ids.goalId,
-      payload: {
-        goalId: ids.goalId,
-        workflowRunId: ids.runId,
-        stepRunId: ids.stepRunId,
-        stepTemplateId: "execution",
-        ordinal: 4,
-      },
-      createdAt: NOW,
-    });
-
-    const activitiesResponse = await server.inject({
-      method: "GET",
-      url: `/v1/goals/${ids.goalId}/activities`,
-      headers: AUTH_HEADERS,
-    });
-    const activities = ListActivitiesResponse.parse(activitiesResponse.json());
-    expect(activities.items).toHaveLength(1);
-    expect(activities.items[0]?.agentSessionId).toBe("session-z");
+    // A bare step start no longer paints a contentless placeholder card. The
+    // "starting" state is the frontend's thinking bubble; the activity thread
+    // opens lazily on the first real tool step.
+    expect(activities.items).toHaveLength(0);
   });
 
   it("ignores a step-start event for an active step that is no longer current", () => {
@@ -885,48 +838,6 @@ describe("daemon activity integration", () => {
       count: number;
     };
     expect(count.count).toBe(0);
-  });
-
-  it("does not attribute a cross-goal session to a step-start activity", async () => {
-    const ids = {
-      goalId: "goal-step-cross",
-      runId: "run-step-cross",
-      stepRunId: "step-step-cross",
-      sessionId: "session-step-cross",
-    };
-    seedLiveWorkflowSession(db, ids);
-    db.prepare(
-      `INSERT INTO goals
-         (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
-       VALUES ('goal-other', 'Other goal', '', 'active', 1, ?, ?, NULL)`
-    ).run(NOW, NOW);
-    db.prepare("UPDATE sessions SET goal_id = 'goal-other' WHERE id = ?").run(
-      ids.sessionId
-    );
-
-    eventBus.publish({
-      seq: 1,
-      id: "event-step-cross",
-      type: "workflow.step.started",
-      goalId: ids.goalId,
-      payload: {
-        goalId: ids.goalId,
-        workflowRunId: ids.runId,
-        stepRunId: ids.stepRunId,
-        stepTemplateId: "execution",
-        ordinal: 4,
-      },
-      createdAt: NOW,
-    });
-
-    const activitiesResponse = await server.inject({
-      method: "GET",
-      url: `/v1/goals/${ids.goalId}/activities`,
-      headers: AUTH_HEADERS,
-    });
-    const activities = ListActivitiesResponse.parse(activitiesResponse.json());
-    expect(activities.items).toHaveLength(1);
-    expect(activities.items[0]?.agentSessionId).toBeNull();
   });
 
   it("ignores a step-start event whose envelope goal differs from the payload goal", () => {
@@ -999,42 +910,6 @@ describe("daemon activity integration", () => {
       count: number;
     };
     expect(count.count).toBe(0);
-  });
-
-  it("opens a step-start activity with a null session when no session exists yet", async () => {
-    const ids = {
-      goalId: "goal-step-no-session",
-      runId: "run-step-no-session",
-      stepRunId: "step-step-no-session",
-      sessionId: "session-step-no-session",
-    };
-    seedLiveWorkflowSession(db, ids);
-    db.prepare("DELETE FROM sessions WHERE id = ?").run(ids.sessionId);
-
-    eventBus.publish({
-      seq: 1,
-      id: "event-step-no-session",
-      type: "workflow.step.started",
-      goalId: ids.goalId,
-      payload: {
-        goalId: ids.goalId,
-        workflowRunId: ids.runId,
-        stepRunId: ids.stepRunId,
-        stepTemplateId: "execution",
-        ordinal: 4,
-        attempt: 1,
-      },
-      createdAt: NOW,
-    });
-
-    const activitiesResponse = await server.inject({
-      method: "GET",
-      url: `/v1/goals/${ids.goalId}/activities`,
-      headers: AUTH_HEADERS,
-    });
-    const activities = ListActivitiesResponse.parse(activitiesResponse.json());
-    expect(activities.items).toHaveLength(1);
-    expect(activities.items[0]?.agentSessionId).toBeNull();
   });
 
   it("does not surface the worker's raw response text as the activity summary", async () => {

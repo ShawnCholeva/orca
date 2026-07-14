@@ -28,11 +28,13 @@ export class ActivityUpdater {
   apply(ctx: ActivityStoreCtx, signal: ActivitySignal): void {
     switch (signal.kind) {
       case "step_started":
-        this.open(ctx, signal, {
-          sourceKind: "step_started",
-          currentText: `Watching the step agent start ${signal.stepName ?? "the step"}…`,
-          workCategory: null
-        });
+        // Do NOT open an activity row here. The "starting/thinking" state is the
+        // frontend's own thinking bubble; the activity thread must carry only
+        // real, tool-derived steps. The row is created lazily on the first
+        // tool_use (appendActivityStep). This prevents a contentless
+        // internal-voice placeholder card — and the phantom turn_completed card
+        // it becomes when a step parks with no tool steps. We still seed the
+        // throttle baseline so the first tool_use is not coalesced away.
         this.perStep.set(signal.stepRunId, {
           lastUpdateMs: this.nowMs(),
           lastCategory: null

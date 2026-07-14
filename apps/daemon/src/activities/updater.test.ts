@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EventBus } from "../events.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import { listActivitiesByGoal } from "./projection.js";
-import { getLiveForStepRun } from "./store.js";
+import { getLiveForStepRun, pauseForConfirmation } from "./store.js";
 import type { ActivityStoreCtx } from "./store.js";
 import { ActivityUpdater } from "./updater.js";
 
@@ -48,21 +48,37 @@ describe("ActivityUpdater", () => {
     db.close();
   });
 
-  it("opens a live bubble naming the started step", () => {
+  it("opens no activity row on step start (the row is lazy)", () => {
     updater.apply(ctx, {
       kind: "step_started",
       ...base,
       stepName: "Implement updater"
     });
 
-    expect(listActivitiesByGoal(db, "g1")).toMatchObject([
-      {
-        status: "active",
-        currentText: "Watching the step agent start Implement updater…",
-        sourceKind: "step_started",
-        workCategory: null
-      }
-    ]);
+    // The starting/thinking state is the frontend's own thinking bubble; the
+    // activity thread must not exist until the step produces a real tool step.
+    expect(listActivitiesByGoal(db, "g1")).toEqual([]);
+    expect(getLiveForStepRun(db, "s1")).toBeUndefined();
+  });
+
+  it("does not persist a phantom card when a step parks with no tool steps", () => {
+    // step_started with no tool_use → no live row → pauseForConfirmation must
+    // surface ONLY the confirmation card, never a finalized placeholder above it.
+    updater.apply(ctx, { kind: "step_started", ...base, stepName: "Triage" });
+
+    pauseForConfirmation(ctx, {
+      goalId: "g1",
+      workflowRunId: "r1",
+      stepRunId: "s1",
+      summary: "Provisional brief ready."
+    });
+
+    const activities = listActivitiesByGoal(db, "g1");
+    expect(activities).toHaveLength(1);
+    expect(activities[0]).toMatchObject({
+      status: "paused_for_input",
+      sourceKind: "step_confirmation_pending"
+    });
   });
 
   it("coalesces same-category tool signals inside the throttle window", () => {
@@ -77,7 +93,9 @@ describe("ActivityUpdater", () => {
 
     const activities = listActivitiesByGoal(db, "g1");
     expect(activities.filter((activity) => activity.workCategory === "reading")).toHaveLength(1);
-    expect(events.filter((event) => event.type === "activity.changed")).toHaveLength(2);
+    // Only the first tool_use opens+updates the (lazy) row; the two throttled
+    // repeats emit nothing, and step_started no longer emits an open event.
+    expect(events.filter((event) => event.type === "activity.changed")).toHaveLength(1);
   });
 
   it("updates immediately when the tool category changes", () => {
@@ -94,11 +112,16 @@ describe("ActivityUpdater", () => {
         workCategory: "editing"
       }
     ]);
-    expect(events.filter((event) => event.type === "activity.changed")).toHaveLength(3);
+    // Two tool_use events (reading opens the lazy row, editing updates it);
+    // step_started no longer emits an open event.
+    expect(events.filter((event) => event.type === "activity.changed")).toHaveLength(2);
   });
 
   it("reassures after weak-signal silence then expires an empty completion", () => {
     updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
+    // Open the (lazy) row with a real tool step so the weak-signal tick has a
+    // live row to reassure over.
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null, toolUseId: null });
 
     nowMs += 9_999;
     updater.apply(ctx, { kind: "weak_signal_tick", ...base });
@@ -138,6 +161,8 @@ describe("ActivityUpdater", () => {
 
   it("ignores a stale weak-signal tick after the turn completes", () => {
     updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
+    // A real tool step opens the (lazy) row so the completed turn has a card.
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null, toolUseId: null });
     updater.apply(ctx, {
       kind: "turn_completed",
       stepRunId: "s1",
@@ -162,6 +187,8 @@ describe("ActivityUpdater", () => {
 
   it("persists exactly one completed final summary", () => {
     updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
+    // A real tool step opens the (lazy) row that the completed turn finalizes.
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null, toolUseId: null });
     updater.apply(ctx, {
       kind: "turn_completed",
       stepRunId: "s1",
@@ -178,6 +205,8 @@ describe("ActivityUpdater", () => {
 
   it("preserves null confidence on a completed summary", () => {
     updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
+    // A real tool step opens the (lazy) row that the completed turn finalizes.
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null, toolUseId: null });
     updater.apply(ctx, {
       kind: "turn_completed",
       stepRunId: "s1",
@@ -208,6 +237,8 @@ describe("ActivityUpdater", () => {
       ]
     };
     updater.apply(ctx, { kind: "step_started", ...base, stepName: null });
+    // A real tool step opens the (lazy) row that the question then pauses.
+    updater.apply(ctx, { kind: "tool_use", ...base, category: "reading", detail: "Read file.ts", diff: null, toolUseId: null });
 
     updater.apply(ctx, {
       kind: "question_pending",
@@ -246,10 +277,10 @@ function ctx() {
 const sig = { goalId: "g1", workflowRunId: "r1", stepRunId: "s1", agentSessionId: null };
 
 describe("ActivityUpdater steps", () => {
-  it("step_started opens an activity with no persisted steps", () => {
+  it("step_started opens no activity row (it is lazy until first tool step)", () => {
     const c = ctx();
     new ActivityUpdater().apply(c, { kind: "step_started", ...sig, stepName: "Root Cause" });
-    expect(getLiveForStepRun(c.db, "s1")!.steps).toEqual([]);
+    expect(getLiveForStepRun(c.db, "s1")).toBeUndefined();
   });
 
   it("tool_use appends a persisted step with detail + diff", () => {
@@ -266,19 +297,24 @@ describe("ActivityUpdater steps", () => {
     const c = ctx();
     const u = new ActivityUpdater();
     u.apply(c, { kind: "step_started", ...sig, stepName: "Root Cause" });
+    // Open the (lazy) row with a real tool step, then confirm a weak-signal tick
+    // adds no further step.
+    u.apply(c, { kind: "tool_use", ...sig, category: "reading", detail: "Read verifier.ts", diff: null, toolUseId: null });
     u.apply(c, { kind: "weak_signal_tick", ...sig });
-    expect(getLiveForStepRun(c.db, "s1")!.steps).toEqual([]);
+    expect(getLiveForStepRun(c.db, "s1")!.steps.map((s) => s.text)).toEqual(["Read verifier.ts"]);
   });
 
   it("does not surface reasoning notes as activity steps (raw worker prose is suppressed)", () => {
     const c = ctx();
     const u = new ActivityUpdater();
     u.apply(c, { kind: "step_started", ...sig, stepName: "Root Cause" });
+    // Open the (lazy) row with a real tool step; a reasoning note must not add one.
+    u.apply(c, { kind: "tool_use", ...sig, category: "reading", detail: "Read verifier.ts", diff: null, toolUseId: null });
     u.apply(c, {
       kind: "reasoning_note",
       ...sig,
       text: "I'll compare an app-wide table against per-goal storage",
     });
-    expect(getLiveForStepRun(c.db, "s1")!.steps).toEqual([]);
+    expect(getLiveForStepRun(c.db, "s1")!.steps.map((s) => s.text)).toEqual(["Read verifier.ts"]);
   });
 });
