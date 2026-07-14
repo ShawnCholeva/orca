@@ -3,8 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceSummary, Workspace, WorkspaceGoalView } from "@orca/contracts";
 import { WorkspacesPage } from "./WorkspacesPage";
 
+// isTauri gates the folder picker: native "Browse…" dialog in Tauri, a typed
+// absolute-path input in a plain browser (dev:browser). Make it per-test settable.
+const tauriEnv = vi.hoisted(() => ({ value: false }));
 vi.mock("@tauri-apps/api/core", () => ({
-  isTauri: () => false,
+  isTauri: () => tauriEnv.value,
   invoke: vi.fn(),
 }));
 
@@ -71,6 +74,7 @@ function makeGoal(overrides: Partial<WorkspaceGoalView> = {}): WorkspaceGoalView
 
 describe("WorkspacesPage", () => {
   beforeEach(() => {
+    tauriEnv.value = false; // default: browser mode (typed-path input)
     listWorkspacesMock.mockReset();
     getWorkspaceMock.mockReset();
     createWorkspaceMock.mockReset();
@@ -161,6 +165,7 @@ describe("WorkspacesPage", () => {
   });
 
   it("create: Browse triggers dialog → inspectWorkspace resolves preview → submit calls createWorkspace", async () => {
+    tauriEnv.value = true; // native folder picker path
     const { open } = await import("@tauri-apps/plugin-dialog");
     const openMock = vi.mocked(open);
     openMock.mockResolvedValue("/repo/a");
@@ -210,6 +215,7 @@ describe("WorkspacesPage", () => {
   });
 
   it("duplicate path error surfaces inline error in create modal", async () => {
+    tauriEnv.value = true; // native folder picker path
     const { open } = await import("@tauri-apps/plugin-dialog");
     const openMock = vi.mocked(open);
     openMock.mockResolvedValue("/repo/a");
@@ -243,6 +249,40 @@ describe("WorkspacesPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /Add workspace/i }));
 
     await screen.findByText("This folder has already been added.");
+  });
+
+  it("browser mode: typed path → Inspect calls inspectWorkspace and shows preview (no Browse dialog)", async () => {
+    tauriEnv.value = false; // plain browser: no native picker, typed-path input instead
+
+    const existingWs = makeWorkspaceSummary();
+    listWorkspacesMock.mockResolvedValue([existingWs]);
+    getWorkspaceMock.mockResolvedValue({ workspace: makeWorkspace(), goals: [] });
+    inspectWorkspaceMock.mockResolvedValue({
+      preview: {
+        path: "/repo/a",
+        name: "a",
+        workspaceType: "repo",
+        branch: "main",
+        isDirty: false,
+        gitProbe: "ok",
+      },
+    });
+
+    render(<WorkspacesPage onCreateGoal={vi.fn()} />);
+    await screen.findByRole("heading", { name: "Workspaces" });
+
+    fireEvent.click(screen.getByTitle("New workspace"));
+    // No native Browse dialog in browser mode.
+    expect(screen.queryByRole("button", { name: /Browse/i })).toBeNull();
+
+    // Type an absolute path and inspect it via Enter (the typed path stays in the
+    // input; a successful inspect populates the workspace-name field from preview).
+    const pathField = screen.getByPlaceholderText(/\/Users\//);
+    fireEvent.change(pathField, { target: { value: "/repo/a" } });
+    fireEvent.keyDown(pathField, { key: "Enter" });
+
+    await screen.findByDisplayValue("a"); // preview.name applied → inspect succeeded
+    expect(inspectWorkspaceMock).toHaveBeenCalledWith(expect.objectContaining({ inputPath: "/repo/a" }));
   });
 
   it("manage: opening Manage modal and saving calls updateWorkspace", async () => {
