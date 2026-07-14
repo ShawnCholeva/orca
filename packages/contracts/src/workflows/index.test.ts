@@ -14,7 +14,7 @@ describe("Refute contracts", () => {
     expect(RefuteCompletionProposal.parse(p)).toEqual(p);
   });
   it("accepts a well-formed request with oracle scope", () => {
-    const r = { step: { name: "Analyze", instructions: "do X" }, goal: { id: "goal-1", description: "ship" },
+    const r = { step: { name: "Analyze", instructions: "do X" }, goal: { id: "goal-1", intent: "ship" },
       stepOutput: { summary: "done" }, selfReportedScoring: { successScore: 0.9 },
       oracle: { ran: true, verdict: "passed", sensorsRun: [{ kind: "test", summary: "12 passed" }], gaps: ["integration"] } };
     expect(RefuteCompletionRequest.parse(r).oracle.gaps).toEqual(["integration"]);

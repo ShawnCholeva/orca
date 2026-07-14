@@ -1535,7 +1535,7 @@ export class OrchestratorService {
 
     const parsedRequest = RefuteCompletionRequest.safeParse({
       step: { name: ctx.stepTpl.name, instructions: ctx.stepTpl.instructions ?? "" },
-      goal: { id: goal.id, description: goal.intent },
+      goal: { id: goal.id, intent: goal.intent },
       stepOutput: isRecord(block) ? block : null,
       selfReportedScoring: isRecord(scoring) ? scoring : null,
       // `oracle.ran` means an EXECUTION oracle ran — grounding-only evidence

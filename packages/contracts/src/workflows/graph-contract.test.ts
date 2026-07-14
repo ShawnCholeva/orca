@@ -131,7 +131,7 @@ describe("gate evaluation contract", () => {
   it("GateEvaluationRequest defaults committedLedger to empty array when omitted", () => {
     const req = GateEvaluationRequest.parse({
       gate: { nodeId: "gate1", name: "Release Gate", instructions: "approve when green" },
-      goal: { id: "goal1", description: "ship it" },
+      goal: { id: "goal1", intent: "ship it" },
       sourceStepOutput: null,
       priorGateDecisions: [],
       availableOutcomes: ["approved", "rejected"],
@@ -142,7 +142,7 @@ describe("gate evaluation contract", () => {
   it("GateEvaluationRequest accepts committedLedger entries", () => {
     const req = GateEvaluationRequest.parse({
       gate: { nodeId: "gate1", name: "Release Gate", instructions: "approve when green" },
-      goal: { id: "goal1", description: "ship it" },
+      goal: { id: "goal1", intent: "ship it" },
       sourceStepOutput: null,
       priorGateDecisions: [],
       availableOutcomes: ["approved"],
@@ -156,7 +156,7 @@ describe("gate evaluation contract", () => {
     expect(() =>
       GateEvaluationRequest.parse({
         gate: { nodeId: "gate1", name: "Release Gate", instructions: "approve when green" },
-        goal: { id: "goal1", description: "ship it" },
+        goal: { id: "goal1", intent: "ship it" },
         sourceStepOutput: null,
         priorGateDecisions: [],
         availableOutcomes: ["approved"],
@@ -168,7 +168,7 @@ describe("gate evaluation contract", () => {
   it("GateEvaluationRequest accepts a committedLedger entry with a note of exactly 500 chars", () => {
     const req = GateEvaluationRequest.parse({
       gate: { nodeId: "gate1", name: "Release Gate", instructions: "approve when green" },
-      goal: { id: "goal1", description: "ship it" },
+      goal: { id: "goal1", intent: "ship it" },
       sourceStepOutput: null,
       priorGateDecisions: [],
       availableOutcomes: ["approved"],
@@ -188,7 +188,7 @@ describe("gate evaluation contract", () => {
     };
     const req = GateEvaluationRequest.parse({
       gate: { nodeId: "gate1", name: "Release Gate", instructions: "approve when green" },
-      goal: { id: "goal1", description: "ship it" },
+      goal: { id: "goal1", intent: "ship it" },
       sourceStepOutput: null,
       priorGateDecisions: [],
       availableOutcomes: ["approved"],
@@ -202,7 +202,7 @@ describe("gate evaluation contract", () => {
     expect(() =>
       GateEvaluationRequest.parse({
         gate: { nodeId: "gate1", name: "Release Gate", instructions: "approve when green" },
-        goal: { id: "goal1", description: "ship it" },
+        goal: { id: "goal1", intent: "ship it" },
         sourceStepOutput: null,
         priorGateDecisions: [],
         availableOutcomes: ["approved"],
@@ -230,7 +230,7 @@ describe("SplitEvaluation schemas", () => {
   it("parses a split request with a null source output", () => {
     const r = SplitEvaluationRequest.parse({
       splitter: { nodeId: "route", name: "Route", instructions: "pick", branches: ["a", "b"] },
-      goal: { id: "g", description: "do the thing" },
+      goal: { id: "g", intent: "do the thing" },
       sourceStepOutput: null,
       priorDecisions: [],
       committedLedger: [],

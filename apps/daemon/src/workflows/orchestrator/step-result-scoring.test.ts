@@ -7,7 +7,7 @@ const input: StepResultScoringInput = {
   stepRunId: "step-1",
   providerId: "orca/anthropic",
   modelId: "claude-sonnet-4-6",
-  goal: { id: "goal-1", description: "Build the feature." },
+  goal: { id: "goal-1", intent: "Build the feature." },
   step: {
     id: "step-1",
     templateId: "execution",

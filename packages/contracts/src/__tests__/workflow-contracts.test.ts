@@ -1048,7 +1048,7 @@ describe("step result scoring contracts", () => {
       },
       goal: {
         id: "goal-1",
-        description: "Build the feature."
+        intent: "Build the feature."
       },
       output: { summary: "Implemented." },
       facts: {

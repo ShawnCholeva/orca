@@ -1804,7 +1804,7 @@ export class DispatchEngine {
         instructions,
         branches: splitterNode.branches ?? [],
       },
-      goal: { id: goal.id, description: goal.intent },
+      goal: { id: goal.id, intent: goal.intent },
       sourceStepOutput: readStepOutputAsRecord(db, run.id, stepRun.id),
       priorDecisions,
       committedLedger,
@@ -2075,7 +2075,7 @@ export class DispatchEngine {
       }));
     return GateEvaluationRequest.parse({
       gate: { nodeId: gateNode.id, name: gateNode.name, instructions: gateNode.instructions ?? "" },
-      goal: { id: goal.id, description: goal.intent },
+      goal: { id: goal.id, intent: goal.intent },
       sourceStepOutput: readStepOutputAsRecord(db, run.id, stepRun.id),
       priorGateDecisions,
       availableOutcomes,

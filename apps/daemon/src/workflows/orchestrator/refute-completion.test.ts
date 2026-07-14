@@ -5,7 +5,7 @@ import { refuteStepCompletion, composeRefutePrompt } from "./refute-completion.j
 
 const REQ: RefuteCompletionRequest = {
   step: { name: "Analyze", instructions: "Cover the error paths." },
-  goal: { id: "goal-1", description: "Ship the feature." },
+  goal: { id: "goal-1", intent: "Ship the feature." },
   stepOutput: { summary: "done" }, selfReportedScoring: { successScore: 0.9 },
   oracle: { ran: false, verdict: null, sensorsRun: [], gaps: [] },
 };

@@ -22,7 +22,7 @@ export interface StepResultScoringInput {
   modelId: string;
   goal: {
     id: string;
-    description: string;
+    intent: string;
   };
   step: {
     id: string;

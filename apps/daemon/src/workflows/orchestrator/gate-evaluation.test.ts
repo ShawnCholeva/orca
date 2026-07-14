@@ -5,7 +5,7 @@ import { evaluateGate, composeGateEvaluationPrompt, issueRefsEqual, GATE_REJECT_
 
 const REQUEST: GateEvaluationRequest = {
   gate: { nodeId: "gate", name: "Review Gate", instructions: "Approve when the deliverable meets the goal." },
-  goal: { id: "goal-1", description: "Ship the feature." },
+  goal: { id: "goal-1", intent: "Ship the feature." },
   sourceStepOutput: { summary: "done" },
   priorGateDecisions: [],
   availableOutcomes: ["approved", "rejected"],
