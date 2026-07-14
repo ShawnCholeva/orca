@@ -26,6 +26,7 @@ import {
   ListPluginsResponse,
   ListSessionsResponse,
   ListSkillsResponse,
+  ListWorkspacesResponse,
   SessionExtractionOutput,
   UpdateGoalOrchestratorModelResponse,
   UpdateGoalResponse
@@ -1465,6 +1466,82 @@ describe('goal refinement and workspace routes', () => {
 
   it('DELETE /v1/goals/:id/workspaces/:workspaceId without Authorization returns 401', async () => {
     const res = await server.inject({ method: 'DELETE', url: '/v1/goals/any/workspaces/any' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  // GET /v1/workspaces — exists reflects disk
+  it('GET /v1/workspaces reports exists=false once the folder is removed from disk', async () => {
+    const created = CreateGoalResponse.parse(JSON.parse(
+      (await server.inject({
+        method: 'POST', url: '/v1/goals',
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { title: 'ws-goal', intent: 'test intent' }
+      })).body
+    ));
+    const attached = JSON.parse(
+      (await server.inject({
+        method: 'POST',
+        url: `/v1/goals/${created.goal.id}/workspaces`,
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { inputPath: wsDir }
+      })).body
+    ) as { workspace: { id: string } };
+
+    const present = ListWorkspacesResponse.parse(JSON.parse(
+      (await server.inject({ method: 'GET', url: '/v1/workspaces', headers: AUTH_HEADERS })).body
+    ));
+    expect(present.workspaces.find((w) => w.id === attached.workspace.id)?.exists).toBe(true);
+
+    rmSync(wsDir, { recursive: true, force: true });
+
+    const gone = ListWorkspacesResponse.parse(JSON.parse(
+      (await server.inject({ method: 'GET', url: '/v1/workspaces', headers: AUTH_HEADERS })).body
+    ));
+    expect(gone.workspaces.find((w) => w.id === attached.workspace.id)?.exists).toBe(false);
+  });
+
+  // DELETE /v1/workspaces/:id — purge a registered workspace
+  it('DELETE /v1/workspaces/:id removes the workspace and returns 204', async () => {
+    const created = CreateGoalResponse.parse(JSON.parse(
+      (await server.inject({
+        method: 'POST', url: '/v1/goals',
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { title: 'ws-goal', intent: 'test intent' }
+      })).body
+    ));
+    const attached = JSON.parse(
+      (await server.inject({
+        method: 'POST',
+        url: `/v1/goals/${created.goal.id}/workspaces`,
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { inputPath: wsDir }
+      })).body
+    ) as { workspace: { id: string } };
+
+    const res = await server.inject({
+      method: 'DELETE',
+      url: `/v1/workspaces/${attached.workspace.id}`,
+      headers: AUTH_HEADERS
+    });
+    expect(res.statusCode).toBe(204);
+
+    const list = ListWorkspacesResponse.parse(JSON.parse(
+      (await server.inject({ method: 'GET', url: '/v1/workspaces', headers: AUTH_HEADERS })).body
+    ));
+    expect(list.workspaces.some((w) => w.id === attached.workspace.id)).toBe(false);
+  });
+
+  it('DELETE /v1/workspaces/:id returns 404 for an unknown id', async () => {
+    const res = await server.inject({
+      method: 'DELETE',
+      url: '/v1/workspaces/nonexistent',
+      headers: AUTH_HEADERS
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('DELETE /v1/workspaces/:id without Authorization returns 401', async () => {
+    const res = await server.inject({ method: 'DELETE', url: '/v1/workspaces/any' });
     expect(res.statusCode).toBe(401);
   });
 

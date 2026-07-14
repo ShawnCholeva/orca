@@ -292,4 +292,39 @@ describe("Goals rail workspace filter", () => {
     const options = Array.from(select.querySelectorAll("option")).map((o) => o.textContent);
     expect(options).toEqual(["All workspaces", "Alpha"]);
   });
+
+  it("reloads the goals list when a workspace is hard-deleted (workspace.deleted)", async () => {
+    // A cascade purge deletes the workspace and its goals server-side and emits
+    // a single workspace.deleted event (goalId: null). The rail must reload so
+    // the purged goals and the vanished workspace option disappear.
+    let onEvent: ((event: { type: string; goalId: string | null }) => void) | undefined;
+    openEventStreamMock.mockImplementation(
+      (handlers: { onEvent: (event: { type: string; goalId: string | null }) => void }) => {
+        onEvent = handlers.onEvent;
+        return { close: vi.fn() };
+      },
+    );
+
+    const { rail, select } = await renderApp();
+    expect(within(rail).getByText("Both Goal")).toBeInTheDocument();
+
+    // Purge removed Beta and the only goal that lived in it.
+    listGoalsMock.mockResolvedValue({
+      goals: [
+        makeGoal({ id: "g-alpha", title: "Alpha Goal", workspaces: [alpha] }),
+        makeGoal({ id: "g-none", title: "Loose Goal", workspaces: [] }),
+      ],
+    });
+
+    await act(async () => {
+      onEvent!({ type: "workspace.deleted", goalId: null });
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(within(rail).queryByText("Both Goal")).not.toBeInTheDocument(),
+    );
+    const options = Array.from(select.querySelectorAll("option")).map((o) => o.textContent);
+    expect(options).toEqual(["All workspaces", "Alpha"]);
+  });
 });

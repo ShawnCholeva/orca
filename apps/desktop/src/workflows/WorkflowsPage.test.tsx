@@ -28,6 +28,7 @@ vi.mock("../api", async (importOriginal) => {
     ...mod,
     listGoals: (...args: unknown[]) => listGoalsMock(...args),
     listTemplateCatalog: (...args: unknown[]) => listTemplateCatalogMock(...args),
+    openEventStream: () => ({ close() {} }),
   };
 });
 

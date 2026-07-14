@@ -1875,6 +1875,7 @@ describe("first-class workspace contracts", () => {
     const s = WorkspaceSummary.parse({
       id: "w1", path: "/repo/a", name: "a", description: "",
       createdAt: "2026-06-19T00:00:00.000Z", updatedAt: "2026-06-19T00:00:00.000Z",
+      exists: true,
       goalCounts: { active: 2, completed: 1, archived: 0 },
     });
     expect(s.goalCounts.active).toBe(2);

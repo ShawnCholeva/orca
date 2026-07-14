@@ -468,7 +468,9 @@ function RegisteredWorkspaceSelect({
   }
 
   const existing = new Set(existingPaths);
-  const available = workspaces.filter((ws) => !existing.has(ws.path));
+  // Exclude workspaces whose folder no longer exists on disk — picking one would
+  // only fail on inspect. They remain visible/removable in the Workspaces tab.
+  const available = workspaces.filter((ws) => ws.exists && !existing.has(ws.path));
 
   return (
     <MiniSelect

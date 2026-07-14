@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type Database from "better-sqlite3";
 import { Workspace, WorkspaceSummary, WorkspaceGoalView } from "@orca/contracts";
 
@@ -134,7 +135,7 @@ export function getWorkspaceByIdAndGoal(db: Database.Database, workspaceId: stri
 export function listWorkspaceSummaries(db: Database.Database): WorkspaceSummary[] {
   type Row = EntityRow & { active: number; completed: number; archived: number };
   return (stmts(db).summaries.all() as Row[]).map((r) =>
-    WorkspaceSummary.parse({ ...toWorkspace(r), goalCounts: { active: r.active, completed: r.completed, archived: r.archived } })
+    WorkspaceSummary.parse({ ...toWorkspace(r), exists: existsSync(r.path), goalCounts: { active: r.active, completed: r.completed, archived: r.archived } })
   );
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { WorkflowScope, WorkflowTemplate } from "@orca/contracts";
-import { listGoals, toErrorMessage } from "../api";
+import { listGoals, openEventStream, toErrorMessage } from "../api";
 import { listTemplates } from "./api";
 import { ChevronRightIcon } from "./icons";
 import { ScopeBadge, ScopeFilter, inputStyle } from "./ScopeControls";
@@ -79,20 +79,31 @@ export function WorkflowsPage() {
     };
   }, []);
 
-  // Load goals once
+  // Load goals for the scope picker, and keep them fresh: goals can be created,
+  // archived, or hard-deleted (e.g. a workspace purge) while this page is open.
   useEffect(() => {
     let cancelled = false;
-    listGoals()
-      .then((response) => {
-        if (!cancelled) {
-          setGoalOptions(response.goals.map((g) => g.title));
+    const refresh = () => {
+      listGoals()
+        .then((response) => {
+          if (!cancelled) setGoalOptions(response.goals.map((g) => g.title));
+        })
+        .catch(() => {
+          // non-fatal — scopePicker just shows no goal options
+        });
+    };
+    refresh();
+    const stream = openEventStream({
+      onEvent(event) {
+        if (event.type.startsWith("goal.") || event.type.startsWith("workspace.")) {
+          refresh();
         }
-      })
-      .catch(() => {
-        // non-fatal — scopePicker just shows no goal options
-      });
+      },
+      onStatus() {},
+    });
     return () => {
       cancelled = true;
+      stream.close();
     };
   }, []);
 

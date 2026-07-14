@@ -13,6 +13,7 @@ import {
   updateWorkspace,
   attachWorkspace,
   detachWorkspace,
+  deleteWorkspace,
   type WorkspaceCtx,
 } from "./usecases.js";
 import type { InspectWorkspacePreview } from "@orca/contracts";
@@ -58,6 +59,16 @@ function goal(db: Database.Database, id: string): void {
   db.prepare(
     "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, 'Test Goal', '', 'active', 1, ?, ?, NULL)",
   ).run(id, now, now);
+}
+
+function session(db: Database.Database, id: string, goalId: string, workspaceId: string): void {
+  db.prepare(
+    "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at) VALUES (?, ?, ?, 'claude', 'S', 'exited', ?)",
+  ).run(id, goalId, workspaceId, new Date().toISOString());
+}
+
+function fkClean(db: Database.Database): boolean {
+  return (db.pragma("foreign_key_check") as unknown[]).length === 0;
 }
 
 afterEach(() => {
@@ -127,6 +138,49 @@ it("detachWorkspace emits workspace.removed with goalId", async () => {
   const evt = published.find((e) => e.type === "workspace.removed");
   expect(evt).toBeDefined();
   expect(evt!.goalId).toBe("g1");
+});
+
+it("deleteWorkspace purges the workspace, its exclusive goals, and their sessions", async () => {
+  const ctx = makeCtx({ inspect: { path: "/r/a", name: "a", workspaceType: "repo", branch: null, isDirty: null, gitProbe: "ok" } });
+  goal(ctx.db, "g1");
+  const ws = await attachWorkspace(ctx, { goalId: "g1", inputPath: "/r/a" });
+  // A session referencing the workspace via ON DELETE RESTRICT is exactly what
+  // used to make the delete throw a FK error and 500.
+  session(ctx.db, "s1", "g1", ws.id);
+  published.splice(0);
+
+  const res = await deleteWorkspace(ctx, { id: ws.id });
+
+  expect(res).toEqual({ goalsDeleted: 1, sessionsDeleted: 1 });
+  expect(findWorkspaceById(ctx.db, ws.id)).toBeNull();
+  expect(ctx.db.prepare("SELECT COUNT(*) AS n FROM goals WHERE id='g1'").get()).toEqual({ n: 0 });
+  expect(ctx.db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE id='s1'").get()).toEqual({ n: 0 });
+  expect(fkClean(ctx.db)).toBe(true);
+  const evt = published.find((e) => e.type === "workspace.deleted");
+  expect(evt!.payload).toMatchObject({ workspaceId: ws.id, goalsDeleted: 1, sessionsDeleted: 1 });
+});
+
+it("deleteWorkspace keeps a goal shared with another workspace, dropping only this link", async () => {
+  const ctx = makeCtx({ inspect: { path: "/r/a", name: "a", workspaceType: "repo", branch: null, isDirty: null, gitProbe: "ok" } });
+  goal(ctx.db, "g1");
+  const wsA = await attachWorkspace(ctx, { goalId: "g1", inputPath: "/r/a" });
+  // Attach a second workspace to the same goal.
+  ctx.inspectWorkspace = () => Promise.resolve({ path: "/r/b", name: "b", workspaceType: "repo", branch: null, isDirty: null, gitProbe: "ok" });
+  const wsB = await attachWorkspace(ctx, { goalId: "g1", inputPath: "/r/b" });
+
+  const res = await deleteWorkspace(ctx, { id: wsA.id });
+
+  expect(res.goalsDeleted).toBe(0); // g1 is shared, so it survives
+  expect(ctx.db.prepare("SELECT COUNT(*) AS n FROM goals WHERE id='g1'").get()).toEqual({ n: 1 });
+  expect(findWorkspaceById(ctx.db, wsB.id)).not.toBeNull();
+  expect(listWorkspacesByGoal(ctx.db, "g1").map((w) => w.id)).toEqual([wsB.id]);
+  expect(fkClean(ctx.db)).toBe(true);
+});
+
+it("deleteWorkspace throws NotFoundError for an unknown workspace", async () => {
+  const ctx = makeCtx({ inspect: { path: "/r/a", name: "a", workspaceType: "repo", branch: null, isDirty: null, gitProbe: "ok" } });
+  const { NotFoundError } = await import("../goals.js");
+  await expect(deleteWorkspace(ctx, { id: randomUUID() })).rejects.toBeInstanceOf(NotFoundError);
 });
 
 it("attachWorkspace throws NotFoundError for nonexistent goal", async () => {

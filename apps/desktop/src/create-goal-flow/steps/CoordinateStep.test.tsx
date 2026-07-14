@@ -45,7 +45,7 @@ describe("CoordinateStep — registry picker", () => {
     listWorkspacesMock.mockResolvedValue([
       {
         id: "ws-2", path: "/repo/billing", name: "billing", description: "",
-        createdAt: NOW, updatedAt: NOW,
+        createdAt: NOW, updatedAt: NOW, exists: true,
         goalCounts: { active: 0, completed: 0, archived: 0 },
       },
     ]);
@@ -72,5 +72,23 @@ describe("CoordinateStep — registry picker", () => {
         expect.objectContaining({ type: "inspectSucceeded", inputPath: "/repo/billing", name: "billing" })
       )
     );
+  });
+
+  it("excludes a registered workspace whose folder no longer exists on disk", async () => {
+    listWorkspacesMock.mockResolvedValue([
+      {
+        id: "ws-gone", path: "/repo/deleted", name: "deleted-repo", description: "",
+        createdAt: NOW, updatedAt: NOW, exists: false,
+        goalCounts: { active: 0, completed: 0, archived: 0 },
+      },
+    ]);
+    const dispatch = vi.fn<(a: FlowAction) => void>();
+
+    render(<CoordinateStep state={coordinateState()} dispatch={dispatch} />);
+
+    // With every registered workspace missing, the picker has nothing to offer
+    // and must not surface the stale entry.
+    await screen.findByText("All registered added");
+    expect(screen.queryByText("deleted-repo")).toBeNull();
   });
 });

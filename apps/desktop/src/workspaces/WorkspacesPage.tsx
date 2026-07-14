@@ -13,6 +13,7 @@ import {
   getWorkspace,
   createWorkspace as apiCreateWorkspace,
   updateWorkspace as apiUpdateWorkspace,
+  deleteWorkspace as apiDeleteWorkspace,
   inspectWorkspace,
   openEventStream,
   ApiError,
@@ -61,6 +62,14 @@ export function WorkspacesPage({ onCreateGoal, onOpenGoal }: WorkspacesPageProps
     return () => stream.close();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const selMissing = selId ? workspaces.find((w) => w.id === selId)?.exists === false : false;
+
+  async function handleRemove(id: string) {
+    await apiDeleteWorkspace(id);
+    setDetail(null);
+    await loadList();
+  }
 
   useEffect(() => {
     if (!selId) {
@@ -129,9 +138,11 @@ export function WorkspacesPage({ onCreateGoal, onOpenGoal }: WorkspacesPageProps
         <WorkspaceDetail
           ws={detail.workspace}
           goals={detail.goals}
+          missing={selMissing}
           onOpenGoal={onOpenGoal}
           onCreateGoal={onCreateGoal}
           onManage={() => setEditing(true)}
+          onRemove={() => handleRemove(detail.workspace.id)}
         />
       )}
 
@@ -309,17 +320,37 @@ function WorkspaceRow({
         <Icon.workspace size={15} />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: "var(--text)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {ws.name}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: ws.exists ? "var(--text)" : "var(--text-2)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {ws.name}
+          </div>
+          {!ws.exists && (
+            <span
+              className="mono"
+              title="This folder no longer exists on disk"
+              style={{
+                flexShrink: 0,
+                fontSize: 9,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                color: "var(--err)",
+                border: "1px solid color-mix(in srgb, var(--err) 40%, transparent)",
+                borderRadius: 5,
+                padding: "1px 5px",
+              }}
+            >
+              Missing
+            </span>
+          )}
         </div>
         <div className="mono" style={{ fontSize: 10.5, color: "var(--text-3)", marginTop: 1 }}>
           {total} goal{total !== 1 ? "s" : ""} · {active} active
@@ -329,18 +360,102 @@ function WorkspaceRow({
   );
 }
 
+// Shown when the selected workspace's folder is gone from disk. Offers a
+// two-step confirm to purge the stale registration (cascades goal links).
+function MissingWorkspaceBanner({
+  path,
+  goalCount,
+  onRemove,
+}: {
+  path: string;
+  goalCount: number;
+  onRemove: () => Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function doRemove() {
+    setRemoving(true);
+    setError(null);
+    try {
+      await onRemove();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Remove failed");
+      setRemoving(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 12,
+        padding: "12px 14px",
+        marginBottom: 20,
+        borderRadius: 11,
+        background: "color-mix(in srgb, var(--err) 8%, transparent)",
+        border: "1px solid color-mix(in srgb, var(--err) 32%, transparent)",
+      }}
+    >
+      <div style={{ flexShrink: 0, marginTop: 1, color: "var(--err)" }}>
+        <Icon.folder size={16} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+          This workspace's folder no longer exists
+        </div>
+        <div className="mono" style={{ fontSize: 11, color: "var(--text-3)", marginTop: 2, wordBreak: "break-all" }}>
+          {path}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 6, lineHeight: 1.5 }}>
+          {confirming
+            ? `Permanently delete this workspace${goalCount > 0 ? `, its ${goalCount} goal${goalCount !== 1 ? "s" : ""},` : ""} and all their sessions? This can't be undone.`
+            : "It won't appear when creating goals. Removing it permanently deletes the workspace and the goals that live only here."}
+        </div>
+        {error && (
+          <span className="mono" style={{ display: "block", fontSize: 11, color: "var(--err)", marginTop: 6 }}>
+            {error}
+          </span>
+        )}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        {confirming ? (
+          <>
+            <Btn kind="ghost" size="sm" onClick={() => setConfirming(false)} disabled={removing}>
+              Cancel
+            </Btn>
+            <Btn kind="danger" size="sm" onClick={() => void doRemove()} disabled={removing}>
+              {removing ? "Removing…" : "Confirm remove"}
+            </Btn>
+          </>
+        ) : (
+          <Btn kind="quiet" size="sm" onClick={() => setConfirming(true)}>
+            Remove
+          </Btn>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function WorkspaceDetail({
   ws,
   goals,
+  missing,
   onOpenGoal,
   onCreateGoal,
   onManage,
+  onRemove,
 }: {
   ws: Workspace;
   goals: WorkspaceGoalView[];
+  missing: boolean;
   onOpenGoal?: (goal: WorkspaceGoalView) => void;
   onCreateGoal: (workspace?: Workspace) => void;
   onManage: () => void;
+  onRemove: () => Promise<void>;
 }) {
   const grouped = GOAL_STATE_ORDER
     .map((st) => ({ status: st, items: goals.filter((g) => g.status === st) }))
@@ -348,6 +463,7 @@ function WorkspaceDetail({
 
   return (
     <div className="scroll" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "20px 24px 28px" }}>
+      {missing && <MissingWorkspaceBanner path={ws.path} goalCount={goals.length} onRemove={onRemove} />}
       {/* header */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginBottom: 24 }}>
         <div

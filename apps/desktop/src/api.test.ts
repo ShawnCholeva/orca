@@ -1668,6 +1668,7 @@ describe("desktop api client", () => {
 
     const workspaceSummary = {
       ...registryWorkspace,
+      exists: true,
       goalCounts: { active: 1, completed: 0, archived: 0 },
     };
 

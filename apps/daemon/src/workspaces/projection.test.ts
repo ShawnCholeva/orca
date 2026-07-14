@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import Database from "better-sqlite3";
+import { tmpdir } from "node:os";
 import { runMigrations, defaultMigrationsDir } from "../migrations.js";
 import * as P from "./projection.js";
 
@@ -45,6 +46,15 @@ it("link/unlink and summaries with goalCounts", () => {
   expect(P.listWorkspacesByGoal(db, "g1").map((w) => w.id)).toEqual(["w1"]);
   expect(P.unlinkGoalWorkspace(db, "g2", "w1")).toBe(true);
   expect(P.listWorkspaceSummaries(db)[0].goalCounts.completed).toBe(0);
+});
+
+it("summaries report exists based on whether the path is present on disk", () => {
+  const db = freshDb();
+  P.insertWorkspaceEntity(db, { id: "w1", path: tmpdir(), name: "here", description: "", createdAt: ISO, updatedAt: ISO });
+  P.insertWorkspaceEntity(db, { id: "w2", path: "/definitely/not/a/real/path/xyz", name: "gone", description: "", createdAt: ISO, updatedAt: ISO });
+  const byId = new Map(P.listWorkspaceSummaries(db).map((s) => [s.id, s.exists]));
+  expect(byId.get("w1")).toBe(true);
+  expect(byId.get("w2")).toBe(false);
 });
 
 it("goal views for a workspace include archived via archived_at", () => {

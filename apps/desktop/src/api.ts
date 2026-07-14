@@ -794,6 +794,12 @@ export async function updateWorkspace(id: string, body: UpdateWorkspaceRequest):
   return res.workspace;
 }
 
+export async function deleteWorkspace(id: string): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  return requestVoid(`${baseUrl}/v1/workspaces/${encodeURIComponent(id)}`,
+    { method: "DELETE", headers: authHeaders(token) }, "Delete workspace failed");
+}
+
 export async function updateGoal(
   id: string,
   patch: UpdateGoalRequest,

@@ -204,6 +204,7 @@ export const DomainEventType = z.enum([
   "workspace.removed",
   "workspace.created",
   "workspace.updated",
+  "workspace.deleted",
   "document.attached",
   "document.removed",
   "document.refreshed",
@@ -357,6 +358,9 @@ export const InspectWorkspacePreview = z.object({
 export type InspectWorkspacePreview = z.infer<typeof InspectWorkspacePreview>;
 
 export const WorkspaceSummary = Workspace.extend({
+  // Whether the workspace's path still resolves on disk. Computed at list time,
+  // not stored — a registered folder can be deleted out from under the daemon.
+  exists: z.boolean(),
   goalCounts: z.object({
     active: z.number().int().nonnegative(),
     completed: z.number().int().nonnegative(),

@@ -106,6 +106,7 @@ import {
   detachWorkspace,
   createWorkspace,
   updateWorkspace,
+  deleteWorkspace,
   DuplicateWorkspaceError,
   type WorkspaceCtx
 } from './workspaces/usecases.js';
@@ -1355,6 +1356,20 @@ export function createServer(
     try {
       const workspace = await updateWorkspace(workspaceCtx, { id, ...parsed.data });
       return reply.send({ workspace } satisfies UpdateWorkspaceResponse);
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        reply.status(404);
+        return apiError('not_found', `Workspace not found: ${id}`);
+      }
+      throw error;
+    }
+  });
+
+  server.delete('/v1/workspaces/:id', async (request, reply): Promise<void | { error: unknown }> => {
+    const { id } = request.params as { id: string };
+    try {
+      await deleteWorkspace(workspaceCtx, { id });
+      reply.code(204).send();
     } catch (error) {
       if (error instanceof NotFoundError) {
         reply.status(404);

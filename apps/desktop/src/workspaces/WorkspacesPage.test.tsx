@@ -39,6 +39,7 @@ function makeWorkspaceSummary(overrides: Partial<WorkspaceSummary> = {}): Worksp
     description: "",
     createdAt: NOW,
     updatedAt: NOW,
+    exists: true,
     goalCounts: { active: 1, completed: 0, archived: 0 },
     ...overrides,
   };
