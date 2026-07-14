@@ -4,7 +4,7 @@ import { buildOrchestratorContext, type OrchestratorContextInput } from "./conte
 describe("buildOrchestratorContext", () => {
   it("assembles goal + run + current step + conversation + prior artifacts", () => {
     const ctx = buildOrchestratorContext({
-      goal: { id: "g1", title: "T", description: "D", attachedWorkspaces: [{ id: "w1", name: "main", root: "/x" }] },
+      goal: { id: "g1", title: "T", description: "D", attachedWorkspaces: [{ id: "w1", name: "main", root: "/x" }], attachedDocuments: [] },
       run: { templateId: "orca/engineering", templateVersion: 4, ordinal: 1, status: "active" },
       currentStep: {
         id: "research", instructions: "do research", outputSchema: [],
@@ -24,7 +24,7 @@ describe("buildOrchestratorContext", () => {
   it("truncates oldest currentStepAgentTurns first when over budget", () => {
     const turns = Array.from({ length: 20 }, (_, i) => ({ role: "agent" as const, body: "X".repeat(5000), ts: `t${i}` }));
     const ctx = buildOrchestratorContext({
-      goal: { id: "g1", title: "T", description: "D", attachedWorkspaces: [] },
+      goal: { id: "g1", title: "T", description: "D", attachedWorkspaces: [], attachedDocuments: [] },
       run: { templateId: "orca/engineering", templateVersion: 4, ordinal: 1, status: "active" },
       currentStep: { id: "research", instructions: "x", outputSchema: [], agentAdapterId: "claude-code", executionMode: "shadow_session" },
       chatMessages: [],
@@ -39,7 +39,7 @@ describe("buildOrchestratorContext", () => {
 
 function baseInput(): OrchestratorContextInput {
   return {
-    goal: { id: "g1", title: "T", description: "D", attachedWorkspaces: [] },
+    goal: { id: "g1", title: "T", description: "D", attachedWorkspaces: [], attachedDocuments: [] },
     run: { templateId: "tpl", templateVersion: 1, ordinal: 0, status: "active" },
     currentStep: { id: "frame", instructions: "i", outputSchema: [{ key: "x", type: "string", required: true }], agentAdapterId: "claude-code", executionMode: "shadow_session", completionPolicy: "interview" },
     chatMessages: [], currentStepAgentTurns: [], priorStepArtifacts: [], payloadBudgetBytes: 64 * 1024,

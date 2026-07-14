@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { CreateGoalAndStartWorkflowRequest } from "@orca/contracts";
 import type { Goal, OrchestratorModelChoice, WorkflowRun } from "@orca/contracts";
-import { ValidationError, DuplicateWorkspaceInRequestError } from "../goals.js";
+import { ValidationError, DuplicateWorkspaceInRequestError, DuplicateDocumentInRequestError } from "../goals.js";
 import { WorkspaceInspectionError } from "../workspaces/errors.js";
+import { DocumentSnapshotError } from "../goal-documents/snapshot.js";
 
 // Injected functions allow clean unit-testing without a real DB.
 export interface GoalBootstrapRouteDeps {
@@ -10,6 +11,7 @@ export interface GoalBootstrapRouteDeps {
     title: string;
     description: string;
     workspaces?: { inputPath: string; name?: string }[];
+    documents?: { kind: "file" | "url"; ref: string; name?: string }[];
     orchestratorModel?: OrchestratorModelChoice;
   }) => Promise<Goal>;
   startWorkflowRunFn: (args: { goalId: string; templateId: string }) => WorkflowRun;
@@ -36,23 +38,27 @@ export function registerGoalBootstrapRoute(
       return { error: "validation_failed", issues: parsed.error.issues };
     }
 
-    const { title, description, workspaces, orchestratorModel, workflowTemplateId } = parsed.data;
+    const { title, description, workspaces, documents, orchestratorModel, workflowTemplateId } = parsed.data;
 
     // Phase 1: create the goal — any failure propagates as a normal HTTP error
     let goal: Goal;
     try {
-      goal = await deps.createGoalFn({ title, description, workspaces, orchestratorModel });
+      goal = await deps.createGoalFn({ title, description, workspaces, documents, orchestratorModel });
     } catch (err) {
       if (err instanceof ValidationError) {
         reply.status(400);
         return { error: "validation_failed", issues: err.issues };
       }
-      if (err instanceof DuplicateWorkspaceInRequestError) {
+      if (err instanceof DuplicateWorkspaceInRequestError || err instanceof DuplicateDocumentInRequestError) {
         reply.status(400);
         return apiError(err.code, err.message);
       }
       if (err instanceof WorkspaceInspectionError) {
         reply.status(inspectionStatus(err));
+        return apiError(err.code, err.message);
+      }
+      if (err instanceof DocumentSnapshotError) {
+        reply.status(err.code === "url_fetch_timeout" ? 504 : 400);
         return apiError(err.code, err.message);
       }
       throw err;

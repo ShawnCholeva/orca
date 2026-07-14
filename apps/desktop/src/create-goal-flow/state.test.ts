@@ -46,6 +46,7 @@ describe("reducer — rough phase", () => {
       title: "My Goal",
       description: "some desc",
       pendingWorkspaces: [],
+    pendingDocuments: [],
       orchestratorModel: null,
       workflowTemplateId: null,
     });
@@ -57,6 +58,7 @@ describe("reducer — rough phase", () => {
       title: "T",
       description: "",
       pendingWorkspaces: [],
+    pendingDocuments: [],
       orchestratorModel: null,
       workflowTemplateId: null,
     };
@@ -70,6 +72,7 @@ describe("reducer — coordinate phase", () => {
     title: "T",
     description: "D",
     pendingWorkspaces: [],
+    pendingDocuments: [],
     orchestratorModel: null,
     workflowTemplateId: null,
   };
@@ -158,7 +161,46 @@ describe("reducer — coordinate phase", () => {
       orchestratorModel,
       workflowTemplateId: "wf-1",
       pendingWorkspaces: [],
+      pendingDocuments: [],
     });
+  });
+
+  it("addDocument appends a pending document and clears error", () => {
+    const doc = { kind: "file" as const, ref: "/docs/plan.md", name: "plan.md" };
+    const s = dispatch({ ...coordinate, error: "old" }, { type: "addDocument", document: doc });
+    if (s.phase !== "coordinate") throw new Error("expected coordinate");
+    expect(s.pendingDocuments).toEqual([doc]);
+    expect(s.error).toBeUndefined();
+  });
+
+  it("removeDocument removes the document at index", () => {
+    const docs = [
+      { kind: "file" as const, ref: "/a.md", name: "a.md" },
+      { kind: "url" as const, ref: "https://x.test/b", name: "b" },
+    ];
+    const s = dispatch(
+      { ...coordinate, pendingDocuments: docs },
+      { type: "removeDocument", index: 0 },
+    );
+    if (s.phase !== "coordinate") throw new Error("expected coordinate");
+    expect(s.pendingDocuments).toEqual([docs[1]]);
+  });
+
+  it("addDocument is no-op outside coordinate phase", () => {
+    expect(
+      dispatch(initialState, { type: "addDocument", document: { kind: "file", ref: "/a", name: "a" } }),
+    ).toBe(initialState);
+  });
+
+  it("submitRequested carries pendingDocuments into submitting, and submitFailed brings them back", () => {
+    const docs = [{ kind: "url" as const, ref: "https://x.test/spec", name: "spec" }];
+    const submitting = dispatch(
+      { ...coordinate, pendingDocuments: docs, workflowTemplateId: "wf-1" },
+      { type: "submitRequested" },
+    );
+    expect(submitting).toMatchObject({ phase: "submitting", pendingDocuments: docs });
+    const back = dispatch(submitting, { type: "submitFailed", error: "boom" });
+    expect(back).toMatchObject({ phase: "coordinate", pendingDocuments: docs, error: "boom" });
   });
 
   it("inspectRequested is no-op outside coordinate phase", () => {
@@ -174,6 +216,7 @@ describe("reducer — submitting phase", () => {
     orchestratorModel,
     workflowTemplateId: "wf-1",
     pendingWorkspaces: [],
+    pendingDocuments: [],
   };
 
   it("submitSucceeded → done with goalId", () => {
@@ -188,6 +231,7 @@ describe("reducer — submitting phase", () => {
       orchestratorModel,
       error: "server error",
       pendingWorkspaces: [],
+    pendingDocuments: [],
     });
   });
 });
@@ -200,6 +244,7 @@ describe("reducer — workflowFailed phase", () => {
     orchestratorModel,
     workflowTemplateId: "wf-1",
     pendingWorkspaces: [],
+    pendingDocuments: [],
   };
 
   it("workflowBootstrapFailed from submitting → workflowFailed (no runId)", () => {
@@ -240,6 +285,7 @@ describe("reducer — workflowFailed phase", () => {
       title: "T",
       description: "D",
       pendingWorkspaces: [],
+    pendingDocuments: [],
       orchestratorModel,
       workflowTemplateId: "wf-1",
       error: "oops",
@@ -263,6 +309,7 @@ describe("reducer — workflowFailed phase", () => {
       title: "T",
       description: "D",
       pendingWorkspaces: [],
+    pendingDocuments: [],
       orchestratorModel,
       workflowTemplateId: "wf-1",
       error: "oops",
@@ -292,6 +339,7 @@ describe("reducer — workflowFailed phase", () => {
       title: "T",
       description: "D",
       pendingWorkspaces: [],
+    pendingDocuments: [],
       orchestratorModel: null,
       workflowTemplateId: null,
     };
@@ -315,6 +363,7 @@ describe("reducer — cross-phase no-ops", () => {
       title: "T",
       description: "D",
       pendingWorkspaces: [],
+    pendingDocuments: [],
       orchestratorModel: null,
       workflowTemplateId: null,
     };

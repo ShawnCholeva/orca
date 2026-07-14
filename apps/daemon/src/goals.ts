@@ -21,6 +21,8 @@ import type { SkillRegistry } from "./registry/skill-registry.js";
 import { insertGoalRefinement } from "./goal-refinements.js";
 import { seedRefinementMemory } from "./memory/refinement-seed.js";
 import { findWorkspaceByPath, insertWorkspaceEntity, linkGoalWorkspace, listWorkspaceIdentitiesByGoal } from "./workspaces/projection.js";
+import { insertGoalDocument } from "./goal-documents/projection.js";
+import { defaultDocumentName, takeSnapshot } from "./goal-documents/usecases.js";
 import type { ModelProviderRegistry } from "./llm/registry.js";
 
 export interface CreateGoalCtx {
@@ -50,6 +52,14 @@ export class DuplicateWorkspaceInRequestError extends Error {
   constructor() {
     super("Duplicate workspace paths in request after canonicalization");
     this.name = "DuplicateWorkspaceInRequestError";
+  }
+}
+
+export class DuplicateDocumentInRequestError extends Error {
+  readonly code = "duplicate_document_in_request" as const;
+  constructor() {
+    super("Duplicate document refs in request");
+    this.name = "DuplicateDocumentInRequestError";
   }
 }
 
@@ -132,6 +142,7 @@ type CreateGoalInput = {
   description?: string;
   refined?: GuidedRefinementOutput;
   workspaces?: Array<{ inputPath: string; name?: string }>;
+  documents?: Array<{ kind: "file" | "url"; ref: string; name?: string }>;
   orchestratorModel?: OrchestratorModelChoice;
 };
 
@@ -175,7 +186,7 @@ function resolveGoalOrigin(
 }
 
 export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Promise<Goal> {
-  const { refined, workspaces } = input;
+  const { refined, workspaces, documents } = input;
 
   let validatedRefined: GuidedRefinementOutput | undefined;
   if (refined !== undefined) {
@@ -225,6 +236,16 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
     const paths = inspected.map((w) => w.preview.path);
     if (new Set(paths).size !== paths.length) throw new DuplicateWorkspaceInRequestError();
   }
+
+  // Snapshot all documents in parallel; any failure propagates before entering
+  // the transaction (an unreadable ref at creation is a typo — fail fast).
+  const docInputs = documents ?? [];
+  if (new Set(docInputs.map((d) => d.ref)).size !== docInputs.length) {
+    throw new DuplicateDocumentInRequestError();
+  }
+  const snapshotted = await Promise.all(
+    docInputs.map(async (d) => ({ input: d, snapshot: await takeSnapshot(d.kind, d.ref) })),
+  );
 
   const { title, description, skillId, extensionPoint, durationMs } = resolveGoalOrigin(
     input,
@@ -297,6 +318,30 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
         workspaceId: ws.id,
         path: ws.path,
         name: ws.name,
+      }));
+    }
+
+    for (const { input: doc, snapshot } of snapshotted) {
+      const row = {
+        id: randomUUID(),
+        goal_id: goalId,
+        kind: doc.kind,
+        ref: doc.ref,
+        name: doc.name ?? defaultDocumentName(doc.kind, doc.ref),
+        content: snapshot.content,
+        content_hash: snapshot.contentHash,
+        content_bytes: snapshot.contentBytes,
+        truncated: snapshot.truncated ? 1 : 0,
+        fetched_at: now,
+        created_at: now,
+      };
+      insertGoalDocument(ctx.db, row);
+      toPublish.push(emitEvent("document.attached", {
+        documentId: row.id,
+        kind: row.kind,
+        ref: row.ref,
+        name: row.name,
+        contentHash: row.content_hash,
       }));
     }
   })();

@@ -195,6 +195,7 @@ describe('context migration 0006_context.sql', () => {
       '0055_proposal_component.sql',
       '0056_learning_events.sql',
       '0057_template_catalog_version.sql',
+      '0058_goal_documents.sql',
     ]);
 
     const tables = (
@@ -316,6 +317,7 @@ describe('context migration 0006_context.sql', () => {
       '0055_proposal_component.sql',
       '0056_learning_events.sql',
       '0057_template_catalog_version.sql',
+      '0058_goal_documents.sql',
     ]);
 
     const counts = {

@@ -85,4 +85,34 @@ export const Icon = {
       <rect x="14" y="14" width="7" height="7" rx="1.5" />
     </>,
   ),
+  chevronDown: ic(<path d="M6 9l6 6 6-6" />),
+  chevronLeft: ic(<path d="M15 6l-6 6 6 6" />),
+  sparkle: ic(
+    <>
+      <path d="M12 3v4" />
+      <path d="M12 17v4" />
+      <path d="M3 12h4" />
+      <path d="M17 12h4" />
+      <path d="M5.5 5.5l2.8 2.8" />
+      <path d="M15.7 15.7l2.8 2.8" />
+      <path d="M5.5 18.5l2.8-2.8" />
+      <path d="M15.7 8.3l2.8-2.8" />
+    </>,
+  ),
+  cpu: ic(
+    <>
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+      <path d="M9 9h6v6H9z" />
+      <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
+    </>,
+  ),
+  workflow: ic(
+    <>
+      <rect x="3" y="3" width="6" height="6" rx="1" />
+      <rect x="15" y="3" width="6" height="6" rx="1" />
+      <rect x="9" y="15" width="6" height="6" rx="1" />
+      <path d="M6 9v3h12V9" />
+      <path d="M12 12v3" />
+    </>,
+  ),
 };

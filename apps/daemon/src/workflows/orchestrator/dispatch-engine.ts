@@ -60,6 +60,8 @@ import { appendWorkflowEvent } from "../events.js";
 import { materializeStepResultActivity } from "../../activities/step-result-activity.js";
 import { resolveGateDecisionActivity, pauseForGateDecision, pauseForConfirmation, expireConfirmation, pauseForMarkDoneInTx } from "../../activities/store.js";
 import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
+import { listGoalDocumentsByGoal } from "../../goal-documents/projection.js";
+import { refreshGoalDocuments } from "../../goal-documents/usecases.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import { createStepOutputArtifact } from "./ledger-commit.js";
 import { scoreCompletedStepResult } from "./step-result-builder.js";
@@ -413,6 +415,11 @@ export class DispatchEngine {
       .prepare("SELECT w.name AS name, w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC")
       .all(ctx.goal.id) as Array<{ name: string; path: string }>;
 
+    // Refresh-on-use: bring reference-document snapshots up to date before they
+    // enter the agent's initial prompt (stale fallback on unreachable sources).
+    await refreshGoalDocuments(db, options.bus ?? new EventBus(), ctx.goal.id);
+    const documentRows = listGoalDocumentsByGoal(db, ctx.goal.id);
+
     const objective = composeAgentInitialPrompt({
       goalTitle: ctx.goal.title,
       goalDescription: ctx.goal.description,
@@ -421,6 +428,7 @@ export class DispatchEngine {
       priorStepArtifacts: collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.id),
       repairContext: latestRejectingGate(db, ctx.run.id),
       workspaces: workspaceRows.map((w) => ({ name: w.name, root: w.path })),
+      documents: documentRows.map((d) => ({ name: d.name, ref: d.ref, content: d.content, truncated: d.truncated === 1 })),
     });
 
     try {

@@ -13,6 +13,7 @@ import type { SessionPreparationAssembler } from './assembler.js';
 import { requestContextPackage } from './usecases.js';
 import { getContextPackageById, listContextPackagesByGoal } from './projection.js';
 import { getWorkspaceByIdAndGoal } from '../workspaces/projection.js';
+import { refreshGoalDocuments } from '../goal-documents/usecases.js';
 import {
   ArchivedTargetError,
   AssociationGoalMismatchError,
@@ -96,6 +97,11 @@ export function registerContextRoutes(server: FastifyInstance, deps: ContextRout
       const triggerRow = stmtGetTrigger.get(goalId, adapterId, role);
       trigger = triggerRow?.status === 'failed' ? 'retry' : 'prepare';
     }
+
+    // Refresh-on-use at the route layer: context/input.ts is a pure projection
+    // reader (no IO) and requestContextPackage is synchronous, so document
+    // snapshots are brought up to date here (stale fallback on failure).
+    await refreshGoalDocuments(db, bus, goalId);
 
     try {
       const result = requestContextPackage(

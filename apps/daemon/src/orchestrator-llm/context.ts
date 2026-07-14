@@ -11,8 +11,16 @@ interface WorkspaceRef {
   root: string;
 }
 
+// Metadata only — the orchestrator judges, it doesn't need document bodies,
+// and goal metadata is never trimmed by the budget loop below.
+interface DocumentRef {
+  id: string;
+  name: string;
+  ref: string;
+}
+
 export interface OrchestratorContextInput {
-  goal: { id: string; title: string; description: string; attachedWorkspaces: WorkspaceRef[] };
+  goal: { id: string; title: string; description: string; attachedWorkspaces: WorkspaceRef[]; attachedDocuments: DocumentRef[] };
   run: { templateId: string; templateVersion: number; ordinal: number; status: WorkflowRunStatus };
   currentStep: {
     id: string;

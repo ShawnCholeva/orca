@@ -6,8 +6,11 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import { z } from 'zod';
 import {
+  AttachGoalDocumentRequest,
+  type AttachGoalDocumentResponse,
   AttachWorkspaceRequest,
   type AttachWorkspaceResponse,
+  type ListGoalDocumentsResponse,
   CreateGoalRequest,
   CreateGoalMemoryRequest,
   type ListGoalMemoryResponse,
@@ -79,6 +82,7 @@ import { getDatabase } from './db.js';
 import {
   archiveGoal,
   createGoal,
+  DuplicateDocumentInRequestError,
   DuplicateWorkspaceInRequestError,
   getGoalById,
   listGoals,
@@ -105,6 +109,14 @@ import {
   DuplicateWorkspaceError,
   type WorkspaceCtx
 } from './workspaces/usecases.js';
+import { listGoalDocumentMetaByGoal } from './goal-documents/projection.js';
+import {
+  attachGoalDocument,
+  detachGoalDocument,
+  DuplicateDocumentError,
+  DocumentSnapshotError,
+  type GoalDocumentCtx
+} from './goal-documents/usecases.js';
 import { pluginRegistry } from './registry/plugin-registry.js';
 import { skillRegistry } from './registry/skill-registry.js';
 import { AgentNotFoundError, listAgents, setAgentConnected } from './agents.js';
@@ -565,12 +577,16 @@ export function createServer(
         reply.status(400);
         return { error: 'validation_failed', issues: error.issues };
       }
-      if (error instanceof DuplicateWorkspaceInRequestError) {
+      if (error instanceof DuplicateWorkspaceInRequestError || error instanceof DuplicateDocumentInRequestError) {
         reply.status(400);
         return apiError(error.code, error.message);
       }
       if (error instanceof WorkspaceInspectionError) {
         reply.status(inspectionStatus(error));
+        return apiError(error.code, error.message);
+      }
+      if (error instanceof DocumentSnapshotError) {
+        reply.status(error.code === 'url_fetch_timeout' ? 504 : 400);
         return apiError(error.code, error.message);
       }
       throw error;
@@ -1156,7 +1172,8 @@ export function createServer(
 
     const refinement = getGoalRefinement(db, id);
     const workspaces = listWorkspacesByGoal(db, id);
-    return { goal, refinement, workspaces };
+    const documents = listGoalDocumentMetaByGoal(db, id);
+    return { goal, refinement, workspaces, documents };
   });
 
   const workspaceCtx: WorkspaceCtx = { db: getDatabase(), bus: eventBus, inspectWorkspace };
@@ -1206,6 +1223,65 @@ export function createServer(
       if (error instanceof NotFoundError) {
         reply.status(404);
         return apiError('not_found', `Workspace not found: ${workspaceId}`);
+      }
+      throw error;
+    }
+  });
+
+  const documentCtx: GoalDocumentCtx = { db: getDatabase(), bus: eventBus };
+
+  server.get('/v1/goals/:id/documents', async (request, reply): Promise<ListGoalDocumentsResponse | { error: unknown }> => {
+    const { id: goalId } = request.params as { id: string };
+    const db = getDatabase();
+    if (!getGoalById(db, goalId)) {
+      reply.status(404);
+      return apiError('not_found', `Goal not found: ${goalId}`);
+    }
+    return { documents: listGoalDocumentMetaByGoal(db, goalId) };
+  });
+
+  server.post('/v1/goals/:id/documents', async (request, reply): Promise<AttachGoalDocumentResponse | { error: unknown }> => {
+    const { id: goalId } = request.params as { id: string };
+    const parsed = AttachGoalDocumentRequest.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'validation_failed', issues: parsed.error.issues } as { error: unknown };
+    }
+
+    try {
+      const document = await attachGoalDocument(
+        documentCtx,
+        { goalId, kind: parsed.data.kind, ref: parsed.data.ref, name: parsed.data.name }
+      );
+      reply.status(201);
+      return { document };
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        reply.status(404);
+        return apiError('not_found', `Goal not found: ${goalId}`);
+      }
+      if (error instanceof DuplicateDocumentError) {
+        reply.status(409);
+        return apiError(error.code, error.message);
+      }
+      if (error instanceof DocumentSnapshotError) {
+        reply.status(error.code === 'url_fetch_timeout' ? 504 : 400);
+        return apiError(error.code, error.message);
+      }
+      throw error;
+    }
+  });
+
+  server.delete('/v1/goals/:id/documents/:documentId', async (request, reply): Promise<void | { error: unknown }> => {
+    const { id: goalId, documentId } = request.params as { id: string; documentId: string };
+
+    try {
+      await detachGoalDocument(documentCtx, { goalId, documentId });
+      reply.code(204).send();
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        reply.status(404);
+        return apiError('not_found', `Document not found: ${documentId}`);
       }
       throw error;
     }

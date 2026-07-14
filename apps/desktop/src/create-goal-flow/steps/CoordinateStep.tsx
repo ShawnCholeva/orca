@@ -1,11 +1,20 @@
-import { useState, useEffect, type Dispatch } from "react";
+import { useState, useEffect, type CSSProperties, type Dispatch } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import type { FlowAction, FlowState, PendingWorkspace } from "../state";
+import type { FlowAction, FlowState, PendingWorkspace, PendingDocument } from "../state";
 import type { ModelProviderInfo, WorkflowTemplate, WorkspaceSummary } from "@orca/contracts";
-import { inspectWorkspace, listModelProviders, listWorkflowTemplates, toErrorMessage } from "../../api";
+import {
+  inspectWorkspace,
+  listModelProviders,
+  listWorkflowTemplates,
+  listWorkspaces,
+  toErrorMessage,
+} from "../../api";
 import type { ApiError } from "../../api";
 import { defaultModelForProvider } from "../orchestratorDefaults";
-import { WorkspacePickerModal } from "./WorkspacePickerModal";
+import { expandTilde } from "../../utils/path";
+import { detectDocumentKind, defaultDocumentName } from "../documents";
+import { Field, FieldGroup, Btn, Pill, MiniSelect, inputStyle } from "../../workspaces/primitives";
+import { Icon } from "../../workspaces/icons";
 
 type Props = {
   state: Extract<FlowState, { phase: "coordinate" }>;
@@ -15,6 +24,7 @@ type Props = {
 };
 
 const SOFT_CAP = 8;
+const DOCS_SOFT_CAP = 20;
 
 const PROVIDER_LABELS: Record<string, string> = {
   "orca/openai": "OpenAI",
@@ -24,6 +34,29 @@ const PROVIDER_LABELS: Record<string, string> = {
 function providerLabel(p: ModelProviderInfo): string {
   return PROVIDER_LABELS[p.id] ?? p.displayName;
 }
+
+// ── Shared styles ──────────────────────────────────────────────
+const rowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: 8,
+  padding: "8px 10px",
+  background: "var(--panel-2)",
+  border: "1px solid var(--hairline)",
+  borderRadius: 8,
+};
+
+const monoPathStyle: CSSProperties = {
+  fontSize: 11,
+  color: "var(--text-3)",
+  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const mutedStyle: CSSProperties = { fontSize: 12, color: "var(--text-3)", margin: 0 };
+const errorStyle: CSSProperties = { fontSize: 12, color: "var(--err)", margin: 0 };
 
 // ── Workspace row ──────────────────────────────────────────────
 function WorkspaceRow({
@@ -36,36 +69,162 @@ function WorkspaceRow({
   dispatch: Dispatch<FlowAction>;
 }) {
   return (
-    <li className="workspace-row">
-      <div className="workspace-row-info">
+    <div style={rowStyle}>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
         <input
           type="text"
-          className="workspace-name-input"
           value={ws.name}
           maxLength={100}
           onChange={(e) => dispatch({ type: "editPendingName", index, name: e.target.value })}
           aria-label="Workspace name"
+          style={{ ...inputStyle, padding: "5px 8px", fontSize: 12.5, fontWeight: 600 }}
         />
-        <span className="workspace-path-text">{ws.path}</span>
-        <div className="workspace-chips">
-          <span className="chip chip--type">{ws.workspaceType}</span>
-          {ws.branch && <span className="chip chip--branch">{ws.branch}</span>}
-          {ws.isDirty === true && <span className="chip chip--dirty">dirty</span>}
+        <span style={monoPathStyle}>{ws.path}</span>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          <Pill tone="neutral" size="xs">
+            {ws.workspaceType}
+          </Pill>
+          {ws.branch && (
+            <Pill tone="info" size="xs">
+              {ws.branch}
+            </Pill>
+          )}
+          {ws.isDirty === true && (
+            <Pill tone="warn" size="xs">
+              dirty
+            </Pill>
+          )}
         </div>
       </div>
-      <button
-        type="button"
-        className="goal-action-button goal-action-button--danger"
-        onClick={() => dispatch({ type: "removePending", index })}
-      >
+      <Btn kind="danger" size="xs" onClick={() => dispatch({ type: "removePending", index })}>
         Remove
-      </button>
-    </li>
+      </Btn>
+    </div>
   );
 }
 
-// ── Split orchestrator LLM + model pickers ─────────────────────
-function OrchestratorPicker({
+// ── Document row ───────────────────────────────────────────────
+function DocumentRow({
+  doc,
+  index,
+  dispatch,
+}: {
+  doc: PendingDocument;
+  index: number;
+  dispatch: Dispatch<FlowAction>;
+}) {
+  return (
+    <div style={rowStyle}>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{doc.name}</span>
+        <span style={monoPathStyle}>{doc.ref}</span>
+        <div>
+          <Pill tone="neutral" size="xs">
+            {doc.kind}
+          </Pill>
+        </div>
+      </div>
+      <Btn kind="danger" size="xs" onClick={() => dispatch({ type: "removeDocument", index })}>
+        Remove
+      </Btn>
+    </div>
+  );
+}
+
+// ── Reference documents block ──────────────────────────────────
+function DocumentsBlock({
+  state,
+  dispatch,
+}: {
+  state: Extract<FlowState, { phase: "coordinate" }>;
+  dispatch: Dispatch<FlowAction>;
+}) {
+  const [ref, setRef] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const atCap = state.pendingDocuments.length >= DOCS_SOFT_CAP;
+
+  function addResolvedRef(kind: "file" | "url", resolved: string): boolean {
+    if (state.pendingDocuments.some((d) => d.ref === resolved)) {
+      setError("Document already added.");
+      return false;
+    }
+    setError(null);
+    dispatch({
+      type: "addDocument",
+      document: { kind, ref: resolved, name: defaultDocumentName(kind, resolved) },
+    });
+    return true;
+  }
+
+  async function handleAdd() {
+    const trimmed = ref.trim();
+    if (!trimmed || atCap) return;
+    const kind = detectDocumentKind(trimmed);
+    const resolved = kind === "file" ? await expandTilde(trimmed) : trimmed;
+    if (addResolvedRef(kind, resolved)) setRef("");
+  }
+
+  async function handleBrowse() {
+    if (atCap) return;
+    const selected = await openDialog({ directory: false, multiple: true });
+    if (!selected) return;
+    for (const path of Array.isArray(selected) ? selected : [selected]) {
+      addResolvedRef("file", path as string);
+    }
+  }
+
+  return (
+    <FieldGroup
+      label="Reference documents"
+      hint="Attach plans or docs (local files or links) to include in the Goal's context."
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {state.pendingDocuments.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {state.pendingDocuments.map((doc, i) => (
+              <DocumentRow key={doc.ref} doc={doc} index={i} dispatch={dispatch} />
+            ))}
+          </div>
+        )}
+        {atCap ? (
+          <p style={mutedStyle}>Maximum {DOCS_SOFT_CAP} documents reached.</p>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="text"
+                value={ref}
+                onChange={(e) => {
+                  setRef(e.target.value);
+                  setError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleAdd();
+                  }
+                }}
+                placeholder="/path/to/plan.md or https://…"
+                aria-label="Document path or URL"
+                style={{ ...inputStyle, flex: 1, minWidth: 0 }}
+              />
+              <Btn kind="primary" onClick={() => void handleAdd()} disabled={!ref.trim()}>
+                Add
+              </Btn>
+              <Btn kind="quiet" onClick={() => void handleBrowse()}>
+                Browse…
+              </Btn>
+            </div>
+            {error && <p style={errorStyle}>{error}</p>}
+          </>
+        )}
+      </div>
+    </FieldGroup>
+  );
+}
+
+// ── Orchestrator LLM + model (two stacked MiniSelects) ─────────
+function OrchestratorFields({
   value,
   onChange,
 }: {
@@ -79,9 +238,21 @@ function OrchestratorPicker({
   useEffect(() => {
     let cancelled = false;
     listModelProviders()
-      .then((rows) => { if (!cancelled) { setProviders(rows); setLoading(false); } })
-      .catch((err) => { if (!cancelled) { setError(toErrorMessage(err, "Failed to load model providers.")); setLoading(false); } });
-    return () => { cancelled = true; };
+      .then((rows) => {
+        if (!cancelled) {
+          setProviders(rows);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(toErrorMessage(err, "Failed to load model providers."));
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const selectable = providers.filter((p) => p.models.length > 0);
@@ -95,82 +266,66 @@ function OrchestratorPicker({
   }, [selectable, value, onChange]);
 
   function onProviderChange(providerId: string) {
-    if (!providerId) { onChange(null); return; }
     const provider = selectable.find((p) => p.id === providerId);
     const defaultModel = provider ? defaultModelForProvider(provider) : null;
     onChange(defaultModel ? { providerId, modelId: defaultModel.id } : null);
   }
 
   function onModelChange(modelId: string) {
-    if (!value || !modelId) { onChange(null); return; }
+    if (!value) return;
     onChange({ ...value, modelId });
   }
 
   if (loading) {
     return (
-      <>
-        <div className="form-field">
-          <label>Orchestrator LLM</label>
-          <p className="form-hint">Loading providers…</p>
-        </div>
-      </>
+      <Field label="Orchestrator LLM">
+        <p style={mutedStyle}>Loading providers…</p>
+      </Field>
     );
   }
 
   if (error) {
     return (
-      <div className="form-field">
-        <label>Orchestrator LLM</label>
-        <p className="form-error">{error}</p>
-      </div>
+      <Field label="Orchestrator LLM">
+        <p style={errorStyle}>{error}</p>
+      </Field>
     );
   }
 
   if (selectable.length === 0) {
     return (
-      <div className="form-field">
-        <label>Orchestrator LLM</label>
-        <p className="form-hint">No providers configured. You can set one up in Settings.</p>
-      </div>
+      <Field label="Orchestrator LLM">
+        <p style={mutedStyle}>No providers configured. You can set one up in Settings.</p>
+      </Field>
     );
   }
 
   return (
     <>
-      <div className="form-field">
-        <label htmlFor="coord-llm-provider">Orchestrator LLM</label>
-        <select
-          id="coord-llm-provider"
-          value={value?.providerId ?? ""}
-          onChange={(e) => onProviderChange(e.target.value)}
-        >
-          <option value="">Choose provider…</option>
-          {selectable.map((p) => (
-            <option key={p.id} value={p.id}>{providerLabel(p)}</option>
-          ))}
-        </select>
-      </div>
-
-      {selectedProvider && (
-        <div className="form-field">
-          <label htmlFor="coord-llm-model">Orchestrator model</label>
-          <select
-            id="coord-llm-model"
-            value={value?.modelId ?? ""}
-            onChange={(e) => onModelChange(e.target.value)}
-          >
-            {selectedProvider.models.map((m) => (
-              <option key={m.id} value={m.id}>{m.displayName}</option>
-            ))}
-          </select>
-        </div>
-      )}
+      <Field label="Orchestrator LLM">
+        <MiniSelect
+          value={value?.providerId ?? null}
+          options={selectable.map((p) => ({ id: p.id, name: providerLabel(p) }))}
+          onChange={onProviderChange}
+          icon={<Icon.sparkle size={14} />}
+          placeholder="Choose provider…"
+        />
+      </Field>
+      <Field label="Orchestrator model">
+        <MiniSelect
+          value={value?.modelId ?? null}
+          options={(selectedProvider?.models ?? []).map((m) => ({ id: m.id, name: m.displayName }))}
+          onChange={onModelChange}
+          icon={<Icon.cpu size={14} />}
+          placeholder="Choose a model…"
+        />
+      </Field>
     </>
   );
 }
 
 // ── Workflow selector ──────────────────────────────────────────
-function WorkflowSelector({
+function WorkflowField({
   value,
   onChange,
 }: {
@@ -184,67 +339,155 @@ function WorkflowSelector({
   useEffect(() => {
     let cancelled = false;
     listWorkflowTemplates()
-      .then((res) => { if (!cancelled) { setTemplates(res.templates); setLoading(false); } })
-      .catch((err) => { if (!cancelled) { setError(toErrorMessage(err, "Failed to load workflows.")); setLoading(false); } });
-    return () => { cancelled = true; };
+      .then((res) => {
+        if (!cancelled) {
+          setTemplates(res.templates);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(toErrorMessage(err, "Failed to load workflows."));
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (loading) {
     return (
-      <div className="form-field">
-        <label>Workflow</label>
-        <p className="form-hint">Loading workflows…</p>
-      </div>
+      <Field label="Workflow">
+        <p style={mutedStyle}>Loading workflows…</p>
+      </Field>
     );
   }
 
   if (error) {
     return (
-      <div className="form-field">
-        <label>Workflow</label>
-        <p className="form-error">{error}</p>
-      </div>
+      <Field label="Workflow">
+        <p style={errorStyle}>{error}</p>
+      </Field>
     );
   }
 
   if (templates.length === 0) {
     return (
-      <div className="form-field">
-        <label>Workflow</label>
-        <p className="form-hint">No workflows available. Create one in the Workflows tab.</p>
-      </div>
+      <Field label="Workflow">
+        <p style={mutedStyle}>No workflows available. Create one in the Workflows tab.</p>
+      </Field>
     );
   }
 
   return (
-    <div className="form-field">
-      <label htmlFor="coord-workflow">Workflow</label>
-      <select
-        id="coord-workflow"
-        value={value ?? ""}
-        onChange={(e) => {
-          if (e.target.value) onChange(e.target.value);
-        }}
-      >
-        <option value="" disabled>Choose workflow…</option>
-        {templates.map((t) => (
-          <option key={t.id} value={t.id}>{t.name}</option>
-        ))}
-      </select>
-      {value && (() => {
-        const tpl = templates.find((t) => t.id === value);
-        return tpl?.description ? (
-          <p className="form-hint">{tpl.description}</p>
-        ) : null;
-      })()}
-    </div>
+    <Field label="Workflow">
+      <MiniSelect
+        value={value}
+        options={templates.map((t) => ({
+          id: t.id,
+          name: t.name,
+          hint: t.description || undefined,
+        }))}
+        onChange={onChange}
+        icon={<Icon.workflow size={14} />}
+        placeholder="Choose workflow…"
+      />
+    </Field>
+  );
+}
+
+// ── Registered-workspace picker (inline dropdown) ──────────────
+function RegisteredWorkspaceSelect({
+  existingPaths,
+  disabled,
+  onPick,
+  onNavigateToWorkspaces,
+}: {
+  existingPaths: string[];
+  disabled: boolean;
+  onPick: (ws: WorkspaceSummary) => void;
+  onNavigateToWorkspaces?: () => void;
+}) {
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    listWorkspaces()
+      .then((rows) => {
+        if (!cancelled) {
+          setWorkspaces(rows);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(toErrorMessage(err, "Failed to load workspaces."));
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (error) return <p style={errorStyle}>{error}</p>;
+
+  if (loading) {
+    return (
+      <MiniSelect
+        value={null}
+        options={[]}
+        onChange={() => {}}
+        icon={<Icon.workspace size={14} />}
+        placeholder="Loading workspaces…"
+        disabled
+      />
+    );
+  }
+
+  // No registered workspaces at all — offer the jump to the Workspaces tab
+  // (the modal's old empty state), rather than a dead dropdown.
+  if (workspaces.length === 0) {
+    return onNavigateToWorkspaces ? (
+      <Btn kind="quiet" onClick={onNavigateToWorkspaces} icon={<Icon.workspace size={14} />}>
+        Register a workspace…
+      </Btn>
+    ) : (
+      <MiniSelect
+        value={null}
+        options={[]}
+        onChange={() => {}}
+        icon={<Icon.workspace size={14} />}
+        placeholder="No registered workspaces"
+        disabled
+      />
+    );
+  }
+
+  const existing = new Set(existingPaths);
+  const available = workspaces.filter((ws) => !existing.has(ws.path));
+
+  return (
+    <MiniSelect
+      value={null}
+      options={available.map((ws) => ({ id: ws.path, name: ws.name }))}
+      onChange={(path) => {
+        const ws = available.find((w) => w.path === path);
+        if (ws) onPick(ws);
+      }}
+      icon={<Icon.workspace size={14} />}
+      placeholder={available.length === 0 ? "All registered added" : "Pick from registered"}
+      disabled={disabled || available.length === 0}
+    />
   );
 }
 
 // ── Main CoordinateStep ────────────────────────────────────────
 export function CoordinateStep({ state, dispatch, onNavigateToWorkspaces }: Props) {
   const [inspectError, setInspectError] = useState<string | null>(null);
-  const [showPicker, setShowPicker] = useState(false);
 
   const atCap = state.pendingWorkspaces.length >= SOFT_CAP;
 
@@ -272,102 +515,99 @@ export function CoordinateStep({ state, dispatch, onNavigateToWorkspaces }: Prop
   }
 
   function handlePickRegistered(ws: WorkspaceSummary) {
-    setShowPicker(false);
     void addWorkspaceByPath(ws.path);
   }
 
+  const noWorkspace = state.pendingWorkspaces.length === 0;
+  const noWorkflow = state.workflowTemplateId === null;
+  const createDisabled = state.inspecting || noWorkspace || noWorkflow;
+  const createTitle = noWorkspace
+    ? "Add a workspace to continue"
+    : noWorkflow
+      ? "Select a workflow to continue"
+      : undefined;
+
   return (
-    <div className="flow-step">
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       {/* Workspaces */}
-      <div className="form-field">
-        <label>Workspaces</label>
-        {state.pendingWorkspaces.length > 0 && (
-          <ul className="workspace-pending-list" style={{ marginBottom: 8 }}>
-            {state.pendingWorkspaces.map((ws, i) => (
-              <WorkspaceRow key={ws.path} ws={ws} index={i} dispatch={dispatch} />
-            ))}
-          </ul>
-        )}
-        {atCap ? (
-          <p className="workspace-cap-notice">Maximum {SOFT_CAP} workspaces reached.</p>
-        ) : (
-          <div className="workspace-add-row">
-            <button
-              type="button"
-              className="goal-action-button workspace-browse-btn"
-              onClick={() => void handlePickFolder()}
-              disabled={state.inspecting}
-            >
-              {state.inspecting ? "Inspecting…" : "Browse…"}
-            </button>
-            <button
-              type="button"
-              className="goal-action-button workspace-pick-btn"
-              onClick={() => setShowPicker(true)}
-              disabled={state.inspecting}
-            >
-              Pick from registered
-            </button>
-            {inspectError && (
-              <p className="form-error workspace-inspect-error">
-                {inspectError}
-                <button
-                  type="button"
-                  className="goal-action-button workspace-retry-btn"
+      <FieldGroup label="Workspaces" hint="Add local folders or git repos this Goal will operate on.">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {state.pendingWorkspaces.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {state.pendingWorkspaces.map((ws, i) => (
+                <WorkspaceRow key={ws.path} ws={ws} index={i} dispatch={dispatch} />
+              ))}
+            </div>
+          )}
+          {atCap ? (
+            <p style={mutedStyle}>Maximum {SOFT_CAP} workspaces reached.</p>
+          ) : (
+            <>
+              <div>
+                <Btn
+                  kind="quiet"
                   onClick={() => void handlePickFolder()}
                   disabled={state.inspecting}
+                  icon={<Icon.folder size={14} />}
                 >
-                  Retry
-                </button>
-              </p>
-            )}
-            {state.error && !inspectError && (
-              <p className="form-error">{state.error}</p>
-            )}
-          </div>
-        )}
-        <p className="form-hint">Add local folders or git repos this Goal will operate on.</p>
-      </div>
+                  {state.inspecting ? "Inspecting…" : "Browse…"}
+                </Btn>
+              </div>
+              <RegisteredWorkspaceSelect
+                existingPaths={state.pendingWorkspaces.map((ws) => ws.path)}
+                disabled={!!state.inspecting}
+                onPick={handlePickRegistered}
+                onNavigateToWorkspaces={onNavigateToWorkspaces}
+              />
+              {inspectError && (
+                <p style={{ ...errorStyle, display: "flex", alignItems: "center", gap: 8 }}>
+                  {inspectError}
+                  <Btn kind="quiet" size="xs" onClick={() => void handlePickFolder()} disabled={state.inspecting}>
+                    Retry
+                  </Btn>
+                </p>
+              )}
+              {state.error && !inspectError && <p style={errorStyle}>{state.error}</p>}
+            </>
+          )}
+        </div>
+      </FieldGroup>
 
-      {showPicker && (
-        <WorkspacePickerModal
-          existingPaths={state.pendingWorkspaces.map((ws) => ws.path)}
-          onPick={handlePickRegistered}
-          onClose={() => setShowPicker(false)}
-          onNavigateToWorkspaces={onNavigateToWorkspaces}
-        />
-      )}
+      {/* Reference documents */}
+      <DocumentsBlock state={state} dispatch={dispatch} />
 
       {/* Orchestrator LLM + model */}
-      <OrchestratorPicker
+      <OrchestratorFields
         value={state.orchestratorModel}
-        onChange={(v) => dispatch({ type: "setOrchestratorModel", orchestratorModel: v as typeof state.orchestratorModel })}
+        onChange={(v) =>
+          dispatch({ type: "setOrchestratorModel", orchestratorModel: v as typeof state.orchestratorModel })
+        }
       />
 
       {/* Workflow */}
-      <WorkflowSelector
+      <WorkflowField
         value={state.workflowTemplateId}
         onChange={(id) => dispatch({ type: "setWorkflowTemplateId", workflowTemplateId: id })}
       />
 
-      <div className="flow-step-actions">
-        <button
-          type="button"
-          className="goal-action-button"
+      {/* Footer actions */}
+      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+        <Btn
+          kind="quiet"
           onClick={() => dispatch({ type: "backToDescribe" })}
           disabled={state.inspecting}
+          icon={<Icon.chevronLeft size={14} />}
         >
-          ← Back
-        </button>
-        <button
-          type="button"
-          className="submit-button"
+          Back
+        </Btn>
+        <Btn
+          kind="primary"
           onClick={() => dispatch({ type: "submitRequested" })}
-          disabled={state.inspecting || state.workflowTemplateId === null}
-          title={state.workflowTemplateId === null ? "Select a workflow to continue" : undefined}
+          disabled={createDisabled}
+          title={createTitle}
         >
           Create Goal
-        </button>
+        </Btn>
       </div>
     </div>
   );

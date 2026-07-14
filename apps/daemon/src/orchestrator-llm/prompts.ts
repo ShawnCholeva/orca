@@ -10,6 +10,40 @@ export interface AgentInitialPromptInput {
   priorStepArtifacts: Array<{ stepId: string; outputJson: unknown }>;
   repairContext?: { reason: string; issueRefs: string[] } | null;
   workspaces?: Array<{ name: string; root: string }>;
+  documents?: Array<{ name: string; ref: string; content: string; truncated: boolean }>;
+}
+
+// Reference-document budget: bounded inline excerpts, deterministic byte-capping
+// only (no LLM summarization). Every doc always appears with name + ref — the
+// ref is the retrievable handle an agent can read/fetch itself.
+export const PROMPT_DOC_MAX_BYTES = 16 * 1024;
+export const PROMPT_DOCS_TOTAL_MAX_BYTES = 32 * 1024;
+
+function capBytes(text: string, maxBytes: number): { text: string; capped: boolean } {
+  if (Buffer.byteLength(text, "utf8") <= maxBytes) return { text, capped: false };
+  const buf = Buffer.from(text, "utf8").subarray(0, maxBytes);
+  return { text: buf.toString("utf8"), capped: true };
+}
+
+function buildDocumentBlock(documents: AgentInitialPromptInput["documents"]): string[] {
+  if (!documents || documents.length === 0) return [];
+  const lines: string[] = ["", "# Reference documents"];
+  let totalBytes = 0;
+  for (const doc of documents) {
+    lines.push("", `## ${doc.name} (source: ${doc.ref})`);
+    if (totalBytes >= PROMPT_DOCS_TOTAL_MAX_BYTES) {
+      lines.push("[omitted for length — read it at the source above]");
+      continue;
+    }
+    const budget = Math.min(PROMPT_DOC_MAX_BYTES, PROMPT_DOCS_TOTAL_MAX_BYTES - totalBytes);
+    const { text, capped } = capBytes(doc.content, budget);
+    totalBytes += Buffer.byteLength(text, "utf8");
+    lines.push(text);
+    if (capped || doc.truncated) {
+      lines.push(`[truncated — read the full document at ${doc.ref}]`);
+    }
+  }
+  return lines;
 }
 
 export function composeAgentInitialPrompt(input: AgentInitialPromptInput): string {
@@ -31,12 +65,14 @@ export function composeAgentInitialPrompt(input: AgentInitialPromptInput): strin
   const workspaceBlock = input.workspaces && input.workspaces.length > 0
     ? ["", "# Workspaces", ...input.workspaces.map((w) => `- ${w.name}: ${w.root}`)]
     : [];
+  const documentBlock = buildDocumentBlock(input.documents);
   return [
     "# Goal",
     input.goalTitle,
     ...(goalDescription ? ["", goalDescription] : []),
     ...repairSection,
     ...workspaceBlock,
+    ...documentBlock,
     "",
     "# Step instructions",
     input.stepInstructions,

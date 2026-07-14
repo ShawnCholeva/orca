@@ -13,6 +13,12 @@ export type PendingWorkspace = {
   gitProbe: InspectWorkspacePreview["gitProbe"];
 };
 
+export type PendingDocument = {
+  kind: "file" | "url";
+  ref: string;
+  name: string;
+};
+
 type RoughState = {
   phase: "rough";
   title: string;
@@ -25,6 +31,7 @@ type CoordinateState = {
   title: string;
   description: string;
   pendingWorkspaces: PendingWorkspace[];
+  pendingDocuments: PendingDocument[];
   orchestratorModel: OrchestratorModelChoice | null;
   workflowTemplateId: string | null;
   inspecting?: boolean;
@@ -36,6 +43,7 @@ type SubmittingState = {
   title: string;
   description: string;
   pendingWorkspaces: PendingWorkspace[];
+  pendingDocuments: PendingDocument[];
   orchestratorModel: OrchestratorModelChoice | null;
   workflowTemplateId: string | null;
   /** Set when goal was already created; skip createGoal on retry. */
@@ -52,6 +60,7 @@ export type WorkflowFailedState = {
   title: string;
   description: string;
   pendingWorkspaces: PendingWorkspace[];
+  pendingDocuments: PendingDocument[];
   orchestratorModel: OrchestratorModelChoice | null;
   workflowTemplateId: string;
   error: string;
@@ -87,6 +96,8 @@ export type FlowAction =
   | { type: "inspectFailed"; error: string }
   | { type: "removePending"; index: number }
   | { type: "editPendingName"; index: number; name: string }
+  | { type: "addDocument"; document: PendingDocument }
+  | { type: "removeDocument"; index: number }
   | { type: "submitRequested" }
   | { type: "submitSucceeded"; goalId: string }
   | { type: "submitFailed"; error: string }
@@ -114,6 +125,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           title: state.title,
           description: state.description,
           pendingWorkspaces: [],
+          pendingDocuments: [],
           orchestratorModel: null,
           workflowTemplateId: null,
         };
@@ -191,6 +203,25 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
       }
       return state;
 
+    case "addDocument":
+      if (state.phase === "coordinate") {
+        return {
+          ...state,
+          error: undefined,
+          pendingDocuments: [...state.pendingDocuments, action.document],
+        };
+      }
+      return state;
+
+    case "removeDocument":
+      if (state.phase === "coordinate") {
+        return {
+          ...state,
+          pendingDocuments: state.pendingDocuments.filter((_, i) => i !== action.index),
+        };
+      }
+      return state;
+
     case "submitRequested":
       if (state.phase === "coordinate") {
         return {
@@ -198,6 +229,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           title: state.title,
           description: state.description,
           pendingWorkspaces: state.pendingWorkspaces,
+          pendingDocuments: state.pendingDocuments,
           orchestratorModel: state.orchestratorModel,
           workflowTemplateId: state.workflowTemplateId,
         };
@@ -217,6 +249,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           title: state.title,
           description: state.description,
           pendingWorkspaces: state.pendingWorkspaces,
+          pendingDocuments: state.pendingDocuments,
           orchestratorModel: state.orchestratorModel,
           workflowTemplateId: state.workflowTemplateId,
           error: action.error,
@@ -233,6 +266,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           title: state.title,
           description: state.description,
           pendingWorkspaces: state.pendingWorkspaces,
+          pendingDocuments: state.pendingDocuments,
           orchestratorModel: state.orchestratorModel,
           workflowTemplateId: state.workflowTemplateId ?? "",
           error: action.error,
@@ -247,6 +281,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           title: state.title,
           description: state.description,
           pendingWorkspaces: state.pendingWorkspaces,
+          pendingDocuments: state.pendingDocuments,
           orchestratorModel: state.orchestratorModel,
           workflowTemplateId: state.workflowTemplateId,
           goalId: state.goalId,

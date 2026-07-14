@@ -183,6 +183,7 @@ describe("runMigrations", () => {
       "0055_proposal_component.sql",
       "0056_learning_events.sql",
       "0057_template_catalog_version.sql",
+      "0058_goal_documents.sql",
     ]);
   });
 
@@ -332,6 +333,7 @@ describe("runMigrations", () => {
       "0055_proposal_component.sql",
       "0056_learning_events.sql",
       "0057_template_catalog_version.sql",
+      "0058_goal_documents.sql",
     ]);
 
     const goalCount = (
@@ -634,6 +636,7 @@ describe("session tables migration", () => {
       "0055_proposal_component.sql",
       "0056_learning_events.sql",
       "0057_template_catalog_version.sql",
+      "0058_goal_documents.sql",
     ]);
 
     const tables = (
@@ -1169,6 +1172,7 @@ describe("migration 0010 workflows", () => {
       "0055_proposal_component.sql",
       "0056_learning_events.sql",
       "0057_template_catalog_version.sql",
+      "0058_goal_documents.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1781,6 +1785,7 @@ describe("migration 0012 orchestration transport", () => {
       "0055_proposal_component.sql",
       "0056_learning_events.sql",
       "0057_template_catalog_version.sql",
+      "0058_goal_documents.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

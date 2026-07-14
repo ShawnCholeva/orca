@@ -359,7 +359,21 @@ describe("goal refinement and workspace contracts", () => {
         assumptions: ["c"],
         refinedAt: now
       },
-      workspaces: [workspaceFixture]
+      workspaces: [workspaceFixture],
+      documents: [
+        {
+          id: "doc-1",
+          goalId: "goal-1",
+          kind: "file" as const,
+          ref: "/tmp/spec.md",
+          name: "spec.md",
+          contentHash: "abc123",
+          contentBytes: 42,
+          truncated: false,
+          fetchedAt: now,
+          createdAt: now
+        }
+      ]
     };
 
     expectRoundTrip(GoalDetailResponse.parse, detail, detail);

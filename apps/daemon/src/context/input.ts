@@ -13,6 +13,7 @@ import { listMemoryByGoal } from '../memory/projection.js';
 import { listDecisionsByGoal } from '../decisions/projection.js';
 import { redactSecrets } from '../memory/normalize.js';
 import { getWorkspaceByIdAndGoal } from '../workspaces/projection.js';
+import { listGoalDocumentsByGoal } from '../goal-documents/projection.js';
 import { GoalNotFoundError } from '../sessions/errors.js';
 
 // IMPORTANT: This file MUST NOT import from sessions/output-store or any pty/* module.
@@ -145,6 +146,18 @@ export function buildContextAssemblyInput(
   const memoryItems = listMemoryByGoal(db, goalId, { includeArchived: false });
   const decisions = listDecisionsByGoal(db, goalId, { includeArchived: false });
   const summaryRows = stmts.listSiblingSummaries.all(goalId) as SiblingSummaryRow[];
+  // Snapshot reads only — refresh-on-use happens at the route layer (this file
+  // does projection reads, no IO).
+  const documentRows = listGoalDocumentsByGoal(db, goalId);
+
+  const documents = documentRows.map((d) => ({
+    id: d.id,
+    name: d.name,
+    kind: d.kind,
+    ref: d.ref,
+    content: redactSecrets(d.content),
+    contentHash: d.content_hash,
+  }));
 
   const memory: SelectableMemory[] = memoryItems.map((item) => ({
     id: item.id,
@@ -193,6 +206,12 @@ export function buildContextAssemblyInput(
     .map((s) => `${s.id}:${s.created_at}`)
     .sort();
 
+  // Content hash (not fetched_at) so a refreshed snapshot invalidates the
+  // fingerprint while a mere touch does not.
+  const sortedDocumentParts = documentRows
+    .map((d) => `${d.id}:${d.content_hash}`)
+    .sort();
+
   // goal_refinements uses goal_id as PK; use refinedAt as the version signal.
   const refinementPart = refinement
     ? `${refinement.goalId}:${refinement.refinedAt}`
@@ -206,6 +225,7 @@ export function buildContextAssemblyInput(
     ...sortedMemoryParts,
     ...sortedDecisionParts,
     ...sortedSummaryParts,
+    ...sortedDocumentParts,
     wsPart,
     refinementPart,
     `${role}:${adapterId}:${objectiveHash}`,
@@ -234,6 +254,7 @@ export function buildContextAssemblyInput(
     role,
     adapterId,
     objective: objective.slice(0, CONTEXT_PACKAGE_MAX_OBJECTIVE_CHARS),
+    documents,
     memory,
     decisions: selectableDecisions,
     siblingSummaries,

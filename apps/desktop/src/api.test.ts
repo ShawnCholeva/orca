@@ -503,6 +503,20 @@ describe("desktop api client", () => {
           refinedAt: now,
         },
         workspaces: [workspace],
+        documents: [
+          {
+            id: "doc-1",
+            goalId: goal.id,
+            kind: "file",
+            ref: "/docs/spec.md",
+            name: "spec.md",
+            contentHash: "h1",
+            contentBytes: 42,
+            truncated: false,
+            fetchedAt: now,
+            createdAt: now,
+          },
+        ],
       }),
     );
 
@@ -510,6 +524,7 @@ describe("desktop api client", () => {
 
     expect(response.goal.id).toBe("goal-1");
     expect(response.workspaces).toHaveLength(1);
+    expect(response.documents).toHaveLength(1);
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("http://127.0.0.1:8787/v1/goals/goal-1");
     expect(init?.method).toBeUndefined();

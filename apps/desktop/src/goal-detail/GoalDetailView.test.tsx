@@ -151,7 +151,7 @@ function setupMemoryEventCapture() {
   const listGoalDecisionsMock = vi.fn().mockResolvedValue([]);
 
   vi.doMock("../api", () => ({
-    getGoalDetail: vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [] }),
+    getGoalDetail: vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [], documents: [] }),
     ...makeBaseApiMock({
       listGoalMemory: listGoalMemoryMock,
       listGoalDecisions: listGoalDecisionsMock,
@@ -214,7 +214,7 @@ function setupOrchestrationEventCapture() {
     feedback: [],
   });
   const listConflictsMock = vi.fn().mockResolvedValue({ conflicts: [] });
-  const getGoalDetailMock = vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [] });
+  const getGoalDetailMock = vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [], documents: [] });
 
   vi.doMock("../api", () => ({
     getGoalDetail: getGoalDetailMock,
@@ -273,7 +273,7 @@ describe("GoalDetailView", () => {
   });
 
   it("renders refinement section when refinement exists", async () => {
-    mockDetail({ goal, refinement, workspaces: [] });
+    mockDetail({ goal, refinement, workspaces: [], documents: [] });
     const { GoalDetailView } = await import("./GoalDetailView");
 
     await act(async () => {
@@ -289,7 +289,7 @@ describe("GoalDetailView", () => {
   });
 
   it("does not render refinement section when refinement is null", async () => {
-    mockDetail({ goal, refinement: null, workspaces: [] });
+    mockDetail({ goal, refinement: null, workspaces: [], documents: [] });
     const { GoalDetailView } = await import("./GoalDetailView");
 
     await act(async () => {
@@ -302,7 +302,7 @@ describe("GoalDetailView", () => {
   });
 
   it("renders workspaces in attach order", async () => {
-    mockDetail({ goal, refinement: null, workspaces: [ws1, ws2] });
+    mockDetail({ goal, refinement: null, workspaces: [ws1, ws2], documents: [] });
     const { GoalDetailView } = await import("./GoalDetailView");
 
     await act(async () => {
@@ -316,8 +316,35 @@ describe("GoalDetailView", () => {
     expect(items[1]?.textContent).toBe("beta");
   });
 
+  it("renders attached documents with name, ref, and kind", async () => {
+    const doc = {
+      id: "doc-1",
+      goalId: "goal-1",
+      kind: "url" as const,
+      ref: "https://example.test/spec",
+      name: "spec",
+      contentHash: "h1",
+      contentBytes: 42,
+      truncated: false,
+      fetchedAt: "2026-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    mockDetail({ goal, refinement: null, workspaces: [], documents: [doc] });
+    const { GoalDetailView } = await import("./GoalDetailView");
+
+    await act(async () => {
+      createRoot(container).render(
+        <GoalDetailView goalId="goal-1" onBack={vi.fn()} refreshKey={0} />,
+      );
+    });
+
+    expect(container.textContent).toContain("Documents (1)");
+    expect(container.textContent).toContain("spec");
+    expect(container.textContent).toContain("https://example.test/spec");
+  });
+
   it("does not render the Sessions panel", async () => {
-    mockDetail({ goal, refinement: null, workspaces: [ws1] });
+    mockDetail({ goal, refinement: null, workspaces: [ws1], documents: [] });
     const { GoalDetailView } = await import("./GoalDetailView");
 
     await act(async () => {
@@ -330,7 +357,7 @@ describe("GoalDetailView", () => {
   });
 
   it("calls getGoalDetail again when refreshKey changes", async () => {
-    const getGoalDetailMock = vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    const getGoalDetailMock = vi.fn().mockResolvedValue({ goal, refinement: null, workspaces: [], documents: [] });
     vi.doMock("../api", () => ({
       getGoalDetail: getGoalDetailMock,
       ...makeBaseApiMock(),

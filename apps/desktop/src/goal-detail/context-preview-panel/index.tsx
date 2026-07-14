@@ -17,6 +17,7 @@ const SOURCE_TYPE_LABELS: Record<ContextSourceType, string> = {
   goal: "Goal",
   refinement: "Refinement",
   workspace: "Workspace",
+  document: "Document",
   memory_item: "Memory",
   decision: "Decision",
   session_summary: "Session summary",

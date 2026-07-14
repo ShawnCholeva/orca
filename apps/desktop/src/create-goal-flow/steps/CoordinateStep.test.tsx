@@ -27,6 +27,7 @@ function coordinateState(): Extract<FlowState, { phase: "coordinate" }> {
     title: "Goal",
     description: "",
     pendingWorkspaces: [],
+    pendingDocuments: [],
     orchestratorModel: null,
     workflowTemplateId: null,
   };
@@ -58,9 +59,12 @@ describe("CoordinateStep — registry picker", () => {
 
     render(<CoordinateStep state={coordinateState()} dispatch={dispatch} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /pick from registered/i }));
-    await waitFor(() => expect(screen.getByText("billing")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("billing"));
+    // The picker loads the registry up-front, so wait for the trigger's label,
+    // then open the inline dropdown and pick the workspace by name. (Target the
+    // visible text rather than the accessible name — the wrapping Field <label>
+    // pollutes the sibling Browse button's accessible name.)
+    fireEvent.click(await screen.findByText("Pick from registered"));
+    fireEvent.click(await screen.findByText("billing"));
 
     await waitFor(() => expect(inspectWorkspaceMock).toHaveBeenCalledWith({ inputPath: "/repo/billing" }));
     await waitFor(() =>

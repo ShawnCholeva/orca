@@ -25,6 +25,16 @@ function loadWorkspaces(
   return rows.map((r) => ({ id: r.id, name: r.name, root: r.path }));
 }
 
+function loadDocuments(
+  db: Database.Database,
+  goalId: string
+): OrchestratorContextInput["goal"]["attachedDocuments"] {
+  const rows = db
+    .prepare("SELECT id, name, ref FROM goal_documents WHERE goal_id = ? ORDER BY created_at ASC, id ASC")
+    .all(goalId) as Array<{ id: string; name: string; ref: string }>;
+  return rows.map((r) => ({ id: r.id, name: r.name, ref: r.ref }));
+}
+
 function loadPriorArtifacts(
   db: Database.Database,
   runId: string,
@@ -154,6 +164,7 @@ export function buildContextFromDb(
     if (activeStep) {
       const { stepTpl, templateVersion, ordinal, templateId, status, selectedOperatorId } = activeStep;
       const attachedWorkspaces = loadWorkspaces(db, args.goalId);
+      const attachedDocuments = loadDocuments(db, args.goalId);
       const priorStepArtifacts = loadPriorArtifacts(db, args.runId, args.stepRunId);
       const currentStepAgentTurns = loadCurrentStepAgentTurns(db, args.runId, args.stepRunId);
 
@@ -163,7 +174,7 @@ export function buildContextFromDb(
           : "claude-code";
 
       const input: OrchestratorContextInput = {
-        goal: { id: goal.id, title: goal.title, description: goal.description, attachedWorkspaces },
+        goal: { id: goal.id, title: goal.title, description: goal.description, attachedWorkspaces, attachedDocuments },
         run: { templateId, templateVersion, ordinal, status },
         currentStep: {
           id: stepTpl.id,
@@ -185,7 +196,7 @@ export function buildContextFromDb(
 
   // Freeform-chat path (no active run or run/template/step row missing).
   const input: OrchestratorContextInput = {
-    goal: { id: goal.id, title: goal.title, description: goal.description, attachedWorkspaces: [] },
+    goal: { id: goal.id, title: goal.title, description: goal.description, attachedWorkspaces: [], attachedDocuments: [] },
     run: { templateId: "", templateVersion: 0, ordinal: 0, status: "active" },
     currentStep: {
       id: "",

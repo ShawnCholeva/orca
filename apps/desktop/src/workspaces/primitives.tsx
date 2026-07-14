@@ -3,6 +3,7 @@
 // to the feature; styling uses the app's existing token set.
 
 import { useState, type ReactElement, type ReactNode, type CSSProperties } from "react";
+import { Icon } from "./icons";
 
 export const inputStyle: CSSProperties = {
   width: "100%",
@@ -208,28 +209,223 @@ export function Tip({ label, children, side = "bottom" }: TipProps) {
   );
 }
 
+export interface MiniSelectOption {
+  id: string;
+  name: string;
+  hint?: string;
+}
+
+interface MiniSelectProps {
+  value: string | null;
+  options: MiniSelectOption[];
+  onChange: (id: string) => void;
+  icon?: ReactElement<{ size?: number }>;
+  placeholder?: string;
+  disabled?: boolean;
+}
+
+export function MiniSelect({ value, options, onChange, icon, placeholder, disabled }: MiniSelectProps) {
+  const [open, setOpen] = useState(false);
+  const cur = options.find((o) => o.id === value) ?? null;
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 9,
+          width: "100%",
+          padding: "9px 11px",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.5 : 1,
+          textAlign: "left",
+          fontFamily: "inherit",
+          background: "var(--panel-2)",
+          border: "1px solid " + (open ? "var(--accent-line)" : "var(--hairline)"),
+          borderRadius: 8,
+          transition: "border-color 100ms ease",
+        }}
+      >
+        {icon && (
+          <span
+            style={{ flexShrink: 0, display: "inline-flex", color: cur ? "var(--accent)" : "var(--text-3)" }}
+          >
+            {icon}
+          </span>
+        )}
+        <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: cur ? "var(--text)" : "var(--text-3)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {cur ? cur.name : placeholder ?? "Select…"}
+          </span>
+          {cur?.hint && <span style={{ fontSize: 10.5, color: "var(--text-3)" }}>{cur.hint}</span>}
+        </span>
+        <Icon.chevronDown
+          size={13}
+          color="var(--text-3)"
+          style={{
+            flexShrink: 0,
+            transform: open ? "rotate(180deg)" : "none",
+            transition: "transform 120ms ease",
+          }}
+        />
+      </button>
+      {open && (
+        <>
+          <div
+            onClick={(e) => {
+              // Field wraps this in a <label>; a plain-div click would bubble to
+              // the label and re-fire the trigger button, reopening the dropdown.
+              // Cancel the label's default activation so an outside click closes.
+              e.preventDefault();
+              e.stopPropagation();
+              setOpen(false);
+            }}
+            style={{ position: "fixed", inset: 0, zIndex: 40 }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              top: "calc(100% + 4px)",
+              left: 0,
+              right: 0,
+              zIndex: 41,
+              background: "var(--raised)",
+              border: "1px solid var(--hairline-strong)",
+              borderRadius: 10,
+              boxShadow: "var(--shadow-lg)",
+              overflow: "hidden",
+              padding: 4,
+              animation: "float-in 120ms ease",
+            }}
+          >
+            {options.map((o) => {
+              const on = o.id === value;
+              return (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={(e) => {
+                    // Same reason as the overlay: setOpen(false) detaches this
+                    // node mid-click, and the wrapping <label> would then fire
+                    // its associated control (the trigger), reopening the menu.
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onChange(o.id);
+                    setOpen(false);
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 9,
+                    width: "100%",
+                    padding: "8px 9px",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    background: on ? "var(--accent-soft)" : "transparent",
+                    border: "none",
+                    fontFamily: "inherit",
+                    textAlign: "left",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!on) e.currentTarget.style.background = "rgba(255,255,255,0.04)";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!on) e.currentTarget.style.background = "transparent";
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 14,
+                      flexShrink: 0,
+                      display: "inline-flex",
+                      justifyContent: "center",
+                      color: "var(--accent)",
+                    }}
+                  >
+                    {on && <Icon.check size={12} />}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span
+                      style={{
+                        display: "block",
+                        fontSize: 12.5,
+                        fontWeight: on ? 600 : 500,
+                        color: on ? "var(--text)" : "var(--text-2)",
+                      }}
+                    >
+                      {o.name}
+                    </span>
+                    {o.hint && (
+                      <span style={{ display: "block", fontSize: 10.5, color: "var(--text-3)", marginTop: 1 }}>
+                        {o.hint}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 interface FieldProps {
   label: string;
   hint?: string;
   children: ReactNode;
 }
 
+function FieldLabelText({ label, hint }: { label: string; hint?: string }) {
+  return (
+    <span
+      className="mono"
+      style={{ fontSize: 10, color: "var(--text-3)", letterSpacing: 1, textTransform: "uppercase" }}
+    >
+      {label}
+      {hint && (
+        <span style={{ textTransform: "none", letterSpacing: 0, color: "var(--text-4)" }}>
+          {" · "}
+          {hint}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Label-wrapped field — use for a SINGLE control (implicit label association). */
 export function Field({ label, hint, children }: FieldProps) {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <span
-        className="mono"
-        style={{ fontSize: 10, color: "var(--text-3)", letterSpacing: 1, textTransform: "uppercase" }}
-      >
-        {label}
-        {hint && (
-          <span style={{ textTransform: "none", letterSpacing: 0, color: "var(--text-4)" }}>
-            {" · "}
-            {hint}
-          </span>
-        )}
-      </span>
+      <FieldLabelText label={label} hint={hint} />
       {children}
     </label>
+  );
+}
+
+/**
+ * Same layout as {@link Field} but a plain <div> — use for a GROUP of controls.
+ * A <label> wrapping multiple/interactive controls mis-associates (its accessible
+ * name absorbs the whole group, and clicks forward to the first control).
+ */
+export function FieldGroup({ label, hint, children }: FieldProps) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <FieldLabelText label={label} hint={hint} />
+      {children}
+    </div>
   );
 }

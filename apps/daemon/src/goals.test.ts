@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -23,6 +23,7 @@ import {
   updateGoalOrchestratorModel,
   ValidationError,
   DuplicateWorkspaceInRequestError,
+  DuplicateDocumentInRequestError,
 } from "./goals.js";
 import type { InspectWorkspacePreview, Workspace } from "@orca/contracts";
 import { insertWorkspaceEntity, linkGoalWorkspace } from "./workspaces/projection.js";
@@ -678,6 +679,64 @@ describe("createGoal — refined goal path", () => {
     expect(eventCount).toBe(2);
     const refCount = (db.prepare("SELECT count(*) AS c FROM goal_refinements").get() as { c: number }).c;
     expect(refCount).toBe(0);
+  });
+});
+
+describe("createGoal — documents", () => {
+  function writeDoc(content: string): string {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "orca-goals-doc-"));
+    tempDirs.push(dir);
+    const file = path.join(dir, "spec.md");
+    writeFileSync(file, content);
+    return file;
+  }
+
+  it("inserts goal_documents rows and document.attached events atomically", async () => {
+    const { db, ctx } = setup();
+    const file = writeDoc("# Plan");
+
+    const goal = await createGoal(
+      { title: "With doc", documents: [{ kind: "file", ref: file, name: "The Plan" }] },
+      ctx,
+    );
+
+    const rows = db
+      .prepare("SELECT name, content, kind FROM goal_documents WHERE goal_id = ?")
+      .all(goal.id) as Array<{ name: string; content: string; kind: string }>;
+    expect(rows).toEqual([{ name: "The Plan", content: "# Plan", kind: "file" }]);
+    const events = db
+      .prepare("SELECT payload FROM events WHERE type = 'document.attached' AND goal_id = ?")
+      .all(goal.id) as Array<{ payload: string }>;
+    expect(events).toHaveLength(1);
+    expect(JSON.parse(events[0]!.payload).name).toBe("The Plan");
+  });
+
+  it("aborts the whole create when a document snapshot fails — no goal row", async () => {
+    const { db, ctx } = setup();
+
+    await expect(
+      createGoal({ title: "Bad doc", documents: [{ kind: "file", ref: "/tmp/definitely-missing-orca-doc.md" }] }, ctx),
+    ).rejects.toThrow();
+
+    const goalCount = (db.prepare("SELECT count(*) AS c FROM goals").get() as { c: number }).c;
+    const eventCount = (db.prepare("SELECT count(*) AS c FROM events").get() as { c: number }).c;
+    expect(goalCount).toBe(0);
+    expect(eventCount).toBe(0);
+  });
+
+  it("rejects duplicate document refs in the request", async () => {
+    const { db, ctx } = setup();
+    const file = writeDoc("# Plan");
+
+    await expect(
+      createGoal(
+        { title: "Dup docs", documents: [{ kind: "file", ref: file }, { kind: "file", ref: file }] },
+        ctx,
+      ),
+    ).rejects.toThrow(DuplicateDocumentInRequestError);
+
+    const goalCount = (db.prepare("SELECT count(*) AS c FROM goals").get() as { c: number }).c;
+    expect(goalCount).toBe(0);
   });
 });
 

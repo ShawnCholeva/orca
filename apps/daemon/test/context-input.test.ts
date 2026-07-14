@@ -621,3 +621,58 @@ describe('objective handling', () => {
     expect(result.input.objective).toHaveLength(4000);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Documents
+// ---------------------------------------------------------------------------
+
+function seedDocument(
+  db: Database.Database,
+  goalId: string,
+  id: string,
+  options: { content?: string; contentHash?: string } = {}
+): void {
+  const content = options.content ?? 'Reference doc body';
+  const contentHash = options.contentHash ?? `hash-${id}`;
+  db.prepare(
+    `INSERT INTO goal_documents
+       (id, goal_id, kind, ref, name, content, content_hash, content_bytes, truncated, fetched_at, created_at)
+     VALUES (?, ?, 'file', ?, ?, ?, ?, ?, 0, ?, ?)`
+  ).run(id, goalId, `/docs/${id}.md`, `${id}.md`, content, contentHash, Buffer.byteLength(content), NOW, NOW);
+}
+
+describe('documents', () => {
+  it('includes document snapshots with redacted content', () => {
+    const db = openTestDb();
+    seedGoal(db, 'goal-1');
+    seedDocument(db, 'goal-1', 'doc-1', { content: 'plan with password=hunter2' });
+
+    const result = buildContextAssemblyInput(
+      { db, assemblerVersion: ASSEMBLER_VERSION },
+      makeRequest()
+    );
+
+    expect(result.input.documents).toHaveLength(1);
+    const doc = result.input.documents![0]!;
+    expect(doc.name).toBe('doc-1.md');
+    expect(doc.ref).toBe('/docs/doc-1.md');
+    expect(doc.content).not.toContain('hunter2');
+  });
+
+  it('changes sourceFingerprint when a document content hash changes, not on touch', () => {
+    const db = openTestDb();
+    seedGoal(db, 'goal-1');
+    seedDocument(db, 'goal-1', 'doc-1', { contentHash: 'v1' });
+
+    const deps = { db, assemblerVersion: ASSEMBLER_VERSION };
+    const before = buildContextAssemblyInput(deps, makeRequest()).sourceFingerprint;
+
+    // fetched_at touch only — fingerprint must be stable
+    db.prepare("UPDATE goal_documents SET fetched_at = '2027-01-01T00:00:00.000Z' WHERE id = 'doc-1'").run();
+    expect(buildContextAssemblyInput(deps, makeRequest()).sourceFingerprint).toBe(before);
+
+    // content hash change — fingerprint must move
+    db.prepare("UPDATE goal_documents SET content_hash = 'v2' WHERE id = 'doc-1'").run();
+    expect(buildContextAssemblyInput(deps, makeRequest()).sourceFingerprint).not.toBe(before);
+  });
+});

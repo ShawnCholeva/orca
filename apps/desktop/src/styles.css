@@ -813,6 +813,10 @@ h2 {
   color: var(--text-3);
 }
 
+.flow-modal .workspace-list-name {
+  color: var(--text);
+}
+
 .flow-modal .workspace-path-input {
   background: var(--panel-2);
   border-color: var(--hairline);

@@ -65,6 +65,64 @@ describe("composeAgentInitialPrompt", () => {
     });
     expect(prompt).not.toMatch(/# Workspaces/);
   });
+
+  const baseInput = {
+    goalTitle: "G",
+    goalDescription: "",
+    stepInstructions: "do it",
+    outputSchema: [{ key: "summary", type: "string", required: true }] as const,
+    priorStepArtifacts: [],
+  };
+
+  it("renders a Reference documents section with name, ref, and content", () => {
+    const prompt = composeAgentInitialPrompt({
+      ...baseInput,
+      outputSchema: [...baseInput.outputSchema],
+      documents: [{ name: "spec.md", ref: "/docs/spec.md", content: "# The spec body", truncated: false }],
+    });
+    expect(prompt).toMatch(/# Reference documents/);
+    expect(prompt).toMatch(/## spec\.md \(source: \/docs\/spec\.md\)/);
+    expect(prompt).toMatch(/# The spec body/);
+    expect(prompt).not.toMatch(/truncated/);
+  });
+
+  it("omits the Reference documents section when none are provided", () => {
+    const prompt = composeAgentInitialPrompt({ ...baseInput, outputSchema: [...baseInput.outputSchema] });
+    expect(prompt).not.toMatch(/# Reference documents/);
+  });
+
+  it("caps a large document and appends a ref-bearing truncation notice", () => {
+    const prompt = composeAgentInitialPrompt({
+      ...baseInput,
+      outputSchema: [...baseInput.outputSchema],
+      documents: [{ name: "big.md", ref: "/docs/big.md", content: "x".repeat(20 * 1024), truncated: false }],
+    });
+    expect(prompt).toMatch(/\[truncated — read the full document at \/docs\/big\.md\]/);
+  });
+
+  it("marks a storage-truncated snapshot even when under the prompt cap", () => {
+    const prompt = composeAgentInitialPrompt({
+      ...baseInput,
+      outputSchema: [...baseInput.outputSchema],
+      documents: [{ name: "s.md", ref: "/docs/s.md", content: "short", truncated: true }],
+    });
+    expect(prompt).toMatch(/\[truncated — read the full document at \/docs\/s\.md\]/);
+  });
+
+  it("past the total cap, later docs still appear as name+ref stubs (never silently dropped)", () => {
+    const big = "y".repeat(17 * 1024);
+    const prompt = composeAgentInitialPrompt({
+      ...baseInput,
+      outputSchema: [...baseInput.outputSchema],
+      documents: [
+        { name: "a.md", ref: "/docs/a.md", content: big, truncated: false },
+        { name: "b.md", ref: "/docs/b.md", content: big, truncated: false },
+        { name: "c.md", ref: "/docs/c.md", content: big, truncated: false },
+      ],
+    });
+    expect(prompt).toMatch(/## c\.md \(source: \/docs\/c\.md\)/);
+    expect(prompt).toMatch(/\[omitted for length — read it at the source above\]/);
+  });
 });
 
 describe("composeOrchestratorPrompt", () => {
@@ -112,7 +170,7 @@ describe("composeOrchestratorPrompt", () => {
     const p = composeOrchestratorPrompt({
       triggerKind: "user_message",
       context: {
-        goal: { id: "G1", title: "T", description: "D", attachedWorkspaces: [] },
+        goal: { id: "G1", title: "T", description: "D", attachedWorkspaces: [], attachedDocuments: [] },
         workflowRun: { templateId: "", templateVersion: 0, ordinal: 0, status: "active" },
         currentStep: { id: "", instructions: "", outputSchema: [], agentAdapterId: "claude-code", executionMode: "shadow_session" },
         conversation: { chatMessages: [], currentStepAgentTurns: [] },
@@ -127,7 +185,7 @@ describe("composeOrchestratorPrompt", () => {
     const p = composeOrchestratorPrompt({
       triggerKind: "user_message",
       context: {
-        goal: { id: "G1", title: "T", description: "D", attachedWorkspaces: [] },
+        goal: { id: "G1", title: "T", description: "D", attachedWorkspaces: [], attachedDocuments: [] },
         workflowRun: { templateId: "", templateVersion: 0, ordinal: 0, status: "active" },
         currentStep: { id: "intake", instructions: "", outputSchema: [], agentAdapterId: "codex", executionMode: "shadow_session" },
         conversation: { chatMessages: [], currentStepAgentTurns: [] },
@@ -184,7 +242,7 @@ describe("composeOrchestratorPrompt", () => {
     const { userPrompt } = composeOrchestratorPrompt({
       triggerKind: "agent_response",
       context: {
-        goal: { id: "G1", title: "T", description: "D", attachedWorkspaces: [] },
+        goal: { id: "G1", title: "T", description: "D", attachedWorkspaces: [], attachedDocuments: [] },
         workflowRun: { templateId: "tmpl", templateVersion: 1, ordinal: 7, status: "active" },
         currentStep: { id: "triage", instructions: "do the thing", outputSchema: [], agentAdapterId: "codex", executionMode: "shadow_session" },
         conversation: { chatMessages: [], currentStepAgentTurns: [] },

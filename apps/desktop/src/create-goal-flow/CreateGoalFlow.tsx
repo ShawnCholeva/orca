@@ -72,6 +72,7 @@ export function CreateGoalFlow({ onClose, onDone, connectionStatus: _connectionS
       title,
       description,
       pendingWorkspaces,
+      pendingDocuments,
       orchestratorModel,
       workflowTemplateId,
     } = state;
@@ -92,6 +93,11 @@ export function CreateGoalFlow({ onClose, onDone, connectionStatus: _connectionS
           workspaces: pendingWorkspaces.map((ws) => ({
             inputPath: ws.inputPath,
             name: ws.name,
+          })),
+          documents: pendingDocuments.map((doc) => ({
+            kind: doc.kind,
+            ref: doc.ref,
+            name: doc.name,
           })),
           orchestratorModel: (orchestratorModel as OrchestratorModelChoice) ?? undefined,
           workflowTemplateId: templateId,

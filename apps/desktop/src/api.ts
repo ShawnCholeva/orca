@@ -11,6 +11,8 @@ import {
   ArchiveGoalResponse,
   AssociateTaskSessionRequest,
   AssociateTaskSessionResponse,
+  AttachGoalDocumentRequest,
+  AttachGoalDocumentResponse,
   AttachWorkspaceRequest,
   AttachWorkspaceResponse,
   CreateWorkspaceRequest,
@@ -725,6 +727,41 @@ export async function detachWorkspace(
       headers: authHeaders(token),
     },
     "Detach workspace failed",
+  );
+}
+
+export async function attachGoalDocument(
+  goalId: string,
+  input: AttachGoalDocumentRequest,
+): Promise<AttachGoalDocumentResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/documents`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(token),
+      },
+      body: JSON.stringify(AttachGoalDocumentRequest.parse(input)),
+    },
+    AttachGoalDocumentResponse,
+    "Attach document failed",
+  );
+}
+
+export async function detachGoalDocument(
+  goalId: string,
+  documentId: string,
+): Promise<void> {
+  const { baseUrl, token } = await loadConfig();
+  return requestVoid(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/documents/${encodeURIComponent(documentId)}`,
+    {
+      method: "DELETE",
+      headers: authHeaders(token),
+    },
+    "Detach document failed",
   );
 }
 

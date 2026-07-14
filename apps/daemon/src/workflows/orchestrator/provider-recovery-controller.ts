@@ -27,6 +27,9 @@ import {
   readGoal,
   preferencesForGoal,
 } from "./db-rows.js";
+import { EventBus } from "../../events.js";
+import { listGoalDocumentsByGoal } from "../../goal-documents/projection.js";
+import { refreshGoalDocuments } from "../../goal-documents/usecases.js";
 
 export class ProviderRecoveryController {
   constructor(
@@ -319,6 +322,10 @@ export class ProviderRecoveryController {
       checkpoint.pendingGuidance.length > 0
         ? `\n\n# Operator guidance\n${checkpoint.pendingGuidance.join("\n\n")}`
         : "";
+    // Refresh-on-use: the handoff prompt re-injects reference documents, so
+    // bring their snapshots up to date first (stale fallback on failure).
+    await refreshGoalDocuments(db, options.bus ?? new EventBus(), goal.id);
+    const documentRows = listGoalDocumentsByGoal(db, goal.id);
     const handoffPrompt =
       composeProviderSwitchPrompt({
         agentPromptInput: {
@@ -328,6 +335,7 @@ export class ProviderRecoveryController {
           outputSchema: stepTpl.outputSchema,
           priorStepArtifacts: collectPriorStepArtifacts(db, run.id, stepRun.id),
           repairContext: latestRejectingGate(db, run.id),
+          documents: documentRows.map((d) => ({ name: d.name, ref: d.ref, content: d.content, truncated: d.truncated === 1 })),
         },
         interruptedTail,
       }) + guidanceBlock;

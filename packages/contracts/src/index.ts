@@ -74,11 +74,37 @@ const WorkspaceAttachmentInput = z.object({
   name: z.string().trim().min(1).max(100).optional()
 });
 
+export const GoalDocumentKind = z.enum(["file", "url"]);
+export type GoalDocumentKind = z.infer<typeof GoalDocumentKind>;
+
+// Metadata only — snapshot content stays daemon-local and never crosses the API
+// (the control plane must never hold user files; see FUTURE_ARCHITECTURE.md).
+export const GoalDocument = z.object({
+  id: z.string(),
+  goalId: z.string(),
+  kind: GoalDocumentKind,
+  ref: z.string().min(1).max(2048),
+  name: z.string().min(1).max(100),
+  contentHash: z.string(),
+  contentBytes: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+  fetchedAt: z.string().datetime(),
+  createdAt: z.string().datetime()
+});
+export type GoalDocument = z.infer<typeof GoalDocument>;
+
+const GoalDocumentAttachmentInput = z.object({
+  kind: GoalDocumentKind,
+  ref: z.string().min(1).max(2048),
+  name: z.string().trim().min(1).max(100).optional()
+});
+
 export const CreateGoalRequest = z.object({
   title: z.string().min(1).max(200),
   intent: z.string().min(1).max(4000),
   refined: GuidedRefinementOutput.optional(),
   workspaces: z.array(WorkspaceAttachmentInput).optional(),
+  documents: z.array(GoalDocumentAttachmentInput).max(20).optional(),
   orchestratorModel: OrchestratorModelChoice.optional()
 });
 export type CreateGoalRequest = z.infer<typeof CreateGoalRequest>;
@@ -92,6 +118,7 @@ export const CreateGoalAndStartWorkflowRequest = z.object({
   title: z.string().min(1).max(200),
   intent: z.string().min(1).max(4000),
   workspaces: z.array(WorkspaceAttachmentInput).optional(),
+  documents: z.array(GoalDocumentAttachmentInput).max(20).optional(),
   orchestratorModel: OrchestratorModelChoice.optional(),
   workflowTemplateId: z.string().min(1),
 });
@@ -177,6 +204,9 @@ export const DomainEventType = z.enum([
   "workspace.removed",
   "workspace.created",
   "workspace.updated",
+  "document.attached",
+  "document.removed",
+  "document.refreshed",
   "session.created",
   "session.started",
   "session.exited",
@@ -421,10 +451,30 @@ export const AttachWorkspaceResponse = z.object({
 });
 export type AttachWorkspaceResponse = z.infer<typeof AttachWorkspaceResponse>;
 
+export const AttachGoalDocumentRequest = z
+  .object({
+    kind: GoalDocumentKind,
+    ref: z.string().min(1).max(2048),
+    name: z.string().trim().min(1).max(100).optional()
+  })
+  .strict();
+export type AttachGoalDocumentRequest = z.infer<typeof AttachGoalDocumentRequest>;
+
+export const AttachGoalDocumentResponse = z.object({
+  document: GoalDocument
+});
+export type AttachGoalDocumentResponse = z.infer<typeof AttachGoalDocumentResponse>;
+
+export const ListGoalDocumentsResponse = z.object({
+  documents: z.array(GoalDocument)
+});
+export type ListGoalDocumentsResponse = z.infer<typeof ListGoalDocumentsResponse>;
+
 export const GoalDetailResponse = z.object({
   goal: Goal,
   refinement: GoalRefinement.nullable(),
-  workspaces: z.array(Workspace)
+  workspaces: z.array(Workspace),
+  documents: z.array(GoalDocument)
 });
 export type GoalDetailResponse = z.infer<typeof GoalDetailResponse>;
 
@@ -558,7 +608,8 @@ export const ContextSourceType = z.enum([
   "workspace",
   "memory_item",
   "decision",
-  "session_summary"
+  "session_summary",
+  "document"
 ]);
 export type ContextSourceType = z.infer<typeof ContextSourceType>;
 
@@ -3223,6 +3274,7 @@ export const ContextSection = z
       "objective",
       "refinement",
       "workspace",
+      "documents",
       "memory",
       "decisions",
       "sibling_summaries",
@@ -3273,6 +3325,17 @@ const ContextAssemblyBudget = z
   })
   .strict();
 
+const ContextAssemblyDocumentInput = z
+  .object({
+    id: z.string(),
+    name: z.string().min(1).max(100),
+    kind: GoalDocumentKind,
+    ref: z.string().min(1).max(2048),
+    content: z.string(),
+    contentHash: z.string()
+  })
+  .strict();
+
 export const ContextAssemblyInput = z
   // @internal Internal-only shared schema for daemon-local context assembly input.
   .object({
@@ -3282,6 +3345,7 @@ export const ContextAssemblyInput = z
     role: ContextRole,
     adapterId: AdapterId,
     objective: z.string().max(CONTEXT_PACKAGE_MAX_OBJECTIVE_CHARS),
+    documents: z.array(ContextAssemblyDocumentInput).optional(),
     memory: z.array(SelectableMemory),
     decisions: z.array(SelectableDecision),
     siblingSummaries: z.array(SelectableSummary),

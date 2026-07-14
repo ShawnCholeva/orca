@@ -8,6 +8,7 @@ function seed(db: Database.Database) {
     CREATE TABLE orchestrator_messages (id TEXT, goal_id TEXT, role TEXT, kind TEXT, body TEXT, created_at TEXT);
     CREATE TABLE workspaces (id TEXT, path TEXT, name TEXT, description TEXT, created_at TEXT, updated_at TEXT);
     CREATE TABLE goal_workspaces (goal_id TEXT, workspace_id TEXT, attached_at TEXT);
+    CREATE TABLE goal_documents (id TEXT, goal_id TEXT, kind TEXT, ref TEXT, name TEXT, content TEXT, content_hash TEXT, content_bytes INTEGER, truncated INTEGER, fetched_at TEXT, created_at TEXT);
     CREATE TABLE workflow_templates (id TEXT PRIMARY KEY, name TEXT, description TEXT, version INTEGER, steps_json TEXT, created_at TEXT, updated_at TEXT);
     CREATE TABLE workflow_runs (id TEXT PRIMARY KEY, goal_id TEXT, template_id TEXT, template_version INTEGER, status TEXT, current_step_run_id TEXT, started_at TEXT);
     CREATE TABLE workflow_step_runs (id TEXT PRIMARY KEY, goal_id TEXT, workflow_run_id TEXT, step_template_id TEXT, ordinal INTEGER, attempt INTEGER, status TEXT, started_at TEXT, fingerprint TEXT, selected_operator_id TEXT);

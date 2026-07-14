@@ -20,17 +20,21 @@ export const ASSEMBLER_VERSION = '0.1.0';
 type SectionGroupKey =
   | 'objective'
   | 'refinement'
+  | 'documents'
   | 'workspace'
   | 'memory'
   | 'decisions'
   | 'sibling_summaries'
   | 'notes';
 
+// Documents sit right after refinement: user-attached reference material is
+// closer to goal metadata than to inferred memory, but stays per-section
+// trimmable (objective never trims; documents do).
 const ROLE_ORDER: Record<ContextRole, SectionGroupKey[]> = {
-  architect:  ['objective', 'refinement', 'decisions', 'memory', 'sibling_summaries', 'workspace', 'notes'],
-  engineer:   ['objective', 'workspace', 'refinement', 'memory', 'decisions', 'sibling_summaries', 'notes'],
-  reviewer:   ['objective', 'decisions', 'memory', 'sibling_summaries', 'refinement', 'workspace', 'notes'],
-  generalist: ['objective', 'refinement', 'memory', 'decisions', 'sibling_summaries', 'workspace', 'notes'],
+  architect:  ['objective', 'refinement', 'documents', 'decisions', 'memory', 'sibling_summaries', 'workspace', 'notes'],
+  engineer:   ['objective', 'workspace', 'refinement', 'documents', 'memory', 'decisions', 'sibling_summaries', 'notes'],
+  reviewer:   ['objective', 'decisions', 'memory', 'sibling_summaries', 'refinement', 'documents', 'workspace', 'notes'],
+  generalist: ['objective', 'refinement', 'documents', 'memory', 'decisions', 'sibling_summaries', 'workspace', 'notes'],
 };
 
 interface SectionGroup {
@@ -97,6 +101,93 @@ function buildWorkspaceSection(
     section: { kind: 'workspace', title: 'Workspace', body, markers: [marker] },
     sources: [{ type: 'workspace', id: workspace.id, label, reason: 'required', marker }],
   };
+}
+
+interface DocRenderState {
+  id: string;
+  name: string;
+  ref: string;
+  content: string;
+  contentTruncated: boolean;
+  stub: boolean;
+}
+
+function renderDocumentItems(items: DocRenderState[]): { body: string; markers: string[]; refs: ContextSourceRef[] } {
+  const markers: string[] = [];
+  const refs: ContextSourceRef[] = [];
+  const parts: string[] = [];
+
+  for (const d of items) {
+    const marker = `[doc:${d.id}]`;
+    markers.push(marker);
+    refs.push({ type: 'document', id: d.id, label: d.name.slice(0, 64), reason: 'required', marker });
+    if (d.stub) {
+      parts.push(`${marker} ${d.name} (source: ${d.ref}) [content omitted — read at source]`);
+    } else {
+      const lines = [`${marker} ${d.name} (source: ${d.ref})`, d.content];
+      if (d.contentTruncated) lines.push(`[truncated — see ${d.ref}]`);
+      parts.push(lines.join('\n'));
+    }
+  }
+
+  return { body: parts.join('\n\n') + '\n', markers, refs };
+}
+
+// Documents never silently drop: over budget, first halve the largest doc's
+// inline content, then reduce trailing docs to one-line name+ref stubs — the
+// ref is the retrievable handle an agent can read/fetch itself.
+function buildDocumentsSection(
+  documents: NonNullable<ContextAssemblyInput['documents']>,
+  perSectionMaxBytes: number
+): SectionGroup {
+  if (documents.length === 0) return { sections: [], sources: [], truncated: false };
+
+  const items: DocRenderState[] = documents.map((d) => ({
+    id: d.id,
+    name: d.name,
+    ref: d.ref,
+    content: d.content,
+    contentTruncated: false,
+    stub: false,
+  }));
+  let truncated = false;
+
+  const MIN_INLINE_BYTES = 256;
+  for (;;) {
+    const r = renderDocumentItems(items);
+    if (Buffer.byteLength(r.body, 'utf8') <= perSectionMaxBytes) {
+      return {
+        sections: [{ kind: 'documents', title: 'Reference Documents', body: r.body, markers: r.markers }],
+        sources: r.refs,
+        truncated,
+      };
+    }
+    truncated = true;
+    // 1) halve the largest inline content that is still worth halving
+    let largest: DocRenderState | null = null;
+    for (const d of items) {
+      if (d.stub) continue;
+      if (Buffer.byteLength(d.content, 'utf8') <= MIN_INLINE_BYTES) continue;
+      if (!largest || d.content.length > largest.content.length) largest = d;
+    }
+    if (largest) {
+      largest.content = largest.content.slice(0, Math.floor(largest.content.length / 2));
+      largest.contentTruncated = true;
+      continue;
+    }
+    // 2) reduce the last non-stub doc to a name+ref stub
+    const lastInline = [...items].reverse().find((d) => !d.stub);
+    if (lastInline) {
+      lastInline.stub = true;
+      continue;
+    }
+    // 3) all stubs and still over budget — drop trailing stubs (degenerate case)
+    if (items.length > 1) {
+      items.pop();
+      continue;
+    }
+    return { sections: [], sources: [], truncated };
+  }
 }
 
 function renderMemoryItems(items: SelectedMemory[]): { body: string; markers: string[]; refs: ContextSourceRef[] } {
@@ -288,7 +379,7 @@ export class DeterministicAssembler implements SessionPreparationAssembler {
   readonly version = ASSEMBLER_VERSION;
 
   assemble(input: ContextAssemblyInput): ContextAssemblyOutput {
-    const { goal, refinement, workspace, memory, decisions, siblingSummaries, budget, objective, role } = input;
+    const { goal, refinement, workspace, documents, memory, decisions, siblingSummaries, budget, objective, role } = input;
     const { perSectionMaxBytes } = budget;
 
     // Select from bounded projection sources
@@ -300,6 +391,7 @@ export class DeterministicAssembler implements SessionPreparationAssembler {
     const objResult = buildObjectiveSection(goal, objective);
     const refResult = refinement ? buildRefinementSection(refinement) : null;
     const wsResult = workspace ? buildWorkspaceSection(workspace) : null;
+    const docGroup = buildDocumentsSection(documents ?? [], perSectionMaxBytes);
     const memGroup = buildMemorySection(selectedMemory, perSectionMaxBytes);
     const decGroup = buildDecisionsSections(selectedDecisions, perSectionMaxBytes);
     const sumGroup = buildSiblingSection(selectedSummaries, perSectionMaxBytes);
@@ -313,6 +405,7 @@ export class DeterministicAssembler implements SessionPreparationAssembler {
       workspace: wsResult
         ? { sections: [wsResult.section], sources: wsResult.sources, truncated: false }
         : { sections: [], sources: [], truncated: false },
+      documents: docGroup,
       memory: memGroup,
       decisions: decGroup,
       sibling_summaries: sumGroup,

@@ -299,4 +299,58 @@ describe('DeterministicAssembler', () => {
       expect(result.success).toBe(true);
     });
   });
+
+  describe('documents section', () => {
+    const makeDoc = (id: string, content = `Body of ${id}`) => ({
+      id,
+      name: `${id}.md`,
+      kind: 'file' as const,
+      ref: `/docs/${id}.md`,
+      content,
+      contentHash: `hash-${id}`,
+    });
+
+    it('renders a Reference Documents section with [doc:] markers and document source refs', () => {
+      const output = assembler.assemble(makeInput({ documents: [makeDoc('d1'), makeDoc('d2')] }));
+      const section = output.sections.find((s) => s.kind === 'documents');
+      expect(section).toBeDefined();
+      expect(section!.title).toBe('Reference Documents');
+      expect(section!.body).toContain('[doc:d1] d1.md (source: /docs/d1.md)');
+      expect(section!.body).toContain('Body of d2');
+      expect(section!.markers).toEqual(['[doc:d1]', '[doc:d2]']);
+      const refs = output.sources.filter((s) => s.type === 'document');
+      expect(refs.map((r) => r.id)).toEqual(['d1', 'd2']);
+      expect(refs[0]!.reason).toBe('required');
+    });
+
+    it('places documents immediately after refinement for the engineer role', () => {
+      const output = assembler.assemble(makeInput({ role: 'engineer', documents: [makeDoc('d1')] }));
+      const kinds = output.sections.map((s) => s.kind);
+      expect(kinds.indexOf('documents')).toBe(kinds.indexOf('refinement') + 1);
+    });
+
+    it('omits the section when there are no documents', () => {
+      const output = assembler.assemble(makeInput());
+      expect(output.sections.some((s) => s.kind === 'documents')).toBe(false);
+    });
+
+    it('over budget: trims content but keeps every doc as a name+ref handle, warns truncated_low_priority', () => {
+      const big = 'z'.repeat(6 * 1024);
+      const docs = [makeDoc('d1', big), makeDoc('d2', big), makeDoc('d3', big)];
+      const output = assembler.assemble(makeInput({ documents: docs }));
+      const section = output.sections.find((s) => s.kind === 'documents');
+      expect(section).toBeDefined();
+      expect(Buffer.byteLength(section!.body, 'utf8')).toBeLessThanOrEqual(8 * 1024);
+      // every doc still present by marker — never silently dropped
+      expect(section!.markers).toEqual(['[doc:d1]', '[doc:d2]', '[doc:d3]']);
+      expect(section!.body).toMatch(/\[truncated — see \/docs\/d\d\.md\]|\[content omitted — read at source\]/);
+      expect(output.truncated).toBe(true);
+      expect(output.warnings).toContain('truncated_low_priority');
+    });
+
+    it('output passes schema with documents present', () => {
+      const output = assembler.assemble(makeInput({ documents: [makeDoc('d1')] }));
+      expect(ContextAssemblyOutput.safeParse(output).success).toBe(true);
+    });
+  });
 });

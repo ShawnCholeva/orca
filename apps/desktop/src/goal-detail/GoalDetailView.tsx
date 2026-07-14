@@ -11,6 +11,7 @@ import {
   type LiveGenerationNotice,
 } from "../events/orchestration-live-refresh";
 import { WorkspaceListPanel } from "./WorkspaceListPanel";
+import { DocumentListPanel } from "./DocumentListPanel";
 import { TasksPanel } from "./tasks/TasksPanel";
 import { MemoryPanel } from "./memory/MemoryPanel";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
@@ -292,7 +293,7 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
 
   if (!detail) return null;
 
-  const { goal, refinement, workspaces } = detail;
+  const { goal, refinement, workspaces, documents } = detail;
 
   return (
     <div className="goal-detail">
@@ -379,6 +380,12 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
         <WorkspaceListPanel
           goalId={goalId}
           workspaces={workspaces}
+          onChanged={() => void loadDetail()}
+        />
+
+        <DocumentListPanel
+          goalId={goalId}
+          documents={documents}
           onChanged={() => void loadDetail()}
         />
 

@@ -70,6 +70,7 @@ export const migrationFiles = [
   "0055_proposal_component.sql",
   "0056_learning_events.sql",
   "0057_template_catalog_version.sql",
+  "0058_goal_documents.sql",
 ] as const;
 
 export function runMigrations(
