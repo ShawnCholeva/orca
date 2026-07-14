@@ -1050,16 +1050,7 @@ export function createServer(
     const row = db
       .prepare(
         `SELECT wsr.goal_id, wsr.workflow_run_id, wsr.step_template_id, wsr.ordinal,
-                wr.template_id,
-                (
-                  SELECT s.id
-                  FROM sessions s
-                  WHERE s.workflow_step_run_id = wsr.id
-                    AND s.goal_id = wsr.goal_id
-                    AND s.status IN ('starting', 'running')
-                  ORDER BY s.created_at DESC, s.id DESC
-                  LIMIT 1
-                ) AS agent_session_id
+                wr.template_id
          FROM workflow_step_runs wsr
          JOIN workflow_runs wr
            ON wr.id = wsr.workflow_run_id
@@ -1076,7 +1067,6 @@ export function createServer(
           step_template_id: string;
           ordinal: number;
           template_id: string;
-          agent_session_id: string | null;
         }
       | undefined;
     if (
@@ -1101,7 +1091,9 @@ export function createServer(
       goalId: row.goal_id,
       workflowRunId: row.workflow_run_id,
       stepRunId,
-      agentSessionId: row.agent_session_id,
+      // The step activity row now opens lazily on the first tool_use (which
+      // carries its own session id), so step_started attributes no session.
+      agentSessionId: null,
       stepName: step.name,
     });
   });
