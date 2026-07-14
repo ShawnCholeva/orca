@@ -199,8 +199,8 @@ describe("Adaptive Delivery v9 completion gates", () => {
   const grounding = (stepId: string) =>
     (def.steps.find((s) => s.id === stepId)!.grounding ?? []) as NonNullable<WorkflowStepTemplate["grounding"]>;
 
-  it("is version 9 and runs the sensor ladder for execution AND validate_build", () => {
-    expect(def.version).toBe(9);
+  it("is version 10 and runs the sensor ladder for execution AND validate_build", () => {
+    expect(def.version).toBe(10);
     const rule = def.guardrails.find((g) => g.kind === "validation_rule")!;
     expect((rule.configJson as { appliesToSteps: string[] }).appliesToSteps.sort())
       .toEqual(["execution", "validate_build"]);
