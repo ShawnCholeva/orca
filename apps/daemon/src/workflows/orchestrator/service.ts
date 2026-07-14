@@ -1472,6 +1472,10 @@ export class OrchestratorService {
               finishedAt,
               proposal,
               refute: refuteForCard,
+              // The deterministic evidence facet (sensors + grounding) so the
+              // confirmation card can show the evidence bundle (paper p.62);
+              // null for reasoning steps that ran no sensors.
+              evidence: evidence ?? null,
             }),
             confirmedLead,
             ctx.stepRun.id

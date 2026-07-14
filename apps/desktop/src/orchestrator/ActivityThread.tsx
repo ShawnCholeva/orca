@@ -193,7 +193,7 @@ export function ConfirmationCard({
       <div className="step-confirm" data-testid="step-confirm">
         <div className="step-confirm-actions">
           {action}
-          {scores ? (
+          {scores || summary?.evidence ? (
             <button
               type="button"
               data-testid={scoresTestid}
@@ -206,53 +206,76 @@ export function ConfirmationCard({
             </button>
           ) : null}
         </div>
-        {scoresOpen && scores ? (
-          <>
-            <dl ref={metricsRef} className="step-result-metrics step-confirm-metrics">
-              <div className="step-confirm-scores-head">
-                <span className="step-confirm-scores-title">How this step scored itself</span>
-                <span className="step-confirm-scores-tag">its own claim — not proof</span>
-              </div>
-              <div><dt>Self-reported success</dt><dd>{pct(scores.successScore)}</dd></div>
-              <div><dt>Complete</dt><dd>{pct(scores.quality.outputCompleteness)}</dd></div>
-              <div><dt>Correct</dt><dd>{pct(scores.quality.outputCorrectness)}</dd></div>
-              <div><dt>Followed instructions</dt><dd>{pct(scores.quality.instructionAdherence)}</dd></div>
-              <div><dt>Downstream readiness</dt><dd>{pct(scores.quality.downstreamReadiness)}</dd></div>
-              <div><dt>Risk level (higher = riskier)</dt><dd>{pct(scores.quality.riskLevel)}</dd></div>
-              <div><dt>Handoff</dt><dd>{scores.handoffReady ? "Ready" : "Not ready"}</dd></div>
-            </dl>
-            {/* The lead chip in ConfirmationFrame already surfaces non-"upheld"
-                verdicts (step-confirm-refute), so only show this line for
-                "upheld" — the one verdict the chip suppresses — to avoid
-                restating the same verdict twice in one card. */}
-            {summary?.refute && summary.refute.verdict === "upheld" ? (
-              <div
-                data-testid="step-confirm-independent"
-                style={{
-                  marginTop: 8,
-                  fontSize: 12,
-                  color: "var(--text-2)",
-                }}
-              >
-                <span
-                  className="mono"
-                  style={{ fontSize: 9.5, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--text-4)" }}
-                >
-                  Independent check
-                </span>
-                <div>{REFUTE_VERDICT_LABEL[summary.refute.verdict] ?? "No independent review ran"}</div>
+        {scoresOpen ? (
+          <div className="step-confirm-evidence" data-testid="step-confirm-evidence">
+            {/* Checks run — the deterministic evidence tier (paper p.62). Execution
+                checks are the trust anchor; structural/grounding are weaker and
+                muted. A reasoning step with no sensor carries a scope line. */}
+            {summary?.evidence ? (
+              <div className="step-confirm-ev-group">
+                <div className="step-confirm-ev-label">Checks run</div>
+                {summary.evidence.checks.length > 0 ? (
+                  <ul className="step-confirm-ev-checks" data-testid="step-confirm-ev-checks">
+                    {summary.evidence.checks.map((c, i) => (
+                      <li key={i} className="step-confirm-ev-check" data-kind={c.kind} data-status={c.status}>
+                        <span className="step-confirm-ev-mark" aria-hidden="true">
+                          {c.status === "failed" ? "✗" : c.status === "warn" ? "!" : "✓"}
+                        </span>
+                        <span className="step-confirm-ev-name">{c.name}</span>
+                        {c.detail ? <span className="step-confirm-ev-detail">{c.detail}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {!summary.evidence.executed ? (
+                  <div className="step-confirm-ev-scope" data-testid="step-confirm-ev-noexec">
+                    No executable checks — this step produces reasoning, not code.
+                  </div>
+                ) : null}
               </div>
             ) : null}
-            <div
-              style={{
-                marginTop: 8,
-                fontSize: 12,
-                color: summary?.refute?.verdict === "refuted" ? "var(--err)" : "var(--text-3)",
-              }}
-            >
-              The AI <b>claimed</b> this step complete. See the Metrics tab for how it trends and how strongly it's verified.
-            </div>
-          </>
+            {summary?.evidence && summary.evidence.cantVerify.length > 0 ? (
+              <div className="step-confirm-ev-group" data-testid="step-confirm-ev-cantverify">
+                <div className="step-confirm-ev-label">Can’t verify</div>
+                <ul className="step-confirm-ev-gaps">
+                  {summary.evidence.cantVerify.map((g, i) => <li key={i}>{g}</li>)}
+                </ul>
+              </div>
+            ) : null}
+            {/* Independent review — only for "upheld". Non-upheld verdicts are
+                already surfaced by the prominent lead chip (ConfirmationFrame);
+                restating them here would double up. */}
+            {summary?.refute && summary.refute.verdict === "upheld" ? (
+              <div className="step-confirm-ev-group" data-testid="step-confirm-independent">
+                <div className="step-confirm-ev-label">Independent check</div>
+                <div className="step-confirm-ev-review">
+                  {REFUTE_VERDICT_LABEL[summary.refute.verdict] ?? "No independent review ran"}
+                </div>
+              </div>
+            ) : null}
+            {/* Model self-scores — demoted behind a disclosure and labeled "not
+                measured" so they're never the primary signal (paper p.62). */}
+            {scores ? (
+              <details className="step-confirm-selfassess">
+                <summary className="step-confirm-selfassess-summary">
+                  <span>Model self-assessment</span>
+                  <span className="step-confirm-scores-tag">its own claim — not proof</span>
+                </summary>
+                <dl ref={metricsRef} className="step-result-metrics step-confirm-metrics">
+                  <div><dt>Self-reported success</dt><dd>{pct(scores.successScore)}</dd></div>
+                  <div><dt>Complete</dt><dd>{pct(scores.quality.outputCompleteness)}</dd></div>
+                  <div><dt>Correct</dt><dd>{pct(scores.quality.outputCorrectness)}</dd></div>
+                  <div><dt>Followed instructions</dt><dd>{pct(scores.quality.instructionAdherence)}</dd></div>
+                  <div><dt>Downstream readiness</dt><dd>{pct(scores.quality.downstreamReadiness)}</dd></div>
+                  <div><dt>Risk level (higher = riskier)</dt><dd>{pct(scores.quality.riskLevel)}</dd></div>
+                  <div><dt>Handoff</dt><dd>{scores.handoffReady ? "Ready" : "Not ready"}</dd></div>
+                </dl>
+                <div className="step-confirm-ev-footer">
+                  The AI <b>claimed</b> this step complete. See the Metrics tab for how it trends and how strongly it's verified.
+                </div>
+              </details>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>

@@ -571,3 +571,58 @@ describe("StepResultCard artifact open affordance", () => {
     expect(openArtifactMock).toHaveBeenCalledWith(".orca/specs/x.md");
   });
 });
+
+describe("evidence bundle (paper p.62)", () => {
+  it("renders Checks run with execution checks and a Can't verify list", () => {
+    render(
+      <LiveActivity
+        activity={{
+          ...confirmActivity,
+          confirmationSummary: {
+            ...confirmActivity.confirmationSummary,
+            evidence: {
+              executed: true,
+              checks: [
+                { name: "typecheck", status: "passed", kind: "execution", detail: "no type errors" },
+                { name: "unit", status: "failed", kind: "execution", detail: "2 failing" },
+              ],
+              cantVerify: ["no e2e coverage for order-fill"],
+            },
+          },
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("confirm-scores-toggle"));
+    expect(screen.getByText("Checks run")).toBeInTheDocument();
+    expect(screen.getByText("typecheck")).toBeInTheDocument();
+    expect(screen.getByText("unit")).toBeInTheDocument();
+    expect(screen.getByTestId("step-confirm-ev-cantverify")).toBeInTheDocument();
+    expect(screen.getByText("no e2e coverage for order-fill")).toBeInTheDocument();
+    // an executable oracle ran -> no reasoning scope line
+    expect(screen.queryByTestId("step-confirm-ev-noexec")).not.toBeInTheDocument();
+  });
+
+  it("shows the 'no executable checks' scope line and structural check for a reasoning step", () => {
+    render(
+      <LiveActivity
+        activity={{
+          ...confirmActivity,
+          confirmationSummary: {
+            ...confirmActivity.confirmationSummary,
+            evidence: {
+              executed: false,
+              checks: [{ name: "Output structure", status: "passed", kind: "structural", detail: "all required fields present" }],
+              cantVerify: [],
+            },
+          },
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("confirm-scores-toggle"));
+    expect(screen.getByTestId("step-confirm-ev-noexec")).toBeInTheDocument();
+    expect(screen.getByText("Output structure")).toBeInTheDocument();
+    // the raw self-scores are demoted behind a "Model self-assessment" disclosure
+    expect(screen.getByText(/Model self-assessment/i)).toBeInTheDocument();
+    expect(screen.getByText(/its own claim/i)).toBeInTheDocument();
+  });
+})

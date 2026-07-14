@@ -1,11 +1,54 @@
 import type {
   ConfirmationSummary as ConfirmationSummaryT,
+  ConfirmationSummaryEvidence,
   ConfirmationSummaryRefute,
+  EvidenceFacet,
   StoredStepResultScoring,
   WorkflowStepOutputField,
   WorkflowStepOutputSchema,
 } from "@orca/contracts";
 import type { StepSplitterRouting } from "../graph/graph-routing.js";
+
+// The single structural check a reasoning step (no executable oracle) carries:
+// reaching the confirmation pause deterministically proves schema validation
+// passed. Honest and clearly scoped as structure-only — never a fake test pass.
+const STRUCTURE_CHECK: ConfirmationSummaryEvidence["checks"][number] = {
+  name: "Output structure",
+  status: "passed",
+  kind: "structural",
+  detail: "all required fields present",
+};
+
+/** Project a step's deterministic EvidenceFacet into the confirmation card's
+ *  evidence bundle (paper p.62). `executed` is true only when a real sensor ran,
+ *  so reasoning steps (facet null) read "no executable checks". Sensor results
+ *  are the strong tier; enforced grounding checks are the structural tier. */
+function buildEvidenceBundle(facet: EvidenceFacet | null): ConfirmationSummaryEvidence {
+  if (!facet) {
+    return { executed: false, checks: [STRUCTURE_CHECK], cantVerify: [] };
+  }
+  const checks: ConfirmationSummaryEvidence["checks"] = [];
+  for (const s of facet.sensorsRun) {
+    checks.push({
+      name: s.kind,
+      status: s.result === "failed" ? "failed" : s.result === "passed" ? "passed" : "warn",
+      kind: "execution",
+      detail: s.summary.trim().slice(0, 512) || null,
+    });
+  }
+  for (const g of facet.grounding?.checks ?? []) {
+    if (g.mode !== "enforce" || g.result === "skipped") continue;
+    checks.push({
+      name: g.field,
+      status: g.result === "failed" ? "failed" : "passed",
+      kind: "grounding",
+      detail: g.detail.trim().slice(0, 512) || null,
+    });
+  }
+  if (checks.length === 0) checks.push(STRUCTURE_CHECK);
+  const cantVerify = [...facet.oracleAdequacy.gaps, ...facet.untestedRegions].slice(0, 32);
+  return { executed: facet.sensorsRun.length > 0, checks: checks.slice(0, 32), cantVerify };
+}
 
 type CardField = ConfirmationSummaryT["fields"][number];
 
@@ -116,7 +159,10 @@ export function buildConfirmationSummary(
   scoring: StoredStepResultScoring | null,
   proposal: string | null,
   routing: StepSplitterRouting | null = null,
-  refute: ConfirmationSummaryT["refute"] = null
+  refute: ConfirmationSummaryT["refute"] = null,
+  // `undefined` = omit the bundle (the persisted result card); `null` = a
+  // reasoning step with no facet (structural bundle); a facet = real evidence.
+  evidence: EvidenceFacet | null | undefined = undefined
 ): ConfirmationSummaryT {
   const obj = (block ?? {}) as Record<string, unknown>;
   const fields: CardField[] = [];
@@ -136,5 +182,11 @@ export function buildConfirmationSummary(
     flattenField(field, obj[field.key], "", 1, fields);
   }
   const lead = confirmationLead(scoring?.reason, proposal, refute ?? null);
-  return { lead, fields: fields.slice(0, 32), scoring, refute: refute ?? null };
+  return {
+    lead,
+    fields: fields.slice(0, 32),
+    scoring,
+    refute: refute ?? null,
+    ...(evidence !== undefined ? { evidence: buildEvidenceBundle(evidence) } : {}),
+  };
 }

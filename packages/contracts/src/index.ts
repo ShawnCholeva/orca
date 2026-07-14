@@ -1354,6 +1354,35 @@ export const ConfirmationSummaryRefute = z
   .strict();
 export type ConfirmationSummaryRefute = z.infer<typeof ConfirmationSummaryRefute>;
 
+// One deterministic check in the confirmation card's evidence bundle (paper
+// p.62). `kind` declares the check's strength: "execution" = a real sensor ran
+// (typecheck/tests — the strong tier); "grounding" = engine-run claim
+// verification (references resolve); "structural" = schema/shape passed. Each
+// row states what it verified so a self-report is never shown as if measured.
+export const ConfirmationSummaryCheck = z
+  .object({
+    name: z.string().min(1).max(128),
+    status: z.enum(["passed", "failed", "warn"]),
+    kind: z.enum(["execution", "structural", "grounding"]),
+    detail: z.string().max(512).nullable(),
+  })
+  .strict();
+export type ConfirmationSummaryCheck = z.infer<typeof ConfirmationSummaryCheck>;
+
+// The evidence bundle: the deterministic checks that ran, and what they could
+// NOT verify. `executed` is true only when an executable oracle (sensor) ran —
+// reasoning steps carry executed=false and only structural checks, so the card
+// can honestly say "no executable checks — reasoning step". Computed by the
+// daemon from the step's EvidenceFacet; the desktop renders it as-is.
+export const ConfirmationSummaryEvidence = z
+  .object({
+    executed: z.boolean(),
+    checks: z.array(ConfirmationSummaryCheck).max(32),
+    cantVerify: z.array(z.string().max(512)).max(32),
+  })
+  .strict();
+export type ConfirmationSummaryEvidence = z.infer<typeof ConfirmationSummaryEvidence>;
+
 export const ConfirmationSummary = z
   .object({
     lead: z.string().max(4000),
@@ -1370,6 +1399,10 @@ export const ConfirmationSummary = z
     // this tolerates a pre-5.5 stash missing `reasoning`, like StoredStepResultScoring.
     scoring: StoredStepResultScoring.nullable(),
     refute: ConfirmationSummaryRefute.nullable().optional(),
+    // Deterministic evidence bundle (paper p.62): replaces the six raw
+    // self-scores as the card's primary signal; the self-scores are still
+    // carried in `scoring` but the desktop demotes them behind a disclosure.
+    evidence: ConfirmationSummaryEvidence.nullable().optional(),
   })
   .strict();
 export type ConfirmationSummary = z.infer<typeof ConfirmationSummary>;

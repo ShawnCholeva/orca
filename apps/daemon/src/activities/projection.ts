@@ -3,6 +3,7 @@ import {
   Activity,
   ActivityStep,
   ConfirmationSummaryRefute,
+  EvidenceFacet,
   PendingQuestion,
   ProviderRecoveryCheckpoint,
   StoredStepResultScoring,
@@ -220,7 +221,7 @@ function enrichConfirmationSummary(db: Database.Database, activity: ActivityT): 
     } | undefined;
   if (!row?.stash || !row.steps_json) return activity;
 
-  let stash: { block?: unknown; scoring?: unknown; proposal?: unknown; refute?: unknown };
+  let stash: { block?: unknown; scoring?: unknown; proposal?: unknown; refute?: unknown; evidence?: unknown };
   try { stash = JSON.parse(row.stash); } catch { return activity; }
 
   const steps = JSON.parse(row.steps_json) as Array<{ id: string; name?: string; outputSchema?: unknown }>;
@@ -230,6 +231,10 @@ function enrichConfirmationSummary(db: Database.Database, activity: ActivityT): 
 
   const scoringParse = StoredStepResultScoring.safeParse(stash.scoring);
   const refuteParse = ConfirmationSummaryRefute.nullable().safeParse(stash.refute ?? null);
+  // A pre-bundle stash has no `evidence` key → parse null → reasoning-style
+  // (structural) bundle. A malformed facet also degrades to null rather than
+  // dropping the whole card.
+  const evidenceParse = EvidenceFacet.nullable().safeParse(stash.evidence ?? null);
   const confirmationSummary = buildConfirmationSummary(
     schemaParse.data,
     stash.block,
@@ -237,6 +242,7 @@ function enrichConfirmationSummary(db: Database.Database, activity: ActivityT): 
     typeof stash.proposal === "string" ? stash.proposal : null,
     routingForStep(row.graph_json, row.step_template_id),
     refuteParse.success ? refuteParse.data : null,
+    evidenceParse.success ? evidenceParse.data : null,
   );
   return Activity.parse({
     ...activity,

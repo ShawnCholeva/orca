@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { EvidenceFacet } from "@orca/contracts";
 import type { WorkflowStepOutputSchema } from "@orca/contracts";
 import { buildConfirmationSummary, confirmationLead } from "./confirmation-summary.js";
 
@@ -179,5 +180,41 @@ describe("buildConfirmationSummary", () => {
     it("does not prepend an advisory when refute is omitted", () => {
       expect(confirmationLead("Looks good", null)).toBe("Looks good");
     });
+  });
+});
+
+describe("buildConfirmationSummary evidence bundle", () => {
+  const schema2: WorkflowStepOutputSchema = [{ key: "summary", type: "string", required: true }];
+
+  it("omits the bundle when evidence is not provided (persisted result card)", () => {
+    const out = buildConfirmationSummary(schema2, { summary: "x" }, null, null);
+    expect(out.evidence).toBeUndefined();
+  });
+
+  it("reasoning step (evidence null): executed=false, one structural check, no gaps", () => {
+    const out = buildConfirmationSummary(schema2, { summary: "x" }, null, null, null, null, null);
+    expect(out.evidence).toEqual({
+      executed: false,
+      checks: [{ name: "Output structure", status: "passed", kind: "structural", detail: "all required fields present" }],
+      cantVerify: [],
+    });
+  });
+
+  it("exec step: executed=true, one check per sensor with mapped status, gaps in cantVerify", () => {
+    const facet = EvidenceFacet.parse({
+      sensorsRun: [
+        { kind: "typecheck", command: "tsc", exitCode: 0, durationMs: 5, result: "passed", summary: "no type errors", artifactRef: null },
+        { kind: "unit", command: "vitest", exitCode: 1, durationMs: 9, result: "failed", summary: "2 failing tests", artifactRef: null },
+      ],
+      verdict: "failed",
+      oracleAdequacy: { sufficient: false, gaps: ["no e2e coverage for order-fill"] },
+    });
+    const out = buildConfirmationSummary(schema2, { summary: "x" }, null, null, null, null, facet);
+    expect(out.evidence?.executed).toBe(true);
+    expect(out.evidence?.checks).toEqual([
+      { name: "typecheck", status: "passed", kind: "execution", detail: "no type errors" },
+      { name: "unit", status: "failed", kind: "execution", detail: "2 failing tests" },
+    ]);
+    expect(out.evidence?.cantVerify).toEqual(["no e2e coverage for order-fill"]);
   });
 });
