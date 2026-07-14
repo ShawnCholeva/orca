@@ -8,7 +8,7 @@ import {
 } from "../index.js";
 
 const baseGoal = {
-  id: "g1", title: "t", description: "d", status: "active" as const,
+  id: "g1", title: "t", intent: "d", status: "active" as const,
   createdAt: "2026-06-03T00:00:00.000Z", updatedAt: "2026-06-03T00:00:00.000Z",
   archivedAt: null,
 };

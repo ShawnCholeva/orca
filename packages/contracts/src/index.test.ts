@@ -116,7 +116,7 @@ const now = "2026-01-01T00:00:00.000Z";
 const goalFixture = Goal.parse({
   id: "goal-1",
   title: "Launch workspace planning",
-  description: "Ship refinement and workspace support",
+  intent: "Ship refinement and workspace support",
   status: "active",
   autonomyLevel: 1,
   createdAt: now,
@@ -145,7 +145,7 @@ const workspacePreviewFixture = InspectWorkspacePreview.parse({
 const guidedOutputFixture = GuidedRefinementOutput.parse({
   skillId: "guided-goal-refinement",
   title: "Launch workspace planning",
-  description: "Implement deterministic refinement",
+  intent: "Implement deterministic refinement",
   successCriteria: ["Goal detail shows refinement"],
   constraints: ["No AI calls"],
   assumptions: ["Local filesystem available"]
@@ -266,7 +266,7 @@ describe("goal refinement and workspace contracts", () => {
   });
 
   it("parses GuidedRefinementInput with default and rejects blank title", () => {
-    expectRoundTrip(GuidedRefinementInput.parse, { title: "Goal" }, { title: "Goal", description: "" });
+    expectRoundTrip(GuidedRefinementInput.parse, { title: "Goal" }, { title: "Goal", intent: "" });
     expect(() => GuidedRefinementInput.parse({ title: "" })).toThrow();
   });
 
@@ -276,11 +276,15 @@ describe("goal refinement and workspace contracts", () => {
   });
 
   it("keeps legacy create request body valid and supports refined workspace fields", () => {
-    expectRoundTrip(CreateGoalRequest.parse, { title: "Legacy create", description: "" }, { title: "Legacy create", description: "" });
+    expectRoundTrip(
+      CreateGoalRequest.parse,
+      { title: "Legacy create", intent: "Ship the legacy flow" },
+      { title: "Legacy create", intent: "Ship the legacy flow" }
+    );
 
     const request = {
       title: "Refined create",
-      description: "",
+      intent: "Ship the refined flow",
       refined: guidedOutputFixture,
       workspaces: [{ inputPath: "/tmp/ws", name: "workspace" }]
     };
@@ -288,9 +292,31 @@ describe("goal refinement and workspace contracts", () => {
     expect(() => CreateGoalRequest.parse({ ...request, workspaces: [{ inputPath: "", name: "x" }] })).toThrow();
   });
 
+  it("CreateGoalRequest requires a non-empty intent", () => {
+    expect(() => CreateGoalRequest.parse({ title: "T" })).toThrow(); // intent missing
+    expect(() => CreateGoalRequest.parse({ title: "T", intent: "" })).toThrow(); // empty
+    const ok = CreateGoalRequest.parse({ title: "T", intent: "Ship the feature" });
+    expect(ok.intent).toBe("Ship the feature");
+  });
+
+  it("CreateGoalAndStartWorkflowRequest requires a non-empty intent", () => {
+    expect(() =>
+      CreateGoalAndStartWorkflowRequest.parse({ title: "T", workflowTemplateId: "wf" }),
+    ).toThrow();
+    expect(() =>
+      CreateGoalAndStartWorkflowRequest.parse({ title: "T", intent: "", workflowTemplateId: "wf" }),
+    ).toThrow();
+    const ok = CreateGoalAndStartWorkflowRequest.parse({
+      title: "T",
+      intent: "Do the thing",
+      workflowTemplateId: "wf",
+    });
+    expect(ok.intent).toBe("Do the thing");
+  });
+
   it("parses RefineGoalRequest strictly and rejects unknown keys", () => {
-    expectRoundTrip(RefineGoalRequest.parse, { title: "Refine me" }, { title: "Refine me", description: "" });
-    expect(() => RefineGoalRequest.parse({ title: "Refine me", description: "", skillId: "x" })).toThrow();
+    expectRoundTrip(RefineGoalRequest.parse, { title: "Refine me" }, { title: "Refine me", intent: "" });
+    expect(() => RefineGoalRequest.parse({ title: "Refine me", intent: "", skillId: "x" })).toThrow();
   });
 
   it("parses RefineGoalResponse and rejects invalid draft", () => {
@@ -1554,6 +1580,7 @@ describe("CreateGoalAndStartWorkflowRequest", () => {
   it("accepts minimal valid input with workflowTemplateId", () => {
     const result = CreateGoalAndStartWorkflowRequest.safeParse({
       title: "My Goal",
+      intent: "Ship the engineering workflow",
       workflowTemplateId: "orca/engineering",
     });
     expect(result.success).toBe(true);

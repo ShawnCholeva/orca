@@ -39,7 +39,7 @@ export type UpdateOperatingModeRequest = z.infer<typeof UpdateOperatingModeReque
 export const Goal = z.object({
   id: z.string(),
   title: z.string(),
-  description: z.string(),
+  intent: z.string(),
   status: GoalStatus,
   autonomyLevel: z.number().int().default(1),
   workerPermissionMode: WorkerPermissionMode.default("ask"),
@@ -55,14 +55,14 @@ export type Goal = z.infer<typeof Goal>;
 
 export const GuidedRefinementInput = z.object({
   title: z.string().min(1).max(200),
-  description: z.string().max(4000).default("")
+  intent: z.string().max(4000).default("")
 });
 export type GuidedRefinementInput = z.infer<typeof GuidedRefinementInput>;
 
 export const GuidedRefinementOutput = z.object({
   skillId: z.literal("guided-goal-refinement"),
   title: z.string().min(1).max(200),
-  description: z.string().max(4000),
+  intent: z.string().max(4000),
   successCriteria: z.array(z.string().min(1).max(200)).max(20),
   constraints: z.array(z.string().min(1).max(200)).max(20),
   assumptions: z.array(z.string().min(1).max(200)).max(20)
@@ -76,7 +76,7 @@ const WorkspaceAttachmentInput = z.object({
 
 export const CreateGoalRequest = z.object({
   title: z.string().min(1).max(200),
-  description: z.string().max(4000).default(""),
+  intent: z.string().min(1).max(4000),
   refined: GuidedRefinementOutput.optional(),
   workspaces: z.array(WorkspaceAttachmentInput).optional(),
   orchestratorModel: OrchestratorModelChoice.optional()
@@ -90,7 +90,7 @@ export type CreateGoalResponse = z.infer<typeof CreateGoalResponse>;
 
 export const CreateGoalAndStartWorkflowRequest = z.object({
   title: z.string().min(1).max(200),
-  description: z.string().max(4000).default(""),
+  intent: z.string().min(1).max(4000),
   workspaces: z.array(WorkspaceAttachmentInput).optional(),
   orchestratorModel: OrchestratorModelChoice.optional(),
   workflowTemplateId: z.string().min(1),
@@ -120,10 +120,10 @@ export type CreateGoalAndStartWorkflowResponse = z.infer<typeof CreateGoalAndSta
 export const UpdateGoalRequest = z
   .object({
     title: z.string().min(1).max(200).optional(),
-    description: z.string().max(4000).optional()
+    intent: z.string().max(4000).optional()
   })
-  .refine((data) => data.title !== undefined || data.description !== undefined, {
-    message: "at least one of title or description must be provided"
+  .refine((data) => data.title !== undefined || data.intent !== undefined, {
+    message: "at least one of title or intent must be provided"
   });
 export type UpdateGoalRequest = z.infer<typeof UpdateGoalRequest>;
 
@@ -386,7 +386,7 @@ export type GoalRefinement = z.infer<typeof GoalRefinement>;
 export const RefineGoalRequest = z
   .object({
     title: z.string().min(1).max(200),
-    description: z.string().max(4000).default("")
+    intent: z.string().max(4000).default("")
   })
   .strict();
 export type RefineGoalRequest = z.infer<typeof RefineGoalRequest>;

@@ -481,6 +481,7 @@ describe("workflow contracts", () => {
     expect(
       CreateGoalRequest.parse({
         title: "Goal",
+        intent: "Ship the goal",
         orchestratorModel: { providerId: "orca/anthropic", modelId: "claude-sonnet-4-6" }
       })
     ).toMatchObject({
@@ -491,7 +492,7 @@ describe("workflow contracts", () => {
       Goal.parse({
         id: "goal-1",
         title: "Goal",
-        description: "",
+        intent: "",
         status: "active",
         autonomyLevel: 1,
         orchestratorProvider: "orca/openai",
