@@ -513,12 +513,18 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   // Suppress the "starting" indicator once any persisted agent-activity card is
   // present — the agent has already emitted steps, so there is nothing to wait for.
   const hasAgentActivityCard = activities.some(isAgentActivityCard);
+  // The orchestrator is between the worker finishing and the step parking:
+  // reviewing the output (judge) or running an independent check (refute). This
+  // window is otherwise silent, so surface an honest status and let it take
+  // precedence over the generic starting/working rows.
+  const orchestratorPhase = workflowState.stepRun?.orchestratorPhase ?? null;
   const showStarting =
     workflowState.run?.status === "active" &&
     workflowState.stepRun?.status === "active" &&
     // The final step run stays "active" with finished_at set while the run waits
     // for completion approval; a finished step is done, not starting.
     workflowState.stepRun?.finishedAt == null &&
+    orchestratorPhase == null &&
     !orcaHasSpoken &&
     !hasLiveActivity &&
     !hasAgentActivityCard;
@@ -668,6 +674,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     currentStepRunId != null && activities.some((a) => a.stepRunId === currentStepRunId);
   const showStepWorking =
     activeStepRunning &&
+    orchestratorPhase == null &&
     !hasLiveActivity &&
     !currentStepHasActivity &&
     answerPendingSince == null &&
@@ -675,6 +682,17 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     !awaitingReply &&
     !runBlocked &&
     !showStarting;
+  const orchestratorPhaseLabel =
+    orchestratorPhase === "reviewing"
+      ? "Reviewing the step output…"
+      : orchestratorPhase === "independent_check"
+        ? "Running an independent check…"
+        : null;
+  const showOrchestratorReview =
+    orchestratorPhaseLabel != null &&
+    workflowState.run?.status === "active" &&
+    workflowState.stepRun?.status === "active" &&
+    !runBlocked;
 
   // Escape interrupts the running step agent so the user can course-correct:
   // it aborts the agent's current turn and focuses the composer. The correction
@@ -1079,6 +1097,12 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
             {answerPendingSince != null && !runBlocked && (
               <div data-testid="answer-thinking">
                 <ThinkingRow label="Thinking…" />
+              </div>
+            )}
+
+            {showOrchestratorReview && (
+              <div data-testid="orchestrator-review">
+                <ThinkingRow label={orchestratorPhaseLabel!} />
               </div>
             )}
 

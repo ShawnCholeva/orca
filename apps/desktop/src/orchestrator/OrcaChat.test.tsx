@@ -341,6 +341,50 @@ describe("OrcaChat", () => {
     expect(screen.queryByTestId("step-starting")).toBeNull();
   });
 
+  it("shows an honest 'reviewing' status (not starting/working) during the judge window", async () => {
+    setupRunLoad();
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+        ordinal: 4, attempt: 1, status: "active", startedAt: now, finishedAt: null,
+        blockedReason: null, orchestratorPhase: "reviewing",
+      },
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const row = await screen.findByTestId("orchestrator-review");
+    expect(row).toHaveTextContent("Reviewing the step output…");
+    expect(screen.queryByTestId("step-starting")).toBeNull();
+    expect(screen.queryByTestId("step-working")).toBeNull();
+  });
+
+  it("shows 'Running an independent check…' during the refute phase", async () => {
+    setupRunLoad();
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+        ordinal: 4, attempt: 1, status: "active", startedAt: now, finishedAt: null,
+        blockedReason: null, orchestratorPhase: "independent_check",
+      },
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByTestId("orchestrator-review")).toHaveTextContent(
+      "Running an independent check…",
+    );
+  });
+
+  it("hides the orchestrator-review status when there is no phase (parked/idle)", async () => {
+    setupRunLoad();
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByTestId("step-starting")).toBeInTheDocument();
+    expect(screen.queryByTestId("orchestrator-review")).toBeNull();
+  });
+
   it("surfaces a blocked run with its reason and suppresses the working spinner", async () => {
     setupRunLoad();
     // The run halted at the splitter and was blocked with a reason.

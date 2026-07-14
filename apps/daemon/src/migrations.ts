@@ -72,6 +72,7 @@ export const migrationFiles = [
   "0057_template_catalog_version.sql",
   "0058_goal_documents.sql",
   "0059_goal_intent_rename.sql",
+  "0060_orchestrator_phase.sql",
 ] as const;
 
 export function runMigrations(

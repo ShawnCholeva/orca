@@ -27,6 +27,13 @@ interface DriftRunRow {
 
 export function reconcileWorkflowsOnBoot(db: Database, now: () => string): void {
   db.transaction(() => {
+    // orchestrator_phase is a live-only status for the judge+refute window. A
+    // crash mid-window would leave it set, so a stale "reviewing"/"independent
+    // check" thinking row would show over stopped work. Clear all on boot.
+    db.prepare(
+      "UPDATE workflow_step_runs SET orchestrator_phase = NULL WHERE orchestrator_phase IS NOT NULL"
+    ).run();
+
     const staleCalls = db
       .prepare(
         "SELECT id, goal_id, workflow_run_id, step_run_id FROM workflow_llm_calls WHERE status IN ('pending','running')"

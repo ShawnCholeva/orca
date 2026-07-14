@@ -31,6 +31,24 @@ describe("AgentActivity", () => {
     expect(screen.getByText("Found the double-charge bug.")).toBeTruthy();
   });
 
+  it("drops the summary's top divider when there are no steps above it (no floating divider)", () => {
+    const { container } = render(<AgentActivity activity={baseActivity({
+      status: "completed", finalSummary: "Approving with scoring.", stepName: undefined, steps: [],
+    })} />);
+    const summary = container.querySelector(".agent-activity-summary");
+    expect(summary).not.toBeNull();
+    expect(summary!.className).toContain("agent-activity-summary--flush");
+  });
+
+  it("keeps the summary divider when there are steps above it", () => {
+    const { container } = render(<AgentActivity activity={baseActivity({
+      status: "completed", finalSummary: "Done.",
+      steps: [{ id: "1", text: "Read verifier.ts", category: "reading", status: "done", createdAt: "t" }],
+    })} />);
+    const summary = container.querySelector(".agent-activity-summary");
+    expect(summary!.className).not.toContain("agent-activity-summary--flush");
+  });
+
   it("renders a cut-short step as interrupted (paused), not a check, when the activity finished while still active", () => {
     render(<AgentActivity activity={baseActivity({
       status: "completed", finalSummary: "Interrupted — send a correction to resume.",

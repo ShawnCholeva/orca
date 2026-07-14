@@ -156,4 +156,17 @@ describe("getWorkflowStepRunById", () => {
     const result = getWorkflowStepRunById(db, "sr1");
     expect(result?.stepResult).toEqual(scoredStepResult);
   });
+
+  it("round-trips the transient orchestrator_phase (null by default, set when present)", () => {
+    const db = setup();
+    seedGoal(db, "goal-1");
+    insertMinimalStepRun(db, "sr1");
+
+    expect(getWorkflowStepRunById(db, "sr1")?.orchestratorPhase ?? null).toBeNull();
+
+    db.prepare("UPDATE workflow_step_runs SET orchestrator_phase = 'independent_check' WHERE id = ?").run("sr1");
+    resetWorkflowStepProjectionPreparedStatements();
+
+    expect(getWorkflowStepRunById(db, "sr1")?.orchestratorPhase).toBe("independent_check");
+  });
 });

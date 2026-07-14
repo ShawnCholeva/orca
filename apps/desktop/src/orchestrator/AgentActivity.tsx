@@ -19,6 +19,10 @@ export function AgentActivity({
   const activeStep = [...activity.steps].reverse().find((s) => s.status === "active") ?? null;
   const doneSteps = activity.steps.filter((s) => s.status === "done");
   const showInitialPulse = !finished && activeStep === null && activity.steps.length === 0;
+  // The summary's top border is a divider from the steps thread above it. With
+  // no steps rendered (a tool-less turn), that divider would float with nothing
+  // above it — so drop it and sit the summary flush.
+  const hasStepsAbove = doneSteps.length > 0 || activeStep !== null || showInitialPulse;
 
   return (
     <div className="agent-activity" data-testid="agent-activity" data-status={activity.status}>
@@ -38,7 +42,9 @@ export function AgentActivity({
         ) : null}
       </div>
       {completed && activity.finalSummary ? (
-        <div className="agent-activity-summary">{activity.finalSummary}</div>
+        <div className={`agent-activity-summary${hasStepsAbove ? "" : " agent-activity-summary--flush"}`}>
+          {activity.finalSummary}
+        </div>
       ) : null}
     </div>
   );

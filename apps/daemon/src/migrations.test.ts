@@ -185,6 +185,7 @@ describe("runMigrations", () => {
       "0057_template_catalog_version.sql",
       "0058_goal_documents.sql",
       "0059_goal_intent_rename.sql",
+      "0060_orchestrator_phase.sql",
     ]);
   });
 
@@ -336,6 +337,7 @@ describe("runMigrations", () => {
       "0057_template_catalog_version.sql",
       "0058_goal_documents.sql",
       "0059_goal_intent_rename.sql",
+      "0060_orchestrator_phase.sql",
     ]);
 
     const goalCount = (
@@ -640,6 +642,7 @@ describe("session tables migration", () => {
       "0057_template_catalog_version.sql",
       "0058_goal_documents.sql",
       "0059_goal_intent_rename.sql",
+      "0060_orchestrator_phase.sql",
     ]);
 
     const tables = (
@@ -1177,6 +1180,7 @@ describe("migration 0010 workflows", () => {
       "0057_template_catalog_version.sql",
       "0058_goal_documents.sql",
       "0059_goal_intent_rename.sql",
+      "0060_orchestrator_phase.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1791,6 +1795,7 @@ describe("migration 0012 orchestration transport", () => {
       "0057_template_catalog_version.sql",
       "0058_goal_documents.sql",
       "0059_goal_intent_rename.sql",
+      "0060_orchestrator_phase.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

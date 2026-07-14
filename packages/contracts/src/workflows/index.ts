@@ -501,6 +501,13 @@ export const WorkflowStepResult = z
   .strict();
 export type WorkflowStepResult = z.infer<typeof WorkflowStepResult>;
 
+// A transient signal that the orchestrator is between the worker finishing and
+// the step parking: "reviewing" the worker's output (judge turn) or running an
+// "independent_check" (adversarial refute turn). Cleared (null) once the step
+// parks/completes. Surfaced only as a live thinking status, never persisted.
+export const OrchestratorStepPhase = z.enum(["reviewing", "independent_check"]);
+export type OrchestratorStepPhase = z.infer<typeof OrchestratorStepPhase>;
+
 export const WorkflowStepRun = z
   .object({
     id: Id,
@@ -517,6 +524,7 @@ export const WorkflowStepRun = z
     selectedProviderId: ModelProviderId.nullable().optional(),
     selectedModelId: z.string().min(1).max(80).nullable().optional(),
     operatorSelectedAt: z.string().datetime().nullable().optional(),
+    orchestratorPhase: OrchestratorStepPhase.nullable().optional(),
     stepResult: WorkflowStepResult.nullable(),
   })
   .strict();

@@ -1327,6 +1327,7 @@
 .agent-activity-pulse { flex: 0 0 14px; justify-content: center; gap: 2px; margin-top: 8px; }
 .agent-activity-pulse span { width: 3px; height: 3px; }
 .agent-activity-summary { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hairline); font-size: 13px; color: var(--text-2); line-height: 1.5; }
+.agent-activity-summary--flush { margin-top: 0; padding-top: 0; border-top: none; }
 .diff-add { color: #3fb950; }
 .diff-del { color: #f85149; }
 .agent-activity-diff-body { margin: 4px 0 0; overflow-x: auto; font-family: var(--mono, monospace); font-size: 12px; }

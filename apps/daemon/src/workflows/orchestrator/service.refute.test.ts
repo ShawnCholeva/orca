@@ -295,6 +295,39 @@ describe("OrchestratorService L5 refute gate", () => {
     expect(t?.telemetry?.outcome).toMatchObject({ status: "failed", failure_code: "refute_veto" });
   });
 
+  it("surfaces 'reviewing' then 'independent_check' during the window, then clears the phase", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    seedToolGate(db, "step-1", "high");
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+
+    const phases: (string | null)[] = [];
+    bus.subscribe((e) => {
+      if (e.type === "workflow.step.phase_changed") {
+        phases.push((e.payload as { phase: string | null }).phase);
+      }
+    });
+
+    const service = makeRefuteService(fakeRefuteAsk("upheld"));
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+    await flushDeferred();
+
+    // Honest, progressing status through the otherwise-silent judge+refute
+    // window, and always cleared afterward (never a stale thinking row).
+    expect(phases).toEqual(["reviewing", "independent_check", null]);
+    const row = db
+      .prepare("SELECT orchestrator_phase FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { orchestrator_phase: string | null };
+    expect(row.orchestrator_phase).toBeNull();
+  });
+
   it("high-risk upheld -> commits; RefuteFacet verdict upheld, no veto", async () => {
     const { db, bus, idFactory } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" });

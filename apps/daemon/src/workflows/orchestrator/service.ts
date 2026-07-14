@@ -7,6 +7,7 @@ import {
   validateStepOutput,
   type DomainEvent,
   type OrchestratorAction,
+  type OrchestratorStepPhase,
   type PendingQuestion as PendingQuestionT,
   type RefuteCompletionProposal,
   type RefuteFacet,
@@ -829,44 +830,101 @@ export class OrchestratorService {
     const adapterId = adapterIdForProvider(goal.orchestrator_provider);
     const modelId = goal.orchestrator_model;
 
-    let action: OrchestratorAction;
+    // Honest in-progress status for the otherwise-silent window between the
+    // worker finishing and the step parking: "reviewing" the output (judge
+    // turn), then an "independent_check" (refute turn, set inside
+    // applyOrchestratorAction). Always cleared in `finally` so it never sticks
+    // on a pause, completion, or error.
+    const phaseScope = { goalId: run.goalId, workflowRunId: run.id, stepRunId: stepRun.id };
+    this.setStepPhase(db, now, phaseScope, "reviewing", options);
     try {
-      action = await judgeAgentResponse({
-        mediator: this.orchestratorMediator as OrchestratorMediator,
-        schemaValidate: (output) => {
-          const v = validateStepOutput(stepTpl.outputSchema, output);
-          return v.ok ? { ok: true } : { ok: false, errors: v.errors };
-        },
-        goalId: run.goalId,
-        runId: run.id,
-        stepRunId: stepRun.id,
-        adapterId,
-        modelId,
-        responseText: payload.responseText,
-      });
-    } catch (err) {
-      // The orchestrator-LLM evaluation failed (e.g. a shadow timeout). Don't
-      // let the run silently park with no result: stash the agent's response so
-      // it can be replayed, and tell the user how to retry.
-      this.stashJudgeFailure(
+      let action: OrchestratorAction;
+      try {
+        action = await judgeAgentResponse({
+          mediator: this.orchestratorMediator as OrchestratorMediator,
+          schemaValidate: (output) => {
+            const v = validateStepOutput(stepTpl.outputSchema, output);
+            return v.ok ? { ok: true } : { ok: false, errors: v.errors };
+          },
+          goalId: run.goalId,
+          runId: run.id,
+          stepRunId: stepRun.id,
+          adapterId,
+          modelId,
+          responseText: payload.responseText,
+        });
+      } catch (err) {
+        // The orchestrator-LLM evaluation failed (e.g. a shadow timeout). Don't
+        // let the run silently park with no result: stash the agent's response
+        // so it can be replayed, and tell the user how to retry.
+        this.stashJudgeFailure(
+          db,
+          now,
+          { goalId: run.goalId, stepRunId: stepRun.id, responseText: payload.responseText, err },
+          options
+        );
+        return;
+      }
+
+      const ctx = { run, stepRun, stepTpl, template, goal };
+      await this.applyOrchestratorAction(
         db,
         now,
-        { goalId: run.goalId, stepRunId: stepRun.id, responseText: payload.responseText, err },
+        ctx,
+        payload.sessionId,
+        payload.responseText,
+        action,
         options
       );
-      return;
+    } finally {
+      this.clearStepPhase(db, now, phaseScope, options);
     }
+  }
 
-    const ctx = { run, stepRun, stepTpl, template, goal };
-    await this.applyOrchestratorAction(
-      db,
-      now,
-      ctx,
-      payload.sessionId,
-      payload.responseText,
-      action,
-      options
+  /**
+   * Set (or clear) the transient orchestrator phase on a step run and notify
+   * clients. The phase is a live-only status ("reviewing" / "independent_check")
+   * surfaced as a thinking row during the judge+refute window; it is never a
+   * durable record and is always cleared once the step parks/completes.
+   */
+  private setStepPhase(
+    db: Database.Database,
+    now: () => string,
+    scope: { goalId: string; workflowRunId: string; stepRunId: string },
+    phase: OrchestratorStepPhase,
+    options: RequestNextDecisionOptions
+  ): void {
+    this.writeStepPhase(db, now, scope, phase, options);
+  }
+
+  private clearStepPhase(
+    db: Database.Database,
+    now: () => string,
+    scope: { goalId: string; workflowRunId: string; stepRunId: string },
+    options: RequestNextDecisionOptions
+  ): void {
+    this.writeStepPhase(db, now, scope, null, options);
+  }
+
+  private writeStepPhase(
+    db: Database.Database,
+    now: () => string,
+    scope: { goalId: string; workflowRunId: string; stepRunId: string },
+    phase: OrchestratorStepPhase | null,
+    options: RequestNextDecisionOptions
+  ): void {
+    db.prepare("UPDATE workflow_step_runs SET orchestrator_phase = ? WHERE id = ?").run(
+      phase,
+      scope.stepRunId
     );
+    const event = appendWorkflowEvent(
+      db,
+      "workflow.step.phase_changed",
+      { goalId: scope.goalId, workflowRunId: scope.workflowRunId, stepRunId: scope.stepRunId, phase },
+      now(),
+      options.idFactory
+    );
+    publishStaged(options.bus, [event]);
   }
 
   /**
@@ -1271,6 +1329,13 @@ export class OrchestratorService {
           // never a second one — and a refuted verdict's failure_code composes
           // with (never overrides) an evidence veto.
           if (!vetoed) {
+            this.setStepPhase(
+              db,
+              now,
+              { goalId: ctx.run.goalId, workflowRunId: ctx.run.id, stepRunId: ctx.stepRun.id },
+              "independent_check",
+              options
+            );
             refute = await this.maybeRefute(db, ctx, block, action.scoring, evidence);
           }
           // A refuted completion is a first-class FAILURE (spec §5), so coerce the
@@ -1351,6 +1416,13 @@ export class OrchestratorService {
           // No deterministic gate for this step — the refute is the only
           // independent check (p.62). Computed once here; this step type has
           // no evidence-gate emit, so nothing has recorded a transition for it yet.
+          this.setStepPhase(
+            db,
+            now,
+            { goalId: ctx.run.goalId, workflowRunId: ctx.run.id, stepRunId: ctx.stepRun.id },
+            "independent_check",
+            options
+          );
           refute = await this.maybeRefute(db, ctx, block, action.scoring, null);
         }
         const refuteFacet = refute.ran ? refute.facet : undefined;

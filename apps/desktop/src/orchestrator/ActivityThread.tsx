@@ -25,6 +25,11 @@ export function isAgentActivityCard(activity: Activity): boolean {
     activity.sourceKind !== "step_confirmation_pending" &&
     activity.sourceKind !== "provider_recovery_pending" &&
     activity.sourceKind !== "gate_decision_pending" &&
+    // The orchestrator's own raw judge-turn reasoning is persisted as an
+    // auditable trajectory, but it leaks first-person voice and internal
+    // mechanics (and pre-empts the step-complete card's "complete" claim), so
+    // it is never surfaced as a chat card — mirrors the reasoning_note rule.
+    activity.sourceKind !== "orchestrator_reasoning" &&
     (activity.steps.length > 0 || isMeaningfulCompleted(activity))
   );
 }

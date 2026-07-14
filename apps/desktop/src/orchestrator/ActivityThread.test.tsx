@@ -363,6 +363,19 @@ describe("isTimelineCard", () => {
       isTimelineCard(mk({ status: "completed", finalSummary: "   ", sourceKind: "turn_completed" })),
     ).toBe(false);
   });
+
+  it("excludes the orchestrator's own raw reasoning from the chat timeline (persisted for audit, not shown)", () => {
+    expect(
+      isTimelineCard(
+        mk({
+          status: "completed",
+          finalSummary:
+            "The assessment step is complete... Approving with scoring.",
+          sourceKind: "orchestrator_reasoning",
+        }),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("ActivityCard", () => {

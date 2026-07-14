@@ -23,6 +23,7 @@ const WORKFLOW_EVENT_TYPE_VALUES = [
   "workflow.step.blocked",
   "workflow.step.skipped",
   "workflow.step.failed",
+  "workflow.step.phase_changed",
   "workflow.artifact.created",
   "workflow.guardrail.evaluated",
   "workflow.operator.selected",
