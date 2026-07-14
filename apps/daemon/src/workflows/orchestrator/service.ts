@@ -832,9 +832,9 @@ export class OrchestratorService {
 
     // Honest in-progress status for the otherwise-silent window between the
     // worker finishing and the step parking: "reviewing" the output (judge
-    // turn), then an "independent_check" (refute turn, set inside
-    // applyOrchestratorAction). Always cleared in `finally` so it never sticks
-    // on a pause, completion, or error.
+    // turn), then an "independent_check" (set inside maybeRefute, only when the
+    // refute actually runs — so steps the gate skips never flash it). Always
+    // cleared in `finally` so it never sticks on a pause, completion, or error.
     const phaseScope = { goalId: run.goalId, workflowRunId: run.id, stepRunId: stepRun.id };
     this.setStepPhase(db, now, phaseScope, "reviewing", options);
     try {
@@ -1329,14 +1329,7 @@ export class OrchestratorService {
           // never a second one — and a refuted verdict's failure_code composes
           // with (never overrides) an evidence veto.
           if (!vetoed) {
-            this.setStepPhase(
-              db,
-              now,
-              { goalId: ctx.run.goalId, workflowRunId: ctx.run.id, stepRunId: ctx.stepRun.id },
-              "independent_check",
-              options
-            );
-            refute = await this.maybeRefute(db, ctx, block, action.scoring, evidence);
+            refute = await this.maybeRefute(db, now, ctx, block, action.scoring, evidence, options);
           }
           // A refuted completion is a first-class FAILURE (spec §5), so coerce the
           // transition status to "failed" — otherwise the sensor-derived
@@ -1416,14 +1409,7 @@ export class OrchestratorService {
           // No deterministic gate for this step — the refute is the only
           // independent check (p.62). Computed once here; this step type has
           // no evidence-gate emit, so nothing has recorded a transition for it yet.
-          this.setStepPhase(
-            db,
-            now,
-            { goalId: ctx.run.goalId, workflowRunId: ctx.run.id, stepRunId: ctx.stepRun.id },
-            "independent_check",
-            options
-          );
-          refute = await this.maybeRefute(db, ctx, block, action.scoring, null);
+          refute = await this.maybeRefute(db, now, ctx, block, action.scoring, null, options);
         }
         const refuteFacet = refute.ran ? refute.facet : undefined;
 
@@ -1581,10 +1567,12 @@ export class OrchestratorService {
    */
   private async maybeRefute(
     db: Database.Database,
+    now: () => string,
     ctx: { run: WorkflowRunT; stepRun: StepRunRow; stepTpl: WorkflowStepTemplate },
     block: unknown,
     scoring: unknown,
-    evidence: Awaited<ReturnType<typeof runSensors>> | null
+    evidence: Awaited<ReturnType<typeof runSensors>> | null,
+    options: RequestNextDecisionOptions
   ): Promise<
     | { ran: false }
     | { ran: true; outcome: RefuteOutcome; facet: RefuteFacet; proposal: RefuteCompletionProposal | null }
@@ -1629,6 +1617,16 @@ export class OrchestratorService {
     // gates have already run; the refute is additive assurance, not a hard gate.
     if (!parsedRequest.success) return { ran: false };
     const request = parsedRequest.data;
+    // Only now — past every skip guard — is the refute actually about to run, so
+    // this is where the honest "independent_check" status belongs. Setting it at
+    // the call site would flash the status on steps the gate skips.
+    this.setStepPhase(
+      db,
+      now,
+      { goalId: ctx.run.goalId, workflowRunId: ctx.run.id, stepRunId: ctx.stepRun.id },
+      "independent_check",
+      options
+    );
     const proposal = await refuteStepCompletion(this.shadowAsk, {
       refuteSessionKey: `${goal.id}::refute`,
       adapterId,

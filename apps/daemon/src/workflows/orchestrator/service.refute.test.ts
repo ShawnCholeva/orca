@@ -436,6 +436,47 @@ describe("OrchestratorService L5 refute gate", () => {
     expect(t?.refute).toBeNull();
   });
 
+  it("does not surface 'independent_check' when the refute gate skips the refute", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const guardrailsJson = JSON.stringify([
+      {
+        id: "validation_required",
+        kind: "validation_rule",
+        label: "x",
+        configJson: { appliesToSteps: ["implement"], required: ["typecheck"] },
+      },
+    ]);
+    setupAgentStepRun(db, { guardrailsJson });
+    seedWorkspaceWithTypecheck(db, 0); // sensors pass, no gaps -> gate skips the refute
+    seedAgentSession(db);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+
+    const phases: (string | null)[] = [];
+    bus.subscribe((e) => {
+      if (e.type === "workflow.step.phase_changed") {
+        phases.push((e.payload as { phase: string | null }).phase);
+      }
+    });
+
+    const ask = fakeRefuteAsk("upheld");
+    const service = makeRefuteService(ask);
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // The refute never ran, so the status must not claim an independent check —
+    // only "reviewing" (the judge), then cleared.
+    expect(ask.calls).toHaveLength(0);
+    expect(phases).toEqual(["reviewing", null]);
+    const row = db
+      .prepare("SELECT orchestrator_phase FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { orchestrator_phase: string | null };
+    expect(row.orchestrator_phase).toBeNull();
+  });
+
   it("exec step whose sensors PASS reaches the refute: refuted rides the SINGLE gate emit as {failed, refute_veto}", async () => {
     const { db, bus, idFactory } = setupHarness();
     const guardrailsJson = JSON.stringify([
