@@ -22,14 +22,14 @@ export type PendingDocument = {
 type RoughState = {
   phase: "rough";
   title: string;
-  description: string;
+  intent: string;
   error?: string;
 };
 
 type CoordinateState = {
   phase: "coordinate";
   title: string;
-  description: string;
+  intent: string;
   pendingWorkspaces: PendingWorkspace[];
   pendingDocuments: PendingDocument[];
   orchestratorModel: OrchestratorModelChoice | null;
@@ -41,7 +41,7 @@ type CoordinateState = {
 type SubmittingState = {
   phase: "submitting";
   title: string;
-  description: string;
+  intent: string;
   pendingWorkspaces: PendingWorkspace[];
   pendingDocuments: PendingDocument[];
   orchestratorModel: OrchestratorModelChoice | null;
@@ -58,7 +58,7 @@ export type WorkflowFailedState = {
   /** Set if startWorkflowRun succeeded before the failure. Skip it on retry. */
   workflowRunId?: string;
   title: string;
-  description: string;
+  intent: string;
   pendingWorkspaces: PendingWorkspace[];
   pendingDocuments: PendingDocument[];
   orchestratorModel: OrchestratorModelChoice | null;
@@ -81,12 +81,12 @@ export type FlowState =
 export const initialState: FlowState = {
   phase: "rough",
   title: "",
-  description: "",
+  intent: "",
 };
 
 export type FlowAction =
   | { type: "setTitle"; title: string }
-  | { type: "setDescription"; description: string }
+  | { type: "setIntent"; intent: string }
   | { type: "proceedToCoordinate" }
   | { type: "backToDescribe" }
   | { type: "setOrchestratorModel"; orchestratorModel: OrchestratorModelChoice | null }
@@ -112,9 +112,9 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
       }
       return state;
 
-    case "setDescription":
+    case "setIntent":
       if (state.phase === "rough") {
-        return { ...state, description: action.description };
+        return { ...state, intent: action.intent };
       }
       return state;
 
@@ -123,7 +123,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
         return {
           phase: "coordinate",
           title: state.title,
-          description: state.description,
+          intent: state.intent,
           pendingWorkspaces: [],
           pendingDocuments: [],
           orchestratorModel: null,
@@ -137,7 +137,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
         return {
           phase: "rough",
           title: state.title,
-          description: state.description,
+          intent: state.intent,
         };
       }
       return state;
@@ -227,7 +227,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
         return {
           phase: "submitting",
           title: state.title,
-          description: state.description,
+          intent: state.intent,
           pendingWorkspaces: state.pendingWorkspaces,
           pendingDocuments: state.pendingDocuments,
           orchestratorModel: state.orchestratorModel,
@@ -247,7 +247,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
         return {
           phase: "coordinate",
           title: state.title,
-          description: state.description,
+          intent: state.intent,
           pendingWorkspaces: state.pendingWorkspaces,
           pendingDocuments: state.pendingDocuments,
           orchestratorModel: state.orchestratorModel,
@@ -264,7 +264,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           goalId: action.goalId,
           workflowRunId: action.workflowRunId,
           title: state.title,
-          description: state.description,
+          intent: state.intent,
           pendingWorkspaces: state.pendingWorkspaces,
           pendingDocuments: state.pendingDocuments,
           orchestratorModel: state.orchestratorModel,
@@ -279,7 +279,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
         return {
           phase: "submitting",
           title: state.title,
-          description: state.description,
+          intent: state.intent,
           pendingWorkspaces: state.pendingWorkspaces,
           pendingDocuments: state.pendingDocuments,
           orchestratorModel: state.orchestratorModel,

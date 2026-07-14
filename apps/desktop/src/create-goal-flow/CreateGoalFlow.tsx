@@ -70,7 +70,7 @@ export function CreateGoalFlow({ onClose, onDone, connectionStatus: _connectionS
 
     const {
       title,
-      description,
+      intent,
       pendingWorkspaces,
       pendingDocuments,
       orchestratorModel,
@@ -89,7 +89,7 @@ export function CreateGoalFlow({ onClose, onDone, connectionStatus: _connectionS
       try {
         const result = await createGoalAndStartWorkflow({
           title,
-          description,
+          intent,
           workspaces: pendingWorkspaces.map((ws) => ({
             inputPath: ws.inputPath,
             name: ws.name,

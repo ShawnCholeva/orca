@@ -83,7 +83,7 @@ const now = "2026-01-01T00:00:00.000Z";
 const goal: Goal = {
   id: "goal-1",
   title: "Ship Engineering workflow chat",
-  description: "Goal description",
+  intent: "Goal description",
   status: "active",
   autonomyLevel: 1,
   workerPermissionMode: "ask",

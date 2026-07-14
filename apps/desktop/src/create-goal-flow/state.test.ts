@@ -27,24 +27,30 @@ function dispatch(state: FlowState, action: FlowAction): FlowState {
 describe("reducer — rough phase", () => {
   it("setTitle updates title and clears error", () => {
     const s = dispatch(
-      { phase: "rough", title: "", description: "", error: "oops" },
+      { phase: "rough", title: "", intent: "", error: "oops" },
       { type: "setTitle", title: "New Title" },
     );
     expect(s).toMatchObject({ phase: "rough", title: "New Title", error: undefined });
   });
 
-  it("setDescription updates description", () => {
-    const s = dispatch(initialState, { type: "setDescription", description: "desc" });
-    expect(s).toMatchObject({ phase: "rough", description: "desc" });
+  it("setIntent updates intent", () => {
+    const s = dispatch(initialState, { type: "setIntent", intent: "desc" });
+    expect(s).toMatchObject({ phase: "rough", intent: "desc" });
+  });
+
+  it("setIntent updates intent in the rough phase", () => {
+    const s = reducer(initialState, { type: "setIntent", intent: "Ship it" });
+    expect(s.phase).toBe("rough");
+    expect((s as Extract<FlowState, { phase: "rough" }>).intent).toBe("Ship it");
   });
 
   it("proceedToCoordinate transitions rough → coordinate with empty workspaces", () => {
-    const rough: FlowState = { phase: "rough", title: "My Goal", description: "some desc" };
+    const rough: FlowState = { phase: "rough", title: "My Goal", intent: "some desc" };
     const s = dispatch(rough, { type: "proceedToCoordinate" });
     expect(s).toEqual({
       phase: "coordinate",
       title: "My Goal",
-      description: "some desc",
+      intent: "some desc",
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel: null,
@@ -56,7 +62,7 @@ describe("reducer — rough phase", () => {
     const coord: FlowState = {
       phase: "coordinate",
       title: "T",
-      description: "",
+      intent: "",
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel: null,
@@ -70,16 +76,16 @@ describe("reducer — coordinate phase", () => {
   const coordinate: FlowState = {
     phase: "coordinate",
     title: "T",
-    description: "D",
+    intent: "D",
     pendingWorkspaces: [],
     pendingDocuments: [],
     orchestratorModel: null,
     workflowTemplateId: null,
   };
 
-  it("backToDescribe returns to rough preserving title/description", () => {
+  it("backToDescribe returns to rough preserving title/intent", () => {
     const s = dispatch(coordinate, { type: "backToDescribe" });
-    expect(s).toMatchObject({ phase: "rough", title: "T", description: "D" });
+    expect(s).toMatchObject({ phase: "rough", title: "T", intent: "D" });
     expect("pendingWorkspaces" in s).toBe(false);
   });
 
@@ -212,7 +218,7 @@ describe("reducer — submitting phase", () => {
   const submitting: FlowState = {
     phase: "submitting",
     title: "T",
-    description: "D",
+    intent: "D",
     orchestratorModel,
     workflowTemplateId: "wf-1",
     pendingWorkspaces: [],
@@ -240,7 +246,7 @@ describe("reducer — workflowFailed phase", () => {
   const submittingNoRun: FlowState = {
     phase: "submitting",
     title: "T",
-    description: "D",
+    intent: "D",
     orchestratorModel,
     workflowTemplateId: "wf-1",
     pendingWorkspaces: [],
@@ -283,7 +289,7 @@ describe("reducer — workflowFailed phase", () => {
       phase: "workflowFailed",
       goalId: "g-1",
       title: "T",
-      description: "D",
+      intent: "D",
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel,
@@ -307,7 +313,7 @@ describe("reducer — workflowFailed phase", () => {
       goalId: "g-1",
       workflowRunId: "r-1",
       title: "T",
-      description: "D",
+      intent: "D",
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel,
@@ -337,7 +343,7 @@ describe("reducer — workflowFailed phase", () => {
     const coord: FlowState = {
       phase: "coordinate",
       title: "T",
-      description: "D",
+      intent: "D",
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel: null,
@@ -361,7 +367,7 @@ describe("reducer — cross-phase no-ops", () => {
     const coord: FlowState = {
       phase: "coordinate",
       title: "T",
-      description: "D",
+      intent: "D",
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel: null,

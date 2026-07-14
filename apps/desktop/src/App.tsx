@@ -506,18 +506,18 @@ function GoalCard({
   const MAX_DESC = 140;
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(goal.title);
-  const [editDescription, setEditDescription] = useState(goal.description);
+  const [editIntent, setEditIntent] = useState(goal.intent);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const truncated =
-    goal.description.length > MAX_DESC
-      ? goal.description.slice(0, MAX_DESC) + "…"
-      : goal.description;
+    goal.intent.length > MAX_DESC
+      ? goal.intent.slice(0, MAX_DESC) + "…"
+      : goal.intent;
 
   function startEdit() {
     setEditTitle(goal.title);
-    setEditDescription(goal.description);
+    setEditIntent(goal.intent);
     setError(null);
     setEditing(true);
   }
@@ -527,10 +527,10 @@ function GoalCard({
     setBusy(true);
     setError(null);
     try {
-      const patch: { title?: string; description?: string } = {};
+      const patch: { title?: string; intent?: string } = {};
       if (editTitle !== goal.title) patch.title = editTitle;
-      if (editDescription !== goal.description) patch.description = editDescription;
-      if (patch.title === undefined && patch.description === undefined) {
+      if (editIntent !== goal.intent) patch.intent = editIntent;
+      if (patch.title === undefined && patch.intent === undefined) {
         setEditing(false);
         return;
       }
@@ -575,11 +575,11 @@ function GoalCard({
             required
             disabled={busy}
           />
-          <label htmlFor={`gc-desc-${goal.id}`}>Description</label>
+          <label htmlFor={`gc-intent-${goal.id}`}>Intent</label>
           <textarea
-            id={`gc-desc-${goal.id}`}
-            value={editDescription}
-            onChange={(e) => setEditDescription(e.target.value)}
+            id={`gc-intent-${goal.id}`}
+            value={editIntent}
+            onChange={(e) => setEditIntent(e.target.value)}
             maxLength={4000}
             rows={3}
             disabled={busy}

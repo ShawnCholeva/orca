@@ -14,7 +14,7 @@ const now = "2026-01-01T00:00:00.000Z";
 const goal = {
   id: "goal-1",
   title: "Ship guided goal flow",
-  description: "Guided goal implementation",
+  intent: "Guided goal implementation",
   status: "active" as const,
   autonomyLevel: 1,
   workerPermissionMode: "ask" as const,

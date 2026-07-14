@@ -13,7 +13,7 @@ const now = "2026-01-01T00:00:00.000Z";
 const draft = GuidedRefinementOutput.parse({
   skillId: "guided-goal-refinement",
   title: "Ship guided goal flow",
-  description: "Refine and attach workspace",
+  intent: "Refine and attach workspace",
   successCriteria: ["detail view shows refinement"],
   constraints: ["deterministic only"],
   assumptions: ["local daemon available"],
@@ -22,7 +22,7 @@ const draft = GuidedRefinementOutput.parse({
 const goal = {
   id: "goal-1",
   title: "Ship guided goal flow",
-  description: "Refine and attach workspace",
+  intent: "Refine and attach workspace",
   status: "active" as const,
   autonomyLevel: 1,
   createdAt: now,
@@ -411,7 +411,7 @@ describe("desktop api client", () => {
 
     const response = await api.createGoal({
       title: "Ship guided goal flow",
-      description: "Refine and attach workspace",
+      intent: "Refine and attach workspace",
       refined: draft,
       workspaces: [{ inputPath: "/tmp/workspace", name: "workspace" }],
     });
@@ -422,7 +422,7 @@ describe("desktop api client", () => {
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({
       title: "Ship guided goal flow",
-      description: "Refine and attach workspace",
+      intent: "Refine and attach workspace",
       refined: draft,
       workspaces: [{ inputPath: "/tmp/workspace", name: "workspace" }],
     });
@@ -433,7 +433,7 @@ describe("desktop api client", () => {
 
     await api.createGoal({
       title: "Workflow goal",
-      description: "Has orchestrator model",
+      intent: "Has orchestrator model",
       orchestratorModel: {
         providerId: "orca/openai",
         modelId: "gpt-5",
@@ -443,7 +443,7 @@ describe("desktop api client", () => {
     const [, init] = fetchMock.mock.calls[0]!;
     expect(JSON.parse(String(init?.body))).toEqual({
       title: "Workflow goal",
-      description: "Has orchestrator model",
+      intent: "Has orchestrator model",
       orchestratorModel: {
         providerId: "orca/openai",
         modelId: "gpt-5",
@@ -478,7 +478,7 @@ describe("desktop api client", () => {
   it("refineGoal posts payload and returns draft", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { draft }));
 
-    const response = await api.refineGoal({ title: "Ship guided goal flow", description: "desc" });
+    const response = await api.refineGoal({ title: "Ship guided goal flow", intent: "desc" });
 
     expect(response.draft.skillId).toBe("guided-goal-refinement");
     const [url, init] = fetchMock.mock.calls[0]!;
@@ -486,7 +486,7 @@ describe("desktop api client", () => {
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({
       title: "Ship guided goal flow",
-      description: "desc",
+      intent: "desc",
     });
   });
 
@@ -583,7 +583,7 @@ describe("desktop api client", () => {
       }),
     );
 
-    await expect(api.refineGoal({ title: "x", description: "" })).rejects.toMatchObject({
+    await expect(api.refineGoal({ title: "x", intent: "" })).rejects.toMatchObject({
       name: "ApiError",
       message: "Title is required",
       code: "invalid_input",

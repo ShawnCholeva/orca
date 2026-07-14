@@ -25,7 +25,7 @@ function coordinateState(): Extract<FlowState, { phase: "coordinate" }> {
   return {
     phase: "coordinate",
     title: "Goal",
-    description: "",
+    intent: "",
     pendingWorkspaces: [],
     pendingDocuments: [],
     orchestratorModel: null,

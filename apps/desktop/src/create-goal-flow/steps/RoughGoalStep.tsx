@@ -7,7 +7,7 @@ type Props = {
 };
 
 export function RoughGoalStep({ state, dispatch }: Props) {
-  const canProceed = state.title.trim().length > 0;
+  const canProceed = state.title.trim().length > 0 && state.intent.trim().length > 0;
 
   return (
     <div className="flow-step">
@@ -26,13 +26,14 @@ export function RoughGoalStep({ state, dispatch }: Props) {
       </div>
 
       <div className="form-field">
-        <label htmlFor="rough-description">Description</label>
+        <label htmlFor="rough-intent">Intent</label>
         <textarea
-          id="rough-description"
-          value={state.description}
-          onChange={(e) => dispatch({ type: "setDescription", description: e.target.value })}
+          id="rough-intent"
+          value={state.intent}
+          onChange={(e) => dispatch({ type: "setIntent", intent: e.target.value })}
           maxLength={4000}
-          placeholder={"Optionally include sections like:\nGoals:\n  - ...\nConstraints:\n  - ...\nAssumptions:\n  - ..."}
+          required
+          placeholder={"What do you want to achieve and why? Describe the outcome, not the steps.\n\nOptionally include sections like:\nGoals:\n  - ...\nConstraints:\n  - ...\nAssumptions:\n  - ..."}
           rows={7}
         />
       </div>

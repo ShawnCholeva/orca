@@ -309,8 +309,8 @@ export function GoalDetailView({ goalId, onBack, refreshKey }: Props) {
           <span className={`goal-status goal-status--${goal.status}`}>{goal.status}</span>
         </header>
 
-        {goal.description && (
-          <p className="goal-detail-description">{goal.description}</p>
+        {goal.intent && (
+          <p className="goal-detail-description">{goal.intent}</p>
         )}
 
         <ConflictsBanner
