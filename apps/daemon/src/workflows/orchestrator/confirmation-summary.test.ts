@@ -217,4 +217,36 @@ describe("buildConfirmationSummary evidence bundle", () => {
     ]);
     expect(out.evidence?.cantVerify).toEqual(["no e2e coverage for order-fill"]);
   });
+
+  it("grounding check uses its label; an observe-mode failure is advisory (warn), not a hard failure", () => {
+    const facet = EvidenceFacet.parse({
+      sensorsRun: [],
+      verdict: "passed",
+      oracleAdequacy: { sufficient: false, gaps: [] },
+      grounding: {
+        checks: [
+          { rule: "paths_exist", field: "files_in_scope", mode: "enforce", result: "passed", detail: "", label: "Referenced files exist" },
+          { rule: "covers_prior", field: "task_plan[].files", mode: "observe", result: "failed", detail: "does not cover prior values: src/b.ts", label: "Plan covers researched files" },
+        ],
+        verdict: "passed",
+      },
+    });
+    const out = buildConfirmationSummary(schema2, { summary: "x" }, null, null, null, null, facet);
+    expect(out.evidence?.checks).toEqual([
+      { name: "Referenced files exist", status: "passed", kind: "grounding", detail: null },
+      { name: "Plan covers researched files", status: "warn", kind: "grounding", detail: "does not cover prior values: src/b.ts" },
+    ]);
+  });
+
+  it("grounding check with no label uses a humanized rule-based default (never the raw field)", () => {
+    const facet = EvidenceFacet.parse({
+      sensorsRun: [],
+      verdict: "passed",
+      oracleAdequacy: { sufficient: false, gaps: [] },
+      grounding: { checks: [{ rule: "member_of", field: "chosen_approach", mode: "enforce", result: "passed", detail: "" }], verdict: "passed" },
+    });
+    const out = buildConfirmationSummary(schema2, { summary: "x" }, null, null, null, null, facet);
+    expect(out.evidence?.checks[0]!.name).not.toBe("chosen_approach");
+    expect(out.evidence?.checks[0]!.kind).toBe("grounding");
+  });
 });

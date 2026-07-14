@@ -107,6 +107,18 @@ function evaluateOne(
   probe: WorkspaceProbe | null,
   readPriorOutput: (stepTemplateId: string) => Record<string, unknown> | null
 ): { result: CheckResult["result"]; detail: string } {
+  // Not-applicable clause: skip the check when a prior step's field equals a
+  // value (e.g. a reference-existence check on a greenfield build, where the
+  // files are planned rather than already present).
+  if (check.skipWhen) {
+    const prior = readPriorOutput(check.skipWhen.stepId);
+    if (prior) {
+      const { values } = resolveSelector(prior, check.skipWhen.field);
+      if (values.some((v) => normalize(v) === normalize(check.skipWhen!.equals))) {
+        return { result: "skipped", detail: check.skipDetail ?? "not applicable" };
+      }
+    }
+  }
   switch (check.rule) {
     case "paths_exist": {
       const { present, values } = resolveSelector(output, check.field);
@@ -177,6 +189,24 @@ function evaluateOne(
         ? { result: "failed", detail: bounded(`${check.field} values not found in prior outputs: ${unmatched.map(String).join(", ")}`) }
         : { result: "passed", detail: "" };
     }
+    case "covers_prior": {
+      const value = resolveSelector(output, check.field);
+      if (!value.present) return { result: "skipped", detail: `${check.field} not present in output` };
+      const current = new Set(value.values.map(normalize));
+      const priorValues = new Set<string>();
+      let anyPrior = false;
+      for (const p of check.prior) {
+        const prior = readPriorOutput(p.stepId);
+        if (prior === null) continue;
+        anyPrior = true;
+        for (const v of resolveSelector(prior, p.field).values) priorValues.add(normalize(v));
+      }
+      if (!anyPrior) return { result: "skipped", detail: "prior step output unavailable" };
+      const missing = [...priorValues].filter((v) => !current.has(v));
+      return missing.length
+        ? { result: "failed", detail: bounded(`${check.field} does not cover prior values: ${missing.join(", ")}`) }
+        : { result: "passed", detail: "" };
+    }
   }
 }
 
@@ -193,7 +223,14 @@ export function evaluateGrounding(opts: {
 }): Grounding {
   const checks: CheckResult[] = opts.checks.map((check) => {
     const { result, detail } = evaluateOne(check, opts.output, opts.probe, opts.readPriorOutput);
-    return { rule: check.rule, field: check.rule === "implies" ? check.when.field : check.field, mode: check.mode, result, detail };
+    return {
+      rule: check.rule,
+      field: check.rule === "implies" ? check.when.field : check.field,
+      mode: check.mode,
+      result,
+      detail,
+      ...(check.label ? { label: check.label } : {}),
+    };
   });
   const enforced = checks.filter((c) => c.mode === "enforce");
   const verdict: Grounding["verdict"] = enforced.some((c) => c.result === "failed")

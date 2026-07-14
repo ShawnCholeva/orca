@@ -129,6 +129,73 @@ describe("evaluateGrounding — subset_of_prior", () => {
   });
 });
 
+describe("evaluateGrounding — covers_prior", () => {
+  const check: GroundingCheck[] = [{
+    rule: "covers_prior", field: "task_plan[].files",
+    prior: [{ stepId: "research", field: "files_in_scope" }], mode: "observe",
+  }];
+  const priorRes = (id: string) => (id === "research" ? { files_in_scope: ["src/a.ts", "src/b.ts"] } : null);
+
+  it("passes when the current field covers every prior value (superset)", () => {
+    const g = evaluateGrounding({
+      checks: check,
+      output: { task_plan: [{ files: ["src/a.ts"] }, { files: ["src/b.ts", "src/c.ts"] }] },
+      readPriorOutput: priorRes, probe: probe([]),
+    });
+    expect(g.checks[0]!.result).toBe("passed");
+  });
+
+  it("fails and names prior values missing from the current field", () => {
+    const g = evaluateGrounding({
+      checks: check,
+      output: { task_plan: [{ files: ["src/a.ts"] }] },
+      readPriorOutput: priorRes, probe: probe([]),
+    });
+    expect(g.checks[0]!.result).toBe("failed");
+    expect(g.checks[0]!.detail).toContain("src/b.ts");
+  });
+
+  it("skips when the current field is absent or no prior output is available", () => {
+    expect(evaluateGrounding({ checks: check, output: {}, readPriorOutput: priorRes, probe: probe([]) }).checks[0]!.result).toBe("skipped");
+    expect(evaluateGrounding({ checks: check, output: { task_plan: [{ files: ["x"] }] }, readPriorOutput: () => null, probe: probe([]) }).checks[0]!.result).toBe("skipped");
+  });
+});
+
+describe("evaluateGrounding — skipWhen", () => {
+  const check: GroundingCheck[] = [{
+    rule: "paths_exist", field: "files_in_scope", mode: "enforce",
+    skipWhen: { stepId: "triage", field: "codebase_state", equals: "greenfield" },
+    skipDetail: "greenfield — files are planned, not yet created",
+  }];
+
+  it("skips (not fails) when the prior field equals the skip value, even if paths do not exist", () => {
+    const g = evaluateGrounding({
+      checks: check,
+      output: { files_in_scope: ["src/new.ts"] }, // does not exist
+      readPriorOutput: (id) => (id === "triage" ? { codebase_state: "greenfield" } : null),
+      probe: probe([]),
+    });
+    expect(g.checks[0]!.result).toBe("skipped");
+    expect(g.checks[0]!.detail).toContain("greenfield");
+  });
+
+  it("still enforces when the prior field does not match the skip value", () => {
+    const g = evaluateGrounding({
+      checks: check,
+      output: { files_in_scope: ["src/new.ts"] },
+      readPriorOutput: (id) => (id === "triage" ? { codebase_state: "existing_understood" } : null),
+      probe: probe(["src/a.ts"]),
+    });
+    expect(g.checks[0]!.result).toBe("failed");
+  });
+
+  it("carries the check's label onto the result", () => {
+    const labeled: GroundingCheck[] = [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce", label: "Referenced files exist" }];
+    const g = run(labeled, { files_in_scope: ["src/a.ts"] }, probe(["src/a.ts"]));
+    expect(g.checks[0]!.label).toBe("Referenced files exist");
+  });
+});
+
 describe("evaluateGrounding — verdict semantics", () => {
   it("excludes observe-mode failures from the verdict", () => {
     const g = run(

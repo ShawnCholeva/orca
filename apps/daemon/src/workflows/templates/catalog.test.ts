@@ -199,8 +199,8 @@ describe("Adaptive Delivery v9 completion gates", () => {
   const grounding = (stepId: string) =>
     (def.steps.find((s) => s.id === stepId)!.grounding ?? []) as NonNullable<WorkflowStepTemplate["grounding"]>;
 
-  it("is version 10 and runs the sensor ladder for execution AND validate_build", () => {
-    expect(def.version).toBe(10);
+  it("is version 11 and runs the sensor ladder for execution AND validate_build", () => {
+    expect(def.version).toBe(11);
     const rule = def.guardrails.find((g) => g.kind === "validation_rule")!;
     expect((rule.configJson as { appliesToSteps: string[] }).appliesToSteps.sort())
       .toEqual(["execution", "validate_build"]);
@@ -218,7 +218,11 @@ describe("Adaptive Delivery v9 completion gates", () => {
     expect(grounding("triage").some((c) => c.rule === "paths_exist")).toBe(true);
     expect(grounding("triage").filter((c) => c.rule === "implies")).toHaveLength(5);
     expect(grounding("research").some((c) => c.rule === "paths_exist")).toBe(true);
+    // Research's reference-existence check skips on a greenfield build (planned files).
+    expect(grounding("research").some((c) => c.rule === "paths_exist" && c.skipWhen?.equals === "greenfield")).toBe(true);
     expect(grounding("proposal").some((c) => c.rule === "member_of")).toBe(true);
+    // Proposal declares an advisory plan-coverage check (task_plan files ⊇ Research files_in_scope).
+    expect(grounding("proposal").some((c) => c.rule === "covers_prior" && c.mode === "observe")).toBe(true);
     expect(grounding("critique").some((c) => c.rule === "implies")).toBe(true);
     expect(grounding("execution").some((c) => c.rule === "paths_changed")).toBe(true);
     expect(grounding("validate_build").some((c) => c.rule === "implies")).toBe(true);
@@ -228,9 +232,10 @@ describe("Adaptive Delivery v9 completion gates", () => {
       expect(subset.length).toBeGreaterThan(0);
       expect(subset.every((c) => c.mode === "observe")).toBe(true);
     }
-    // Interview prose / bare booleans: nothing mechanically checkable.
+    // Verify declares an advisory covers_prior check (concerns_addressed ⊇ Critique concerns).
+    expect(grounding("verify").some((c) => c.rule === "covers_prior" && c.mode === "observe")).toBe(true);
+    // Interview prose: nothing mechanically checkable.
     expect(grounding("clarify")).toHaveLength(0);
-    expect(grounding("verify")).toHaveLength(0);
   });
 });
 

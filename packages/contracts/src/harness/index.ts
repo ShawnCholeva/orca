@@ -61,6 +61,7 @@ export const EvidenceFacet = z
                 mode: z.enum(["enforce", "observe"]),
                 result: z.enum(["passed", "failed", "skipped"]),
                 detail: z.string().max(512),
+                label: z.string().max(128).optional(),
               })
               .strict()
           )

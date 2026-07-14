@@ -19,6 +19,22 @@ const STRUCTURE_CHECK: ConfirmationSummaryEvidence["checks"][number] = {
   detail: "all required fields present",
 };
 
+// A readable default name for a grounding check when the template gives no
+// `label` — humanizes the selector and phrases it by rule kind. `field` may be
+// a selector like "task_plan[].files"; strip the array markers first.
+function groundingCheckName(rule: string, field: string): string {
+  const humanField = field.replace(/\[\]/g, "").split(".").map(humanizeKey).join(" ");
+  switch (rule) {
+    case "paths_exist": return "Referenced files exist";
+    case "paths_changed": return "Changed files are real";
+    case "member_of": return `${humanField} is a valid choice`;
+    case "implies": return `${humanField} consistency`;
+    case "subset_of_prior": return `${humanField} traces to prior step`;
+    case "covers_prior": return `${humanField} covers prior step`;
+    default: return humanField;
+  }
+}
+
 /** Project a step's deterministic EvidenceFacet into the confirmation card's
  *  evidence bundle (paper p.62). `executed` is true only when a real sensor ran,
  *  so reasoning steps (facet null) read "no executable checks". Sensor results
@@ -37,10 +53,13 @@ function buildEvidenceBundle(facet: EvidenceFacet | null): ConfirmationSummaryEv
     });
   }
   for (const g of facet.grounding?.checks ?? []) {
-    if (g.mode !== "enforce" || g.result === "skipped") continue;
+    if (g.result === "skipped") continue;
+    // An observe-mode check is advisory (it never vetoes), so a miss surfaces as
+    // "warn", not a hard "failed" — only enforced checks fail the card.
+    const status = g.result === "failed" ? (g.mode === "enforce" ? "failed" : "warn") : "passed";
     checks.push({
-      name: g.field,
-      status: g.result === "failed" ? "failed" : "passed",
+      name: g.label ?? groundingCheckName(g.rule, g.field),
+      status,
       kind: "grounding",
       detail: g.detail.trim().slice(0, 512) || null,
     });

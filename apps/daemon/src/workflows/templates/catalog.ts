@@ -124,14 +124,20 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       { key: "files_in_scope", type: "array", itemType: "string", required: true },
       { key: "risks", type: "array", itemType: "string", required: false },
     ],
-    grounding: [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce" }],
+    grounding: [{
+      rule: "paths_exist", field: "files_in_scope", mode: "enforce", label: "Referenced files exist",
+      // A greenfield build's files_in_scope are planned, not yet on disk — skip
+      // the existence check rather than force the agent to under-specify scope.
+      skipWhen: { stepId: "triage", field: "codebase_state", equals: "greenfield" },
+      skipDetail: "greenfield — files are planned, not yet created",
+    }],
     agentPreference: REASONING,
   },
   {
     id: "proposal", ordinal: 3, name: "Proposal",
     completionPolicy: "reasoning",
     instructions:
-      "Propose two or three genuinely different approaches grounded in the research, each with explicit tradeoffs, then lead with your recommended one and the reasoning behind it. Apply YAGNI ruthlessly — cut any scope, abstraction, or flexibility the goal does not require. Stay pre-implementation: make no code changes. When the choice between approaches is the user's to make (a product, scope, or UX fork), pause and ask with the options and your recommendation rather than selecting silently. Set chosen_approach to the exact name of the approach you chose — it must match one of your approaches' name values verbatim, not a description of it. Also produce an ordered task_plan that breaks the chosen approach into the steps needed to realize it — a single item for a small feature, several for a large initiative; the executing agent will work through it. If you are the entry step and no Research ran before you, do a quick targeted look at the files in the Triage brief to ground yourself before proposing.",
+      "Propose two or three genuinely different approaches grounded in the research, each with explicit tradeoffs, then lead with your recommended one and the reasoning behind it. Apply YAGNI ruthlessly — cut any scope, abstraction, or flexibility the goal does not require. Stay pre-implementation: make no code changes. When the choice between approaches is the user's to make (a product, scope, or UX fork), pause and ask with the options and your recommendation rather than selecting silently. Set chosen_approach to the exact name of the approach you chose — it must match one of your approaches' name values verbatim, not a description of it. Also produce an ordered task_plan that breaks the chosen approach into the steps needed to realize it — a single item for a small feature, several for a large initiative; the executing agent will work through it. For each task_plan item, list in `files` the files it will create or touch, so the plan collectively covers the files Research put in scope. If you are the entry step and no Research ran before you, do a quick targeted look at the files in the Triage brief to ground yourself before proposing.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       {
@@ -148,10 +154,16 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
         fields: [
           { key: "title", type: "string", required: true },
           { key: "detail", type: "string", required: true },
+          { key: "files", type: "array", itemType: "string", required: false },
         ],
       },
     ],
-    grounding: [{ rule: "member_of", field: "chosen_approach", set: "approaches[].name", mode: "enforce" }],
+    grounding: [
+      { rule: "member_of", field: "chosen_approach", set: "approaches[].name", mode: "enforce", label: "Chosen approach is one you proposed" },
+      // Advisory: the plan should touch every file Research put in scope. Observe
+      // mode — a free-form coverage miss should inform the reviewer, not veto.
+      { rule: "covers_prior", field: "task_plan[].files", prior: [{ stepId: "research", field: "files_in_scope" }], mode: "observe", label: "Plan covers researched files" },
+    ],
     agentPreference: REASONING,
   },
   {
@@ -165,7 +177,7 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       { key: "verdict", type: "string", required: true, enum: ["sound", "needs_work"] },
     ],
     grounding: [
-      { rule: "implies", when: { field: "verdict", equals: "needs_work" }, then: { field: "concerns", nonEmpty: true }, mode: "enforce" },
+      { rule: "implies", when: { field: "verdict", equals: "needs_work" }, then: { field: "concerns", nonEmpty: true }, mode: "enforce", label: "Concerns listed when needs_work" },
     ],
     agentPreference: REASONING,
   },
@@ -173,11 +185,17 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
     id: "verify", ordinal: 5, name: "Verify",
     completionPolicy: "reasoning",
     instructions:
-      "Validate the chosen approach against the success outcome and hard constraints before it advances. Confirm it is feasible and that the design accounts for the facets it touches — component boundaries, data flow, error handling, and testing — and that the acceptance signals are concrete and checkable. When validation surfaces an unresolved decision that is the user's to make, pause and ask with options and a recommendation rather than assuming.",
+      "Validate the chosen approach against the success outcome and hard constraints before it advances. Confirm it is feasible and that the design accounts for the facets it touches — component boundaries, data flow, error handling, and testing — and that the acceptance signals are concrete and checkable. Echo into concerns_addressed each concern Critique raised that this validation resolves. When validation surfaces an unresolved decision that is the user's to make, pause and ask with options and a recommendation rather than assuming.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "feasible", type: "boolean", required: true },
       { key: "notes", type: "array", itemType: "string", required: false },
+      { key: "concerns_addressed", type: "array", itemType: "string", required: false },
+    ],
+    grounding: [
+      // Advisory: the concerns Critique raised should be reflected here. Observe
+      // mode — free-text concern matching is imperfect, so it informs, not vetoes.
+      { rule: "covers_prior", field: "concerns_addressed", prior: [{ stepId: "critique", field: "concerns" }], mode: "observe", label: "Critique concerns addressed" },
     ],
     agentPreference: LIGHT,
   },
@@ -857,7 +875,13 @@ export const BUILTIN_TEMPLATE_CATALOG: BuiltInTemplateDefinition[] = [
     // `has_code_understanding` boolean, and a grounding gate forbids
     // approach_only unless the code is already understood — a greenfield build
     // can no longer skip Clarify + Research straight to Proposal (OBS-6).
-    version: 10, category: CATEGORY, recommended: true,
+    // v11: design-phase grounding enrichments — Research's paths_exist skips on a
+    // greenfield build (files are planned, not yet on disk), Proposal declares a
+    // covers_prior check that its task_plan `files` cover Research's files_in_scope,
+    // and Verify declares a covers_prior check that concerns_addressed covers
+    // Critique's concerns (both observe/advisory). Every grounding rule carries a
+    // human-readable `label` for the confirmation card's evidence bundle.
+    version: 11, category: CATEGORY, recommended: true,
     steps: ADAPTIVE_STEPS, guardrails: [APPROVAL_MARK_DONE, validationRule(["execution", "validate_build"]), CONTEXT_RULE], graph: ADAPTIVE_GRAPH,
   },
   {
