@@ -4,6 +4,7 @@
 
 import { useState, useEffect } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { isTauri } from "@tauri-apps/api/core";
 import { Icon } from "./icons";
 import { Btn, Pill, Tip, Field, inputStyle } from "./primitives";
 import { GOAL_STATE_META, GOAL_STATE_ORDER, slugify } from "./data";
@@ -783,11 +784,13 @@ function WorkspaceCreateModal({
   const [desc, setDesc] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [pathInput, setPathInput] = useState("");
 
-  async function handleBrowse() {
-    const selected = await openDialog({ directory: true, multiple: false });
-    if (!selected) return;
-    const path = selected as string;
+  // Native folder picker only works in Tauri; in a plain browser (dev:browser)
+  // the Tauri IPC bridge is absent, so we fall back to a typed absolute path.
+  const tauri = isTauri();
+
+  async function inspectPath(path: string) {
     setInspecting(true);
     setInspectError(null);
     setPreview(null);
@@ -801,6 +804,12 @@ function WorkspaceCreateModal({
     } finally {
       setInspecting(false);
     }
+  }
+
+  async function handleBrowse() {
+    const selected = await openDialog({ directory: true, multiple: false });
+    if (!selected) return;
+    await inspectPath(selected as string);
   }
 
   async function submit() {
@@ -835,16 +844,34 @@ function WorkspaceCreateModal({
       </header>
 
       <div className="scroll" style={{ flex: 1, padding: 20, overflow: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Btn kind="quiet" size="sm" icon={<Icon.folder />} onClick={() => void handleBrowse()} disabled={inspecting}>
-            {inspecting ? "Inspecting…" : "Browse…"}
-          </Btn>
-          {preview && (
-            <span className="mono" style={{ fontSize: 11.5, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {preview.path}
-            </span>
-          )}
-        </div>
+        {tauri ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Btn kind="quiet" size="sm" icon={<Icon.folder />} onClick={() => void handleBrowse()} disabled={inspecting}>
+              {inspecting ? "Inspecting…" : "Browse…"}
+            </Btn>
+            {preview && (
+              <span className="mono" style={{ fontSize: 11.5, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {preview.path}
+              </span>
+            )}
+          </div>
+        ) : (
+          <Field label="Folder path" hint="absolute path">
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                autoFocus
+                value={pathInput}
+                onChange={(e) => setPathInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && pathInput.trim()) void inspectPath(pathInput.trim()); }}
+                placeholder="/Users/you/projects/my-repo"
+                style={inputStyle}
+              />
+              <Btn kind="quiet" size="sm" icon={<Icon.folder />} onClick={() => void inspectPath(pathInput.trim())} disabled={inspecting || !pathInput.trim()}>
+                {inspecting ? "Inspecting…" : "Inspect"}
+              </Btn>
+            </div>
+          </Field>
+        )}
 
         {inspectError && (
           <span className="mono" style={{ fontSize: 11, color: "var(--err)" }}>{inspectError}</span>
