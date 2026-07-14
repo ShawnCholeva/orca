@@ -9,7 +9,7 @@ function appWithGoalAndActivity() {
   const db = new Database(":memory:");
   runMigrations(db, defaultMigrationsDir());
   db.prepare(
-    `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+    `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
      VALUES ('g1', 't', '', 'active', 1, '2026-06-05', '2026-06-05', null)`
   ).run();
   db.prepare(

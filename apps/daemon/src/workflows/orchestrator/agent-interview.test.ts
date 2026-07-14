@@ -116,7 +116,7 @@ function seedAgentSessionWithSentinel(
   });
 
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
   ).run(goalId, NOW, NOW);
 
   db.prepare(
@@ -321,7 +321,7 @@ describe("OrchestratorService.onSessionOutputChunk", () => {
     const goalId = "goal-noop-1";
     const sessionId = "sess-noop-1";
     db.prepare(
-      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'G', 'd', 'active', 1, ?, ?, NULL, NULL, NULL)"
+      "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'G', 'd', 'active', 1, ?, ?, NULL, NULL, NULL)"
     ).run(goalId, NOW, NOW);
     db.prepare(
       `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`

@@ -51,7 +51,7 @@ function setup(): TestContext {
 
   // Seed goal
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Test Goal', 'desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Test Goal', 'desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
   ).run(GOAL_ID, NOW, NOW);
 
   // Seed workflow template
@@ -277,7 +277,7 @@ describe("submit-input: PTY answer injection", () => {
 
     // Minimal seeding (no session)
     db2.prepare(
-      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+      "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
     ).run(GOAL_ID, NOW, NOW);
     db2.prepare(
       "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('tmpl-1', 'T', 'd', 1, 1, 1, '[]', '[]', ?, ?)"

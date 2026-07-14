@@ -45,7 +45,7 @@ function openTestDb(): Database.Database {
 // anchorForStep resolves. The metrics themselves don't matter — diagnoseTemplate is mocked.
 function seed(db: Database.Database) {
   const day = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
-  db.prepare(`INSERT INTO goals (id,title,description,status,autonomy_level,created_at,updated_at,archived_at)
+  db.prepare(`INSERT INTO goals (id,title,intent,status,autonomy_level,created_at,updated_at,archived_at)
               VALUES ('g','G','','active',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL)`).run();
   db.prepare(`UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-opus-4-8' WHERE id = 'g'`).run();
   db.prepare(`INSERT INTO workflow_templates (id,name,description,version,is_built_in,is_locked,steps_json,guardrails_json,created_at,updated_at)

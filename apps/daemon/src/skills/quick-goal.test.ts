@@ -5,34 +5,41 @@ import { ValidationError } from "../goals.js";
 const ctx = { now: () => new Date().toISOString() };
 
 describe("quickGoalSkill", () => {
-  it("returns trimmed title and description on happy path", () => {
+  it("returns trimmed title and intent on happy path", () => {
     const result = quickGoalSkill.invoke(
-      { title: "  My Goal  ", description: "  Some desc  " },
+      { title: "  My Goal  ", intent: "  Some desc  " },
       ctx
     );
-    expect(result).toEqual({ title: "My Goal", description: "Some desc" });
+    expect(result).toEqual({ title: "My Goal", intent: "Some desc" });
   });
 
-  it("defaults missing description to empty string", () => {
-    const result = quickGoalSkill.invoke({ title: "A goal" }, ctx);
-    expect(result).toEqual({ title: "A goal", description: "" });
+  it("rejects missing intent", () => {
+    expect(() =>
+      quickGoalSkill.invoke({ title: "A goal" }, ctx)
+    ).toThrow(ValidationError);
+  });
+
+  it("rejects empty intent after trim", () => {
+    expect(() =>
+      quickGoalSkill.invoke({ title: "A goal", intent: "   " }, ctx)
+    ).toThrow(ValidationError);
   });
 
   it("rejects empty title after trim", () => {
     expect(() =>
-      quickGoalSkill.invoke({ title: "   " }, ctx)
+      quickGoalSkill.invoke({ title: "   ", intent: "Some desc" }, ctx)
     ).toThrow(ValidationError);
   });
 
   it("rejects title longer than 200 chars after trim", () => {
     expect(() =>
-      quickGoalSkill.invoke({ title: "a".repeat(201) }, ctx)
+      quickGoalSkill.invoke({ title: "a".repeat(201), intent: "Some desc" }, ctx)
     ).toThrow(ValidationError);
   });
 
-  it("rejects description longer than 4000 chars after trim", () => {
+  it("rejects intent longer than 4000 chars after trim", () => {
     expect(() =>
-      quickGoalSkill.invoke({ title: "Valid", description: "x".repeat(4001) }, ctx)
+      quickGoalSkill.invoke({ title: "Valid", intent: "x".repeat(4001) }, ctx)
     ).toThrow(ValidationError);
   });
 
@@ -60,19 +67,19 @@ describe("quickGoalSkill", () => {
 
   it("has no side effects — no DB or bus access", () => {
     // Calling invoke should not throw due to missing DB/bus — it is pure computation.
-    const result = quickGoalSkill.invoke({ title: "No side effects" }, ctx);
+    const result = quickGoalSkill.invoke({ title: "No side effects", intent: "Some desc" }, ctx);
     expect(result.title).toBe("No side effects");
   });
 
   it("accepts exactly 200-char title", () => {
     const title = "a".repeat(200);
-    const result = quickGoalSkill.invoke({ title }, ctx);
+    const result = quickGoalSkill.invoke({ title, intent: "Some desc" }, ctx);
     expect(result.title).toBe(title);
   });
 
-  it("accepts exactly 4000-char description", () => {
-    const description = "x".repeat(4000);
-    const result = quickGoalSkill.invoke({ title: "Valid", description }, ctx);
-    expect(result.description).toBe(description);
+  it("accepts exactly 4000-char intent", () => {
+    const intent = "x".repeat(4000);
+    const result = quickGoalSkill.invoke({ title: "Valid", intent }, ctx);
+    expect(result.intent).toBe(intent);
   });
 });

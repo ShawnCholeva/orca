@@ -84,7 +84,7 @@ function setupAgentStepRun(db: Database.Database, opts: { guardrailsJson?: strin
   };
 
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
   ).run("goal-1", NOW, NOW);
 
   db.prepare(

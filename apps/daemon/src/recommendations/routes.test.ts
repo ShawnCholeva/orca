@@ -106,7 +106,7 @@ describe('recommendation routes', () => {
 
   function seedGoal(id: string, opts?: { archived?: boolean }): void {
     db.prepare(
-      `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+      `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
        VALUES (?, 'Goal', 'Route tests', 'active', 1, ?, ?, ?)`
     ).run(id, NOW, NOW, opts?.archived ? NOW : null);
   }

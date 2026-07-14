@@ -56,7 +56,7 @@ function makeCtx(opts: { inspect: InspectWorkspacePreview }): WorkspaceCtx & { d
 function goal(db: Database.Database, id: string): void {
   const now = new Date().toISOString();
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, 'Test Goal', '', 'active', 1, ?, ?, NULL)",
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, 'Test Goal', '', 'active', 1, ?, ?, NULL)",
   ).run(id, now, now);
 }
 

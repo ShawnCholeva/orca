@@ -91,7 +91,7 @@ function seedTemplates(): void {
 
 function seedGoal(operatingMode = "automated"): void {
   db.prepare(
-    `INSERT INTO goals (id, title, description, status, autonomy_level, operating_mode, created_at, updated_at, archived_at)
+    `INSERT INTO goals (id, title, intent, status, autonomy_level, operating_mode, created_at, updated_at, archived_at)
      VALUES ('g1','G','', 'active', 1, ?, ?, ?, NULL)`
   ).run(operatingMode, NOW, NOW);
 }
@@ -277,7 +277,7 @@ describe("composition engine wiring", () => {
     // still surfaces its output when threaded via delegatePriorOutputs.
     const artifacts: WorkflowArtifact[] = [];
     const input = buildStepExecutionInput({
-      goal: { id: "g1", description: "d" },
+      goal: { id: "g1", intent: "d" },
       steps: [{ id: "s-p1", ordinal: 1, name: "Finish", instructions: "", outputSchema: [], agentPreference: [] } as never],
       currentStep: { id: "s-p1", ordinal: 1, name: "Finish", instructions: "", outputSchema: [] } as never,
       artifacts,

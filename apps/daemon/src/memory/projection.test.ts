@@ -47,7 +47,7 @@ function openTestDb(dataDir?: string): Database.Database {
 function seedGoal(db: Database.Database, goalId: string): void {
   const now = '2026-01-01T00:00:00.000Z';
   db.prepare(
-    `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+    `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
      VALUES (?, 'Goal', '', 'active', 1, ?, ?, null)`
   ).run(goalId, now, now);
 }

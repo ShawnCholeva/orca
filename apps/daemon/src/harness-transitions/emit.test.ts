@@ -18,7 +18,7 @@ function cfg(d: string): Config {
     memoryExtractionTimeoutMs: 15000, hookResolverCommand: ["node","x.js"], getAuthToken: () => "t" };
 }
 function seedGoal(db: Database.Database, id: string) {
-  db.prepare(`INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+  db.prepare(`INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
     VALUES (?, 'G', '', 'active', 1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL)`).run(id);
 }
 let db: Database.Database; let ctx: HarnessTransitionCtx; let n = 0;

@@ -31,7 +31,7 @@ function seed() {
   db.prepare(`INSERT INTO workflow_templates (id, name, steps_json, guardrails_json, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
     .run("tpl", "Test Template", "[]", "[]", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
   // goal
-  db.prepare(`INSERT INTO goals (id, title, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
+  db.prepare(`INSERT INTO goals (id, title, intent, status, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
     .run("g", "Goal", "desc", "active", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
 }
 

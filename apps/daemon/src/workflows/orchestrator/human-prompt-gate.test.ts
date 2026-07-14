@@ -29,7 +29,7 @@ function setup(): Database.Database {
   const db = openDatabase(config(dir));
   runMigrations(db, defaultMigrationsDir());
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('g1','G','d','active',1,?,?,NULL,'orca/openai','gpt-5')"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('g1','G','d','active',1,?,?,NULL,'orca/openai','gpt-5')"
   ).run(NOW, NOW);
   return db;
 }

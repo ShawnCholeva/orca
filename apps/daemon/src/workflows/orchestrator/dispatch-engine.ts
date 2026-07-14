@@ -422,7 +422,7 @@ export class DispatchEngine {
 
     const objective = composeAgentInitialPrompt({
       goalTitle: ctx.goal.title,
-      goalDescription: ctx.goal.description,
+      goalIntent: ctx.goal.intent,
       stepInstructions: ctx.stepTpl.instructions,
       outputSchema: ctx.stepTpl.outputSchema,
       priorStepArtifacts: collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.id),
@@ -581,7 +581,7 @@ export class DispatchEngine {
       payloadBudget: Math.floor(ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES * 0.25),
     });
     const input = buildStepExecutionInput({
-      goal: { id: goal.id, description: goal.description },
+      goal: { id: goal.id, intent: goal.intent },
       steps: template.steps,
       currentStep: stepTpl,
       artifacts,
@@ -1804,7 +1804,7 @@ export class DispatchEngine {
         instructions,
         branches: splitterNode.branches ?? [],
       },
-      goal: { id: goal.id, description: goal.description },
+      goal: { id: goal.id, description: goal.intent },
       sourceStepOutput: readStepOutputAsRecord(db, run.id, stepRun.id),
       priorDecisions,
       committedLedger,
@@ -2075,7 +2075,7 @@ export class DispatchEngine {
       }));
     return GateEvaluationRequest.parse({
       gate: { nodeId: gateNode.id, name: gateNode.name, instructions: gateNode.instructions ?? "" },
-      goal: { id: goal.id, description: goal.description },
+      goal: { id: goal.id, description: goal.intent },
       sourceStepOutput: readStepOutputAsRecord(db, run.id, stepRun.id),
       priorGateDecisions,
       availableOutcomes,

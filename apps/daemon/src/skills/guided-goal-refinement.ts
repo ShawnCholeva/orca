@@ -31,7 +31,7 @@ function processItems(items: string[]): string[] {
 }
 
 function parseDescription(raw: string): {
-  description: string;
+  intent: string;
   successCriteria: string[];
   constraints: string[];
   assumptions: string[];
@@ -62,10 +62,10 @@ function parseDescription(raw: string): {
     }
   }
 
-  const description = descLines.join("\n").replace(/\n{4,}/g, "\n\n\n").trimEnd();
+  const intent = descLines.join("\n").replace(/\n{4,}/g, "\n\n\n").trimEnd();
 
   return {
-    description,
+    intent,
     successCriteria: processItems(collected.successCriteria),
     constraints: processItems(collected.constraints),
     assumptions: processItems(collected.assumptions),
@@ -88,14 +88,14 @@ export const guidedGoalRefinementSkill: SkillDescriptor<
 
   invoke(input, _ctx): GuidedRefinementOutput {
     const parsed = GuidedRefinementInput.parse(input);
-    const { description, successCriteria, constraints, assumptions } = parseDescription(
-      parsed.description
+    const { intent, successCriteria, constraints, assumptions } = parseDescription(
+      parsed.intent
     );
 
     return GuidedRefinementOutput.parse({
       skillId: SKILL_ID,
       title: parsed.title.trim(),
-      description,
+      intent,
       successCriteria,
       constraints,
       assumptions,

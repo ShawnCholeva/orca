@@ -43,7 +43,7 @@ function createConfig(dataDir: string): Config {
 
 function seedWorkflow(db: Database.Database): void {
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES ('goal-1', 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at) VALUES ('goal-1', 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL)"
   ).run(NOW, NOW);
   db.prepare(
     "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', 'desc', 1, 1, 1, '[]', '[]', ?, ?)"

@@ -34,7 +34,7 @@ function seedTemplate(db: Database.Database, id: string, version: number, stepNa
 
 function insertRun(db: Database.Database, id: string, templateId: string, version: number, snapshotJson: string | null): void {
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, 't', 'd', 'active', 1, ?, ?, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, 't', 'd', 'active', 1, ?, ?, NULL)"
   ).run(`goal-${id}`, NOW, NOW);
   db.prepare(
     "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, template_snapshot_json, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES (?, ?, ?, ?, ?, 'active', NULL, NULL, ?, NULL)"

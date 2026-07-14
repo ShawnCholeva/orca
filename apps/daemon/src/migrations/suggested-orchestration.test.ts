@@ -186,7 +186,8 @@ describe("suggested orchestration migration schema", () => {
       "0055_proposal_component.sql",
       "0056_learning_events.sql",
       "0057_template_catalog_version.sql",
-      "0058_goal_documents.sql"
+      "0058_goal_documents.sql",
+      "0059_goal_intent_rename.sql"
     ]);
 
     const postCounts = {

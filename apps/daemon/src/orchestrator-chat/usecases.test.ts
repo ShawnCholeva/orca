@@ -52,10 +52,10 @@ function setup(): {
   const db = openDatabase(createConfig(dir));
   runMigrations(db, defaultMigrationsDir());
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, 'orca/openai', 'gpt-5')"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, 'orca/openai', 'gpt-5')"
   ).run("goal-1", NOW, NOW);
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'No Model', 'Missing model', 'active', 1, ?, ?, NULL, NULL, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'No Model', 'Missing model', 'active', 1, ?, ?, NULL, NULL, NULL)"
   ).run("goal-without-model", NOW, NOW);
   const events: DomainEvent[] = [];
   const bus = new EventBus();

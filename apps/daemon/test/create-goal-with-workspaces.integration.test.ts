@@ -163,7 +163,7 @@ Constraints:
         const resp = await fetch(`${url1}/v1/goals/refine`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-          body: JSON.stringify({ title: 'Guided Goal Integration', description: refineDescription }),
+          body: JSON.stringify({ title: 'Guided Goal Integration', intent: refineDescription }),
         });
         expect(resp.status).toBe(200);
         const body = (await resp.json()) as RefineGoalResponse;
@@ -183,7 +183,7 @@ Constraints:
           headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
           body: JSON.stringify({
             title: draft.title,
-            description: draft.description,
+            intent: draft.intent,
             refined: draft,
             workspaces: [
               { inputPath: gitRepoDir },

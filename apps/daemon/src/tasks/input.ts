@@ -9,7 +9,7 @@ import { listTasksByGoal } from './projection.js';
 interface GoalRow {
   id: string;
   title: string;
-  description: string;
+  intent: string;
   archived_at: string | null;
 }
 
@@ -60,7 +60,7 @@ function ensureGoalStmt(db: Database.Database): Database.Statement<[string], Goa
   if (db !== _db) {
     _db = db;
     _selectGoal = db.prepare(
-      'SELECT id, title, description, archived_at FROM goals WHERE id = ?'
+      'SELECT id, title, intent, archived_at FROM goals WHERE id = ?'
     );
   }
   return _selectGoal!;
@@ -75,8 +75,8 @@ function sha256(input: string): string {
   return createHash('sha256').update(input, 'utf8').digest('hex');
 }
 
-function normalizeGoalObjective(description: string): string {
-  return description.trim();
+function normalizeGoalObjective(intent: string): string {
+  return intent.trim();
 }
 
 export function buildTaskGenerationInput(
@@ -121,7 +121,7 @@ export function buildTaskGenerationInput(
       updatedAt: task.updatedAt,
     }));
 
-  const normalizedObjective = normalizeGoalObjective(goalRow.description);
+  const normalizedObjective = normalizeGoalObjective(goalRow.intent);
   const normalizedRefinement: TaskInputRefinement | null = refinement
     ? {
         id: refinement.goalId,

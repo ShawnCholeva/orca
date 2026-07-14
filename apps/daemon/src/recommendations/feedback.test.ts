@@ -46,7 +46,7 @@ function freshDb(): Database.Database {
 function seedGoalAndRec(db: Database.Database, goalId = 'g1', recId = 'rec-1') {
   const now = NOW;
   db.prepare(
-    `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+    `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
      VALUES (?, 'G', '', 'active', 1, ?, ?, NULL)`
   ).run(goalId, now, now);
   insertRecommendation(db, {

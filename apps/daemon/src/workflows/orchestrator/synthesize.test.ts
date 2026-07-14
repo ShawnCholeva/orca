@@ -32,7 +32,7 @@ const input: SynthesisInput = {
   providerId: "orca/anthropic",
   modelId: "claude-sonnet-4-6",
   outputSchema: schema as unknown as SynthesisInput["outputSchema"],
-  stepInput: { goal: { id: "g", description: "" }, currentStep: { id: "execution", ordinal: 4, name: "Execution", instructions: "i", outputSchema: schema as unknown as SynthesisInput["outputSchema"] }, previousStepOutput: null, priorStepOutputs: [], transcript: [] },
+  stepInput: { goal: { id: "g", intent: "" }, currentStep: { id: "execution", ordinal: 4, name: "Execution", instructions: "i", outputSchema: schema as unknown as SynthesisInput["outputSchema"] }, previousStepOutput: null, priorStepOutputs: [], transcript: [] },
   sessionResult: "",
 };
 

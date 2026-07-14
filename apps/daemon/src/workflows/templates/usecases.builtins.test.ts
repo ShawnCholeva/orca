@@ -62,7 +62,7 @@ describe("reconcileBuiltInTemplates", () => {
   it("preserves a stale built-in that still has a workflow run", () => {
     insertBuiltIn("orca/engineering");
     db.prepare(
-      "INSERT INTO goals (id, title, description, status, created_at, updated_at) VALUES ('g1','t','d','active','t','t')"
+      "INSERT INTO goals (id, title, intent, status, created_at, updated_at) VALUES ('g1','t','d','active','t','t')"
     ).run();
     db.prepare(
       "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, started_at) VALUES ('r1','g1','orca/engineering',1,'completed','t')"

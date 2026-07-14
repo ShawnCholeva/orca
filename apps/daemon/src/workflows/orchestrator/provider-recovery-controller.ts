@@ -330,7 +330,7 @@ export class ProviderRecoveryController {
       composeProviderSwitchPrompt({
         agentPromptInput: {
           goalTitle: goal.title,
-          goalDescription: goal.description,
+          goalIntent: goal.intent,
           stepInstructions: stepTpl.instructions,
           outputSchema: stepTpl.outputSchema,
           priorStepArtifacts: collectPriorStepArtifacts(db, run.id, stepRun.id),

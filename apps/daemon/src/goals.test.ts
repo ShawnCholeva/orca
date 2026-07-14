@@ -121,7 +121,7 @@ describe("createGoal operating_mode default", () => {
     const { db, ctx } = setup();
     setSupervisionMode(db, "supervised", new Date().toISOString());
 
-    const goal = await createGoal({ title: "X" }, ctx);
+    const goal = await createGoal({ title: "X", intent: "test intent" }, ctx);
 
     expect(goal.operatingMode).toBe("human_review");
   });
@@ -130,7 +130,7 @@ describe("createGoal operating_mode default", () => {
     const { db, ctx } = setup();
     setSupervisionMode(db, "unsupervised", new Date().toISOString());
 
-    const goal = await createGoal({ title: "X" }, ctx);
+    const goal = await createGoal({ title: "X", intent: "test intent" }, ctx);
 
     expect(goal.operatingMode).toBe("automated");
     const row = db
@@ -144,7 +144,7 @@ describe("createGoal", () => {
   it("returns a Goal; events table has two rows (skill.invoked + goal.created) and goals has one row", async () => {
     const { db, ctx } = setup();
 
-    const goal = await createGoal({ title: "X" }, ctx);
+    const goal = await createGoal({ title: "X", intent: "test intent" }, ctx);
 
     expect(goal.id).toBeTypeOf("string");
     expect(goal.title).toBe("X");
@@ -173,7 +173,7 @@ describe("createGoal", () => {
     const { db, ctx } = setup();
     forceGoalInsertFailure(db);
 
-    await expect(createGoal({ title: "Y" }, ctx)).rejects.toThrow();
+    await expect(createGoal({ title: "Y", intent: "test intent" }, ctx)).rejects.toThrow();
 
     const eventCount = (
       db.prepare("SELECT count(*) as cnt FROM events").get() as { cnt: number }
@@ -191,7 +191,7 @@ describe("createGoal", () => {
     const publishSpy = vi.spyOn(eventBus, "publish");
     forceGoalInsertFailure(db);
 
-    await expect(createGoal({ title: "Z" }, ctx)).rejects.toThrow();
+    await expect(createGoal({ title: "Z", intent: "test intent" }, ctx)).rejects.toThrow();
 
     expect(publishSpy).not.toHaveBeenCalled();
   });
@@ -200,7 +200,7 @@ describe("createGoal", () => {
     const { ctx } = setup();
     const publishSpy = vi.spyOn(eventBus, "publish");
 
-    await createGoal({ title: "Alpha" }, ctx);
+    await createGoal({ title: "Alpha", intent: "test intent" }, ctx);
 
     expect(publishSpy).toHaveBeenCalledTimes(2);
     const skillEvent = publishSpy.mock.calls[0]![0]!;
@@ -215,7 +215,7 @@ describe("createGoal", () => {
 
   it("throws ValidationError for invalid input", async () => {
     const { ctx } = setup();
-    await expect(createGoal({ title: "" }, ctx)).rejects.toThrow(ValidationError);
+    await expect(createGoal({ title: "", intent: "test intent" }, ctx)).rejects.toThrow(ValidationError);
     await expect(createGoal({ title: "a".repeat(201) }, ctx)).rejects.toThrow(ValidationError);
   });
 });
@@ -223,7 +223,7 @@ describe("createGoal", () => {
 describe("createGoal — event ordering and payload invariants", () => {
   it("skill.invoked has a strictly smaller seq than goal.created, both share the same goalId", async () => {
     const { db, ctx } = setup();
-    const goal = await createGoal({ title: "event ordering" }, ctx);
+    const goal = await createGoal({ title: "event ordering", intent: "test intent" }, ctx);
 
     const rows = db
       .prepare("SELECT seq, type, goal_id FROM events WHERE goal_id = ? ORDER BY seq ASC")
@@ -239,7 +239,7 @@ describe("createGoal — event ordering and payload invariants", () => {
 
   it("skill.invoked payload has skillId, extensionPoint, and non-negative integer durationMs", async () => {
     const { db, ctx } = setup();
-    const goal = await createGoal({ title: "Timing check" }, ctx);
+    const goal = await createGoal({ title: "Timing check", intent: "test intent" }, ctx);
 
     const row = db
       .prepare("SELECT payload FROM events WHERE goal_id = ? AND type = 'skill.invoked'")
@@ -258,22 +258,22 @@ describe("createGoal — event ordering and payload invariants", () => {
     expect(payload.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it("goal.created payload remains limited to title and description", async () => {
+  it("goal.created payload remains limited to title and intent", async () => {
     const { db, ctx } = setup();
-    const goal = await createGoal({ title: "Payload invariant", description: "keep me" }, ctx);
+    const goal = await createGoal({ title: "Payload invariant", intent: "keep me" }, ctx);
 
     const row = db
       .prepare("SELECT payload FROM events WHERE goal_id = ? AND type = 'goal.created'")
       .get(goal.id) as { payload: string } | undefined;
 
     expect(row).toBeDefined();
-    const payload = JSON.parse(row!.payload) as { title: string; description: string };
-    expect(payload).toEqual({ title: "Payload invariant", description: "keep me" });
+    const payload = JSON.parse(row!.payload) as { title: string; intent: string };
+    expect(payload).toEqual({ title: "Payload invariant", intent: "keep me" });
   });
 
   it("goals projection has exactly one row matching the new Goal id", async () => {
     const { db, ctx } = setup();
-    const goal = await createGoal({ title: "Projection check" }, ctx);
+    const goal = await createGoal({ title: "Projection check", intent: "test intent" }, ctx);
 
     const rows = db
       .prepare("SELECT id FROM goals WHERE id = ?")
@@ -287,7 +287,7 @@ describe("createGoal — event ordering and payload invariants", () => {
     const publishSpy = vi.spyOn(eventBus, "publish");
     forceGoalInsertFailure(db);
 
-    await expect(createGoal({ title: "Rollback both" }, ctx)).rejects.toThrow();
+    await expect(createGoal({ title: "Rollback both", intent: "test intent" }, ctx)).rejects.toThrow();
 
     const count = (db.prepare("SELECT count(*) AS c FROM events").get() as { c: number }).c;
     expect(count).toBe(0);
@@ -298,7 +298,7 @@ describe("createGoal — event ordering and payload invariants", () => {
     const { db, ctx } = setup();
     const publishSpy = vi.spyOn(eventBus, "publish");
 
-    await expect(createGoal({ title: "  " }, ctx)).rejects.toThrow(ValidationError);
+    await expect(createGoal({ title: "  ", intent: "test intent" }, ctx)).rejects.toThrow(ValidationError);
 
     const eventCount = (db.prepare("SELECT count(*) AS c FROM events").get() as { c: number }).c;
     const goalCount = (db.prepare("SELECT count(*) AS c FROM goals").get() as { c: number }).c;
@@ -309,7 +309,7 @@ describe("createGoal — event ordering and payload invariants", () => {
 
   it("normalizes title whitespace — returned Goal.title is trimmed", async () => {
     const { ctx } = setup();
-    const goal = await createGoal({ title: "  trimmed  " }, ctx);
+    const goal = await createGoal({ title: "  trimmed  ", intent: "test intent" }, ctx);
     expect(goal.title).toBe("trimmed");
   });
 });
@@ -319,7 +319,7 @@ describe("createGoal — refined goal path", () => {
     return {
       skillId: "guided-goal-refinement" as const,
       title: "Build a search engine",
-      description: "Index and retrieve documents efficiently.",
+      intent: "Index and retrieve documents efficiently.",
       successCriteria: ["P95 query latency < 50ms"],
       constraints: ["Must run on-premises"],
       assumptions: ["Dataset fits in RAM"],
@@ -543,20 +543,20 @@ describe("createGoal — refined goal path", () => {
     expect(eventCount).toBe(0);
   });
 
-  it("goal title and description in goals row come from refined payload", async () => {
+  it("goal title and intent in goals row come from refined payload", async () => {
     const { db, ctx } = setup();
-    const refined = makeRefined({ title: "Refined Title", description: "Refined desc" });
+    const refined = makeRefined({ title: "Refined Title", intent: "Refined desc" });
 
-    const goal = await createGoal({ title: "Rough Title", description: "Rough desc", refined }, ctx);
+    const goal = await createGoal({ title: "Rough Title", intent: "Rough desc", refined }, ctx);
 
     expect(goal.title).toBe("Refined Title");
-    expect(goal.description).toBe("Refined desc");
+    expect(goal.intent).toBe("Refined desc");
 
     const row = db
-      .prepare("SELECT title, description FROM goals WHERE id = ?")
-      .get(goal.id) as { title: string; description: string };
+      .prepare("SELECT title, intent FROM goals WHERE id = ?")
+      .get(goal.id) as { title: string; intent: string };
     expect(row.title).toBe("Refined Title");
-    expect(row.description).toBe("Refined desc");
+    expect(row.intent).toBe("Refined desc");
   });
 
   it("workspace.attached event payload includes workspaceId, path, name", async () => {
@@ -667,10 +667,10 @@ describe("createGoal — refined goal path", () => {
   it("minimal create path response shape is preserved (same fields, 2 events)", async () => {
     const { db, ctx } = setup();
 
-    const goal = await createGoal({ title: "Minimal", description: "no change" }, ctx);
+    const goal = await createGoal({ title: "Minimal", intent: "no change" }, ctx);
 
     expect(goal.title).toBe("Minimal");
-    expect(goal.description).toBe("no change");
+    expect(goal.intent).toBe("no change");
     expect(goal.status).toBe("active");
     expect(goal.autonomyLevel).toBe(1);
     expect(goal.archivedAt).toBeNull();
@@ -696,7 +696,7 @@ describe("createGoal — documents", () => {
     const file = writeDoc("# Plan");
 
     const goal = await createGoal(
-      { title: "With doc", documents: [{ kind: "file", ref: file, name: "The Plan" }] },
+      { title: "With doc", intent: "test intent", documents: [{ kind: "file", ref: file, name: "The Plan" }] },
       ctx,
     );
 
@@ -744,7 +744,7 @@ describe("listGoals", () => {
   it("returns the created goal", async () => {
     const { ctx } = setup();
 
-    const created = await createGoal({ title: "Beta" }, ctx);
+    const created = await createGoal({ title: "Beta", intent: "test intent" }, ctx);
     const goals = listGoals();
 
     expect(goals).toHaveLength(1);
@@ -756,9 +756,9 @@ describe("listGoals", () => {
   it("populates per-goal workspace identity ({id,name}) for zero, one, and many workspaces", async () => {
     const { db, ctx } = setup();
 
-    const none = await createGoal({ title: "No workspace" }, ctx);
-    const one = await createGoal({ title: "One workspace" }, ctx);
-    const many = await createGoal({ title: "Many workspaces" }, ctx);
+    const none = await createGoal({ title: "No workspace", intent: "test intent" }, ctx);
+    const one = await createGoal({ title: "One workspace", intent: "test intent" }, ctx);
+    const many = await createGoal({ title: "Many workspaces", intent: "test intent" }, ctx);
 
     const at = "2026-01-01T00:00:00.000Z";
     const mkWs = (id: string, name: string): Workspace => ({
@@ -785,13 +785,13 @@ describe("listGoals", () => {
 });
 
 describe("updateGoal", () => {
-  it("persists title/description and writes a goal.updated event with the patch payload", async () => {
+  it("persists title/intent and writes a goal.updated event with the patch payload", async () => {
     const { db, ctx } = setup();
-    const created = await createGoal({ title: "Original", description: "old" }, ctx);
+    const created = await createGoal({ title: "Original", intent: "old" }, ctx);
 
     const updated = updateGoal(created.id, { title: "New Title" });
     expect(updated.title).toBe("New Title");
-    expect(updated.description).toBe("old");
+    expect(updated.intent).toBe("old");
     expect(updated.updatedAt >= created.updatedAt).toBe(true);
 
     const eventRow = db
@@ -804,12 +804,12 @@ describe("updateGoal", () => {
     expect(JSON.parse(eventRow!.payload)).toEqual({ title: "New Title" });
   });
 
-  it("can update both title and description in one call", async () => {
+  it("can update both title and intent in one call", async () => {
     const { ctx } = setup();
-    const created = await createGoal({ title: "Orig" }, ctx);
-    const updated = updateGoal(created.id, { title: "T", description: "D" });
+    const created = await createGoal({ title: "Orig", intent: "orig intent" }, ctx);
+    const updated = updateGoal(created.id, { title: "T", intent: "D" });
     expect(updated.title).toBe("T");
-    expect(updated.description).toBe("D");
+    expect(updated.intent).toBe("D");
   });
 
   it("throws NotFoundError for unknown id", () => {
@@ -819,13 +819,13 @@ describe("updateGoal", () => {
 
   it("throws ValidationError when no fields provided", async () => {
     const { ctx } = setup();
-    const created = await createGoal({ title: "A" }, ctx);
+    const created = await createGoal({ title: "A", intent: "test intent" }, ctx);
     expect(() => updateGoal(created.id, {})).toThrow(ValidationError);
   });
 
   it("publishes goal.updated event with numeric seq", async () => {
     const { ctx } = setup();
-    const created = await createGoal({ title: "A" }, ctx);
+    const created = await createGoal({ title: "A", intent: "test intent" }, ctx);
     const publishSpy = vi.spyOn(eventBus, "publish");
 
     updateGoal(created.id, { title: "B" });
@@ -840,7 +840,7 @@ describe("updateGoal", () => {
 
   it("throws NotFoundError when updating an archived goal", async () => {
     const { ctx } = setup();
-    const created = await createGoal({ title: "X" }, ctx);
+    const created = await createGoal({ title: "X", intent: "test intent" }, ctx);
     archiveGoal(created.id);
 
     expect(() => updateGoal(created.id, { title: "Y" })).toThrow(NotFoundError);
@@ -848,7 +848,7 @@ describe("updateGoal", () => {
 
   it("does not append a goal.updated event when target is archived", async () => {
     const { db, ctx } = setup();
-    const created = await createGoal({ title: "X" }, ctx);
+    const created = await createGoal({ title: "X", intent: "test intent" }, ctx);
     archiveGoal(created.id);
 
     expect(() => updateGoal(created.id, { title: "Y" })).toThrow(NotFoundError);
@@ -865,7 +865,7 @@ describe("updateGoal", () => {
 
   it("appends goal.updated event before updating the goals projection", async () => {
     const { db, ctx } = setup();
-    const created = await createGoal({ title: "OrderProof" }, ctx);
+    const created = await createGoal({ title: "OrderProof", intent: "test intent" }, ctx);
 
     db.exec(`
       CREATE TRIGGER enforce_update_event_first
@@ -894,6 +894,7 @@ describe("orchestrator model selection", () => {
     const goal = await createGoal(
       {
         title: "With provider",
+        intent: "test intent",
         orchestratorModel: {
           providerId: "orca/openai",
           modelId: "gpt-5",
@@ -933,7 +934,7 @@ describe("orchestrator model selection", () => {
 
   it("patches orchestrator model and emits goal.orchestrator_model_changed", async () => {
     const { db, ctx } = setup();
-    const created = await createGoal({ title: "Patch me" }, ctx);
+    const created = await createGoal({ title: "Patch me", intent: "test intent" }, ctx);
     const publishSpy = vi.spyOn(eventBus, "publish");
 
     const updated = await updateGoalOrchestratorModel(
@@ -983,7 +984,7 @@ describe("orchestrator model selection", () => {
 describe("archiveGoal", () => {
   it("sets archived_at, removes goal from listGoals, and emits goal.archived event", async () => {
     const { db, ctx } = setup();
-    const created = await createGoal({ title: "ToArchive" }, ctx);
+    const created = await createGoal({ title: "ToArchive", intent: "test intent" }, ctx);
 
     const archived = archiveGoal(created.id);
     expect(archived.status).toBe("archived");
@@ -1008,8 +1009,8 @@ describe("archiveGoal", () => {
 
   it("reaps the goal's gate_approval_counts rows on archive", async () => {
     const { db, ctx } = setup();
-    const created = await createGoal({ title: "X" }, ctx);
-    const other = await createGoal({ title: "Y" }, ctx);
+    const created = await createGoal({ title: "X", intent: "test intent" }, ctx);
+    const other = await createGoal({ title: "Y", intent: "test intent" }, ctx);
     const now = new Date().toISOString();
     const ins = db.prepare(
       "INSERT INTO gate_approval_counts (goal_id, action_class, consecutive_approvals, last_decision, updated_at) VALUES (?, ?, ?, 'allow', ?)"
@@ -1032,7 +1033,7 @@ describe("archiveGoal", () => {
 
   it("throws NotFoundError when archiving an already-archived goal", async () => {
     const { ctx } = setup();
-    const created = await createGoal({ title: "X" }, ctx);
+    const created = await createGoal({ title: "X", intent: "test intent" }, ctx);
     archiveGoal(created.id);
 
     expect(() => archiveGoal(created.id)).toThrow(NotFoundError);
@@ -1040,7 +1041,7 @@ describe("archiveGoal", () => {
 
   it("emits exactly one goal.archived event across two archive calls", async () => {
     const { db, ctx } = setup();
-    const created = await createGoal({ title: "X" }, ctx);
+    const created = await createGoal({ title: "X", intent: "test intent" }, ctx);
     archiveGoal(created.id);
     expect(() => archiveGoal(created.id)).toThrow(NotFoundError);
 
@@ -1056,7 +1057,7 @@ describe("archiveGoal", () => {
 
   it("appends goal.archived event before updating the goals projection", async () => {
     const { db, ctx } = setup();
-    const created = await createGoal({ title: "ArchiveOrderProof" }, ctx);
+    const created = await createGoal({ title: "ArchiveOrderProof", intent: "test intent" }, ctx);
 
     db.exec(`
       CREATE TRIGGER enforce_archive_event_first
@@ -1082,7 +1083,7 @@ describe("workerPermissionMode", () => {
   it("new goals default workerPermissionMode to 'ask' and round-trip through the DB", async () => {
     const { db, ctx } = setup();
 
-    const created = await createGoal({ title: "Permission Mode Test" }, ctx);
+    const created = await createGoal({ title: "Permission Mode Test", intent: "test intent" }, ctx);
     expect(created.workerPermissionMode).toBe("ask");
 
     const row = db
@@ -1106,7 +1107,7 @@ describe("workerPermissionMode", () => {
 describe("projection schema parsing", () => {
   it("throws when a goal row in the projection has an invalid status", async () => {
     const { db, ctx } = setup();
-    const created = await createGoal({ title: "X" }, ctx);
+    const created = await createGoal({ title: "X", intent: "test intent" }, ctx);
 
     db.prepare("UPDATE goals SET status = 'bogus' WHERE id = ?").run(created.id);
 

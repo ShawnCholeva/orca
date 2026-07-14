@@ -45,7 +45,7 @@ function createMigrationsDir(files: string[]): string {
 
 function seedGoal(db: Database.Database, id: string): void {
   db.prepare(
-    'INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(id, 'Goal', 'goal for migration tests', 'active', 1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', null);
 }
 
@@ -196,6 +196,7 @@ describe('context migration 0006_context.sql', () => {
       '0056_learning_events.sql',
       '0057_template_catalog_version.sql',
       '0058_goal_documents.sql',
+      '0059_goal_intent_rename.sql',
     ]);
 
     const tables = (
@@ -256,7 +257,10 @@ describe('context migration 0006_context.sql', () => {
 
     runMigrations(db, m5Dir);
 
-    seedGoal(db, 'goal-upgrade');
+    // Pre-0059 schema: the goals column is still named `description` at this point.
+    db.prepare(
+      'INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run('goal-upgrade', 'Goal', 'goal for migration tests', 'active', 1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', null);
     // Pre-0036 schema: seed the legacy per-goal workspaces row so 0036 can migrate it.
     db.prepare(
       'INSERT INTO workspaces (id, goal_id, path, name, workspace_type, branch, is_dirty, git_probe, attached_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
@@ -318,6 +322,7 @@ describe('context migration 0006_context.sql', () => {
       '0056_learning_events.sql',
       '0057_template_catalog_version.sql',
       '0058_goal_documents.sql',
+      '0059_goal_intent_rename.sql',
     ]);
 
     const counts = {

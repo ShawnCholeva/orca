@@ -6,16 +6,16 @@ import { bootstrapRegistries } from "../registry/bootstrap.js";
 
 const ctx = { now: () => new Date().toISOString() };
 
-function invoke(title: string, description: string) {
-  return guidedGoalRefinementSkill.invoke({ title, description }, ctx);
+function invoke(title: string, intent: string) {
+  return guidedGoalRefinementSkill.invoke({ title, intent }, ctx);
 }
 
 describe("guidedGoalRefinementSkill", () => {
-  it("empty description produces all empty arrays", () => {
+  it("empty intent produces all empty arrays", () => {
     const result = invoke("My Goal", "");
     expect(result.skillId).toBe("guided-goal-refinement");
     expect(result.title).toBe("My Goal");
-    expect(result.description).toBe("");
+    expect(result.intent).toBe("");
     expect(result.successCriteria).toEqual([]);
     expect(result.constraints).toEqual([]);
     expect(result.assumptions).toEqual([]);
@@ -67,7 +67,7 @@ describe("guidedGoalRefinementSkill", () => {
     expect(result.successCriteria).toEqual(["G1"]);
     expect(result.constraints).toEqual(["C1"]);
     expect(result.assumptions).toEqual(["A1"]);
-    expect(result.description).toBe("");
+    expect(result.intent).toBe("");
   });
 
   it("section matching is case-insensitive", () => {
@@ -110,10 +110,10 @@ describe("guidedGoalRefinementSkill", () => {
     expect(result.successCriteria[19]).toBe("Item 20");
   });
 
-  it("preamble text before sections is preserved in description", () => {
+  it("preamble text before sections is preserved in intent", () => {
     const desc = "Preamble here.\nGoals:\n- G1";
     const result = invoke("T", desc);
-    expect(result.description).toBe("Preamble here.");
+    expect(result.intent).toBe("Preamble here.");
     expect(result.successCriteria).toEqual(["G1"]);
   });
 
@@ -122,21 +122,21 @@ describe("guidedGoalRefinementSkill", () => {
     const desc = "First part.\n\n\n\nGoals:\n- G1";
     const result = invoke("T", desc);
     // 4 newlines collapsed to 3 (= 2 blank lines), then trimEnd removes trailing
-    expect(result.description).toBe("First part.");
+    expect(result.intent).toBe("First part.");
     expect(result.successCriteria).toEqual(["G1"]);
   });
 
   it("preamble with multiple blank lines (not exceeding 3) is preserved", () => {
     const desc = "Line 1.\n\nLine 2.\nGoals:\n- G1";
     const result = invoke("T", desc);
-    expect(result.description).toBe("Line 1.\n\nLine 2.");
+    expect(result.intent).toBe("Line 1.\n\nLine 2.");
     expect(result.successCriteria).toEqual(["G1"]);
   });
 
-  it("preamble plus sections: both preamble description and arrays are populated", () => {
+  it("preamble plus sections: both preamble intent and arrays are populated", () => {
     const desc = "Background info.\n\nConstraints:\n- Must be fast\nAssumptions:\n- Node 20+";
     const result = invoke("T", desc);
-    expect(result.description).toBe("Background info.");
+    expect(result.intent).toBe("Background info.");
     expect(result.constraints).toEqual(["Must be fast"]);
     expect(result.assumptions).toEqual(["Node 20+"]);
   });

@@ -162,7 +162,7 @@ describe.sequential('context package proof loop', () => {
       headers: AUTH,
       payload: {
         title: 'Context proof loop',
-        description: [
+        intent: [
           'Goals:',
           '- Prove context preparation survives restart',
           '',
@@ -173,7 +173,7 @@ describe.sequential('context package proof loop', () => {
       },
     });
     expect(refineRes.statusCode).toBe(200);
-    const draft = (JSON.parse(refineRes.body) as { draft: unknown }).draft;
+    const draft = (JSON.parse(refineRes.body) as { draft: { intent: string } }).draft;
 
     const createGoalRes = await server.inject({
       method: 'POST',
@@ -181,6 +181,7 @@ describe.sequential('context package proof loop', () => {
       headers: AUTH,
       payload: {
         title: 'Context proof loop',
+        intent: 'test intent',
         refined: draft,
         workspaces: [{ inputPath: workspaceDir }],
       },

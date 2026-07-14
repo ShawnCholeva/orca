@@ -332,7 +332,7 @@ function setupAgentStepRun(db: Database.Database, opts: { guardrailsJson?: strin
   };
 
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
   ).run("goal-1", NOW, NOW);
 
   db.prepare(
@@ -369,7 +369,7 @@ function setupTwoStepAgentRun(db: Database.Database) {
   });
 
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
   ).run("goal-1", NOW, NOW);
   db.prepare(
     "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', 'desc', 1, 1, 1, ?, '[]', ?, ?)"
@@ -400,7 +400,7 @@ function setupInterviewStepRun(db: Database.Database) {
   };
 
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
   ).run("goal-1", NOW, NOW);
 
   db.prepare(
@@ -434,7 +434,7 @@ function setupHandoffStepRun(db: Database.Database) {
   };
 
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
   ).run("goal-1", NOW, NOW);
 
   db.prepare(
@@ -1069,7 +1069,7 @@ describe("OrchestratorService agent step", () => {
     const run = { id: "run-1", goalId: "goal-1", templateId: "orca/engineering", templateVersion: 1, status: "active", currentStepRunId: "step-1" };
     const stepRun = db.prepare("SELECT * FROM workflow_step_runs WHERE id = 'step-1'").get() as never;
     const template = { id: "orca/engineering", steps: [db.prepare("SELECT steps_json FROM workflow_templates WHERE id='orca/engineering'").pluck().get()].flatMap((j) => JSON.parse(j as string)), guardrails: [] };
-    const goal = db.prepare("SELECT id, title, description, orchestrator_provider, orchestrator_model FROM goals WHERE id='goal-1'").get() as never;
+    const goal = db.prepare("SELECT id, title, intent, orchestrator_provider, orchestrator_model FROM goals WHERE id='goal-1'").get() as never;
     const ctx = { run, stepRun, stepTpl: (template.steps as Array<{ id: string }>).find((s) => s.id === (stepRun as { step_template_id: string }).step_template_id), template, goal } as never;
 
     await engine.spawnStepAgent(db, () => NOW, ctx, { bus, idFactory });
@@ -2215,7 +2215,7 @@ function setupFirstStepRun(db: Database.Database) {
   });
 
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
   ).run("goal-1", NOW, NOW);
   db.prepare(
     "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', 'desc', 1, 1, 1, ?, '[]', ?, ?)"
@@ -2252,7 +2252,7 @@ function setupTwoStepRunWithOutput(db: Database.Database) {
   });
 
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL)"
   ).run("goal-1", NOW, NOW);
   db.prepare(
     "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', 'desc', 1, 1, 1, ?, '[]', ?, ?)"
@@ -2787,7 +2787,7 @@ describe("OrchestratorService.continueAllPausedSteps", () => {
 
     // Goal-2: a SECOND goal/run/step parked at a confirmation checkpoint (still human_review).
     db.prepare(
-      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model, operating_mode) VALUES ('goal-2', 'Goal 2', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL, 'human_review')"
+      "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model, operating_mode) VALUES ('goal-2', 'Goal 2', 'Goal desc', 'active', 1, ?, ?, NULL, NULL, NULL, 'human_review')"
     ).run(NOW, NOW);
     db.prepare(
       "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-2', 'goal-2', 'orca/engineering', 1, 'active', 'step-2', NULL, ?, NULL)"

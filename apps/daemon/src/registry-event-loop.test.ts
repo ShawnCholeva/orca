@@ -134,7 +134,7 @@ describe.sequential('registry/event-loop scenarios 1–6', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'registry loop' }
+      payload: { title: 'registry loop', intent: 'test intent' }
     });
 
     expect(res.statusCode).toBe(201);
@@ -155,7 +155,7 @@ describe.sequential('registry/event-loop scenarios 1–6', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'Should Roll Back' }
+      payload: { title: 'Should Roll Back', intent: 'test intent' }
     });
 
     expect(res.statusCode).toBe(500);
@@ -181,7 +181,7 @@ describe.sequential('registry/event-loop scenarios 1–6', () => {
         method: 'POST',
         url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'WS order' }
+        payload: { title: 'WS order', intent: 'test intent' }
       });
 
       await Promise.race([
@@ -238,7 +238,7 @@ describe('registry/event-loop restart: event ordering survives DB close/reopen',
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'Persisted' }
+      payload: { title: 'Persisted', intent: 'test intent' }
     });
     expect(res.statusCode).toBe(201);
     const { goal } = CreateGoalResponse.parse(JSON.parse(res.body));

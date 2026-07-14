@@ -134,8 +134,8 @@ export function buildContextFromDb(
   args: { goalId: string; runId: string | null; stepRunId: string | null; payloadBudgetBytes: number }
 ): OrchestratorInvocationContext {
   const goal = db
-    .prepare("SELECT id, title, description FROM goals WHERE id = ?")
-    .get(args.goalId) as { id: string; title: string; description: string } | undefined;
+    .prepare("SELECT id, title, intent FROM goals WHERE id = ?")
+    .get(args.goalId) as { id: string; title: string; intent: string } | undefined;
   if (!goal) throw new Error(`goal not found: ${args.goalId}`);
 
   const chatRows = db
@@ -174,7 +174,7 @@ export function buildContextFromDb(
           : "claude-code";
 
       const input: OrchestratorContextInput = {
-        goal: { id: goal.id, title: goal.title, description: goal.description, attachedWorkspaces, attachedDocuments },
+        goal: { id: goal.id, title: goal.title, intent: goal.intent, attachedWorkspaces, attachedDocuments },
         run: { templateId, templateVersion, ordinal, status },
         currentStep: {
           id: stepTpl.id,
@@ -196,7 +196,7 @@ export function buildContextFromDb(
 
   // Freeform-chat path (no active run or run/template/step row missing).
   const input: OrchestratorContextInput = {
-    goal: { id: goal.id, title: goal.title, description: goal.description, attachedWorkspaces: [], attachedDocuments: [] },
+    goal: { id: goal.id, title: goal.title, intent: goal.intent, attachedWorkspaces: [], attachedDocuments: [] },
     run: { templateId: "", templateVersion: 0, ordinal: 0, status: "active" },
     currentStep: {
       id: "",

@@ -34,7 +34,7 @@ function seedTerminalStepRun(
 ): void {
   db.prepare(
     `INSERT INTO goals (
-       id, title, description, status, autonomy_level, created_at, updated_at, archived_at
+       id, title, intent, status, autonomy_level, created_at, updated_at, archived_at
      ) VALUES (?, 'Goal', '', 'active', 1, ?, ?, NULL)`
   ).run(input.goalId, "2026-06-09", "2026-06-09");
   db.prepare(

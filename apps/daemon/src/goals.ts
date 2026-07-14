@@ -66,7 +66,7 @@ export class DuplicateDocumentInRequestError extends Error {
 interface GoalRow {
   id: string;
   title: string;
-  description: string;
+  intent: string;
   status: string;
   autonomy_level: number;
   orchestrator_provider: string | null;
@@ -83,7 +83,7 @@ function rowToGoal(row: GoalRow): Goal {
   return Goal.parse({
     id: row.id,
     title: row.title,
-    description: row.description,
+    intent: row.intent,
     status: row.status,
     autonomyLevel: row.autonomy_level,
     orchestratorProvider: row.orchestrator_provider,
@@ -117,14 +117,14 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
         "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)"
       ),
       insertGoal: db.prepare(
-        "INSERT INTO goals (id, title, description, status, autonomy_level, orchestrator_provider, orchestrator_model, worker_permission_mode, operating_mode, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, ?, ?, 'ask', ?, ?, ?)"
+        "INSERT INTO goals (id, title, intent, status, autonomy_level, orchestrator_provider, orchestrator_model, worker_permission_mode, operating_mode, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, ?, ?, 'ask', ?, ?, ?)"
       ),
       selectGoals: db.prepare(
         "SELECT * FROM goals WHERE archived_at IS NULL ORDER BY updated_at DESC"
       ),
       selectGoalById: db.prepare("SELECT * FROM goals WHERE id = ?"),
       updateGoal: db.prepare(
-        "UPDATE goals SET title = COALESCE(?, title), description = COALESCE(?, description), updated_at = ? WHERE id = ?"
+        "UPDATE goals SET title = COALESCE(?, title), intent = COALESCE(?, intent), updated_at = ? WHERE id = ?"
       ),
       archiveGoal: db.prepare(
         "UPDATE goals SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?"
@@ -139,7 +139,7 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
 
 type CreateGoalInput = {
   title: string;
-  description?: string;
+  intent?: string;
   refined?: GuidedRefinementOutput;
   workspaces?: Array<{ inputPath: string; name?: string }>;
   documents?: Array<{ kind: "file" | "url"; ref: string; name?: string }>;
@@ -148,7 +148,7 @@ type CreateGoalInput = {
 
 type GoalOrigin = {
   title: string;
-  description: string;
+  intent: string;
   skillId: string;
   extensionPoint: string;
   durationMs: number;
@@ -162,7 +162,7 @@ function resolveGoalOrigin(
   if (validatedRefined) {
     return {
       title: validatedRefined.title,
-      description: validatedRefined.description,
+      intent: validatedRefined.intent,
       skillId: "guided-goal-refinement",
       extensionPoint: "goal.refine",
       durationMs: 0,
@@ -174,11 +174,11 @@ function resolveGoalOrigin(
   // ValidationError from skill.invoke propagates as-is (→ HTTP 400); no DB writes occur.
   const normalized = skill.invoke(input, { now: () => new Date().toISOString() }) as {
     title: string;
-    description: string;
+    intent: string;
   };
   return {
     title: normalized.title,
-    description: normalized.description,
+    intent: normalized.intent,
     skillId: skill.id,
     extensionPoint: skill.extensionPoint,
     durationMs: Math.round(performance.now() - startedAt),
@@ -247,7 +247,7 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
     docInputs.map(async (d) => ({ input: d, snapshot: await takeSnapshot(d.kind, d.ref) })),
   );
 
-  const { title, description, skillId, extensionPoint, durationMs } = resolveGoalOrigin(
+  const { title, intent, skillId, extensionPoint, durationMs } = resolveGoalOrigin(
     input,
     ctx,
     validatedRefined,
@@ -271,11 +271,11 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
     };
 
     toPublish.push(emitEvent("skill.invoked", { skillId, extensionPoint, durationMs }));
-    toPublish.push(emitEvent("goal.created", { title, description }));
+    toPublish.push(emitEvent("goal.created", { title, intent }));
     stmts.insertGoal.run(
       goalId,
       title,
-      description,
+      intent,
       validatedOrchestratorModel?.providerId ?? null,
       validatedOrchestratorModel?.modelId ?? null,
       operatingMode,
@@ -357,7 +357,7 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
   return {
     id: goalId,
     title,
-    description,
+    intent,
     status: "active",
     autonomyLevel: 1,
     orchestratorProvider: validatedOrchestratorModel?.providerId ?? null,
@@ -398,7 +398,7 @@ export function updateGoal(id: string, input: unknown): Goal {
 
     stmts.updateGoal.run(
       patch.title ?? null,
-      patch.description ?? null,
+      patch.intent ?? null,
       now,
       id
     );

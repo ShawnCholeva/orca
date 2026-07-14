@@ -246,13 +246,13 @@ describe('server routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'first', description: 'desc' }
+      payload: { title: 'first', intent: 'desc' }
     });
 
     expect(response.statusCode).toBe(201);
     const body = CreateGoalResponse.parse(JSON.parse(response.body));
     expect(body.goal.title).toBe('first');
-    expect(body.goal.description).toBe('desc');
+    expect(body.goal.intent).toBe('desc');
     expect(body.goal.status).toBe('active');
   });
 
@@ -263,6 +263,7 @@ describe('server routes', () => {
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: {
         title: 'with-orchestrator',
+        intent: 'test intent',
         orchestratorModel: {
           providerId: 'orca/openai',
           modelId: 'gpt-5',
@@ -283,6 +284,7 @@ describe('server routes', () => {
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: {
         title: 'with-codex-model',
+        intent: 'test intent',
         orchestratorModel: {
           providerId: 'orca/openai',
           modelId: 'gpt-5.5',
@@ -319,7 +321,7 @@ describe('server routes', () => {
             method: 'POST',
             url: '/v1/goals',
             headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-            payload: { title: 'orig' }
+            payload: { title: 'orig', intent: 'test intent' }
           })
         ).body
       )
@@ -356,7 +358,7 @@ describe('server routes', () => {
             method: 'POST',
             url: '/v1/goals',
             headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-            payload: { title: 'orchestrator-target' },
+            payload: { title: 'orchestrator-target', intent: 'test intent' },
           })
         ).body
       )
@@ -384,7 +386,7 @@ describe('server routes', () => {
             method: 'POST',
             url: '/v1/goals',
             headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-            payload: { title: 'orchestrator-target-2' },
+            payload: { title: 'orchestrator-target-2', intent: 'test intent' },
           })
         ).body
       )
@@ -410,7 +412,7 @@ describe('server routes', () => {
             method: 'POST',
             url: '/v1/goals',
             headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-            payload: { title: 'orig' }
+            payload: { title: 'orig', intent: 'test intent' }
           })
         ).body
       )
@@ -433,7 +435,7 @@ describe('server routes', () => {
             method: 'POST',
             url: '/v1/goals',
             headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-            payload: { title: 'to-archive' }
+            payload: { title: 'to-archive', intent: 'test intent' }
           })
         ).body
       )
@@ -602,7 +604,7 @@ describe('server routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'operators', description: '' },
+      payload: { title: 'operators', intent: 'test intent' },
     });
     expect(created.statusCode).toBe(201);
 
@@ -638,7 +640,7 @@ describe('server routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'second' }
+      payload: { title: 'second', intent: 'test intent' }
     });
     expect(postResponse.statusCode).toBe(201);
     const created = CreateGoalResponse.parse(JSON.parse(postResponse.body));
@@ -664,7 +666,7 @@ describe('server routes', () => {
             method: 'POST',
             url: '/v1/goals',
             headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-            payload: { title: 'will-archive' }
+            payload: { title: 'will-archive', intent: 'test intent' }
           })
         ).body
       )
@@ -792,6 +794,7 @@ describe('server orchestrator bootstrap routing', () => {
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
         payload: {
           title: 'antigravity-bootstrap',
+          intent: 'test intent',
           workflowTemplateId: 'orca/engineering',
           orchestratorModel: {
             providerId: 'orca/google',
@@ -975,7 +978,7 @@ describe('WebSocket /v1/events', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'ws-goal' }
+      payload: { title: 'ws-goal', intent: 'test intent' }
     });
 
     const event = await Promise.race([
@@ -1002,7 +1005,7 @@ describe('WebSocket /v1/events', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'after-close' }
+      payload: { title: 'after-close', intent: 'test intent' }
     });
 
     // Allow any in-flight async to settle before asserting
@@ -1051,7 +1054,7 @@ describe('GET /v1/events (replay)', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title }
+      payload: { title, intent: 'test intent' }
     });
     expect(res.statusCode).toBe(201);
   }
@@ -1140,7 +1143,7 @@ describe('goal refinement and workspace routes', () => {
   const DRAFT = {
     skillId: 'guided-goal-refinement' as const,
     title: 'My Goal',
-    description: 'A description',
+    intent: 'A description',
     successCriteria: ['Success 1'],
     constraints: ['Constraint 1'],
     assumptions: ['Assumption 1']
@@ -1174,7 +1177,7 @@ describe('goal refinement and workspace routes', () => {
       method: 'POST',
       url: '/v1/goals/refine',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'My Goal', description: 'Goals:\n- ship it\nConstraints:\n- no budget' }
+      payload: { title: 'My Goal', intent: 'Goals:\n- ship it\nConstraints:\n- no budget' }
     });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body) as { draft: { skillId: string; title: string; successCriteria: string[] } };
@@ -1214,7 +1217,7 @@ describe('goal refinement and workspace routes', () => {
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: {
         title: DRAFT.title,
-        description: DRAFT.description,
+        intent: DRAFT.intent,
         refined: DRAFT,
         workspaces: [{ inputPath: wsDir }, { inputPath: wsDir2 }]
       }
@@ -1242,6 +1245,7 @@ describe('goal refinement and workspace routes', () => {
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: {
         title: 'g',
+        intent: 'test intent',
         refined: DRAFT,
         workspaces: [{ inputPath: '/this/does/not/exist/ever/goal-workspace' }]
       }
@@ -1261,6 +1265,7 @@ describe('goal refinement and workspace routes', () => {
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
       payload: {
         title: 'g',
+        intent: 'test intent',
         refined: DRAFT,
         workspaces: [{ inputPath: wsDir }, { inputPath: wsDir }]
       }
@@ -1285,7 +1290,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'to-archive' }
+        payload: { title: 'to-archive', intent: 'test intent' }
       })).body
     ));
     await server.inject({ method: 'POST', url: `/v1/goals/${created.goal.id}/archive`, headers: AUTH_HEADERS });
@@ -1301,7 +1306,7 @@ describe('goal refinement and workspace routes', () => {
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
         payload: {
           title: DRAFT.title,
-          description: DRAFT.description,
+          intent: DRAFT.intent,
           refined: DRAFT,
           workspaces: [{ inputPath: wsDir }, { inputPath: wsDir2 }]
         }
@@ -1327,7 +1332,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'quick', description: 'no refine' }
+        payload: { title: 'quick', intent: 'no refine' }
       })).body
     ));
 
@@ -1349,7 +1354,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'ws-goal' }
+        payload: { title: 'ws-goal', intent: 'test intent' }
       })).body
     ));
 
@@ -1370,7 +1375,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'ws-goal' }
+        payload: { title: 'ws-goal', intent: 'test intent' }
       })).body
     ));
 
@@ -1414,7 +1419,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'ws-goal' }
+        payload: { title: 'ws-goal', intent: 'test intent' }
       })).body
     ));
     const attached = JSON.parse(
@@ -1436,10 +1441,10 @@ describe('goal refinement and workspace routes', () => {
 
   it('DELETE /v1/goals/:id/workspaces/:workspaceId returns 404 for mismatched goal/workspace ids', async () => {
     const goal1 = CreateGoalResponse.parse(JSON.parse(
-      (await server.inject({ method: 'POST', url: '/v1/goals', headers: { 'content-type': 'application/json', ...AUTH_HEADERS }, payload: { title: 'g1' } })).body
+      (await server.inject({ method: 'POST', url: '/v1/goals', headers: { 'content-type': 'application/json', ...AUTH_HEADERS }, payload: { title: 'g1', intent: 'test intent' } })).body
     ));
     const goal2 = CreateGoalResponse.parse(JSON.parse(
-      (await server.inject({ method: 'POST', url: '/v1/goals', headers: { 'content-type': 'application/json', ...AUTH_HEADERS }, payload: { title: 'g2' } })).body
+      (await server.inject({ method: 'POST', url: '/v1/goals', headers: { 'content-type': 'application/json', ...AUTH_HEADERS }, payload: { title: 'g2', intent: 'test intent' } })).body
     ));
     const attached = JSON.parse(
       (await server.inject({
@@ -1585,7 +1590,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'ws-goal', workspaces: [{ inputPath: wsDir }] }
+        payload: { title: 'ws-goal', intent: 'test intent', workspaces: [{ inputPath: wsDir }] }
       })).body
     ));
 
@@ -1628,7 +1633,7 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'session-goal' }
+      payload: { title: 'session-goal', intent: 'test intent' }
     });
     goalId = (CreateGoalResponse.parse(JSON.parse(goalRes.body))).goal.id;
 
@@ -1858,7 +1863,7 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'Test Goal' },
+      payload: { title: 'Test Goal', intent: 'test intent' },
     });
     return (CreateGoalResponse.parse(JSON.parse(res.body))).goal.id;
   }
@@ -2285,7 +2290,7 @@ describe('session summary and extract-memory routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'memory-routes-goal' },
+      payload: { title: 'memory-routes-goal', intent: 'test intent' },
     });
     goalId = CreateGoalResponse.parse(JSON.parse(goalRes.body)).goal.id;
 
@@ -2657,7 +2662,7 @@ describe('GET/PUT /v1/settings', () => {
     seedEngineeringTemplate(db, () => now);
     // Seed a human_review goal with a run parked at a confirmation checkpoint.
     db.prepare(
-      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model, operating_mode) VALUES ('goal-hr', 'HR Goal', 'desc', 'active', 1, ?, ?, NULL, NULL, NULL, 'human_review')"
+      "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model, operating_mode) VALUES ('goal-hr', 'HR Goal', 'desc', 'active', 1, ?, ?, NULL, NULL, NULL, 'human_review')"
     ).run(now, now);
     db.prepare(
       "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-hr', 'goal-hr', 'orca/engineering', 1, 'active', 'step-hr', NULL, ?, NULL)"
@@ -2721,7 +2726,7 @@ describe('POST /v1/workflows/runs/:id/provider-recovery/*', () => {
 
   function seedRecoveryRun(db: ReturnType<typeof openDatabase>, mode: 'choose' | 'waiting'): void {
     db.prepare(
-      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES ('goal-1', 'Goal', 'desc', 'active', 1, ?, ?, NULL)"
+      "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at) VALUES ('goal-1', 'Goal', 'desc', 'active', 1, ?, ?, NULL)"
     ).run(NOW, NOW);
     db.prepare(
       `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`

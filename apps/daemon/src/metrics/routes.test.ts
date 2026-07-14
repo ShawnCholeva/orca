@@ -26,7 +26,7 @@ function openTestDb(): Database.Database {
 function seed(db: Database.Database) {
   const recent = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1h ago
   const recentEnd = new Date(Date.now() - 30 * 60 * 1000).toISOString(); // 30m ago
-  db.prepare(`INSERT INTO goals (id,title,description,status,autonomy_level,created_at,updated_at,archived_at)
+  db.prepare(`INSERT INTO goals (id,title,intent,status,autonomy_level,created_at,updated_at,archived_at)
               VALUES ('g','G','','active',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL)`).run();
   db.prepare(`INSERT INTO workflow_templates (id,name,description,version,is_built_in,is_locked,steps_json,guardrails_json,created_at,updated_at)
               VALUES ('tpl','Brainstorm','',1,1,0,'[{"id":"define-intent","name":"Define Intent"}]','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')`).run();

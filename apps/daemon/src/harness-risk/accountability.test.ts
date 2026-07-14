@@ -16,7 +16,7 @@ function createConfig(d: string): Config {
     hookResolverCommand: ["node","t.js"], getAuthToken: () => "t" };
 }
 function openTestDb(): Database.Database { const dir = mkdtempSync(path.join(os.tmpdir(), "orca-acct-")); tempDirs.push(dir); const db = openDatabase(createConfig(dir)); runMigrations(db, defaultMigrationsDir()); return db; }
-function seedGoal(db: Database.Database) { const now = "2026-01-01T00:00:00.000Z"; db.prepare(`INSERT INTO goals (id,title,description,status,autonomy_level,created_at,updated_at,archived_at) VALUES ('g','x','','active',1,?,?,NULL)`).run(now, now); }
+function seedGoal(db: Database.Database) { const now = "2026-01-01T00:00:00.000Z"; db.prepare(`INSERT INTO goals (id,title,intent,status,autonomy_level,created_at,updated_at,archived_at) VALUES ('g','x','','active',1,?,?,NULL)`).run(now, now); }
 let db: Database.Database; let bus: EventBus;
 beforeEach(() => { db = openTestDb(); bus = new EventBus(); seedGoal(db); });
 afterEach(() => { closeDatabase(); resetPreparedStatements(); for (const d of tempDirs.splice(0)) rmSync(d, { recursive: true, force: true }); });

@@ -137,7 +137,7 @@ function seedAdaptiveRunAtValidation(db: Database.Database, bus: EventBus): void
   installBuiltInTemplates({ db, bus }, ["orca/adaptive-delivery"]);
 
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('goal-fd', 'FD Goal', 'Feature goal', 'active', 1, ?, ?, NULL, 'orca/anthropic', 'claude-sonnet-4-6')"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('goal-fd', 'FD Goal', 'Feature goal', 'active', 1, ?, ?, NULL, 'orca/anthropic', 'claude-sonnet-4-6')"
   ).run(NOW, NOW);
 
   db.prepare(
@@ -177,7 +177,7 @@ function seedAdaptiveRunAtDone(db: Database.Database, bus: EventBus): void {
   installBuiltInTemplates({ db, bus }, ["orca/adaptive-delivery"]);
 
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('goal-fd', 'FD Goal', 'Feature goal', 'active', 1, ?, ?, NULL, 'orca/anthropic', 'claude-sonnet-4-6')"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('goal-fd', 'FD Goal', 'Feature goal', 'active', 1, ?, ?, NULL, 'orca/anthropic', 'claude-sonnet-4-6')"
   ).run(NOW, NOW);
 
   db.prepare(

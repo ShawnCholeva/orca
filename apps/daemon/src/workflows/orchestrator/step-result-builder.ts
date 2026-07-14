@@ -191,7 +191,7 @@ export async function scoreCompletedStepResult(
         stepRunId: ctx.stepRun.id,
         providerId: ctx.goal.orchestrator_provider,
         modelId: ctx.goal.orchestrator_model,
-        goal: { id: ctx.goal.id, description: ctx.goal.description },
+        goal: { id: ctx.goal.id, description: ctx.goal.intent },
         step: {
           id: ctx.stepRun.id,
           templateId: ctx.stepTpl.id,

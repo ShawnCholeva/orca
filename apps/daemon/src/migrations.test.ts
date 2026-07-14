@@ -184,6 +184,7 @@ describe("runMigrations", () => {
       "0056_learning_events.sql",
       "0057_template_catalog_version.sql",
       "0058_goal_documents.sql",
+      "0059_goal_intent_rename.sql",
     ]);
   });
 
@@ -334,6 +335,7 @@ describe("runMigrations", () => {
       "0056_learning_events.sql",
       "0057_template_catalog_version.sql",
       "0058_goal_documents.sql",
+      "0059_goal_intent_rename.sql",
     ]);
 
     const goalCount = (
@@ -421,7 +423,7 @@ describe("runMigrations", () => {
     );
 
     db.prepare(
-      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
       "g1",
       "t",
@@ -519,7 +521,7 @@ describe("runMigrations", () => {
 describe("session tables migration", () => {
   function seedGoal(db: ReturnType<typeof freshDb>, id: string) {
     db.prepare(
-      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(id, "Test Goal", "", "active", 1, "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z", null);
   }
 
@@ -637,6 +639,7 @@ describe("session tables migration", () => {
       "0056_learning_events.sql",
       "0057_template_catalog_version.sql",
       "0058_goal_documents.sql",
+      "0059_goal_intent_rename.sql",
     ]);
 
     const tables = (
@@ -707,7 +710,7 @@ describe("session tables migration", () => {
 describe("memory tables migration", () => {
   function seedGoal(db: ReturnType<typeof freshDb>, id: string) {
     db.prepare(
-      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(id, "Memory Goal", "", "active", 1, "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z", null);
   }
 
@@ -1173,6 +1176,7 @@ describe("migration 0010 workflows", () => {
       "0056_learning_events.sql",
       "0057_template_catalog_version.sql",
       "0058_goal_documents.sql",
+      "0059_goal_intent_rename.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1223,7 +1227,7 @@ describe("migration 0010 workflows", () => {
     runMigrations(db, defaultMigrationsDir());
 
     db.prepare(
-      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES ('goal-1', 'Goal', 'desc', 'active', 1, ?, ?, NULL)"
+      "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at) VALUES ('goal-1', 'Goal', 'desc', 'active', 1, ?, ?, NULL)"
     ).run("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
 
     db.prepare(
@@ -1292,7 +1296,7 @@ describe("migration 0021 workflow_template scope and graph", () => {
 describe("migration 0012 orchestration transport", () => {
   function seedGoal(db: ReturnType<typeof freshDb>, id: string) {
     db.prepare(
-      "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(id, "Transport Goal", "", "active", 1, "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z", null);
   }
 
@@ -1786,6 +1790,7 @@ describe("migration 0012 orchestration transport", () => {
       "0056_learning_events.sql",
       "0057_template_catalog_version.sql",
       "0058_goal_documents.sql",
+      "0059_goal_intent_rename.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1847,5 +1852,24 @@ describe("migration 0036 workspaces first class", () => {
     const cols = db.prepare("PRAGMA table_info(workspaces)").all() as { name: string }[];
     expect(cols.map((c) => c.name)).toEqual(
       ["id","path","name","description","created_at","updated_at"]);
+  });
+});
+
+describe("migration 0059 goal intent rename", () => {
+  it("0059 renames goals.description to intent and preserves values", () => {
+    const db = freshDb();
+    applyMigrationsUpTo(db, "0059_goal_intent_rename.sql");
+    db.prepare(
+      "INSERT INTO goals (id, title, description, status, autonomy_level, worker_permission_mode, operating_mode, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, 'ask', 'human_review', ?, ?)",
+    ).run("g1", "T", "keep me", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+
+    const sql = readFileSync(path.join(defaultMigrationsDir(), "0059_goal_intent_rename.sql"), "utf-8");
+    db.exec(sql);
+
+    const cols = (db.prepare("PRAGMA table_info(goals)").all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toContain("intent");
+    expect(cols).not.toContain("description");
+    const row = db.prepare("SELECT intent FROM goals WHERE id = 'g1'").get() as { intent: string };
+    expect(row.intent).toBe("keep me");
   });
 });

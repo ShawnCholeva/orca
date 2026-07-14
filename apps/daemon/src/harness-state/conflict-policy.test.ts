@@ -43,7 +43,7 @@ const NOW = "2026-06-26T00:00:00.000Z";
 
 function seedGoal(db: Database.Database, id: string, mode: "human_review" | "automated"): void {
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, operating_mode, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'G', 'd', 'active', 1, ?, ?, ?, NULL, NULL, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, operating_mode, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES (?, 'G', 'd', 'active', 1, ?, ?, ?, NULL, NULL, NULL)"
   ).run(id, mode, NOW, NOW);
 }
 

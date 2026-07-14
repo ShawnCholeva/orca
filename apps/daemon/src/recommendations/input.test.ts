@@ -40,14 +40,14 @@ function freshDb(): Database.Database {
 
 async function seedGoal(
   db: Database.Database,
-  description = 'Build an authentication system'
+  intent = 'Build an authentication system'
 ): Promise<string> {
   const bus = new EventBus();
   const skills = new SkillRegistry();
   skills.register(quickGoalSkill);
   const inspectWorkspace = () => Promise.reject(new Error('not expected'));
   const goal = await createGoal(
-    { title: 'Test Goal', description },
+    { title: 'Test Goal', intent },
     { db, bus, skills, modelProviderRegistry: new ModelProviderRegistry(), inspectWorkspace }
   );
   return goal.id;

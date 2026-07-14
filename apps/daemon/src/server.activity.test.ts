@@ -60,7 +60,7 @@ function seedLiveWorkflowSession(
 ): void {
   db.prepare(
     `INSERT INTO goals
-       (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+       (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
      VALUES (?, 'Activity goal', '', 'active', 1, ?, ?, NULL)`
   ).run(ids.goalId, NOW, NOW);
   seedEngineeringTemplate(db, () => NOW);
@@ -897,7 +897,7 @@ describe("daemon activity integration", () => {
     seedLiveWorkflowSession(db, ids);
     db.prepare(
       `INSERT INTO goals
-         (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+         (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
        VALUES ('goal-other', 'Other goal', '', 'active', 1, ?, ?, NULL)`
     ).run(NOW, NOW);
     db.prepare("UPDATE sessions SET goal_id = 'goal-other' WHERE id = ?").run(

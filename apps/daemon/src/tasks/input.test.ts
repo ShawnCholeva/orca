@@ -48,10 +48,10 @@ function ctx(db: Database.Database): TaskCtx {
   };
 }
 
-async function seedGoal(db: Database.Database, description = ''): Promise<string> {
+async function seedGoal(db: Database.Database, intent = ''): Promise<string> {
   const bus = new EventBus();
   const goal = await createGoal(
-    { title: 'Goal', description },
+    { title: 'Goal', intent },
     {
       db,
       bus,
@@ -59,7 +59,7 @@ async function seedGoal(db: Database.Database, description = ''): Promise<string
         byId: () => ({
           id: 'quick-goal',
           extensionPoint: 'goal.refine',
-          invoke: () => ({ title: 'Goal', description }),
+          invoke: () => ({ title: 'Goal', intent }),
         }),
       } as never,
       modelProviderRegistry: new ModelProviderRegistry(),

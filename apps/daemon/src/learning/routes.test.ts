@@ -31,7 +31,7 @@ function openTestDb(): Database.Database {
 function seed(db: Database.Database) {
   // Anchor 7 days ago so harness_transitions are always inside the 30d analysis window.
   const anchorDay = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
-  db.prepare(`INSERT INTO goals (id,title,description,status,autonomy_level,created_at,updated_at,archived_at)
+  db.prepare(`INSERT INTO goals (id,title,intent,status,autonomy_level,created_at,updated_at,archived_at)
               VALUES ('g','G','','active',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL)`).run();
   // B resolves provider/model from the anchor run's goal — set them.
   db.prepare(`UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-opus-4-8' WHERE id = 'g'`).run();

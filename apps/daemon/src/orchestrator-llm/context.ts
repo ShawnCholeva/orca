@@ -20,7 +20,7 @@ interface DocumentRef {
 }
 
 export interface OrchestratorContextInput {
-  goal: { id: string; title: string; description: string; attachedWorkspaces: WorkspaceRef[]; attachedDocuments: DocumentRef[] };
+  goal: { id: string; title: string; intent: string; attachedWorkspaces: WorkspaceRef[]; attachedDocuments: DocumentRef[] };
   run: { templateId: string; templateVersion: number; ordinal: number; status: WorkflowRunStatus };
   currentStep: {
     id: string;

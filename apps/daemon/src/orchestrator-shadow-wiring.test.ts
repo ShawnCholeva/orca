@@ -47,7 +47,7 @@ describe("shadow orchestrator wiring", () => {
     const mediator = new OrchestratorMediator({
       llm: new ShadowSessionLlmClient(mgr, { timeoutMs: 1000 }),
       buildContext: () => ({
-        goal: { id: "G1", title: "T", description: "D", attachedWorkspaces: [], attachedDocuments: [] },
+        goal: { id: "G1", title: "T", intent: "D", attachedWorkspaces: [], attachedDocuments: [] },
         workflowRun: { templateId: "", templateVersion: 0, ordinal: 0, status: "active" },
         currentStep: { id: "", instructions: "", outputSchema: [], agentAdapterId: "claude-code", executionMode: "shadow_session" },
         conversation: { chatMessages: [], currentStepAgentTurns: [] },

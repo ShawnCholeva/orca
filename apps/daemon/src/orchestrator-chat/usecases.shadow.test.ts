@@ -5,7 +5,7 @@ import { createOrchestratorMessage } from "./usecases.js";
 function setup() {
   const db = new Database(":memory:");
   db.exec(`
-    CREATE TABLE goals (id TEXT PRIMARY KEY, title TEXT, description TEXT,
+    CREATE TABLE goals (id TEXT PRIMARY KEY, title TEXT, intent TEXT,
       orchestrator_provider TEXT, orchestrator_model TEXT, active_workflow_run_id TEXT, archived_at TEXT);
     CREATE TABLE orchestrator_messages (id TEXT PRIMARY KEY, goal_id TEXT, role TEXT, kind TEXT,
       body TEXT, correlation_id TEXT, created_at TEXT, pending_question TEXT, pending_approval TEXT);

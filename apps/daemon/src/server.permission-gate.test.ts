@@ -28,7 +28,7 @@ function openTestDb(): Database.Database {
 }
 function seed(db: Database.Database, mode: string) {
   const now = "2026-01-01T00:00:00.000Z";
-  db.prepare(`INSERT INTO goals (id,title,description,status,autonomy_level,created_at,updated_at,archived_at,operating_mode) VALUES ('g','x','','active',1,?,?,NULL,?)`).run(now, now, mode);
+  db.prepare(`INSERT INTO goals (id,title,intent,status,autonomy_level,created_at,updated_at,archived_at,operating_mode) VALUES ('g','x','','active',1,?,?,NULL,?)`).run(now, now, mode);
   db.prepare(`INSERT INTO workspaces (id,path,name,description,created_at,updated_at) VALUES ('ws','/tmp/r','m','',?,?)`).run(now, now);
   db.prepare(`INSERT INTO sessions (id,goal_id,workspace_id,adapter_id,title,status,created_at) VALUES ('s','g','ws','claude-code','t','running',?)`).run(now);
 }
@@ -107,7 +107,7 @@ describe("resolvePermissionDecision", () => {
 describe("resolvePermissionDecision — stamps the workflow run/step id on tool_gate", () => {
   const t0 = "2026-01-01T00:00:00.000Z";
   function seedWorkflow(mode: string) {
-    db.prepare(`INSERT INTO goals (id,title,description,status,autonomy_level,created_at,updated_at,archived_at,operating_mode) VALUES ('g','x','','active',1,?,?,NULL,?)`).run(t0, t0, mode);
+    db.prepare(`INSERT INTO goals (id,title,intent,status,autonomy_level,created_at,updated_at,archived_at,operating_mode) VALUES ('g','x','','active',1,?,?,NULL,?)`).run(t0, t0, mode);
     db.prepare(`INSERT INTO workspaces (id,path,name,description,created_at,updated_at) VALUES ('ws','/tmp/r','m','',?,?)`).run(t0, t0);
     db.prepare(`INSERT INTO workflow_templates (id,name,created_at,updated_at) VALUES ('tpl','T',?,?)`).run(t0, t0);
     db.prepare(`INSERT INTO workflow_runs (id,goal_id,template_id,template_version,status,started_at) VALUES ('run1','g','tpl',1,'active',?)`).run(t0);

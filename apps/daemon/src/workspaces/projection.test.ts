@@ -13,7 +13,7 @@ function freshDb() {
 const ISO = "2026-06-19T00:00:00.000Z";
 
 function goal(db: Database.Database, id: string, status = "active") {
-  db.prepare("INSERT INTO goals (id,title,description,status,created_at,updated_at) VALUES (?,?,?,?,?,?)")
+  db.prepare("INSERT INTO goals (id,title,intent,status,created_at,updated_at) VALUES (?,?,?,?,?,?)")
     .run(id, id, "", status, ISO, ISO);
 }
 

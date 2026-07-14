@@ -40,7 +40,7 @@ export interface OrchestratorChatCtx {
 type GoalRow = {
   id: string;
   title: string;
-  description: string;
+  intent: string;
   orchestrator_provider: ModelProviderId | null;
   orchestrator_model: string | null;
   active_workflow_run_id: string | null;
@@ -130,7 +130,7 @@ export async function createOrchestratorMessage(
       'Return JSON: {"replyText":"..."}.',
       "Output protocol: wrap that JSON in a fenced ```orca:action block and emit nothing after the closing fence.",
     ].join("\n");
-    const usr = JSON.stringify({ goal: { id: goal.id, title: goal.title, description: goal.description }, userMessage: parsed.body });
+    const usr = JSON.stringify({ goal: { id: goal.id, title: goal.title, intent: goal.intent }, userMessage: parsed.body });
     void ctx.shadowAsk(goalId, {
       adapterId: toShadowAdapterId(goal.orchestrator_provider),
       systemPrompt: sys,
@@ -160,7 +160,7 @@ export async function createOrchestratorMessage(
       "Return only structured JSON matching OrchestratorGuidanceReply.",
     ].join("\n"),
     userPrompt: JSON.stringify({
-      goal: { id: goal.id, title: goal.title, description: goal.description },
+      goal: { id: goal.id, title: goal.title, intent: goal.intent },
       activeWorkflowRunId: goal.active_workflow_run_id,
       currentStep,
       userMessage: parsed.body,
@@ -191,7 +191,7 @@ function readGoal(db: Database.Database, goalId: string): GoalRow | null {
   return (
     (db
       .prepare(
-        `SELECT id, title, description, orchestrator_provider, orchestrator_model, active_workflow_run_id
+        `SELECT id, title, intent, orchestrator_provider, orchestrator_model, active_workflow_run_id
            FROM goals
           WHERE id = ?
             AND archived_at IS NULL`

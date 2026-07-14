@@ -15,7 +15,7 @@ beforeEach(() => {
   db = new Database(":memory:");
   runMigrations(db, MIG_DIR);
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at) VALUES ('g','G','','active',1,'2026-06-12T00:00:00.000Z','2026-06-12T00:00:00.000Z')"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at) VALUES ('g','G','','active',1,'2026-06-12T00:00:00.000Z','2026-06-12T00:00:00.000Z')"
   ).run();
   db.prepare(
     "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('t','T','',1,0,0,'[]','[]','2026-06-12T00:00:00.000Z','2026-06-12T00:00:00.000Z')"

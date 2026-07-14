@@ -6,7 +6,7 @@ const steps: WorkflowStepTemplate[] = [
   { id: "intake", ordinal: 0, name: "Intake", instructions: "i0", outputSchema: [{ key: "problem", type: "string", required: true }], agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] },
   { id: "research", ordinal: 1, name: "Research", instructions: "i1", outputSchema: [{ key: "summary", type: "string", required: true }], agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] },
 ];
-const goal = { id: "g", description: "make it scroll" };
+const goal = { id: "g", intent: "make it scroll" };
 
 function out(stepRunId: string, ordinalStepId: string, body: object): WorkflowArtifact {
   return {
@@ -22,7 +22,7 @@ describe("buildStepExecutionInput", () => {
     const env = buildStepExecutionInput({ goal, steps, currentStep: steps[0], artifacts: [], transcript: [], stepRunByStepId: {} });
     expect(env.previousStepOutput).toBeNull();
     expect(env.priorStepOutputs).toEqual([]);
-    expect(env.goal.description).toBe("make it scroll");
+    expect(env.goal.intent).toBe("make it scroll");
   });
   it("ordinal N exposes previous output + prior outputs", () => {
     const artifacts = [out("sr0", "intake", { problem: "p" })];

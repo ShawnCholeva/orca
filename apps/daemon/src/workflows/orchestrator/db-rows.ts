@@ -5,7 +5,7 @@ import { adapterIdForProvider } from "../../orchestrator-llm/model-provider-llm-
 export interface GoalRow {
   id: string;
   title: string;
-  description: string;
+  intent: string;
   orchestrator_provider: ModelProviderId | null;
   orchestrator_model: string | null;
 }
@@ -59,7 +59,7 @@ export function readStepRun(db: Database.Database, stepRunId: string | null): St
 export function readGoal(db: Database.Database, goalId: string): GoalRow {
   const row = db
     .prepare(
-      "SELECT id, title, description, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?",
+      "SELECT id, title, intent, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?",
     )
     .get(goalId) as GoalRow | undefined;
   if (!row) throw new OrchestratorGoalNotFoundError(goalId);

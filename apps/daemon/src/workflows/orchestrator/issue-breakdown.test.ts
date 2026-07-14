@@ -42,7 +42,7 @@ function freshDb(): Database.Database {
 
 function seedGoal(db: Database.Database, id: string): void {
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, 'Goal', '', 'active', 1, ?, ?, NULL)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at) VALUES (?, 'Goal', '', 'active', 1, ?, ?, NULL)"
   ).run(id, NOW, NOW);
 }
 

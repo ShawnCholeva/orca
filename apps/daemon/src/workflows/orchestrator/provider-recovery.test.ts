@@ -153,7 +153,7 @@ describe("buildProviderRecoveryChoices", () => {
 describe("composeProviderSwitchPrompt", () => {
   const BASE_INPUT = {
     goalTitle: "Build the feature",
-    goalDescription: "Implement the whole thing end-to-end.",
+    goalIntent: "Implement the whole thing end-to-end.",
     stepInstructions: "Write the code for the next step.",
     outputSchema: [] as [],
     priorStepArtifacts: [] as [],

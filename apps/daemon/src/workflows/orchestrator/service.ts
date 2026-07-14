@@ -143,7 +143,7 @@ function composeRecoveryScoringPrompt(
       goal: {
         id: input.goal.id,
         title: input.goal.title,
-        description: input.goal.description,
+        intent: input.goal.intent,
       },
       step: {
         id: input.stepTpl.id,
@@ -357,7 +357,7 @@ export class OrchestratorService {
     const transcript = reconstructTranscript(artifacts.filter((a) => a.stepRunId === stepRun.id));
     const stepRunByStepId = stepRunIdsByTemplateId(db, run.id);
     const stepInput = buildStepExecutionInput({
-      goal: { id: goal.id, description: goal.description },
+      goal: { id: goal.id, intent: goal.intent },
       steps: template.steps,
       currentStep: stepTpl,
       artifacts,
@@ -1535,7 +1535,7 @@ export class OrchestratorService {
 
     const parsedRequest = RefuteCompletionRequest.safeParse({
       step: { name: ctx.stepTpl.name, instructions: ctx.stepTpl.instructions ?? "" },
-      goal: { id: goal.id, description: goal.description },
+      goal: { id: goal.id, description: goal.intent },
       stepOutput: isRecord(block) ? block : null,
       selfReportedScoring: isRecord(scoring) ? scoring : null,
       // `oracle.ran` means an EXECUTION oracle ran — grounding-only evidence
@@ -1762,7 +1762,7 @@ export class OrchestratorService {
     if (!stepTpl) return;
     const goal = db
       .prepare(
-        "SELECT id, title, description, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?"
+        "SELECT id, title, intent, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?"
       )
       .get(run.goalId) as GoalRow | undefined;
     if (!goal) return;
@@ -1912,7 +1912,7 @@ export class OrchestratorService {
     if (!stepTpl) return;
     const goal = db
       .prepare(
-        "SELECT id, title, description, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?"
+        "SELECT id, title, intent, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?"
       )
       .get(run.goalId) as GoalRow | undefined;
     if (!goal) return;

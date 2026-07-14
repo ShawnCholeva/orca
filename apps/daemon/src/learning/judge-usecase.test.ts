@@ -30,7 +30,7 @@ const passedEvidence = { sensorsRun: [], verdict: "passed", untestedRegions: [],
 const refutedRefute = { verdict: "refuted", triggered_by: ["no_oracle"], risk_class: "low", reason: "bad", issue_refs: ["x"] };
 
 function seedGoalAndRun(db: Database.Database) {
-  db.prepare(`INSERT INTO goals (id,title,description,status,autonomy_level,created_at,updated_at,archived_at)
+  db.prepare(`INSERT INTO goals (id,title,intent,status,autonomy_level,created_at,updated_at,archived_at)
               VALUES ('g1','G','','active',1,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',NULL)`).run();
   db.prepare(`UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-opus-4-8' WHERE id = 'g1'`).run();
   db.prepare(`INSERT INTO workflow_templates (id,name,description,version,is_built_in,is_locked,steps_json,guardrails_json,created_at,updated_at)

@@ -40,7 +40,7 @@ function seed() {
   db.prepare(`INSERT INTO workflow_templates (id, name, steps_json, guardrails_json, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
     .run("tpl", "Test Template", "[]", "[]", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
   // goal
-  db.prepare(`INSERT INTO goals (id, title, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
+  db.prepare(`INSERT INTO goals (id, title, intent, status, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
     .run("g", "Goal", "desc", "active", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
   // workflow_runs: r1+r2 use 'delegating' (outside the unique-active-per-goal index), r3 is 'active'
   db.prepare(`INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, started_at) VALUES (?,?,?,?,?,?)`)
@@ -71,7 +71,7 @@ describe("composition store", () => {
   describe("listCompositionsForGoal", () => {
     it("returns compositions for a goal in created_at ASC order", () => {
       // Seed goal g2 for cross-goal test
-      db.prepare(`INSERT INTO goals (id, title, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
+      db.prepare(`INSERT INTO goals (id, title, intent, status, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
         .run("g2", "Goal2", "desc", "active", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
       // Seed runs for goal g2 to avoid FK constraint
       db.prepare(`INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, started_at) VALUES (?,?,?,?,?,?)`)
@@ -93,7 +93,7 @@ describe("composition store", () => {
     });
     it("returns empty array for goal with no compositions", () => {
       // Seed another goal with no compositions
-      db.prepare(`INSERT INTO goals (id, title, description, status, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
+      db.prepare(`INSERT INTO goals (id, title, intent, status, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
         .run("g_empty", "GoalEmpty", "desc", "active", "2026-07-01T00:00:00.000Z", "2026-07-01T00:00:00.000Z");
 
       const result = listCompositionsForGoal(db, "g_empty");

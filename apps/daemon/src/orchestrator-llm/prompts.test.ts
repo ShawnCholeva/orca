@@ -6,7 +6,7 @@ describe("composeAgentInitialPrompt", () => {
   it("includes the goal, step instructions, outputSchema, and orca-output convention", () => {
     const out = composeAgentInitialPrompt({
       goalTitle: "Add dark mode",
-      goalDescription: "Users want a dark theme toggle in settings.",
+      goalIntent: "Users want a dark theme toggle in settings.",
       stepInstructions: "Interview the user.",
       outputSchema: [{ key: "problem", type: "string", required: true }],
       priorStepArtifacts: [],
@@ -21,7 +21,7 @@ describe("composeAgentInitialPrompt", () => {
   it("includes bounded prior step artifacts", () => {
     const out = composeAgentInitialPrompt({
       goalTitle: "G",
-      goalDescription: "D",
+      goalIntent: "D",
       stepInstructions: "Research.",
       outputSchema: [],
       priorStepArtifacts: [{ stepId: "intake", outputJson: { problem: "P", success_outcome: "O" } }],
@@ -33,7 +33,7 @@ describe("composeAgentInitialPrompt", () => {
   it("handles an empty goal description without a dangling header", () => {
     const out = composeAgentInitialPrompt({
       goalTitle: "Just a title",
-      goalDescription: "",
+      goalIntent: "",
       stepInstructions: "Do it.",
       outputSchema: [],
       priorStepArtifacts: [],
@@ -44,7 +44,7 @@ describe("composeAgentInitialPrompt", () => {
   it("renders a Workspaces section when workspaces are provided", () => {
     const prompt = composeAgentInitialPrompt({
       goalTitle: "G",
-      goalDescription: "",
+      goalIntent: "",
       stepInstructions: "do it",
       outputSchema: [{ key: "summary", type: "string", required: true }],
       priorStepArtifacts: [],
@@ -58,7 +58,7 @@ describe("composeAgentInitialPrompt", () => {
   it("omits the Workspaces section when none are provided", () => {
     const prompt = composeAgentInitialPrompt({
       goalTitle: "G",
-      goalDescription: "",
+      goalIntent: "",
       stepInstructions: "do it",
       outputSchema: [{ key: "summary", type: "string", required: true }],
       priorStepArtifacts: [],
@@ -68,7 +68,7 @@ describe("composeAgentInitialPrompt", () => {
 
   const baseInput = {
     goalTitle: "G",
-    goalDescription: "",
+    goalIntent: "",
     stepInstructions: "do it",
     outputSchema: [{ key: "summary", type: "string", required: true }] as const,
     priorStepArtifacts: [],
@@ -170,7 +170,7 @@ describe("composeOrchestratorPrompt", () => {
     const p = composeOrchestratorPrompt({
       triggerKind: "user_message",
       context: {
-        goal: { id: "G1", title: "T", description: "D", attachedWorkspaces: [], attachedDocuments: [] },
+        goal: { id: "G1", title: "T", intent: "D", attachedWorkspaces: [], attachedDocuments: [] },
         workflowRun: { templateId: "", templateVersion: 0, ordinal: 0, status: "active" },
         currentStep: { id: "", instructions: "", outputSchema: [], agentAdapterId: "claude-code", executionMode: "shadow_session" },
         conversation: { chatMessages: [], currentStepAgentTurns: [] },
@@ -185,7 +185,7 @@ describe("composeOrchestratorPrompt", () => {
     const p = composeOrchestratorPrompt({
       triggerKind: "user_message",
       context: {
-        goal: { id: "G1", title: "T", description: "D", attachedWorkspaces: [], attachedDocuments: [] },
+        goal: { id: "G1", title: "T", intent: "D", attachedWorkspaces: [], attachedDocuments: [] },
         workflowRun: { templateId: "", templateVersion: 0, ordinal: 0, status: "active" },
         currentStep: { id: "intake", instructions: "", outputSchema: [], agentAdapterId: "codex", executionMode: "shadow_session" },
         conversation: { chatMessages: [], currentStepAgentTurns: [] },
@@ -242,7 +242,7 @@ describe("composeOrchestratorPrompt", () => {
     const { userPrompt } = composeOrchestratorPrompt({
       triggerKind: "agent_response",
       context: {
-        goal: { id: "G1", title: "T", description: "D", attachedWorkspaces: [], attachedDocuments: [] },
+        goal: { id: "G1", title: "T", intent: "D", attachedWorkspaces: [], attachedDocuments: [] },
         workflowRun: { templateId: "tmpl", templateVersion: 1, ordinal: 7, status: "active" },
         currentStep: { id: "triage", instructions: "do the thing", outputSchema: [], agentAdapterId: "codex", executionMode: "shadow_session" },
         conversation: { chatMessages: [], currentStepAgentTurns: [] },

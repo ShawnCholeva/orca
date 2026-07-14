@@ -4,7 +4,7 @@ import { SENTINEL_INSTRUCTION } from "./sentinel.js";
 
 export interface AgentInitialPromptInput {
   goalTitle: string;
-  goalDescription: string;
+  goalIntent: string;
   stepInstructions: string;
   outputSchema: WorkflowStepOutputSchema;
   priorStepArtifacts: Array<{ stepId: string; outputJson: unknown }>;
@@ -51,7 +51,7 @@ export function composeAgentInitialPrompt(input: AgentInitialPromptInput): strin
     ? "(no prior step outputs)"
     : input.priorStepArtifacts.map((a) => `## prior step: ${a.stepId}\n${JSON.stringify(a.outputJson, null, 2)}`).join("\n\n");
 
-  const goalDescription = input.goalDescription.trim();
+  const goalIntent = input.goalIntent.trim();
   const repair = input.repairContext;
   const repairSection = repair
     ? [
@@ -69,7 +69,7 @@ export function composeAgentInitialPrompt(input: AgentInitialPromptInput): strin
   return [
     "# Goal",
     input.goalTitle,
-    ...(goalDescription ? ["", goalDescription] : []),
+    ...(goalIntent ? ["", goalIntent] : []),
     ...repairSection,
     ...workspaceBlock,
     ...documentBlock,

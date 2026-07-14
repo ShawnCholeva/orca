@@ -4,7 +4,7 @@ import { buildContextFromDb } from "./build-context.js";
 
 function seed(db: Database.Database) {
   db.exec(`
-    CREATE TABLE goals (id TEXT, title TEXT, description TEXT);
+    CREATE TABLE goals (id TEXT, title TEXT, intent TEXT);
     CREATE TABLE orchestrator_messages (id TEXT, goal_id TEXT, role TEXT, kind TEXT, body TEXT, created_at TEXT);
     CREATE TABLE workspaces (id TEXT, path TEXT, name TEXT, description TEXT, created_at TEXT, updated_at TEXT);
     CREATE TABLE goal_workspaces (goal_id TEXT, workspace_id TEXT, attached_at TEXT);

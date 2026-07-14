@@ -148,7 +148,7 @@ export interface BuildRecommendationInputParams {
 interface GoalDbRow {
   id: string;
   title: string;
-  description: string;
+  intent: string;
   archived_at: string | null;
 }
 
@@ -188,7 +188,7 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
   if (db !== _db) {
     _db = db;
     _stmts = {
-      getGoal: db.prepare('SELECT id, title, description, archived_at FROM goals WHERE id = ?'),
+      getGoal: db.prepare('SELECT id, title, intent, archived_at FROM goals WHERE id = ?'),
       listSessions: db.prepare(
         'SELECT id, workspace_id, task_id, status, role, adapter_id, exited_at FROM sessions WHERE goal_id = ? ORDER BY created_at DESC LIMIT 100'
       ),
@@ -402,7 +402,7 @@ export function buildRecommendationInput(
 
   return {
     goalId,
-    objective: goalRow.description.trim(),
+    objective: goalRow.intent.trim(),
     refinement,
     workspaces,
     tasks,

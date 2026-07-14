@@ -42,7 +42,7 @@ const STEP_RESULT_JSON = JSON.stringify({
 
 function seedData(db: Database.Database) {
   db.prepare(
-    `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+    `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
      VALUES ('g1', 'Goal', '', 'active', 1, '2026-06-09', '2026-06-09', NULL)`
   ).run();
   db.prepare(
@@ -165,7 +165,7 @@ describe("enrichConfirmationSummary", () => {
     db = new Database(":memory:");
     runMigrations(db, defaultMigrationsDir());
     db.prepare(
-      `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+      `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
        VALUES ('g1', 'Goal', '', 'active', 1, '2026-06-09', '2026-06-09', NULL)`
     ).run();
     db.prepare(
@@ -348,7 +348,7 @@ describe("step_result confirmed-frame enrichment", () => {
     db = new Database(":memory:");
     runMigrations(db, defaultMigrationsDir());
     db.prepare(
-      `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+      `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
        VALUES ('g1', 'Goal', '', 'active', 1, '2026-06-21', '2026-06-21', NULL)`
     ).run();
     db.prepare(
@@ -484,7 +484,7 @@ describe("mark_done_pending recommendationId projection", () => {
     db = new Database(":memory:");
     runMigrations(db, defaultMigrationsDir());
     db.prepare(
-      `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+      `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
        VALUES ('g1', 'Goal', '', 'active', 1, '2026-06-27', '2026-06-27', NULL)`
     ).run();
   });

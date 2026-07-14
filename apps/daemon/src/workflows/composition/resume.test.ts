@@ -111,7 +111,7 @@ function seedFixtures(childRunStatus: "active" | "failed" = "active"): void {
   ).run("child-tpl", "Child Tpl", "desc", 1, CHILD_STEPS_JSON, "[]", NOW, NOW);
 
   db.prepare(
-    `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+    `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
      VALUES (?, 'G', '', 'active', 1, ?, ?, NULL)`
   ).run("g1", NOW, NOW);
 

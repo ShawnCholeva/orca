@@ -62,7 +62,7 @@ function insertGoal(db: ReturnType<typeof openDatabase>, goalId: string, permiss
   // 'auto' → automated (unattended except the safety floor); 'ask' → human_review.
   const operatingMode = permissionMode === 'auto' ? 'automated' : 'human_review';
   db.prepare(
-    `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, worker_permission_mode, operating_mode)
+    `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, worker_permission_mode, operating_mode)
      VALUES (?, ?, '', 'active', 1, ?, ?, ?, ?)`
   ).run(goalId, 'test-goal', now, now, permissionMode, operatingMode);
 }

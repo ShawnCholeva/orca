@@ -18,7 +18,7 @@ function makeMigratedDb(): Database.Database {
 
 function seedGoal(db: Database.Database, goalId: string) {
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at) VALUES (?,?,?,?,?,?,?)"
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at) VALUES (?,?,?,?,?,?,?)"
   ).run(goalId, "t", "d", "active", 1, "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
 }
 

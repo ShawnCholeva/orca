@@ -51,7 +51,7 @@ const NOW = '2026-01-01T00:00:00.000Z';
 
 function seedGoal(db: Database.Database, goalId: string, archived = false): void {
   db.prepare(
-    `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+    `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
      VALUES (?, 'Test Goal', '', ?, 1, ?, ?, ?)`
   ).run(goalId, archived ? 'archived' : 'active', NOW, NOW, archived ? NOW : null);
 }

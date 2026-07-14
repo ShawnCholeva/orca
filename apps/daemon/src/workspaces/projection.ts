@@ -49,7 +49,7 @@ function stmts(db: Database.Database) {
         "LEFT JOIN goals g ON g.id = gw.goal_id " +
         "GROUP BY w.id ORDER BY w.name ASC, w.id ASC"),
       goalsForWs: db.prepare(
-        "SELECT g.id,g.title,g.description,g.status,g.created_at,g.active_workflow_run_id AS run_id " +
+        "SELECT g.id,g.title,g.intent AS description,g.status,g.created_at,g.active_workflow_run_id AS run_id " +
         "FROM goals g JOIN goal_workspaces gw ON gw.goal_id = g.id " +
         "WHERE gw.workspace_id = ? ORDER BY g.created_at DESC, g.id ASC"),
       runProgress: db.prepare(

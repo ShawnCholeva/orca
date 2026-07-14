@@ -43,7 +43,7 @@ function setup(): { db: Database.Database; ctx: GoalDocumentCtx; dir: string; go
   const goalId = "goal-1";
   const now = new Date().toISOString();
   db.prepare(
-    "INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at) VALUES (?, 'T', '', 'active', 1, ?, ?)",
+    "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at) VALUES (?, 'T', '', 'active', 1, ?, ?)",
   ).run(goalId, now, now);
   return { db, ctx: { db, bus: eventBus }, dir, goalId };
 }

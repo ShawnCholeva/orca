@@ -260,7 +260,7 @@ describe.sequential('orchestration proof loop', () => {
       headers: AUTH,
       payload: {
         title: 'Orchestration proof loop',
-        description: [
+        intent: [
           'Goals:',
           '- Implement suggested orchestration',
           '',
@@ -271,7 +271,7 @@ describe.sequential('orchestration proof loop', () => {
       },
     });
     expect(refineRes.statusCode, refineRes.body).toBe(200);
-    const draft = (JSON.parse(refineRes.body) as { draft: unknown }).draft;
+    const draft = (JSON.parse(refineRes.body) as { draft: { intent: string } }).draft;
 
     const createGoalRes = await server.inject({
       method: 'POST',
@@ -279,6 +279,7 @@ describe.sequential('orchestration proof loop', () => {
       headers: AUTH,
       payload: {
         title: 'Orchestration proof loop',
+        intent: 'test intent',
         refined: draft,
         workspaces: [{ inputPath: workspaceDir }],
       },
@@ -593,16 +594,16 @@ describe.sequential('orchestration proof loop', () => {
       method: 'POST',
       url: '/v1/goals/refine',
       headers: AUTH,
-      payload: { title: 'Content-free test', description: 'Goals:\n- Test content-free events' },
+      payload: { title: 'Content-free test', intent: 'Goals:\n- Test content-free events' },
     });
     expect(refineRes.statusCode).toBe(200);
-    const draft = (JSON.parse(refineRes.body) as { draft: unknown }).draft;
+    const draft = (JSON.parse(refineRes.body) as { draft: { intent: string } }).draft;
 
     const createGoalRes = await server.inject({
       method: 'POST',
       url: '/v1/goals',
       headers: AUTH,
-      payload: { title: 'Content-free test', refined: draft, workspaces: [{ inputPath: workspaceDir }] },
+      payload: { title: 'Content-free test', intent: 'test intent', refined: draft, workspaces: [{ inputPath: workspaceDir }] },
     });
     expect(createGoalRes.statusCode).toBe(201);
     const { goal } = CreateGoalResponse.parse(JSON.parse(createGoalRes.body));
@@ -660,16 +661,16 @@ describe.sequential('orchestration proof loop', () => {
       method: 'POST',
       url: '/v1/goals/refine',
       headers: AUTH,
-      payload: { title: 'No-auto-launch test', description: 'Goals:\n- No auto launch' },
+      payload: { title: 'No-auto-launch test', intent: 'Goals:\n- No auto launch' },
     });
     expect(refineRes.statusCode).toBe(200);
-    const draft = (JSON.parse(refineRes.body) as { draft: unknown }).draft;
+    const draft = (JSON.parse(refineRes.body) as { draft: { intent: string } }).draft;
 
     const createGoalRes = await server.inject({
       method: 'POST',
       url: '/v1/goals',
       headers: AUTH,
-      payload: { title: 'No-auto-launch test', refined: draft, workspaces: [{ inputPath: workspaceDir }] },
+      payload: { title: 'No-auto-launch test', intent: 'test intent', refined: draft, workspaces: [{ inputPath: workspaceDir }] },
     });
     expect(createGoalRes.statusCode).toBe(201);
     const { goal } = CreateGoalResponse.parse(JSON.parse(createGoalRes.body));

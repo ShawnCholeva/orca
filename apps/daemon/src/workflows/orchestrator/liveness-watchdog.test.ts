@@ -70,7 +70,7 @@ function seedRunningWorkerStep(
   });
 
   db.prepare(
-    `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model)
+    `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model)
      VALUES (?, 'Goal', 'Goal desc', 'active', 1, ?, ?, NULL, ?, ?)`
   ).run(goalId, NOW, NOW, PROVIDER, MODEL);
 

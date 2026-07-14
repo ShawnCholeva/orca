@@ -21,6 +21,7 @@ async function buildServer(deps: GoalBootstrapRouteDeps) {
 
 const VALID_BODY = {
   title: "My Goal",
+  intent: "test intent",
   workflowTemplateId: "orca/engineering",
 };
 

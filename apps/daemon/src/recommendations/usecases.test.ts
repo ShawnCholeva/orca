@@ -63,7 +63,7 @@ function freshDb(): Database.Database {
 function seedGoal(db: Database.Database, id: string): void {
   const now = NOW;
   db.prepare(
-    `INSERT INTO goals (id, title, description, status, autonomy_level, created_at, updated_at, archived_at)
+    `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
      VALUES (?, 'G', '', 'active', 1, ?, ?, NULL)`
   ).run(id, now, now);
 }
