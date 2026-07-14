@@ -17,7 +17,7 @@ describe("synthesize_step_output", () => {
       sessionResult: "ran tests; all green",
       outputSchema: [{ key: "summary", type: "string", required: true }],
       stepInput: {
-        goal: { id: "g", description: "x" },
+        goal: { id: "g", intent: "x" },
         currentStep: {
           id: "execution",
           ordinal: 4,
@@ -40,7 +40,7 @@ describe("synthesize_step_output", () => {
         sessionResult: big,
         outputSchema: [{ key: "summary", type: "string", required: true }],
         stepInput: {
-          goal: { id: "g", description: "x" },
+          goal: { id: "g", intent: "x" },
           currentStep: {
             id: "x",
             ordinal: 0,
