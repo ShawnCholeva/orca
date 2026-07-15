@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import {
   OrchestrationRequest,
   GateEvaluationRequest,
+  GateEvaluationProposal,
   SplitEvaluationProposal,
   SplitEvaluationRequest,
   StepSkillProposal,
@@ -2148,10 +2149,44 @@ export class DispatchEngine {
       return;
     }
 
-    // Honest, verification-governed termination (agent-harness.pdf p.31/p.46):
-    // stop on an OBJECTIVE non-progress signal — the same unresolved issues recur
-    // (stagnation) — or at the hard GATE_REJECT_CAP ceiling; never on model
-    // confidence. The block reason carries the enumerated issue evidence.
+    await this.applyGateProposal(
+      db,
+      now,
+      { run, stepRun, stepTpl, template, goal, gateNode, graph },
+      proposal,
+      options
+    );
+  }
+
+  /**
+   * The shared gate tail, reached once a `GateEvaluationProposal` exists — from
+   * either substrate (shadow one-shot LLM, or the async worker gate's Stop hook).
+   * Honest, verification-governed termination (agent-harness.pdf p.31/p.46): block
+   * on an OBJECTIVE non-progress signal — the same unresolved issues recur
+   * (stagnation) — or at the hard GATE_REJECT_CAP ceiling; never on model
+   * confidence. Otherwise record the decision (issueRefs flow to the closing step
+   * via latestRejectingGate -> repairContext) and route inline (automated => no
+   * Continue): forward on approve, backward on reject. `stepRun`/`stepTpl` are the
+   * SOURCE step feeding the gate (the sourceStepRunId for routing), never the gate
+   * worker's surrogate step-run.
+   */
+  private async applyGateProposal(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+      gateNode: WorkflowGraphNode;
+      graph: ReturnType<typeof effectiveGraph>;
+    },
+    proposal: GateEvaluationProposal,
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    const { run, stepRun, stepTpl, template, goal, gateNode, graph } = ctx;
+
     if (proposal.outcome === "rejected") {
       const priorRejects = listGateDecisionsForRun(db, run.id).filter(
         (d) => d.nodeId === gateNode.id && d.outcome === "rejected"
