@@ -15,7 +15,11 @@ interface WorkflowRunRow {
   current_node_kind: string | null;
   traversal_seq: number;
   pending_split_route_json: string | null;
+  pending_gate_route_json: string | null;
 }
+
+const RUN_COLUMNS =
+  "id, goal_id, template_id, template_version, status, current_step_run_id, started_at, finished_at, blocked_reason, current_node_id, current_node_kind, traversal_seq, pending_split_route_json, pending_gate_route_json";
 
 let _db: Database.Database | null = null;
 let _stmts: {
@@ -28,10 +32,10 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
     _db = db;
     _stmts = {
       getById: db.prepare(
-        "SELECT id, goal_id, template_id, template_version, status, current_step_run_id, started_at, finished_at, blocked_reason, current_node_id, current_node_kind, traversal_seq, pending_split_route_json FROM workflow_runs WHERE id = ?"
+        `SELECT ${RUN_COLUMNS} FROM workflow_runs WHERE id = ?`
       ),
       listByGoal: db.prepare(
-        "SELECT id, goal_id, template_id, template_version, status, current_step_run_id, started_at, finished_at, blocked_reason, current_node_id, current_node_kind, traversal_seq, pending_split_route_json FROM workflow_runs WHERE goal_id = ? ORDER BY started_at DESC"
+        `SELECT ${RUN_COLUMNS} FROM workflow_runs WHERE goal_id = ? ORDER BY started_at DESC`
       ),
     };
   }
@@ -66,6 +70,30 @@ function rowToRun(row: WorkflowRunRow): WorkflowRunT {
       // ignore malformed stash; leave pendingSplitChoice null
     }
   }
+  // Surface a worker-gate's recommendation while parked awaiting a human decision
+  // (Task 4c stores it on the gate stash). The card renders reasoning + issueRefs.
+  let pendingGateReview: WorkflowRunT["pendingGateReview"] = null;
+  if (row.pending_gate_route_json) {
+    try {
+      const g = JSON.parse(row.pending_gate_route_json) as {
+        awaitingHumanDecision?: boolean;
+        gateNodeId?: string;
+        recommendedOutcome?: "approved" | "rejected";
+        reasoning?: string | null;
+        issueRefs?: string[];
+      };
+      if (g.awaitingHumanDecision && g.gateNodeId && (g.recommendedOutcome === "approved" || g.recommendedOutcome === "rejected")) {
+        pendingGateReview = {
+          gateNodeId: g.gateNodeId,
+          recommendedOutcome: g.recommendedOutcome,
+          reasoning: g.reasoning ?? null,
+          issueRefs: Array.isArray(g.issueRefs) ? g.issueRefs : [],
+        };
+      }
+    } catch {
+      // ignore malformed stash; leave pendingGateReview null
+    }
+  }
   return WorkflowRun.parse({
     id: row.id,
     goalId: row.goal_id,
@@ -80,6 +108,7 @@ function rowToRun(row: WorkflowRunRow): WorkflowRunT {
     currentNodeKind: row.current_node_kind,
     traversalSeq: row.traversal_seq,
     pendingSplitChoice,
+    pendingGateReview,
   });
 }
 

@@ -154,6 +154,37 @@ describe("LiveActivity", () => {
     fireEvent.click(screen.getByTestId("gate-decision-reject"));
     expect(onGateDecide).toHaveBeenCalledWith("r1", "rejected");
   });
+
+  it("renders a worker gate's reasoning + issueRefs alongside the decision controls", () => {
+    const onGateDecide = vi.fn();
+    render(
+      <LiveActivity
+        activity={mk({
+          workflowRunId: "r1",
+          status: "paused_for_input",
+          currentText: 'Gate "Critique" needs your approval to continue.',
+          sourceKind: "gate_decision_pending",
+        })}
+        onGateDecide={onGateDecide}
+        gateReview={{
+          recommendedOutcome: "rejected",
+          reasoning: "The threading.Lock is held across the trade call, breaking trading purity.",
+          issueRefs: ["threading.Lock held across trade", "trading purity"],
+        }}
+      />,
+    );
+    // The worker's rich reasoning renders.
+    expect(screen.getByTestId("gate-review-reasoning")).toHaveTextContent(/threading\.Lock is held across the trade call/);
+    // Each issueRef renders as a list item.
+    const issues = screen.getByTestId("gate-review-issues");
+    expect(issues).toHaveTextContent("threading.Lock held across trade");
+    expect(issues).toHaveTextContent("trading purity");
+    // A rejection communicates "back to Proposal".
+    expect(screen.getByTestId("gate-review-verdict")).toHaveTextContent(/back to Proposal/i);
+    // The human decision controls are still present and wired.
+    fireEvent.click(screen.getByTestId("gate-decision-reject"));
+    expect(onGateDecide).toHaveBeenCalledWith("r1", "rejected");
+  });
 });
 
 const confirmActivity = {

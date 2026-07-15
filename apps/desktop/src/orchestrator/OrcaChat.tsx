@@ -1100,6 +1100,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                     onRevise={handleRevise}
                     onGateDecide={(_runId, outcome) => void handleGateDecision(outcome)}
                     gateDeciding={decidingGate}
+                    gateReview={workflowState.run?.pendingGateReview ?? null}
                   />
                 </div>
               </div>

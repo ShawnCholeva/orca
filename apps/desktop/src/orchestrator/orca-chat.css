@@ -1145,6 +1145,19 @@
 .step-confirm-actions .step-confirm-scores-toggle { margin-left: auto; }
 .step-confirm-metrics { margin-top: 16px; }
 
+/* Worker-gate verdict surfaced on the gate decision card (Critique gate). */
+.gate-review {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent, #6a7cff);
+  background: var(--surface-subtle, rgba(127, 127, 127, 0.08));
+  border-radius: 4px;
+}
+.gate-review-verdict { font-size: 0.85rem; margin-bottom: 6px; }
+.gate-review-reasoning { font-size: 0.9rem; line-height: 1.45; white-space: pre-wrap; }
+.gate-review-issues { margin: 8px 0 0; padding-left: 18px; font-size: 0.85rem; }
+.gate-review-issues li { margin: 2px 0; }
+
 /* Evidence bundle (paper p.62) — replaces the six raw self-scores as the card's
    primary verification signal. */
 .step-confirm-evidence { margin-top: 14px; display: flex; flex-direction: column; gap: 12px; }

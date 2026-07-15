@@ -423,6 +423,7 @@ export function LiveActivity({
   onRevise,
   onGateDecide,
   gateDeciding = false,
+  gateReview = null,
 }: {
   activity: Activity;
   renderProviderRecovery?: ComponentType<ProviderRecoveryProps>;
@@ -430,6 +431,12 @@ export function LiveActivity({
   onRevise?: (runId: string) => void;
   onGateDecide?: (runId: string, outcome: "approved" | "rejected") => void;
   gateDeciding?: boolean;
+  // A worker-backed gate's verdict, surfaced as a recommendation on the gate card.
+  gateReview?: {
+    recommendedOutcome: "approved" | "rejected";
+    reasoning: string | null;
+    issueRefs: string[];
+  } | null;
 }) {
   const isConfirmation =
     activity.status === "paused_for_input" &&
@@ -485,6 +492,26 @@ export function LiveActivity({
       <div className="activity-bubble-text">{activity.currentText}</div>
       {isGateDecision ? (
         <div className="step-confirm" data-testid="gate-decision">
+          {gateReview ? (
+            <div className="gate-review" data-testid="gate-review">
+              <div className="gate-review-verdict" data-testid="gate-review-verdict">
+                Critic recommends{" "}
+                <strong>{gateReview.recommendedOutcome === "rejected" ? "back to Proposal" : "approve"}</strong>
+              </div>
+              {gateReview.reasoning ? (
+                <div className="gate-review-reasoning" data-testid="gate-review-reasoning">
+                  {gateReview.reasoning}
+                </div>
+              ) : null}
+              {gateReview.issueRefs.length > 0 ? (
+                <ul className="gate-review-issues" data-testid="gate-review-issues">
+                  {gateReview.issueRefs.map((ref, i) => (
+                    <li key={`${ref}-${i}`}>{ref}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
           <div className="step-confirm-actions">
             <button
               type="button"

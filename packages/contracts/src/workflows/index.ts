@@ -429,6 +429,18 @@ export const PendingSplitChoice = z
   .strict();
 export type PendingSplitChoice = z.infer<typeof PendingSplitChoice>;
 
+// Set only when a run is parked at a worker-backed gate awaiting a human decision:
+// the worker's verdict, surfaced as a recommendation the human approves/rejects.
+export const PendingGateReview = z
+  .object({
+    gateNodeId: Id100,
+    recommendedOutcome: z.enum(["approved", "rejected"]),
+    reasoning: z.string().max(8000).nullable(),
+    issueRefs: z.array(z.string().max(500)).max(50),
+  })
+  .strict();
+export type PendingGateReview = z.infer<typeof PendingGateReview>;
+
 export const WorkflowRun = z
   .object({
     id: Id,
@@ -445,6 +457,8 @@ export const WorkflowRun = z
     traversalSeq: z.number().int().nonnegative().default(0),
     // Set only when the run is parked awaiting a human routing choice at a splitter.
     pendingSplitChoice: PendingSplitChoice.nullable().optional(),
+    // Set only when parked at a worker-backed gate: the worker's recommendation.
+    pendingGateReview: PendingGateReview.nullable().optional(),
     parentCompositionId: z.string().nullable().default(null),
   })
   .strict();
