@@ -20,14 +20,22 @@ export function collectPriorStepArtifacts(
     .prepare("SELECT id, step_template_id FROM workflow_step_runs WHERE workflow_run_id = ?")
     .all(runId) as Array<{ id: string; step_template_id: string }>;
   const byId = new Map(stepRuns.map((s) => [s.id, s]));
+  // Exclude the current step's OWN template — not merely its exact step_run_id.
+  // On a gate-reject loop re-run the current step shares its template with its
+  // prior (rejected) attempt; feeding that stale attempt's output back as
+  // authoritative prior context makes the re-run reason over a superseded — and
+  // sometimes self-contradicting — decision (observed live: a re-run Proposal
+  // clung to its rejected "user chose X" instead of the fresh answer). The reject
+  // repair context (latestRejectingGate) is the correct channel for what to fix.
+  const currentTemplateId = byId.get(currentStepRunId)?.step_template_id;
   // listArtifactsForRun is ordered by created_at ASC; keeping the last seen
   // artifact per template yields the most recent output per step.
   const latestByTemplate = new Map<string, unknown>();
   for (const artifact of listArtifactsForRun(db, runId)) {
     if (artifact.type !== "step_output" || !artifact.stepRunId) continue;
-    if (artifact.stepRunId === currentStepRunId) continue;
     const owner = byId.get(artifact.stepRunId);
     if (!owner) continue;
+    if (owner.step_template_id === currentTemplateId) continue;
     let parsed: unknown;
     try {
       parsed = JSON.parse(artifact.body);
