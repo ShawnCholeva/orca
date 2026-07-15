@@ -271,6 +271,16 @@ export class OrchestratorService {
       .get(sess.workflow_step_run_id) as StepRunRow | undefined;
     if (!stepRun || stepRun.status !== "active") return;
 
+    // (2b) Worker-gate surrogate whose session ended while still active: the gate
+    // worker exited/crashed WITHOUT a parseable Stop hook (else completeGateWorker
+    // would have closed the surrogate). It has no template step, so the step
+    // synthesis below would bail at (4) and leave the gate parked forever. Route
+    // it through completeGateWorker with no verdict → escalate to a human decision.
+    if (stepRun.step_template_id.startsWith("__gate__:")) {
+      await this.engine.completeGateWorker(db, now, stepRun, "", options);
+      return;
+    }
+
     // (3) Idempotency: skip synthesis if step_output exists, but still advance.
     const existing = db
       .prepare(

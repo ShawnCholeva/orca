@@ -2404,6 +2404,22 @@ export class DispatchEngine {
     publishStaged(options.bus, stagedEvents);
 
     const objective = composeGateWorkerPrompt(gateRequest);
+    // A launch throw or a failed delivery means the worker will never receive its
+    // objective and can never emit a verdict — the awaitingWorker park would hang
+    // with no worker (and no liveness backstop fires until the worker is observed
+    // dead). Roll the park back to the human terminus, exactly like the no-adapter
+    // degrade above. Idempotent guards keep a surviving worker's Stop hook safe.
+    const escalateNoDelivery = (message: string) => {
+      postOrchestratorMessage(db, now, goal.id, message, options);
+      db.prepare(
+        "UPDATE workflow_step_runs SET status='passed', finished_at=? WHERE id=? AND status='active'"
+      ).run(now(), surrogateId);
+      db.prepare("UPDATE workflow_runs SET pending_gate_route_json = NULL WHERE id = ?").run(run.id);
+      const fresh = getWorkflowRunById(db, run.id);
+      if (fresh && fresh.status === "active") {
+        this.parkForGateApproval(db, now, { run: fresh, stepRun, stepTpl, template, goal, gateNodeId: gateNode.id }, options);
+      }
+    };
     try {
       const { sessionId } = await this.launcher.launch({
         goalId: goal.id,
@@ -2416,23 +2432,15 @@ export class DispatchEngine {
       await this.workerSpawn?.({ sessionId, goalId: goal.id, adapterId: dispatch.adapterId });
       const delivered = await this.workerDeliver?.(sessionId, objective);
       if (delivered && delivered !== "delivered") {
-        postOrchestratorMessage(
-          db,
-          now,
-          goal.id,
+        escalateNoDelivery(
           delivered === "timeout"
-            ? `Unable to submit the gate objective (${dispatch.adapterId}): the gate worker did not become idle in time.`
-            : `Unable to submit the gate objective (${dispatch.adapterId}): the gate worker session is not running.`,
-          options
+            ? `The gate worker (${dispatch.adapterId}) did not become idle in time to receive its objective — escalating the gate to a human decision.`
+            : `The gate worker (${dispatch.adapterId}) session is not running — escalating the gate to a human decision.`
         );
       }
     } catch (err) {
-      postOrchestratorMessage(
-        db,
-        now,
-        goal.id,
-        `Unable to start the gate worker (${dispatch.adapterId}): ${err instanceof Error ? err.message : "unknown error"}`,
-        options
+      escalateNoDelivery(
+        `Unable to start the gate worker (${dispatch.adapterId}): ${err instanceof Error ? err.message : "unknown error"} — escalating the gate to a human decision.`
       );
     }
   }

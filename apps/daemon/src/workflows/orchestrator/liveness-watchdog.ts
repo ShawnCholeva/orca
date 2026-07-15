@@ -84,14 +84,23 @@ export function buildLivenessWatchdogDeps(
     listRunningWorkerSteps: () => {
       const rows = db
         .prepare(
+          // Two worker-bearing shapes: an active STEP node (session on the run's
+          // current step) OR a worker GATE parked mid-eval (session on the gate
+          // SURROGATE, `__gate__:*`; the run's current_step_run_id is NULL there,
+          // so match the surrogate directly). A dead gate worker is otherwise
+          // invisible — reaping it emits session.failed, which onWorkflowSession-
+          // Completed routes to completeGateWorker → human escalation.
           `SELECT s.id AS session_id, wsr.goal_id AS goal_id, wsr.id AS step_run_id, s.started_at AS started_at
-           FROM workflow_runs wr
-           JOIN workflow_step_runs wsr ON wsr.id = wr.current_step_run_id
-           JOIN sessions s ON s.workflow_step_run_id = wsr.id AND s.goal_id = wsr.goal_id
+           FROM sessions s
+           JOIN workflow_step_runs wsr ON wsr.id = s.workflow_step_run_id AND wsr.goal_id = s.goal_id
+           JOIN workflow_runs wr ON wr.id = wsr.workflow_run_id
            WHERE wr.status = 'active'
-             AND wr.current_node_kind = 'step'
              AND wsr.status = 'active'
-             AND s.status = 'running'`
+             AND s.status = 'running'
+             AND (
+                   (wr.current_node_kind = 'step' AND wr.current_step_run_id = wsr.id)
+                OR (wr.current_node_kind = 'gate' AND wsr.step_template_id GLOB '__gate__:*')
+                 )`
         )
         .all() as Array<{ session_id: string; goal_id: string; step_run_id: string; started_at: string | null }>;
       return rows.map((r) => ({

@@ -84,7 +84,12 @@ export function listStepRunsForRun(
 ): WorkflowStepRunT[] {
   const rows = db
     .prepare(
-      "SELECT id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, started_at, finished_at, blocked_reason, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at, orchestrator_phase, step_result_json FROM workflow_step_runs WHERE workflow_run_id = ? ORDER BY ordinal ASC, attempt ASC"
+      // ordinal >= 0 excludes internal surrogate step-runs (gate/delegate nodes
+      // materialize a surrogate at the sentinel ordinal -1; a worker gate keeps
+      // its surrogate `active` for the whole eval). They are not real steps —
+      // and their negative ordinal violates WorkflowStepRun's nonnegative-ordinal
+      // contract, so serving them would 500 this projection.
+      "SELECT id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, started_at, finished_at, blocked_reason, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at, orchestrator_phase, step_result_json FROM workflow_step_runs WHERE workflow_run_id = ? AND ordinal >= 0 ORDER BY ordinal ASC, attempt ASC"
     )
     .all(workflowRunId) as WorkflowStepRunRow[];
   return rows.map(rowToStepRun);

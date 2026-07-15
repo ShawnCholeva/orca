@@ -291,4 +291,48 @@ describe("livenessWatchdogTick", () => {
     expect(crashRetries(db, stepRunId)).toBe(0);
     expect(launch).not.toHaveBeenCalled();
   });
+
+  it("reaps a dead worker-GATE surrogate (parked awaitingWorker) → session.failed → human gate escalation", async () => {
+    const { db, bus, idFactory } = setupHarness();
+
+    // A run parked mid-eval at a worker gate: current_step_run_id NULL, a live
+    // surrogate step-run, and a `running` session on it (started past grace).
+    const graph = {
+      nodes: [
+        { id: "validation", type: "step", name: "V", stepId: "validation" },
+        { id: "gate", type: "gate", name: "Critique", evalSubstrate: "worker", instructions: "x", agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] },
+        { id: "done", type: "step", name: "Done", stepId: "done", terminal: true },
+      ],
+      edges: [ { from: "validation", to: "gate" }, { from: "gate", to: "done", port: "approved" }, { from: "gate", to: "validation", port: "rejected" } ],
+      positions: {},
+    };
+    const steps = [
+      makeStep({ id: "validation", ordinal: 0, name: "V", instructions: "v", outputSchema: [{ key: "result", type: "string", required: true }] }),
+      makeStep({ id: "done", ordinal: 1, name: "Done", instructions: "d", outputSchema: [{ key: "result", type: "string", required: true }] }),
+    ];
+    db.prepare("INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at, orchestrator_provider, orchestrator_model) VALUES ('goal-1','Goal','desc','active',1,?,?,NULL,?,?)").run(NOW, NOW, PROVIDER, MODEL);
+    db.prepare("INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES ('ws-1','/tmp/repo','main','',?,?)").run(NOW, NOW);
+    db.prepare("INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES ('goal-1','ws-1',?)").run(NOW);
+    db.prepare("INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, graph_json, created_at, updated_at) VALUES ('orca/engineering','Engineering','desc',1,1,1,?,'[]',?,?,?)").run(JSON.stringify(steps), JSON.stringify(graph), NOW, NOW);
+    db.prepare("INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, pending_gate_route_json, blocked_reason, started_at, finished_at) VALUES ('run-1','goal-1','orca/engineering',1,'active',NULL,'gate','gate',?,NULL,?,NULL)").run(JSON.stringify({ awaitingWorker: true, gateNodeId: "gate", sourceStepRunId: "step-src", surrogateStepRunId: "sur-1" }), NOW);
+    db.prepare("INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-src','goal-1','run-1','validation',0,1,'passed','[]','[]',NULL,?,?,'fp-src')").run(NOW, NOW);
+    db.prepare("INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('sur-1','goal-1','run-1','__gate__:gate',-1,1,'active','[]','[]',NULL,?,NULL,'fp-sur')").run(NOW);
+    db.prepare("INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, started_at, workflow_step_run_id) VALUES ('gate-sess-1','goal-1','ws-1','claude-code','Gate','running',?,?,?)").run(NOW, STARTED_PAST_GRACE, "sur-1");
+
+    const launch: WorkflowSessionLauncher["launch"] = vi.fn(async () => ({ sessionId: "respawn-1" }));
+    const { completions } = makeServiceWithSubscriber(db, bus, idFactory, launch);
+    const deps = buildLivenessWatchdogDeps(db, bus, { isTmuxAlive: async () => false, now: () => NOW, graceMs: GRACE_MS });
+
+    await livenessWatchdogTick(deps);
+    await Promise.all(completions);
+
+    // The dead gate worker was reaped and escalated (no step respawn — a gate is
+    // not a step): surrogate closed, run parked for a human gate decision.
+    expect(sessionStatus(db, "gate-sess-1")).toBe("failed");
+    expect((db.prepare("SELECT status FROM workflow_step_runs WHERE id='sur-1'").get() as { status: string }).status).toBe("passed");
+    const run = db.prepare("SELECT status, pending_gate_route_json FROM workflow_runs WHERE id='run-1'").get() as { status: string; pending_gate_route_json: string | null };
+    expect(run.status).toBe("active");
+    expect(JSON.parse(run.pending_gate_route_json!).awaitingHumanDecision).toBe(true);
+    expect(launch).not.toHaveBeenCalled();
+  });
 });

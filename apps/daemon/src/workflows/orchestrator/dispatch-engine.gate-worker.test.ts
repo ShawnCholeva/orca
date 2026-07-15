@@ -232,6 +232,29 @@ describe("dispatch-engine worker-backed gate — spawn (Task 4b)", () => {
     expect(stash.sourceStepRunId).toBe("step-validation");
   });
 
+  it("escalates to a human gate park when the worker cannot receive its objective (delivery timeout)", async () => {
+    seedRunAtValidation(db);
+    const launch = vi.fn(async (_ctx: WorkflowLaunchContext) => ({ sessionId: "gate-sess-1" }));
+    const engine = makeWorkerEngine({
+      launcher: makeLauncher(launch),
+      workerSpawn: vi.fn(async () => {}),
+      workerDeliver: vi.fn(async () => "timeout" as const),
+    });
+
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+
+    // The worker will never get its objective → don't leave it parked awaitingWorker
+    // (which would hang). The surrogate is closed and the gate parks for a human.
+    const surrogate = surrogateRow(db);
+    expect(surrogate!.status).toBe("passed");
+    const run = getWorkflowRunById(db, "run-1");
+    expect(run!.status).toBe("active");
+    expect(run!.currentStepRunId).toBeNull();
+    const stash = JSON.parse((db.prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id='run-1'").get() as { pending_gate_route_json: string }).pending_gate_route_json);
+    expect(stash.awaitingHumanDecision).toBe(true);
+    expect(stash.awaitingWorker).toBeUndefined();
+  });
+
   it("degrades to a human gate park when no worker adapter/model is available", async () => {
     seedRunAtValidation(db);
     // A gate whose agentPreference cannot be satisfied by fakeStepDispatch
@@ -416,6 +439,42 @@ describe("dispatch-engine worker-backed gate — complete (Task 4c)", () => {
     // The gate resolved: decision recorded and routed to the rejected port.
     expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(1);
     expect(getWorkflowRunById(db, "run-1")!.currentNodeId).toBe("execution");
+  });
+
+  it("a gate worker session that ends WITHOUT a decision escalates to a human gate park (no hang)", async () => {
+    seedRunAtValidation(db);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    const operators = { async list() { return [agentOperatorDescriptor()]; } };
+    const engine = new DispatchEngine(
+      fakeStepBroker(),
+      operators,
+      makeLauncher(),
+      fakeStepDispatch(),
+      vi.fn(async () => {}),
+      vi.fn(async () => "delivered" as const),
+    );
+    const service = new OrchestratorService(engine, fakeStepBroker(), operators);
+    const surrogate = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory }).then(() =>
+      db.prepare("SELECT * FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = '__gate__:gate'").get() as StepRunRow
+    );
+    db.prepare(
+      "INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES ('ws-1', '/tmp/ws-1', 'ws', '', ?, ?)"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES ('gate-sess-1', 'goal-1', 'ws-1', 'claude-code', 'Gate', 'exited', ?, ?)"
+    ).run(NOW, surrogate.id);
+
+    // The worker session ended (crash/exit) with no orca:gate-decision ever parsed.
+    await service.onWorkflowSessionCompleted(db, () => NOW, { sessionId: "gate-sess-1", goalId: "goal-1" }, { bus, idFactory });
+
+    // The gate did not hang: surrogate closed, run parked for a human decision.
+    expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(0);
+    const surAfter = db.prepare("SELECT status FROM workflow_step_runs WHERE id=?").get(surrogate.id) as { status: string };
+    expect(surAfter.status).toBe("passed");
+    const run = getWorkflowRunById(db, "run-1");
+    expect(run!.status).toBe("active");
+    const stash = JSON.parse((db.prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id='run-1'").get() as { pending_gate_route_json: string }).pending_gate_route_json);
+    expect(stash.awaitingHumanDecision).toBe(true);
   });
 
   it("an unparseable worker response escalates to a human gate park", async () => {

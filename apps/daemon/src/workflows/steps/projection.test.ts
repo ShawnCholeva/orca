@@ -110,6 +110,27 @@ describe("listStepRunsForRun", () => {
     // Ordered by ordinal ascending.
     expect(runs[0].stepTemplateId).toBe("triage");
   });
+
+  it("excludes internal surrogate step-runs (ordinal -1: gate/delegate) — they are not real steps and would fail the nonnegative-ordinal contract", () => {
+    const db = setup();
+    seedGoal(db, "goal-1");
+    insertMinimalStepRun(db, "sr-triage"); // creates tpl-1 + wr-1
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, started_at, finished_at, blocked_reason, fingerprint) VALUES ('sr-real','goal-1','wr-1','triage',0,1,'passed','[]','[]',?,?,NULL,'fp-real')"
+    ).run(NOW, NOW);
+    // A gate-worker surrogate (ordinal -1). Without a filter, rowToStepRun's
+    // WorkflowStepRun.parse throws on the negative ordinal and 500s GET /step-runs.
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, started_at, finished_at, blocked_reason, fingerprint) VALUES ('sr-gate','goal-1','wr-1','__gate__:critique',-1,1,'active','[]','[]',?,NULL,NULL,'fp-gate')"
+    ).run(NOW);
+
+    // Must not throw (the -1 surrogate would fail the nonnegative-ordinal parse),
+    // and the surrogate must be absent from the served step list.
+    const runs = listStepRunsForRun(db, "wr-1");
+    const ids = runs.map((r) => r.stepTemplateId);
+    expect(ids).toContain("triage");
+    expect(ids).not.toContain("__gate__:critique");
+  });
 });
 
 describe("recordOperatorSelection", () => {
