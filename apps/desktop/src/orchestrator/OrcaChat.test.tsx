@@ -2244,6 +2244,25 @@ describe("ChatMessageRow worker questions", () => {
     expect(screen.getByRole("radio", { name: /something else/i })).not.toBeChecked();
   });
 
+  it("marks the chosen option's row distinctly on an answered card, but not the unchosen rows", async () => {
+    const { ChatMessageRow } = await import("./OrcaChat");
+    // A two-option answered question: the disabled radio greys out (no filled dot
+    // in WKWebView), so the chosen row must carry its own selected treatment.
+    const twoOpt = {
+      ...workerMsg,
+      pendingQuestion: {
+        ...workerMsg.pendingQuestion,
+        questions: [{ header: "H", question: "Which?", multiSelect: false, options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] }],
+        answer: { answers: [{ questionIndex: 0, selectedLabels: ["A"] }] },
+      },
+    };
+    render(<ChatMessageRow message={twoOpt as never} goalId="g1" />);
+    const chosenRow = screen.getByLabelText("A").closest("label")!;
+    const otherRow = screen.getByLabelText("B").closest("label")!;
+    expect(chosenRow.className).toMatch(/orca-chat-option-row--chosen/);
+    expect(otherRow.className).not.toMatch(/orca-chat-option-row--chosen/);
+  });
+
   it("shows the inline free-text answer when answered with 'Something else'", async () => {
     const { ChatMessageRow } = await import("./OrcaChat");
     const answered = { ...workerMsg, pendingQuestion: { ...workerMsg.pendingQuestion, answer: { freeText: "do it my way" } } };

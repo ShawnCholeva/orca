@@ -905,6 +905,15 @@
 }
 .orca-chat-option-row:hover { border-color: var(--hairline-strong); }
 .orca-chat-option-row input { margin: 0; flex: none; margin-top: 3px; }
+/* Answered card: the disabled radio greys its checked dot out (WKWebView), so
+   the chosen row gets its own accent treatment — border, tint, and a bold,
+   full-contrast label — so the user's choice reads unmistakably after sending. */
+.orca-chat-option-row--chosen {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.orca-chat-option-row--chosen input { accent-color: var(--accent); opacity: 1; }
+.orca-chat-option-row--chosen .orca-chat-option-label { color: var(--text); font-weight: 600; }
 .orca-chat-option-content { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .orca-chat-option-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .orca-chat-option-freetext {

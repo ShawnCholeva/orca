@@ -1438,7 +1438,13 @@ function WorkerQuestionForm({
               ? opt.label.slice(0, -recommendedSuffix.length)
               : opt.label;
             return (
-              <label key={oi} className="orca-chat-option-row">
+              <label
+                key={oi}
+                // An answered card disables its radios, which greys out the
+                // checked dot (WKWebView) — mark the chosen row so CSS can show
+                // the selection unmistakably instead of relying on that dot.
+                className={`orca-chat-option-row${submitted && chosen ? " orca-chat-option-row--chosen" : ""}`}
+              >
                 <input
                   type={q.multiSelect ? "checkbox" : "radio"}
                   name={`${pending.questionId}-${qi}`}
@@ -1464,7 +1470,9 @@ function WorkerQuestionForm({
           })}
           {offerFreeText && qi === pending.questions.length - 1 ? (
             <>
-              <label className="orca-chat-option-row">
+              <label
+                className={`orca-chat-option-row${submitted && freeTextSelected ? " orca-chat-option-row--chosen" : ""}`}
+              >
                 <input
                   type={q.multiSelect ? "checkbox" : "radio"}
                   name={`${pending.questionId}-${qi}`}
