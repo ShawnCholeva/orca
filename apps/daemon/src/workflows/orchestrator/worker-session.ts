@@ -18,6 +18,15 @@ const BUSY_DEFAULT = /esc to interrupt|\bthinking\b|running .* hook/i;
 // NOTE: claude pads the empty input line with a non-breaking space (U+00A0), not
 // a normal space — the char class MUST include   or idle is never detected.
 const PROMPT_IDLE = /❯[ \t ]*(?:\n|$)/;
+// The composer prompt is PRESENT and accepting input — the ❯ line, whether empty
+// or bearing text. After a denied AskUserQuestion, Claude Code renders its
+// suggested answer as greyed PLACEHOLDER text ("❯ Local web UI, …"); the composer
+// is idle and ready, but PROMPT_IDLE (empty-only) is fooled by that placeholder and
+// deliver() would time out. The INITIAL idle-wait uses this looser check (with
+// !busy); the post-submit confirm-clear keeps the strict empty PROMPT_IDLE so the
+// "answer stuck in the box" retry still fires. deliver() sends C-u before pasting
+// so any real (non-placeholder) text is cleared and can't be appended to.
+const PROMPT_READY = /❯[ \t ]/;
 // Codex renders its composer prompt with a single right-angle quote (› U+203A,
 // distinct from claude's ❯) followed by placeholder/typed text, e.g. "› Summarize
 // recent commits". It's present whenever the composer accepts input, so combined
@@ -218,7 +227,9 @@ export class WorkerSessionManager {
     while (Date.now() < deadline) {
       const pane = await capturePane(this.tmux, s.name);
       const busy = BUSY_DEFAULT.test(pane);
-      const idle = !busy && (PROMPT_IDLE.test(pane) || CODEX_PROMPT_IDLE.test(pane));
+      // Ready = a not-busy composer prompt, EMPTY or bearing placeholder/leftover
+      // text (PROMPT_READY, not the strict empty PROMPT_IDLE) — see PROMPT_READY.
+      const idle = !busy && (PROMPT_READY.test(pane) || CODEX_PROMPT_IDLE.test(pane));
       if (idle) {
         if (idleSince === null) idleSince = Date.now();
         if (Date.now() - idleSince >= idleQuiet) { ready = true; break; }
@@ -230,6 +241,11 @@ export class WorkerSessionManager {
     if (!ready) return "timeout";
 
     const buf = `orca-worker-${sessionId}`;
+    // Clear the composer before pasting: a placeholder suggestion is ghost text
+    // (paste replaces it), but any REAL leftover (e.g. a prior un-submitted answer)
+    // would be appended to. C-u kills the line — a no-op on an empty composer, and
+    // it never triggers Claude's Esc-Esc rewind menu the way an interrupt would.
+    await sendKey(this.tmux, s.name, "C-u");
     await paste(this.tmux, s.name, buf, text);
     await sleep(this.deps.postPasteMs ?? 250);
     // Claude only submits on Enter when the cursor is at the END of the composer.

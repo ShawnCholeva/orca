@@ -392,6 +392,33 @@ describe("WorkerSessionManager.deliver", () => {
       if (keys[i] === "Enter") expect(keys[i - 1]).toBe("End");
     }
   });
+
+  it("delivers to an idle composer that shows a placeholder suggestion (empty, not busy)", async () => {
+    // After a denied AskUserQuestion, Claude Code renders its suggested answer as
+    // greyed PLACEHOLDER text in the (empty) composer: "❯ <suggested answer>".
+    // The composer is idle and ready, but the strict empty-prompt check is fooled
+    // by the placeholder text and deliver would time out. deliver must treat a
+    // not-busy prompt line as idle, clear the line first (C-u), then paste+submit.
+    const placeholder = "❯ Local web UI, free API with cached fallback, Python\n  ⏸ manual mode on";
+    const tmux = fakeTmux(["auto mode on", placeholder, "esc to interrupt"]);
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
+      resolveProvider,
+    });
+    await mgr.spawn({ sessionId: "sess-ph", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    expect(await mgr.deliver("sess-ph", "my real answer")).toBe("delivered");
+    // The composer is cleared (C-u) before the paste, so the answer can't append
+    // to any leftover text.
+    const order = tmux.calls.map((c) => c[0] + (c[0] === "send-keys" ? `:${c[3]}` : ""));
+    const clearIdx = order.indexOf("send-keys:C-u");
+    const pasteIdx = order.indexOf("paste-buffer");
+    expect(clearIdx).toBeGreaterThanOrEqual(0);
+    expect(clearIdx).toBeLessThan(pasteIdx);
+  });
 });
 
 describe("WorkerSessionManager.terminate", () => {

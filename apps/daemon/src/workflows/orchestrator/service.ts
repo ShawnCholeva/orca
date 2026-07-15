@@ -1799,15 +1799,18 @@ export class OrchestratorService {
       )
       .get(stepRunId, goalId) as { id: string } | undefined;
     if (!sess || !this.workerDeliver) {
-      // The worker session ended while parked; clear the park and tell the user.
+      // The worker session ended while parked; clear the park, block the run with
+      // the same inspectable reason (the step can't resume without a respawn), and
+      // tell the user — never leave it looking like it's still working.
       db.prepare(
         "UPDATE workflow_step_runs SET pending_worker_question_id = NULL WHERE id = ?"
       ).run(stepRunId);
+      this.blockRunForWorkerAnswer(db, now, goalId, stepRunId, options);
       postOrchestratorMessage(
         db,
         now,
         goalId,
-        "Recorded your answer, but the step agent session is no longer running — the step may need to be respawned to continue.",
+        "Recorded your answer, but the step agent session is no longer running — the run is blocked; respawn the step to continue.",
         options
       );
       return;
@@ -1840,6 +1843,10 @@ export class OrchestratorService {
     options: RequestNextDecisionOptions
   ): Promise<void> {
     try {
+      // deliver() itself tolerates the placeholder-suggestion the denied
+      // AskUserQuestion leaves in the (empty) composer and clears any real
+      // leftover with C-u before pasting, so no pre-interrupt is needed here —
+      // an interrupt would trip Claude's Esc-Esc rewind menu and re-wedge it.
       const r = await this.workerDeliver!(sessionId, reason);
       if (!db.open) return;
       if (r === "delivered") {
@@ -1848,18 +1855,52 @@ export class OrchestratorService {
         ).run(stepRunId);
         return;
       }
+      // Genuine delivery failure: block the run with a clear, inspectable reason
+      // (mirroring reconcile) so the UI shows a stalled run instead of a dishonest
+      // "Working on {step}…", and clear the stash so reconcile does not re-fire it.
+      this.blockRunForWorkerAnswer(db, now, goalId, stepRunId, options);
       postOrchestratorMessage(
         db,
         now,
         goalId,
         r === "timeout"
-          ? "Couldn't deliver your answer because the step agent did not become idle in time; it will be re-surfaced on the next restart."
-          : "Couldn't deliver your answer because the step agent session is not running.",
+          ? "Couldn't deliver your answer to the step agent (it didn't become ready in time). The run is blocked — retry or restart it to continue."
+          : "Couldn't deliver your answer because the step agent session is no longer running. The run is blocked.",
         options
       );
     } catch (err) {
       console.error("[orchestrator] flushPendingWorkerAnswer failed", err);
     }
+  }
+
+  /**
+   * Blocks a run whose worker-answer delivery failed, with the same inspectable
+   * reason reconcile uses. Clears the stash and emits a workflow.run.blocked
+   * event (once — only if the run was still active), so an answered-but-undelivered
+   * step reads as a stalled run the user can act on, not a silent "Working…".
+   */
+  private blockRunForWorkerAnswer(
+    db: Database.Database,
+    now: () => string,
+    goalId: string,
+    stepRunId: string,
+    _options: RequestNextDecisionOptions
+  ): void {
+    const row = db
+      .prepare("SELECT workflow_run_id FROM workflow_step_runs WHERE id = ?")
+      .get(stepRunId) as { workflow_run_id: string } | undefined;
+    db.prepare("UPDATE workflow_step_runs SET pending_worker_answer_json = NULL WHERE id = ?").run(stepRunId);
+    if (!row) return;
+    const res = db
+      .prepare("UPDATE workflow_runs SET status='blocked', blocked_reason='worker_answer_delivery_failed' WHERE id=? AND status='active'")
+      .run(row.workflow_run_id);
+    if (res.changes === 0) return; // already blocked/finished — don't duplicate the event
+    appendWorkflowEvent(
+      db,
+      "workflow.run.blocked",
+      { goalId, workflowRunId: row.workflow_run_id, stepRunId, failureCode: "worker_answer_delivery_failed" },
+      now()
+    );
   }
 
   /**
