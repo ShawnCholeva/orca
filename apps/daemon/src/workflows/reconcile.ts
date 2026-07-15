@@ -160,6 +160,51 @@ export function reconcileWorkflowsOnBoot(db: Database, now: () => string): void 
         now()
       );
     }
+
+    // A worker-backed gate whose async evaluation was IN FLIGHT when the daemon
+    // died (pending_gate_route_json.awaitingWorker). Its verdict arrives only via
+    // the worker's Stop hook, which may never come after the restart — and the
+    // drift clause above deliberately excludes gate-kind runs (a gate awaiting a
+    // HUMAN is a valid park), so nothing else would catch this. Mirror the
+    // interrupted-delivery paths: close the gate surrogate, clear the stash, and
+    // block the run with a clear, inspectable/resumable reason. A surviving
+    // worker's late Stop hook harmlessly no-ops on a non-active run. Human/route
+    // gate parks (awaitingHumanDecision / deferred route) are left untouched.
+    const inFlightGateWorkers = db
+      .prepare(
+        `SELECT id AS run_id, goal_id, pending_gate_route_json AS stash
+         FROM workflow_runs
+         WHERE status='active' AND current_node_kind='gate' AND pending_gate_route_json IS NOT NULL`
+      )
+      .all() as { run_id: string; goal_id: string; stash: string }[];
+
+    for (const g of inFlightGateWorkers) {
+      let parsed: { awaitingWorker?: boolean; surrogateStepRunId?: string };
+      try {
+        parsed = JSON.parse(g.stash);
+      } catch {
+        continue;
+      }
+      if (!parsed.awaitingWorker) continue; // a human/route gate park — valid, leave it
+      if (parsed.surrogateStepRunId) {
+        db.prepare(
+          "UPDATE workflow_step_runs SET status='passed', finished_at=? WHERE id=? AND status='active'"
+        ).run(now(), parsed.surrogateStepRunId);
+      }
+      db.prepare(
+        "UPDATE workflow_runs SET pending_gate_route_json=NULL, status='blocked', blocked_reason='gate_worker_interrupted' WHERE id=? AND status='active'"
+      ).run(g.run_id);
+      appendWorkflowEvent(
+        db,
+        "workflow.run.blocked",
+        {
+          goalId: g.goal_id,
+          workflowRunId: g.run_id,
+          failureCode: "gate_worker_interrupted",
+        },
+        now()
+      );
+    }
   })();
 
   // Re-assert supervised confirmation checkpoints for steps that were held

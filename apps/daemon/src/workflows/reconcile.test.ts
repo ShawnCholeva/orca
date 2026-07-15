@@ -464,4 +464,56 @@ describe("reconcileWorkflowsOnBoot", () => {
       .all() as Array<{ id: string }>;
     expect(blocked).toHaveLength(0);
   });
+
+  it("blocks a worker gate whose async eval was in flight (awaitingWorker) and closes its surrogate", () => {
+    const db = setup();
+    seedGoal(db);
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, '[]', '[]', ?, ?)"
+    ).run(NOW, NOW);
+    // Run parked at a gate (current_step_run_id NULL) with a live surrogate step-run.
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, pending_gate_route_json, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', NULL, 'gate', 'gate', ?, NULL, ?, NULL)"
+    ).run(JSON.stringify({ awaitingWorker: true, gateNodeId: "gate", sourceStepRunId: "step-src", surrogateStepRunId: "sur-1" }), NOW);
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('sur-1', 'goal-1', 'run-1', '__gate__:gate', -1, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-sur-1')"
+    ).run(NOW);
+
+    reconcileWorkflowsOnBoot(db, () => NOW);
+
+    const run = db
+      .prepare("SELECT status, blocked_reason, pending_gate_route_json FROM workflow_runs WHERE id='run-1'")
+      .get() as { status: string; blocked_reason: string | null; pending_gate_route_json: string | null };
+    expect(run.status).toBe("blocked");
+    expect(run.blocked_reason).toBe("gate_worker_interrupted");
+    expect(run.pending_gate_route_json).toBeNull();
+    const sur = db.prepare("SELECT status FROM workflow_step_runs WHERE id='sur-1'").get() as { status: string };
+    expect(sur.status).toBe("passed");
+    const events = db
+      .prepare("SELECT payload FROM events WHERE type='workflow.run.blocked'")
+      .all() as Array<{ payload: string }>;
+    expect(events).toHaveLength(1);
+    expect(JSON.parse(events[0]!.payload)).toMatchObject({ workflowRunId: "run-1", failureCode: "gate_worker_interrupted" });
+  });
+
+  it("leaves a worker gate parked for a HUMAN decision (awaitingHumanDecision) untouched", () => {
+    const db = setup();
+    seedGoal(db);
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, '[]', '[]', ?, ?)"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, pending_gate_route_json, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', NULL, 'gate', 'gate', ?, NULL, ?, NULL)"
+    ).run(JSON.stringify({ awaitingHumanDecision: true, gateNodeId: "gate", sourceStepRunId: "step-src", recommendedOutcome: "rejected" }), NOW);
+
+    reconcileWorkflowsOnBoot(db, () => NOW);
+
+    const run = db
+      .prepare("SELECT status, pending_gate_route_json FROM workflow_runs WHERE id='run-1'")
+      .get() as { status: string; pending_gate_route_json: string | null };
+    expect(run.status).toBe("active"); // a human park is a valid paused state
+    expect(run.pending_gate_route_json).not.toBeNull();
+    const blocked = db.prepare("SELECT id FROM events WHERE type='workflow.run.blocked'").all() as Array<{ id: string }>;
+    expect(blocked).toHaveLength(0);
+  });
 });
