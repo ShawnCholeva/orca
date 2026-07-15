@@ -459,3 +459,45 @@ Not a code task — the acceptance gate.
 - **Spec coverage:** P1 evalSubstrate (T1), validation (T2), worker I/O (T3), engine path incl. evaluate-always + mode split (T4). P2 template loop (T5), Verify cleanup (T6), strong prompt/agent (T7), card UX (T8), live verify (T9). Composed human `designgate` unchanged (no task needed — kept as-is). CANDOR/other-gate-migration explicitly non-goals.
 - **Placeholder scan:** engine Task 4 intentionally cites the `spawnStepAgent` worker-lifecycle pattern to reuse rather than reproducing the whole lifecycle — flagged as an implementation note, with exact anchors and the exact interface (`GateEvaluationProposal`, `workerSpawn`/`workerDeliver`, the shared route/park tail). All other steps carry concrete code.
 - **Type consistency:** `evalSubstrate`, `agentPreference`, `GateEvaluationProposal` (`outcome/reasoning/reason/issueRefs/inputsConsidered`), `composeGateWorkerPrompt`/`parseGateDecision` used consistently across tasks.
+
+---
+
+# Task 4 — REVISED (supersedes the original Task 4 above)
+
+**Why revised:** the original Task 4 assumed a worker gate could `await` inline
+like the shadow path. It cannot — a worker runs **asynchronously** and completes
+via the Stop hook. This is a ~4-subtask phase, not one task. Design below is
+grounded in a full wiring-map trace (2026-07-15).
+
+## Wiring map (verified anchors — read these first)
+
+- **Step worker spawn:** `DispatchEngine.spawnStepAgent` — `dispatch-engine.ts:379`.
+  - "worker running for a step" marker = a `sessions` row with `workflow_step_run_id` = active step_run, status in `('created','starting','running')` (double-launch guard L393-400).
+  - session created by `this.launcher.launch({ goalId, workflowRunId, workflowStepRunId, operatorId:"agent:"+adapterId, operatorKind:"agent", objective })` (L435-442); then `workerSpawn({sessionId,goalId,adapterId})` (L452) + `workerDeliver(sessionId, objective)` (L453).
+  - cursor state set by `insertStep`/`insertStepForRouting` (`steps/usecases.ts:196-210`): `workflow_runs.current_step_run_id`, `current_node_id`, `current_node_kind`.
+- **Stop hook:** `POST /v1/agent-hooks/stop` (`agent-hooks/routes.ts:120-131`, `failure==='1'` short-circuits) → server.ts:1683-1706 → `OrchestratorService.onAgentResponseDone(db,now,payload,opts)` — `service.ts:806`.
+  - finds step_run via `sessions.workflow_step_run_id` (L812-819); guards `status!=='active'` and `pending_worker_question_id` (L823).
+  - parses `orca:step-complete` from `payload.responseText` (the hook's `last_assistant_message`, NOT readTail) inside `applyOrchestratorAction` case `approve_step_complete` via `extractOrcaStepCompleteBlock` (`orca-output.ts:32`).
+  - advances via `this.engine.advanceToNextStep` (`service.ts:1548` → `dispatch-engine.ts:295`).
+- **Gate dispatch (sync today):** `evaluateAndParkGate` — `dispatch-engine.ts:2094`. Inline `await evaluateGate(this.shadowAsk,...)` (L2139); stagnation/`GATE_REJECT_CAP` tail L2155-2176; route tail `resolveGateNext`→`recordGateDecision`→`routeGateDestination`→`spawnStepAgent` L2178-2224.
+- **Node-kind disambiguator:** `workflow_runs.current_node_kind ∈ 'step'|'gate'|'splitter'|'delegate'`. Sessions/step_runs carry NO node-kind. Gates today have `current_step_run_id=NULL` + no session.
+- **Precedent for a non-step surrogate step-run:** delegate nodes materialize a **surrogate step-run** (`dispatch-engine.ts:1284`). Mirror it.
+
+## Design: worker-gate as an async surrogate-step-run turn
+
+At a `type:"gate", evalSubstrate:"worker"` node, dispatch spawns a worker bound to
+a **gate surrogate step-run**; the Stop hook recognizes it and runs the gate tail.
+
+### Task 4a — Extract the gate tail into a shared `applyGateProposal`
+Refactor `evaluateAndParkGate` L2155-2224 into `private applyGateProposal(db, now, ctx, gateNode, graph, proposal, options)` that does: stagnation/`GATE_REJECT_CAP` block, `resolveGateNext`, `recordGateDecision`, `routeGateDestination`, next-step spawn. The existing SHADOW path calls it with the inline `proposal`. TDD: existing gate tests must stay green (pure refactor, no behavior change). Commit.
+
+### Task 4b — Spawn a gate worker + surrogate step-run; park
+In `evaluateAndParkGate`, before the shadow branch: `if (gateNode.evalSubstrate === 'worker')` → create a gate surrogate step-run (mirror delegate surrogate at L1284; step_template_id marks it a gate-eval, e.g. `"__gate__:<nodeId>"`), set `current_step_run_id` + keep `current_node_kind='gate'`, launch a session + `workerSpawn` + `workerDeliver(composeGateWorkerPrompt(buildGateEvaluationRequest(...)))`, then **return** (parked). Evaluate-always regardless of mode. TDD with stub `workerSpawn`/`workerDeliver`: assert a session+surrogate step-run exist and the run is parked at the gate. Commit.
+
+### Task 4c — Stop-hook branch for gate-eval sessions
+In `onAgentResponseDone`, after loading the step_run, detect a gate-eval surrogate (step_template_id prefix `__gate__:` OR `run.current_node_kind==='gate'`). Branch: `parseGateDecision(payload.responseText)`; `null` → `parkForGateApproval` (escalate). Else: **automated** → `applyGateProposal(...)` (4a); **supervised** (`goalRequiresHumanReview`) → `parkForGateApproval` carrying `{recommendedOutcome, reasoning, issueRefs}`. Also: validate `proposal.outcome` is offered by the gate's ports (Task 3 Minor #2) — `resolveGateNext` already throws→blocks, but constrain `composeGateWorkerPrompt` by `request.availableOutcomes` too. TDD: stub delivers a canned `orca:gate-decision` (rejected+issueRefs) → assert decision recorded + routed to `rejected` port; 2nd identical → stagnation block; unparseable → human park; shadow path unchanged. Commit.
+
+### Task 4d — Reconcile a gate-eval worker interrupted by restart
+Mirror step-worker reconcile: on boot, a run at `current_node_kind='gate'` with a live-but-dead gate-eval session → re-drive or park (follow `reconcile.ts` step handling). TDD. Commit.
+
+Then P2 (Tasks 5-8) proceeds unchanged, and Task 8's card also renders the supervised gate recommendation payload from 4c.
