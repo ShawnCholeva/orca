@@ -821,6 +821,13 @@ export class OrchestratorService {
     // the park settling, not a completion. Do NOT judge/advance — the /answer
     // route clears the park and re-drives the worker with the user's answer.
     if (stepRun.pending_worker_question_id) return;
+    // Worker-backed gate: the completing session is bound to a gate SURROGATE
+    // step-run (no template step, so step scoring below does not apply). Its Stop
+    // hook resolves the gate — parse the verdict and route/park via the engine.
+    if (stepRun.step_template_id.startsWith("__gate__:")) {
+      await this.engine.completeGateWorker(db, now, stepRun, payload.responseText, options);
+      return;
+    }
     const run = getWorkflowRunById(db, stepRun.workflow_run_id);
     if (!run || run.status !== "active") return;
     const template = loadRunTemplate(db, run);

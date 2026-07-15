@@ -7,8 +7,11 @@ import { resetWorkflowStepProjectionPreparedStatements } from "../steps/projecti
 import type { OperatorDescriptor, WorkflowGraph } from "@orca/contracts";
 import type { WorkflowLaunchContext, WorkflowSessionLauncher } from "./session-launcher.js";
 import { DispatchEngine } from "./dispatch-engine.js";
+import { OrchestratorService } from "./service.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import { listGateDecisionsForRun } from "../gates/projection.js";
+import { recordGateDecision, nextTraversalSeq } from "../gates/usecases.js";
+import type { StepRunRow } from "./db-rows.js";
 import {
   cleanupHarness,
   NOW,
@@ -256,5 +259,183 @@ describe("dispatch-engine worker-backed gate — spawn (Task 4b)", () => {
       .get() as { pending_gate_route_json: string | null };
     const stash = JSON.parse(stashRow.pending_gate_route_json!);
     expect(stash.awaitingHumanDecision).toBe(true);
+  });
+});
+
+function gateDecision(outcome: "approved" | "rejected", issueRefs: string[]): string {
+  return `\`\`\`orca:gate-decision\n${JSON.stringify({
+    reasoning: `judged ${outcome}`,
+    outcome,
+    reason: `${outcome} because reasons`,
+    issueRefs,
+    inputsConsidered: ["sourceStepOutput"],
+  })}\n\`\`\``;
+}
+
+describe("dispatch-engine worker-backed gate — complete (Task 4c)", () => {
+  let db: Database.Database;
+  let bus: import("../../events.js").EventBus;
+  let idFactory: () => string;
+
+  beforeEach(() => {
+    const h = setupHarness();
+    db = h.db;
+    bus = h.bus;
+    idFactory = h.idFactory;
+  });
+
+  afterEach(() => {
+    resetWorkflowEventPreparedStatements();
+    resetWorkflowStepProjectionPreparedStatements();
+    closeDatabase();
+    cleanupHarness();
+    vi.restoreAllMocks();
+  });
+
+  /** Drive requestNextDecision until the run parks at the worker gate; return the surrogate row. */
+  async function parkAtGate(engine: DispatchEngine): Promise<StepRunRow> {
+    await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory });
+    return db
+      .prepare("SELECT * FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = '__gate__:gate'")
+      .get() as StepRunRow;
+  }
+
+  it("automated: a rejected worker verdict records the decision and routes to the rejected port", async () => {
+    seedRunAtValidation(db);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    const engine = makeWorkerEngine({
+      launcher: makeLauncher(),
+      workerSpawn: vi.fn(async () => {}),
+      workerDeliver: vi.fn(async () => "delivered" as const),
+    });
+    const surrogate = await parkAtGate(engine);
+
+    await engine.completeGateWorker(db, () => NOW, surrogate, gateDecision("rejected", ["lock", "purity"]), { bus, idFactory });
+
+    // Decision recorded with the worker's issueRefs.
+    const decisions = listGateDecisionsForRun(db, "run-1");
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]!.outcome).toBe("rejected");
+    expect(decisions[0]!.issueRefs).toEqual(["lock", "purity"]);
+    // Routed backward to a fresh Execution attempt (the rejected port target).
+    const run = getWorkflowRunById(db, "run-1");
+    expect(run!.status).toBe("active");
+    expect(run!.currentNodeId).toBe("execution");
+    const cur = db.prepare("SELECT step_template_id, status FROM workflow_step_runs WHERE id = ?").get(run!.currentStepRunId) as { step_template_id: string; status: string };
+    expect(cur.step_template_id).toBe("execution");
+    expect(cur.status).toBe("active");
+    // Surrogate closed; stash cleared.
+    const sur = db.prepare("SELECT status FROM workflow_step_runs WHERE id = ?").get(surrogate.id) as { status: string };
+    expect(sur.status).toBe("passed");
+    const stashRow = db.prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'").get() as { pending_gate_route_json: string | null };
+    expect(stashRow.pending_gate_route_json).toBeNull();
+  });
+
+  it("automated: a rejection repeating the prior issueRefs blocks the run (stagnation)", async () => {
+    seedRunAtValidation(db);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    const engine = makeWorkerEngine({
+      launcher: makeLauncher(),
+      workerSpawn: vi.fn(async () => {}),
+      workerDeliver: vi.fn(async () => "delivered" as const),
+    });
+    const surrogate = await parkAtGate(engine);
+    // Seed a prior rejection on this gate with the SAME issueRefs.
+    recordGateDecision(db, () => NOW, {
+      goalId: "goal-1", workflowRunId: "run-1", nodeId: "gate", traversalSeq: nextTraversalSeq(db, "run-1"),
+      outcome: "rejected", reason: "first pass", reasoning: null, selectedEdgeTo: "execution",
+      inputsConsidered: [], issueRefs: ["lock", "purity"], ledgerVersion: 0,
+    });
+
+    await engine.completeGateWorker(db, () => NOW, surrogate, gateDecision("rejected", ["lock", "purity"]), { bus, idFactory });
+
+    const run = getWorkflowRunById(db, "run-1");
+    expect(run!.status).toBe("blocked");
+    expect(run!.blockedReason).toContain("not converging");
+  });
+
+  it("supervised: a worker verdict parks with a recommendation (no auto-route)", async () => {
+    seedRunAtValidation(db); // goal defaults to human_review (supervised)
+    const engine = makeWorkerEngine({
+      launcher: makeLauncher(),
+      workerSpawn: vi.fn(async () => {}),
+      workerDeliver: vi.fn(async () => "delivered" as const),
+    });
+    const surrogate = await parkAtGate(engine);
+
+    await engine.completeGateWorker(db, () => NOW, surrogate, gateDecision("rejected", ["lock", "purity"]), { bus, idFactory });
+
+    // No auto-decision; the run parks for a human decision carrying the recommendation.
+    expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(0);
+    const run = getWorkflowRunById(db, "run-1");
+    expect(run!.status).toBe("active");
+    expect(run!.currentStepRunId).toBeNull();
+    const stash = JSON.parse((db.prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'").get() as { pending_gate_route_json: string }).pending_gate_route_json);
+    expect(stash.awaitingHumanDecision).toBe(true);
+    expect(stash.recommendedOutcome).toBe("rejected");
+    expect(stash.issueRefs).toEqual(["lock", "purity"]);
+    expect(stash.reasoning).toBe("judged rejected");
+    // The human can then act on it: decideGate routes to the rejected port.
+    await engine.decideGate(db, () => NOW, "run-1", "rejected", { bus, idFactory });
+    expect(getWorkflowRunById(db, "run-1")!.currentNodeId).toBe("execution");
+  });
+
+  it("the surrogate session's Stop hook routes through onAgentResponseDone to completeGateWorker", async () => {
+    seedRunAtValidation(db);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    const operators = { async list() { return [agentOperatorDescriptor()]; } };
+    const engine = new DispatchEngine(
+      fakeStepBroker(),
+      operators,
+      makeLauncher(),
+      fakeStepDispatch(),
+      vi.fn(async () => {}),
+      vi.fn(async () => "delivered" as const),
+    );
+    const service = new OrchestratorService(engine, fakeStepBroker(), operators);
+
+    const surrogate = await engine.requestNextDecision(db, () => NOW, "run-1", { bus, idFactory }).then(() =>
+      db.prepare("SELECT * FROM workflow_step_runs WHERE workflow_run_id = 'run-1' AND step_template_id = '__gate__:gate'").get() as StepRunRow
+    );
+    // The real launcher would have inserted this; the stub does not, so link the
+    // session to the surrogate ourselves (the Stop hook resolves by session id).
+    db.prepare(
+      "INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES ('ws-1', '/tmp/ws-1', 'ws', '', ?, ?)"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id) VALUES ('gate-sess-1', 'goal-1', 'ws-1', 'claude-code', 'Gate', 'running', ?, ?)"
+    ).run(NOW, surrogate.id);
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "gate-sess-1", adapterId: "claude-code", responseText: gateDecision("rejected", ["lock"]) },
+      { bus, idFactory }
+    );
+
+    // The gate resolved: decision recorded and routed to the rejected port.
+    expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(1);
+    expect(getWorkflowRunById(db, "run-1")!.currentNodeId).toBe("execution");
+  });
+
+  it("an unparseable worker response escalates to a human gate park", async () => {
+    seedRunAtValidation(db);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    const engine = makeWorkerEngine({
+      launcher: makeLauncher(),
+      workerSpawn: vi.fn(async () => {}),
+      workerDeliver: vi.fn(async () => "delivered" as const),
+    });
+    const surrogate = await parkAtGate(engine);
+
+    await engine.completeGateWorker(db, () => NOW, surrogate, "the worker rambled but emitted no decision block", { bus, idFactory });
+
+    expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(0);
+    const run = getWorkflowRunById(db, "run-1");
+    expect(run!.status).toBe("active");
+    expect(run!.currentStepRunId).toBeNull();
+    const stash = JSON.parse((db.prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'").get() as { pending_gate_route_json: string }).pending_gate_route_json);
+    expect(stash.awaitingHumanDecision).toBe(true);
+    expect(stash.recommendedOutcome).toBeUndefined();
   });
 });

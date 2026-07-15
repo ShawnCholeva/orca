@@ -9,6 +9,10 @@ export function composeGateWorkerPrompt(request: GateEvaluationRequest): string 
     "On 'rejected', issueRefs MUST enumerate the specific, addressable blocking",
     "failures — 'fix only these; do not rewrite what is correct'. On 'approved', issueRefs is [].",
     "",
+    // Constrain the verdict to the outcomes this gate actually wires an edge for
+    // (a gate may only offer 'approved'); an unoffered outcome would fail routing.
+    `\`outcome\` MUST be exactly one of: ${request.availableOutcomes.map((o) => `"${o}"`).join(", ")}.`,
+    "",
     "EVIDENCE:",
     JSON.stringify({
       goal: request.goal,
@@ -19,7 +23,7 @@ export function composeGateWorkerPrompt(request: GateEvaluationRequest): string 
     "",
     "When done, emit EXACTLY one fenced block, nothing after the closing fence:",
     "```orca:gate-decision",
-    '{ "reasoning": "...", "outcome": "approved|rejected", "reason": "...", "issueRefs": [...], "inputsConsidered": [...] }',
+    `{ "reasoning": "...", "outcome": ${request.availableOutcomes.map((o) => `"${o}"`).join("|")}, "reason": "...", "issueRefs": [...], "inputsConsidered": [...] }`,
     "```",
   ].join("\n");
 }

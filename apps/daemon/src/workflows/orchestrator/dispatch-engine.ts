@@ -64,7 +64,7 @@ import { resolveGateDecisionActivity, pauseForGateDecision, pauseForConfirmation
 import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
 import { listGoalDocumentsByGoal } from "../../goal-documents/projection.js";
 import { refreshGoalDocuments } from "../../goal-documents/usecases.js";
-import { composeGateWorkerPrompt } from "./gate-worker.js";
+import { composeGateWorkerPrompt, parseGateDecision } from "./gate-worker.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import { createStepOutputArtifact } from "./ledger-commit.js";
 import { scoreCompletedStepResult } from "./step-result-builder.js";
@@ -1660,7 +1660,10 @@ export class DispatchEngine {
       goal: GoalRow;
       gateNodeId: string;
     },
-    options: RequestNextDecisionOptions
+    options: RequestNextDecisionOptions,
+    // A worker-backed gate parks WITH the worker's verdict as a recommendation the
+    // human decides on (approve/reject the finding), rather than deciding blind.
+    recommendation?: { recommendedOutcome: "approved" | "rejected"; reasoning: string | null; issueRefs: string[]; reason: string }
   ): void {
     const { run, stepRun, stepTpl, template, goal, gateNodeId } = ctx;
     const graph = effectiveGraph(template.graph, template.steps);
@@ -1683,6 +1686,14 @@ export class DispatchEngine {
           awaitingHumanDecision: true,
           gateNodeId: gateNode.id,
           sourceStepRunId: stepRun.id,
+          ...(recommendation
+            ? {
+                recommendedOutcome: recommendation.recommendedOutcome,
+                reasoning: recommendation.reasoning,
+                issueRefs: recommendation.issueRefs,
+                reason: recommendation.reason,
+              }
+            : {}),
         }),
         run.id
       );
@@ -2427,6 +2438,104 @@ export class DispatchEngine {
   }
 
   /**
+   * The gate worker's Stop hook fired (routed here from `onAgentResponseDone` when
+   * the completing step-run is a gate surrogate). Parse the worker's verdict and
+   * converge on the same gate machinery both substrates share: on a parse failure
+   * escalate to the human park; else in automated mode route inline via
+   * `applyGateProposal`, and in supervised mode park WITH the verdict as a
+   * recommendation the human decides on. `stepRun` is the surrogate; the SOURCE
+   * step (for routing/park) comes from the stash written at spawn.
+   */
+  async completeGateWorker(
+    db: Database.Database,
+    now: () => string,
+    surrogateStepRun: StepRunRow,
+    responseText: string,
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, surrogateStepRun.workflow_run_id);
+    // Idempotent guards: a superseded run, or a stash already consumed/cleared,
+    // means this completion is stale — just close the surrogate and stop.
+    const stashRow = run
+      ? (db.prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id = ?").get(run.id) as { pending_gate_route_json: string | null } | undefined)
+      : undefined;
+    const closeSurrogate = () =>
+      db.prepare("UPDATE workflow_step_runs SET status = 'passed', finished_at = ? WHERE id = ?").run(now(), surrogateStepRun.id);
+    if (!run || run.status !== "active" || !stashRow?.pending_gate_route_json) {
+      closeSurrogate();
+      return;
+    }
+    let stash: { awaitingWorker?: boolean; gateNodeId: string; sourceStepRunId: string };
+    try {
+      stash = JSON.parse(stashRow.pending_gate_route_json);
+    } catch {
+      closeSurrogate();
+      return;
+    }
+    if (!stash.awaitingWorker) {
+      // Not an in-flight worker gate (already a human park, or something else).
+      closeSurrogate();
+      return;
+    }
+
+    const template = loadRunTemplate(db, run);
+    if (!template) {
+      closeSurrogate();
+      return;
+    }
+    const goal = readGoal(db, run.goalId);
+    const graph = effectiveGraph(template.graph, template.steps);
+    const gateNode = graph.nodes.find((n) => n.id === stash.gateNodeId && n.type === "gate");
+    const sourceStepRun = readStepRun(db, stash.sourceStepRunId);
+    const sourceStepTpl = template.steps.find((s) => s.id === sourceStepRun.step_template_id) ?? template.steps[0]!;
+
+    // Close the surrogate and clear the in-flight stash before routing/parking so a
+    // racing resume/decide cannot double-consume; the park paths re-write it.
+    closeSurrogate();
+    db.prepare("UPDATE workflow_runs SET pending_gate_route_json = NULL WHERE id = ?").run(run.id);
+
+    if (!gateNode) {
+      this.blockRun(db, now, { run, stepRun: sourceStepRun, stepTpl: sourceStepTpl, goal }, `gate node not found in graph: ${stash.gateNodeId}`, options);
+      return;
+    }
+
+    const proposal = parseGateDecision(responseText);
+    if (!proposal) {
+      // No usable verdict — escalate to a human decision (same safety terminus as
+      // the shadow path's null evaluation).
+      this.parkForGateApproval(db, now, { run, stepRun: sourceStepRun, stepTpl: sourceStepTpl, template, goal, gateNodeId: gateNode.id }, options);
+      return;
+    }
+
+    if (goalRequiresHumanReview(db, goal.id)) {
+      // Supervised: present the worker's verdict as a recommendation; the human
+      // decides (decideGate). Do NOT auto-record a gate decision.
+      this.parkForGateApproval(
+        db,
+        now,
+        { run, stepRun: sourceStepRun, stepTpl: sourceStepTpl, template, goal, gateNodeId: gateNode.id },
+        options,
+        {
+          recommendedOutcome: proposal.outcome,
+          reasoning: proposal.reasoning ?? null,
+          issueRefs: proposal.issueRefs ?? [],
+          reason: proposal.reason,
+        }
+      );
+      return;
+    }
+
+    // Automated: route inline through the shared gate tail.
+    await this.applyGateProposal(
+      db,
+      now,
+      { run, stepRun: sourceStepRun, stepTpl: sourceStepTpl, template, goal, gateNode, graph },
+      proposal,
+      options
+    );
+  }
+
+  /**
    * Park a run at a splitter that could not be routed (no deterministic branchKey
    * value AND no orchestrator decision) so a human can pick the branch. Surfaces
    * the declared branches labeled by their destination step. No silent default, no
@@ -2786,6 +2895,7 @@ export class DispatchEngine {
 
     let stash: {
       awaitingHumanDecision?: boolean;
+      awaitingWorker?: boolean;
       gateNodeId: string;
       outcome: string;
       destNodeId: string;
@@ -2799,6 +2909,10 @@ export class DispatchEngine {
       db.prepare("UPDATE workflow_runs SET pending_gate_route_json = NULL WHERE id = ?").run(runId);
       return;
     }
+    // A worker gate is still evaluating (its Stop hook, completeGateWorker, will
+    // route/park when it fires). It carries no dest yet — Continue must not touch
+    // it, or the resume sweep would route with an undefined destination.
+    if (stash.awaitingWorker) return;
     // A human-gated park is resolved by decideGate (the user picks the outcome),
     // not by Continue — leave it parked so confirmGate/resume cannot auto-route it.
     if (stash.awaitingHumanDecision) return;
