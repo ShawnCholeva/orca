@@ -455,6 +455,40 @@ describe("OrcaChat", () => {
     expect(screen.queryByTestId("step-working")).toBeNull();
   });
 
+  it("suppresses 'Working on {step}' while parked on an ORCHESTRATOR-source question too", async () => {
+    setupRunLoad(); // active mid-run step "Build It", no live activity
+    // A step's AskUserQuestion can surface with source "orchestrator" (observed
+    // live). The step is just as parked-on-the-human as a worker-source question,
+    // so the "Working on {step}…" status must be suppressed for it as well.
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "oq-park", goalId: "goal-1", role: "orchestrator", kind: "message",
+          body: "I need your input before continuing.", correlationId: null, createdAt: now,
+          pendingQuestion: {
+            questionId: "question-orch", toolUseId: "tool-orch", source: "orchestrator",
+            questions: [
+              {
+                header: "Signal style",
+                question: "How should divide(a, b) signal a divide-by-zero?",
+                multiSelect: false,
+                options: [
+                  { label: "Throw", description: "Throw a RangeError." },
+                  { label: "Result object", description: "Return a tagged result." },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByText("How should divide(a, b) signal a divide-by-zero?");
+    expect(screen.queryByTestId("step-working")).toBeNull();
+  });
+
   it("surfaces a blocked run with its reason and suppresses the working spinner", async () => {
     setupRunLoad();
     // The run halted at the splitter and was blocked with a reason.

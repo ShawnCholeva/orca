@@ -324,9 +324,11 @@ export function WorkflowTracker({
                         boxShadow: "0 0 0 3px var(--accent-soft)",
                       }}
                     />
-                    {awaitingConfirm && !awaitingApproval && !awaitingGate
-                      ? "awaiting confirmation"
-                      : "awaiting approval"}
+                    {awaitingGate
+                      ? "awaiting gate"
+                      : awaitingConfirm && !awaitingApproval
+                        ? "awaiting confirmation"
+                        : "awaiting approval"}
                   </span>
                 )}
                 {isSkipped && (

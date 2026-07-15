@@ -537,6 +537,15 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     [...messages].reverse().find(
       (m) => m.pendingQuestion?.source === "worker" && m.pendingQuestion.answer == null && !m.pendingQuestion.withdrawn,
     )?.pendingQuestion?.questionId ?? null;
+  // ANY unanswered pending question (worker OR orchestrator source) means the step
+  // is parked on the human, not working. The composer-routing above cares which
+  // source it is; the "Working on {step}…" honest-status suppression does not — a
+  // step's AskUserQuestion can surface as "orchestrator" source (observed live),
+  // and claiming it is "working" while it waits on the user is dishonest.
+  const pendingAnyQuestionId =
+    [...messages].reverse().find(
+      (m) => m.pendingQuestion != null && m.pendingQuestion.answer == null && !m.pendingQuestion.withdrawn,
+    )?.pendingQuestion?.questionId ?? null;
 
   const pendingRevisionRunId =
     [...messages].reverse().find((m) => m.pendingRevision != null)?.pendingRevision?.workflowRunId ?? null;
@@ -686,9 +695,10 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     !hasLiveActivity &&
     !currentStepStreaming &&
     answerPendingSince == null &&
-    // Parked on an unanswered worker question: the worker ended its turn and is
-    // waiting on the human, so it is NOT working — don't claim otherwise.
-    pendingWorkerQuestionId == null &&
+    // Parked on an unanswered question (worker OR orchestrator source): the step
+    // ended its turn and is waiting on the human, so it is NOT working — don't
+    // claim otherwise.
+    pendingAnyQuestionId == null &&
     !sendingMessage &&
     !awaitingReply &&
     !runBlocked &&

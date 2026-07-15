@@ -125,7 +125,7 @@ describe("WorkflowTracker", () => {
     expect(screen.queryByRole("button", { name: /approve to complete/i })).toBeNull();
   });
 
-  it("marks the gate's source step 'awaiting approval' when parked at a gate (no inline buttons)", () => {
+  it("marks the gate's source step 'awaiting gate' when parked at a gate (not 'approval', no inline buttons)", () => {
     render(
       <WorkflowTracker
         workflowName="Bug Triage & Fix"
@@ -136,8 +136,11 @@ describe("WorkflowTracker", () => {
       />,
     );
 
+    // A gate park is anchored to its (finished) source step; the label says the
+    // GATE is awaiting a decision — not that this done step needs approval.
+    expect(screen.getByText(/awaiting gate/i)).toBeInTheDocument();
+    expect(screen.queryByText(/awaiting approval/i)).toBeNull();
     // The approve/reject action lives in the chat thread, not the tracker.
-    expect(screen.getByText(/awaiting approval/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^reject$/i })).toBeNull();
   });
