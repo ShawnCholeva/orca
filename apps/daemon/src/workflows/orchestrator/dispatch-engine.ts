@@ -43,6 +43,7 @@ import {
   advanceToNextStepOrGate,
   insertStepForRouting,
   nextAttemptForStep,
+  stepFingerprint,
 } from "../steps/usecases.js";
 import { effectiveGraph, resolveGateNext, resolveSplitterNext, resolveStepNext, type Destination } from "../graph/graph-routing.js";
 import { nextTraversalSeq, recordGateDecision } from "../gates/usecases.js";
@@ -63,6 +64,7 @@ import { resolveGateDecisionActivity, pauseForGateDecision, pauseForConfirmation
 import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
 import { listGoalDocumentsByGoal } from "../../goal-documents/projection.js";
 import { refreshGoalDocuments } from "../../goal-documents/usecases.js";
+import { composeGateWorkerPrompt } from "./gate-worker.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import { createStepOutputArtifact } from "./ledger-commit.js";
 import { scoreCompletedStepResult } from "./step-result-builder.js";
@@ -2113,6 +2115,15 @@ export class DispatchEngine {
       return;
     }
 
+    // Worker-backed gate: the judgment is produced ASYNCHRONOUSLY by a full worker
+    // agent, not the shadow one-shot LLM below. Spawn it and park; its Stop hook
+    // (completeGateWorker) resolves the gate. Evaluate-always — mode only decides
+    // what happens with the verdict, not whether the worker runs.
+    if (gateNode.evalSubstrate === "worker") {
+      await this.spawnGateWorker(db, now, { run, stepRun, stepTpl, template, goal, gateNode, graph }, options);
+      return;
+    }
+
     // L4, or no evaluator wired: keep the human-authoritative park (unchanged).
     let adapterId: ShadowAdapterId | null = null;
     if (this.shadowAsk && !goalRequiresHumanReview(db, goal.id)) {
@@ -2256,6 +2267,162 @@ export class DispatchEngine {
       if (nextTpl) {
         await this.spawnStepAgent(db, now, { run: after, stepRun: nextStepRun, stepTpl: nextTpl, template, goal }, options);
       }
+    }
+  }
+
+  /**
+   * A worker-backed gate (evalSubstrate:"worker"). Unlike the shadow one-shot LLM
+   * eval, the verdict is produced ASYNCHRONOUSLY by a full worker agent (strong
+   * model, tools). We bind that worker to a gate SURROGATE step-run
+   * (step_template_id `__gate__:<nodeId>`, mirroring the delegate surrogate at
+   * join.ts) so its Stop hook lands in `onAgentResponseDone`; `completeGateWorker`
+   * then parses the decision and runs the shared `applyGateProposal` tail. The run
+   * parks meanwhile: cursor on the gate (current_step_run_id NULL, as every gate
+   * park) with `pending_gate_route_json.awaitingWorker` marking the eval in flight
+   * and stashing the SOURCE step for the completion to route/park against. On a
+   * request-cap overflow or no ready worker adapter/model, degrade to the human
+   * park — the same safety terminus as the shadow path.
+   */
+  private async spawnGateWorker(
+    db: Database.Database,
+    now: () => string,
+    ctx: {
+      run: WorkflowRunT;
+      stepRun: StepRunRow;
+      stepTpl: WorkflowStepTemplate;
+      template: WorkflowTemplateT;
+      goal: GoalRow;
+      gateNode: WorkflowGraphNode;
+      graph: ReturnType<typeof effectiveGraph>;
+    },
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    const { run, stepRun, stepTpl, template, goal, gateNode, graph } = ctx;
+
+    let gateRequest: GateEvaluationRequest;
+    try {
+      gateRequest = this.buildGateEvaluationRequest(db, { run, stepRun, goal, gateNode, graph });
+    } catch {
+      this.parkForGateApproval(db, now, { run, stepRun, stepTpl, template, goal, gateNodeId: gateNode.id }, options);
+      return;
+    }
+
+    // Resolve the STRONG worker agent from the gate's own agentPreference (the
+    // lever that makes a worker gate a rigorous critic). No ready adapter/model
+    // -> degrade to the human park.
+    let dispatch: ResolvedStepDispatch;
+    try {
+      if (!this.stepDispatch) throw new Error("step dispatch capabilities not configured");
+      dispatch = await resolveStepDispatch({
+        preferences: preferencesForGoal(gateNode.agentPreference ?? [], goal.orchestrator_provider),
+        isAdapterReady: (id) => this.stepDispatch!.isAdapterReady(id),
+        supportsModel: (id, mid) => this.stepDispatch!.supportsModel(id, mid),
+        resolveMode: (id) => this.stepDispatch!.resolveMode(id),
+      });
+    } catch {
+      this.parkForGateApproval(db, now, { run, stepRun, stepTpl, template, goal, gateNodeId: gateNode.id }, options);
+      return;
+    }
+
+    // Surrogate step-run for the gate node (mirror the delegate surrogate). Active
+    // so the worker's Stop hook processes it; ordinal -1; a fresh attempt each gate
+    // entry (loop backward edges) so the UNIQUE fingerprint index never collides.
+    const idFactory = options.idFactory ?? randomUUID;
+    const surrogateTemplateId = `__gate__:${gateNode.id}`;
+    const surrogateId = idFactory();
+    const attempt = nextAttemptForStep(db, run.id, surrogateTemplateId);
+    const fingerprint = stepFingerprint(run.id, surrogateTemplateId, attempt);
+
+    const stagedEvents: DomainEvent[] = [];
+    db.transaction(() => {
+      db.prepare(
+        "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES (?, ?, ?, ?, -1, ?, 'active', '[]', '[]', NULL, ?, NULL, ?)"
+      ).run(surrogateId, goal.id, run.id, surrogateTemplateId, attempt, now(), fingerprint);
+
+      // Record the strong-model selection on the surrogate so the worker session
+      // launches on the gate's chosen model (mirrors commitDeterministicStepSelection).
+      recordOperatorSelection(db, surrogateId, {
+        operatorId: `agent:${dispatch.adapterId}`,
+        providerId: dispatch.providerId ?? null,
+        modelId: dispatch.modelId,
+        at: now(),
+      });
+
+      // Park at the gate: cursor stays on the gate node (current_step_run_id NULL, as
+      // every gate park); the stash marks the async eval in flight and carries the
+      // SOURCE step for completeGateWorker to route/park against.
+      db.prepare(
+        "UPDATE workflow_runs SET current_step_run_id = NULL, current_node_id = ?, current_node_kind = 'gate', pending_gate_route_json = ? WHERE id = ?"
+      ).run(
+        gateNode.id,
+        JSON.stringify({
+          awaitingWorker: true,
+          gateNodeId: gateNode.id,
+          sourceStepRunId: stepRun.id,
+          surrogateStepRunId: surrogateId,
+        }),
+        run.id
+      );
+
+      // A decision trace on the SOURCE step so the caller (commitNoopLatestDecision)
+      // has something to return while the run parks awaiting the worker verdict —
+      // mirrors parkForGateApproval's await_human trace.
+      recordDecisionInTx(
+        db,
+        now,
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          stepRunId: stepRun.id,
+          decisionType: "evaluate_gate",
+          selectedAction: `gate:${gateNode.id}:await_worker`,
+          reason: `Gate "${gateNode.name}" evaluating via worker`,
+          influencedBy: [
+            { kind: "workflow_step", id: stepTpl.id, label: stepTpl.name, effect: "satisfied" },
+          ],
+          inputFingerprint: decisionFingerprint({
+            runId: run.id,
+            stepRunId: stepRun.id,
+            decisionType: "evaluate_gate",
+            payload: `${gateNode.id}:await_worker`,
+          }),
+        },
+        { idFactory: options.idFactory, stagedEvents }
+      );
+    })();
+    publishStaged(options.bus, stagedEvents);
+
+    const objective = composeGateWorkerPrompt(gateRequest);
+    try {
+      const { sessionId } = await this.launcher.launch({
+        goalId: goal.id,
+        workflowRunId: run.id,
+        workflowStepRunId: surrogateId,
+        operatorId: `agent:${dispatch.adapterId}`,
+        operatorKind: "agent",
+        objective,
+      });
+      await this.workerSpawn?.({ sessionId, goalId: goal.id, adapterId: dispatch.adapterId });
+      const delivered = await this.workerDeliver?.(sessionId, objective);
+      if (delivered && delivered !== "delivered") {
+        postOrchestratorMessage(
+          db,
+          now,
+          goal.id,
+          delivered === "timeout"
+            ? `Unable to submit the gate objective (${dispatch.adapterId}): the gate worker did not become idle in time.`
+            : `Unable to submit the gate objective (${dispatch.adapterId}): the gate worker session is not running.`,
+          options
+        );
+      }
+    } catch (err) {
+      postOrchestratorMessage(
+        db,
+        now,
+        goal.id,
+        `Unable to start the gate worker (${dispatch.adapterId}): ${err instanceof Error ? err.message : "unknown error"}`,
+        options
+      );
     }
   }
 
