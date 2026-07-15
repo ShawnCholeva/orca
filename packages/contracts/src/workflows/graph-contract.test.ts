@@ -81,9 +81,9 @@ describe("WorkflowGraphNode", () => {
     expect(parsed.evalSubstrate).toBe("worker");
   });
 
-  it("defaults evalSubstrate to shadow when omitted", () => {
+  it("leaves evalSubstrate absent when omitted (engine treats absent as shadow)", () => {
     const parsed = WorkflowGraphNode.parse({ id: "g", type: "gate", name: "G", instructions: "x" });
-    expect(parsed.evalSubstrate).toBe("shadow");
+    expect(parsed.evalSubstrate).toBeUndefined();
   });
 
   it("rejects a worker gate missing agentPreference", () => {

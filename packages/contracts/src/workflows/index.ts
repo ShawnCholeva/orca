@@ -335,10 +335,13 @@ const WorkflowGraphNodeBase = z
     writes: z.record(z.string().min(1).max(64), z.string().min(1).max(64)).optional(),  // { parentOutputKey: childOutputKey }
     validationRequired: z.boolean().optional(),
     requiresLaunchApproval: z.boolean().optional(),
-    // Gate nodes: how the judgment is produced. "shadow" (default) = one-shot
-    // orchestrator LLM eval; "worker" = a full worker agent (strong model, tools),
-    // which then feeds the same gate routing/loop machinery.
-    evalSubstrate: z.enum(["shadow", "worker"]).default("shadow"),
+    // Gate nodes: how the judgment is produced. Absent/"shadow" (the default) =
+    // one-shot orchestrator LLM eval; "worker" = a full worker agent (strong
+    // model, tools) that then feeds the same gate routing/loop machinery. Left
+    // OPTIONAL (not `.default("shadow")`) so existing graph-node literals still
+    // typecheck with zero migration — the engine treats absent as "shadow" by
+    // only ever branching on `=== "worker"`.
+    evalSubstrate: z.enum(["shadow", "worker"]).optional(),
     // Worker gates carry the same agent selection steps use.
     agentPreference: z.array(StepAgentChoice).min(1).max(8).optional(),
   })
