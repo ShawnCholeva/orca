@@ -70,6 +70,28 @@ describe("WorkflowGraphNode", () => {
     });
     expect(node.condition).toBe("x === true");
   });
+
+  it("accepts a worker-backed gate with instructions + agentPreference", () => {
+    const parsed = WorkflowGraphNode.parse({
+      id: "critique", type: "gate", name: "Critique",
+      evalSubstrate: "worker",
+      instructions: "Challenge the approach…",
+      agentPreference: [{ adapterId: "claude-code", modelId: "claude-opus-4-8" }],
+    });
+    expect(parsed.evalSubstrate).toBe("worker");
+  });
+
+  it("defaults evalSubstrate to shadow when omitted", () => {
+    const parsed = WorkflowGraphNode.parse({ id: "g", type: "gate", name: "G", instructions: "x" });
+    expect(parsed.evalSubstrate).toBe("shadow");
+  });
+
+  it("rejects a worker gate missing agentPreference", () => {
+    const r = WorkflowGraphNode.safeParse({
+      id: "g", type: "gate", name: "G", evalSubstrate: "worker", instructions: "x",
+    });
+    expect(r.success).toBe(false);
+  });
 });
 
 describe("WorkflowGraphNode splitter", () => {

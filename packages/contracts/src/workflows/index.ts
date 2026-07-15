@@ -335,11 +335,23 @@ const WorkflowGraphNodeBase = z
     writes: z.record(z.string().min(1).max(64), z.string().min(1).max(64)).optional(),  // { parentOutputKey: childOutputKey }
     validationRequired: z.boolean().optional(),
     requiresLaunchApproval: z.boolean().optional(),
+    // Gate nodes: how the judgment is produced. "shadow" (default) = one-shot
+    // orchestrator LLM eval; "worker" = a full worker agent (strong model, tools),
+    // which then feeds the same gate routing/loop machinery.
+    evalSubstrate: z.enum(["shadow", "worker"]).default("shadow"),
+    // Worker gates carry the same agent selection steps use.
+    agentPreference: z.array(StepAgentChoice).min(1).max(8).optional(),
   })
   .strict();
 export const WorkflowGraphNode = WorkflowGraphNodeBase.superRefine((n, ctx) => {
   if (n.type === "delegate" && (!n.childTemplateId || n.childTemplateVersion === undefined)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "delegate node requires childTemplateId + childTemplateVersion" });
+  }
+  if (n.type === "gate" && n.evalSubstrate === "worker") {
+    if (!n.agentPreference || n.agentPreference.length === 0)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "worker gate requires agentPreference" });
+    if (!n.instructions)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "worker gate requires instructions" });
   }
 });
 export type WorkflowGraphNode = z.infer<typeof WorkflowGraphNode>;
