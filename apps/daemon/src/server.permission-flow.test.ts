@@ -824,7 +824,8 @@ describe('worker question (elicit hook) flow', () => {
       now
     );
 
-    // Fire elicit hook without awaiting — it holds until the question is answered.
+    // Fire the elicit hook — it returns immediately (the step parks; the answer
+    // is delivered to the parked worker out of band).
     const elicitPromise = server.inject({
       method: 'POST',
       url: `/v1/agent-hooks/elicit?sessionId=${sessionId}`,
@@ -857,7 +858,7 @@ describe('worker question (elicit hook) flow', () => {
       .get(orchMsgId) as { pending_question: string };
     expect(JSON.parse(orchRow.pending_question)).toMatchObject({ withdrawn: true });
 
-    // Answer the question to unblock the held hook.
+    // Answer the question; it is delivered to the parked worker out of band.
     await server.inject({
       method: 'POST',
       url: `/v1/goals/${goalId}/worker-questions/${workerQ.questionId}/answer`,
@@ -866,6 +867,13 @@ describe('worker question (elicit hook) flow', () => {
     });
     const elicitRes = await elicitPromise;
     expect(elicitRes.statusCode).toBe(200);
+    expect(elicitRes.json().hookSpecificOutput.permissionDecision).toBe('deny');
+    // Answering clears the park synchronously (the answer is then delivered out
+    // of band), so the worker's Stop-hook no longer treats the step as parked.
+    const parked = db
+      .prepare('SELECT pending_worker_question_id FROM workflow_step_runs WHERE id = ?')
+      .get(stepRunId) as { pending_worker_question_id: string | null };
+    expect(parked.pending_worker_question_id).toBeNull();
   });
 
   it('elicit hook without workflow context: pending_question has no stepRunId (no crash)', async () => {

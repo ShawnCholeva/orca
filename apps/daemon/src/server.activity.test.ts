@@ -180,15 +180,22 @@ describe("daemon activity integration", () => {
   let server: FastifyInstance;
   let db: ReturnType<typeof openDatabase>;
   let dataDir: string;
+  // Deterministic worker delivery: worker answers are delivered to the parked
+  // worker via this stub instead of a real tmux session.
+  const workerDeliverMock = vi.fn<(sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">>(
+    async () => "delivered"
+  );
 
   beforeEach(() => {
+    workerDeliverMock.mockClear();
+    workerDeliverMock.mockResolvedValue("delivered");
     dataDir = mkdtempSync(path.join(os.tmpdir(), "orca-server-activity-"));
     const config = createConfig(dataDir);
     db = openDatabase(config);
     runMigrations(db, defaultMigrationsDir());
     seedAgents(db);
     const daemonContext = createDaemonContext(db, eventBus);
-    server = createServer(config, { daemonContext });
+    server = createServer(config, { daemonContext, workerDeliver: workerDeliverMock });
   });
 
   afterEach(async () => {
@@ -456,7 +463,7 @@ describe("daemon activity integration", () => {
     }
   });
 
-  it("inserts a worker-question chat message and settles the activity thread at ask time (legacy pending test)", async () => {
+  it("posts a worker-question chat message, parks the step, and returns the parked reason immediately", async () => {
     const ids = {
       goalId: "goal-question-pending",
       runId: "run-question-pending",
@@ -480,24 +487,17 @@ describe("daemon activity integration", () => {
         .statusCode
     ).toBe(200);
 
-    const elicitPromise = postElicit(
+    // The elicit hook returns immediately (non-blocking): the worker is told to
+    // park and stop, not held open waiting for the answer.
+    const elicit = await postElicit(
       server,
       ids.sessionId,
       "question-tool-pending",
       questions
     );
     const recorded = await waitForRecordedQuestion(db, ids);
-    const answer = await server.inject({
-      method: "POST",
-      url: `/v1/goals/${ids.goalId}/worker-questions/${recorded.pendingQuestion.questionId}/answer`,
-      headers: { "content-type": "application/json", ...AUTH_HEADERS },
-      payload: {
-        answers: [{ questionIndex: 0, selectedLabels: ["Wait"] }],
-      },
-    });
-    const elicit = await elicitPromise;
 
-    // The question is now a chat message, not an activity pause.
+    // The question is a chat message, not an activity pause.
     expect(recorded.pendingQuestion).toEqual({
       questionId: expect.any(String),
       toolUseId: "question-tool-pending",
@@ -513,11 +513,18 @@ describe("daemon activity integration", () => {
     expect(chatRows).toContainEqual({
       body: "I need your call on release plan.",
     });
-    expect(answer.statusCode).toBe(200);
+    // The hook denies the tool with a "parked, stop your turn" reason.
     expect(elicit.statusCode).toBe(200);
+    expect(elicit.json().hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(elicit.json().hookSpecificOutput.permissionDecisionReason).toContain("awaiting their answer");
+    // The step is parked on the question id (worker's Stop-hook must not judge it).
+    const parked = db
+      .prepare("SELECT pending_worker_question_id FROM workflow_step_runs WHERE id = ?")
+      .get(ids.stepRunId) as { pending_worker_question_id: string | null };
+    expect(parked.pending_worker_question_id).toBe(recorded.pendingQuestion.questionId);
   });
 
-  it("completes the paused activity while preserving the exact assembled answer reason", async () => {
+  it("records the answer, clears the park, and delivers the assembled reason to the worker", async () => {
     const ids = {
       goalId: "goal-question-answered",
       runId: "run-question-answered",
@@ -560,14 +567,23 @@ describe("daemon activity integration", () => {
     const elicit = await elicitPromise;
 
     expect(answer.statusCode).toBe(200);
+    // The elicit hook returns immediately (park) — it never carries the answer.
     expect(elicit.statusCode).toBe(200);
-    expect(elicit.json()).toEqual({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "deny",
-        permissionDecisionReason:
-          "User answered via Orca chat. Q1 'Release Plan': Ship now. These are the user's final answers — treat the AskUserQuestion as fully answered with exactly these selections and continue. Do not call AskUserQuestion again.",
-      },
+    expect(elicit.json().hookSpecificOutput.permissionDecision).toBe("deny");
+    // The assembled answer reason is delivered to the parked worker out of band.
+    await vi.waitFor(() =>
+      expect(workerDeliverMock).toHaveBeenCalledWith(
+        ids.sessionId,
+        "User answered via Orca chat. Q1 'Release Plan': Ship now. These are the user's final answers — treat the AskUserQuestion as fully answered with exactly these selections and continue. Do not call AskUserQuestion again.",
+      ),
+    );
+    // On delivery the park is cleared and the stash flushed.
+    await vi.waitFor(() => {
+      const row = db
+        .prepare("SELECT pending_worker_question_id, pending_worker_answer_json FROM workflow_step_runs WHERE id = ?")
+        .get(ids.stepRunId) as { pending_worker_question_id: string | null; pending_worker_answer_json: string | null };
+      expect(row.pending_worker_question_id).toBeNull();
+      expect(row.pending_worker_answer_json).toBeNull();
     });
     // The answer is recorded on the question message; no "Forwarding" activity.
     const messages = ListOrchestratorMessagesResponse.parse(
@@ -744,16 +760,16 @@ describe("daemon activity integration", () => {
     const elicit = await elicitPromise;
 
     expect(answer.statusCode).toBe(200);
-    expect(elicit.json()).toEqual({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "deny",
-        permissionDecisionReason:
-          'User answered via Orca chat with a custom response: "a dedicated workspaces tab". ' +
+    expect(elicit.json().hookSpecificOutput.permissionDecision).toBe("deny");
+    // The assembled free-text reason is delivered to the parked worker out of band.
+    await vi.waitFor(() =>
+      expect(workerDeliverMock).toHaveBeenCalledWith(
+        ids.sessionId,
+        'User answered via Orca chat with a custom response: "a dedicated workspaces tab". ' +
           "Treat the AskUserQuestion as fully answered with this response and continue. " +
           "Do not call AskUserQuestion again.",
-      },
-    });
+      ),
+    );
 
     // Card free-text: answer is stored on the question message; no separate user message.
     const afterMessages = ListOrchestratorMessagesResponse.parse(

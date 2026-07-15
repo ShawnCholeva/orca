@@ -20,6 +20,8 @@ const stepRun: StepRunRow = {
   pending_provider_recovery_json: null,
   pending_judge_json: null,
   pending_revision_json: null,
+  pending_worker_question_id: null,
+  pending_worker_answer_json: null,
 };
 
 const deps: StepResultBuilderDeps = {

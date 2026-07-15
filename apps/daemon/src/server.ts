@@ -268,6 +268,14 @@ import { resolveAgentProvider } from './orchestrator-llm/providers/registry.js';
 import { WorkerQuestionStore } from './workflows/orchestrator/worker-questions.js';
 import { PermissionApprovalStore } from './workflows/orchestrator/permission-approvals.js';
 import { validateAnswers, assembleAnswerReason, assembleFreeTextReason } from './workflows/orchestrator/worker-answer-format.js';
+
+// Returned to the worker (as the AskUserQuestion deny reason) the instant it
+// asks. The question is posted to chat and the step parks durably; the worker
+// must stop here and wait to be re-prompted rather than block or guess.
+const WORKER_QUESTION_PARKED_REASON =
+  "Your question has been delivered to the user in Orca chat and is awaiting their answer. " +
+  "Do not call AskUserQuestion again and do not guess. Stop now and end your turn — you will be " +
+  "automatically re-prompted with the user's answer when they respond.";
 import { registerOrchestrationTransportRoutes } from './workflows/orchestration-transport/routes.js';
 import {
   buildOrchestrationProviderCatalog,
@@ -320,6 +328,9 @@ export function createServer(
     assembler?: SessionPreparationAssembler;
     daemonContext?: DaemonContext;
     resumeActiveRunsOnBoot?: boolean;
+    // Override the idle-gated worker stdin delivery (defaults to the real tmux
+    // WorkerSessionManager.deliver). Tests inject a deterministic stub.
+    workerDeliver?: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">;
   }
 ): FastifyInstance {
   const startedAt = new Date().toISOString();
@@ -667,7 +678,6 @@ export function createServer(
     },
   });
   const workerQuestions = new WorkerQuestionStore(daemonContext.idFactory);
-  const ELICIT_ANSWER_TIMEOUT_MS = 590_000; // slightly under the 600s hook timeout
   const permissionApprovals = new PermissionApprovalStore(daemonContext.idFactory);
   const PERMISSION_DECISION_TIMEOUT_MS = 1_790_000; // ~under the 1800s PermissionRequest hook timeout; then deny
   const activityUpdater = new ActivityUpdater();
@@ -770,7 +780,7 @@ export function createServer(
     const sandboxed = noopSandbox.wrap(spawn);
     await workerSessions.spawn({ sessionId, goalId, adapterId, workspacePath: wsRow.path, command: sandboxed.command, env: sandboxed.env });
   };
-  const workerDeliverFn = (sessionId: string, text: string) => workerSessions.deliver(sessionId, text);
+  const workerDeliverFn = deps?.workerDeliver ?? ((sessionId: string, text: string) => workerSessions.deliver(sessionId, text));
   const workerWaitFn = (sessionId: string, adapterId: string) => workerSessions.waitForProviderReset(sessionId, adapterId);
 
   const dispatchEngine = new DispatchEngine(
@@ -1787,12 +1797,7 @@ export function createServer(
       const goalRow = db.prepare("SELECT goal_id FROM sessions WHERE id = ?").get(sessionId) as { goal_id: string } | undefined;
       if (!goalRow) return "No goal is associated with this session; proceed using your best judgment.";
       const goalId = goalRow.goal_id;
-      const { questionId, answered, isNew } = workerQuestions.record({
-        toolUseId: payload.toolUseId,
-        sessionId,
-        goalId,
-        questions: payload.questions,
-      });
+      const { questionId, isNew } = workerQuestions.record({ toolUseId: payload.toolUseId });
       if (isNew) {
         // Resolve step context first so it's available for both the
         // pending_question payload and the supersede call below.
@@ -1817,10 +1822,18 @@ export function createServer(
             },
           },
         );
-        // Supersede any redundant orchestrator question for this step run, then
-        // settle the current activity thread (empty summary -> expireLive) so the
-        // agent's post-answer work opens a fresh thread after the question bubble.
+        // Park the step on the question: the worker ends its turn now and the
+        // step waits (indefinitely) for the human. pending_worker_question_id
+        // tells the worker's Stop-hook not to judge/advance while parked, and
+        // survives a restart so the answer can still be delivered. Supersede any
+        // redundant orchestrator question, then settle the current activity
+        // thread (empty summary -> expireLive) so the agent's post-answer work
+        // opens a fresh thread after the question bubble.
         if (stepContext) {
+          db.prepare("UPDATE workflow_step_runs SET pending_worker_question_id = ? WHERE id = ?").run(
+            questionId,
+            stepContext.stepRunId
+          );
           try {
             withdrawOrchestratorPromptsForStepRun(
               { db, bus: eventBus, idFactory: daemonContext.idFactory },
@@ -1839,14 +1852,10 @@ export function createServer(
           });
         }
       }
-      let timerId: ReturnType<typeof setTimeout>;
-      const timed = new Promise<string>((res) => {
-        timerId = setTimeout(() => res("No answer received from the user; proceed using your best judgment."), ELICIT_ANSWER_TIMEOUT_MS);
-      });
-      const reason = await Promise.race([answered, timed]);
-      clearTimeout(timerId!); // release the timer; harmless if it already fired
-      workerQuestions.resolveAnswers(questionId, reason); // no-op if the /answer route already resolved this
-      return reason;
+      // Non-blocking: return immediately so the hook can't time out and bypass
+      // the human. The worker parks; the answer is delivered out of band by the
+      // /answer route once the user responds in chat.
+      return WORKER_QUESTION_PARKED_REASON;
     },
   });
 
@@ -1856,10 +1865,23 @@ export function createServer(
     const { goalId, questionId } = request.params as { goalId: string; questionId: string };
     const parsed = SubmitWorkerAnswersRequest.safeParse(request.body);
     if (!parsed.success) { reply.status(400); return { error: "validation_failed", issues: parsed.error.issues }; }
-    const pending = workerQuestions.get(questionId);
-    // Not-found OR a goal mismatch both read as "not found" for this goal — never
-    // let a question scoped to one goal be answered through another goal's URL.
-    if (!pending || pending.goalId !== goalId) { reply.status(404); return { error: { code: "question_not_found" } }; }
+    // Read the durable question from its chat message (not an in-memory store),
+    // so answering works after a daemon restart. Scoping by goal_id means a
+    // question owned by one goal reads as "not found" through another goal's URL.
+    const msgRow = db
+      .prepare(
+        `SELECT pending_question FROM orchestrator_messages
+          WHERE goal_id = ? AND json_extract(pending_question, '$.questionId') = ? LIMIT 1`
+      )
+      .get(goalId, questionId) as { pending_question: string } | undefined;
+    if (!msgRow) { reply.status(404); return { error: { code: "question_not_found" } }; }
+    const pending = JSON.parse(msgRow.pending_question) as {
+      questions: PendingQuestionItem[];
+      stepRunId?: string;
+      answer?: unknown;
+    };
+    // Already answered — durable idempotency guard (survives restart).
+    if (pending.answer != null) { reply.status(409); return { error: { code: "already_answered" } }; }
 
     let reason: string;
     let answer: PendingQuestionAnswer;
@@ -1872,9 +1894,6 @@ export function createServer(
       reason = assembleAnswerReason(pending.questions, parsed.data.answers!);
       answer = { answers: parsed.data.answers! };
     }
-
-    const ok = workerQuestions.resolveAnswers(questionId, reason);
-    if (!ok) { reply.status(409); return { error: { code: "already_answered" } }; }
 
     // Composer answers post the user's text as a chat message; card answers
     // (options or inline "Something else") render inline on the question bubble
@@ -1893,9 +1912,18 @@ export function createServer(
       );
     }
 
+    // Record the answer on the question bubble (also the persisted "answered"
+    // state the guard above reads), then deliver it to the parked worker out of
+    // band so the step resumes.
     recordWorkerQuestionAnswer(
       { db, bus: eventBus, idFactory: daemonContext.idFactory },
       { goalId, questionId, answer },
+    );
+    orchestratorService.deliverWorkerAnswer(
+      db,
+      daemonContext.now,
+      { goalId, stepRunId: pending.stepRunId ?? null, reason },
+      { bus: eventBus, idFactory: daemonContext.idFactory }
     );
 
     return { ok: true };

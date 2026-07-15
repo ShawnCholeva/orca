@@ -1,60 +1,33 @@
-import type { PendingQuestionItem } from "@orca/contracts";
-
-export interface PendingWorkerQuestion {
-  toolUseId: string;
-  sessionId: string;
-  goalId: string;
-  questions: PendingQuestionItem[];
-  resolve: (reason: string) => void;
-  answered: Promise<string>;
-}
-
 export interface RecordInput {
   toolUseId: string;
-  sessionId: string;
-  goalId: string;
-  questions: PendingQuestionItem[];
 }
 
 export interface RecordHandle {
   questionId: string;
-  answered: Promise<string>;
   /** False when a question with the same toolUseId was already recorded (duplicate
    * hook fire) — callers use this to avoid posting a second chat message. */
   isNew: boolean;
 }
 
+/**
+ * Mints a stable questionId per worker AskUserQuestion tool call and dedups
+ * duplicate PreToolUse hook fires by toolUseId. The question itself is persisted
+ * durably (a chat message plus a step-run park via pending_worker_question_id),
+ * so this in-memory map is NOT the source of truth — it only stops a double-fire
+ * of the same tool call from posting the question twice within one daemon
+ * lifetime. There is no held promise: the elicit hook returns immediately and the
+ * step parks until the human answers.
+ */
 export class WorkerQuestionStore {
-  private readonly pending = new Map<string, PendingWorkerQuestion>();
   private readonly byToolUseId = new Map<string, string>();
 
   constructor(private readonly idFactory: () => string = () => Math.random().toString(36).slice(2)) {}
 
   record(input: RecordInput): RecordHandle {
-    const existingId = this.byToolUseId.get(input.toolUseId);
-    if (existingId) {
-      const existing = this.pending.get(existingId);
-      if (existing) return { questionId: existingId, answered: existing.answered, isNew: false };
-    }
+    const existing = this.byToolUseId.get(input.toolUseId);
+    if (existing) return { questionId: existing, isNew: false };
     const questionId = this.idFactory();
-    let resolve!: (reason: string) => void;
-    const answered = new Promise<string>((res) => { resolve = res; });
-    this.pending.set(questionId, { ...input, resolve, answered });
     this.byToolUseId.set(input.toolUseId, questionId);
-    return { questionId, answered, isNew: true };
-  }
-
-  get(questionId: string): PendingWorkerQuestion | undefined {
-    return this.pending.get(questionId);
-  }
-
-  /** Resolves the held hook with `reason`. Returns false if already resolved/absent. */
-  resolveAnswers(questionId: string, reason: string): boolean {
-    const entry = this.pending.get(questionId);
-    if (!entry) return false;
-    this.pending.delete(questionId);
-    this.byToolUseId.delete(entry.toolUseId);
-    entry.resolve(reason);
-    return true;
+    return { questionId, isNew: true };
   }
 }

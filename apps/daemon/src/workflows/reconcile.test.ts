@@ -360,6 +360,77 @@ describe("reconcileWorkflowsOnBoot", () => {
     });
   });
 
+  it("blocks an active run whose step has an undelivered worker answer", () => {
+    const db = setup();
+    seedGoal(db);
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, '[]', '[]', ?, ?)"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)"
+    ).run(NOW);
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-1', 'goal-1', 'run-1', 'execution', 0, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1')"
+    ).run(NOW);
+    // Answered, but the deferred delivery to the parked worker did not survive
+    // the restart (stash present, question already cleared).
+    db.prepare("UPDATE workflow_step_runs SET pending_worker_answer_json = ? WHERE id = 'step-1'").run(
+      JSON.stringify({ reason: "User answered via Orca chat. ...", sessionId: "sess-1" })
+    );
+
+    reconcileWorkflowsOnBoot(db, () => NOW);
+
+    const run = db
+      .prepare("SELECT status, blocked_reason FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { status: string; blocked_reason: string | null };
+    expect(run).toEqual({ status: "blocked", blocked_reason: "worker_answer_delivery_failed" });
+
+    // Stash cleared so it does not re-fire on the next boot.
+    const step = db
+      .prepare("SELECT pending_worker_answer_json FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { pending_worker_answer_json: string | null };
+    expect(step.pending_worker_answer_json).toBeNull();
+
+    const events = db
+      .prepare("SELECT payload FROM events WHERE type='workflow.run.blocked'")
+      .all() as Array<{ payload: string }>;
+    expect(events).toHaveLength(1);
+    expect(JSON.parse(events[0]!.payload)).toMatchObject({
+      goalId: "goal-1",
+      workflowRunId: "run-1",
+      stepRunId: "step-1",
+      failureCode: "worker_answer_delivery_failed",
+    });
+  });
+
+  it("leaves a step merely PARKED on a worker question ACTIVE (not blocked)", () => {
+    const db = setup();
+    seedGoal(db);
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, '[]', '[]', ?, ?)"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)"
+    ).run(NOW);
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-1', 'goal-1', 'run-1', 'execution', 0, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-1')"
+    ).run(NOW);
+    // Parked awaiting the human — no answer yet. A valid paused state: the user
+    // can still answer after the restart, so reconcile must leave it alone.
+    db.prepare("UPDATE workflow_step_runs SET pending_worker_question_id = 'wq-1' WHERE id = 'step-1'").run();
+
+    reconcileWorkflowsOnBoot(db, () => NOW);
+
+    const run = db
+      .prepare("SELECT status, blocked_reason FROM workflow_runs WHERE id = 'run-1'")
+      .get() as { status: string; blocked_reason: string | null };
+    expect(run).toEqual({ status: "active", blocked_reason: null });
+    const step = db
+      .prepare("SELECT pending_worker_question_id FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { pending_worker_question_id: string | null };
+    expect(step.pending_worker_question_id).toBe("wq-1");
+  });
+
   it("leaves a splitter parked for a human routing choice ACTIVE (not drift-blocked)", () => {
     const db = setup();
     seedGoal(db);

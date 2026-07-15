@@ -186,6 +186,7 @@ describe("runMigrations", () => {
       "0058_goal_documents.sql",
       "0059_goal_intent_rename.sql",
       "0060_orchestrator_phase.sql",
+      "0061_step_run_pending_worker_hitl.sql",
     ]);
   });
 
@@ -338,6 +339,7 @@ describe("runMigrations", () => {
       "0058_goal_documents.sql",
       "0059_goal_intent_rename.sql",
       "0060_orchestrator_phase.sql",
+      "0061_step_run_pending_worker_hitl.sql",
     ]);
 
     const goalCount = (
@@ -643,6 +645,7 @@ describe("session tables migration", () => {
       "0058_goal_documents.sql",
       "0059_goal_intent_rename.sql",
       "0060_orchestrator_phase.sql",
+      "0061_step_run_pending_worker_hitl.sql",
     ]);
 
     const tables = (
@@ -1181,6 +1184,7 @@ describe("migration 0010 workflows", () => {
       "0058_goal_documents.sql",
       "0059_goal_intent_rename.sql",
       "0060_orchestrator_phase.sql",
+      "0061_step_run_pending_worker_hitl.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1796,6 +1800,7 @@ describe("migration 0012 orchestration transport", () => {
       "0058_goal_documents.sql",
       "0059_goal_intent_rename.sql",
       "0060_orchestrator_phase.sql",
+      "0061_step_run_pending_worker_hitl.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

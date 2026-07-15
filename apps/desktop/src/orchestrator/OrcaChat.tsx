@@ -1340,7 +1340,9 @@ function WorkerQuestionForm({
   // Local optimistic flag for an in-flight submit; a persisted answer also makes
   // the card read-only (covers composer/cross-session answers on this message).
   const [localSubmitted, setLocalSubmitted] = useState(false);
-  const [expired, setExpired] = useState(false);
+  // A submit that failed (network/server error). The question itself never
+  // expires — it parks durably until answered — so a failure is always retryable.
+  const [submitError, setSubmitError] = useState(false);
   const [freeTextSelected, setFreeTextSelected] = useState(answer?.freeText != null);
   const [freeText, setFreeText] = useState(answer?.freeText ?? "");
   const singleQuestion = pending.questions.length === 1;
@@ -1354,7 +1356,7 @@ function WorkerQuestionForm({
     const a = pending.answer ?? null;
     setSelections(selectionsFromAnswer(a));
     setLocalSubmitted(false);
-    setExpired(false);
+    setSubmitError(false);
     setFreeTextSelected(a?.freeText != null);
     setFreeText(a?.freeText ?? "");
   }, [pending.questionId]);
@@ -1388,7 +1390,7 @@ function WorkerQuestionForm({
       else await submitWorkerAnswers(goalId, pending.questionId, answers);
     } catch {
       setLocalSubmitted(false);
-      setExpired(true);
+      setSubmitError(true);
     }
   }
 
@@ -1512,7 +1514,7 @@ function WorkerQuestionForm({
         <span>{submitted ? "Sent" : "Send answer"}</span>
       </button>
       {answeredViaChat && <p className="orca-chat-question-answered-note">Answered in chat.</p>}
-      {expired && <p className="form-error" role="alert">This question expired.</p>}
+      {submitError && <p className="form-error" role="alert">Couldn't send your answer. Please try again.</p>}
     </div>
   );
 }

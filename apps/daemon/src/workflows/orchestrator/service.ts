@@ -817,6 +817,10 @@ export class OrchestratorService {
       .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
       .get(sess.workflow_step_run_id) as StepRunRow | undefined;
     if (!stepRun || stepRun.status !== "active") return;
+    // Parked on a worker AskUserQuestion awaiting the human: this turn ending is
+    // the park settling, not a completion. Do NOT judge/advance — the /answer
+    // route clears the park and re-drives the worker with the user's answer.
+    if (stepRun.pending_worker_question_id) return;
     const run = getWorkflowRunById(db, stepRun.workflow_run_id);
     if (!run || run.status !== "active") return;
     const template = loadRunTemplate(db, run);
@@ -1770,6 +1774,91 @@ export class OrchestratorService {
       );
     } catch (err) {
       console.error("[orchestrator] flushPendingRevision failed", err);
+    }
+  }
+
+  /**
+   * Delivers a recorded answer to a worker parked on an AskUserQuestion. Clears
+   * the pending_worker_question_id park; when a live worker session exists it
+   * also stashes the answer (pending_worker_answer_json) and flushes it out of
+   * band — mirroring flushPendingRevision so the worker (which just ended its
+   * turn to ask) is reached while idle and reconcile can re-drive after a
+   * restart. Never throws.
+   */
+  deliverWorkerAnswer(
+    db: Database.Database,
+    now: () => string,
+    input: { goalId: string; stepRunId: string | null; reason: string },
+    options: RequestNextDecisionOptions = {}
+  ): void {
+    const { goalId, stepRunId, reason } = input;
+    if (!stepRunId) return; // question wasn't tied to a step; nothing to resume
+    const sess = db
+      .prepare(
+        "SELECT id FROM sessions WHERE workflow_step_run_id = ? AND goal_id = ? AND status IN ('starting','running') ORDER BY rowid DESC LIMIT 1"
+      )
+      .get(stepRunId, goalId) as { id: string } | undefined;
+    if (!sess || !this.workerDeliver) {
+      // The worker session ended while parked; clear the park and tell the user.
+      db.prepare(
+        "UPDATE workflow_step_runs SET pending_worker_question_id = NULL WHERE id = ?"
+      ).run(stepRunId);
+      postOrchestratorMessage(
+        db,
+        now,
+        goalId,
+        "Recorded your answer, but the step agent session is no longer running — the step may need to be respawned to continue.",
+        options
+      );
+      return;
+    }
+    const sessionId = sess.id;
+    // Clear the park and stash the answer, then deliver AFTER this request
+    // returns (setImmediate). Delivering inline races the worker's own hook.
+    db.prepare(
+      "UPDATE workflow_step_runs SET pending_worker_question_id = NULL, pending_worker_answer_json = ? WHERE id = ?"
+    ).run(JSON.stringify({ reason, sessionId }), stepRunId);
+    setImmediate(() => {
+      void this.flushPendingWorkerAnswer(db, now, goalId, stepRunId, sessionId, reason, options);
+    });
+  }
+
+  /**
+   * Delivers a stashed worker answer (pending_worker_answer_json) to the parked
+   * step worker once it is idle, then clears the stash. Runs OUT of band so it
+   * does not deadlock against the worker's own in-flight hook. On failure the
+   * stash is left in place so reconcile can surface it after a restart. Never
+   * throws.
+   */
+  private async flushPendingWorkerAnswer(
+    db: Database.Database,
+    now: () => string,
+    goalId: string,
+    stepRunId: string,
+    sessionId: string,
+    reason: string,
+    options: RequestNextDecisionOptions
+  ): Promise<void> {
+    try {
+      const r = await this.workerDeliver!(sessionId, reason);
+      if (!db.open) return;
+      if (r === "delivered") {
+        db.prepare(
+          "UPDATE workflow_step_runs SET pending_worker_answer_json = NULL WHERE id = ?"
+        ).run(stepRunId);
+        return;
+      }
+      postOrchestratorMessage(
+        db,
+        now,
+        goalId,
+        r === "timeout"
+          ? "Couldn't deliver your answer because the step agent did not become idle in time; it will be re-surfaced on the next restart."
+          : "Couldn't deliver your answer because the step agent session is not running.",
+        options
+      );
+    } catch (err) {
+      console.error("[orchestrator] flushPendingWorkerAnswer failed", err);
     }
   }
 

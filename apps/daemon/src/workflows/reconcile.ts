@@ -124,6 +124,42 @@ export function reconcileWorkflowsOnBoot(db: Database, now: () => string): void 
         now()
       );
     }
+
+    // A step stashed a worker answer (pending_worker_answer_json) whose deferred
+    // delivery to the parked worker did not survive the restart. Mirror the
+    // revision path: block the run with a clear reason so the answered-but-not-
+    // resumed step is inspectable, and clear the stash so it does not re-fire.
+    // (A step still *parked* on the question — pending_worker_question_id set,
+    // no answer yet — is a valid paused state and is intentionally left alone so
+    // the human can still answer it after the restart.)
+    const pendingWorkerAnswers = db
+      .prepare(
+        `SELECT ws.id AS step_run_id, ws.workflow_run_id AS run_id, ws.goal_id AS goal_id
+         FROM workflow_step_runs ws
+         JOIN workflow_runs wr ON wr.id = ws.workflow_run_id
+         WHERE ws.pending_worker_answer_json IS NOT NULL AND ws.finished_at IS NULL AND wr.status = 'active'`
+      )
+      .all() as { step_run_id: string; run_id: string; goal_id: string }[];
+
+    for (const pa of pendingWorkerAnswers) {
+      db.prepare(
+        "UPDATE workflow_step_runs SET pending_worker_answer_json = NULL WHERE id = ?"
+      ).run(pa.step_run_id);
+      db.prepare(
+        "UPDATE workflow_runs SET status='blocked', blocked_reason='worker_answer_delivery_failed' WHERE id=? AND status='active'"
+      ).run(pa.run_id);
+      appendWorkflowEvent(
+        db,
+        "workflow.run.blocked",
+        {
+          goalId: pa.goal_id,
+          workflowRunId: pa.run_id,
+          stepRunId: pa.step_run_id,
+          failureCode: "worker_answer_delivery_failed",
+        },
+        now()
+      );
+    }
   })();
 
   // Re-assert supervised confirmation checkpoints for steps that were held

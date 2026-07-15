@@ -1432,10 +1432,10 @@ describe("OrcaChat", () => {
     expect(screen.getByRole("button", { name: /send answer/i })).toBeDisabled();
   });
 
-  it("shows an expired notice and re-enables Submit when the answer is rejected", async () => {
+  it("shows a retryable error and re-enables Submit when the answer submit fails", async () => {
     setupRunLoad();
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [pendingMsg] });
-    submitOrchestratorAnswerMock.mockRejectedValueOnce(new Error("question_not_found"));
+    submitOrchestratorAnswerMock.mockRejectedValueOnce(new Error("network_error"));
     const { OrcaChat } = await import("./OrcaChat");
 
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
@@ -1445,7 +1445,7 @@ describe("OrcaChat", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /^A/i }));
     fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
 
-    await screen.findByText("This question expired.");
+    await screen.findByText("Couldn't send your answer. Please try again.");
     // Controls came back: Submit is enabled again (selections still satisfy the gate).
     expect(screen.getByRole("button", { name: /send answer/i })).toBeEnabled();
   });

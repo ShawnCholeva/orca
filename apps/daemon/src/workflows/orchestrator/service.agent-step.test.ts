@@ -1144,6 +1144,43 @@ describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {
     ).toHaveLength(2);
   });
 
+  it("does not judge a step parked on a worker question (pending_worker_question_id set)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    // The worker asked a question and ended its turn; the step is parked awaiting
+    // the human. This Stop-hook must NOT be treated as a completion.
+    db.prepare(
+      "UPDATE workflow_step_runs SET pending_worker_question_id = 'wq-1' WHERE id = 'step-1'"
+    ).run();
+
+    const deliver = vi.fn(async () => "delivered" as const);
+    const mediator = spyMediator({ kind: "approve_step_complete" });
+    const service = makeJudgeService(mediator, deliver);
+    const responseText =
+      "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+
+    // The park short-circuits before the judge turn: no mediator call, no result,
+    // and the step stays active (waiting for the answer to be delivered).
+    expect(mediator.calls).toBe(0);
+    expect(stepOutputCount(db)).toBe(0);
+    const row = db
+      .prepare("SELECT step_result_json, status FROM workflow_step_runs WHERE id = 'step-1'")
+      .get() as { step_result_json: string | null; status: string };
+    expect(row.step_result_json).toBeNull();
+    expect(row.status).toBe("active");
+  });
+
   it("ask_user posts a chat message carrying an interactive pending_question", async () => {
     const { db, bus, idFactory } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" });

@@ -198,6 +198,7 @@ describe('context migration 0006_context.sql', () => {
       '0058_goal_documents.sql',
       '0059_goal_intent_rename.sql',
       '0060_orchestrator_phase.sql',
+      '0061_step_run_pending_worker_hitl.sql',
     ]);
 
     const tables = (
@@ -325,6 +326,7 @@ describe('context migration 0006_context.sql', () => {
       '0058_goal_documents.sql',
       '0059_goal_intent_rename.sql',
       '0060_orchestrator_phase.sql',
+      '0061_step_run_pending_worker_hitl.sql',
     ]);
 
     const counts = {
