@@ -133,6 +133,20 @@ describe("validateGraph", () => {
     const g = { ...valid, edges: valid.edges.map((e) => (e.from === "analysis" ? { ...e, port: "approved" as const } : e)) };
     expect(validateGraph(g, steps)).toContain("step edge must not carry a port: analysis -> execution");
   });
+
+  it("validates a worker-backed gate with a backward loop edge", () => {
+    const graph = {
+      nodes: [
+        { id: "a", type: "step", name: "A", stepId: "a" },
+        { id: "g", type: "gate", name: "G", evalSubstrate: "worker", instructions: "x",
+          agentPreference: [{ adapterId: "claude-code", modelId: "claude-opus-4-8" }] },
+        { id: "b", type: "step", name: "B", stepId: "b", terminal: true },
+      ],
+      edges: [ {from:"a",to:"g"}, {from:"g",to:"b",port:"approved"}, {from:"g",to:"a",port:"rejected"} ],
+      positions: { a:{x:0,y:0}, g:{x:0,y:1}, b:{x:0,y:2} },
+    };
+    expect(() => validateGraph(graph as never, [step("a", 0), step("b", 1)])).not.toThrow();
+  });
 });
 
 describe("validateGraph splitter", () => {
