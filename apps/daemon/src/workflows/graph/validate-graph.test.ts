@@ -135,7 +135,7 @@ describe("validateGraph", () => {
   });
 
   it("validates a worker-backed gate with a backward loop edge", () => {
-    const graph = {
+    const graph: WorkflowGraph = {
       nodes: [
         { id: "a", type: "step", name: "A", stepId: "a" },
         { id: "g", type: "gate", name: "G", evalSubstrate: "worker", instructions: "x",
@@ -145,7 +145,7 @@ describe("validateGraph", () => {
       edges: [ {from:"a",to:"g"}, {from:"g",to:"b",port:"approved"}, {from:"g",to:"a",port:"rejected"} ],
       positions: { a:{x:0,y:0}, g:{x:0,y:1}, b:{x:0,y:2} },
     };
-    expect(() => validateGraph(graph as never, [step("a", 0), step("b", 1)])).not.toThrow();
+    expect(validateGraph(graph, [step("a", 0), step("b", 1)])).toEqual([]);
   });
 });
 
