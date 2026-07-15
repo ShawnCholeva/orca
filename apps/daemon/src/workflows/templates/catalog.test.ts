@@ -61,7 +61,7 @@ describe("built-in template catalog", () => {
     const summaries = builtInCatalogSummaries();
     expect(summaries).toHaveLength(7);
     const byId = (id: string) => summaries.find((s) => s.id === id);
-    expect(byId("orca/adaptive-delivery")?.stepCount).toBe(12); // 9 steps + splitter + 2 gates
+    expect(byId("orca/adaptive-delivery")?.stepCount).toBe(12); // 8 steps + splitter + 3 gates (Critique is a worker gate as of v12)
     expect(byId("orca/code-review")?.stepCount).toBe(4);
   });
 
@@ -199,8 +199,8 @@ describe("Adaptive Delivery v9 completion gates", () => {
   const grounding = (stepId: string) =>
     (def.steps.find((s) => s.id === stepId)!.grounding ?? []) as NonNullable<WorkflowStepTemplate["grounding"]>;
 
-  it("is version 11 and runs the sensor ladder for execution AND validate_build", () => {
-    expect(def.version).toBe(11);
+  it("is version 12 and runs the sensor ladder for execution AND validate_build", () => {
+    expect(def.version).toBe(12);
     const rule = def.guardrails.find((g) => g.kind === "validation_rule")!;
     expect((rule.configJson as { appliesToSteps: string[] }).appliesToSteps.sort())
       .toEqual(["execution", "validate_build"]);
@@ -223,7 +223,8 @@ describe("Adaptive Delivery v9 completion gates", () => {
     expect(grounding("proposal").some((c) => c.rule === "member_of")).toBe(true);
     // Proposal declares an advisory plan-coverage check (task_plan files ⊇ Research files_in_scope).
     expect(grounding("proposal").some((c) => c.rule === "covers_prior" && c.mode === "observe")).toBe(true);
-    expect(grounding("critique").some((c) => c.rule === "implies")).toBe(true);
+    // Critique is a worker GATE as of v12 (no longer a step with grounding).
+    expect(def.steps.some((s) => s.id === "critique")).toBe(false);
     expect(grounding("execution").some((c) => c.rule === "paths_changed")).toBe(true);
     expect(grounding("validate_build").some((c) => c.rule === "implies")).toBe(true);
     // Cross-step requirement checks ship observe-only (free-text, paraphrase-prone).
@@ -232,8 +233,9 @@ describe("Adaptive Delivery v9 completion gates", () => {
       expect(subset.length).toBeGreaterThan(0);
       expect(subset.every((c) => c.mode === "observe")).toBe(true);
     }
-    // Verify declares an advisory covers_prior check (concerns_addressed ⊇ Critique concerns).
-    expect(grounding("verify").some((c) => c.rule === "covers_prior" && c.mode === "observe")).toBe(true);
+    // Verify's covers_prior on critique.concerns is dropped in v12 — Critique is a
+    // gate now and emits no `concerns` step output, so nothing may reference it.
+    expect(grounding("verify").some((c) => (c as { prior?: { stepId: string }[] }).prior?.some((p) => p.stepId === "critique"))).toBe(false);
     // Interview prose: nothing mechanically checkable.
     expect(grounding("clarify")).toHaveLength(0);
   });
@@ -258,5 +260,30 @@ describe("Adaptive Delivery splitter wiring", () => {
     const rejected = g.edges.find((e) => e.from === "designgate" && e.port === "rejected");
     expect(approved?.to).toBe("execution");
     expect(rejected?.to).toBe("proposal");
+  });
+});
+
+describe("Adaptive Delivery v12 Critique worker gate", () => {
+  const def = BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === "orca/adaptive-delivery")!;
+  const g = def.graph!;
+  const critique = g.nodes.find((n) => n.id === "critique")!;
+
+  it("Critique is a worker-backed gate carrying a strong agent + instructions", () => {
+    expect(critique.type).toBe("gate");
+    expect(critique.evalSubstrate).toBe("worker");
+    expect((critique.agentPreference ?? []).length).toBeGreaterThan(0);
+    expect(critique.instructions && critique.instructions.length).toBeGreaterThan(0);
+  });
+
+  it("Proposal flows into Critique; Critique approves to Verify and rejects back to Proposal", () => {
+    expect(g.edges.some((e) => e.from === "proposal" && e.to === "critique")).toBe(true);
+    const approved = g.edges.find((e) => e.from === "critique" && e.port === "approved");
+    const rejected = g.edges.find((e) => e.from === "critique" && e.port === "rejected");
+    expect(approved?.to).toBe("verify");
+    expect(rejected?.to).toBe("proposal");
+  });
+
+  it("has no `critique` step template (the step became a gate)", () => {
+    expect(def.steps.some((s) => s.id === "critique")).toBe(false);
   });
 });
