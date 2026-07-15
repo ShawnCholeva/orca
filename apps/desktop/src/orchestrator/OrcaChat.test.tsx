@@ -420,6 +420,41 @@ describe("OrcaChat", () => {
     expect(await screen.findByTestId("step-working")).toBeInTheDocument();
   });
 
+  it("suppresses 'Working on {step}' while the step is parked on an unanswered worker question", async () => {
+    setupRunLoad(); // active mid-run step "Build It", no live activity
+    // The worker asked a question and ended its turn — the step is parked
+    // waiting on the human, so the status must NOT claim it is working.
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "wq-park", goalId: "goal-1", role: "orchestrator", kind: "message",
+          body: "I need your input before continuing.", correlationId: null, createdAt: now,
+          pendingQuestion: {
+            questionId: "question-park", toolUseId: "tool-park", source: "worker",
+            questions: [
+              {
+                header: "Interface",
+                question: "What interface should the user drive the app through?",
+                multiSelect: false,
+                options: [
+                  { label: "Local web app", description: "A small local server + browser UI." },
+                  { label: "CLI", description: "Command-line commands." },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    // The question card is answerable...
+    await screen.findByText("What interface should the user drive the app through?");
+    // ...and no dishonest "Working on {step}" indicator sits under it.
+    expect(screen.queryByTestId("step-working")).toBeNull();
+  });
+
   it("surfaces a blocked run with its reason and suppresses the working spinner", async () => {
     setupRunLoad();
     // The run halted at the splitter and was blocked with a reason.

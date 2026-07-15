@@ -686,6 +686,9 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     !hasLiveActivity &&
     !currentStepStreaming &&
     answerPendingSince == null &&
+    // Parked on an unanswered worker question: the worker ended its turn and is
+    // waiting on the human, so it is NOT working — don't claim otherwise.
+    pendingWorkerQuestionId == null &&
     !sendingMessage &&
     !awaitingReply &&
     !runBlocked &&
