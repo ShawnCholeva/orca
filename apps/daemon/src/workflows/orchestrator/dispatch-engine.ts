@@ -2287,6 +2287,9 @@ export class DispatchEngine {
       inputsConsidered: proposal.inputsConsidered,
       issueRefs: proposal.issueRefs ?? [],
       ledgerVersion: ledger.version,
+      recommendedOutcome: null,
+      recommendedReason: null,
+      recommendedIssueRefs: [],
     });
 
     // Route inline (automated => no Continue). Mirrors evaluateAndParkSplitter's
@@ -2692,7 +2695,14 @@ export class DispatchEngine {
     // an approval that did not apply must be visible to the caller, not ok:true.
     if (!stashRow?.pending_gate_route_json) return { applied: false, reason: "no_pending_gate" };
 
-    let stash: { awaitingHumanDecision?: boolean; gateNodeId: string; sourceStepRunId: string };
+    let stash: {
+      awaitingHumanDecision?: boolean;
+      gateNodeId: string;
+      sourceStepRunId: string;
+      recommendedOutcome?: "approved" | "rejected";
+      reason?: string;
+      issueRefs?: string[];
+    };
     try {
       stash = JSON.parse(stashRow.pending_gate_route_json);
     } catch {
@@ -2746,6 +2756,9 @@ export class DispatchEngine {
       inputsConsidered: [],
       issueRefs: [],
       ledgerVersion: ledger.version,
+      recommendedOutcome: stash.recommendedOutcome ?? null,
+      recommendedReason: stash.reason ?? null,
+      recommendedIssueRefs: stash.issueRefs ?? [],
     });
     resolveGateDecisionActivity(
       { db, bus: options.bus ?? new EventBus() },

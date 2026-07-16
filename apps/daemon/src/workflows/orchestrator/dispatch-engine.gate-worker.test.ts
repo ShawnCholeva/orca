@@ -368,6 +368,7 @@ describe("dispatch-engine worker-backed gate — complete (Task 4c)", () => {
       goalId: "goal-1", workflowRunId: "run-1", nodeId: "gate", traversalSeq: nextTraversalSeq(db, "run-1"),
       outcome: "rejected", reason: "first pass", reasoning: null, selectedEdgeTo: "execution",
       inputsConsidered: [], issueRefs: ["lock", "purity"], ledgerVersion: 0,
+      recommendedOutcome: null, recommendedReason: null, recommendedIssueRefs: [],
     });
 
     await engine.completeGateWorker(db, () => NOW, surrogate, gateDecision("rejected", ["lock", "purity"]), { bus, idFactory });

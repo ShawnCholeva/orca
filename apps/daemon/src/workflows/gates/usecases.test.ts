@@ -48,6 +48,9 @@ describe("recordGateDecision", () => {
       inputsConsidered: ["validation"],
       issueRefs: ["issue-1"],
       ledgerVersion: 0,
+      recommendedOutcome: null,
+      recommendedReason: null,
+      recommendedIssueRefs: [],
     });
     const decisions = listGateDecisionsForRun(db, "r");
     expect(decisions).toHaveLength(1);
@@ -69,6 +72,9 @@ describe("recordGateDecision", () => {
       inputsConsidered: [],
       issueRefs: [],
       ledgerVersion: 3,
+      recommendedOutcome: null,
+      recommendedReason: null,
+      recommendedIssueRefs: [],
     });
     const decisions = listGateDecisionsForRun(db, "r");
     expect(decisions).toHaveLength(1);
@@ -89,6 +95,9 @@ describe("recordGateDecision", () => {
       inputsConsidered: [],
       issueRefs: [],
       ledgerVersion: 0,
+      recommendedOutcome: null,
+      recommendedReason: null,
+      recommendedIssueRefs: [],
     };
     recordGateDecision(db, () => "2026-06-12T00:00:01.000Z", args);
     expect(() => recordGateDecision(db, () => "2026-06-12T00:00:02.000Z", { ...args, id: "gd2" })).toThrow();
@@ -107,10 +116,40 @@ describe("recordGateDecision", () => {
       inputsConsidered: [],
       issueRefs: [],
       ledgerVersion: 1,
+      recommendedOutcome: null,
+      recommendedReason: null,
+      recommendedIssueRefs: [],
     });
     const row = db.prepare("SELECT reasoning FROM workflow_gate_decisions WHERE id = ?").get(id) as {
       reasoning: string | null;
     };
     expect(row.reasoning).toBe("criteria met");
+  });
+
+  it("persists recommended_outcome alongside the human outcome so overturn is reconstructable", () => {
+    recordGateDecision(db, () => "2026-07-16T00:00:00.000Z", {
+      id: "d1",
+      goalId: "g",
+      workflowRunId: "r",
+      nodeId: "review",
+      traversalSeq: 1,
+      outcome: "rejected",
+      reason: "rejected by user",
+      reasoning: null,
+      selectedEdgeTo: "proposal",
+      inputsConsidered: [],
+      issueRefs: [],
+      ledgerVersion: 0,
+      recommendedOutcome: "approved",
+      recommendedReason: "looks done",
+      recommendedIssueRefs: [],
+    });
+    const row = db.prepare("SELECT outcome, recommended_outcome FROM workflow_gate_decisions WHERE id='d1'").get() as {
+      outcome: string;
+      recommended_outcome: string | null;
+    };
+    expect(row.outcome).toBe("rejected");
+    expect(row.recommended_outcome).toBe("approved");
+    expect(row.recommended_outcome !== row.outcome).toBe(true); // overturn
   });
 });

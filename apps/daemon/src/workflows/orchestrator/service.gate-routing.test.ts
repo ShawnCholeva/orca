@@ -780,6 +780,7 @@ describe("OrchestratorService automated gate evaluation (L5)", () => {
         traversalSeq: nextTraversalSeq(db, "run-1"), outcome: "rejected",
         reason: `prior reject ${i}`, reasoning: null, selectedEdgeTo: "execution",
         inputsConsidered: [], issueRefs: [`old-${i}`], ledgerVersion: 0,
+        recommendedOutcome: null, recommendedReason: null, recommendedIssueRefs: [],
       });
     }
     const engine = makeEngineWithAsk(
@@ -803,6 +804,7 @@ describe("OrchestratorService automated gate evaluation (L5)", () => {
       traversalSeq: nextTraversalSeq(db, "run-1"), outcome: "rejected",
       reason: "first pass", reasoning: null, selectedEdgeTo: "execution",
       inputsConsidered: [], issueRefs: ["missing-tests"], ledgerVersion: 0,
+      recommendedOutcome: null, recommendedReason: null, recommendedIssueRefs: [],
     });
     const engine = makeEngineWithAsk(
       fakeStepBroker(),
