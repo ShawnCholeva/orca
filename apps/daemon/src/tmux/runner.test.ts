@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { capturePane, paste, sendEnter, sendKey, type TmuxRunner } from "./runner.js";
+import { capturePane, listSessions, paste, sendEnter, sendKey, type TmuxRunner } from "./runner.js";
 
 function fakeRunner(stdout = ""): TmuxRunner & { calls: string[][] } {
   const calls: string[][] = [];
@@ -33,5 +33,16 @@ describe("tmux runner helpers", () => {
     const r = fakeRunner();
     await sendKey(r, "sess", "Down");
     expect(r.calls[0]).toEqual(["send-keys", "-t", "sess", "Down"]);
+  });
+
+  it("listSessions returns one session name per line, ignoring blanks", async () => {
+    const r = fakeRunner("orca-worker-a\norca-shadow-g1\n\n");
+    expect(await listSessions(r)).toEqual(["orca-worker-a", "orca-shadow-g1"]);
+    expect(r.calls[0]).toEqual(["list-sessions", "-F", "#{session_name}"]);
+  });
+
+  it("listSessions returns [] when tmux has no server/sessions (nonzero exit)", async () => {
+    const r: TmuxRunner = { run: async () => ({ stdout: "", stderr: "no server running", code: 1 }) };
+    expect(await listSessions(r)).toEqual([]);
   });
 });

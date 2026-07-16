@@ -264,6 +264,8 @@ import { buildContextFromDb } from './orchestrator-llm/build-context.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
 import { registerAgentHookRoutes } from './agent-hooks/routes.js';
 import { WorkerSessionManager } from './workflows/orchestrator/worker-session.js';
+import { defaultTmuxRunner } from './tmux/runner.js';
+import { reapOrphanTmuxSessions, workerSessionIdsForRun } from './sessions/reap-orphan-sessions.js';
 import { resolveAgentProvider } from './orchestrator-llm/providers/registry.js';
 import { WorkerQuestionStore } from './workflows/orchestrator/worker-questions.js';
 import { PermissionApprovalStore } from './workflows/orchestrator/permission-approvals.js';
@@ -954,7 +956,18 @@ export function createServer(
           realVersionProbe
         );
       },
-    }).catch((err) => console.error("[resume] boot resume failed", err));
+    })
+      // After reattach has adopted the workers of still-active runs, reap any
+      // orca-worker/orca-shadow tmux sessions orphaned by a prior daemon
+      // generation (tmux outlives the daemon; nothing else reaps them). Ordered
+      // AFTER resume so a wanted worker is never killed out from under a reattach.
+      .then(() => reapOrphanTmuxSessions(defaultTmuxRunner(), db))
+      .then((reaped) => {
+        if (reaped.length > 0) {
+          console.log(`[reap] killed ${reaped.length} orphaned tmux session(s): ${reaped.join(", ")}`);
+        }
+      })
+      .catch((err) => console.error("[resume] boot resume failed", err));
   }
 
   // Tear down shadow sessions when a workflow run reaches a terminal state (best-effort).
@@ -968,6 +981,16 @@ export function createServer(
     if (TERMINAL_RUN_EVENTS.has(event.type) && event.goalId) {
       void shadowSessions.terminate(event.goalId).catch(() => {});
       void shadowSessions.terminate(`${event.goalId}::refute`).catch(() => {});
+      // Also tear down the run's worker sessions. A completed run already killed
+      // them via the step-completion path (this is then a no-op), but a run that
+      // goes terminal WITHOUT completing (cancel/fail/block mid-step) would
+      // otherwise leak its live worker tmux session.
+      const runId = typeof event.payload.workflowRunId === "string" ? event.payload.workflowRunId : null;
+      if (runId) {
+        for (const sessionId of workerSessionIdsForRun(db, runId)) {
+          void workerSessions.terminate(sessionId).catch(() => {});
+        }
+      }
     }
   });
 

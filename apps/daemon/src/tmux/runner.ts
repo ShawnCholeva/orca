@@ -60,3 +60,11 @@ export async function killSession(r: TmuxRunner, name: string): Promise<void> {
 export async function hasSession(r: TmuxRunner, name: string): Promise<boolean> {
   return (await r.run(["has-session", "-t", name])).code === 0;
 }
+
+// Every live tmux session name. Empty when tmux has no running server/sessions
+// (a nonzero exit), so callers never treat "no server" as an error.
+export async function listSessions(r: TmuxRunner): Promise<string[]> {
+  const res = await r.run(["list-sessions", "-F", "#{session_name}"]);
+  if (res.code !== 0) return [];
+  return res.stdout.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+}
