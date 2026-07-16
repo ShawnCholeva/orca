@@ -1801,6 +1801,102 @@ describe("OrcaChat", () => {
     expect(screen.queryByTestId("gate-decision")).not.toBeInTheDocument();
     // Single-bubble invariant: the step-working bubble is not also present.
     expect(screen.queryByTestId("step-working")).not.toBeInTheDocument();
+    // Single-bubble invariant: the generic answer-thinking row must yield to the
+    // gate-specific bubble while parked at a gate.
+    expect(screen.queryByTestId("answer-thinking")).not.toBeInTheDocument();
+  });
+
+  it("yields the answer-thinking bubble to gate-working when Continue parks the run at a gate", async () => {
+    const ts = new Date().toISOString();
+    listActivitiesMock.mockResolvedValueOnce([
+      {
+        id: "a-confirm-gate",
+        goalId: "goal-1",
+        workflowRunId: "run-1",
+        stepRunId: "step-1",
+        agentSessionId: "sess-1",
+        turnOrdinal: 1,
+        status: "paused_for_input",
+        currentText: "Completeness 90% · Ready for handoff — Continue or send revisions.",
+        finalSummary: null,
+        sourceKind: "step_confirmation_pending",
+        workCategory: null,
+        confidence: null,
+        createdAt: ts,
+        updatedAt: ts,
+        completedAt: null,
+      },
+    ]);
+    // Once Continue confirms the step, the daemon parks the run at the gate
+    // and the step's pending confirmation activity is gone — this is what
+    // lets hasLiveActivity clear so showGateWorking can take the tail.
+    listActivitiesMock.mockResolvedValue([]);
+    getGoalDetailMock.mockResolvedValue({
+      goal: { ...goal, activeWorkflowRunId: "run-1" },
+      refinement: null,
+      workspaces: [],
+    });
+    getWorkflowRunMock.mockResolvedValueOnce({
+      run: {
+        id: "run-1",
+        goalId: "goal-1",
+        templateId: "orca/engineering",
+        templateVersion: 1,
+        status: "active",
+        currentStepRunId: "step-1",
+        currentNodeKind: "step",
+        currentNodeId: "design",
+        startedAt: ts,
+        finishedAt: null,
+        blockedReason: null,
+      },
+    });
+    getWorkflowRunMock.mockResolvedValue({
+      run: {
+        id: "run-1",
+        goalId: "goal-1",
+        templateId: "orca/engineering",
+        templateVersion: 1,
+        status: "active",
+        currentStepRunId: null,
+        currentNodeKind: "gate",
+        currentNodeId: "critique",
+        startedAt: ts,
+        finishedAt: null,
+        blockedReason: null,
+        pendingGateReview: null,
+      },
+    });
+    getWorkflowTemplateMock.mockResolvedValue({
+      template: {
+        steps: [{ id: "design", ordinal: 0, name: "Design" }],
+        graph: {
+          nodes: [
+            { id: "design", type: "step", name: "Design" },
+            { id: "critique", type: "gate", name: "Critique" },
+          ],
+          edges: [{ from: "design", to: "critique" }],
+          positions: {},
+        },
+      },
+    });
+    listWorkflowDecisionsMock.mockResolvedValue({ decisions: [] });
+    listWorkflowRunArtifactsMock.mockResolvedValue({ artifacts: [] });
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(
+      <OrcaChat goals={[{ ...goal, activeWorkflowRunId: "run-1" }]} selectedGoalId="goal-1" connectionStatus="open" />,
+    );
+
+    const btn = await screen.findByTestId("step-confirm-continue");
+    fireEvent.click(btn);
+    await waitFor(() => expect(confirmStepMock).toHaveBeenCalledWith("run-1"));
+
+    // markAnswerPending() fires synchronously on click, before the refetch
+    // resolves the next node as a gate — exercising the exact overlap window
+    // from the review. Once settled, exactly one tail ThinkingRow renders.
+    await waitFor(() => expect(screen.getAllByText(/Working on Critique…/)).toHaveLength(1));
+    expect(screen.queryByTestId("answer-thinking")).not.toBeInTheDocument();
   });
 
   it("does not flash a loading indicator or blank content on SSE-driven refresh once loaded", async () => {

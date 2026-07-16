@@ -1190,7 +1190,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
               </div>
             )}
 
-            {answerPendingSince != null && !runBlocked && !showOrchestratorReview && (
+            {answerPendingSince != null && !runBlocked && !showOrchestratorReview && !awaitingGate && (
               <div data-testid="answer-thinking">
                 <ThinkingRow label="Thinking…" />
               </div>
