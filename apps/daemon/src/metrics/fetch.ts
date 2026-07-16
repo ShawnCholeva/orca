@@ -17,6 +17,19 @@ export type TemplateStepRun = {
   templateVersion: number;
 };
 export type TemplateRunInfo = { templateId: string; name: string; latestVersion: number };
+export type GateDecisionRow = {
+  id: string;
+  workflowRunId: string;
+  nodeId: string;
+  traversalSeq: number;
+  outcome: "approved" | "rejected";
+  reason: string;
+  issueRefs: string[];
+  recommendedOutcome: "approved" | "rejected" | null;
+  recommendedReason: string | null;
+  createdAt: string;
+  templateVersion: number;
+};
 
 const FACET_COLS = HARNESS_FACETS.map((f) => `ht.${f.column}`).join(", ");
 
@@ -75,6 +88,31 @@ export function listStepRunsByTemplate(
     workflowRunId: r.workflow_run_id, stepTemplateId: r.step_template_id, attempt: r.attempt,
     status: r.status, startedAt: r.started_at, finishedAt: r.finished_at,
     blockedReason: r.blocked_reason, templateVersion: r.template_version,
+  }));
+}
+
+export function listGateDecisionsByTemplate(
+  db: Database.Database, templateId: string, sinceIso: string, untilIso: string
+): GateDecisionRow[] {
+  const rows = db.prepare(
+    `SELECT gd.id, gd.workflow_run_id, gd.node_id, gd.traversal_seq, gd.outcome, gd.reason,
+            gd.issue_refs_json, gd.recommended_outcome, gd.recommended_reason,
+            gd.created_at, wr.template_version
+     FROM workflow_gate_decisions gd
+     JOIN workflow_runs wr ON wr.id = gd.workflow_run_id
+     WHERE wr.template_id = ? AND gd.created_at >= ? AND gd.created_at < ?
+     ORDER BY gd.created_at ASC, gd.id ASC`
+  ).all(templateId, sinceIso, untilIso) as {
+    id: string; workflow_run_id: string; node_id: string; traversal_seq: number;
+    outcome: "approved" | "rejected"; reason: string; issue_refs_json: string;
+    recommended_outcome: "approved" | "rejected" | null; recommended_reason: string | null;
+    created_at: string; template_version: number;
+  }[];
+  return rows.map((r) => ({
+    id: r.id, workflowRunId: r.workflow_run_id, nodeId: r.node_id, traversalSeq: r.traversal_seq,
+    outcome: r.outcome, reason: r.reason, issueRefs: JSON.parse(r.issue_refs_json) as string[],
+    recommendedOutcome: r.recommended_outcome, recommendedReason: r.recommended_reason,
+    createdAt: r.created_at, templateVersion: r.template_version,
   }));
 }
 

@@ -59,6 +59,18 @@ function stepNames(db: Database.Database, templateId: string): Map<string, { nam
   return map;
 }
 
+export function gateNodeNames(db: Database.Database, templateId: string): Map<string, { name: string; evalSubstrate: "shadow" | "worker" }> {
+  const row = db.prepare(`SELECT graph_json FROM workflow_templates WHERE id = ?`).get(templateId) as { graph_json: string | null } | undefined;
+  const map = new Map<string, { name: string; evalSubstrate: "shadow" | "worker" }>();
+  if (!row?.graph_json) return map;
+  const graph = JSON.parse(row.graph_json) as { nodes: { id: string; type: string; name?: string; evalSubstrate?: "shadow" | "worker" }[] };
+  for (const n of graph.nodes) {
+    if (n.type !== "gate") continue;
+    map.set(n.id, { name: n.name || n.id, evalSubstrate: n.evalSubstrate ?? "shadow" });
+  }
+  return map;
+}
+
 export function getTemplateMetricsDetail(db: Database.Database, templateId: string, period: MetricPeriod, nowIso?: string): TemplateMetricsDetail | null {
   const now = nowOr(nowIso);
   const info = listTemplatesWithRuns(db).find((t) => t.templateId === templateId);
