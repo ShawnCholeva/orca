@@ -214,10 +214,12 @@ export function computeStepMetrics(input: {
   const byStep = new Map<string, TemplateTransition[]>();
   for (const t of input.transitions) {
     if (!t.stepTemplateId) continue;
+    if (t.stepTemplateId.startsWith("__gate__:")) continue;
     (byStep.get(t.stepTemplateId) ?? byStep.set(t.stepTemplateId, []).get(t.stepTemplateId)!).push(t);
   }
   const runsByStep = new Map<string, TemplateStepRun[]>();
   for (const r of input.stepRuns) {
+    if (r.stepTemplateId.startsWith("__gate__:")) continue;
     (runsByStep.get(r.stepTemplateId) ?? runsByStep.set(r.stepTemplateId, []).get(r.stepTemplateId)!).push(r);
   }
 

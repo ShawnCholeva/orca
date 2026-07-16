@@ -1,8 +1,9 @@
 import type Database from "better-sqlite3";
 import type { MetricPeriod, TemplateMetricsDetail, TemplateMetricsSummary } from "@orca/contracts";
-import { listStepRunsByTemplate, listTemplatesWithRuns, listTransitionsByTemplate } from "./fetch.js";
+import { listGateDecisionsByTemplate, listStepRunsByTemplate, listTemplatesWithRuns, listTransitionsByTemplate } from "./fetch.js";
 import { computeStepMetrics, computeTemplateSummary, windowStart } from "./aggregate.js";
 import { computeCalibration } from "./verification.js";
+import { buildGateMetrics, buildPolicyGatewayMetrics } from "./gate-metrics.js";
 
 function nowOr(nowIso?: string): string {
   return nowIso ?? new Date().toISOString();
@@ -77,8 +78,18 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
   if (!info) return null;
   const since = windowStart(now, period);
   const transitions = listTransitionsByTemplate(db, templateId, since, now);
+  const gateDecisions = listGateDecisionsByTemplate(db, templateId, since, now);
+  const gates = buildGateMetrics({ decisions: gateDecisions, transitions, names: gateNodeNames(db, templateId), period });
+  const scored = gates.filter((g) => g.health != null);
+  const gateHealthValue = scored.length ? Math.round(scored.reduce((n, g) => n + g.health!, 0) / scored.length) : null;
+  const gateHealth = {
+    value: gateHealthValue,
+    grade: gateHealthValue == null ? null : (gateHealthValue >= 90 ? "A" : gateHealthValue >= 80 ? "B" : gateHealthValue >= 70 ? "C" : gateHealthValue >= 60 ? "D" : "F") as "A" | "B" | "C" | "D" | "F",
+    delta: null, confidence: (scored.length >= 1 ? "ok" : "low") as "ok" | "low",
+  };
+  const summary = { ...buildSummary(db, info, period, now), gateHealth };
   return {
-    summary: buildSummary(db, info, period, now),
+    summary,
     steps: computeStepMetrics({
       transitions,
       stepRuns: listStepRunsByTemplate(db, templateId, since, now),
@@ -86,12 +97,7 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
       nowIso: now, period,
       calibration: computeCalibration(transitions),
     }),
-    // TODO(gate-metrics): populated in the gates-wiring task
-    gates: [],
-    policyGateway: {
-      decisionDist: { allow: 0, require_approval: 0, deny: 0 },
-      overPermissive: { count: 0, sampleTransitionIds: [] },
-      boundaryViolations: [],
-    },
+    gates,
+    policyGateway: buildPolicyGatewayMetrics(transitions),
   };
 }
