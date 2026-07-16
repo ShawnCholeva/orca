@@ -738,6 +738,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     activities.some((a) => a.stepRunId === currentStepRunId && a.status === "active");
   const showStepWorking =
     activeStepRunning &&
+    !awaitingGate &&
     orchestratorPhase == null &&
     !hasLiveActivity &&
     !currentStepStreaming &&
@@ -751,6 +752,24 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     !awaitingReply &&
     !runBlocked &&
     !showStarting;
+  // Honest progress while a gate's reviewer runs. A run parked at a gate has
+  // current_step_run_id = NULL, so showStepWorking (which keys off an active
+  // stepRun) never fires here. Derive the reviewing window from the run cursor:
+  // parked at a gate (awaitingGate) with no verdict surfaced yet
+  // (pendingGateReview == null) and no live pause card up (hasLiveActivity flips
+  // true the instant the gate parks for a decision). Holds for both substrates —
+  // worker (async) and shadow (brief sync eval). Single-bubble invariant: the
+  // guards below make this mutually exclusive with every other tail indicator.
+  const pendingGateReview = workflowState.run?.pendingGateReview ?? null;
+  const gateWorkingName = awaitingGate ? gateNode?.name ?? "Gate" : null;
+  const showGateWorking =
+    awaitingGate &&
+    pendingGateReview == null &&
+    !hasLiveActivity &&
+    !runBlocked &&
+    !showStarting &&
+    !sendingMessage &&
+    !awaitingReply;
   const orchestratorPhaseLabel =
     orchestratorPhase === "reviewing"
       ? "Reviewing the step output…"
@@ -1192,6 +1211,12 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
             {showStepWorking && (
               <div data-testid="step-working">
                 <ThinkingRow label={activeStepName ? `Working on ${activeStepName}…` : "Working…"} />
+              </div>
+            )}
+
+            {showGateWorking && (
+              <div data-testid="gate-working">
+                <ThinkingRow label={`Working on ${gateWorkingName}…`} />
               </div>
             )}
 

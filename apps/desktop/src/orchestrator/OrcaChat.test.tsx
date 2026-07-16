@@ -1751,6 +1751,58 @@ describe("OrcaChat", () => {
     await waitFor(() => expect(confirmSplitMock).toHaveBeenCalledWith("run-1", "approach_only"));
   });
 
+  it("shows a single 'Working on <gate>…' bubble while a gate reviewer runs", async () => {
+    const ts = new Date().toISOString();
+    listActivitiesMock.mockResolvedValue([]);
+    getGoalDetailMock.mockResolvedValue({
+      goal: { ...goal, activeWorkflowRunId: "run-1" },
+      refinement: null,
+      workspaces: [],
+    });
+    getWorkflowRunMock.mockResolvedValue({
+      run: {
+        id: "run-1",
+        goalId: "goal-1",
+        templateId: "orca/engineering",
+        templateVersion: 1,
+        status: "active",
+        currentStepRunId: null,
+        currentNodeKind: "gate",
+        currentNodeId: "critique",
+        startedAt: ts,
+        finishedAt: null,
+        blockedReason: null,
+        pendingGateReview: null,
+      },
+    });
+    getWorkflowTemplateMock.mockResolvedValue({
+      template: {
+        steps: [{ id: "design", ordinal: 0, name: "Design" }],
+        graph: {
+          nodes: [
+            { id: "design", type: "step", name: "Design" },
+            { id: "critique", type: "gate", name: "Critique" },
+          ],
+          edges: [{ from: "design", to: "critique" }],
+          positions: {},
+        },
+      },
+    });
+    listWorkflowDecisionsMock.mockResolvedValue({ decisions: [] });
+    listWorkflowRunArtifactsMock.mockResolvedValue({ artifacts: [] });
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(
+      <OrcaChat goals={[{ ...goal, activeWorkflowRunId: "run-1" }]} selectedGoalId="goal-1" connectionStatus="open" />,
+    );
+
+    const bubbles = await screen.findAllByText(/Working on Critique…/);
+    expect(bubbles).toHaveLength(1);
+    expect(screen.queryByTestId("gate-decision")).not.toBeInTheDocument();
+    // Single-bubble invariant: the step-working bubble is not also present.
+    expect(screen.queryByTestId("step-working")).not.toBeInTheDocument();
+  });
+
   it("does not flash a loading indicator or blank content on SSE-driven refresh once loaded", async () => {
     setupRunLoad();
     listOrchestratorMessagesMock.mockResolvedValue({ messages: [userMessage, orcaMessage] });
