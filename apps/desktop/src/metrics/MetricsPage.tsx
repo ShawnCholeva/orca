@@ -4,6 +4,7 @@ import { getTemplateMetricsSummaries, getTemplateMetricsDetail } from "../api";
 import { gradeFor, workflowHealthFromSteps } from "./metrics-data";
 import { StatTile } from "./metrics-charts";
 import { StepPerformancePanel, WorkflowDropdown } from "./StepPerformance";
+import { GatePerformancePanel, PolicyGatewayReadout } from "./GatePerformance";
 import { SelfImprovementRail } from "./SelfImprovement";
 import { Workflow, Refresh } from "./metrics-icons";
 
@@ -17,6 +18,7 @@ export function MetricsPage() {
   const [wfId, setWfId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TemplateMetricsDetail | null>(null);
   const [openStep, setOpenStep] = useState<string | null>(null);
+  const [openGate, setOpenGate] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -76,6 +78,8 @@ export function MetricsPage() {
         </div>
 
         <StepPerformancePanel detail={detail} loading={detail === null} openStep={openStep} onToggleStep={(name) => setOpenStep((o) => (o === name ? null : name))} />
+        <GatePerformancePanel detail={detail} openGate={openGate} onToggleGate={(id) => setOpenGate((o) => (o === id ? null : id))} />
+        <PolicyGatewayReadout detail={detail} />
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
