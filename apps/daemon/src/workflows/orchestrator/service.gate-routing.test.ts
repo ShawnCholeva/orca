@@ -133,6 +133,7 @@ function fakeGateAsk(proposal: {
   reason: string;
   issueRefs?: string[];
   inputsConsidered?: string[];
+  residualRisks?: { risk: string; severity: "low" | "medium" | "high" }[];
 }): ShadowAsk {
   return {
     async ask() {
@@ -142,6 +143,7 @@ function fakeGateAsk(proposal: {
           outcome: proposal.outcome,
           reason: proposal.reason,
           issueRefs: proposal.issueRefs ?? [],
+          residualRisks: proposal.residualRisks ?? [],
           inputsConsidered: proposal.inputsConsidered ?? ["sourceStepOutput"],
         }),
       };
@@ -740,15 +742,31 @@ describe("OrchestratorService automated gate evaluation (L5)", () => {
     expect(JSON.parse(stash.pending_gate_route_json!)).toMatchObject({ awaitingHumanDecision: true });
   });
 
-  it("L4 human_review still parks for a human decideGate (no auto-eval)", async () => {
-    // operating_mode left at default (human_review); shadowAsk present but must NOT be consulted.
+  it("L4 human_review still parks for a human decideGate, but WITH the reviewer's recommendation (no blind park)", async () => {
+    // operating_mode left at default (human_review); shadowAsk IS consulted now — no blind
+    // parks — but its verdict is carried as a recommendation, never auto-recorded as a decision.
     const asked = { n: 0 };
-    const spyAsk: ShadowAsk = { async ask() { asked.n += 1; return { text: "{}" }; } };
+    const inner = fakeGateAsk({
+      outcome: "approved",
+      reason: "Meets the goal.",
+      residualRisks: [{ risk: "edge case X not covered", severity: "low" }],
+    });
+    const spyAsk: ShadowAsk = {
+      async ask(goalId, input) {
+        asked.n += 1;
+        return inner.ask(goalId, input);
+      },
+    };
     const engine = makeEngineWithAsk(fakeStepBroker(), spyAsk);
     await advanceRunToGate(engine);
 
-    expect(asked.n).toBe(0);
+    expect(asked.n).toBe(1);
+    // No automated decision recorded — the human still decides via decideGate.
     expect(listGateDecisionsForRun(db, "run-1")).toHaveLength(0);
+    const run = getWorkflowRunById(db, "run-1")!;
+    expect(run.pendingGateReview).not.toBeNull();
+    expect(run.pendingGateReview?.recommendedOutcome).toBe("approved");
+    expect(run.pendingGateReview?.residualRisks.length).toBeGreaterThan(0);
     const stash = db.prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id = 'run-1'").get() as { pending_gate_route_json: string | null };
     expect(JSON.parse(stash.pending_gate_route_json!)).toMatchObject({ awaitingHumanDecision: true });
   });

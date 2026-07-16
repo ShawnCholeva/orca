@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { GateEvaluationRequest, GateEvaluationProposal } from "@orca/contracts";
 import type { ShadowAsk } from "./recover-step-scoring.js";
 import { evaluateGate, composeGateEvaluationPrompt, issueRefsEqual, GATE_REJECT_CAP } from "./gate-evaluation.js";
+import { composeGateWorkerPrompt } from "./gate-worker.js";
 
 const REQUEST: GateEvaluationRequest = {
   gate: { nodeId: "gate", name: "Review Gate", instructions: "Approve when the deliverable meets the goal." },
@@ -110,5 +111,28 @@ describe("issueRefsEqual", () => {
     expect(issueRefsEqual(["a", "b"], ["b", "a"])).toBe(true);
     expect(issueRefsEqual(["a"], ["a", "b"])).toBe(false);
     expect(issueRefsEqual([], [])).toBe(true);
+  });
+});
+
+const REQ = {
+  gate: { nodeId: "critique", name: "Critique", instructions: "Judge the design." },
+  goal: { id: "g1", intent: "ship it" },
+  sourceStepOutput: { plan: "..." },
+  priorGateDecisions: [],
+  availableOutcomes: ["approved", "rejected"] as ("approved" | "rejected")[],
+  committedLedger: [],
+};
+
+describe("reviewer prompts request residual risks", () => {
+  it("worker prompt asks for residualRisks with severity", () => {
+    const p = composeGateWorkerPrompt(REQ);
+    expect(p).toContain("residualRisks");
+    expect(p).toMatch(/severity/i);
+  });
+
+  it("shadow prompt asks for residualRisks with severity", () => {
+    const { systemPrompt } = composeGateEvaluationPrompt(REQ);
+    expect(systemPrompt).toContain("residualRisks");
+    expect(systemPrompt).toMatch(/severity/i);
   });
 });

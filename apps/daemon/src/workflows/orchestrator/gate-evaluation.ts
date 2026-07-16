@@ -30,11 +30,13 @@ export function composeGateEvaluationPrompt(
     "evidence you used.",
     "On 'rejected', issueRefs MUST be a short enumerated list of specific, addressable failures",
     "— 'fix only these; do not rewrite what is correct'. On 'approved', issueRefs is [].",
+    "List in `residualRisks` the risks that remain even if you approve — each a short statement",
+    'with a severity of "low", "medium", or "high"; use [] only if genuinely none.',
     "Work through the evidence in `reasoning` FIRST, THEN commit to the outcome — do not restate the outcome as the reasoning.",
     "Produce exactly one GateEvaluationProposal JSON object in one fenced block, nothing after",
     "the closing fence:",
     "```orca:action",
-    '{ "reasoning": "...", "outcome": "...", "reason": "...", "issueRefs": [...], "inputsConsidered": [...] }',
+    '{ "reasoning": "...", "outcome": "...", "reason": "...", "residualRisks": [{ "risk": "...", "severity": "low|medium|high" }], "issueRefs": [...], "inputsConsidered": [...] }',
     "```",
   ].join("\n");
   return { systemPrompt, userPrompt: JSON.stringify(request) };

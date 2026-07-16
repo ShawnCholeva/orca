@@ -2101,12 +2101,16 @@ export class DispatchEngine {
   }
 
   /**
-   * Gate = the PEV Verify phase. In human_review (L4) — or when no shadow
-   * evaluator is available — parks for a human decideGate (unchanged). In
-   * automated (L5), the LLM fills the verdict + issue list; the deterministic
-   * core branches, bounds the reject loop (GATE_REJECT_CAP), records the decision
-   * with issueRefs (which flow to the closing step via latestRejectingGate ->
-   * repairContext), and routes inline (forward on approve, backward on reject).
+   * Gate = the PEV Verify phase. No blind parks: a shadow reviewer runs
+   * regardless of review mode. In human_review (L4), the run parks WITH the
+   * reviewer's verdict (outcome, reason, residualRisks, inputsConsidered) as a
+   * recommendation for decideGate — the human still decides. In automated (L5),
+   * the LLM fills the verdict + issue list; the deterministic core branches,
+   * bounds the reject loop (GATE_REJECT_CAP), records the decision with issueRefs
+   * (which flow to the closing step via latestRejectingGate -> repairContext),
+   * and routes inline (forward on approve, backward on reject). Only when no
+   * reviewer can run at all (no shadowAsk / no adapter / build failure / null
+   * eval) does it fall back to a bare park with no recommendation.
    */
   private async evaluateAndParkGate(
     db: Database.Database,
@@ -2138,23 +2142,24 @@ export class DispatchEngine {
       return;
     }
 
-    // L4, or no evaluator wired: keep the human-authoritative park (unchanged).
+    // No blind parks: a gate reviewer runs even when a human will decide. Resolve a
+    // shadow reviewer regardless of review mode.
     let adapterId: ShadowAdapterId | null = null;
-    if (this.shadowAsk && !goalRequiresHumanReview(db, goal.id)) {
+    if (this.shadowAsk) {
       try {
         adapterId = resolveShadowAdapterId(goal);
       } catch {
         adapterId = null;
       }
     }
-    if (!this.shadowAsk || goalRequiresHumanReview(db, goal.id) || !adapterId) {
+    // The ONLY surviving blind park: no reviewer can run at all (reviewer unavailable).
+    if (!this.shadowAsk || !adapterId) {
       this.parkForGateApproval(db, now, { run, stepRun, stepTpl, template, goal, gateNodeId }, options);
       return;
     }
 
     // An oversized source output/ledger can exceed the request payload cap. Rather
-    // than throw out of the dispatch flow, degrade to the human park (the same
-    // safety terminus as a failed evaluation below).
+    // than throw out of the dispatch flow, degrade to the reviewer-unavailable park.
     let gateRequest: GateEvaluationRequest;
     try {
       gateRequest = this.buildGateEvaluationRequest(db, { run, stepRun, goal, gateNode, graph });
@@ -2169,11 +2174,32 @@ export class DispatchEngine {
       timeoutMs: SHADOW_LLM_TIMEOUT_MS,
     });
     if (!proposal) {
-      // Escalate to a human — the same safety terminus as the broker's human_review.
+      // Evaluation failed — reviewer-unavailable park (labeled in the card).
       this.parkForGateApproval(db, now, { run, stepRun, stepTpl, template, goal, gateNodeId }, options);
       return;
     }
 
+    if (goalRequiresHumanReview(db, goal.id)) {
+      // Supervised: park WITH the reviewer's verdict as a recommendation; the human
+      // decides (decideGate). Do NOT auto-record a gate decision.
+      this.parkForGateApproval(
+        db,
+        now,
+        { run, stepRun, stepTpl, template, goal, gateNodeId },
+        options,
+        {
+          recommendedOutcome: proposal.outcome,
+          reasoning: proposal.reasoning ?? null,
+          issueRefs: proposal.issueRefs ?? [],
+          reason: proposal.reason,
+          residualRisks: proposal.residualRisks,
+          inputsConsidered: proposal.inputsConsidered,
+        }
+      );
+      return;
+    }
+
+    // Automated: route inline through the shared gate tail.
     await this.applyGateProposal(
       db,
       now,
