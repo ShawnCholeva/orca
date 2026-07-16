@@ -1522,7 +1522,9 @@ function WorkerQuestionForm({
                 <span className="orca-chat-option-content">
                   <span className="orca-chat-option-head">
                     <span className="orca-chat-option-label">
-                      {submitted && chosen ? "✓ " : ""}
+                      {submitted && chosen ? (
+                        <span className="orca-chat-option-check">✓ </span>
+                      ) : null}
                       {displayLabel}
                     </span>
                     {recommended ? (

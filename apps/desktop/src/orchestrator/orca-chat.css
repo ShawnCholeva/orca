@@ -914,6 +914,7 @@
 }
 .orca-chat-option-row--chosen input { accent-color: var(--accent); opacity: 1; }
 .orca-chat-option-row--chosen .orca-chat-option-label { color: var(--text); font-weight: 600; }
+.orca-chat-option-check { color: var(--ok, #3fb950); font-weight: 700; }
 .orca-chat-option-content { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .orca-chat-option-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .orca-chat-option-freetext {
