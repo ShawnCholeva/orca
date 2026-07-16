@@ -587,36 +587,73 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const sortedSteps = workflowState.template
     ? [...workflowState.template.steps].sort((left, right) => left.ordinal - right.ordinal)
     : [];
-  const trackerSteps: TrackerStep[] = sortedSteps.map((step) => ({
-    name: step.name,
-    role: step.agentPreference?.[0]?.adapterId,
-  }));
+  // The tracker shows steps AND gates as their own nodes. Steps are the linear
+  // backbone; a gate (a template.graph node of type "gate") is anchored right
+  // after the step whose forward edge leads into it (edge.to === gate.id and
+  // edge.from === step.id — graph nodes reuse the step id for step nodes). Each
+  // tracker item keeps its source id so active/skipped state resolves by id, not
+  // by fragile positional remapping. Legacy templates (graph === null) yield
+  // steps only, unchanged.
+  type GraphNode = NonNullable<WorkflowTemplate["graph"]>["nodes"][number];
+  const graph = workflowState.template?.graph ?? null;
+  const gatesAfterStep = new Map<string, GraphNode[]>();
+  if (graph) {
+    for (const node of graph.nodes) {
+      if (node.type !== "gate") continue;
+      const inEdge = graph.edges.find(
+        (e) => e.to === node.id && sortedSteps.some((s) => s.id === e.from),
+      );
+      if (!inEdge) continue;
+      const list = gatesAfterStep.get(inEdge.from) ?? [];
+      list.push(node);
+      gatesAfterStep.set(inEdge.from, list);
+    }
+  }
+  type TrackerItemSrc = { item: TrackerStep; stepId?: string; gateId?: string; anchorStepId: string };
+  const trackerSrc: TrackerItemSrc[] = [];
+  for (const step of sortedSteps) {
+    trackerSrc.push({
+      item: { kind: "step", name: step.name, role: step.agentPreference?.[0]?.adapterId },
+      stepId: step.id,
+      anchorStepId: step.id,
+    });
+    for (const gate of gatesAfterStep.get(step.id) ?? []) {
+      trackerSrc.push({
+        item: {
+          kind: "gate",
+          name: gate.name || "Gate",
+          role: gate.evalSubstrate === "worker" ? gate.agentPreference?.[0]?.adapterId : undefined,
+        },
+        gateId: gate.id,
+        anchorStepId: step.id,
+      });
+    }
+  }
+  const trackerSteps: TrackerStep[] = trackerSrc.map((s) => s.item);
   // A run parked at a gate has current_step_run_id = NULL (so workflowState.stepRun
-  // is null). Detect it from the run cursor + template graph so the tracker shows
-  // the gate's source step awaiting approval instead of falling back to step 0.
+  // is null). Detect it from the run cursor + template graph so the tracker parks
+  // the gate's own node "awaiting" instead of falling back to step 0.
   const gateNode =
     workflowState.run?.currentNodeKind === "gate" && workflowState.run.currentNodeId
-      ? workflowState.template?.graph?.nodes.find(
+      ? graph?.nodes.find(
           (node) => node.id === workflowState.run?.currentNodeId && node.type === "gate",
         )
       : undefined;
   const awaitingGate = gateNode != null;
-  // The step whose edge leads into the parked gate — the tracker anchors the
-  // "awaiting approval" affordance on it.
-  const gateSourceStepIndex = (() => {
-    if (!awaitingGate || !workflowState.template?.graph) return -1;
-    const edge = workflowState.template.graph.edges.find((e) => e.to === gateNode!.id);
-    if (!edge) return -1;
-    return sortedSteps.findIndex((step) => step.id === edge.from);
-  })();
   const trackerActiveIndex = (() => {
-    if (sortedSteps.length === 0) return 0;
-    if (awaitingGate && gateSourceStepIndex >= 0) return gateSourceStepIndex;
-    const byId = workflowState.stepRun
-      ? sortedSteps.findIndex((step) => step.id === workflowState.stepRun?.stepTemplateId)
-      : -1;
-    const raw = byId >= 0 ? byId : workflowState.stepRun?.ordinal ?? 0;
-    return Math.min(sortedSteps.length - 1, Math.max(0, raw));
+    if (trackerSrc.length === 0) return 0;
+    if (awaitingGate && gateNode) {
+      const gi = trackerSrc.findIndex((s) => s.gateId === gateNode.id);
+      if (gi >= 0) return gi;
+    }
+    const activeStepId = workflowState.stepRun?.stepTemplateId;
+    const byId = activeStepId ? trackerSrc.findIndex((s) => s.stepId === activeStepId) : -1;
+    if (byId >= 0) return byId;
+    // No id match (early load): fall back to the step at the run's ordinal.
+    const ord = Math.min(sortedSteps.length - 1, Math.max(0, workflowState.stepRun?.ordinal ?? 0));
+    const target = sortedSteps[ord];
+    const mi = target ? trackerSrc.findIndex((s) => s.stepId === target.id) : -1;
+    return mi >= 0 ? mi : 0;
   })();
   // A step that has produced its output and parked for the human to Continue/
   // Revise emits a step_confirmation_pending activity (status paused_for_input).
@@ -639,10 +676,14 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   // the run we can still see here is parked on the passed terminal step. Treat
   // that as completion for the tracker header and the chat notice, which would
   // otherwise go silent after the last step.
+  const lastStepTrackerIndex = (() => {
+    for (let i = trackerSrc.length - 1; i >= 0; i--) if (trackerSrc[i].stepId) return i;
+    return -1;
+  })();
   const workflowFinished =
     workflowState.run?.status === "completed" ||
     (workflowState.stepRun?.status === "passed" &&
-      trackerActiveIndex === sortedSteps.length - 1);
+      trackerActiveIndex === lastStepTrackerIndex);
   // Derive the approve-to-complete affordance from the persisted activity stream.
   // The daemon emits a mark_done_pending activity (status paused_for_input) that
   // carries the complete_workflow_run recommendation id; no side fetch needed.
@@ -659,9 +700,11 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const skippedIndices =
     executedStepIds.size === 0
       ? []
-      : sortedSteps.reduce<number[]>((acc, step, i) => {
+      : trackerSrc.reduce<number[]>((acc, src, i) => {
           const behind = workflowFinished || i < trackerActiveIndex;
-          if (behind && !executedStepIds.has(step.id)) acc.push(i);
+          // A gate whose source step was routed past renders skipped too, so it
+          // never shows a false green "passed" check on a path that didn't run.
+          if (behind && !executedStepIds.has(src.anchorStepId)) acc.push(i);
           return acc;
         }, []);
   const showTracker = workflowState.run !== null && trackerSteps.length > 0;

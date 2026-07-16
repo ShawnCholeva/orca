@@ -8,6 +8,10 @@ import type { CSSProperties, ReactNode } from "react";
 export type TrackerStep = {
   name: string;
   role?: string;
+  // Steps and gates share the stepper. A gate renders as a distinct node (rounded
+  // square + shield glyph) so the user can see where a workflow's approval/critique
+  // checkpoints sit in the flow, not just its steps. Absent means "step".
+  kind?: "step" | "gate";
 };
 
 type Props = {
@@ -84,6 +88,16 @@ const WorkflowIcon = (p: { size?: number; color?: string }) =>
 const CheckIcon = (p: { size?: number; color?: string }) =>
   svg(<path d="M5 12l4.5 4.5L19 7" />, p);
 
+// Shield-check: the gate node glyph (approval/critique checkpoint).
+const GateIcon = (p: { size?: number; color?: string }) =>
+  svg(
+    <>
+      <path d="M12 3l7 3v5c0 4-3 6.8-7 8-4-1.2-7-4-7-8V6l7-3z" />
+      <path d="M9 11.5l2 2 4-4" />
+    </>,
+    p,
+  );
+
 const ArrowRightIcon = (p: { size?: number; color?: string; style?: CSSProperties }) =>
   svg(
     <>
@@ -109,6 +123,12 @@ export function WorkflowTracker({
 }: Props) {
   if (steps.length === 0) return null;
   const active = completed || !activeRunning ? undefined : steps[activeIndex];
+  // The header counts steps only — gates share the stepper but aren't "Step N".
+  // When parked at a gate, the count reflects its source step (the last step at
+  // or before the active index), which reads naturally ("Step 2 of 4" at the gate
+  // that follows step 2).
+  const totalSteps = steps.filter((s) => s.kind !== "gate").length;
+  const currentStepNumber = steps.slice(0, activeIndex + 1).filter((s) => s.kind !== "gate").length;
 
   return (
     <div
@@ -126,7 +146,7 @@ export function WorkflowTracker({
         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{workflowName}</span>
         <span style={{ width: 3, height: 3, borderRadius: "50%", background: "var(--text-4)" }} />
         <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>
-          {completed ? "Completed" : `Step ${activeIndex + 1} of ${steps.length}`}
+          {completed ? "Completed" : `Step ${currentStepNumber} of ${totalSteps}`}
         </span>
         {active && active.role && (
           <span
@@ -193,6 +213,7 @@ export function WorkflowTracker({
       {/* stepper */}
       <div style={{ display: "flex", alignItems: "flex-start" }}>
         {steps.map((step, i) => {
+          const isGate = step.kind === "gate";
           const isSkipped = skippedIndices.includes(i);
           const isAwaiting =
             !completed && (awaitingApproval || awaitingGate || awaitingConfirm) && i === activeIndex;
@@ -227,11 +248,11 @@ export function WorkflowTracker({
                   style={{
                     width: 24,
                     height: 24,
-                    borderRadius: "50%",
+                    borderRadius: isGate ? 7 : "50%",
                     flexShrink: 0,
                     background: dotColor,
                     border: "1.5px solid " + ringColor,
-                    boxShadow: isActive ? "0 0 0 4px var(--accent-soft)" : "none",
+                    boxShadow: isActive || (isAwaiting && isGate) ? "0 0 0 4px var(--accent-soft)" : "none",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -242,12 +263,14 @@ export function WorkflowTracker({
                     <span data-testid="tracker-done-check" style={{ display: "inline-flex" }}>
                       <CheckIcon size={13} color="#fff" />
                     </span>
-                  ) : isAwaiting ? (
-                    <CheckIcon size={13} color="#fff" />
                   ) : isSkipped ? (
                     <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: "var(--text-4)" }}>
                       –
                     </span>
+                  ) : isGate ? (
+                    <GateIcon size={13} color={isActive || isAwaiting ? "#fff" : "var(--text-4)"} />
+                  ) : isAwaiting ? (
+                    <CheckIcon size={13} color="#fff" />
                   ) : (
                     <span
                       className="mono"
@@ -342,6 +365,19 @@ export function WorkflowTracker({
                     }}
                   >
                     skipped
+                  </span>
+                )}
+                {isGate && !isActive && !isAwaiting && !isSkipped && (
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: 9,
+                      letterSpacing: 0.8,
+                      textTransform: "uppercase",
+                      color: done ? "var(--text-3)" : "var(--text-4)",
+                    }}
+                  >
+                    gate
                   </span>
                 )}
               </div>

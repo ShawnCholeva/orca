@@ -145,6 +145,44 @@ describe("WorkflowTracker", () => {
     expect(screen.queryByRole("button", { name: /^reject$/i })).toBeNull();
   });
 
+  it("renders a gate as its own node (with a 'gate' label) and counts steps only in the header", () => {
+    const withGate = [
+      { name: "Proposal", role: "claude-code", kind: "step" as const },
+      { name: "Critique", kind: "gate" as const },
+      { name: "Apply", kind: "step" as const },
+    ];
+    render(<WorkflowTracker workflowName="Bug Triage & Fix" steps={withGate} activeIndex={0} />);
+
+    // The gate appears as its own node with its name and a 'gate' descriptor.
+    expect(screen.getByText("Critique")).toBeInTheDocument();
+    expect(screen.getByText("gate")).toBeInTheDocument();
+    // The header counts steps only — the gate is not "Step N".
+    expect(screen.getByText("Step 1 of 2")).toBeInTheDocument();
+  });
+
+  it("parks 'awaiting gate' on the gate node itself, not the preceding step", () => {
+    const withGate = [
+      { name: "Proposal", kind: "step" as const },
+      { name: "Critique", kind: "gate" as const },
+      { name: "Apply", kind: "step" as const },
+    ];
+    render(
+      <WorkflowTracker
+        workflowName="Bug Triage & Fix"
+        steps={withGate}
+        activeIndex={1}
+        activeRunning={false}
+        awaitingGate
+      />,
+    );
+
+    expect(screen.getByText(/awaiting gate/i)).toBeInTheDocument();
+    // Parked at the gate after step 1 → header still reads the source step.
+    expect(screen.getByText("Step 1 of 2")).toBeInTheDocument();
+    // The preceding step (index 0) rendered its completed check, not an awaiting badge.
+    expect(screen.getAllByTestId("tracker-done-check")).toHaveLength(1);
+  });
+
   it("marks a step parked for Continue/Revise 'awaiting confirmation', not 'running'", () => {
     render(
       <WorkflowTracker
