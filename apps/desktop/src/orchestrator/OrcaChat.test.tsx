@@ -2488,7 +2488,11 @@ describe("ChatMessageRow worker questions", () => {
     const { ChatMessageRow } = await import("./OrcaChat");
     const answered = { ...workerMsg, pendingQuestion: { ...workerMsg.pendingQuestion, answer: { answers: [{ questionIndex: 0, selectedLabels: ["A"] }] } } };
     render(<ChatMessageRow message={answered as never} goalId="g1" />);
-    expect(screen.getByText(/✓\s*A/)).toBeInTheDocument();
+    // The ✓ renders in its own .orca-chat-option-check span (colored green), so
+    // it and the label are separate DOM text nodes — assert the chosen label's
+    // combined text still reads "✓ A".
+    const chosenLabel = document.querySelector(".orca-chat-option-row--chosen .orca-chat-option-label");
+    expect(chosenLabel?.textContent).toMatch(/✓\s*A/);
     const sent = screen.getByRole("button", { name: "Sent" });
     expect(sent).toBeDisabled();
     // 'Something else' stays listed (unchecked) so the offered options are complete.
