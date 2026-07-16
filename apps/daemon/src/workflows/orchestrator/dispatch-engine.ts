@@ -4,6 +4,7 @@ import {
   OrchestrationRequest,
   GateEvaluationRequest,
   GateEvaluationProposal,
+  type GateResidualRisk,
   SplitEvaluationProposal,
   SplitEvaluationRequest,
   StepSkillProposal,
@@ -1663,7 +1664,7 @@ export class DispatchEngine {
     options: RequestNextDecisionOptions,
     // A worker-backed gate parks WITH the worker's verdict as a recommendation the
     // human decides on (approve/reject the finding), rather than deciding blind.
-    recommendation?: { recommendedOutcome: "approved" | "rejected"; reasoning: string | null; issueRefs: string[]; reason: string }
+    recommendation?: { recommendedOutcome: "approved" | "rejected"; reasoning: string | null; issueRefs: string[]; reason: string; residualRisks: GateResidualRisk[]; inputsConsidered: string[] }
   ): void {
     const { run, stepRun, stepTpl, template, goal, gateNodeId } = ctx;
     const graph = effectiveGraph(template.graph, template.steps);
@@ -1692,6 +1693,8 @@ export class DispatchEngine {
                 reasoning: recommendation.reasoning,
                 issueRefs: recommendation.issueRefs,
                 reason: recommendation.reason,
+                residualRisks: recommendation.residualRisks,
+                inputsConsidered: recommendation.inputsConsidered,
               }
             : {}),
         }),
@@ -2528,6 +2531,8 @@ export class DispatchEngine {
           reasoning: proposal.reasoning ?? null,
           issueRefs: proposal.issueRefs ?? [],
           reason: proposal.reason,
+          residualRisks: proposal.residualRisks,
+          inputsConsidered: proposal.inputsConsidered,
         }
       );
       return;

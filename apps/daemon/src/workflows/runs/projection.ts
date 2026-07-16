@@ -47,7 +47,7 @@ export function resetPreparedStatements(): void {
   _stmts = null;
 }
 
-function rowToRun(row: WorkflowRunRow): WorkflowRunT {
+export function rowToRun(row: WorkflowRunRow): WorkflowRunT {
   // Surface a pending human routing choice (set when a splitter parked because it
   // could not be routed deterministically and the orchestrator gave no decision).
   let pendingSplitChoice: WorkflowRunT["pendingSplitChoice"] = null;
@@ -80,14 +80,20 @@ function rowToRun(row: WorkflowRunRow): WorkflowRunT {
         gateNodeId?: string;
         recommendedOutcome?: "approved" | "rejected";
         reasoning?: string | null;
+        reason?: string | null;
         issueRefs?: string[];
+        residualRisks?: { risk: string; severity: "low" | "medium" | "high" }[];
+        inputsConsidered?: string[];
       };
       if (g.awaitingHumanDecision && g.gateNodeId && (g.recommendedOutcome === "approved" || g.recommendedOutcome === "rejected")) {
         pendingGateReview = {
           gateNodeId: g.gateNodeId,
           recommendedOutcome: g.recommendedOutcome,
           reasoning: g.reasoning ?? null,
+          reason: g.reason ?? null,
           issueRefs: Array.isArray(g.issueRefs) ? g.issueRefs : [],
+          residualRisks: Array.isArray(g.residualRisks) ? g.residualRisks : [],
+          inputsConsidered: Array.isArray(g.inputsConsidered) ? g.inputsConsidered : [],
         };
       }
     } catch {

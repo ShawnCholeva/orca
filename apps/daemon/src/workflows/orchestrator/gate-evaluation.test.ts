@@ -32,7 +32,7 @@ describe("evaluateGate", () => {
 
   it("parses an approved proposal", async () => {
     const proposal: GateEvaluationProposal = {
-      reasoning: "step output satisfies every gate criterion", outcome: "approved", reason: "Meets the goal.", issueRefs: [], inputsConsidered: ["sourceStepOutput"],
+      reasoning: "step output satisfies every gate criterion", outcome: "approved", reason: "Meets the goal.", issueRefs: [], residualRisks: [], inputsConsidered: ["sourceStepOutput"],
     };
     const result = await evaluateGate(askReturning(JSON.stringify(proposal)), {
       goalId: "goal-1", adapterId: "claude-code", request: REQUEST, timeoutMs: 1000,
@@ -42,7 +42,7 @@ describe("evaluateGate", () => {
 
   it("preserves the enumerated issueRefs on a rejected proposal", async () => {
     const proposal: GateEvaluationProposal = {
-      reasoning: "found two concrete gaps against the gate criteria", outcome: "rejected", reason: "Two gaps.", issueRefs: ["missing-tests", "no-error-handling"], inputsConsidered: ["sourceStepOutput"],
+      reasoning: "found two concrete gaps against the gate criteria", outcome: "rejected", reason: "Two gaps.", issueRefs: ["missing-tests", "no-error-handling"], residualRisks: [], inputsConsidered: ["sourceStepOutput"],
     };
     const result = await evaluateGate(askReturning(JSON.stringify(proposal)), {
       goalId: "goal-1", adapterId: "claude-code", request: REQUEST, timeoutMs: 1000,

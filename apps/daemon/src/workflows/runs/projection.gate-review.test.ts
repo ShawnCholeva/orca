@@ -51,7 +51,10 @@ describe("run projection — pendingGateReview", () => {
       gateNodeId: "critique",
       recommendedOutcome: "rejected",
       reasoning: "The lock is held across the trade call.",
+      reason: null,
       issueRefs: ["threading.Lock", "trading purity"],
+      residualRisks: [],
+      inputsConsidered: [],
     });
   });
 
