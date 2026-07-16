@@ -426,6 +426,31 @@ describe("OrcaChat", () => {
     expect(screen.queryByTestId("agent-activity-active")).toBeNull();
   });
 
+  it("hides the orchestrator review indicator once the step has parked for confirmation", async () => {
+    setupRunLoad();
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+        ordinal: 4, attempt: 1, status: "active", startedAt: now, finishedAt: null,
+        blockedReason: null, orchestratorPhase: "independent_check",
+      },
+    });
+    // The step parked for confirmation (Continue/Revise card up) — the review is
+    // over and awaiting the human, so the "independent check" bubble must be gone.
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity, id: "act-confirm", status: "paused_for_input",
+        sourceKind: "step_confirmation_pending", currentText: "Step complete — review and Continue.",
+        confirmationSummary: null,
+      },
+    ]);
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    await screen.findByPlaceholderText("Message Orca…");
+    expect(screen.queryByTestId("orchestrator-review")).toBeNull();
+  });
+
   it("hides the orchestrator-review status when there is no phase (parked/idle)", async () => {
     setupRunLoad();
     // A genuine first step (ordinal 0) so the starting row is expected.

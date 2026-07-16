@@ -718,6 +718,10 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     orchestratorPhaseLabel != null &&
     workflowState.run?.status === "active" &&
     workflowState.stepRun?.status === "active" &&
+    // Once the step has parked (a confirmation / gate / recovery card is the live
+    // activity), the review is over and awaiting the human — a stale phase must not
+    // keep the "reviewing / independent check" bubble alive over the parked card.
+    !hasLiveActivity &&
     !runBlocked;
 
   // Escape interrupts the running step agent so the user can course-correct:
