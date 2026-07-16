@@ -31,6 +31,7 @@ describe("getTemplateMetricsSummaries", () => {
       deltas: { trajectoryEfficiency: null, verificationStrength: null, recovery: null,
                 stateConsistency: null, safetyCompliance: null, replayability: null, latencyP50Ms: null },
       versionComparison: null, versions: [], confidence: "low", calibration: [],
+      gateHealth: { value: null, grade: null, delta: null, confidence: "low" },
     }];
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ summaries }), { status: 200, headers: { "content-type": "application/json" } }));
 
@@ -65,8 +66,9 @@ describe("getTemplateMetricsDetail", () => {
       deltas: { trajectoryEfficiency: null, verificationStrength: null, recovery: null,
                 stateConsistency: null, safetyCompliance: null, replayability: null, latencyP50Ms: null },
       versionComparison: null, versions: [], confidence: "low", calibration: [],
+      gateHealth: { value: null, grade: null, delta: null, confidence: "low" },
     };
-    const detail = { summary, steps: [] };
+    const detail = { summary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] } };
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ detail }), { status: 200, headers: { "content-type": "application/json" } }));
 
     const result = await api.getTemplateMetricsDetail("tpl", "7d");
