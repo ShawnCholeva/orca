@@ -164,6 +164,17 @@ describe("getWorkflowStepRunById", () => {
     expect(result?.stepResult).toBeNull();
   });
 
+  it("surfaces judgePending from a stashed judge failure (pending_judge_json)", () => {
+    const db = setup();
+    seedGoal(db, "goal-1");
+    insertMinimalStepRun(db, "sr1");
+    expect(getWorkflowStepRunById(db, "sr1")?.judgePending).toBe(false);
+    db.prepare("UPDATE workflow_step_runs SET pending_judge_json = ? WHERE id = 'sr1'").run(
+      JSON.stringify({ responseText: "saved", error: "shadow timeout", at: NOW }),
+    );
+    expect(getWorkflowStepRunById(db, "sr1")?.judgePending).toBe(true);
+  });
+
   it("parses step_result_json for terminal steps", () => {
     const db = setup();
     seedGoal(db, "goal-1");

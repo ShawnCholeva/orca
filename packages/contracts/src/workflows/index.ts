@@ -554,6 +554,10 @@ export const WorkflowStepRun = z
     selectedModelId: z.string().min(1).max(80).nullable().optional(),
     operatorSelectedAt: z.string().datetime().nullable().optional(),
     orchestratorPhase: OrchestratorStepPhase.nullable().optional(),
+    // True when the worker finished but the orchestrator's evaluation failed
+    // (e.g. shadow timeout) and its output is stashed awaiting a retry. The step
+    // is still `active` but NOT progressing — the UI must not claim it is working.
+    judgePending: z.boolean().optional(),
     stepResult: WorkflowStepResult.nullable(),
   })
   .strict();

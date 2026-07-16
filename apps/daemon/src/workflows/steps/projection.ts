@@ -21,8 +21,12 @@ interface WorkflowStepRunRow {
   selected_model_id: string | null;
   operator_selected_at: string | null;
   orchestrator_phase: string | null;
+  pending_judge_json: string | null;
   step_result_json: string | null;
 }
+
+const STEP_RUN_COLUMNS =
+  "id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, started_at, finished_at, blocked_reason, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at, orchestrator_phase, pending_judge_json, step_result_json";
 
 let _db: Database.Database | null = null;
 let _stmt: Database.Statement | null = null;
@@ -31,7 +35,7 @@ function ensureStmt(db: Database.Database): Database.Statement {
   if (_db !== db || !_stmt) {
     _db = db;
     _stmt = db.prepare(
-      "SELECT id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, started_at, finished_at, blocked_reason, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at, orchestrator_phase, step_result_json FROM workflow_step_runs WHERE id = ?"
+      `SELECT ${STEP_RUN_COLUMNS} FROM workflow_step_runs WHERE id = ?`
     );
   }
   return _stmt;
@@ -63,6 +67,7 @@ function rowToStepRun(row: WorkflowStepRunRow): WorkflowStepRunT {
     selectedModelId: row.selected_model_id,
     operatorSelectedAt: row.operator_selected_at,
     orchestratorPhase: row.orchestrator_phase as never,
+    judgePending: row.pending_judge_json != null,
     stepResult,
   });
 }
@@ -89,7 +94,7 @@ export function listStepRunsForRun(
       // its surrogate `active` for the whole eval). They are not real steps —
       // and their negative ordinal violates WorkflowStepRun's nonnegative-ordinal
       // contract, so serving them would 500 this projection.
-      "SELECT id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, started_at, finished_at, blocked_reason, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at, orchestrator_phase, step_result_json FROM workflow_step_runs WHERE workflow_run_id = ? AND ordinal >= 0 ORDER BY ordinal ASC, attempt ASC"
+      `SELECT ${STEP_RUN_COLUMNS} FROM workflow_step_runs WHERE workflow_run_id = ? AND ordinal >= 0 ORDER BY ordinal ASC, attempt ASC`
     )
     .all(workflowRunId) as WorkflowStepRunRow[];
   return rows.map(rowToStepRun);

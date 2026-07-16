@@ -382,6 +382,50 @@ describe("OrcaChat", () => {
     );
   });
 
+  it("does not show 'Working on {step}' when the step's evaluation timed out and is awaiting a retry", async () => {
+    setupRunLoad();
+    // Worker finished, judge failed (shadow timeout) → output stashed, step still
+    // active but stalled on the human; the status must not claim it is working.
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+        ordinal: 4, attempt: 1, status: "active", startedAt: now, finishedAt: null,
+        blockedReason: null, judgePending: true,
+      },
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByPlaceholderText("Message Orca…")).toBeInTheDocument();
+    expect(screen.queryByTestId("step-working")).toBeNull();
+  });
+
+  it("does not also pulse a worker activity while the orchestrator review runs (one live indicator)", async () => {
+    setupRunLoad();
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+        ordinal: 4, attempt: 1, status: "active", startedAt: now, finishedAt: null,
+        blockedReason: null, orchestratorPhase: "independent_check",
+      },
+    });
+    // The worker's last turn is still marked active (its completion can lag the
+    // phase update); it must not keep pulsing once the orchestrator has taken over.
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity, id: "act-read", status: "active", currentText: "Read calc.js",
+        steps: [{ id: "s1", text: "Read calc.js", category: "reading", status: "active", createdAt: now }],
+      },
+    ]);
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    // The orchestrator review is the single honest live indicator…
+    expect(await screen.findByTestId("orchestrator-review")).toHaveTextContent("Running an independent check…");
+    // …and the worker step is not still pulsing next to it.
+    expect(screen.queryByTestId("agent-activity-active")).toBeNull();
+  });
+
   it("hides the orchestrator-review status when there is no phase (parked/idle)", async () => {
     setupRunLoad();
     // A genuine first step (ordinal 0) so the starting row is expected.

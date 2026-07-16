@@ -514,6 +514,10 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   // window is otherwise silent, so surface an honest status and let it take
   // precedence over the generic starting/working rows.
   const orchestratorPhase = workflowState.stepRun?.orchestratorPhase ?? null;
+  // The worker finished but the orchestrator's evaluation failed (e.g. shadow
+  // timeout) and stashed the output awaiting a retry. The step is still `active`
+  // but stalled on the human — never claim it is "working".
+  const judgePending = workflowState.stepRun?.judgePending === true;
   // "Starting workflow" is a first-moment-of-the-run affordance, so gate it on the
   // run's FIRST step (ordinal 0). Every later step's start-latency uses the generic
   // "Working on {step}…" row instead — otherwise "Starting workflow" wrongly
@@ -699,6 +703,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     // ended its turn and is waiting on the human, so it is NOT working — don't
     // claim otherwise.
     pendingAnyQuestionId == null &&
+    !judgePending &&
     !sendingMessage &&
     !awaitingReply &&
     !runBlocked &&
@@ -1071,7 +1076,10 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                   <OrcaMark />
                   <div className="msg-body">
                     <div className="mono msg-meta">orca</div>
-                    <AgentActivity activity={entry.activity} interrupted={runBlocked} />
+                    {/* During the orchestrator's post-worker review the worker's
+                        turn is over, so its activity must stop pulsing — otherwise
+                        two live indicators show at once. */}
+                    <AgentActivity activity={entry.activity} interrupted={runBlocked || showOrchestratorReview} />
                   </div>
                 </div>
               )
