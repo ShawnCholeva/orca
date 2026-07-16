@@ -55,7 +55,7 @@ function costTransitions(usd: number): TemplateTransition[] {
 const riskT = (gate: string, risk: string): TemplateTransition => ({
   templateVersion: 1, stepTemplateId: "s1",
   transition: { id: `t-${gate}-${risk}`, workflowRunId: "r1", boundary: "tool_gate", createdAt: "2026-07-16T00:00:00.000Z",
-    risk: { boundary: "tool_gate", gate_decision: gate, risk_class: risk } } as never,
+    risk: { gate_decision: gate, risk_class: risk } } as never,
 });
 
 describe("buildPolicyGatewayMetrics", () => {
