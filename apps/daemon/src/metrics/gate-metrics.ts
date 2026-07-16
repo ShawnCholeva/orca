@@ -1,4 +1,4 @@
-import type { GateMetrics, GateFailureMode, MetricPeriod } from "@orca/contracts";
+import type { GateMetrics, GateFailureMode, MetricPeriod, PolicyGatewayMetrics } from "@orca/contracts";
 import { labelForGateFailure } from "@orca/contracts";
 import type { GateDecisionRow, TemplateTransition } from "./fetch.js";
 
@@ -129,4 +129,33 @@ export function buildGateMetrics(input: {
     });
   }
   return gates.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function buildPolicyGatewayMetrics(transitions: TemplateTransition[]): PolicyGatewayMetrics {
+  const dist: Record<string, number> = { allow: 0, require_approval: 0, deny: 0 };
+  const overIds: string[] = [];
+  const violationsByClass = new Map<string, { count: number; ids: string[] }>();
+  for (const t of transitions) {
+    if (t.transition.boundary !== "tool_gate") continue;
+    const risk = (t.transition as { risk?: { gate_decision?: string; risk_class?: string } }).risk;
+    if (!risk || !risk.gate_decision) continue;
+    dist[risk.gate_decision] = (dist[risk.gate_decision] ?? 0) + 1;
+    const id = t.transition.id;
+    if (risk.gate_decision === "allow" && (risk.risk_class === "high" || risk.risk_class === "critical")) {
+      if (overIds.length < GATE_SAMPLE_CAP) overIds.push(id);
+    }
+    if (risk.gate_decision === "deny" || risk.gate_decision === "require_approval") {
+      const key = risk.risk_class ?? "unknown";
+      const bucket = violationsByClass.get(key) ?? { count: 0, ids: [] };
+      bucket.count++; if (bucket.ids.length < GATE_SAMPLE_CAP) bucket.ids.push(id);
+      violationsByClass.set(key, bucket);
+    }
+  }
+  return {
+    decisionDist: dist,
+    overPermissive: { count: overIds.length, sampleTransitionIds: overIds },
+    boundaryViolations: [...violationsByClass.entries()].map(([risk_class, b]) => ({
+      failureCode: null, boundary: `tool_gate:${risk_class}`, count: b.count, sampleTransitionIds: b.ids,
+    })),
+  };
 }
