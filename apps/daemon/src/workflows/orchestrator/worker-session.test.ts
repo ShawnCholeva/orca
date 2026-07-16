@@ -358,6 +358,88 @@ describe("WorkerSessionManager.deliver", () => {
     expect(await mgr.deliver("sess-churn", "b")).toBe("delivered");
   });
 
+  // The real welcome/home screen a promptless worker launches onto: a decorative
+  // "What's new" release-notes panel pinned to the TOP of the pane, then ~tens of
+  // blank rows, then the idle composer near the BOTTOM. Reproduced from a live
+  // 220x50 worker capture. The release notes contain "thinking", "hook", and
+  // "auto mode" — words a whole-pane busy/idle scan misreads as a live turn.
+  const welcomeScreen = (releaseNote: string): string =>
+    [
+      "╭─── Claude Code v2.1.211 ───────────────────────────╮",
+      "│                 Welcome back Shawn!                │ Tips for getting started",
+      "│                       ▐▛███▜▌                      │ What's new",
+      `│                      ▝▜█████▛▘                     │ ${releaseNote}`,
+      "│              ~/projects/stock-trader               │ /release-notes for more",
+      "╰────────────────────────────────────────────────────╯",
+      "",
+      " ⚠ 3 MCP servers need authentication · run /mcp",
+      ...Array(30).fill(""),
+      "                                          ● high · /effort",
+      "──────────────────────────────────────────────────────────",
+      "❯ ",
+      "──────────────────────────────────────────────────────────",
+      "  ⏸ manual mode on · ← for agents",
+    ].join("\n");
+
+  it("treats an idle welcome screen whose 'What's new' prose contains the word 'thinking' as idle", async () => {
+    // Claude Code v2.1.211's panel: "…include subagent text and thinking in stream-json
+    // output". A whole-pane /\bthinking\b/ scan wedged deliver() for the full 120s while
+    // the ❯ prompt sat idle — the production bug this guards.
+    const pane = welcomeScreen("Added --forward-subagent-text to include subagent text and thinking in stream-json output");
+    const tmux = fakeTmux(["auto mode on", pane]);
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
+      resolveProvider,
+    });
+    await mgr.spawn({ sessionId: "sess-welcome", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    expect(await mgr.deliver("sess-welcome", "the objective")).toBe("delivered");
+  });
+
+  it("ignores a still-live busy token ('esc to interrupt') that appears in decorative upper-pane prose", async () => {
+    // The general fragility fix: even a busy token we DO still match ("esc to interrupt")
+    // must not count when it appears in a decorative release note far above the composer,
+    // not in the live spinner directly above it. liveRegion() scopes the scan to the
+    // composer's neighbourhood, so this idle worker is delivered, not timed out.
+    const pane = welcomeScreen("Fixed the hint text — press esc to interrupt now shows during tool use");
+    const tmux = fakeTmux(["auto mode on", pane]);
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
+      resolveProvider,
+    });
+    await mgr.spawn({ sessionId: "sess-deco", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    expect(await mgr.deliver("sess-deco", "the objective")).toBe("delivered");
+  });
+
+  it("still detects a genuine live spinner ('esc to interrupt') in the status line above the composer", async () => {
+    // Guard the other direction: the busy spinner renders just above the composer, inside
+    // liveRegion(). A worker mid-turn must NOT be treated as idle (pasting would corrupt
+    // its input), so deliver() waits until the spinner clears before pasting.
+    const working = welcomeScreen("nothing relevant here").replace("● high · /effort", "✳ Thinking… (3s · esc to interrupt)");
+    const idle = welcomeScreen("nothing relevant here");
+    const tmux = fakeTmux(["auto mode on", working, idle]);
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
+      resolveProvider,
+    });
+    await mgr.spawn({ sessionId: "sess-spin", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    expect(await mgr.deliver("sess-spin", "the objective")).toBe("delivered");
+    // First capture (spinner) was busy → deliver waited and pasted only on the idle frame.
+    const pastes = tmux.calls.filter((c) => c[0] === "paste-buffer").length;
+    expect(pastes).toBe(1);
+  });
+
   it("moves to end then re-submits when a short answer stays in the box", async () => {
     // Repro of the wedge: a one-line answer renders inline in the composer (not as a
     // "[Pasted text]" placeholder), so if the first submit doesn't land (cursor parked

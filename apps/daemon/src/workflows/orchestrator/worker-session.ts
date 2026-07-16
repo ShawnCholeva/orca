@@ -11,7 +11,11 @@ const READY_DEFAULT = /(auto mode on|\? for shortcuts|\n\s*❯)/i;
 // to an in-progress turn. Note: the past-tense summaries Claude Code prints AFTER
 // a turn ("Cooked for 12s", "Churned for 36s") are shown while IDLE at the prompt,
 // so they must NOT count as busy (every genuinely-busy frame carries "esc to interrupt").
-const BUSY_DEFAULT = /esc to interrupt|\bthinking\b|running .* hook/i;
+// These patterns are matched against liveRegion(), NOT the whole pane — Claude Code's
+// welcome/"What's new" panel prints release-note prose that has contained "thinking",
+// "hook", and "auto mode", and a whole-pane scan misread that decoration as a live turn
+// (it wedged deliver() on a promptless worker for the full 120s). See liveRegion().
+const BUSY_DEFAULT = /esc to interrupt|running .* hook/i;
 // claude renders the input box (❯) ABOVE its status/footer lines, so the prompt
 // is not at end-of-pane. Match an EMPTY prompt line (❯ followed by only spaces)
 // anywhere; combined with !busy this means the agent is idle and ready for input.
@@ -32,6 +36,29 @@ const PROMPT_READY = /❯[ \t ]/;
 // recent commits". It's present whenever the composer accepts input, so combined
 // with !busy it signals idle. (› never appears in claude's TUI, so this is additive.)
 const CODEX_PROMPT_IDLE = /(?:\n|^)[ \t]*›[ \t]/;
+
+// Both providers pin the composer input box near the BOTTOM of the pane and render
+// their live spinner ("esc to interrupt") in the status line(s) directly above it.
+// Decorative panels — the welcome/"What's new" release notes, tips, MCP notices —
+// render in the UPPER pane, tens of (usually blank) lines above the composer. So
+// busy/idle detection scans only this "live region": a small lookback above the
+// composer down to the pane bottom. That structurally excludes decorative prose,
+// which no busy/idle heuristic can safely be trusted against (release notes have
+// literally contained "thinking", "hook", and "auto mode"). The lookback is generous
+// enough for a multi-line spinner yet far short of the decoration's distance.
+const LIVE_REGION_LOOKBACK = 6;
+function liveRegion(pane: string): string {
+  const lines = pane.split("\n");
+  let anchor = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].includes("❯") || lines[i].includes("›")) { anchor = i; break; }
+  }
+  // No composer rendered yet (early startup): keep the whole pane — there's no idle
+  // prompt to match against anyway, and a genuine "running … hook" frame is still busy.
+  if (anchor === -1) return pane;
+  return lines.slice(Math.max(0, anchor - LIVE_REGION_LOOKBACK)).join("\n");
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export type DeliverResult = "delivered" | "no_session" | "timeout";
@@ -225,11 +252,11 @@ export class WorkerSessionManager {
     let idleSince: number | null = null;
     let ready = false;
     while (Date.now() < deadline) {
-      const pane = await capturePane(this.tmux, s.name);
-      const busy = BUSY_DEFAULT.test(pane);
+      const region = liveRegion(await capturePane(this.tmux, s.name));
+      const busy = BUSY_DEFAULT.test(region);
       // Ready = a not-busy composer prompt, EMPTY or bearing placeholder/leftover
       // text (PROMPT_READY, not the strict empty PROMPT_IDLE) — see PROMPT_READY.
-      const idle = !busy && (PROMPT_READY.test(pane) || CODEX_PROMPT_IDLE.test(pane));
+      const idle = !busy && (PROMPT_READY.test(region) || CODEX_PROMPT_IDLE.test(region));
       if (idle) {
         if (idleSince === null) idleSince = Date.now();
         if (Date.now() - idleSince >= idleQuiet) { ready = true; break; }
@@ -264,7 +291,7 @@ export class WorkerSessionManager {
     // reliable signal is the box clearing. Re-send End+Enter until it does.
     for (let attempt = 0; attempt < 3; attempt++) {
       await sleep(poll);
-      const after = await capturePane(this.tmux, s.name);
+      const after = liveRegion(await capturePane(this.tmux, s.name));
       const cleared =
         BUSY_DEFAULT.test(after) || PROMPT_IDLE.test(after) || CODEX_PROMPT_IDLE.test(after);
       if (cleared) break;
