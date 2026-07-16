@@ -59,6 +59,10 @@ export const TemplateMetricsSummary = z.object({
     sampleSize: z.number().int().nonnegative(),
     state: z.enum(["measured", "insufficient", "unmeasurable"]),
   }).strict()),
+  gateHealth: z.object({
+    value: z.number().nullable(), grade: z.enum(["A", "B", "C", "D", "F"]).nullable(),
+    delta: z.number().nullable(), confidence: z.enum(["low", "ok"]),
+  }).strict(),
 }).strict();
 export type TemplateMetricsSummary = z.infer<typeof TemplateMetricsSummary>;
 
@@ -78,6 +82,60 @@ export const EvidenceArtifact = z.object({
   verdict: z.enum(["pass", "fail", "partial", "inconclusive"]),
 }).strict();
 export type EvidenceArtifact = z.infer<typeof EvidenceArtifact>;
+
+export const GateFailureMode = z.object({
+  label: z.string(), count: z.number().int().nonnegative(), pct: z.number(),
+  sampleDecisionIds: z.array(z.string()),
+}).strict();
+export type GateFailureMode = z.infer<typeof GateFailureMode>;
+
+export const GateMetrics = z.object({
+  nodeId: z.string(),
+  name: z.string(),
+  evalSubstrate: z.enum(["shadow", "worker"]),
+  health: z.number().nullable(),
+  grade: z.enum(["A", "B", "C", "D", "F"]).nullable(),
+  confidence: z.enum(["low", "ok"]),
+  sampleSize: z.number().int().nonnegative(),
+  delta: z.number().nullable(),
+  scored: z.object({
+    overturnRate: z.number().nullable(),
+    overturnSampleSize: z.number().int().nonnegative(),
+    overturnDecisionIds: z.array(z.string()),
+    groundedness: z.number().nullable(),
+    ungroundedDecisionIds: z.array(z.string()),
+    convergence: z.number().nullable(),
+    limitingTerm: z.enum(["overturn", "groundedness", "convergence"]).nullable(),
+  }).strict(),
+  cost: z.object({
+    p50LatencyMs: z.number().nullable(),
+    meanTokens: z.number().nullable(),
+    meanUsd: z.number().nullable(),
+    tokensSpentOnOverturned: z.number().nullable(),
+  }).strict(),
+  failureModes: z.array(GateFailureMode),
+  context: z.object({
+    approvalRate: z.number().nullable(),
+    rejectRate: z.number().nullable(),
+    decisions: z.number().int().nonnegative(),
+    meanLoops: z.number().nullable(),
+    capHitRate: z.number().nullable(),
+    stagnationRate: z.number().nullable(),
+    parkRate: z.number().nullable(),
+    residualRiskBurden: z.number().nullable(),
+    recentRejectReasons: z.array(z.object({ at: z.string(), reason: z.string(), issueRefs: z.array(z.string()) }).strict()),
+  }).strict(),
+  trend: z.array(z.number()),
+  versionBoundaries: z.array(z.number().int()),
+}).strict();
+export type GateMetrics = z.infer<typeof GateMetrics>;
+
+export const PolicyGatewayMetrics = z.object({
+  decisionDist: z.record(z.string(), z.number()),
+  overPermissive: z.object({ count: z.number().int().nonnegative(), sampleTransitionIds: z.array(z.string()) }).strict(),
+  boundaryViolations: z.array(FailureCluster),
+}).strict();
+export type PolicyGatewayMetrics = z.infer<typeof PolicyGatewayMetrics>;
 
 export const FailureMode = z.object({
   label: z.string(), count: z.number().int().nonnegative(), pct: z.number(),
@@ -149,5 +207,7 @@ export type StepMetrics = z.infer<typeof StepMetrics>;
 export const TemplateMetricsDetail = z.object({
   summary: TemplateMetricsSummary,
   steps: z.array(StepMetrics),
+  gates: z.array(GateMetrics),
+  policyGateway: PolicyGatewayMetrics,
 }).strict();
 export type TemplateMetricsDetail = z.infer<typeof TemplateMetricsDetail>;
