@@ -429,6 +429,14 @@ export const PendingSplitChoice = z
   .strict();
 export type PendingSplitChoice = z.infer<typeof PendingSplitChoice>;
 
+export const GateResidualRisk = z
+  .object({
+    risk: z.string().min(1).max(512),
+    severity: z.enum(["low", "medium", "high"]),
+  })
+  .strict();
+export type GateResidualRisk = z.infer<typeof GateResidualRisk>;
+
 // Set only when a run is parked at a worker-backed gate awaiting a human decision:
 // the worker's verdict, surfaced as a recommendation the human approves/rejects.
 export const PendingGateReview = z
@@ -436,6 +444,9 @@ export const PendingGateReview = z
     gateNodeId: Id100,
     recommendedOutcome: z.enum(["approved", "rejected"]),
     reasoning: z.string().max(8000).nullable(),
+    reason: z.string().max(1024).nullable(),
+    residualRisks: z.array(GateResidualRisk).max(50).default([]),
+    inputsConsidered: z.array(z.string().max(512)).max(50).default([]),
     issueRefs: z.array(z.string().max(500)).max(50),
   })
   .strict();
@@ -892,6 +903,7 @@ export const GateEvaluationProposal = z
     reasoning: z.string().min(1).max(REASONING_MAX),
     outcome: z.enum(["approved", "rejected"]),
     reason: z.string().min(1).max(1024),
+    residualRisks: z.array(GateResidualRisk).max(50).default([]),
     issueRefs: z.array(z.string().min(1).max(128)).max(50).optional(),
     inputsConsidered: z.array(z.string().min(1).max(512)).max(50),
   })

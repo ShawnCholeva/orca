@@ -7,6 +7,7 @@ import {
   CreateSessionRequest,
   CreateTaskRequest,
   DomainEventType,
+  GateEvaluationProposal,
   getModelProviderDisplayName,
   Goal,
   GetOrchestrationWorkerResponse,
@@ -27,6 +28,7 @@ import {
   OrchestrationTransportFailureReason,
   OrchestrationWorkerDetail,
   OrchestrationWorkerState,
+  PendingGateReview,
   ProposedAction,
   Recommendation,
   RecommendationType,
@@ -1313,5 +1315,70 @@ describe("OrchestratorAction approve_step_complete scoring", () => {
   it("parses approval with no scoring", () => {
     const parsed = OrchestratorAction.parse({ kind: "approve_step_complete" });
     expect(parsed.kind).toBe("approve_step_complete");
+  });
+});
+
+describe("GateEvaluationProposal residualRisks", () => {
+  it("accepts structured residual risks with severity", () => {
+    const parsed = GateEvaluationProposal.parse({
+      reasoning: "ok",
+      outcome: "approved",
+      reason: "meets bar",
+      inputsConsidered: ["sourceStepOutput"],
+      residualRisks: [{ risk: "SQLite cross-thread access", severity: "medium" }],
+    });
+    expect(parsed.residualRisks).toEqual([
+      { risk: "SQLite cross-thread access", severity: "medium" },
+    ]);
+  });
+
+  it("defaults residualRisks to [] when omitted", () => {
+    const parsed = GateEvaluationProposal.parse({
+      reasoning: "ok",
+      outcome: "approved",
+      reason: "meets bar",
+      inputsConsidered: [],
+    });
+    expect(parsed.residualRisks).toEqual([]);
+  });
+
+  it("rejects an unknown severity", () => {
+    const r = GateEvaluationProposal.safeParse({
+      reasoning: "ok",
+      outcome: "approved",
+      reason: "meets bar",
+      inputsConsidered: [],
+      residualRisks: [{ risk: "x", severity: "critical" }],
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("PendingGateReview evidence bundle", () => {
+  it("carries reason, residualRisks and inputsConsidered", () => {
+    const parsed = PendingGateReview.parse({
+      gateNodeId: "critique",
+      recommendedOutcome: "approved",
+      reasoning: "long summary",
+      reason: "one-liner",
+      residualRisks: [{ risk: "rate limits", severity: "low" }],
+      inputsConsidered: ["sourceStepOutput", "committedLedger"],
+      issueRefs: [],
+    });
+    expect(parsed.reason).toBe("one-liner");
+    expect(parsed.residualRisks[0]?.severity).toBe("low");
+    expect(parsed.inputsConsidered).toHaveLength(2);
+  });
+
+  it("defaults residualRisks and inputsConsidered to []", () => {
+    const parsed = PendingGateReview.parse({
+      gateNodeId: "critique",
+      recommendedOutcome: "rejected",
+      reasoning: null,
+      reason: null,
+      issueRefs: ["fix X"],
+    });
+    expect(parsed.residualRisks).toEqual([]);
+    expect(parsed.inputsConsidered).toEqual([]);
   });
 });
