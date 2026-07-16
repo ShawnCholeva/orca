@@ -61,7 +61,7 @@ describe("built-in template catalog", () => {
     const summaries = builtInCatalogSummaries();
     expect(summaries).toHaveLength(7);
     const byId = (id: string) => summaries.find((s) => s.id === id);
-    expect(byId("orca/adaptive-delivery")?.stepCount).toBe(12); // 8 steps + splitter + 3 gates (Critique is a worker gate as of v12)
+    expect(byId("orca/adaptive-delivery")?.stepCount).toBe(9); // 6 steps + splitter + 2 gates (Critique + Verify worker gates as of v13)
     expect(byId("orca/code-review")?.stepCount).toBe(4);
   });
 
@@ -199,11 +199,11 @@ describe("Adaptive Delivery v9 completion gates", () => {
   const grounding = (stepId: string) =>
     (def.steps.find((s) => s.id === stepId)!.grounding ?? []) as NonNullable<WorkflowStepTemplate["grounding"]>;
 
-  it("is version 12 and runs the sensor ladder for execution AND validate_build", () => {
-    expect(def.version).toBe(12);
+  it("is version 13 and runs the sensor ladder for execution", () => {
+    expect(def.version).toBe(13);
     const rule = def.guardrails.find((g) => g.kind === "validation_rule")!;
     expect((rule.configJson as { appliesToSteps: string[] }).appliesToSteps.sort())
-      .toEqual(["execution", "validate_build"]);
+      .toEqual(["execution"]);
   });
 
   it("states the exact-name contract the member_of grounding check enforces", () => {
@@ -226,16 +226,16 @@ describe("Adaptive Delivery v9 completion gates", () => {
     // Critique is a worker GATE as of v12 (no longer a step with grounding).
     expect(def.steps.some((s) => s.id === "critique")).toBe(false);
     expect(grounding("execution").some((c) => c.rule === "paths_changed")).toBe(true);
-    expect(grounding("validate_build").some((c) => c.rule === "implies")).toBe(true);
     // Cross-step requirement checks ship observe-only (free-text, paraphrase-prone).
-    for (const stepId of ["validate_build", "done"]) {
+    for (const stepId of ["done"]) {
       const subset = grounding(stepId).filter((c) => c.rule === "subset_of_prior");
       expect(subset.length).toBeGreaterThan(0);
       expect(subset.every((c) => c.mode === "observe")).toBe(true);
     }
-    // Verify's covers_prior on critique.concerns is dropped in v12 — Critique is a
-    // gate now and emits no `concerns` step output, so nothing may reference it.
-    expect(grounding("verify").some((c) => (c as { prior?: { stepId: string }[] }).prior?.some((p) => p.stepId === "critique"))).toBe(false);
+    // The Verify and Validate Build steps are removed in v13 — the post-build check
+    // is the worker-backed Verify gate, not a step with grounding.
+    expect(def.steps.some((s) => s.id === "verify")).toBe(false);
+    expect(def.steps.some((s) => s.id === "validate_build")).toBe(false);
     // Interview prose: nothing mechanically checkable.
     expect(grounding("clarify")).toHaveLength(0);
   });
@@ -255,11 +255,17 @@ describe("Adaptive Delivery splitter wiring", () => {
     expect(resolveStepNext(g, "triage")).toEqual({ kind: "splitter", nodeId: "route" });
   });
 
-  it("the design gate approves to Execution and rejects back to Proposal", () => {
-    const approved = g.edges.find((e) => e.from === "designgate" && e.port === "approved");
-    const rejected = g.edges.find((e) => e.from === "designgate" && e.port === "rejected");
-    expect(approved?.to).toBe("execution");
-    expect(rejected?.to).toBe("proposal");
+  it("Execution flows into the worker-backed Verify gate, which approves to Done and rejects back to Execution", () => {
+    const verifyGate = g.nodes.find((n) => n.id === "review")!;
+    expect(verifyGate.type).toBe("gate");
+    expect(verifyGate.name).toBe("Verify");
+    expect(verifyGate.evalSubstrate).toBe("worker");
+    expect((verifyGate.agentPreference ?? []).length).toBeGreaterThan(0);
+    expect(g.edges.some((e) => e.from === "execution" && e.to === "review")).toBe(true);
+    const approved = g.edges.find((e) => e.from === "review" && e.port === "approved");
+    const rejected = g.edges.find((e) => e.from === "review" && e.port === "rejected");
+    expect(approved?.to).toBe("done");
+    expect(rejected?.to).toBe("execution");
   });
 });
 
@@ -275,11 +281,11 @@ describe("Adaptive Delivery v12 Critique worker gate", () => {
     expect(critique.instructions && critique.instructions.length).toBeGreaterThan(0);
   });
 
-  it("Proposal flows into Critique; Critique approves to Verify and rejects back to Proposal", () => {
+  it("Proposal flows into Critique; Critique approves to Execution and rejects back to Proposal", () => {
     expect(g.edges.some((e) => e.from === "proposal" && e.to === "critique")).toBe(true);
     const approved = g.edges.find((e) => e.from === "critique" && e.port === "approved");
     const rejected = g.edges.find((e) => e.from === "critique" && e.port === "rejected");
-    expect(approved?.to).toBe("verify");
+    expect(approved?.to).toBe("execution");
     expect(rejected?.to).toBe("proposal");
   });
 

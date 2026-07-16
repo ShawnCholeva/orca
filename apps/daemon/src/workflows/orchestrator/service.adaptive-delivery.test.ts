@@ -2,13 +2,14 @@
  * End-to-end smoke test for the Adaptive Delivery template loop.
  *
  * Proves that the orca/adaptive-delivery graph specifically drives:
- *   - Release Readiness gate rejection → backward route to a fresh Execution attempt
- *   - Release Readiness gate approval → forward route to terminal Done
+ *   - Verify gate rejection → backward route to a fresh Execution attempt
+ *   - Verify gate approval → forward route to terminal Done
  *   - Terminal Done completion → mark_run_complete recommendation (human yield, no auto-complete)
  *
  * This file drives orca/adaptive-delivery end-to-end. It seeds runs at
- * key positions (validate_build, done) and asserts the gate routing and
- * run-complete recommendation behaviour specific to that template.
+ * key positions (execution, done) and asserts the gate routing and
+ * run-complete recommendation behaviour specific to that template. As of v13
+ * Execution flows straight into the worker-backed Verify gate (node id `review`).
  */
 
 import type Database from "better-sqlite3";
@@ -32,6 +33,7 @@ import { DispatchEngine } from "./dispatch-engine.js";
 import type { OperatorDescriptor } from "@orca/contracts";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
 import type { StepDispatchCapabilities } from "./dispatch-types.js";
+import type { StepRunRow } from "./db-rows.js";
 import { installBuiltInTemplates } from "../templates/usecases.js";
 import type { EventBus } from "../../events.js";
 
@@ -122,18 +124,29 @@ function makeEngine(
     { async list() { return [agentDescriptor]; } },
     makeLauncher(),
     adStepDispatch(),
-    undefined,
-    undefined,
+    async () => {},                   // workerSpawn (Verify gate is a worker gate)
+    async () => "delivered" as const, // workerDeliver
     undefined
   );
 }
 
+// The worker gate's verdict text, as its Stop hook would deliver it.
+function gateDecision(outcome: "approved" | "rejected", issueRefs: string[]): string {
+  return `\`\`\`orca:gate-decision\n${JSON.stringify({
+    reasoning: `judged ${outcome}`,
+    outcome,
+    reason: `${outcome} because reasons`,
+    issueRefs,
+    inputsConsidered: ["sourceStepOutput"],
+  })}\n\`\`\``;
+}
+
 /**
- * Seed the AD template and a run positioned at the `validate_build` step with a
- * step_output artifact (the gate-routing trigger). A prior execution attempt
- * (attempt 1) exists so a rejection routes to attempt 2.
+ * Seed the AD template and a run positioned at the `execution` step (attempt 1)
+ * with a step_output artifact (the gate-routing trigger into the Verify gate).
+ * A rejection routes back to Execution, creating attempt 2.
  */
-function seedAdaptiveRunAtValidation(db: Database.Database, bus: EventBus): void {
+function seedAdaptiveRunAtExecution(db: Database.Database, bus: EventBus): void {
   installBuiltInTemplates({ db, bus }, ["orca/adaptive-delivery"]);
 
   db.prepare(
@@ -141,28 +154,23 @@ function seedAdaptiveRunAtValidation(db: Database.Database, bus: EventBus): void
   ).run(NOW, NOW);
 
   db.prepare(
-    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, traversal_seq, blocked_reason, started_at, finished_at) VALUES ('run-fd', 'goal-fd', ?, ?, 'active', 'step-fd-validate_build', 'validate_build', 'step', 0, NULL, ?, NULL)"
+    "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, current_node_id, current_node_kind, traversal_seq, blocked_reason, started_at, finished_at) VALUES ('run-fd', 'goal-fd', ?, ?, 'active', 'step-fd-execution', 'execution', 'step', 0, NULL, ?, NULL)"
   ).run(ADAPTIVE_ID, ADAPTIVE_VERSION, NOW);
 
-  // Active validate_build step.
+  // Active execution step (attempt 1) — its step_output triggers gate routing.
   db.prepare(
-    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-fd-validate_build', 'goal-fd', 'run-fd', 'validate_build', 7, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-val', 'agent:claude-code', NULL, 'claude-opus-4-7', ?)"
+    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at) VALUES ('step-fd-execution', 'goal-fd', 'run-fd', 'execution', 6, 1, 'active', '[]', '[]', NULL, ?, NULL, 'fp-exec', 'agent:claude-code', NULL, 'claude-opus-4-7', ?)"
   ).run(NOW, NOW);
 
-  // Prior execution attempt (attempt 1, passed) so rejection creates attempt 2.
+  // step_output on the active execution step — triggers gate routing into Verify.
   db.prepare(
-    "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-fd-execution', 'goal-fd', 'run-fd', 'execution', 6, 1, 'passed', '[]', '[]', NULL, ?, ?, 'fp-exec')"
-  ).run(NOW, NOW);
-
-  // step_output on the active validate_build step — triggers gate routing.
-  db.prepare(
-    "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-fd-val', 'goal-fd', 'run-fd', 'step-fd-validate_build', 'step_output', 'Validate Build', ?, 'orchestrator', NULL, NULL, NULL, ?)"
+    "INSERT INTO workflow_artifacts (id, goal_id, workflow_run_id, step_run_id, type, title, body, source, linked_session_id, linked_task_id, linked_context_package_id, created_at) VALUES ('art-fd-exec', 'goal-fd', 'run-fd', 'step-fd-execution', 'step_output', 'Execution', ?, 'orchestrator', NULL, NULL, NULL, ?)"
   ).run(
     JSON.stringify({
-      summary: "Validation complete",
-      verdict: "passed",
-      requirement_results: [{ requirement_ref: "req-1", result: "passed", evidence: "tests pass" }],
-      checks: [{ command: "pnpm test", result: "passed", evidence: "all green" }],
+      summary: "Implementation complete",
+      completed_requirements: ["req-1"],
+      changes: [{ file: "src/x.ts", description: "impl", requirement_refs: ["req-1"] }],
+      validation: [{ command: "pnpm test", result: "passed", evidence: "all green" }],
       handoff: "Ready for gate",
     }),
     NOW
@@ -211,15 +219,28 @@ afterEach(() => {
 });
 
 describe("OrchestratorService — adaptive delivery loop", () => {
-  it("rejected Release Readiness gate routes backward to a fresh Execution attempt", async () => {
-    const { db, bus, idFactory } = setupHarness();
-    setSupervisionMode(db, "unsupervised", NOW);
-    seedAdaptiveRunAtValidation(db, bus);
-    const engine = makeEngine(fakeGateBroker("rejected"));
+  // Drive requestNextDecision until the run parks at the worker Verify gate;
+  // return its surrogate step-run (step_template_id '__gate__:review').
+  async function parkAtVerifyGate(
+    db: Database.Database,
+    engine: DispatchEngine,
+    ctx: { bus: EventBus; idFactory: () => string }
+  ): Promise<StepRunRow> {
+    await engine.requestNextDecision(db, () => NOW, "run-fd", ctx);
+    return db
+      .prepare("SELECT * FROM workflow_step_runs WHERE workflow_run_id = 'run-fd' AND step_template_id = '__gate__:review'")
+      .get() as StepRunRow;
+  }
 
-    // Reaching the gate parks for a human decision; the user rejects.
-    await engine.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });
-    await engine.decideGate(db, () => NOW, "run-fd", "rejected", { bus, idFactory });
+  it("rejected Verify gate routes backward to a fresh Execution attempt", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedAdaptiveRunAtExecution(db, bus);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-fd'").run();
+    const engine = makeEngine(fakeGateBroker("approved")); // broker serves step proposals; the gate is worker-driven
+
+    // Execution's output routes into the worker Verify gate; the worker rejects.
+    const surrogate = await parkAtVerifyGate(db, engine, { bus, idFactory });
+    await engine.completeGateWorker(db, () => NOW, surrogate, gateDecision("rejected", ["i1"]), { bus, idFactory });
 
     // Gate decision recorded with rejected outcome routing to execution.
     const decisions = listGateDecisionsForRun(db, "run-fd");
@@ -238,15 +259,15 @@ describe("OrchestratorService — adaptive delivery loop", () => {
     expect(execRuns.map((r) => r.attempt)).toEqual([1, 2]);
   });
 
-  it("approved Release Readiness gate routes to the terminal Done step", async () => {
+  it("approved Verify gate routes to the terminal Done step", async () => {
     const { db, bus, idFactory } = setupHarness();
-    setSupervisionMode(db, "unsupervised", NOW);
-    seedAdaptiveRunAtValidation(db, bus);
+    seedAdaptiveRunAtExecution(db, bus);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-fd'").run();
     const engine = makeEngine(fakeGateBroker("approved"));
 
-    // Reaching the gate parks for a human decision; the user approves.
-    await engine.requestNextDecision(db, () => NOW, "run-fd", { bus, idFactory });
-    await engine.decideGate(db, () => NOW, "run-fd", "approved", { bus, idFactory });
+    // Execution's output routes into the worker Verify gate; the worker approves.
+    const surrogate = await parkAtVerifyGate(db, engine, { bus, idFactory });
+    await engine.completeGateWorker(db, () => NOW, surrogate, gateDecision("approved", []), { bus, idFactory });
 
     const decisions = listGateDecisionsForRun(db, "run-fd");
     expect(decisions.at(-1)).toMatchObject({
