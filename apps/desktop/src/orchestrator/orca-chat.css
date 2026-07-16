@@ -1455,6 +1455,6 @@
 .gate-review-risk[data-severity="medium"] .gate-review-risk-sev { background: #d29922; }
 .gate-review-risk[data-severity="high"] .gate-review-risk-sev { background: #f85149; }
 .gate-review-risk-text { min-width: 0; color: var(--text-2); }
-.gate-review-evidence { margin-top: 12px; }
-.gate-review-evidence-summary { cursor: pointer; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
+/* "Evidence reviewed" is a Scores-style toggle in the action row; its panel
+   reuses .step-confirm-evidence, so only the list itself needs bespoke type. */
 .gate-review-evidence-list { margin: 6px 0 0; padding-left: 18px; font-size: 0.85rem; color: var(--text-2); }

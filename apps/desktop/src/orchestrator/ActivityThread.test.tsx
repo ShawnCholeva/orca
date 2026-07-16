@@ -216,10 +216,15 @@ describe("LiveActivity", () => {
     expect(screen.getByText("SQLite cross-thread access")).toBeInTheDocument();
     const risk = screen.getByText("SQLite cross-thread access").closest("li");
     expect(risk).toHaveAttribute("data-severity", "high");
-    // Evidence reviewed is present but collapsed (a <details> without [open]).
-    const evidence = screen.getByTestId("gate-review-evidence");
-    expect(evidence).toBeInTheDocument();
-    expect(evidence).not.toHaveAttribute("open");
+    // Evidence reviewed toggles like the Scores dropdown: a right-aligned button
+    // in the action row, panel collapsed by default, revealed on click.
+    const evidenceToggle = screen.getByTestId("gate-review-evidence-toggle");
+    expect(evidenceToggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("gate-review-evidence")).toBeNull();
+    expect(screen.queryByText("committedLedger")).toBeNull();
+    fireEvent.click(evidenceToggle);
+    expect(evidenceToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("gate-review-evidence")).toBeInTheDocument();
     expect(screen.getByText("committedLedger")).toBeInTheDocument();
     // Mutual exclusion: a present gateReview never shows the unavailable note.
     expect(screen.queryByTestId("gate-review-unavailable")).toBeNull();

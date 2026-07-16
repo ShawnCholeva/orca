@@ -442,6 +442,7 @@ export function LiveActivity({
     issueRefs: string[];
   } | null;
 }) {
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const isConfirmation =
     activity.status === "paused_for_input" &&
     activity.sourceKind === "step_confirmation_pending";
@@ -533,16 +534,6 @@ export function LiveActivity({
                   ))}
                 </ul>
               ) : null}
-              {gateReview.inputsConsidered.length > 0 ? (
-                <details className="gate-review-evidence" data-testid="gate-review-evidence">
-                  <summary className="gate-review-evidence-summary">Evidence reviewed</summary>
-                  <ul className="gate-review-evidence-list">
-                    {gateReview.inputsConsidered.map((ev, i) => (
-                      <li key={`${ev}-${i}`}>{ev}</li>
-                    ))}
-                  </ul>
-                </details>
-              ) : null}
             </div>
           ) : (
             <div className="gate-review-unavailable" data-testid="gate-review-unavailable">
@@ -568,7 +559,31 @@ export function LiveActivity({
             >
               Reject
             </button>
+            {gateReview && gateReview.inputsConsidered.length > 0 ? (
+              <button
+                type="button"
+                data-testid="gate-review-evidence-toggle"
+                className="step-confirm-scores-toggle"
+                aria-expanded={evidenceOpen}
+                onClick={() => setEvidenceOpen((o) => !o)}
+              >
+                <span>Evidence reviewed</span>
+                <ScoresCaret />
+              </button>
+            ) : null}
           </div>
+          {evidenceOpen && gateReview && gateReview.inputsConsidered.length > 0 ? (
+            <div className="step-confirm-evidence" data-testid="gate-review-evidence">
+              <div className="gate-review-group">
+                <div className="gate-review-group-label">Evidence reviewed</div>
+                <ul className="gate-review-evidence-list">
+                  {gateReview.inputsConsidered.map((ev, i) => (
+                    <li key={`${ev}-${i}`}>{ev}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
       {isProviderRecovery && ProviderRecovery && activity.providerRecovery ? (
