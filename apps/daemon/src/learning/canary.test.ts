@@ -25,7 +25,9 @@ function summary(over: Partial<TemplateMetricsSummary> = {}): TemplateMetricsSum
     firstPass: 0.5, recovered: 0.2, escalated: 0.05, latencyP50Ms: 100,
     deltas: { trajectoryEfficiency: null, verificationStrength: null, recovery: null, stateConsistency: null, safetyCompliance: null, replayability: null, latencyP50Ms: null },
     versionComparison: { latest: 2, prior: 1, byDimension: { safetyCompliance: -0.2, verificationStrength: 0.05 } },
-    versions: [{ version: 2, runs: 6, firstSeenAt: "2026-05-01T00:00:00.000Z" }], confidence: "ok", calibration: [], ...over,
+    versions: [{ version: 2, runs: 6, firstSeenAt: "2026-05-01T00:00:00.000Z" }], confidence: "ok", calibration: [],
+    // TODO(gate-metrics): populated in the gates-wiring task
+    gateHealth: { value: null, grade: null, delta: null, confidence: "low" }, ...over,
   };
 }
 function applied(over: Partial<TemplateInstructionProposal> = {}): TemplateInstructionProposal {

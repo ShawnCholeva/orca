@@ -74,5 +74,12 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
       nowIso: now, period,
       calibration: computeCalibration(transitions),
     }),
+    // TODO(gate-metrics): populated in the gates-wiring task
+    gates: [],
+    policyGateway: {
+      decisionDist: { allow: 0, require_approval: 0, deny: 0 },
+      overPermissive: { count: 0, sampleTransitionIds: [] },
+      boundaryViolations: [],
+    },
   };
 }

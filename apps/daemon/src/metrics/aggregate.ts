@@ -150,6 +150,8 @@ export function computeTemplateSummary(input: {
     versions: input.versions,
     confidence: input.runCount < SAMPLE_MIN ? "low" : "ok",
     calibration: computeCalibration(input.current.transitions),
+    // TODO(gate-metrics): populated in the gates-wiring task
+    gateHealth: { value: null, grade: null, delta: null, confidence: "low" },
   };
 }
 

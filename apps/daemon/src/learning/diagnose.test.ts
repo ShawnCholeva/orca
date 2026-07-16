@@ -26,8 +26,17 @@ function detail(steps: StepMetrics[]): TemplateMetricsDetail {
       deltas: { trajectoryEfficiency: null, verificationStrength: null, recovery: null, stateConsistency: null, safetyCompliance: null, replayability: null, latencyP50Ms: null },
       versionComparison: { latest: 2, prior: 1, byDimension: { verificationStrength: -0.05 } },
       versions: [], confidence: "ok", calibration: [],
+      // TODO(gate-metrics): populated in the gates-wiring task
+      gateHealth: { value: null, grade: null, delta: null, confidence: "low" },
     },
     steps,
+    // TODO(gate-metrics): populated in the gates-wiring task
+    gates: [],
+    policyGateway: {
+      decisionDist: { allow: 0, require_approval: 0, deny: 0 },
+      overPermissive: { count: 0, sampleTransitionIds: [] },
+      boundaryViolations: [],
+    },
   };
 }
 const meta = new Map([["s1", { instructions: "Generate a proposal.", outputSchemaJson: '[\n  {\n    "key": "summary",\n    "type": "string",\n    "required": true\n  }\n]' }]]);
