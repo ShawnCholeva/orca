@@ -15,16 +15,26 @@ const summary = {
     stateConsistency: 0, safetyCompliance: -0.03, replayability: 0, latencyP50Ms: -300 },
   versionComparison: null, versions: [{ version: 1, runs: 12, firstSeenAt: "2026-05-01T00:00:00.000Z" }], confidence: "ok" as const,
   calibration: [],
+  gateHealth: { value: 78, grade: "C" as const, delta: null, confidence: "ok" as const },
 };
 
 describe("MetricsPage", () => {
   it("shows a loading state then renders the health tile", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [] });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], policyGateway: { decisionDist: {}, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] } });
     render(<MetricsPage />);
     expect(screen.getByText(/Loading/i)).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("Workflow health")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Step health")).toBeInTheDocument());
     expect(screen.getByText("Brainstorm")).toBeInTheDocument();
+  });
+
+  it("shows Step health and Gate health as two distinct readouts", async () => {
+    vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], policyGateway: { decisionDist: {}, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] } });
+    render(<MetricsPage />);
+    expect(await screen.findByText("Step health")).toBeInTheDocument();
+    expect(screen.getByText("Gate health")).toBeInTheDocument();
+    expect(screen.queryByText("Workflow health")).toBeNull();
   });
 
   it("shows the empty state when no templates have runs", async () => {
@@ -46,9 +56,9 @@ describe("MetricsPage", () => {
       firstPass: null, confidence: "ok" as const,
     };
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([nullSummary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary: nullSummary, steps: [] });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary: nullSummary, steps: [], gates: [], policyGateway: { decisionDist: {}, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] } });
     render(<MetricsPage />);
-    await waitFor(() => expect(screen.getByText("Workflow health")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Step health")).toBeInTheDocument());
     const dashes = screen.getAllByText("—");
     expect(dashes.length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("F")).not.toBeInTheDocument();

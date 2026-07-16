@@ -68,7 +68,8 @@ export function MetricsPage() {
         </div>
 
         <div style={{ display: "flex", gap: 10, flexShrink: 0, opacity: wf.confidence === "low" ? 0.55 : 1 }}>
-          <StatTile label="Workflow health" value={health} accent={healthColor} grade={health == null ? null : gradeFor(health)} delta={pctDelta(wf.deltas.verificationStrength)} deltaGood="up" />
+          <StatTile label="Step health" value={health} accent={healthColor} grade={health == null ? null : gradeFor(health)} delta={pctDelta(wf.deltas.verificationStrength)} deltaGood="up" />
+          <StatTile label="Gate health" value={wf.gateHealth.value} accent={wf.gateHealth.value == null ? "var(--text-3)" : wf.gateHealth.value >= 80 ? "var(--run)" : wf.gateHealth.value >= 60 ? "var(--warn)" : "var(--err)"} grade={wf.gateHealth.grade} delta={pctDelta(wf.gateHealth.delta)} deltaGood="up" />
           <StatTile label="First-pass" value={rate(wf.firstPass)} unit="%" />
           <StatTile label="Self-recovered" value={rate(wf.recovered)} unit="%" accent="var(--warn)" />
           <StatTile label="Escalated" value={rate(wf.escalated)} unit="%" accent="var(--err)" />
