@@ -548,6 +548,14 @@
   background: var(--accent-soft, rgba(91, 140, 255, 0.08));
 }
 
+/* The gate decision card is a "your decision" card like the step confirmation
+   card, so it wears the same neutral panel surface — not the accent-soft pause
+   tint — and reuses .step-confirm-head / .step-confirm-field styling. */
+.activity-bubble--gate[data-status="paused_for_input"] {
+  border-color: var(--hairline);
+  background: var(--panel-2);
+}
+
 /* A pending question supplies its own card chrome; the wrapping bubble must not
    double it up with a second border/background. */
 .activity-bubble.activity-bubble--question,
@@ -1148,15 +1156,11 @@
 
 /* Worker-gate verdict surfaced on the gate decision card (Critique gate). */
 .gate-review {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border-left: 2px solid var(--accent, #6a7cff);
-  background: var(--surface-subtle, rgba(127, 127, 127, 0.08));
-  border-radius: 4px;
+  margin-top: 0;
 }
-.gate-review-verdict { font-size: 0.85rem; margin-bottom: 6px; }
-.gate-review-reasoning { font-size: 0.9rem; line-height: 1.45; white-space: pre-wrap; }
-.gate-review-issues { margin: 8px 0 0; padding-left: 18px; font-size: 0.85rem; }
+.gate-review-verdict { font-weight: 600; margin-bottom: 16px; color: var(--text); }
+.gate-review-reasoning { font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap; color: var(--text-2); }
+.gate-review-issues { margin: 8px 0 0; padding-left: 18px; font-size: 0.85rem; color: var(--text-2); }
 .gate-review-issues li { margin: 2px 0; }
 /* No reviewer verdict ran (adapter unavailable, request too large, eval failed) — the
    one park that stays without a verdict; labeled so it's never mistaken for the bundle above. */
@@ -1439,9 +1443,9 @@
 }
 .orca-chat-split-choice-btn:hover { background: var(--bg-3, rgba(0,0,0,0.06)); }
 
-.gate-review-group { margin-top: 8px; }
-.gate-review-group-label { font-size: 12px; font-weight: 600; color: var(--text-muted, #8b949e); margin-bottom: 4px; }
-.gate-review-risks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.gate-review-group { margin-top: 12px; }
+.gate-review-group-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); margin-bottom: 6px; }
+.gate-review-risks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .gate-review-risk { display: flex; align-items: baseline; gap: 8px; }
 .gate-review-risk-sev {
   flex: none; text-transform: uppercase; font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
@@ -1450,7 +1454,7 @@
 .gate-review-risk[data-severity="low"] .gate-review-risk-sev { background: var(--ok, #3fb950); }
 .gate-review-risk[data-severity="medium"] .gate-review-risk-sev { background: #d29922; }
 .gate-review-risk[data-severity="high"] .gate-review-risk-sev { background: #f85149; }
-.gate-review-risk-text { min-width: 0; }
-.gate-review-evidence { margin-top: 8px; }
-.gate-review-evidence-summary { cursor: pointer; font-size: 12px; color: var(--text-muted, #8b949e); }
-.gate-review-evidence-list { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: var(--text-muted, #8b949e); }
+.gate-review-risk-text { min-width: 0; color: var(--text-2); }
+.gate-review-evidence { margin-top: 12px; }
+.gate-review-evidence-summary { cursor: pointer; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
+.gate-review-evidence-list { margin: 6px 0 0; padding-left: 18px; font-size: 0.85rem; color: var(--text-2); }

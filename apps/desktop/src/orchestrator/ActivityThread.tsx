@@ -492,8 +492,14 @@ export function LiveActivity({
   }
 
   return (
-    <div className="activity-bubble" data-testid="activity-bubble" data-status={activity.status}>
-      <div className="activity-bubble-text">{activity.currentText}</div>
+    <div
+      className={`activity-bubble${isGateDecision ? " activity-bubble--gate" : ""}`}
+      data-testid="activity-bubble"
+      data-status={activity.status}
+    >
+      <div className={isGateDecision ? "step-confirm-head" : "activity-bubble-text"}>
+        {activity.currentText}
+      </div>
       {isGateDecision ? (
         <div className="step-confirm" data-testid="gate-decision">
           {gateReview ? (
