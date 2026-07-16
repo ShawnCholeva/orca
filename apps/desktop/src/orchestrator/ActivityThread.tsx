@@ -435,6 +435,7 @@ export function LiveActivity({
   gateReview?: {
     recommendedOutcome: "approved" | "rejected";
     reasoning: string | null;
+    // reason: one-line rationale carried for the persisted gate record; the card shows the fuller `reasoning` instead.
     reason: string | null;
     residualRisks: { risk: string; severity: "low" | "medium" | "high" }[];
     inputsConsidered: string[];
@@ -537,7 +538,11 @@ export function LiveActivity({
                 </details>
               ) : null}
             </div>
-          ) : null}
+          ) : (
+            <div className="gate-review-unavailable" data-testid="gate-review-unavailable">
+              No automated review ran — approve or reject on your own judgment.
+            </div>
+          )}
           <div className="step-confirm-actions">
             <button
               type="button"

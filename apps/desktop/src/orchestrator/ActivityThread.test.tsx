@@ -221,6 +221,29 @@ describe("LiveActivity", () => {
     expect(evidence).toBeInTheDocument();
     expect(evidence).not.toHaveAttribute("open");
     expect(screen.getByText("committedLedger")).toBeInTheDocument();
+    // Mutual exclusion: a present gateReview never shows the unavailable note.
+    expect(screen.queryByTestId("gate-review-unavailable")).toBeNull();
+  });
+
+  it("labels a gate park with no reviewer verdict as 'reviewer unavailable' (spec B4)", () => {
+    render(
+      <LiveActivity
+        activity={mk({
+          workflowRunId: "r1",
+          status: "paused_for_input",
+          sourceKind: "gate_decision_pending",
+          currentText: 'Gate "Verdict" needs your approval to continue.',
+        })}
+        onGateDecide={vi.fn()}
+        gateReview={null}
+      />,
+    );
+
+    expect(screen.getByTestId("gate-review-unavailable")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-decision-approve")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-decision-reject")).toBeInTheDocument();
+    // No structured bundle without a verdict.
+    expect(screen.queryByTestId("gate-review")).toBeNull();
   });
 });
 

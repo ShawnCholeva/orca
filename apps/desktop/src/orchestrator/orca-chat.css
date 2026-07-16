@@ -1158,6 +1158,13 @@
 .gate-review-reasoning { font-size: 0.9rem; line-height: 1.45; white-space: pre-wrap; }
 .gate-review-issues { margin: 8px 0 0; padding-left: 18px; font-size: 0.85rem; }
 .gate-review-issues li { margin: 2px 0; }
+/* No reviewer verdict ran (adapter unavailable, request too large, eval failed) — the
+   one park that stays without a verdict; labeled so it's never mistaken for the bundle above. */
+.gate-review-unavailable {
+  margin-top: 12px;
+  font-size: 0.85rem;
+  color: var(--text-muted, #8b949e);
+}
 
 /* Evidence bundle (paper p.62) — replaces the six raw self-scores as the card's
    primary verification signal. */
