@@ -1431,3 +1431,19 @@
   font-size: 13px;
 }
 .orca-chat-split-choice-btn:hover { background: var(--bg-3, rgba(0,0,0,0.06)); }
+
+.gate-review-group { margin-top: 8px; }
+.gate-review-group-label { font-size: 12px; font-weight: 600; color: var(--text-muted, #8b949e); margin-bottom: 4px; }
+.gate-review-risks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.gate-review-risk { display: flex; align-items: baseline; gap: 8px; }
+.gate-review-risk-sev {
+  flex: none; text-transform: uppercase; font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+  padding: 1px 6px; border-radius: 999px; color: #fff;
+}
+.gate-review-risk[data-severity="low"] .gate-review-risk-sev { background: var(--ok, #3fb950); }
+.gate-review-risk[data-severity="medium"] .gate-review-risk-sev { background: #d29922; }
+.gate-review-risk[data-severity="high"] .gate-review-risk-sev { background: #f85149; }
+.gate-review-risk-text { min-width: 0; }
+.gate-review-evidence { margin-top: 8px; }
+.gate-review-evidence-summary { cursor: pointer; font-size: 12px; color: var(--text-muted, #8b949e); }
+.gate-review-evidence-list { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: var(--text-muted, #8b949e); }

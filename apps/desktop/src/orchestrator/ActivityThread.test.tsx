@@ -169,6 +169,9 @@ describe("LiveActivity", () => {
         gateReview={{
           recommendedOutcome: "rejected",
           reasoning: "The threading.Lock is held across the trade call, breaking trading purity.",
+          reason: null,
+          residualRisks: [],
+          inputsConsidered: [],
           issueRefs: ["threading.Lock held across trade", "trading purity"],
         }}
       />,
@@ -184,6 +187,40 @@ describe("LiveActivity", () => {
     // The human decision controls are still present and wired.
     fireEvent.click(screen.getByTestId("gate-decision-reject"));
     expect(onGateDecide).toHaveBeenCalledWith("r1", "rejected");
+  });
+
+  it("renders the gate evidence bundle: risks with severity and collapsed evidence", () => {
+    render(
+      <LiveActivity
+        activity={mk({
+          status: "paused_for_input",
+          sourceKind: "gate_decision_pending",
+          currentText: 'Gate "Critique" needs your approval to continue.',
+        })}
+        onGateDecide={vi.fn()}
+        gateReview={{
+          recommendedOutcome: "approved",
+          reasoning: "The design decomposes into single-purpose modules.",
+          reason: "meets the bar",
+          residualRisks: [
+            { risk: "SQLite cross-thread access", severity: "high" },
+            { risk: "CoinGecko rate limits", severity: "low" },
+          ],
+          inputsConsidered: ["sourceStepOutput", "committedLedger"],
+          issueRefs: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("gate-review-risks")).toBeInTheDocument();
+    expect(screen.getByText("SQLite cross-thread access")).toBeInTheDocument();
+    const risk = screen.getByText("SQLite cross-thread access").closest("li");
+    expect(risk).toHaveAttribute("data-severity", "high");
+    // Evidence reviewed is present but collapsed (a <details> without [open]).
+    const evidence = screen.getByTestId("gate-review-evidence");
+    expect(evidence).toBeInTheDocument();
+    expect(evidence).not.toHaveAttribute("open");
+    expect(screen.getByText("committedLedger")).toBeInTheDocument();
   });
 });
 

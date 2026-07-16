@@ -431,10 +431,13 @@ export function LiveActivity({
   onRevise?: (runId: string) => void;
   onGateDecide?: (runId: string, outcome: "approved" | "rejected") => void;
   gateDeciding?: boolean;
-  // A worker-backed gate's verdict, surfaced as a recommendation on the gate card.
+  // A gate reviewer's verdict, surfaced as a structured evidence bundle on the card.
   gateReview?: {
     recommendedOutcome: "approved" | "rejected";
     reasoning: string | null;
+    reason: string | null;
+    residualRisks: { risk: string; severity: "low" | "medium" | "high" }[];
+    inputsConsidered: string[];
     issueRefs: string[];
   } | null;
 }) {
@@ -503,12 +506,35 @@ export function LiveActivity({
                   {gateReview.reasoning}
                 </div>
               ) : null}
+              {gateReview.residualRisks.length > 0 ? (
+                <div className="gate-review-group">
+                  <div className="gate-review-group-label">Residual risks</div>
+                  <ul className="gate-review-risks" data-testid="gate-review-risks">
+                    {gateReview.residualRisks.map((r, i) => (
+                      <li key={`${r.risk}-${i}`} className="gate-review-risk" data-severity={r.severity}>
+                        <span className="gate-review-risk-sev" aria-hidden="true">{r.severity}</span>
+                        <span className="gate-review-risk-text">{r.risk}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               {gateReview.issueRefs.length > 0 ? (
                 <ul className="gate-review-issues" data-testid="gate-review-issues">
                   {gateReview.issueRefs.map((ref, i) => (
                     <li key={`${ref}-${i}`}>{ref}</li>
                   ))}
                 </ul>
+              ) : null}
+              {gateReview.inputsConsidered.length > 0 ? (
+                <details className="gate-review-evidence" data-testid="gate-review-evidence">
+                  <summary className="gate-review-evidence-summary">Evidence reviewed</summary>
+                  <ul className="gate-review-evidence-list">
+                    {gateReview.inputsConsidered.map((ev, i) => (
+                      <li key={`${ev}-${i}`}>{ev}</li>
+                    ))}
+                  </ul>
+                </details>
               ) : null}
             </div>
           ) : null}
