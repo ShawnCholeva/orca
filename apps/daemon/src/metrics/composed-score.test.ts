@@ -7,6 +7,9 @@ const tx = (over: Record<string, unknown>): TemplateTransition => ({
   transition: { workflowRunId: "r", boundary: "step_complete", createdAt: "2026-07-16T00:00:00Z", ...over } as never,
 });
 const ev = (o: Record<string, unknown>) => ({ sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: false, gaps: [] }, ...o });
+// A grounding verdict of "passed" backed by an enforce-mode, non-skipped check — the
+// minimum classifyTier requires to count grounding as having actually run.
+const groundingPassed = { verdict: "passed", checks: [{ mode: "enforce", result: "passed" }] };
 
 describe("composedScore", () => {
   it("refuted → 0", () => expect(composedScore(tx({ refute: { verdict: "refuted" } })).score).toBe(0));
@@ -16,17 +19,27 @@ describe("composedScore", () => {
     expect(r.score).toBe(1); expect(r.base).toBe(1); expect(r.coverage).toBe(1);
   });
   it("grounding + review, no execution → ~0.86", () => {
-    const r = composedScore(tx({ evidence: ev({ grounding: { verdict: "passed" } }), refute: { verdict: "upheld" } }));
+    const r = composedScore(tx({ evidence: ev({ grounding: groundingPassed }), refute: { verdict: "upheld" } }));
     expect(r.base).toBeCloseTo(0.865, 3); expect(r.coverage).toBe(1); expect(r.score).toBeCloseTo(0.865, 3);
   });
   it("grounding only → 0.70", () => {
-    expect(composedScore(tx({ evidence: ev({ grounding: { verdict: "passed" } }) })).score).toBeCloseTo(0.7, 5);
+    expect(composedScore(tx({ evidence: ev({ grounding: groundingPassed }) })).score).toBeCloseTo(0.7, 5);
+  });
+  it("verdict passed with only an observe-mode check → grounding not credited, self-report floor", () => {
+    const r = composedScore(tx({ evidence: ev({ grounding: { verdict: "passed", checks: [{ mode: "observe", result: "passed" }] } }) }));
+    expect(r.verifiers.grounding).toBe(false); // verdict alone isn't enough — must match classifyTier's enforce-mode requirement
+    expect(r.score).toBeCloseTo(0.3, 5);
+  });
+  it("verdict passed with an enforce-mode non-skipped check → grounding credited, base 0.7", () => {
+    const r = composedScore(tx({ evidence: ev({ grounding: { verdict: "passed", checks: [{ mode: "enforce", result: "passed" }] } }) }));
+    expect(r.verifiers.grounding).toBe(true);
+    expect(r.base).toBeCloseTo(0.7, 5);
   });
   it("self-report only (no verifiers) → 0.30 floor", () => {
     expect(composedScore(tx({ evidence: ev({}) })).score).toBeCloseTo(0.3, 5);
   });
   it("partial oracle (sensors ran, sufficient=false) → executable excluded, grounding base × 1.0", () => {
-    const r = composedScore(tx({ evidence: ev({ sensorsRun: [{ kind: "typecheck" }], verdict: "partial", grounding: { verdict: "passed" } }) }));
+    const r = composedScore(tx({ evidence: ev({ sensorsRun: [{ kind: "typecheck" }], verdict: "partial", grounding: groundingPassed }) }));
     expect(r.verifiers.executable).toBe(false); // sufficiency-gated
     expect(r.base).toBeCloseTo(0.7, 5); expect(r.coverage).toBe(1); expect(r.score).toBeCloseTo(0.7, 5);
   });
@@ -37,7 +50,7 @@ describe("composedScore", () => {
   });
   it("code change, no execution → coverage floors from per-file untested", () => {
     const r = composedScore(tx({
-      evidence: ev({ grounding: { verdict: "passed" }, untestedRegions: ["src/a.ts — changed, no test or check ran over it"] }),
+      evidence: ev({ grounding: groundingPassed, untestedRegions: ["src/a.ts — changed, no test or check ran over it"] }),
       stateDeps: { write_set: [{ kind: "file", ref: "src/a.ts", change_kind: "modified" }] },
     }));
     expect(r.coverage).toBeCloseTo(0.3, 5); // 1 of 1 code file untested → floor
@@ -52,7 +65,7 @@ describe("composedScore", () => {
   });
   it("prefix collision fix: a.ts must not match a.tsx untested region", () => {
     const r = composedScore(tx({
-      evidence: ev({ grounding: { verdict: "passed" }, untestedRegions: ["src/a.tsx — changed, no test or check ran over it"] }),
+      evidence: ev({ grounding: groundingPassed, untestedRegions: ["src/a.tsx — changed, no test or check ran over it"] }),
       stateDeps: { write_set: [
         { kind: "file", ref: "src/a.ts", change_kind: "modified" },
         { kind: "file", ref: "src/a.tsx", change_kind: "modified" },
