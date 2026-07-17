@@ -123,6 +123,20 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
               </div>
             ))}
 
+            {step.quality.scoreBreakdown && (
+              <>
+                <SectionLabel>How this score was reached</SectionLabel>
+                <div className="mono" style={{ fontSize: 11.5, color: "var(--text-3)" }}>
+                  {step.quality.scoreBreakdown.meanCoverage != null && step.quality.scoreBreakdown.coverageLimited > 0
+                    ? `${step.quality.scoreBreakdown.coverageLimited} completion(s) capped by what wasn't covered · `
+                    : ""}
+                  {(() => { const m = step.quality.scoreBreakdown!.verifierMix;
+                    const parts = [m.executable && "ran & tested", m.grounding && "claims checked", m.independentReview && "second-model review"].filter(Boolean);
+                    return parts.length ? `verified by: ${parts.join(", ")}` : "self-reported only"; })()}
+                </div>
+              </>
+            )}
+
             <Chips label="What we couldn't check" items={step.quality.untestedRegions} />
             <Chips label="Remaining risks" items={step.quality.residualRisk} />
 

@@ -72,6 +72,23 @@ describe("StepRow expanded", () => {
     expect(screen.queryByText(/\b(oracle|sensor|verdict|refute|veto)\b/i)).toBeNull();
   });
 
+  it("renders a plain-language 'how this score was reached' line from scoreBreakdown", () => {
+    const stepWithBreakdown: StepMetrics = {
+      ...step,
+      quality: {
+        ...step.quality,
+        scoreBreakdown: {
+          meanBase: 0.8, meanCoverage: 0.9, coverageLimited: 2,
+          verifierMix: { executable: 3, grounding: 1, independentReview: 0, selfReportOnly: 0 },
+        },
+      },
+    };
+    render(<StepRow step={stepWithBreakdown} index={0} isLast open onToggle={() => {}} />);
+    expect(screen.getByText(/how this score was reached/i)).toBeInTheDocument();
+    // no jargon
+    expect(document.body.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
+  });
+
   it("renders the reviewer's reason when a claim was overturned", () => {
     const s: StepMetrics = {
       ...reconciledStep,
