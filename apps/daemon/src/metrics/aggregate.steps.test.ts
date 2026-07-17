@@ -466,6 +466,72 @@ describe("computeStepMetrics", () => {
     expect(step.quality.scoreBreakdown?.coverageLimited).toBe(0);
     expect(step.quality.scoreBreakdown?.verifierMix).toEqual({ executable: 1, grounding: 0, independentReview: 0, selfReportOnly: 0 });
   });
+
+  it("scoreBreakdown excludes fail-edge completions (refuted/failed) from coverage and verifier-mix stats", () => {
+    // Fail-edge: refute upheld → composedScore's zero() (base:0, coverage:0). Must
+    // NOT count toward coverageLimited or selfReportOnly — it's a failure, not a
+    // coverage-capped or self-reported pass.
+    const failed: TemplateTransition = {
+      templateVersion: 1, stepTemplateId: "s",
+      transition: {
+        id: "f1", goalId: "g", workflowRunId: "r1", workflowStepRunId: "r1-s",
+        boundary: "step_complete", risk: null, stateDeps: null,
+        evidence: { sensorsRun: [], verdict: "failed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: false, gaps: [] } },
+        refute: { verdict: "refuted", triggered_by: [], risk_class: "low", reason: "overturned", issue_refs: [] },
+        telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "failed", failure_code: "invalid_output" } },
+        createdAt: "2026-05-01T00:00:00.000Z",
+      },
+    };
+    // Grounding-passed (enforce, non-skipped) → composedScore.verifiers.grounding true, base 0.7.
+    const groundingPassed: TemplateTransition = {
+      templateVersion: 1, stepTemplateId: "s",
+      transition: {
+        id: "g1", goalId: "g", workflowRunId: "r2", workflowStepRunId: "r2-s",
+        boundary: "step_complete", risk: null, stateDeps: null,
+        evidence: {
+          sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [],
+          oracleAdequacy: { sufficient: false, gaps: [] },
+          grounding: { checks: [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce", result: "passed", detail: "" }], verdict: "passed" },
+        },
+        telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
+        createdAt: "2026-05-01T00:01:00.000Z",
+      },
+    };
+    const ts = [failed, groundingPassed];
+    // r1's finishedAt equals its own completion's createdAt (not after) so the
+    // hard-fail-supersede reclassification (aggregate.ts ~306-314, a DIFFERENT
+    // mechanism for a later attempt superseding a stale earlier pass) does not
+    // kick in here — this test isolates the scoreBreakdown fail-edge filter itself.
+    const runs: TemplateStepRun[] = [
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:00:00.000Z", blockedReason: null, templateVersion: 1 },
+      { workflowRunId: "r2", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:01:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 },
+    ];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.quality.scoreBreakdown?.coverageLimited).toBe(0);
+    expect(step.quality.scoreBreakdown?.verifierMix).toEqual({ executable: 0, grounding: 1, independentReview: 0, selfReportOnly: 0 });
+  });
+
+  it("scoreBreakdown is empty when every completion is a fail-edge", () => {
+    const failed: TemplateTransition = {
+      templateVersion: 1, stepTemplateId: "s",
+      transition: {
+        id: "f1", goalId: "g", workflowRunId: "r1", workflowStepRunId: "r1-s",
+        boundary: "step_complete", risk: null, stateDeps: null,
+        evidence: { sensorsRun: [], verdict: "failed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: false, gaps: [] } },
+        refute: { verdict: "refuted", triggered_by: [], risk_class: "low", reason: "overturned", issue_refs: [] },
+        telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "failed", failure_code: "invalid_output" } },
+        createdAt: "2026-05-01T00:00:00.000Z",
+      },
+    };
+    const runs: TemplateStepRun[] = [
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:00:00.000Z", blockedReason: null, templateVersion: 1 },
+    ];
+    const [step] = computeStepMetrics({ transitions: [failed], stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.quality.scoreBreakdown?.meanBase).toBeNull();
+    expect(step.quality.scoreBreakdown?.meanCoverage).toBeNull();
+    expect(step.quality.scoreBreakdown?.coverageLimited).toBe(0);
+    expect(step.quality.scoreBreakdown?.verifierMix).toEqual({ executable: 0, grounding: 0, independentReview: 0, selfReportOnly: 0 });
+  });
 });
 
 describe("deriveInsights", () => {
@@ -573,14 +639,15 @@ describe("computeStepMetrics: calibration divergence insight", () => {
     blockedReason: null, templateVersion: 1,
   }];
 
-  it("reports the adjusted weight when measured calibration diverges and feeds the score", () => {
+  it("reports the divergence observationally, without claiming it moved the score", () => {
     const calibration: CalibrationEntry[] = [
       { tier: "ai_reviewed", assumed: 0.55, measured: 0.87, sampleSize: 13, state: "measured" },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
     expect(step.verification.tier).toBe("ai_reviewed");
-    // measured 0.87 capped at the partly-verified prior (0.7) for a review-only tier.
-    expect(step.insights.join(" ")).toMatch(/upholds 87%.*count for 70%.*was 55%/);
+    // Honest wording: reports measured vs. assumed, never claims the score changed.
+    expect(step.insights.join(" ")).toMatch(/upholds 87%.*assumes 55%.*pessimistic/);
+    expect(step.insights.join(" ")).not.toMatch(/now count for|so passes here/i);
     expect(step.insights.join(" ")).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 

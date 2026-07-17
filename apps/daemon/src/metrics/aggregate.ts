@@ -2,7 +2,7 @@ import type { HarnessMetrics } from "../harness-metrics/usecases.js";
 import { computeHarnessMetricsFromTransitions } from "../harness-metrics/usecases.js";
 import type { MetricPeriod, TemplateMetricsSummary, StepMetrics } from "@orca/contracts";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
-import { classifyTier, strongestTier, TIER_LABEL, buildArtifacts, computeCalibration, CALIBRATION_DIVERGENCE, CALIBRATION_SCORE_MIN, effectiveTierConfidence } from "./verification.js";
+import { classifyTier, strongestTier, TIER_LABEL, buildArtifacts, computeCalibration, CALIBRATION_DIVERGENCE, CALIBRATION_SCORE_MIN } from "./verification.js";
 import type { CalibrationEntry } from "./verification.js";
 import { labelForFailure } from "./failure-labels.js";
 import { composedScore } from "./composed-score.js";
@@ -200,14 +200,9 @@ export function deriveInsights(step: StepMetrics, calibration?: CalibrationEntry
   const cal = calibration?.find((c) => c.tier === step.verification.tier);
   if (cal && cal.state === "measured" && cal.sampleSize >= CALIBRATION_SCORE_MIN && Math.abs(cal.measured! - cal.assumed) > CALIBRATION_DIVERGENCE) {
     const measured = cal.measured!;
-    const effective = effectiveTierConfidence(step.verification.tier, calibration);
-    if (effective !== cal.assumed) {
-      // The measured rate feeds the score (effectiveTierConfidence) — say so instead
-      // of warning about a divergence that has already been corrected.
-      out.push(`Independent review upholds ${Math.round(measured * 100)}% of this step's passes, so passes here now count for ${Math.round(effective * 100)}% (built-in assumption was ${Math.round(cal.assumed * 100)}%).`);
-    } else {
-      out.push(`Independent review upholds ${Math.round(measured * 100)}% of this step's passes; the score assumes ${Math.round(cal.assumed * 100)}% — scores here may be too ${measured > cal.assumed ? "pessimistic" : "optimistic"}.`);
-    }
+    // Observational only — calibration no longer feeds composedScore, so this must
+    // never claim passes "now count for" a different weight.
+    out.push(`Independent review upholds ${Math.round(measured * 100)}% of this step's passes; the score assumes ${Math.round(cal.assumed * 100)}% — scores here may be too ${measured > cal.assumed ? "pessimistic" : "optimistic"}.`);
   }
   return out;
 }
@@ -480,8 +475,12 @@ export function computeStepMetrics(input: {
 
     // Inspectable breakdown of the composed score over the conclusive completions
     // (same population scoreOver/scoredSampleSize weight by) — lets the UI/falsifier
-    // see WHICH verifiers drove the score, not just the final number.
-    const concScores = conclusive.map((t) => scoreByCompletion.get(t)!);
+    // see WHICH verifiers drove the score, not just the final number. Fail-edge
+    // completions (composedScore's zero(), base===0) are excluded here: they aren't
+    // "coverage-capped" or "self-reported", they're failures, and including them would
+    // mislabel a failed step as weakly-verified. A legitimate self-report floor is
+    // base===0.3, so base===0 uniquely marks a zero() fail-edge.
+    const concScores = conclusive.map((t) => scoreByCompletion.get(t)!).filter((s) => s.base !== 0);
     const scoreBreakdown = {
       meanBase: mean(concScores.map((s) => s.base)),
       meanCoverage: mean(concScores.map((s) => s.coverage)),
