@@ -1,15 +1,5 @@
 import type { SensorResult, WorkflowSensorKind } from "@orca/contracts";
-
-// Code-file extensions for write-set classification. Deliberately conservative;
-// a file not matched here is treated as non-code output.
-const CODE_EXTS = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".go", ".rs", ".java",
-  ".rb", ".c", ".h", ".cc", ".cpp", ".cs", ".php", ".swift", ".kt", ".scala", ".sh",
-]);
-function isCodeFile(p: string): boolean {
-  const dot = p.lastIndexOf(".");
-  return dot >= 0 && CODE_EXTS.has(p.slice(dot).toLowerCase());
-}
+import { isCodeFile } from "./code-files.js";
 
 // Plain-language "available but unran" gap phrasing per sensor kind (no jargon).
 // Written per-kind (rather than a shared template) so singular labels ("lint",
