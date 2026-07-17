@@ -5,6 +5,7 @@ import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
 import { classifyTier, strongestTier, TIER_LABEL, buildArtifacts, computeCalibration, CALIBRATION_DIVERGENCE, CALIBRATION_SCORE_MIN, effectiveTierConfidence } from "./verification.js";
 import type { CalibrationEntry } from "./verification.js";
 import { labelForFailure } from "./failure-labels.js";
+import { composedScore } from "./composed-score.js";
 
 export const SAMPLE_MIN = 5;
 // Per-side minimum of SCORED samples before a per-step version delta is emitted.
@@ -312,13 +313,13 @@ export function computeStepMetrics(input: {
         .map((r) => r.workflowRunId)
     );
     const tierByCompletion = new Map(finalStepCompletes.map((t) => [t, classifyTier(t)] as const));
+    const scoreByCompletion = new Map(finalStepCompletes.map((t) => [t, composedScore(t)] as const));
     const conclusive = finalStepCompletes.filter((t) =>
       tierByCompletion.get(t) !== "unverified" && !supersededByHardFail.has(t.transition.workflowRunId ?? ""));
     const completeRunIds = new Set(finalStepCompletes.map((t) => t.transition.workflowRunId).filter((x): x is string => x != null));
     const hardFailedFinals = finals.filter((r) =>
       FAILED_STATUSES.has(r.status) && (!completeRunIds.has(r.workflowRunId) || supersededByHardFail.has(r.workflowRunId)));
-    const contribution = (t: (typeof stepCompletes)[number]) =>
-      vFail(t) ? 0 : effectiveTierConfidence(tierByCompletion.get(t)!, input.calibration);
+    const contribution = (t: (typeof stepCompletes)[number]) => scoreByCompletion.get(t)!.score;
     const scoreOver = (completes: typeof finalStepCompletes, hardFails: number): { n: number; value: number | null } => {
       const conc = completes.filter((t) =>
         tierByCompletion.get(t) !== "unverified" && !supersededByHardFail.has(t.transition.workflowRunId ?? ""));
@@ -477,6 +478,22 @@ export function computeStepMetrics(input: {
       .slice(0, 5)
       .map((r) => ({ at: r.finishedAt ?? r.startedAt ?? "", reason: r.blockedReason! }));
 
+    // Inspectable breakdown of the composed score over the conclusive completions
+    // (same population scoreOver/scoredSampleSize weight by) — lets the UI/falsifier
+    // see WHICH verifiers drove the score, not just the final number.
+    const concScores = conclusive.map((t) => scoreByCompletion.get(t)!);
+    const scoreBreakdown = {
+      meanBase: mean(concScores.map((s) => s.base)),
+      meanCoverage: mean(concScores.map((s) => s.coverage)),
+      coverageLimited: concScores.filter((s) => s.coverage < 1).length,
+      verifierMix: {
+        executable: concScores.filter((s) => s.verifiers.executable).length,
+        grounding: concScores.filter((s) => s.verifiers.grounding).length,
+        independentReview: concScores.filter((s) => s.verifiers.independentReview).length,
+        selfReportOnly: concScores.filter((s) => !s.verifiers.executable && !s.verifiers.grounding && !s.verifiers.independentReview).length,
+      },
+    };
+
     const step: StepMetrics = {
       stepTemplateId, name: meta.name, ordinal: meta.ordinal,
       score: scoreValue == null ? null : Math.round(scoreValue * 100), sampleSize, confidence: sampleSize < SAMPLE_MIN ? "low" : "ok",
@@ -488,6 +505,7 @@ export function computeStepMetrics(input: {
         residualRisk: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.residualRisk)),
         oracleGaps: uniqueCapped(evidenceCompletes.flatMap((t) => t.transition.evidence!.oracleAdequacy.gaps)),
         limitingDimension: null,
+        scoreBreakdown,
       },
       cost: { p50LatencyMs: p50(latencies), meanTokens: mean(tokens), meanUsd: mean(usds), meanRetries },
       risk: { riskClassDist, gateDecisionDist, hardConstraintViolations, approvals },

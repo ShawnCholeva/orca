@@ -363,7 +363,10 @@ describe("computeStepMetrics", () => {
       t.templateVersion = v;
       return t;
     };
-    // v1: two failed evidence completions (score 0); v2: two passed (conf 1.0 needs sensors — sc() has none, so ai-tier? no: evidence present, no sensors → ai_reviewed 0.55).
+    // v1: two failed evidence completions → composedScore 0 each (ev.verdict "failed" → zero()).
+    // v2: two passed, oracleAdequacy.sufficient=true (via sc()'s oracleSufficient param) → composedScore
+    // treats sufficiency alone as the executable verifier (base=1, coverage=1 since sufficient)
+    // → composed score 1.0 each, regardless of the ai_reviewed DISPLAY tier (no sensors ran).
     const ts = [
       mk("a", "r1", "failed", 1, "2026-05-01T00:00:00.000Z"), mk("b", "r2", "failed", 1, "2026-05-01T01:00:00.000Z"),
       mk("c", "r3", "passed", 2, "2026-05-02T00:00:00.000Z"), mk("d", "r4", "passed", 2, "2026-05-02T01:00:00.000Z"),
@@ -375,8 +378,8 @@ describe("computeStepMetrics", () => {
       blockedReason: null, templateVersion: t.templateVersion,
     }));
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
-    // v2 mean = 0.55 (ai_reviewed passes), v1 mean = 0 → delta 0.55
-    expect(step.versionScoreDelta).toBeCloseTo(0.55);
+    // v2 mean = 1.0 (composed executable score), v1 mean = 0 → delta 1.0
+    expect(step.versionScoreDelta).toBeCloseTo(1.0);
   });
 
   it("versionScoreDelta sees an all-hard-fail version even though it has no step_complete (I1)", () => {
@@ -420,6 +423,39 @@ describe("computeStepMetrics", () => {
     }));
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.versionInvalidOutputRateDelta).toBeCloseTo(0.5); // v2: 1/2, v1: 0/2
+  });
+
+  it("scores identical-evidence completions identically (composed, not tier-quantized)", () => {
+    // Two completions, each: grounding FAIL → evidence.verdict 'failed' → composed 0.
+    // (Same evidence must yield the same score — the Research/Proposal incoherence fix.)
+    const mk = (id: string, runId: string): TemplateTransition => ({
+      templateVersion: 1, stepTemplateId: "s",
+      transition: {
+        id, goalId: "g", workflowRunId: runId, workflowStepRunId: `${runId}-s`,
+        boundary: "step_complete", risk: null, stateDeps: null,
+        evidence: { sensorsRun: [], verdict: "failed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: false, gaps: [] }, grounding: { checks: [], verdict: "failed" } },
+        refute: { verdict: "upheld", triggered_by: [], risk_class: "low", reason: null, issue_refs: [] },
+        telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "failed", failure_code: "invalid_output" } },
+        createdAt: "2026-05-01T00:00:00.000Z",
+      },
+    });
+    const ts = [mk("a", "r1"), mk("b", "r2")];
+    const runs: TemplateStepRun[] = ts.map((t) => ({ workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }));
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.score).toBe(0); // both failed grounding → 0, no split by verification tier
+  });
+
+  it("emits an inspectable scoreBreakdown", () => {
+    const t = sc("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z");
+    t.transition.evidence!.sensorsRun = [
+      { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
+    ];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const [step] = computeStepMetrics({ transitions: [t], stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.quality.scoreBreakdown?.meanBase).toBe(1);
+    expect(step.quality.scoreBreakdown?.meanCoverage).toBe(1);
+    expect(step.quality.scoreBreakdown?.coverageLimited).toBe(0);
+    expect(step.quality.scoreBreakdown?.verifierMix).toEqual({ executable: 1, grounding: 0, independentReview: 0, selfReportOnly: 0 });
   });
 });
 
@@ -556,8 +592,12 @@ describe("computeStepMetrics: calibration divergence insight", () => {
   });
 });
 
-describe("computeStepMetrics: calibration-aware scoring", () => {
-  // No evidence, refute upheld → ai_reviewed passes (prior 0.55 each).
+describe("computeStepMetrics: calibration no longer feeds the composed score", () => {
+  // No evidence, refute upheld → ai_reviewed passes (prior 0.55 each). composedScore
+  // (Task 2) computes its own designed-prior weight per completion and has no
+  // calibration parameter — effectiveTierConfidence (calibration-adjusted) is no
+  // longer in the scoring path, only in deriveInsights' display text. So the score
+  // stays at the 0.55 design prior regardless of what calibration measures.
   const aiReviewedPasses: TemplateTransition[] = ["r1", "r2", "r3"].map((r, i) => ({
     templateVersion: 1, stepTemplateId: "s",
     transition: {
@@ -573,12 +613,12 @@ describe("computeStepMetrics: calibration-aware scoring", () => {
     startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1,
   }));
 
-  it("a fully-upheld ai_reviewed step scores the capped measured weight (70), not the 0.55 prior", () => {
+  it("a fully-upheld ai_reviewed step keeps the 0.55 design prior even with a high measured calibration (70 no longer applies)", () => {
     const calibration: CalibrationEntry[] = [
       { tier: "ai_reviewed", assumed: 0.55, measured: 1.0, sampleSize: 12, state: "measured" },
     ];
     const [step] = computeStepMetrics({ transitions: aiReviewedPasses, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
-    expect(step.score).toBe(70);
+    expect(step.score).toBe(55);
     expect(step.verification.tier).toBe("ai_reviewed");
     expect(step.verification.tierLabel).toBe("Reviewed, not proven");
   });
@@ -596,11 +636,11 @@ describe("computeStepMetrics: calibration-aware scoring", () => {
     expect(step.score).toBe(55);
   });
 
-  it("a low measured rate lowers the score below the prior (too-optimistic case)", () => {
+  it("a low measured rate does not lower the score below the prior anymore (30 no longer applies)", () => {
     const calibration: CalibrationEntry[] = [
       { tier: "ai_reviewed", assumed: 0.55, measured: 0.3, sampleSize: 12, state: "measured" },
     ];
     const [step] = computeStepMetrics({ transitions: aiReviewedPasses, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
-    expect(step.score).toBe(30);
+    expect(step.score).toBe(55);
   });
 });

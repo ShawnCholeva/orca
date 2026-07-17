@@ -166,6 +166,17 @@ export const StepMetrics = z.object({
     verifiedSampleSize: z.number().int().nonnegative(),
     untestedRegions: z.array(z.string()), residualRisk: z.array(z.string()),
     oracleGaps: z.array(z.string()), limitingDimension: z.string().nullable(),
+    scoreBreakdown: z.object({
+      meanBase: z.number().nullable(),
+      meanCoverage: z.number().nullable(),
+      coverageLimited: z.number().int().nonnegative(),
+      verifierMix: z.object({
+        executable: z.number().int().nonnegative(),
+        grounding: z.number().int().nonnegative(),
+        independentReview: z.number().int().nonnegative(),
+        selfReportOnly: z.number().int().nonnegative(),
+      }).strict(),
+    }).strict().optional(),
   }).strict(),
   cost: z.object({
     p50LatencyMs: z.number().nullable(), meanTokens: z.number().nullable(),
