@@ -290,7 +290,7 @@ describe("buildEvidenceFacet — scope population", () => {
     expect(f.verdict).toBe("passed");            // UNCHANGED
     expect(f.oracleAdequacy.sufficient).toBe(true); // UNCHANGED
     expect(f.oracleAdequacy.gaps).toContain("build: no matching script"); // pre-existing preserved
-    expect(f.oracleAdequacy.gaps).toContain("lint are available here but none ran over this change"); // derived
+    expect(f.oracleAdequacy.gaps).toContain("lint is available here but none ran over this change"); // derived
     expect(f.untestedRegions).toEqual([]); // a sensor ran → no per-file untested
   });
 });
@@ -385,7 +385,7 @@ import { buildArtifacts } from "./verification.js";
 it("executable artifact's cannotVerify shows the real gap, not the 'untested regions' placeholder", () => {
   const arts = buildArtifacts({
     hasEvidence: true, anySensors: true, oracleSufficientRate: 0.5,
-    oracleGaps: ["lint are available here but none ran over this change"],
+    oracleGaps: ["lint is available here but none ran over this change"],
     hasRefute: false, falseAccept: 0, hasGrounding: false, groundingFailed: false,
   });
   const exe = arts.find((a) => a.source === "executable")!;
