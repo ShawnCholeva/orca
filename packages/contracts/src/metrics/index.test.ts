@@ -33,6 +33,7 @@ describe("metrics contracts", () => {
       versions: [{ version: 2, runs: 6, firstSeenAt: "2026-05-01T00:00:00.000Z" }],
       confidence: "ok" as const,
       calibration: [],
+      gateHealth: { value: null, grade: null, delta: null, confidence: "low" as const },
     };
     expect(TemplateMetricsSummary.parse(summary)).toEqual(summary);
   });
@@ -52,6 +53,7 @@ describe("metrics contracts", () => {
                   stateConsistency: null, safetyCompliance: null, replayability: null, latencyP50Ms: null },
         versionComparison: null, versions: [], confidence: "low" as const,
         calibration: [],
+        gateHealth: { value: null, grade: null, delta: null, confidence: "low" as const },
       }),
       steps: [{
         stepTemplateId: "s1", name: "Define Intent", ordinal: 0,
@@ -74,6 +76,12 @@ describe("metrics contracts", () => {
         insights: ["Weakest step"], recentReasons: [],
         versionScoreDelta: null, versionInvalidOutputRateDelta: null,
       }],
+      gates: [],
+      policyGateway: {
+        decisionDist: { allow: 0, require_approval: 0, deny: 0 },
+        overPermissive: { count: 0, sampleTransitionIds: [] },
+        boundaryViolations: [],
+      },
     };
     expect(TemplateMetricsDetail.parse(detail)).toEqual(detail);
   });

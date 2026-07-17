@@ -27,6 +27,8 @@ const fetchHealthMock = vi.fn();
 const listAgentsMock = vi.fn();
 const listGoalsMock = vi.fn();
 const openEventStreamMock = vi.fn();
+const getTemplateMetricsSummariesMock = vi.fn();
+const getTemplateMetricsDetailMock = vi.fn();
 
 vi.mock("./api", async (importOriginal) => {
   const mod = await importOriginal<typeof import("./api")>();
@@ -36,10 +38,45 @@ vi.mock("./api", async (importOriginal) => {
     listAgents: (...args: unknown[]) => listAgentsMock(...args),
     listGoals: (...args: unknown[]) => listGoalsMock(...args),
     openEventStream: (...args: unknown[]) => openEventStreamMock(...args),
+    getTemplateMetricsSummaries: (...args: unknown[]) => getTemplateMetricsSummariesMock(...args),
+    getTemplateMetricsDetail: (...args: unknown[]) => getTemplateMetricsDetailMock(...args),
   };
 });
 
 const now = "2026-01-01T00:00:00.000Z";
+
+const metricsSummary = {
+  templateId: "tpl",
+  name: "Brainstorm",
+  latestVersion: 1,
+  runs: 12,
+  dimensions: {
+    trajectoryEfficiency: { value: null },
+    verificationStrength: { value: 0.82 },
+    recovery: { value: 0.28 },
+    stateConsistency: { value: 1 },
+    safetyCompliance: { value: 0.92 },
+    replayability: { value: 1 },
+  },
+  firstPass: 0.64,
+  recovered: 0.28,
+  escalated: 0.08,
+  latencyP50Ms: 2400,
+  deltas: {
+    trajectoryEfficiency: null,
+    verificationStrength: 0.04,
+    recovery: 0.05,
+    stateConsistency: 0,
+    safetyCompliance: -0.03,
+    replayability: 0,
+    latencyP50Ms: -300,
+  },
+  versionComparison: null,
+  versions: [{ version: 1, runs: 12, firstSeenAt: now }],
+  confidence: "ok" as const,
+  calibration: [],
+  gateHealth: { value: 78, grade: "C" as const, delta: null, confidence: "ok" as const },
+};
 
 function makeGoal(overrides: Partial<GoalListItem> = {}): GoalListItem {
   return {
@@ -79,11 +116,24 @@ describe("App tab visibility with zero goals", () => {
     listAgentsMock.mockReset();
     listGoalsMock.mockReset();
     openEventStreamMock.mockReset();
+    getTemplateMetricsSummariesMock.mockReset();
+    getTemplateMetricsDetailMock.mockReset();
 
     fetchHealthMock.mockResolvedValue({ status: "ok" });
     listAgentsMock.mockResolvedValue([makeAgent()]);
     listGoalsMock.mockResolvedValue({ goals: [] });
     openEventStreamMock.mockReturnValue({ close: vi.fn() });
+    getTemplateMetricsSummariesMock.mockResolvedValue([metricsSummary]);
+    getTemplateMetricsDetailMock.mockResolvedValue({
+      summary: metricsSummary,
+      steps: [],
+      gates: [],
+      policyGateway: {
+        decisionDist: { allow: 0, require_approval: 0, deny: 0 },
+        overPermissive: { count: 0, sampleTransitionIds: [] },
+        boundaryViolations: [],
+      },
+    });
   });
 
   async function renderApp() {
@@ -129,7 +179,7 @@ describe("App tab visibility with zero goals", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: /Metrics/ }));
 
-    expect(await screen.findByText("Workflow health")).toBeInTheDocument();
+    expect(await screen.findByText("Step health")).toBeInTheDocument();
   });
 });
 
