@@ -104,8 +104,16 @@ export function computeTemplateSummary(input: {
   current: { transitions: TemplateTransition[]; stepRuns: TemplateStepRun[] };
   prior: { transitions: TemplateTransition[]; stepRuns: TemplateStepRun[] };
 }): TemplateMetricsSummary {
-  const cur = dimsFromTransitions(input.current.transitions);
-  const prev = dimsFromTransitions(input.prior.transitions);
+  // Gate surrogate transitions (__gate__:*) are steps only for tile-rate/escalation
+  // purposes (computeStepMetrics already excludes them there); they must not feed the
+  // six-dimension harness metrics, or gate approvals/denials contaminate verificationStrength
+  // etc. — same predicate computeStepMetrics uses.
+  const isGateTransition = (t: TemplateTransition) => t.stepTemplateId?.startsWith("__gate__:");
+  const currentNonGate = input.current.transitions.filter((t) => !isGateTransition(t));
+  const priorNonGate = input.prior.transitions.filter((t) => !isGateTransition(t));
+
+  const cur = dimsFromTransitions(currentNonGate);
+  const prev = dimsFromTransitions(priorNonGate);
   const curLatency = medianLatencyMs(input.current.transitions);
   const priorLatency = medianLatencyMs(input.prior.transitions);
 
@@ -114,8 +122,8 @@ export function computeTemplateSummary(input: {
   let versionComparison: TemplateMetricsSummary["versionComparison"] = null;
   if (presentVersions.length >= 2) {
     const [latestV, priorV] = presentVersions;
-    const latestDims = dimsFromTransitions(input.current.transitions.filter((t) => t.templateVersion === latestV));
-    const priorDims = dimsFromTransitions(input.current.transitions.filter((t) => t.templateVersion === priorV));
+    const latestDims = dimsFromTransitions(currentNonGate.filter((t) => t.templateVersion === latestV));
+    const priorDims = dimsFromTransitions(currentNonGate.filter((t) => t.templateVersion === priorV));
     versionComparison = {
       latest: latestV, prior: priorV,
       byDimension: {

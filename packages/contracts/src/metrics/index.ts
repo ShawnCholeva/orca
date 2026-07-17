@@ -132,7 +132,7 @@ export const GateMetrics = z.object({
 export type GateMetrics = z.infer<typeof GateMetrics>;
 
 export const PolicyGatewayMetrics = z.object({
-  decisionDist: z.record(z.string(), z.number()),
+  decisionDist: z.object({ allow: z.number(), require_approval: z.number(), deny: z.number() }).strict(),
   overPermissive: z.object({ count: z.number().int().nonnegative(), sampleTransitionIds: z.array(z.string()) }).strict(),
   boundaryViolations: z.array(FailureCluster),
 }).strict();

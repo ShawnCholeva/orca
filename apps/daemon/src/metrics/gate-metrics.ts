@@ -114,7 +114,7 @@ export function buildGateMetrics(input: {
     gates.push({
       nodeId, name: meta.name, evalSubstrate: meta.evalSubstrate,
       health, grade: health == null ? null : grade(health),
-      confidence: decisions.length >= GATE_OVERTURN_MIN ? "ok" : "low",
+      confidence: overturnSampleSize >= GATE_OVERTURN_MIN ? "ok" : "low",
       sampleSize: decisions.length, delta: null,
       scored: { overturnRate, overturnSampleSize, overturnDecisionIds, groundedness, ungroundedDecisionIds, convergence, limitingTerm },
       cost: { p50LatencyMs: median(latencies), meanTokens: mean(tokens), meanUsd: mean(usd), tokensSpentOnOverturned: overturnedTokens.length ? overturnedTokens.reduce((a, b) => a + b, 0) : null },
@@ -132,14 +132,19 @@ export function buildGateMetrics(input: {
 }
 
 export function buildPolicyGatewayMetrics(transitions: TemplateTransition[]): PolicyGatewayMetrics {
-  const dist: Record<string, number> = { allow: 0, require_approval: 0, deny: 0 };
+  const dist = { allow: 0, require_approval: 0, deny: 0 };
   const overIds: string[] = [];
   const violationsByClass = new Map<string, { count: number; ids: string[] }>();
   for (const t of transitions) {
     if (t.transition.boundary !== "tool_gate") continue;
     const risk = (t.transition as { risk?: { gate_decision?: string; risk_class?: string } }).risk;
     if (!risk || !risk.gate_decision) continue;
-    dist[risk.gate_decision] = (dist[risk.gate_decision] ?? 0) + 1;
+    // Defensive: only the three known GateDecision values may enter dist — decisionDist
+    // is now a strict 3-key contract, so an unexpected value must not add a 4th key.
+    const decision = risk.gate_decision;
+    if (decision === "allow" || decision === "require_approval" || decision === "deny") {
+      dist[decision]++;
+    }
     const id = t.transition.id;
     if (risk.gate_decision === "allow" && (risk.risk_class === "high" || risk.risk_class === "critical")) {
       if (overIds.length < GATE_SAMPLE_CAP) overIds.push(id);

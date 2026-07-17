@@ -21,7 +21,7 @@ const summary = {
 describe("MetricsPage", () => {
   it("shows a loading state then renders the health tile", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], policyGateway: { decisionDist: {}, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] } });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] } });
     render(<MetricsPage />);
     expect(screen.getByText(/Loading/i)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Step health")).toBeInTheDocument());
@@ -30,7 +30,7 @@ describe("MetricsPage", () => {
 
   it("shows Step health and Gate health as two distinct readouts", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], policyGateway: { decisionDist: {}, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] } });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] } });
     render(<MetricsPage />);
     expect(await screen.findByText("Step health")).toBeInTheDocument();
     expect(screen.getByText("Gate health")).toBeInTheDocument();
@@ -56,7 +56,7 @@ describe("MetricsPage", () => {
       firstPass: null, confidence: "ok" as const,
     };
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([nullSummary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary: nullSummary, steps: [], gates: [], policyGateway: { decisionDist: {}, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] } });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary: nullSummary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] } });
     render(<MetricsPage />);
     await waitFor(() => expect(screen.getByText("Step health")).toBeInTheDocument());
     const dashes = screen.getAllByText("—");
