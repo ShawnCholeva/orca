@@ -57,7 +57,7 @@ Let `ev = t.transition.evidence`, `rf = t.transition.refute`.
 **Otherwise (passed or partial) → `base × coverage`:**
 
 - **`base`** = `1 − ∏(1 − cᵢ)` over the **passing independent verifiers**, floored at `SELF_REPORT = 0.3`:
-  - executable: `ev.sensorsRun.length > 0 && ev.verdict !== "failed"` → `c = 1.0`
+  - executable: **`ev.oracleAdequacy.sufficient === true`** → `c = 1.0`. (Sufficiency-gated, NOT merely "sensors ran": a *partial* oracle — a required check couldn't run though the ones that did passed — must not earn full executable credit, or a partly-checked change would score 1.0. A partial oracle therefore drops out of `base`, so the score comes from grounding/review and lands honestly below a fully-verified step. This is "the green test is not the full specification" enforced in `base` rather than relying on coverage to catch the kind-gap.)
   - grounding: `ev.grounding?.verdict === "passed"` → `c = 0.7`
   - independent review: `rf?.verdict === "upheld"` → `c = 0.55`
   - if no independent verifier passed → `base = SELF_REPORT` (0.3).
@@ -93,14 +93,14 @@ Purely additive to the contract; lets the UI (and Phase 3) see *why* a step scor
 ### 3.4 What changes numerically (flagged for review)
 - **Partial completions** (missing-required sensor) move from **0** to `base × coverage` — an intended honesty upgrade (partial ≠ total failure). Existing step scores that had partial completions will rise.
 - **Identical-evidence steps converge** (Research == Proposal). Steps with a grounding FAIL in some completions drop toward the honest value.
-- **Full-sensor steps** stay at/near 1.0 (base 1.0 × coverage 1.0); grounding-only steps land below them (base ~0.86) instead of tying at the tier ceiling.
+- **Full-sensor steps** stay at/near 1.0 (base 1.0 × coverage 1.0). A grounding+review step (no execution — e.g. Triage) lands at ~0.86 (`1−(1−0.7)(1−0.55)`), grounding-only at 0.70 — below the run-and-tested ceiling instead of tying at 100 as the tier calibration does today.
 - Because calibration no longer adjusts the score in 2b-i, steps whose per-tier calibration had *raised* them (e.g. partially_verified bumped 0.7→~1.0) will reflect the **designed** prior until 2b-ii re-homes calibration. This is expected and honest (uncalibrated priors), and called out so the shift isn't mistaken for a regression.
 
 ---
 
 ## 4. Testing & verification
 
-- **Unit (daemon):** `composedScore` fixture tests — refuted → 0; failed → 0; full sensor pass → 1.0; grounding-only pass → ~0.86; self-report-only → 0.3 floor; **partial → graded** (was 0); code write-set + inadequate oracle → coverage = exercised-fraction floored; non-code → coverage 1.0 (no double-penalty); coverage ∈ [floor,1].
+- **Unit (daemon):** `composedScore` fixture tests — refuted → 0; failed → 0; full sensor pass (sufficient) → 1.0; grounding+review (no execution) → ~0.86; grounding-only → 0.70; self-report-only → 0.3 floor; **partial oracle (sensors ran, `sufficient=false`)** → executable excluded from base, score = grounding/review base × 1.0 (not 1.0, not 0); code write-set + no execution → coverage = exercised-fraction floored (0.3 when 0 files exercised); non-code → coverage 1.0 (no double-penalty); coverage ∈ [floor,1].
 - **`scoreOver` tests:** the Research/Proposal-style identical-evidence fixtures now converge; hard-fail-in-denominator + conclusive/unverified gates unchanged; a step with only unverified completions still scores `null`.
 - **Breakdown tests:** `scoreBreakdown` aggregates correctly; additive contract parses.
 - **Regression:** full daemon suite green; existing scoring tests whose expected numbers legitimately change (partial→graded; calibration no longer bumping) updated to the correct new value with a noted reason, never weakened.
