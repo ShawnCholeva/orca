@@ -15,7 +15,7 @@ export function composedScore(t: TemplateTransition): CompletionScore {
   if (rf?.verdict === "refuted") return zero();
   if (ev?.verdict === "failed") return zero();
 
-  const executable = ev?.oracleAdequacy.sufficient === true;   // sufficiency-gated
+  const executable = !!ev && ev.sensorsRun.length > 0 && ev.oracleAdequacy.sufficient === true;   // sensors ran + sufficiency-gated (match classifyTier)
   const grounding = ev?.grounding?.verdict === "passed";
   const independentReview = rf?.verdict === "upheld";
   const cs: number[] = [];

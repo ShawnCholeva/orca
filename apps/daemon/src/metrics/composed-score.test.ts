@@ -30,6 +30,11 @@ describe("composedScore", () => {
     expect(r.verifiers.executable).toBe(false); // sufficiency-gated
     expect(r.base).toBeCloseTo(0.7, 5); expect(r.coverage).toBe(1); expect(r.score).toBeCloseTo(0.7, 5);
   });
+  it("vacuous sufficiency (no required sensors, sensorsRun empty) → executable excluded, self-report floor", () => {
+    const r = composedScore(tx({ evidence: ev({ sensorsRun: [], oracleAdequacy: { sufficient: true, gaps: [] } }) }));
+    expect(r.verifiers.executable).toBe(false); // sufficient alone must not grant executable credit — match classifyTier
+    expect(r.score).toBeCloseTo(0.3, 5);
+  });
   it("code change, no execution → coverage floors from per-file untested", () => {
     const r = composedScore(tx({
       evidence: ev({ grounding: { verdict: "passed" }, untestedRegions: ["src/a.ts — changed, no test or check ran over it"] }),

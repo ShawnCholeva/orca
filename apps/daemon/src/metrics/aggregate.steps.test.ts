@@ -364,12 +364,21 @@ describe("computeStepMetrics", () => {
       return t;
     };
     // v1: two failed evidence completions → composedScore 0 each (ev.verdict "failed" → zero()).
-    // v2: two passed, oracleAdequacy.sufficient=true (via sc()'s oracleSufficient param) → composedScore
-    // treats sufficiency alone as the executable verifier (base=1, coverage=1 since sufficient)
-    // → composed score 1.0 each, regardless of the ai_reviewed DISPLAY tier (no sensors ran).
+    // v2: two passed, with a real sensor that ran and oracleAdequacy.sufficient=true (via
+    // sc()'s oracleSufficient param) → composedScore's executable verifier requires both
+    // sensorsRun.length > 0 AND sufficient (matching classifyTier) → composed score 1.0 each,
+    // honestly earned this time (verified_executed tier, not just a vacuous sufficiency).
+    const c = mk("c", "r3", "passed", 2, "2026-05-02T00:00:00.000Z");
+    const d = mk("d", "r4", "passed", 2, "2026-05-02T01:00:00.000Z");
+    c.transition.evidence!.sensorsRun = [
+      { kind: "unit", command: "npm test", exitCode: 0, durationMs: 1, result: "passed", summary: "", artifactRef: null },
+    ];
+    d.transition.evidence!.sensorsRun = [
+      { kind: "unit", command: "npm test", exitCode: 0, durationMs: 1, result: "passed", summary: "", artifactRef: null },
+    ];
     const ts = [
       mk("a", "r1", "failed", 1, "2026-05-01T00:00:00.000Z"), mk("b", "r2", "failed", 1, "2026-05-01T01:00:00.000Z"),
-      mk("c", "r3", "passed", 2, "2026-05-02T00:00:00.000Z"), mk("d", "r4", "passed", 2, "2026-05-02T01:00:00.000Z"),
+      c, d,
     ];
     const runs: TemplateStepRun[] = ts.map((t) => ({
       workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1,
