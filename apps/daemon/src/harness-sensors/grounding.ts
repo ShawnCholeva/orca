@@ -2,7 +2,8 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import type { EvidenceFacet, GroundingCheck } from "@orca/contracts";
+import type { EvidenceFacet, GroundingCheck, WorkflowSensorKind } from "@orca/contracts";
+import { deriveEvidenceScope } from "./scope.js";
 
 type Grounding = NonNullable<EvidenceFacet["grounding"]>;
 type CheckResult = Grounding["checks"][number];
@@ -250,23 +251,36 @@ export function evaluateGrounding(opts: {
 export function buildEvidenceFacet(args: {
   sensors: EvidenceFacet | null;
   grounding: Grounding | null;
+  scope: { writeSet: string[]; availableSensors: WorkflowSensorKind[] };
 }): EvidenceFacet | null {
   const grounding = args.grounding && args.grounding.verdict !== "skipped" ? args.grounding : null;
   if (!args.sensors && !grounding) return null;
   const groundingFailed = grounding?.verdict === "failed";
+  const ranSensors = args.sensors?.sensorsRun ?? [];
+  const derived = deriveEvidenceScope({
+    writeSet: args.scope.writeSet,
+    availableSensors: args.scope.availableSensors,
+    ranSensors,
+  });
   if (!args.sensors) {
     return {
       sensorsRun: [],
       verdict: groundingFailed ? "failed" : "passed",
-      untestedRegions: [],
-      residualRisk: [],
-      oracleAdequacy: { sufficient: false, gaps: [] },
+      untestedRegions: derived.untestedRegions,
+      residualRisk: derived.residualRisk,
+      oracleAdequacy: { sufficient: false, gaps: derived.gaps },
       grounding: grounding!,
     };
   }
   return {
     ...args.sensors,
     verdict: groundingFailed ? "failed" : args.sensors.verdict,
+    untestedRegions: derived.untestedRegions,
+    residualRisk: derived.residualRisk,
+    oracleAdequacy: {
+      sufficient: args.sensors.oracleAdequacy.sufficient, // UNCHANGED
+      gaps: [...new Set([...args.sensors.oracleAdequacy.gaps, ...derived.gaps])],
+    },
     ...(grounding ? { grounding } : {}),
   };
 }

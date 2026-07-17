@@ -233,30 +233,64 @@ describe("buildEvidenceFacet", () => {
     verdict: "skipped" as const,
   };
 
+  const noScope = { writeSet: [], availableSensors: [] };
+
   it("returns null when nothing ran", () => {
-    expect(buildEvidenceFacet({ sensors: null, grounding: null })).toBeNull();
-    expect(buildEvidenceFacet({ sensors: null, grounding: skippedGrounding })).toBeNull();
+    expect(buildEvidenceFacet({ sensors: null, grounding: null, scope: noScope })).toBeNull();
+    expect(buildEvidenceFacet({ sensors: null, grounding: skippedGrounding, scope: noScope })).toBeNull();
   });
 
   it("builds a grounding-only facet with a sensor-free oracle", () => {
-    const f = buildEvidenceFacet({ sensors: null, grounding: passedGrounding })!;
+    const f = buildEvidenceFacet({ sensors: null, grounding: passedGrounding, scope: noScope })!;
     expect(f.sensorsRun).toHaveLength(0);
     expect(f.verdict).toBe("passed");
     expect(f.oracleAdequacy.sufficient).toBe(false);
-    expect(f.oracleAdequacy.gaps).toHaveLength(0);
+    // Non-code, no-execution scope: derived gap for "nothing was executed".
+    expect(f.oracleAdequacy.gaps).toEqual(["nothing was executed to check this — semantic correctness is unverified"]);
     expect(f.grounding?.verdict).toBe("passed");
   });
 
   it("a failed enforce grounding check fails the merged verdict", () => {
-    expect(buildEvidenceFacet({ sensors, grounding: failedGrounding })!.verdict).toBe("failed");
-    expect(buildEvidenceFacet({ sensors: null, grounding: failedGrounding })!.verdict).toBe("failed");
+    expect(buildEvidenceFacet({ sensors, grounding: failedGrounding, scope: noScope })!.verdict).toBe("failed");
+    expect(buildEvidenceFacet({ sensors: null, grounding: failedGrounding, scope: noScope })!.verdict).toBe("failed");
   });
 
   it("passing grounding never upgrades a sensor verdict or oracle adequacy", () => {
     const partial: EvidenceFacet = { ...sensors, verdict: "partial", oracleAdequacy: { sufficient: false, gaps: ["unit_tests: no matching script"] } };
-    const merged = buildEvidenceFacet({ sensors: partial, grounding: passedGrounding })!;
+    const merged = buildEvidenceFacet({ sensors: partial, grounding: passedGrounding, scope: noScope })!;
     expect(merged.verdict).toBe("partial");
     expect(merged.oracleAdequacy.sufficient).toBe(false);
     expect(merged.oracleAdequacy.gaps).toEqual(["unit_tests: no matching script"]);
+  });
+});
+
+const groundingPass = { verdict: "passed" as const, checks: [{ mode: "enforce", result: "passed" }] } as never;
+
+describe("buildEvidenceFacet — scope population", () => {
+  it("no-sensors branch populates untested/gaps from scope (non-code)", () => {
+    const f = buildEvidenceFacet({
+      sensors: null, grounding: groundingPass,
+      scope: { writeSet: ["docs/x.md"], availableSensors: ["unit"] },
+    })!;
+    expect(f.oracleAdequacy.sufficient).toBe(false); // UNCHANGED
+    expect(f.oracleAdequacy.gaps).toContain("nothing was executed to check this — semantic correctness is unverified");
+    expect(f.untestedRegions).toContain("semantic correctness — nothing was executed");
+  });
+
+  it("sensors branch merges derived gaps with existing missing-required gaps; verdict/sufficient unchanged", () => {
+    const sensorsFacet: EvidenceFacet = {
+      sensorsRun: [{ kind: "unit", command: "npm test", exitCode: 0, durationMs: 1, result: "passed", summary: "", artifactRef: null }],
+      verdict: "passed", untestedRegions: [], residualRisk: [],
+      oracleAdequacy: { sufficient: true, gaps: ["build: no matching script"] },
+    };
+    const f = buildEvidenceFacet({
+      sensors: sensorsFacet, grounding: null,
+      scope: { writeSet: ["src/a.ts"], availableSensors: ["unit", "lint"] },
+    })!;
+    expect(f.verdict).toBe("passed");            // UNCHANGED
+    expect(f.oracleAdequacy.sufficient).toBe(true); // UNCHANGED
+    expect(f.oracleAdequacy.gaps).toContain("build: no matching script"); // pre-existing preserved
+    expect(f.oracleAdequacy.gaps).toContain("lint is available here but none ran over this change"); // derived
+    expect(f.untestedRegions).toEqual([]); // a sensor ran → no per-file untested
   });
 });

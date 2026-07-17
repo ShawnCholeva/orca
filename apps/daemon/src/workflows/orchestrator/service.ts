@@ -87,6 +87,7 @@ import {
   readStepOutputAsRecord,
 } from "./queries.js";
 import { buildEvidenceFacet, evaluateGrounding, localWorkspaceProbe } from "../../harness-sensors/grounding.js";
+import { availableSensorKinds } from "../../harness-sensors/detect.js";
 import { postOrchestratorMessage } from "./orchestrator-message.js";
 import { isHumanPromptOpen } from "./human-prompt-gate.js";
 import { recordPromptSuppressed } from "../../orchestrator-chat/usecases.js";
@@ -1321,7 +1322,11 @@ export class OrchestratorService {
               grounding = null;
             }
           }
-          evidence = buildEvidenceFacet({ sensors, grounding });
+          const writeSet = (stateFacet?.write_set ?? [])
+            .filter((w) => w.kind === "file")
+            .map((w) => w.ref);
+          const availableSensors = workspacePath ? availableSensorKinds(workspacePath) : [];
+          evidence = buildEvidenceFacet({ sensors, grounding, scope: { writeSet, availableSensors } });
 
           const evStaged: DomainEvent[] = [];
           evStaged.push(

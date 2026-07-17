@@ -103,6 +103,16 @@ describe("buildArtifacts", () => {
     const failed = buildArtifacts({ hasEvidence: true, anySensors: false, oracleSufficientRate: 0, oracleGaps: [], hasRefute: false, falseAccept: 0, hasGrounding: true, groundingFailed: true });
     expect(failed.find((x) => x.source === "grounding")?.verdict).toBe("fail");
   });
+  it("executable artifact's cannotVerify shows the real gap, not the 'untested regions' placeholder", () => {
+    const arts = buildArtifacts({
+      hasEvidence: true, anySensors: true, oracleSufficientRate: 0.5,
+      oracleGaps: ["lint is available here but none ran over this change"],
+      hasRefute: false, falseAccept: 0, hasGrounding: false, groundingFailed: false,
+    });
+    const exe = arts.find((a) => a.source === "executable")!;
+    expect(exe.cannotVerify).toContain("lint is available here but none ran");
+    expect(exe.cannotVerify).not.toBe("untested regions");
+  });
 });
 
 describe("TIER_CONFIDENCE", () => {
