@@ -45,4 +45,15 @@ describe("composedScore", () => {
     }));
     expect(r.coverage).toBe(1);
   });
+  it("prefix collision fix: a.ts must not match a.tsx untested region", () => {
+    const r = composedScore(tx({
+      evidence: ev({ grounding: { verdict: "passed" }, untestedRegions: ["src/a.tsx — changed, no test or check ran over it"] }),
+      stateDeps: { write_set: [
+        { kind: "file", ref: "src/a.ts", change_kind: "modified" },
+        { kind: "file", ref: "src/a.tsx", change_kind: "modified" },
+      ] },
+    }));
+    expect(r.coverage).toBeCloseTo(0.5, 5); // 1 untested of 2 → max(0.3, 1 - 1/2) = 0.5
+    expect(r.score).toBeCloseTo(0.7 * 0.5, 5);
+  });
 });

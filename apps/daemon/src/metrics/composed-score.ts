@@ -34,6 +34,6 @@ function computeCoverage(t: TemplateTransition, ev: TemplateTransition["transiti
     .filter((w) => w.kind === "file" && isCodeFile(w.ref))
     .map((w) => w.ref);
   if (codeFiles.length === 0) return 1.0; // non-code output → no double-penalty
-  const untestedCode = codeFiles.filter((f) => ev.untestedRegions.some((r) => r.startsWith(f))).length;
+  const untestedCode = codeFiles.filter((f) => ev.untestedRegions.some((r) => r.startsWith(f + " "))).length;
   return Math.max(COVERAGE_FLOOR, 1 - untestedCode / codeFiles.length);
 }
