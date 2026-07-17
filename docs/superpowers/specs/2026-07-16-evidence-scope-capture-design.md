@@ -19,6 +19,19 @@ Live confirmation, every non-code Adaptive Delivery step (`triage`, `research`, 
 
 So Orca records *that* verification is thin (a boolean) but not *what it fails to cover*. A Phase-2b scope-aware score built today would score over `[]` and deliver none of the "untested scope" value. **2a captures the scope so 2b has real signal to reflect.**
 
+### The evidence bundle is already split across two facets
+
+The paper's evidence bundle has four parts: *checks run · assumptions preserved · untested regions · remaining risks* (§5.2.2). Orca already captures two of them and 2a completes the other two:
+- **checks run** → `EvidenceFacet.sensorsRun` + `grounding` (present today).
+- **assumptions preserved** → `StateDepsFacet.assumptions` (present today — `service.ts:1167` explicitly cites "the paper's 'assumptions preserved, p.62/p.64'"). Not on `EvidenceFacet`; **2a does not touch it.**
+- **untested regions** + **remaining risks** → `EvidenceFacet.untestedRegions` / `residualRisk` (the empty fields **2a fills**).
+
+So post-2a the full four-part bundle is captured across `EvidenceFacet` + `StateDepsFacet`.
+
+### Mechanical vs. semantic oracle adequacy (scope of the honesty claim)
+
+Oracle adequacy — the paper's central bottleneck (§5.2.1) — has two layers: **mechanical** ("did the relevant sensors actually run over this change?") and **semantic** ("does the check that ran actually test the *intended task*, not a narrow proxy?" — §5.2.2, p.65: *"an OCR result verifies visible text but not semantic correctness"*). **2a captures the mechanical layer deterministically.** The semantic layer requires reasoning about intent and is model-territory — deferred with the LLM-named source (below). 2a does **not** claim to solve oracle adequacy; it makes the mechanical/coverage half honest and inspectable, which is the prerequisite for the rest.
+
 ### Non-negotiable: honesty over richness
 
 A *hallucinated* untested-regions list is worse than an empty one — it manufactures false coverage claims and would poison Phase 3's learning loop (the paper: "if the verifier is weak, the agent will learn to optimize against the wrong signal"). The paper grounds verification in **deterministic sensors** and requires any model-derived signal to **declare itself as lower-confidence**. Therefore **2a derives scope only from facts about what ran** — the write-set, detected sensor availability, and grounding results. **No LLM-generated scope in 2a.** Model-*named* untested regions are explicitly deferred to a later, confidence-marked artifact source.
@@ -37,6 +50,7 @@ A *hallucinated* untested-regions list is worse than an empty one — it manufac
 - Any model/LLM-generated scope (reviewer-named untested regions) — deferred to a confidence-marked source in a later phase.
 - Epistemic bands, gate-groundedness re-weight, deterministic-completion-gate telemetry — 2c.
 - Coverage instrumentation (line/branch coverage reports) — out of scope; 2a uses file-granularity write-set vs sensor-run, not intra-file coverage.
+- **Typed/structured scope items.** The paper (§5.2.2) notes feedback should be "routed differently depending on its type." 2a emits display-faithful **strings** (the fields are `string[]` today). A typed/routable representation (`{ kind, detail }`) would help Phase-3 gap-routing and 2b weighting — but 2b's coverage math derives from `oracleAdequacy.sufficient` + sensor diversity (already structured), not from parsing this prose, so structure is **not needed yet**. Deferred as a deliberate contract decision, not guessed here (YAGNI).
 
 ---
 
@@ -96,7 +110,15 @@ At `service.ts:1324`, `buildEvidenceFacet` currently gets `{ sensors, grounding 
 - **`writeSet`** — the Stateful-axis write-set is already derived in this completion handler (near `service.ts:1223`, "derive write_set + assumptions"). Thread that existing value in; do not recompute. (Exact variable pinned in the plan.)
 - **`availableSensors`** — `detectSensors(workspacePath, required)` is currently called *inside* `runSensors` (`runner.ts:20`) and discarded. Surface the detected kinds so the call site can pass them (either return them from `runSensors` alongside the facet, or call `detectSensors` once at the site). The plan picks the lower-churn option.
 
-### 3.4 Data & backward-compat
+### 3.4 Feed the existing per-artifact "verifies / cannotVerify" declarations
+
+The paper (p.65) wants each signal to "expose its scope" — *"a type checker verifies types but not behavior."* Orca **already** emits this per-artifact structure: `buildArtifacts` (`verification.ts:68`) produces `EvidenceArtifact { verifies, cannotVerify, confidence, verdict }` per source. But its `cannotVerify` text currently falls back to placeholders precisely because the scope fields are empty — e.g. the executable artifact's `cannotVerify` is `oracleGaps.join("; ")` **or the literal fallback `"untested regions"`** (`verification.ts:80`).
+
+So 2a needs **no new artifact structure** — populating `untestedRegions`/`gaps` automatically makes the *existing* per-artifact `cannotVerify` declarations concrete. Two light requirements so this lands cleanly:
+- Phrase the derived scope to read naturally as a "cannotVerify" clause (e.g. the no-oracle untested region reads `"semantic correctness — nothing was executed"`, matching the grounding artifact's existing wording at `verification.ts:89`).
+- No change to `buildArtifacts`' shape; only its inputs (the now-populated `oracleGaps`/`untestedRegions`) change. Confirm the executable artifact's `cannotVerify` stops showing the `"untested regions"` placeholder once real content exists.
+
+### 3.5 Data & backward-compat
 
 - Scores are **recomputed from persisted transitions on read** (Phase-1 fact), and evidence facets are persisted in `harness_transitions.evidence_json`. 2a changes *new* completions' facets going forward; historical facets keep their empty `[]` (honest — that scope was never captured). No migration, no backfill.
 - The contract shape is unchanged (`untestedRegions`/`gaps`/`residualRisk` already exist and are arrays) — 2a only starts *writing* them. No contract or schema change.
@@ -108,7 +130,8 @@ At `service.ts:1324`, `buildEvidenceFacet` currently gets `{ sensors, grounding 
 - **Unit (daemon):** fixture tests for `deriveEvidenceScope` — code write-set with no sensors → "code changed but nothing executed it" + per-file untested regions; non-code write-set → "no execution oracle applies"; available-but-unrun sensor → gap; full sensor coverage → empty gaps/untested (honest: nothing to report); dedupe with pre-existing missing-required gaps; jargon-free assertions; cap enforcement.
 - **`buildEvidenceFacet` tests:** extend existing tests to assert the scope is populated in both branches and that `verdict`/`oracleAdequacy.sufficient` are unchanged (sensor semantics preserved).
 - **Regression:** the full daemon suite stays green; existing evidence/grounding/metrics tests updated only where they asserted `untestedRegions: []`/`gaps: []` on a fixture that now legitimately has content (update to the correct new value, never weaken).
-- **Live (per `/verify`):** re-run the Adaptive Delivery flow (or inspect a fresh completion) and confirm `untestedRegions`/`gaps` are now populated and correct — `research` → "no execution oracle applies — semantic correctness is unverified"; a code step missing tests → "unit checks are available here but none ran." Confirm the confirmation card's "What we couldn't check" renders the real content.
+- **Per-artifact `cannotVerify` (§3.4):** assert (unit, via `buildArtifacts` over a facet now carrying real scope) that the executable artifact's `cannotVerify` shows the real gap text, not the `"untested regions"` placeholder.
+- **Live (per `/verify`):** re-run the Adaptive Delivery flow (or inspect a fresh completion) and confirm `untestedRegions`/`gaps` are now populated and correct — `research` → "no execution oracle applies — semantic correctness is unverified"; a code step missing tests → "unit checks are available here but none ran." Confirm the confirmation card's "What we couldn't check" and the Metrics "Checks run" per-artifact lines render the real content.
 
 ---
 
@@ -120,6 +143,9 @@ At `service.ts:1324`, `buildEvidenceFacet` currently gets `{ sensors, grounding 
 | §5.2.2 "declare what it cannot verify" | `oracleAdequacy.gaps` enriched to articulate the unverified surface |
 | §3.4.4 verification grounded in deterministic sensors | scope derived from facts (write-set, sensor availability, grounding) — no model guess |
 | §5.2.2 model-derived signals must declare confidence | LLM-named scope explicitly deferred to a later confidence-marked source |
+| §5.2.2 / p.65 "each signal exposes what it verifies but not" | scope feeds the existing per-artifact `verifies/cannotVerify` (`buildArtifacts`), replacing placeholders (§3.4) |
+| §5.2.2 four-part bundle (checks · assumptions · untested · risks) | checks + assumptions already captured (assumptions on `StateDepsFacet`); 2a fills untested + risks → bundle complete |
+| §5.2.1 oracle adequacy has mechanical + semantic layers | 2a captures the mechanical layer deterministically; semantic layer deferred (no overclaim) |
 | §5.2.3 don't let a weak verifier mislead learning | honest deterministic scope protects Phase 3's learning inputs |
 
 ---
