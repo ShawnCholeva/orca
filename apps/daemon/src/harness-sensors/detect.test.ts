@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { detectSensors } from "./detect.js";
+import { availableSensorKinds, detectSensors } from "./detect.js";
 
 const dirs: string[] = [];
 function workspaceWith(scripts: Record<string, string>): string {
@@ -49,5 +49,18 @@ describe("detectSensors", () => {
       ["run", "test"],
       ["run", "test:integration"],
     ]);
+  });
+});
+
+describe("availableSensorKinds", () => {
+  it("returns the kinds whose script exists, ignoring guardrail required", () => {
+    const ws = workspaceWith({ typecheck: "tsc", test: "vitest", lint: "eslint" });
+    expect(availableSensorKinds(ws).sort()).toEqual(["lint", "typecheck", "unit"]);
+  });
+
+  it("returns [] when package.json is absent or has no matching scripts", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "orca-detect-empty-"));
+    dirs.push(dir);
+    expect(availableSensorKinds(dir)).toEqual([]);
   });
 });

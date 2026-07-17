@@ -57,3 +57,10 @@ export function detectSensors(workspacePath: string, required: string[]): Detect
   }
   return out;
 }
+
+/** Sensor kinds whose package.json script exists in the workspace, regardless of
+ *  guardrail `required` — i.e. what verification COULD run here. */
+export function availableSensorKinds(workspacePath: string): WorkflowSensorKind[] {
+  const scripts = readScripts(workspacePath);
+  return HARNESS_SENSORS.filter((entry) => typeof scripts[entry.script] === "string").map((e) => e.kind);
+}
