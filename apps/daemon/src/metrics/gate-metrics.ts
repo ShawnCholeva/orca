@@ -1,4 +1,4 @@
-import type { GateMetrics, GateFailureMode, MetricPeriod, PolicyGatewayMetrics } from "@orca/contracts";
+import type { CompletionGateMetrics, GateMetrics, GateFailureMode, MetricPeriod, PolicyGatewayMetrics } from "@orca/contracts";
 import { labelForGateFailure } from "@orca/contracts";
 import type { GateDecisionRow, TemplateTransition } from "./fetch.js";
 import { composedScore } from "./composed-score.js";
@@ -167,5 +167,32 @@ export function buildPolicyGatewayMetrics(transitions: TemplateTransition[]): Po
     boundaryViolations: [...violationsByClass.entries()].map(([risk_class, b]) => ({
       failureCode: null, boundary: `tool_gate:${risk_class}`, count: b.count, sampleTransitionIds: b.ids,
     })),
+  };
+}
+
+export function buildCompletionGateMetrics(transitions: TemplateTransition[]): CompletionGateMetrics {
+  const dist = { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 };
+  const vetoedIds: string[] = [];
+  for (const t of transitions) {
+    const tr = t.transition;
+    if (tr.boundary !== "step_complete") continue;
+    if (t.stepTemplateId?.startsWith("__gate__:")) continue;
+    if (!(tr as { evidence?: unknown }).evidence) continue; // only gated completions carry an evidence facet
+    const oc = (tr as { telemetry?: { outcome?: { status?: string; failure_code?: string | null } } }).telemetry?.outcome;
+    const fc = oc?.failure_code ?? null;
+    if (fc === "refute_veto") {
+      dist.refute_veto++;
+      if (vetoedIds.length < GATE_SAMPLE_CAP) vetoedIds.push(tr.id);
+    } else if (fc === "evidence_veto") {
+      if (oc?.status === "escalated") dist.escalated++;
+      else dist.evidence_veto++;
+      if (vetoedIds.length < GATE_SAMPLE_CAP) vetoedIds.push(tr.id);
+    } else {
+      dist.upheld++;
+    }
+  }
+  return {
+    verdictDist: dist,
+    vetoed: { count: dist.escalated + dist.evidence_veto + dist.refute_veto, sampleTransitionIds: vetoedIds },
   };
 }

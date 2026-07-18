@@ -3,7 +3,7 @@ import type { MetricPeriod, TemplateMetricsDetail, TemplateMetricsSummary } from
 import { listGateDecisionsByTemplate, listStepRunsByTemplate, listTemplatesWithRuns, listTransitionsByTemplate } from "./fetch.js";
 import { computeStepMetrics, computeTemplateSummary, windowStart } from "./aggregate.js";
 import { computeCalibration } from "./verification.js";
-import { buildGateMetrics, buildPolicyGatewayMetrics } from "./gate-metrics.js";
+import { buildCompletionGateMetrics, buildGateMetrics, buildPolicyGatewayMetrics } from "./gate-metrics.js";
 
 function nowOr(nowIso?: string): string {
   return nowIso ?? new Date().toISOString();
@@ -100,5 +100,6 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
     }),
     gates,
     policyGateway: buildPolicyGatewayMetrics(transitions),
+    completionGate: buildCompletionGateMetrics(transitions),
   };
 }

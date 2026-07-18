@@ -83,6 +83,7 @@ describe("metrics contracts", () => {
         overPermissive: { count: 0, sampleTransitionIds: [] },
         boundaryViolations: [],
       },
+      completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } },
     };
     expect(TemplateMetricsDetail.parse(detail)).toEqual(detail);
   });

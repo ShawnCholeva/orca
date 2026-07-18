@@ -139,6 +139,20 @@ export const PolicyGatewayMetrics = z.object({
 }).strict();
 export type PolicyGatewayMetrics = z.infer<typeof PolicyGatewayMetrics>;
 
+export const CompletionGateMetrics = z.object({
+  verdictDist: z.object({
+    upheld: z.number().int().nonnegative(),
+    escalated: z.number().int().nonnegative(),
+    evidence_veto: z.number().int().nonnegative(),
+    refute_veto: z.number().int().nonnegative(),
+  }).strict(),
+  vetoed: z.object({
+    count: z.number().int().nonnegative(),
+    sampleTransitionIds: z.array(z.string()),
+  }).strict(),
+}).strict();
+export type CompletionGateMetrics = z.infer<typeof CompletionGateMetrics>;
+
 export const FailureMode = z.object({
   label: z.string(), count: z.number().int().nonnegative(), pct: z.number(),
 }).strict();
@@ -223,5 +237,6 @@ export const TemplateMetricsDetail = z.object({
   steps: z.array(StepMetrics),
   gates: z.array(GateMetrics),
   policyGateway: PolicyGatewayMetrics,
+  completionGate: CompletionGateMetrics,
 }).strict();
 export type TemplateMetricsDetail = z.infer<typeof TemplateMetricsDetail>;

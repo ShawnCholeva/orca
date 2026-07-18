@@ -37,6 +37,7 @@ function detail(steps: StepMetrics[]): TemplateMetricsDetail {
       overPermissive: { count: 0, sampleTransitionIds: [] },
       boundaryViolations: [],
     },
+    completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } },
   };
 }
 const meta = new Map([["s1", { instructions: "Generate a proposal.", outputSchemaJson: '[\n  {\n    "key": "summary",\n    "type": "string",\n    "required": true\n  }\n]' }]]);

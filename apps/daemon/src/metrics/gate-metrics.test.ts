@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGateMetrics, buildPolicyGatewayMetrics } from "./gate-metrics.js";
+import { buildCompletionGateMetrics, buildGateMetrics, buildPolicyGatewayMetrics } from "./gate-metrics.js";
 import type { GateDecisionRow, TemplateTransition } from "./fetch.js";
 
 const names = new Map([["review", { name: "Review", evalSubstrate: "shadow" as const }]]);
@@ -122,5 +122,45 @@ describe("buildPolicyGatewayMetrics", () => {
     expect(pg.decisionDist.deny).toBe(1);
     expect(pg.overPermissive.count).toBe(1); // the allow at high risk
     expect(pg.overPermissive.sampleTransitionIds).toContain("t-allow-high");
+  });
+});
+
+const cgT = (over: { id?: string; evidence?: unknown; status?: string; failure_code?: string | null; boundary?: string; stepTemplateId?: string }): TemplateTransition => ({
+  templateVersion: 1, stepTemplateId: over.stepTemplateId ?? "s1",
+  transition: {
+    id: over.id ?? "t", workflowRunId: "r1", boundary: over.boundary ?? "step_complete",
+    createdAt: "2026-07-16T00:00:00.000Z",
+    evidence: over.evidence,
+    telemetry: { outcome: { status: over.status ?? "succeeded", failure_code: over.failure_code ?? null } },
+  } as never,
+});
+
+describe("buildCompletionGateMetrics", () => {
+  it("buckets gated completions 4 ways and ignores non-gated / gate / non-complete transitions", () => {
+    const cg = buildCompletionGateMetrics([
+      cgT({ id: "up1", evidence: {}, status: "succeeded", failure_code: null }),
+      cgT({ id: "esc1", evidence: {}, status: "escalated", failure_code: "evidence_veto" }),
+      cgT({ id: "veto1", evidence: {}, status: "failed", failure_code: "evidence_veto" }),
+      cgT({ id: "ref1", evidence: {}, status: "failed", failure_code: "refute_veto" }),
+      cgT({ id: "nongated", status: "succeeded", failure_code: null }),                       // NO evidence → ignored
+      cgT({ id: "gatenode", evidence: {}, stepTemplateId: "__gate__:review" }),               // gate node → ignored
+      cgT({ id: "toolgate", evidence: {}, boundary: "tool_gate" }),                           // wrong boundary → ignored
+    ]);
+    expect(cg.verdictDist).toEqual({ upheld: 1, escalated: 1, evidence_veto: 1, refute_veto: 1 });
+    expect(cg.vetoed.count).toBe(3);
+    expect([...cg.vetoed.sampleTransitionIds].sort()).toEqual(["esc1", "ref1", "veto1"]);
+  });
+
+  it("caps sampleTransitionIds at GATE_SAMPLE_CAP while count stays the true total", () => {
+    const cg = buildCompletionGateMetrics(
+      Array.from({ length: 6 }, (_, i) => cgT({ id: `v${i}`, evidence: {}, status: "failed", failure_code: "evidence_veto" })),
+    );
+    expect(cg.verdictDist.evidence_veto).toBe(6);
+    expect(cg.vetoed.count).toBe(6);
+    expect(cg.vetoed.sampleTransitionIds).toHaveLength(5);
+  });
+
+  it("no gated completions → all zero", () => {
+    expect(buildCompletionGateMetrics([]).verdictDist).toEqual({ upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 });
   });
 });
