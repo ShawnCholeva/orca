@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TemplateTransition } from "./fetch.js";
-import { classifyTier, strongestTier, TIER_CONFIDENCE, buildArtifacts, computeCalibration, effectiveTierConfidence, CALIBRATION_SCORE_MIN, type CalibrationEntry } from "./verification.js";
+import { classifyTier, strongestTier, TIER_CONFIDENCE, buildArtifacts, computeCalibration, effectiveSourceConfidence, CALIBRATION_MIN, CALIBRATION_SCORE_MIN } from "./verification.js";
+import { SOURCE_CONFIDENCE } from "./source-signals.js";
 
 function tx(over: Partial<TemplateTransition["transition"]>): TemplateTransition {
   return {
@@ -122,111 +123,119 @@ describe("TIER_CONFIDENCE", () => {
   });
 });
 
-// no-evidence completion at ai_reviewed tier: refute upheld → pass, refuted → overturned.
-function aiReviewed(id: string, verdict: "upheld" | "refuted", minute: number): TemplateTransition {
+// Calibration-test fixtures. `txc` builds a step_complete transition with the given
+// evidence/refute on a distinct run — runId doubles as id/workflowRunId, so
+// finalCompletions (dedup by run+step) never collapses two calibration fixtures together.
+function txc(runId: string, opts: {
+  evidence?: TemplateTransition["transition"]["evidence"];
+  refute?: { verdict: "upheld" | "refuted" | "uncertain" | "unavailable" };
+}): TemplateTransition {
   return tx({
-    id, workflowRunId: `r-${id}`, workflowStepRunId: `r-${id}-s`,
-    evidence: null, refute: { verdict, triggered_by: [], risk_class: "low", reason: null, issue_refs: [] },
-    createdAt: `2026-05-01T00:${String(minute).padStart(2, "0")}:00.000Z`,
+    id: runId, workflowRunId: runId, workflowStepRunId: `${runId}-s`,
+    evidence: opts.evidence ?? null,
+    refute: opts.refute ? { verdict: opts.refute.verdict, triggered_by: [], risk_class: "low", reason: null, issue_refs: [] } : null,
   });
 }
 
-// evidence-tier completion (verified_executed: sensors ran, oracle sufficient), no refute.
-function evidencePassed(id: string, minute: number): TemplateTransition {
-  return tx({
-    id, workflowRunId: `r-${id}`, workflowStepRunId: `r-${id}-s`,
-    evidence: {
-      sensorsRun: [{ kind: "unit", command: "t", exitCode: 0, durationMs: 1, result: "passed", summary: "", artifactRef: null }],
-      verdict: "passed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: true, gaps: [] },
-    },
-    createdAt: `2026-05-01T01:${String(minute).padStart(2, "0")}:00.000Z`,
-  });
-}
-
-// self_reported completion: no evidence, refute inconclusive.
-function selfReported(id: string, minute: number): TemplateTransition {
-  return tx({
-    id, workflowRunId: `r-${id}`, workflowStepRunId: `r-${id}-s`,
-    evidence: null, refute: { verdict: "uncertain", triggered_by: [], risk_class: "low", reason: null, issue_refs: [] },
-    createdAt: `2026-05-01T02:${String(minute).padStart(2, "0")}:00.000Z`,
-  });
-}
-
-describe("effectiveTierConfidence", () => {
-  const measured = (tier: CalibrationEntry["tier"], value: number, sampleSize = CALIBRATION_SCORE_MIN + 2): CalibrationEntry[] => [
-    { tier, assumed: TIER_CONFIDENCE[tier], measured: value, sampleSize, state: "measured" },
-  ];
-
-  it("returns the prior when no calibration is provided", () => {
-    expect(effectiveTierConfidence("ai_reviewed")).toBe(TIER_CONFIDENCE.ai_reviewed);
-    expect(effectiveTierConfidence("ai_reviewed", [])).toBe(TIER_CONFIDENCE.ai_reviewed);
-  });
-
-  it("returns the prior for insufficient or unmeasurable entries", () => {
-    const entries: CalibrationEntry[] = [
-      { tier: "ai_reviewed", assumed: 0.55, measured: null, sampleSize: 3, state: "insufficient" },
-      { tier: "self_reported", assumed: 0.3, measured: null, sampleSize: 0, state: "unmeasurable" },
-    ];
-    expect(effectiveTierConfidence("ai_reviewed", entries)).toBe(TIER_CONFIDENCE.ai_reviewed);
-    expect(effectiveTierConfidence("self_reported", entries)).toBe(TIER_CONFIDENCE.self_reported);
-  });
-
-  it("returns the prior when the measured sample is below CALIBRATION_SCORE_MIN", () => {
-    expect(effectiveTierConfidence("ai_reviewed", measured("ai_reviewed", 1.0, CALIBRATION_SCORE_MIN - 1))).toBe(TIER_CONFIDENCE.ai_reviewed);
-  });
-
-  it("uses the measured rate directly for evidence tiers", () => {
-    expect(effectiveTierConfidence("verified_executed", measured("verified_executed", 0.8))).toBeCloseTo(0.8);
-    expect(effectiveTierConfidence("partially_verified", measured("partially_verified", 0.9))).toBeCloseTo(0.9);
-  });
-
-  it("caps a non-evidence tier at the partially_verified prior — review never certifies run-and-tested", () => {
-    expect(effectiveTierConfidence("ai_reviewed", measured("ai_reviewed", 1.0))).toBeCloseTo(TIER_CONFIDENCE.partially_verified);
-    expect(effectiveTierConfidence("self_reported", measured("self_reported", 0.95))).toBeCloseTo(TIER_CONFIDENCE.partially_verified);
-  });
-
-  it("lowers a non-evidence tier below its prior when review overturns claims often", () => {
-    expect(effectiveTierConfidence("ai_reviewed", measured("ai_reviewed", 0.4))).toBeCloseTo(0.4);
-  });
+const groundingPassed = { verdict: "passed" as const, checks: [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce" as const, result: "passed" as const, detail: "" }] };
+// grounding-passed evidence (no sensors run — grounding is the only source that passed).
+const ev = () => ({
+  sensorsRun: [], verdict: "passed" as const, untestedRegions: [], residualRisk: [],
+  oracleAdequacy: { sufficient: false, gaps: [] }, grounding: groundingPassed,
+});
+// executable-passed evidence (sensors ran, oracle sufficient).
+const execEv = () => ({
+  sensorsRun: [{ kind: "unit" as const, command: "t", exitCode: 0, durationMs: 1, result: "passed" as const, summary: "", artifactRef: null }],
+  verdict: "passed" as const, untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: true, gaps: [] },
 });
 
 describe("computeCalibration", () => {
-  it("measures ai_reviewed survival among independently-concluded claims", () => {
-    // 13 upheld + 2 refuted no-evidence completions (distinct runs) → claims 15, measured 13/15.
-    const ts = [
-      ...Array.from({ length: 13 }, (_, i) => aiReviewed(`u${i}`, "upheld", i)),
-      ...Array.from({ length: 2 }, (_, i) => aiReviewed(`f${i}`, "refuted", 20 + i)),
-    ];
-    const entry = computeCalibration(ts).find((c) => c.tier === "ai_reviewed")!;
-    expect(entry.state).toBe("measured");
-    expect(entry.measured).toBeCloseTo(13 / 15);
-    expect(entry.sampleSize).toBe(15);
-    expect(entry.assumed).toBeCloseTo(0.55);
+  it("computes per-source survival for grounding against refute; review/self unmeasurable", () => {
+    // 12 grounding-passed completions, each with a refute; 3 refuted / 9 upheld.
+    const txs: TemplateTransition[] = [];
+    for (let i = 0; i < 12; i++) txs.push(txc(`r${i}`, { evidence: ev(), refute: { verdict: i < 3 ? "refuted" : "upheld" } }));
+    const cal = computeCalibration(txs);
+    const g = cal.find((c) => c.source === "grounding")!;
+    expect(g.state).toBe("measured");
+    expect(g.measured).toBeCloseTo(9 / 12, 5);
+    expect(cal.find((c) => c.source === "independent_review")!.state).toBe("unmeasurable");
+    expect(cal.find((c) => c.source === "self_report")!.measured).toBeNull();
   });
 
-  it("self_reported is always unmeasurable; zero-refute evidence tier is unmeasurable (never measured 1.0)", () => {
-    // 6 evidence-passed completions with NO refute → verified_executed tier: passes 6, coverage 0 → unmeasurable, measured null.
-    const evidenceTs = Array.from({ length: 6 }, (_, i) => evidencePassed(`e${i}`, i));
-    const selfReportedTs = Array.from({ length: 6 }, (_, i) => selfReported(`s${i}`, i));
-    const entries = computeCalibration([...evidenceTs, ...selfReportedTs]);
-    const verified = entries.find((c) => c.tier === "verified_executed")!;
-    expect(verified.state).toBe("unmeasurable");
-    expect(verified.measured).toBeNull();
-    expect(verified.sampleSize).toBe(6);
-    const self = entries.find((c) => c.tier === "self_reported")!;
-    expect(self.state).toBe("unmeasurable");
-    expect(self.measured).toBeNull();
+  it("computes per-source survival for executable against refute", () => {
+    // 8 executable-passed completions, each with a refute; 2 refuted / 6 upheld.
+    const txs: TemplateTransition[] = [];
+    for (let i = 0; i < 8; i++) txs.push(txc(`e${i}`, { evidence: execEv(), refute: { verdict: i < 2 ? "refuted" : "upheld" } }));
+    const entry = computeCalibration(txs).find((c) => c.source === "executable")!;
+    expect(entry.state).toBe("measured");
+    expect(entry.measured).toBeCloseTo(6 / 8, 5);
+    expect(entry.sampleSize).toBe(8);
+    expect(entry.assumed).toBeCloseTo(SOURCE_CONFIDENCE.executable);
+  });
+
+  it("coverage gate: too few of a source's passes had a refute run → unmeasurable", () => {
+    // 10 grounding-passed completions, only 3 have a refute run → coverage 0.3 < CALIBRATION_COVERAGE (0.5).
+    const txs: TemplateTransition[] = [
+      ...Array.from({ length: 3 }, (_, i) => txc(`c${i}`, { evidence: ev(), refute: { verdict: "upheld" } })),
+      ...Array.from({ length: 7 }, (_, i) => txc(`n${i}`, { evidence: ev() })),
+    ];
+    const entry = computeCalibration(txs).find((c) => c.source === "grounding")!;
+    expect(entry.state).toBe("unmeasurable");
+    expect(entry.measured).toBeNull();
   });
 
   it("below CALIBRATION_MIN claims → insufficient with measured null", () => {
-    // 3 upheld + 1 refuted → claims 4 < CALIBRATION_MIN (5).
-    const ts = [
-      ...Array.from({ length: 3 }, (_, i) => aiReviewed(`u${i}`, "upheld", i)),
-      aiReviewed("f0", "refuted", 10),
-    ];
-    const entry = computeCalibration(ts).find((c) => c.tier === "ai_reviewed")!;
+    const n = CALIBRATION_MIN - 1; // claims below the floor
+    const txs = Array.from({ length: n }, (_, i) => txc(`u${i}`, { evidence: ev(), refute: { verdict: "upheld" } }));
+    const entry = computeCalibration(txs).find((c) => c.source === "grounding")!;
     expect(entry.state).toBe("insufficient");
     expect(entry.measured).toBeNull();
-    expect(entry.sampleSize).toBe(4);
+    expect(entry.sampleSize).toBe(n);
+  });
+
+  it("independent_review and self_report are always unmeasurable regardless of data", () => {
+    const txs = Array.from({ length: 20 }, (_, i) => txc(`x${i}`, { evidence: ev(), refute: { verdict: "upheld" } }));
+    const cal = computeCalibration(txs);
+    for (const source of ["independent_review", "self_report"] as const) {
+      const entry = cal.find((c) => c.source === source)!;
+      expect(entry.state).toBe("unmeasurable");
+      expect(entry.measured).toBeNull();
+      expect(entry.sampleSize).toBe(0);
+    }
+  });
+});
+
+describe("effectiveSourceConfidence", () => {
+  it("effectiveSourceConfidence: measured feeds in past threshold; executable capped-down; review/self fixed", () => {
+    const measuredCal = [{ source: "grounding", assumed: 0.7, measured: 0.5, sampleSize: CALIBRATION_SCORE_MIN, state: "measured" }] as never;
+    expect(effectiveSourceConfidence("grounding", measuredCal)).toBe(0.5);           // measured used
+    expect(effectiveSourceConfidence("grounding", undefined)).toBe(0.7);             // prior when no cal
+    const exeCal = [{ source: "executable", assumed: 1.0, measured: 1.3, sampleSize: CALIBRATION_SCORE_MIN, state: "measured" }] as never;
+    expect(effectiveSourceConfidence("executable", exeCal)).toBe(1.0);              // capped at prior (can't exceed)
+    expect(effectiveSourceConfidence("independent_review", measuredCal)).toBe(0.55); // never calibrated
+  });
+
+  it("returns the prior when no calibration is provided", () => {
+    expect(effectiveSourceConfidence("grounding")).toBe(SOURCE_CONFIDENCE.grounding);
+    expect(effectiveSourceConfidence("grounding", [])).toBe(SOURCE_CONFIDENCE.grounding);
+  });
+
+  it("returns the prior for insufficient or unmeasurable entries", () => {
+    const entries = [
+      { source: "grounding", assumed: 0.7, measured: null, sampleSize: 3, state: "insufficient" },
+      { source: "executable", assumed: 1.0, measured: null, sampleSize: 0, state: "unmeasurable" },
+    ] as never;
+    expect(effectiveSourceConfidence("grounding", entries)).toBe(SOURCE_CONFIDENCE.grounding);
+    expect(effectiveSourceConfidence("executable", entries)).toBe(SOURCE_CONFIDENCE.executable);
+  });
+
+  it("returns the prior when the measured sample is below CALIBRATION_SCORE_MIN", () => {
+    const entries = [{ source: "grounding", assumed: 0.7, measured: 0.9, sampleSize: CALIBRATION_SCORE_MIN - 1, state: "measured" }] as never;
+    expect(effectiveSourceConfidence("grounding", entries)).toBe(SOURCE_CONFIDENCE.grounding);
+  });
+
+  it("lowers grounding below its prior when independent review overturns claims often", () => {
+    const entries = [{ source: "grounding", assumed: 0.7, measured: 0.4, sampleSize: CALIBRATION_SCORE_MIN, state: "measured" }] as never;
+    expect(effectiveSourceConfidence("grounding", entries)).toBeCloseTo(0.4);
   });
 });

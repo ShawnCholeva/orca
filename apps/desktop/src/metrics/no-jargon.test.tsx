@@ -119,9 +119,9 @@ describe("no jargon in the self-improvement rail", () => {
       summary: {
         templateId: "tpl", name: "Brainstorm",
         calibration: [
-          { tier: "ai_reviewed", assumed: 0.55, measured: 0.62, sampleSize: 41, state: "measured" },
-          { tier: "verified_executed", assumed: 1.0, measured: null, sampleSize: 2, state: "insufficient" },
-          { tier: "self_reported", assumed: 0.3, measured: null, sampleSize: 0, state: "unmeasurable" },
+          { source: "grounding", assumed: 0.7, measured: 0.62, sampleSize: 41, state: "measured" },
+          { source: "executable", assumed: 1.0, measured: null, sampleSize: 2, state: "insufficient" },
+          { source: "self_report", assumed: 0.3, measured: null, sampleSize: 0, state: "unmeasurable" },
         ],
       },
     } as never;

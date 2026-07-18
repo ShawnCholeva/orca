@@ -631,8 +631,24 @@ describe("deriveInsights", () => {
 });
 
 describe("computeStepMetrics: calibration divergence insight", () => {
-  // sc() always yields an ai_reviewed step (evidence present, no sensors run).
-  const ts = [sc("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z")];
+  // A completion whose only calibratable source is grounding (enforce-mode check
+  // passed, no sensors run) — verifierMix.grounding > 0, so the grounding calibration
+  // entry is one the step actually used and can surface.
+  const groundingTx = (id: string, runId: string, at: string): TemplateTransition => ({
+    templateVersion: 1, stepTemplateId: "s",
+    transition: {
+      id, goalId: "g", workflowRunId: runId, workflowStepRunId: `${runId}-s`,
+      boundary: "step_complete", risk: null, stateDeps: null,
+      evidence: {
+        sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [],
+        oracleAdequacy: { sufficient: false, gaps: [] },
+        grounding: { checks: [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce", result: "passed", detail: "" }], verdict: "passed" },
+      },
+      telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
+      createdAt: at,
+    },
+  });
+  const ts = [groundingTx("a", "r1", "2026-05-01T00:00:00.000Z")];
   const runs: TemplateStepRun[] = [{
     workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed",
     startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z",
@@ -641,39 +657,40 @@ describe("computeStepMetrics: calibration divergence insight", () => {
 
   it("reports the divergence observationally, without claiming it moved the score", () => {
     const calibration: CalibrationEntry[] = [
-      { tier: "ai_reviewed", assumed: 0.55, measured: 0.87, sampleSize: 13, state: "measured" },
+      { source: "grounding", assumed: 0.7, measured: 0.95, sampleSize: 13, state: "measured" },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
-    expect(step.verification.tier).toBe("ai_reviewed");
+    expect(step.quality.scoreBreakdown?.verifierMix.grounding).toBeGreaterThan(0);
     // Honest wording: reports measured vs. assumed, never claims the score changed.
-    expect(step.insights.join(" ")).toMatch(/upholds 87%.*assumes 55%.*pessimistic/);
+    expect(step.insights.join(" ")).toMatch(/hold up 95%.*70% assumed/);
     expect(step.insights.join(" ")).not.toMatch(/now count for|so passes here/i);
     expect(step.insights.join(" ")).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 
-  it("no divergence insight for a non-matching tier", () => {
+  it("no divergence insight for a calibratable source the step didn't use", () => {
     const calibration: CalibrationEntry[] = [
-      { tier: "verified_executed", assumed: 1.0, measured: 0.6, sampleSize: 13, state: "measured" },
+      { source: "executable", assumed: 1.0, measured: 0.6, sampleSize: 13, state: "measured" },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
-    expect(step.insights.some((i) => i.includes("Independent review upholds"))).toBe(false);
+    expect(step.insights.some((i) => i.includes("hold up"))).toBe(false);
   });
 
   it("no divergence insight when sampleSize is below 10", () => {
     const calibration: CalibrationEntry[] = [
-      { tier: "ai_reviewed", assumed: 0.55, measured: 0.87, sampleSize: 9, state: "measured" },
+      { source: "grounding", assumed: 0.7, measured: 0.95, sampleSize: 9, state: "measured" },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
-    expect(step.insights.some((i) => i.includes("Independent review upholds"))).toBe(false);
+    expect(step.insights.some((i) => i.includes("hold up"))).toBe(false);
   });
 });
 
 describe("computeStepMetrics: calibration no longer feeds the composed score", () => {
-  // No evidence, refute upheld → ai_reviewed passes (prior 0.55 each). composedScore
-  // (Task 2) computes its own designed-prior weight per completion and has no
-  // calibration parameter — effectiveTierConfidence (calibration-adjusted) is no
-  // longer in the scoring path, only in deriveInsights' display text. So the score
-  // stays at the 0.55 design prior regardless of what calibration measures.
+  // No evidence, refute upheld → ai_reviewed passes (independent_review prior 0.55
+  // each). composedScore (Task 2) computes its own designed-prior weight per
+  // completion and has no calibration parameter — effectiveSourceConfidence
+  // (calibration-adjusted) is not in the scoring path yet (Task 3 reconnects it),
+  // only in deriveInsights' display text. So the score stays at the 0.55 design
+  // prior regardless of what calibration measures.
   const aiReviewedPasses: TemplateTransition[] = ["r1", "r2", "r3"].map((r, i) => ({
     templateVersion: 1, stepTemplateId: "s",
     transition: {
@@ -691,7 +708,7 @@ describe("computeStepMetrics: calibration no longer feeds the composed score", (
 
   it("a fully-upheld ai_reviewed step keeps the 0.55 design prior even with a high measured calibration (70 no longer applies)", () => {
     const calibration: CalibrationEntry[] = [
-      { tier: "ai_reviewed", assumed: 0.55, measured: 1.0, sampleSize: 12, state: "measured" },
+      { source: "independent_review", assumed: 0.55, measured: 1.0, sampleSize: 12, state: "measured" },
     ];
     const [step] = computeStepMetrics({ transitions: aiReviewedPasses, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
     expect(step.score).toBe(55);
@@ -706,7 +723,7 @@ describe("computeStepMetrics: calibration no longer feeds the composed score", (
 
   it("a small measured sample (below CALIBRATION_SCORE_MIN) does not move the score", () => {
     const calibration: CalibrationEntry[] = [
-      { tier: "ai_reviewed", assumed: 0.55, measured: 1.0, sampleSize: 6, state: "measured" },
+      { source: "independent_review", assumed: 0.55, measured: 1.0, sampleSize: 6, state: "measured" },
     ];
     const [step] = computeStepMetrics({ transitions: aiReviewedPasses, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
     expect(step.score).toBe(55);
@@ -714,7 +731,7 @@ describe("computeStepMetrics: calibration no longer feeds the composed score", (
 
   it("a low measured rate does not lower the score below the prior anymore (30 no longer applies)", () => {
     const calibration: CalibrationEntry[] = [
-      { tier: "ai_reviewed", assumed: 0.55, measured: 0.3, sampleSize: 12, state: "measured" },
+      { source: "independent_review", assumed: 0.55, measured: 0.3, sampleSize: 12, state: "measured" },
     ];
     const [step] = computeStepMetrics({ transitions: aiReviewedPasses, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
     expect(step.score).toBe(55);

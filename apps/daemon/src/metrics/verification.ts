@@ -1,5 +1,6 @@
 import type { VerificationTier, EvidenceArtifact } from "@orca/contracts";
 import type { TemplateTransition } from "./fetch.js";
+import { sourcesPassed, SOURCE_CONFIDENCE, type CalibrationSource } from "./source-signals.js";
 
 export const TIER_CONFIDENCE: Record<VerificationTier, number> = {
   verified_executed: 1.0, partially_verified: 0.7, ai_reviewed: 0.55, self_reported: 0.3, unverified: 0,
@@ -7,15 +8,15 @@ export const TIER_CONFIDENCE: Record<VerificationTier, number> = {
 
 // Calibration: how well the assumed confidences above (designed priors) match what
 // independent review actually finds. Pure. Below CALIBRATION_SCORE_MIN claims the
-// rate is display-only; at or above it, effectiveTierConfidence feeds the measured
+// rate is display-only; at or above it, effectiveSourceConfidence feeds the measured
 // rate into scoring in place of the prior.
-export const CALIBRATION_MIN = 5; // min independently-concluded claims per tier before we'll report a rate
-export const CALIBRATION_COVERAGE = 0.5; // evidence tiers: refutes-run / passes floor before we trust the rate
+export const CALIBRATION_MIN = 5; // min independently-concluded claims per source before we'll report a rate
+export const CALIBRATION_COVERAGE = 0.5; // refutes-run / passes floor before we trust the rate
 export const CALIBRATION_DIVERGENCE = 0.2;
 export const CALIBRATION_SCORE_MIN = 10; // min measured claims before calibration adjusts scoring
 
 export type CalibrationEntry = {
-  tier: VerificationTier;
+  source: CalibrationSource;
   assumed: number;
   measured: number | null;
   sampleSize: number;
@@ -110,14 +111,6 @@ export function buildArtifacts(input: {
   return out;
 }
 
-// Same vFail semantics as aggregate.ts's finalStepCompletes scoring (replicated here,
-// not imported, to avoid a cycle: aggregate imports this module).
-function vFail(t: TemplateTransition): boolean {
-  const tr = t.transition;
-  return tr.evidence?.verdict === "failed" || tr.evidence?.verdict === "partial" ||
-    (tr.evidence == null && tr.refute?.verdict === "refuted");
-}
-
 // Final completion per distinct (run, step): boundary step_complete, latest by createdAt.
 function finalCompletions(ts: TemplateTransition[]): TemplateTransition[] {
   const byKey = new Map<string, TemplateTransition>();
@@ -130,59 +123,44 @@ function finalCompletions(ts: TemplateTransition[]): TemplateTransition[] {
   return [...byKey.values()];
 }
 
-const CALIBRATION_TIERS: VerificationTier[] = ["verified_executed", "partially_verified", "ai_reviewed", "self_reported"];
-const EVIDENCE_TIERS = new Set<VerificationTier>(["verified_executed", "partially_verified"]);
+const CALIBRATABLE: CalibrationSource[] = ["executable", "grounding"];
+const ALL_SOURCES: CalibrationSource[] = ["executable", "grounding", "independent_review", "self_report"];
 
-// Scoring weight for a tier: the designed prior until independent measurement is
-// strong enough (measured state, ≥ CALIBRATION_SCORE_MIN claims), then the measured
-// survival rate. Non-evidence tiers are capped at the partially_verified prior —
-// consistent independent review can raise trust toward partly-verified, but never
-// to run-and-tested, because nothing was executed. A low measured rate lowers the
-// weight below the prior symmetrically.
-export function effectiveTierConfidence(tier: VerificationTier, calibration?: CalibrationEntry[]): number {
-  const prior = TIER_CONFIDENCE[tier];
-  const cal = calibration?.find((c) => c.tier === tier);
-  if (!cal || cal.state !== "measured" || cal.measured == null || cal.sampleSize < CALIBRATION_SCORE_MIN) return prior;
-  return EVIDENCE_TIERS.has(tier) ? cal.measured : Math.min(cal.measured, TIER_CONFIDENCE.partially_verified);
-}
-
-// Per tier: how often does an independently-concluded claim actually survive, versus
-// the designed prior (TIER_CONFIDENCE) assumed for that tier? "Claims" excludes
-// completions with no independent conclusion at all (an evidence-failed completion
-// with no refute run is weak evidence, not a concluded overturn). Pure; consumed for
-// display and, once measured over enough claims, by effectiveTierConfidence scoring.
+// Per source: how often does an independently-concluded claim from a completion that
+// PASSED this source actually survive an independent refute, versus the designed
+// prior (SOURCE_CONFIDENCE) assumed for that source? independent_review is the refute
+// signal itself (circular to calibrate against itself) and self_report has no
+// independent check at all — both are always unmeasurable. Pure; consumed for display
+// and, once measured over enough claims, by effectiveSourceConfidence scoring.
 export function computeCalibration(transitions: TemplateTransition[]): CalibrationEntry[] {
   const finals = finalCompletions(transitions);
-  const byTier = new Map<VerificationTier, TemplateTransition[]>();
-  for (const t of finals) {
-    const tier = classifyTier(t);
-    if (!CALIBRATION_TIERS.includes(tier)) continue; // "unverified" carries no claim to calibrate
-    (byTier.get(tier) ?? byTier.set(tier, []).get(tier)!).push(t);
-  }
-  return CALIBRATION_TIERS.map((tier) => {
-    const completions = byTier.get(tier) ?? [];
-    const passes = completions.filter((t) => !vFail(t));
-    const overturned = completions.filter((t) => t.transition.refute?.verdict === "refuted");
-    const claims = passes.length + overturned.length;
-    const measuredRaw = claims === 0 ? null : passes.length / claims;
-
-    let state: CalibrationEntry["state"];
-    if (tier === "self_reported") {
-      state = "unmeasurable"; // no independent signal exists for this tier at all
-    } else if (
-      EVIDENCE_TIERS.has(tier) && passes.length > 0 &&
-      passes.filter((t) => t.transition.refute != null).length / passes.length < CALIBRATION_COVERAGE
-    ) {
-      state = "unmeasurable"; // too few of the passes had an independent refute run alongside
-    } else if (claims < CALIBRATION_MIN) {
-      state = "insufficient";
-    } else {
-      state = "measured";
+  return ALL_SOURCES.map((source): CalibrationEntry => {
+    const assumed = SOURCE_CONFIDENCE[source];
+    if (!CALIBRATABLE.includes(source)) {
+      // review is the independent signal itself (circular); self-report has no independent check.
+      return { source, assumed, measured: null, sampleSize: 0, state: "unmeasurable" };
     }
-
-    return {
-      tier, assumed: TIER_CONFIDENCE[tier], sampleSize: claims, state,
-      measured: state === "measured" ? measuredRaw : null,
-    };
+    const passedKey = source === "executable" ? "executable" : "grounding";
+    const bucket = finals.filter((t) => sourcesPassed(t.transition.evidence, t.transition.refute)[passedKey]);
+    const withRefute = bucket.filter((t) => t.transition.refute?.verdict === "upheld" || t.transition.refute?.verdict === "refuted");
+    const upheld = withRefute.filter((t) => t.transition.refute?.verdict === "upheld").length;
+    const claims = withRefute.length;
+    let state: CalibrationEntry["state"];
+    if (bucket.length > 0 && withRefute.length / bucket.length < CALIBRATION_COVERAGE) state = "unmeasurable";
+    else if (claims < CALIBRATION_MIN) state = "insufficient";
+    else state = "measured";
+    return { source, assumed, sampleSize: claims, measured: state === "measured" ? upheld / claims : null, state };
   });
+}
+
+// Confidence for a source: designed prior until an independent measurement is strong
+// enough (measured, ≥ CALIBRATION_SCORE_MIN claims), then the measured survival rate.
+// executable is capped at its 1.0 prior — measurement can only LOWER it (a passing check
+// that later got refuted was weak; nothing exceeds certainty). review/self never move.
+export function effectiveSourceConfidence(source: CalibrationSource, calibration?: CalibrationEntry[]): number {
+  const prior = SOURCE_CONFIDENCE[source];
+  if (!CALIBRATABLE.includes(source)) return prior;
+  const cal = calibration?.find((c) => c.source === source);
+  if (!cal || cal.state !== "measured" || cal.measured == null || cal.sampleSize < CALIBRATION_SCORE_MIN) return prior;
+  return source === "executable" ? Math.min(cal.measured, prior) : cal.measured;
 }

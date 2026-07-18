@@ -197,12 +197,17 @@ export function deriveInsights(step: StepMetrics, calibration?: CalibrationEntry
   const top = step.failureModes[0];
   if (top && top.count > 0) out.push(`Most common problem: ${top.label.toLowerCase()} (${top.count}×).`);
   if ((step.cost.meanRetries ?? 0) >= 1.5) out.push("Loops between failed attempts — high retry churn.");
-  const cal = calibration?.find((c) => c.tier === step.verification.tier);
-  if (cal && cal.state === "measured" && cal.sampleSize >= CALIBRATION_SCORE_MIN && Math.abs(cal.measured! - cal.assumed) > CALIBRATION_DIVERGENCE) {
-    const measured = cal.measured!;
-    // Observational only — calibration no longer feeds composedScore, so this must
-    // never claim passes "now count for" a different weight.
-    out.push(`Independent review upholds ${Math.round(measured * 100)}% of this step's passes; the score assumes ${Math.round(cal.assumed * 100)}% — scores here may be too ${measured > cal.assumed ? "pessimistic" : "optimistic"}.`);
+  // Observational only — calibration does not yet feed composedScore (Task 3), so this
+  // must never claim a source's passes "now count for" a different weight. Only surface
+  // a calibratable source the step actually used (via scoreBreakdown.verifierMix).
+  const mix = step.quality.scoreBreakdown?.verifierMix;
+  for (const c of calibration ?? []) {
+    if (c.state !== "measured" || c.measured == null || c.sampleSize < CALIBRATION_SCORE_MIN) continue;
+    if (Math.abs(c.measured - c.assumed) <= CALIBRATION_DIVERGENCE) continue;
+    const used = c.source === "executable" ? (mix?.executable ?? 0) > 0 : c.source === "grounding" ? (mix?.grounding ?? 0) > 0 : false;
+    if (!used) continue;
+    const label = c.source === "grounding" ? "Grounding claims" : "Executed checks";
+    out.push(`${label} hold up ${Math.round(c.measured * 100)}% of the time here vs the ${Math.round(c.assumed * 100)}% assumed.`);
   }
   return out;
 }

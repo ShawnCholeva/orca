@@ -56,7 +56,8 @@ export const TemplateMetricsSummary = z.object({
   }).strict()),
   confidence: z.enum(["low", "ok"]),
   calibration: z.array(z.object({
-    tier: VerificationTier, assumed: z.number(), measured: z.number().nullable(),
+    source: z.enum(["executable", "grounding", "independent_review", "self_report"]),
+    assumed: z.number(), measured: z.number().nullable(),
     sampleSize: z.number().int().nonnegative(),
     state: z.enum(["measured", "insufficient", "unmeasurable"]),
   }).strict()),
