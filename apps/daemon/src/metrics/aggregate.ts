@@ -486,6 +486,15 @@ export function computeStepMetrics(input: {
     // mislabel a failed step as weakly-verified. A legitimate self-report floor is
     // base===0.3, so base===0 uniquely marks a zero() fail-edge.
     const concScores = conclusive.map((t) => scoreByCompletion.get(t)!).filter((s) => s.base !== 0);
+    const scoredCount = concScores.length;
+    const executableCount = concScores.filter((s) => s.verifiers.executable).length;
+    // Epistemic band = verification KIND (strong/weak/needs-evidence), ORTHOGONAL to the
+    // score magnitude: a high-scoring grounding-only step is honestly "Weakly verified".
+    const bandLevel: "strong" | "weak" | "needs_evidence" =
+      scoreValue == null ? "needs_evidence"
+      : executableCount > scoredCount / 2 ? "strong"
+      : "weak";
+    const BAND_LABEL = { strong: "Strongly verified", weak: "Weakly verified", needs_evidence: "Needs more evidence" } as const;
     const scoreBreakdown = {
       meanBase: mean(concScores.map((s) => s.base)),
       meanCoverage: mean(concScores.map((s) => s.coverage)),
@@ -525,6 +534,7 @@ export function computeStepMetrics(input: {
           groundingFailed: groundingCompletes.some((t) => t.transition.evidence!.grounding!.verdict === "failed"),
         }),
         recentRefuteReasons,
+        band: { level: bandLevel, label: BAND_LABEL[bandLevel] },
       },
       failureModes,
       reconciliation,

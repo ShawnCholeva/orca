@@ -11,7 +11,7 @@ function step(over: Partial<StepMetrics> = {}): StepMetrics {
     cost: { p50LatencyMs: 100, meanTokens: 1000, meanUsd: 0.01, meanRetries: 0.2 },
     risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
     failureClusters: [{ failureCode: "invalid_output", boundary: "step_complete", count: 8, sampleTransitionIds: ["t1", "t2"] }],
-    verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.55, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
+    verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.55, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [], band: { level: "weak", label: "Weakly verified" } },
     failureModes: [{ label: "Produced output that didn't match what the step asked for", count: 8, pct: 1 }],
     reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false, refuteReason: null },
     trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [], ...over,

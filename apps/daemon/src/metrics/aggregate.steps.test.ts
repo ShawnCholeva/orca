@@ -532,6 +532,75 @@ describe("computeStepMetrics", () => {
     expect(step.quality.scoreBreakdown?.coverageLimited).toBe(0);
     expect(step.quality.scoreBreakdown?.verifierMix).toEqual({ executable: 0, grounding: 0, independentReview: 0, selfReportOnly: 0 });
   });
+
+  it("bands a majority-executed step 'strong'", () => {
+    // 2/3 scored completions had execution → STRICT majority → strong band.
+    const exec1 = sc("e1", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z");
+    exec1.transition.evidence!.sensorsRun = [
+      { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
+    ];
+    const exec2 = sc("e2", "r2", "s", "passed", true, "2026-05-01T00:01:00.000Z");
+    exec2.transition.evidence!.sensorsRun = [
+      { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
+    ];
+    const grounding = sc("g1", "r3", "s", "passed", true, "2026-05-01T00:02:00.000Z");
+    grounding.transition.evidence!.oracleAdequacy = { sufficient: false, gaps: [] };
+    grounding.transition.evidence!.grounding = {
+      checks: [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce", result: "passed", detail: "" }],
+      verdict: "passed",
+    };
+    const ts = [exec1, exec2, grounding];
+    const runs: TemplateStepRun[] = ts.map((t) => ({
+      workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "passed",
+      startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1,
+    }));
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.verification.band).toEqual({ level: "strong", label: "Strongly verified" });
+  });
+
+  it("bands a HIGH-scoring grounding-only step 'weak' (kind ≠ magnitude)", () => {
+    // Grounding-only completions can score high (base 0.7), but no execution ran →
+    // the band is honestly "weak", orthogonal to the score magnitude.
+    const g1 = sc("g1", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z");
+    g1.transition.evidence!.oracleAdequacy = { sufficient: false, gaps: [] };
+    g1.transition.evidence!.grounding = {
+      checks: [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce", result: "passed", detail: "" }],
+      verdict: "passed",
+    };
+    const g2 = sc("g2", "r2", "s", "passed", true, "2026-05-01T00:01:00.000Z");
+    g2.transition.evidence!.oracleAdequacy = { sufficient: false, gaps: [] };
+    g2.transition.evidence!.grounding = {
+      checks: [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce", result: "passed", detail: "" }],
+      verdict: "passed",
+    };
+    const ts = [g1, g2];
+    const runs: TemplateStepRun[] = ts.map((t) => ({
+      workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "passed",
+      startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1,
+    }));
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.score).toBeGreaterThanOrEqual(70); // grounding base 0.7 × full coverage — a HIGH score
+    expect(step.verification.band.level).toBe("weak");
+    expect(step.verification.band.label).toBe("Weakly verified");
+  });
+
+  it("bands a step with no conclusive verification 'needs_evidence'", () => {
+    // evaluation_failed completion: unverified, no hard fail, score stays null.
+    const ts: TemplateTransition[] = [{
+      templateVersion: 1, stepTemplateId: "s",
+      transition: {
+        id: "e1", goalId: "g", workflowRunId: "r1", workflowStepRunId: "r1-s",
+        boundary: "step_complete", risk: null, stateDeps: null, evidence: null, refute: null,
+        telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "failed", failure_code: "evaluation_failed" } },
+        createdAt: "2026-05-01T00:00:00.000Z",
+      },
+    }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:01:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.score).toBeNull();
+    expect(step.verification.band.level).toBe("needs_evidence");
+    expect(step.verification.band.label).toBe("Needs more evidence");
+  });
 });
 
 describe("deriveInsights", () => {
@@ -543,7 +612,7 @@ describe("deriveInsights", () => {
       cost: { p50LatencyMs: 100, meanTokens: 100, meanUsd: 0.01, meanRetries: 0 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.55, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
+      verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.55, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [], band: { level: "weak", label: "Weakly verified" } },
       failureModes: [], reconciliation: null,
       trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
     });
@@ -559,7 +628,7 @@ describe("deriveInsights", () => {
       cost: { p50LatencyMs: 100, meanTokens: 100, meanUsd: 0.01, meanRetries: 0 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "self_reported", tierLabel: "Reported success, no check", confidence: 0.3, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
+      verification: { tier: "self_reported", tierLabel: "Reported success, no check", confidence: 0.3, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [], band: { level: "weak", label: "Weakly verified" } },
       failureModes: [], reconciliation: null,
       trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
     });
@@ -575,7 +644,7 @@ describe("deriveInsights", () => {
       cost: { p50LatencyMs: 100, meanTokens: 100, meanUsd: 0.01, meanRetries: 0 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0.3, artifacts: [], recentRefuteReasons: [] },
+      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0.3, artifacts: [], recentRefuteReasons: [], band: { level: "needs_evidence", label: "Needs more evidence" } },
       failureModes: [], reconciliation: null,
       trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
     });
@@ -591,7 +660,7 @@ describe("deriveInsights", () => {
       cost: { p50LatencyMs: 100, meanTokens: 100, meanUsd: 0.01, meanRetries: 0 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
+      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [], band: { level: "needs_evidence", label: "Needs more evidence" } },
       failureModes: [{ label: "Timeout", count: 3, pct: 1 }], reconciliation: null,
       trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
     });
@@ -607,7 +676,7 @@ describe("deriveInsights", () => {
       cost: { p50LatencyMs: 150, meanTokens: 500, meanUsd: 0.02, meanRetries: 2.0 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
+      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [], band: { level: "needs_evidence", label: "Needs more evidence" } },
       failureModes: [], reconciliation: null,
       trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
     });
@@ -622,7 +691,7 @@ describe("deriveInsights", () => {
       cost: { p50LatencyMs: 100, meanTokens: 500, meanUsd: 0.01, meanRetries: 0.3 },
       risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
       failureClusters: [],
-      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [] },
+      verification: { tier: "unverified", tierLabel: "No check yet", confidence: 0, falseAcceptanceRate: 0, artifacts: [], recentRefuteReasons: [], band: { level: "needs_evidence", label: "Needs more evidence" } },
       failureModes: [], reconciliation: null,
       trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
     });

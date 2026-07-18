@@ -195,6 +195,7 @@ export const StepMetrics = z.object({
     falseAcceptanceRate: z.number(), artifacts: z.array(EvidenceArtifact),
     // The independent reviewer's own words for recently overturned claims (≤3).
     recentRefuteReasons: z.array(z.string()),
+    band: z.object({ level: z.enum(["strong", "weak", "needs_evidence"]), label: z.string() }).strict(),
   }).strict(),
   failureModes: z.array(FailureMode),
   reconciliation: z.object({
