@@ -74,4 +74,12 @@ describe("composedScore", () => {
     expect(r.coverage).toBeCloseTo(0.5, 5); // 1 untested of 2 → max(0.3, 1 - 1/2) = 0.5
     expect(r.score).toBeCloseTo(0.7 * 0.5, 5);
   });
+  it("uses the calibrated grounding confidence when calibration is supplied", () => {
+    const r = composedScore(tx({ evidence: ev({ grounding: groundingPassed }) }), [
+      { source: "grounding", assumed: 0.7, measured: 0.5, sampleSize: 10, state: "measured" },
+    ] as never);
+    const noCal = composedScore(tx({ evidence: ev({ grounding: groundingPassed }) }));
+    expect(noCal.base).toBeCloseTo(0.7, 5);   // designed prior (2b-i behavior preserved when no calibration)
+    expect(r.base).toBeCloseTo(0.5, 5); // calibrated grounding survival feeds base
+  });
 });

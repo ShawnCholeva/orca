@@ -1,6 +1,7 @@
 import type { TemplateTransition } from "./fetch.js";
 import { isCodeFile } from "../harness-sensors/code-files.js";
 import { sourcesPassed, SOURCE_CONFIDENCE } from "./source-signals.js";
+import { effectiveSourceConfidence, type CalibrationEntry } from "./verification.js";
 
 const COVERAGE_FLOOR = 0.3;
 
@@ -9,7 +10,7 @@ export type CompletionScore = {
   verifiers: { executable: boolean; grounding: boolean; independentReview: boolean };
 };
 
-export function composedScore(t: TemplateTransition): CompletionScore {
+export function composedScore(t: TemplateTransition, calibration?: CalibrationEntry[]): CompletionScore {
   const ev = t.transition.evidence;
   const rf = t.transition.refute;
   const zero = (): CompletionScore => ({ score: 0, base: 0, coverage: 0, verifiers: { executable: false, grounding: false, independentReview: false } });
@@ -18,9 +19,9 @@ export function composedScore(t: TemplateTransition): CompletionScore {
 
   const { executable, grounding, independentReview } = sourcesPassed(ev, rf);
   const cs: number[] = [];
-  if (executable) cs.push(SOURCE_CONFIDENCE.executable);
-  if (grounding) cs.push(SOURCE_CONFIDENCE.grounding);
-  if (independentReview) cs.push(SOURCE_CONFIDENCE.independent_review);
+  if (executable) cs.push(effectiveSourceConfidence("executable", calibration));
+  if (grounding) cs.push(effectiveSourceConfidence("grounding", calibration));
+  if (independentReview) cs.push(SOURCE_CONFIDENCE.independent_review); // never calibrated (circular)
   const base = cs.length === 0 ? SOURCE_CONFIDENCE.self_report : 1 - cs.reduce((p, c) => p * (1 - c), 1);
 
   const coverage = computeCoverage(t, ev);

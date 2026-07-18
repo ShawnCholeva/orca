@@ -197,9 +197,9 @@ export function deriveInsights(step: StepMetrics, calibration?: CalibrationEntry
   const top = step.failureModes[0];
   if (top && top.count > 0) out.push(`Most common problem: ${top.label.toLowerCase()} (${top.count}×).`);
   if ((step.cost.meanRetries ?? 0) >= 1.5) out.push("Loops between failed attempts — high retry churn.");
-  // Observational only — calibration does not yet feed composedScore (Task 3), so this
-  // must never claim a source's passes "now count for" a different weight. Only surface
-  // a calibratable source the step actually used (via scoreBreakdown.verifierMix).
+  // The score now feeds a calibratable source's measured survival rate in place of
+  // the designed prior (composedScore -> effectiveSourceConfidence). Only surface a
+  // calibratable source the step actually used (via scoreBreakdown.verifierMix).
   const mix = step.quality.scoreBreakdown?.verifierMix;
   for (const c of calibration ?? []) {
     if (c.state !== "measured" || c.measured == null || c.sampleSize < CALIBRATION_SCORE_MIN) continue;
@@ -207,7 +207,7 @@ export function deriveInsights(step: StepMetrics, calibration?: CalibrationEntry
     const used = c.source === "executable" ? (mix?.executable ?? 0) > 0 : c.source === "grounding" ? (mix?.grounding ?? 0) > 0 : false;
     if (!used) continue;
     const label = c.source === "grounding" ? "Grounding claims" : "Executed checks";
-    out.push(`${label} hold up ${Math.round(c.measured * 100)}% of the time here vs the ${Math.round(c.assumed * 100)}% assumed.`);
+    out.push(`${label} hold up ${Math.round(c.measured * 100)}% of the time here vs the ${Math.round(c.assumed * 100)}% assumed — the score now uses the measured rate.`);
   }
   return out;
 }
@@ -313,7 +313,7 @@ export function computeStepMetrics(input: {
         .map((r) => r.workflowRunId)
     );
     const tierByCompletion = new Map(finalStepCompletes.map((t) => [t, classifyTier(t)] as const));
-    const scoreByCompletion = new Map(finalStepCompletes.map((t) => [t, composedScore(t)] as const));
+    const scoreByCompletion = new Map(finalStepCompletes.map((t) => [t, composedScore(t, input.calibration)] as const));
     const conclusive = finalStepCompletes.filter((t) =>
       tierByCompletion.get(t) !== "unverified" && !supersededByHardFail.has(t.transition.workflowRunId ?? ""));
     const completeRunIds = new Set(finalStepCompletes.map((t) => t.transition.workflowRunId).filter((x): x is string => x != null));
