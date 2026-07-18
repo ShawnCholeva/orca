@@ -69,6 +69,7 @@ describe("metrics contracts", () => {
         verification: {
           tier: "ai_reviewed" as const, tierLabel: "Reviewed, not proven", confidence: 0.8,
           falseAcceptanceRate: 0.05, artifacts: [], recentRefuteReasons: [],
+          band: { level: "weak", label: "Weakly verified" },
         },
         failureModes: [],
         reconciliation: null,

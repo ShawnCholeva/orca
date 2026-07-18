@@ -13,6 +13,7 @@ const base = {
     tier: "ai_reviewed" as const, tierLabel: "Reviewed, not proven", confidence: 0.55, falseAcceptanceRate: 0,
     artifacts: [{ source: "self_report" as const, verifies: "a claim only", cannotVerify: "everything", confidence: 0.3, verdict: "pass" as const }],
     recentRefuteReasons: [],
+    band: { level: "weak", label: "Weakly verified" },
   },
   failureModes: [{ label: "Reported success without an independent check", count: 3, pct: 1 }],
   reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false, refuteReason: null },
