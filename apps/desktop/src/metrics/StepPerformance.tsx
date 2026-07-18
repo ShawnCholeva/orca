@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { StepMetrics, TemplateMetricsDetail, TemplateMetricsSummary } from "@orca/contracts";
 import { Pill } from "../workspaces/primitives";
-import { gradeFor, latencyLabel, statusForStep, statusMeta } from "./metrics-data";
+import { bandMeta, gradeFor, latencyLabel, statusForStep, statusMeta } from "./metrics-data";
 import { OutcomeBar, Panel, SectionLabel, Sparkline } from "./metrics-charts";
 import { ChevronDown, ChevronRight, Sparkle, Workflow } from "./metrics-icons";
 
@@ -73,7 +73,7 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{step.name}</span>
-            <Pill tone={status === "unverified" ? "accent" : m.tone} size="xs">{status === "unverified" ? "No check yet" : step.verification.tierLabel}</Pill>
+            <Pill tone={bandMeta[step.verification.band.level].tone} size="xs">{step.verification.band.label}</Pill>
             {low && <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }} title={`Based on only ${step.sampleSize} run${step.sampleSize === 1 ? "" : "s"} — low confidence (fewer than 5). Scores here can swing as more runs accrue.`}>n={step.sampleSize}</span>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 7 }}>
@@ -99,10 +99,11 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
         <div style={{ padding: "2px 16px 16px 60px" }}>
           <div style={{ background: "var(--panel-2)", border: "1px solid var(--hairline)", borderRadius: 10, padding: 12 }}>
             {(() => {
-              const rank = ["unverified", "self_reported", "ai_reviewed", "partially_verified", "verified_executed"].indexOf(step.verification.tier) + 1;
+              const rank = { needs_evidence: 1, weak: 2, strong: 3 }[step.verification.band.level];
+              const color = bandMeta[step.verification.band.level].color;
               return (
                 <div style={{ display: "flex", gap: 3, marginBottom: 10 }}>
-                  {[0, 1, 2, 3, 4].map((i) => <div key={i} style={{ height: 6, flex: 1, borderRadius: 3, background: i < rank ? "var(--warn)" : "rgba(255,255,255,0.08)" }} />)}
+                  {[0, 1, 2].map((i) => <div key={i} style={{ height: 6, flex: 1, borderRadius: 3, background: i < rank ? color : "rgba(255,255,255,0.08)" }} />)}
                 </div>
               );
             })()}

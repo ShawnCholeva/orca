@@ -19,7 +19,7 @@ const step: StepMetrics = {
   failureClusters: [{ failureCode: "invalid_output", boundary: "step_complete", count: 4, sampleTransitionIds: ["a"] }],
   verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.7, falseAcceptanceRate: 0.1,
     artifacts: [{ source: "independent_review", verifies: "a second model reviewed the output", cannotVerify: "whether it executes correctly", confidence: 0.6, verdict: "pass" }],
-    recentRefuteReasons: [] },
+    recentRefuteReasons: [], band: { level: "weak", label: "Weakly verified" } },
   failureModes: [{ label: "invalid_output", count: 4, pct: 0.2 }],
   reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false, refuteReason: null },
   trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: ["Loops between failed strategies — high retry churn."],

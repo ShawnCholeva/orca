@@ -15,6 +15,12 @@ export const statusMeta: Record<StepStatus, { tone: "run" | "warn" | "err"; colo
   unverified: { tone: "warn", color: "var(--accent)", label: "No check yet" },
 };
 
+export const bandMeta: Record<"strong" | "weak" | "needs_evidence", { tone: "run" | "warn" | "accent"; color: string }> = {
+  strong: { tone: "run", color: "var(--run)" },
+  weak: { tone: "warn", color: "var(--warn)" },
+  needs_evidence: { tone: "accent", color: "var(--accent)" },
+};
+
 export const verificationMeta: Record<VerificationTier, { label: string; color: string }> = {
   verified_executed: { label: "Run & tested", color: "var(--run)" },
   partially_verified: { label: "Partly verified", color: "var(--warn)" },

@@ -15,7 +15,7 @@ const step: StepMetrics = {
   failureClusters: [{ failureCode: "invalid_output", boundary: "step_complete", count: 4, sampleTransitionIds: ["a"] }],
   verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.7, falseAcceptanceRate: 0.1,
     artifacts: [{ source: "independent_review", verifies: "a second model reviewed the output", cannotVerify: "whether it executes correctly", confidence: 0.6, verdict: "pass" }],
-    recentRefuteReasons: [] },
+    recentRefuteReasons: [], band: { level: "weak", label: "Weakly verified" } },
   failureModes: [{ label: "invalid_output", count: 4, pct: 0.2 }],
   reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false, refuteReason: null },
   trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: ["Loops between failed strategies — high retry churn."],
@@ -38,10 +38,11 @@ describe("StepPerformancePanel", () => {
     const unverified: StepMetrics = {
       ...step, stepTemplateId: "critique", name: "Critique", score: null,
       quality: { ...step.quality, verdictPassRate: 0, verifiedSampleSize: 0, scoredSampleSize: 0 },
+      verification: { ...step.verification, band: { level: "needs_evidence", label: "Needs more evidence" } },
     };
     render(<StepPerformancePanel detail={{ summary: { name: "X" }, steps: [unverified] } as unknown as TemplateMetricsDetail} loading={false} openStep={null} onToggleStep={() => {}} />);
     expect(screen.getByText(/needs a check/i)).toBeInTheDocument();
-    expect(screen.getByText("No check yet")).toBeInTheDocument();
+    expect(screen.getByText("Needs more evidence")).toBeInTheDocument();
     expect(screen.queryByText("/100 F")).not.toBeInTheDocument();
   });
 
@@ -60,7 +61,7 @@ const reconciledStep: StepMetrics = {
   failureClusters: [], trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: ["Consistently passes but is never independently proven."], recentReasons: [],
   verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.62, falseAcceptanceRate: 0,
     artifacts: [{ source: "independent_review", verifies: "a second model reviewed the result", cannotVerify: "anything not executed", confidence: 0.55, verdict: "pass" }],
-    recentRefuteReasons: [] },
+    recentRefuteReasons: [], band: { level: "weak", label: "Weakly verified" } },
   failureModes: [], reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false, refuteReason: null },
 };
 
@@ -105,5 +106,12 @@ describe("StepRow expanded", () => {
     expect(screen.getByText(/needs a check/i)).toBeInTheDocument();
     rerender(<StepRow step={{ ...step, score: 0 }} index={0} isLast={false} open={false} onToggle={() => {}} />);
     expect(screen.getByText("0")).toBeInTheDocument();
+  });
+
+  it("renders the epistemic band pill, not the tier label", () => {
+    const s: StepMetrics = { ...step, verification: { ...step.verification, tierLabel: "Run & tested", band: { level: "weak", label: "Weakly verified" } } };
+    render(<StepRow step={s} index={0} isLast open onToggle={() => {}} />);
+    expect(screen.getByText("Weakly verified")).toBeInTheDocument();
+    expect(screen.queryByText("Run & tested")).toBeNull(); // tier pill retired
   });
 });
