@@ -94,3 +94,23 @@ export function PolicyGatewayReadout({ detail }: { detail: TemplateMetricsDetail
     </Panel>
   );
 }
+
+export function CompletionGateReadout({ detail }: { detail: TemplateMetricsDetail | null }) {
+  const cg = detail?.completionGate;
+  if (!cg) return null;
+  const d = cg.verdictDist;
+  const total = d.upheld + d.escalated + d.evidence_veto + d.refute_veto;
+  if (total === 0) return null;
+  return (
+    <Panel title="Completion gate" kicker="EVIDENCE VETO" style={{ marginTop: 12 }}>
+      <div className="mono" style={{ fontSize: 11.5, color: "var(--text-2)" }}>
+        {d.upheld} upheld · {d.escalated} escalated · {d.evidence_veto} vetoed · {d.refute_veto} overturned
+      </div>
+      {cg.vetoed.count > 0 && (
+        <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-3)" }}>
+          {cg.vetoed.count} completion(s) the harness didn't accept as-is.
+        </div>
+      )}
+    </Panel>
+  );
+}

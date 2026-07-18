@@ -21,7 +21,7 @@ const summary = {
 describe("MetricsPage", () => {
   it("shows a loading state then renders the health tile", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] } });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
     render(<MetricsPage />);
     expect(screen.getByText(/Loading/i)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Step health")).toBeInTheDocument());
@@ -30,11 +30,26 @@ describe("MetricsPage", () => {
 
   it("shows Step health and Gate health as two distinct readouts", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] } });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
     render(<MetricsPage />);
     expect(await screen.findByText("Step health")).toBeInTheDocument();
     expect(screen.getByText("Gate health")).toBeInTheDocument();
     expect(screen.queryByText("Workflow health")).toBeNull();
+  });
+
+  it("renders the completion gate readout with the four verdict counts", async () => {
+    vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({
+      summary, steps: [], gates: [],
+      policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] },
+      completionGate: { verdictDist: { upheld: 3, escalated: 1, evidence_veto: 2, refute_veto: 0 }, vetoed: { count: 3, sampleTransitionIds: ["a", "b", "c"] } },
+    });
+    render(<MetricsPage />);
+    const readout = await screen.findByText(/3 upheld/);
+    expect(readout.textContent).toContain("3 upheld");
+    expect(readout.textContent).toContain("1 escalated");
+    expect(readout.textContent).toContain("2 vetoed");
+    expect(readout.textContent).toContain("0 overturned");
   });
 
   it("shows the empty state when no templates have runs", async () => {
@@ -56,7 +71,7 @@ describe("MetricsPage", () => {
       firstPass: null, confidence: "ok" as const,
     };
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([nullSummary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary: nullSummary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] } });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary: nullSummary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
     render(<MetricsPage />);
     await waitFor(() => expect(screen.getByText("Step health")).toBeInTheDocument());
     const dashes = screen.getAllByText("—");
