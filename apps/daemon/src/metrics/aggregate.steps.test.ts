@@ -684,13 +684,12 @@ describe("computeStepMetrics: calibration divergence insight", () => {
   });
 });
 
-describe("computeStepMetrics: calibration no longer feeds the composed score", () => {
+describe("computeStepMetrics: independent_review calibration never feeds the composed score", () => {
   // No evidence, refute upheld → ai_reviewed passes (independent_review prior 0.55
-  // each). composedScore (Task 2) computes its own designed-prior weight per
-  // completion and has no calibration parameter — effectiveSourceConfidence
-  // (calibration-adjusted) is not in the scoring path yet (Task 3 reconnects it),
-  // only in deriveInsights' display text. So the score stays at the 0.55 design
-  // prior regardless of what calibration measures.
+  // each). Calibration feeds the composed score for executable/grounding sources
+  // (Phase 2b-ii Task 3), but independent_review is never calibrated (it IS the
+  // refute signal—circular), so these completions keep the 0.55 designed prior
+  // regardless of what calibration measures.
   const aiReviewedPasses: TemplateTransition[] = ["r1", "r2", "r3"].map((r, i) => ({
     templateVersion: 1, stepTemplateId: "s",
     transition: {
