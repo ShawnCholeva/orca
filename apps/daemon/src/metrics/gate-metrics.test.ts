@@ -9,6 +9,21 @@ const decision = (over: Partial<GateDecisionRow>): GateDecisionRow => ({
   createdAt: "2026-07-16T00:00:00.000Z", templateVersion: 1, ...over,
 });
 
+// --- fixtures for graded groundedness (mirror composed-score.test.ts shapes) ---
+const evf = (o: Record<string, unknown>) => ({
+  sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [],
+  oracleAdequacy: { sufficient: false, gaps: [] }, ...o,
+});
+const groundingPassed = { verdict: "passed", checks: [{ mode: "enforce", result: "passed" }] };
+const stepTx = (over: { workflowRunId?: string; createdAt?: string; evidence?: unknown; refute?: unknown }): TemplateTransition => ({
+  templateVersion: 1, stepTemplateId: "s",
+  transition: {
+    workflowRunId: over.workflowRunId ?? "r", boundary: "step_complete",
+    createdAt: over.createdAt ?? "2026-07-15T00:00:00.000Z",
+    evidence: over.evidence, refute: over.refute,
+  } as never,
+});
+
 describe("buildGateMetrics", () => {
   it("renders health null ('unproven') when overturn coverage is below the floor", () => {
     const gates = buildGateMetrics({ decisions: [decision({})], transitions: [], names, period: "7d" });
@@ -41,6 +56,48 @@ describe("buildGateMetrics", () => {
     const noCost = buildGateMetrics({ decisions, transitions: [], names, period: "7d" });
     expect(withCost[0].health).toBe(noCost[0].health); // cost never folded into health
     expect(withCost[0].cost.meanUsd).not.toBeNull();
+  });
+
+  it("groundedness is the graded MEAN of reviewed-step evidence strength (not a binary fraction)", () => {
+    const mk = (run: string, evidence: unknown) => ({
+      d: decision({ id: `dec-${run}`, workflowRunId: run, recommendedOutcome: null }),
+      t: stepTx({ workflowRunId: run, evidence }),
+    });
+    const exe = mk("r1", evf({ sensorsRun: [{ kind: "unit" }], oracleAdequacy: { sufficient: true, gaps: [] } })); // base 1.0
+    const grd = mk("r2", evf({ grounding: groundingPassed }));                                                     // base 0.7
+    const slf = mk("r3", evf({}));                                                                                 // base 0.3
+    const gates = buildGateMetrics({
+      decisions: [exe.d, grd.d, slf.d], transitions: [exe.t, grd.t, slf.t], names, period: "7d",
+    });
+    expect(gates[0].scored.groundedness).toBeCloseTo((1.0 + 0.7 + 0.3) / 3, 5); // 0.6667 — graded, not 1/3
+  });
+
+  it("a strongly grounding-verified reviewed step is GROUNDED — not ungrounded, not blind (honesty fix)", () => {
+    const d = decision({ workflowRunId: "r1", outcome: "approved", recommendedOutcome: null });
+    const t = stepTx({ workflowRunId: "r1", evidence: evf({ grounding: groundingPassed }) }); // base 0.7 > 0.3
+    const gates = buildGateMetrics({ decisions: [d], transitions: [t], names, period: "7d" });
+    expect(gates[0].scored.groundedness).toBeCloseTo(0.7, 5);
+    expect(gates[0].scored.ungroundedDecisionIds).toEqual([]);
+    expect(gates[0].failureModes.find((f) => f.label.match(/self-report|independent/i))).toBeUndefined();
+  });
+
+  it("self-report-only and refuted reviewed steps are ungrounded; an approved self-report is blind", () => {
+    const dSelf = decision({ id: "dSelf", workflowRunId: "r1", outcome: "approved", recommendedOutcome: null });
+    const tSelf = stepTx({ workflowRunId: "r1", evidence: evf({}) });                                            // base 0.3 (== floor)
+    const dRef = decision({ id: "dRef", workflowRunId: "r2", outcome: "rejected", recommendedOutcome: null });
+    const tRef = stepTx({ workflowRunId: "r2", refute: { verdict: "refuted" }, evidence: evf({ grounding: groundingPassed }) }); // refuted → base 0
+    const gates = buildGateMetrics({ decisions: [dSelf, dRef], transitions: [tSelf, tRef], names, period: "7d" });
+    expect([...gates[0].scored.ungroundedDecisionIds].sort()).toEqual(["dRef", "dSelf"]);
+    const blind = gates[0].failureModes.find((f) => f.label.match(/self-report|independent/i));
+    expect(blind?.count).toBe(1);                 // only the approved one; dRef was rejected
+    expect(blind?.sampleDecisionIds).toEqual(["dSelf"]);
+  });
+
+  it("a decision with no reviewed step-complete contributes 0 to groundedness", () => {
+    const d = decision({ workflowRunId: "r1", outcome: "approved", recommendedOutcome: null });
+    const gates = buildGateMetrics({ decisions: [d], transitions: [], names, period: "7d" });
+    expect(gates[0].scored.groundedness).toBe(0);
+    expect(gates[0].scored.ungroundedDecisionIds).toEqual(["d"]);
   });
 });
 

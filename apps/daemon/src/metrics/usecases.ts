@@ -79,7 +79,8 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
   const since = windowStart(now, period);
   const transitions = listTransitionsByTemplate(db, templateId, since, now);
   const gateDecisions = listGateDecisionsByTemplate(db, templateId, since, now);
-  const gates = buildGateMetrics({ decisions: gateDecisions, transitions, names: gateNodeNames(db, templateId), period });
+  const calibration = computeCalibration(transitions);
+  const gates = buildGateMetrics({ decisions: gateDecisions, transitions, names: gateNodeNames(db, templateId), period, calibration });
   const scored = gates.filter((g) => g.health != null);
   const gateHealthValue = scored.length ? Math.round(scored.reduce((n, g) => n + g.health!, 0) / scored.length) : null;
   const gateHealth = {

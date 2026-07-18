@@ -1,6 +1,9 @@
 import type { GateMetrics, GateFailureMode, MetricPeriod, PolicyGatewayMetrics } from "@orca/contracts";
 import { labelForGateFailure } from "@orca/contracts";
 import type { GateDecisionRow, TemplateTransition } from "./fetch.js";
+import { composedScore } from "./composed-score.js";
+import { SOURCE_CONFIDENCE } from "./source-signals.js";
+import type { CalibrationEntry } from "./verification.js";
 
 export const GATE_OVERTURN_MIN = 5;   // supervised-with-recommendation decisions before overturnRate is non-null
 export const GATE_SAMPLE_CAP = 5;     // max artifact ids per drill-through list
@@ -22,7 +25,9 @@ export function buildGateMetrics(input: {
   transitions: TemplateTransition[];
   names: Map<string, { name: string; evalSubstrate: "shadow" | "worker" }>;
   period: MetricPeriod;
+  calibration?: CalibrationEntry[];
 }): GateMetrics[] {
+  const calibration = input.calibration;
   const byNode = new Map<string, GateDecisionRow[]>();
   for (const d of input.decisions) (byNode.get(d.nodeId) ?? byNode.set(d.nodeId, []).get(d.nodeId)!).push(d);
 
@@ -48,16 +53,16 @@ export function buildGateMetrics(input: {
     const overturnRate = overturnSampleSize >= GATE_OVERTURN_MIN ? overturned.length / overturnSampleSize : null;
     const overturnDecisionIds = overturned.slice(0, GATE_SAMPLE_CAP).map((d) => d.id);
 
-    // --- Groundedness: did the reviewed step's evidence stand on checks? ---
-    const isGrounded = (d: GateDecisionRow): boolean => {
+    // --- Groundedness: how strongly did the reviewed step's evidence stand up? (graded, composed) ---
+    const GROUNDED_FLOOR = SOURCE_CONFIDENCE.self_report; // 0.3 — at/below ⇒ no independent verifier passed
+    const groundednessOf = (d: GateDecisionRow): number => {
       const completes = stepCompletesByRun.get(d.workflowRunId) ?? [];
       const reviewed = [...completes].reverse().find((t) => t.transition.createdAt < d.createdAt);
-      const ev = (reviewed?.transition as { evidence?: { sensorsRun?: unknown[]; oracleAdequacy?: { sufficient?: boolean } } } | undefined)?.evidence;
-      return !!ev && (ev.sensorsRun?.length ?? 0) > 0 && ev.oracleAdequacy?.sufficient === true;
+      return reviewed ? composedScore(reviewed, calibration).base : 0; // no reviewed step / refuted / failed ⇒ 0
     };
-    const grounded = decisions.filter(isGrounded);
-    const groundedness = decisions.length ? grounded.length / decisions.length : null;
-    const ungroundedDecisionIds = decisions.filter((d) => !isGrounded(d)).slice(0, GATE_SAMPLE_CAP).map((d) => d.id);
+    const isUngrounded = (d: GateDecisionRow): boolean => groundednessOf(d) <= GROUNDED_FLOOR;
+    const groundedness = mean(decisions.map(groundednessOf)); // number | null (null only on empty — unreachable per node)
+    const ungroundedDecisionIds = decisions.filter(isUngrounded).slice(0, GATE_SAMPLE_CAP).map((d) => d.id);
 
     // --- Convergence: resolutions = decisions grouped per run; loops penalize toward the cap ---
     const byRun = new Map<string, GateDecisionRow[]>();
@@ -103,7 +108,7 @@ export function buildGateMetrics(input: {
       modes.push({ label: labelForGateFailure(code), count: rows.length, pct: rows.length / decisions.length, sampleDecisionIds: rows.slice(0, GATE_SAMPLE_CAP).map((d) => d.id) });
     };
     pushMode("overturned_approve", overturned.filter((d) => d.recommendedOutcome === "approved" && d.outcome === "rejected"));
-    pushMode("blind_approve", decisions.filter((d) => d.outcome === "approved" && !isGrounded(d)));
+    pushMode("blind_approve", decisions.filter((d) => d.outcome === "approved" && isUngrounded(d)));
     pushMode("cap_hit", resolutions.filter((r) => r.length >= GATE_REJECT_CAP).flat());
     pushMode("stagnation", stagnated.flat());
 
