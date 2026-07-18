@@ -96,7 +96,7 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
       stepRuns: listStepRunsByTemplate(db, templateId, since, now),
       stepNames: stepNames(db, templateId),
       nowIso: now, period,
-      calibration: computeCalibration(transitions),
+      calibration,
     }),
     gates,
     policyGateway: buildPolicyGatewayMetrics(transitions),

@@ -2,6 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StepRow } from "./StepPerformance";
 import { SelfImprovementRail } from "./SelfImprovement";
+import { PolicyGatewayReadout, CompletionGateReadout } from "./GatePerformance";
 import type { StepMetrics } from "@orca/contracts";
 import * as api from "../api";
 
@@ -29,6 +30,26 @@ const step: StepMetrics = {
 describe("no jargon in the metrics step detail", () => {
   it("renders no 'oracle', 'sensor', 'verdict', 'refute', or 'veto'", () => {
     const { container } = render(<StepRow step={step} index={0} isLast open onToggle={() => {}} />);
+    expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
+  });
+});
+
+describe("no jargon in the gateway readouts", () => {
+  // The completion-gate + policy-gateway panels are user-visible copy; scan them here so
+  // a jargon word (e.g. an "EVIDENCE VETO" kicker) can't slip past the no-jargon bar.
+  const detailWithGateways = {
+    policyGateway: { decisionDist: { allow: 5, require_approval: 2, deny: 1 }, overPermissive: { count: 1, sampleTransitionIds: ["t1"] }, boundaryViolations: [] },
+    completionGate: { verdictDist: { upheld: 10, escalated: 1, evidence_veto: 2, refute_veto: 1 }, vetoed: { count: 4, sampleTransitionIds: ["a", "b"] } },
+  } as never;
+
+  it("renders no 'oracle', 'sensor', 'verdict', 'refute', or 'veto' in the policy + completion gateway panels", () => {
+    const { container } = render(
+      <>
+        <PolicyGatewayReadout detail={detailWithGateways} />
+        <CompletionGateReadout detail={detailWithGateways} />
+      </>
+    );
+    expect(container.textContent).toMatch(/upheld/i); // guard: the completion panel actually rendered
     expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 });
