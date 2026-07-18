@@ -102,7 +102,7 @@ export function CompletionGateReadout({ detail }: { detail: TemplateMetricsDetai
   const total = d.upheld + d.escalated + d.evidence_veto + d.refute_veto;
   if (total === 0) return null;
   return (
-    <Panel title="Completion gate" kicker="EVIDENCE VETO" style={{ marginTop: 12 }}>
+    <Panel title="Completion gate" kicker="EVIDENCE CHECK" style={{ marginTop: 12 }}>
       <div className="mono" style={{ fontSize: 11.5, color: "var(--text-2)" }}>
         {d.upheld} upheld · {d.escalated} escalated · {d.evidence_veto} vetoed · {d.refute_veto} overturned
       </div>
