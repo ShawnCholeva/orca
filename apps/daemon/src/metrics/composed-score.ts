@@ -1,7 +1,8 @@
 import type { TemplateTransition } from "./fetch.js";
 import { isCodeFile } from "../harness-sensors/code-files.js";
+import { sourcesPassed, SOURCE_CONFIDENCE } from "./source-signals.js";
 
-const C_EXECUTABLE = 1.0, C_GROUNDING = 0.7, C_REVIEW = 0.55, SELF_REPORT = 0.3, COVERAGE_FLOOR = 0.3;
+const COVERAGE_FLOOR = 0.3;
 
 export type CompletionScore = {
   score: number; base: number; coverage: number;
@@ -15,16 +16,12 @@ export function composedScore(t: TemplateTransition): CompletionScore {
   if (rf?.verdict === "refuted") return zero();
   if (ev?.verdict === "failed") return zero();
 
-  const executable = !!ev && ev.sensorsRun.length > 0 && ev.oracleAdequacy.sufficient === true;   // sensors ran + sufficiency-gated (match classifyTier)
-  const grounding =
-    ev?.grounding?.verdict === "passed" &&
-    (ev.grounding.checks ?? []).some((c) => c.mode === "enforce" && c.result !== "skipped");   // match classifyTier: verdict alone isn't enough
-  const independentReview = rf?.verdict === "upheld";
+  const { executable, grounding, independentReview } = sourcesPassed(ev, rf);
   const cs: number[] = [];
-  if (executable) cs.push(C_EXECUTABLE);
-  if (grounding) cs.push(C_GROUNDING);
-  if (independentReview) cs.push(C_REVIEW);
-  const base = cs.length === 0 ? SELF_REPORT : 1 - cs.reduce((p, c) => p * (1 - c), 1);
+  if (executable) cs.push(SOURCE_CONFIDENCE.executable);
+  if (grounding) cs.push(SOURCE_CONFIDENCE.grounding);
+  if (independentReview) cs.push(SOURCE_CONFIDENCE.independent_review);
+  const base = cs.length === 0 ? SOURCE_CONFIDENCE.self_report : 1 - cs.reduce((p, c) => p * (1 - c), 1);
 
   const coverage = computeCoverage(t, ev);
   return { score: base * coverage, base, coverage, verifiers: { executable, grounding, independentReview } };
