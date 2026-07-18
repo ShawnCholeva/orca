@@ -53,7 +53,7 @@ export function GateRow({ gate, index, isLast, open, onToggle }: { gate: GateMet
               </div>
             ))}
             <SectionLabel>Grounded in checks</SectionLabel>
-            <div style={{ fontSize: 12, color: "var(--text-2)" }}>{pct(gate.scored.groundedness)} of calls stood on checks that actually ran.</div>
+            <div style={{ fontSize: 12, color: "var(--text-2)" }}>{pct(gate.scored.groundedness)} average strength of the evidence behind gate calls.</div>
             <SectionLabel>Cost</SectionLabel>
             <div className="mono" style={{ fontSize: 11.5, color: "var(--text-3)" }}>
               {gate.cost.p50LatencyMs == null ? "—" : `${Math.round(gate.cost.p50LatencyMs)}ms`} · {gate.cost.meanTokens == null ? "—" : `${Math.round(gate.cost.meanTokens)} tok`} · {gate.cost.meanUsd == null ? "—" : `$${gate.cost.meanUsd.toFixed(3)}`}
