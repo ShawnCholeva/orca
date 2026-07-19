@@ -6,6 +6,9 @@ export { labelForGateFailure, GATE_FAILURE_CODES } from "./gate-failure-labels.j
 export const MetricPeriod = z.enum(["24h", "7d", "30d"]);
 export type MetricPeriod = z.infer<typeof MetricPeriod>;
 
+export const MetricScope = z.enum(["current", "latest", "all"]);
+export type MetricScope = z.infer<typeof MetricScope>;
+
 // Mirrors the daemon HarnessMetrics Metric shape (value 0..1 or a count, or null+reason).
 export const Metric = z.object({ value: z.number().nullable(), reason: z.string().optional() }).strict();
 export type Metric = z.infer<typeof Metric>;
@@ -38,6 +41,8 @@ export const TemplateMetricsSummary = z.object({
   templateId: z.string(),
   name: z.string(),
   latestVersion: z.number().int(),
+  // Echoes the active MetricScope this detail response was computed under.
+  scope: MetricScope,
   runs: z.number().int().nonnegative(),
   dimensions: SixDimensions,
   // Tile rates (0..1 or null) — the four legacy tiles, computed server-side.

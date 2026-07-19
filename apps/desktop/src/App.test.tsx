@@ -49,6 +49,7 @@ const metricsSummary = {
   templateId: "tpl",
   name: "Brainstorm",
   latestVersion: 1,
+  scope: "current" as const,
   runs: 12,
   dimensions: {
     trajectoryEfficiency: { value: null },

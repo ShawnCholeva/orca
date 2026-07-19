@@ -20,7 +20,7 @@ function step(over: Partial<StepMetrics> = {}): StepMetrics {
 
 function summary(over: Partial<TemplateMetricsSummary> = {}): TemplateMetricsSummary {
   return {
-    templateId: "tpl", name: "B", latestVersion: 2, runs: 10,
+    templateId: "tpl", name: "B", latestVersion: 2, scope: "current", runs: 10,
     dimensions: { trajectoryEfficiency: { value: 0.8 }, verificationStrength: { value: 0.6 }, recovery: { value: 0.5 }, stateConsistency: { value: 1 }, safetyCompliance: { value: 1 }, replayability: { value: 1 } },
     firstPass: 0.5, recovered: 0.2, escalated: 0.05, latencyP50Ms: 100,
     deltas: { trajectoryEfficiency: null, verificationStrength: null, recovery: null, stateConsistency: null, safetyCompliance: null, replayability: null, latencyP50Ms: null },

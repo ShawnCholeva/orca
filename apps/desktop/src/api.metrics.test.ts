@@ -20,7 +20,7 @@ describe("getTemplateMetricsSummaries", () => {
 
   it("requests the templates endpoint with the period and returns summaries", async () => {
     const summaries = [{
-      templateId: "tpl", name: "Brainstorm", latestVersion: 1, runs: 3,
+      templateId: "tpl", name: "Brainstorm", latestVersion: 1, scope: "current" as const, runs: 3,
       dimensions: {
         trajectoryEfficiency: { value: null }, verificationStrength: { value: 0.8 },
         recovery: { value: null }, stateConsistency: { value: 1 },
@@ -55,7 +55,7 @@ describe("getTemplateMetricsDetail", () => {
 
   it("requests the template detail endpoint with period and returns detail", async () => {
     const summary = {
-      templateId: "tpl", name: "Brainstorm", latestVersion: 1, runs: 3,
+      templateId: "tpl", name: "Brainstorm", latestVersion: 1, scope: "current" as const, runs: 3,
       dimensions: {
         trajectoryEfficiency: { value: null }, verificationStrength: { value: 0.8 },
         recovery: { value: null }, stateConsistency: { value: 1 },

@@ -1,4 +1,4 @@
-import type { CompletionGateMetrics, GateMetrics, GateFailureMode, MetricPeriod, PolicyGatewayMetrics } from "@orca/contracts";
+import type { CompletionGateMetrics, GateMetrics, GateFailureMode, MetricPeriod, MetricScope, PolicyGatewayMetrics } from "@orca/contracts";
 import { labelForGateFailure } from "@orca/contracts";
 import type { GateDecisionRow, TemplateTransition } from "./fetch.js";
 import { composedScore } from "./composed-score.js";
@@ -26,14 +26,17 @@ export function buildGateMetrics(input: {
   names: Map<string, { name: string; evalSubstrate: "shadow" | "worker" }>;
   period: MetricPeriod;
   calibration?: CalibrationEntry[];
+  scope?: MetricScope;
 }): GateMetrics[] {
   const calibration = input.calibration;
+  const scope = input.scope ?? "current";
   // Scope to the CURRENT template's gates: a node id not in `names` is a retired gate
   // from an older version. If the gate set is unknown (empty), don't filter.
+  // scope="all" disables this filter entirely (pre-A-i behavior).
   const currentGates = input.names;
   const byNode = new Map<string, GateDecisionRow[]>();
   for (const d of input.decisions) {
-    if (currentGates.size > 0 && !currentGates.has(d.nodeId)) continue;
+    if (scope !== "all" && currentGates.size > 0 && !currentGates.has(d.nodeId)) continue;
     (byNode.get(d.nodeId) ?? byNode.set(d.nodeId, []).get(d.nodeId)!).push(d);
   }
 

@@ -6,7 +6,7 @@ import * as api from "../api";
 afterEach(() => vi.restoreAllMocks());
 
 const summary = {
-  templateId: "tpl", name: "Brainstorm", latestVersion: 1, runs: 12,
+  templateId: "tpl", name: "Brainstorm", latestVersion: 1, scope: "current" as const, runs: 12,
   dimensions: { trajectoryEfficiency: { value: null }, verificationStrength: { value: 0.82 },
     recovery: { value: 0.28 }, stateConsistency: { value: 1 }, safetyCompliance: { value: 0.92 }, replayability: { value: 1 } },
   firstPass: 0.64, recovered: 0.28, escalated: 0.08,

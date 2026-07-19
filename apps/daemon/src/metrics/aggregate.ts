@@ -1,6 +1,6 @@
 import type { HarnessMetrics } from "../harness-metrics/usecases.js";
 import { computeHarnessMetricsFromTransitions } from "../harness-metrics/usecases.js";
-import type { MetricPeriod, TemplateMetricsSummary, StepMetrics } from "@orca/contracts";
+import type { MetricPeriod, MetricScope, TemplateMetricsSummary, StepMetrics } from "@orca/contracts";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
 import { classifyTier, strongestTier, TIER_LABEL, buildArtifacts, computeCalibration, CALIBRATION_DIVERGENCE, CALIBRATION_SCORE_MIN } from "./verification.js";
 import type { CalibrationEntry } from "./verification.js";
@@ -104,7 +104,7 @@ export function computeTemplateSummary(input: {
   versions: { version: number; runs: number; firstSeenAt: string }[];
   current: { transitions: TemplateTransition[]; stepRuns: TemplateStepRun[] };
   prior: { transitions: TemplateTransition[]; stepRuns: TemplateStepRun[] };
-}): TemplateMetricsSummary {
+}): Omit<TemplateMetricsSummary, "scope"> {
   // Gate surrogate transitions (__gate__:*) are steps only for tile-rate/escalation
   // purposes (computeStepMetrics already excludes them there); they must not feed the
   // six-dimension harness metrics, or gate approvals/denials contaminate verificationStrength
@@ -219,12 +219,15 @@ export function computeStepMetrics(input: {
   nowIso: string;
   period: MetricPeriod;
   calibration?: CalibrationEntry[];
+  scope?: MetricScope;
 }): StepMetrics[] {
   // Scope to the CURRENT template's steps: a step id not in stepNames is a fossil
   // from a retired version, or the step-era of a node that is now a gate — either way
   // it isn't part of today's pipeline. If the step set is unknown (empty), don't filter.
+  // scope="all" disables this id-shape filter entirely (pre-A-i behavior).
+  const scope = input.scope ?? "current";
   const currentSteps = input.stepNames;
-  const inCurrentShape = (id: string) => currentSteps.size === 0 || currentSteps.has(id);
+  const inCurrentShape = scope === "all" ? () => true : (id: string) => currentSteps.size === 0 || currentSteps.has(id);
 
   const byStep = new Map<string, TemplateTransition[]>();
   for (const t of input.transitions) {

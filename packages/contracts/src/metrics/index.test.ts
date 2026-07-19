@@ -16,7 +16,7 @@ describe("metrics contracts", () => {
 
   it("round-trips a minimal TemplateMetricsSummary", () => {
     const summary = {
-      templateId: "tpl", name: "Brainstorm", latestVersion: 2, runs: 10,
+      templateId: "tpl", name: "Brainstorm", latestVersion: 2, scope: "current" as const, runs: 10,
       dimensions: {
         trajectoryEfficiency: { value: null, reason: "no transitions" },
         verificationStrength: { value: 0.8 },
@@ -41,7 +41,7 @@ describe("metrics contracts", () => {
   it("round-trips a TemplateMetricsDetail with one step", () => {
     const detail = {
       summary: TemplateMetricsSummary.parse({
-        templateId: "tpl", name: "Brainstorm", latestVersion: 1, runs: 1,
+        templateId: "tpl", name: "Brainstorm", latestVersion: 1, scope: "current" as const, runs: 1,
         dimensions: {
           trajectoryEfficiency: { value: null }, verificationStrength: { value: 1 },
           recovery: { value: null }, stateConsistency: { value: 1 },

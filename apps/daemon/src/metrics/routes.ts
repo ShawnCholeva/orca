@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
-import { MetricPeriod } from "@orca/contracts";
+import { MetricPeriod, MetricScope } from "@orca/contracts";
 import { getTemplateMetricsDetail, getTemplateMetricsSummaries } from "./usecases.js";
 
 export interface MetricsRouteDeps { db: Database.Database }
@@ -24,7 +24,9 @@ export function registerMetricsRoutes(server: FastifyInstance, deps: MetricsRout
       return { error: { code: "invalid_period", message: "period must be one of 24h, 7d, 30d" } };
     }
     const { templateId } = request.params as { templateId: string };
-    const detail = getTemplateMetricsDetail(db, templateId, period.data);
+    const scopeParsed = MetricScope.safeParse((request.query as { scope?: string }).scope);
+    const scope = scopeParsed.success ? scopeParsed.data : "current";
+    const detail = getTemplateMetricsDetail(db, templateId, period.data, undefined, scope);
     if (!detail) {
       reply.status(404);
       return { error: { code: "template_not_found", message: `Template not found or has no runs: ${templateId}` } };
