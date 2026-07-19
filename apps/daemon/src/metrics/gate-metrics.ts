@@ -28,8 +28,14 @@ export function buildGateMetrics(input: {
   calibration?: CalibrationEntry[];
 }): GateMetrics[] {
   const calibration = input.calibration;
+  // Scope to the CURRENT template's gates: a node id not in `names` is a retired gate
+  // from an older version. If the gate set is unknown (empty), don't filter.
+  const currentGates = input.names;
   const byNode = new Map<string, GateDecisionRow[]>();
-  for (const d of input.decisions) (byNode.get(d.nodeId) ?? byNode.set(d.nodeId, []).get(d.nodeId)!).push(d);
+  for (const d of input.decisions) {
+    if (currentGates.size > 0 && !currentGates.has(d.nodeId)) continue;
+    (byNode.get(d.nodeId) ?? byNode.set(d.nodeId, []).get(d.nodeId)!).push(d);
+  }
 
   // Step-completion transitions per run, sorted by time — used for the gate→evidence join.
   const stepCompletesByRun = new Map<string, TemplateTransition[]>();

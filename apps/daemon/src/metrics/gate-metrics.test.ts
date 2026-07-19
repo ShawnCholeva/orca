@@ -99,6 +99,21 @@ describe("buildGateMetrics", () => {
     expect(gates[0].scored.groundedness).toBe(0);
     expect(gates[0].scored.ungroundedDecisionIds).toEqual(["d"]);
   });
+
+  it("shows only the current template's gates — a decision for a retired gate node drops out", () => {
+    const decisions = [
+      decision({ id: "d1", nodeId: "review", workflowRunId: "r1", recommendedOutcome: null }),   // current gate
+      decision({ id: "d2", nodeId: "designgate", workflowRunId: "r2", recommendedOutcome: null }), // retired gate — not in `names`
+    ];
+    const gates = buildGateMetrics({ decisions, transitions: [], names, period: "7d" });
+    expect(gates.map((g) => g.nodeId)).toEqual(["review"]); // designgate excluded
+  });
+
+  it("falls back to showing all gates when the gate set is unknown (empty names)", () => {
+    const decisions = [decision({ id: "d1", nodeId: "review", workflowRunId: "r1", recommendedOutcome: null })];
+    const gates = buildGateMetrics({ decisions, transitions: [], names: new Map(), period: "7d" });
+    expect(gates.map((g) => g.nodeId)).toEqual(["review"]); // no filtering when the set is unknown
+  });
 });
 
 function costTransitions(usd: number): TemplateTransition[] {
