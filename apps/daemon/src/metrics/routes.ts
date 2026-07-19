@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import { MetricPeriod, MetricScope } from "@orca/contracts";
 import { getTemplateMetricsDetail, getTemplateMetricsSummaries } from "./usecases.js";
+import { getSampleDetail } from "./sample-detail.js";
 
 export interface MetricsRouteDeps { db: Database.Database }
 
@@ -32,5 +33,12 @@ export function registerMetricsRoutes(server: FastifyInstance, deps: MetricsRout
       return { error: { code: "template_not_found", message: `Template not found or has no runs: ${templateId}` } };
     }
     return { detail };
+  });
+
+  server.get("/v1/metrics/samples/:transitionId", async (request, reply) => {
+    const { transitionId } = request.params as { transitionId: string };
+    const sample = getSampleDetail(db, transitionId);
+    if (!sample) { reply.status(404); return { error: { code: "not_found", message: "sample not found" } }; }
+    return { sample };
   });
 }

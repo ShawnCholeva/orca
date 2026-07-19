@@ -264,6 +264,18 @@ export const PipelineNode = z.object({
 }).strict();
 export type PipelineNode = z.infer<typeof PipelineNode>;
 
+export const SampleDetail = z.object({
+  transitionId: z.string(),
+  goalId: z.string(),
+  workflowRunId: z.string().nullable(),
+  createdAt: z.string(),
+  templateVersion: z.number().int().nullable(),
+  failureCode: z.string().nullable(),
+  status: z.string(),
+  checks: z.array(z.object({ label: z.string(), detail: z.string().nullable(), result: z.string() }).strict()),
+}).strict();
+export type SampleDetail = z.infer<typeof SampleDetail>;
+
 export const TemplateMetricsDetail = z.object({
   summary: TemplateMetricsSummary,
   steps: z.array(StepMetrics),
