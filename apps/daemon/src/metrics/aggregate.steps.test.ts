@@ -17,6 +17,49 @@ function sc(id: string, runId: string, step: string, verdict: "passed" | "failed
 }
 
 const names = new Map([["s", { name: "Generate Proposal", ordinal: 2 }]]);
+const nowIso = "2026-05-08T00:00:00.000Z";
+
+// Completion-shape builders for band-derivation tests, reusing sc()'s base shape
+// (same evidence/telemetry skeleton composed-score.test.ts uses via tx()/ev()).
+function groundingPassedTxs(step: string, n: number): TemplateTransition[] {
+  return Array.from({ length: n }, (_, i) => {
+    const t = sc(`g${i}`, `r${i}`, step, "passed", false, `2026-05-01T00:0${i}:00.000Z`);
+    t.transition.evidence!.grounding = {
+      checks: [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce", result: "passed", detail: "" }],
+      verdict: "passed",
+    };
+    return t;
+  });
+}
+function executableTxs(step: string, n: number): TemplateTransition[] {
+  return Array.from({ length: n }, (_, i) => {
+    const t = sc(`e${i}`, `r${i}`, step, "passed", true, `2026-05-01T00:0${i}:00.000Z`);
+    t.transition.evidence!.sensorsRun = [
+      { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
+    ];
+    return t;
+  });
+}
+function selfReportTxs(step: string, n: number): TemplateTransition[] {
+  return Array.from({ length: n }, (_, i) => sc(`s${i}`, `r${i}`, step, "passed", false, `2026-05-01T00:0${i}:00.000Z`));
+}
+function unverifiedTxs(step: string, n: number): TemplateTransition[] {
+  return Array.from({ length: n }, (_, i) => ({
+    templateVersion: 1, stepTemplateId: step,
+    transition: {
+      id: `u${i}`, goalId: "g", workflowRunId: `r${i}`, workflowStepRunId: `r${i}-${step}`,
+      boundary: "step_complete", risk: null, stateDeps: null, evidence: null, refute: null,
+      telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "failed", failure_code: "evaluation_failed" } },
+      createdAt: `2026-05-01T00:0${i}:00.000Z`,
+    },
+  }));
+}
+function passRuns(step: string, n: number): TemplateStepRun[] {
+  return Array.from({ length: n }, (_, i) => ({
+    workflowRunId: `r${i}`, stepTemplateId: step, attempt: 1, status: "passed",
+    startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1,
+  }));
+}
 
 describe("computeStepMetrics", () => {
   it("rolls up a step's three channels and failure clusters", () => {
@@ -533,8 +576,10 @@ describe("computeStepMetrics", () => {
     expect(step.quality.scoreBreakdown?.verifierMix).toEqual({ executable: 0, grounding: 0, independentReview: 0, selfReportOnly: 0 });
   });
 
-  it("bands a majority-executed step 'strong'", () => {
-    // 2/3 scored completions had execution → STRICT majority → strong band.
+  it("bands a majority-executed step 'strong' when the step requires execution", () => {
+    // 2/3 scored completions had execution → STRICT majority → strong band. The step
+    // is EXECUTION-REQUIRING (passed via requiresExecution) — the pre-Phase-B1 test's
+    // intent (majority-executed → strong) is preserved by supplying that ceiling.
     const exec1 = sc("e1", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z");
     exec1.transition.evidence!.sensorsRun = [
       { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
@@ -554,13 +599,15 @@ describe("computeStepMetrics", () => {
       workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "passed",
       startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1,
     }));
-    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
-    expect(step.verification.band).toEqual({ level: "strong", label: "Strongly verified" });
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", requiresExecution: new Set(["s"]) });
+    expect(step.verification.band).toEqual({ level: "strong", label: "Run & tested" });
   });
 
-  it("bands a HIGH-scoring grounding-only step 'weak' (kind ≠ magnitude)", () => {
-    // Grounding-only completions can score high (base 0.7), but no execution ran →
-    // the band is honestly "weak", orthogonal to the score magnitude.
+  it("bands a HIGH-scoring grounding-only no-code step 'strong' (ceiling-relative, kind ≠ magnitude)", () => {
+    // Grounding-only completions can score high (base 0.7); this step does NOT
+    // require execution (requiresExecution not provided), so it is judged at its
+    // best-available verifier — grounding — not against an execution bar it could
+    // never meet. The score and the band both land honestly high here.
     const g1 = sc("g1", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z");
     g1.transition.evidence!.oracleAdequacy = { sufficient: false, gaps: [] };
     g1.transition.evidence!.grounding = {
@@ -580,8 +627,8 @@ describe("computeStepMetrics", () => {
     }));
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBeGreaterThanOrEqual(70); // grounding base 0.7 × full coverage — a HIGH score
-    expect(step.verification.band.level).toBe("weak");
-    expect(step.verification.band.label).toBe("Weakly verified");
+    expect(step.verification.band.level).toBe("strong");
+    expect(step.verification.band.label).toBe("Reviewed");
   });
 
   it("bands a step with no conclusive verification 'needs_evidence'", () => {
@@ -599,7 +646,39 @@ describe("computeStepMetrics", () => {
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBeNull();
     expect(step.verification.band.level).toBe("needs_evidence");
-    expect(step.verification.band.label).toBe("Needs more evidence");
+    expect(step.verification.band.label).toBe("Not checked yet");
+  });
+
+  describe("step-type-aware band (Phase B1: ceiling-relative level + honest label)", () => {
+    it("no-code step at its ceiling (grounding-majority) bands STRONG 'Reviewed'", () => {
+      const [step] = computeStepMetrics({ transitions: groundingPassedTxs("s", 3), stepRuns: passRuns("s", 3), stepNames: names, nowIso, period: "7d" });
+      expect(step.verification.band.level).toBe("strong");
+      expect(step.verification.band.label).toBe("Reviewed");
+    });
+
+    it("a step that REQUIRES execution but wasn't executed bands WEAK 'Not tested'", () => {
+      const [step] = computeStepMetrics({ transitions: groundingPassedTxs("s", 3), stepRuns: passRuns("s", 3), stepNames: names, nowIso, period: "7d", requiresExecution: new Set(["s"]) });
+      expect(step.verification.band.level).toBe("weak");
+      expect(step.verification.band.label).toBe("Not tested");
+    });
+
+    it("executed step bands STRONG 'Run & tested' when it requires execution", () => {
+      const [step] = computeStepMetrics({ transitions: executableTxs("s", 3), stepRuns: passRuns("s", 3), stepNames: names, nowIso, period: "7d", requiresExecution: new Set(["s"]) });
+      expect(step.verification.band.level).toBe("strong");
+      expect(step.verification.band.label).toBe("Run & tested");
+    });
+
+    it("self-report-only no-code step bands WEAK 'Only self-reported'", () => {
+      const [step] = computeStepMetrics({ transitions: selfReportTxs("s", 3), stepRuns: passRuns("s", 3), stepNames: names, nowIso, period: "7d" });
+      expect(step.verification.band.level).toBe("weak");
+      expect(step.verification.band.label).toBe("Only self-reported");
+    });
+
+    it("no conclusive verification → needs_evidence 'Not checked yet'", () => {
+      const [step] = computeStepMetrics({ transitions: unverifiedTxs("s", 1), stepRuns: passRuns("s", 1), stepNames: names, nowIso, period: "7d" });
+      expect(step.verification.band.level).toBe("needs_evidence");
+      expect(step.verification.band.label).toBe("Not checked yet");
+    });
   });
 
   it("shows only the current template's steps — fossils and retyped/renamed ids drop out", () => {

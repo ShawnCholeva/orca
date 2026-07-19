@@ -1,10 +1,11 @@
 import type Database from "better-sqlite3";
-import type { MetricPeriod, MetricScope, TemplateMetricsDetail, TemplateMetricsSummary } from "@orca/contracts";
+import type { MetricPeriod, MetricScope, TemplateMetricsDetail, TemplateMetricsSummary, WorkflowGuardrailConfig } from "@orca/contracts";
 import { listGateDecisionsByTemplate, listStepRunsByTemplate, listTemplatesWithRuns, listTransitionsByTemplate } from "./fetch.js";
 import { computeStepMetrics, computeTemplateSummary, windowStart } from "./aggregate.js";
 import { computeCalibration } from "./verification.js";
 import { buildCompletionGateMetrics, buildGateMetrics, buildPolicyGatewayMetrics } from "./gate-metrics.js";
 import { computeNodeLineage } from "./node-lineage.js";
+import { stepRequiresExecution } from "../workflows/orchestrator/requires-execution.js";
 
 function nowOr(nowIso?: string): string {
   return nowIso ?? new Date().toISOString();
@@ -93,6 +94,10 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
   const stepRuns = scope === "latest" ? allStepRuns.filter((r) => r.templateVersion === info.latestVersion) : allStepRuns;
   const calibration = computeCalibration(transitions);
   const lineage = computeNodeLineage(db, templateId, since, now);
+  const currentStepNames = stepNames(db, templateId);
+  const gRow = db.prepare(`SELECT guardrails_json FROM workflow_templates WHERE id = ?`).get(templateId) as { guardrails_json: string } | undefined;
+  const guardrails = gRow ? (JSON.parse(gRow.guardrails_json) as WorkflowGuardrailConfig[]) : [];
+  const requiresExecution = new Set([...currentStepNames.keys()].filter((id) => stepRequiresExecution(guardrails, id) !== null));
   const gates = buildGateMetrics({ decisions: gateDecisions, transitions, names: gateNodeNames(db, templateId), period, calibration, scope, lineage });
   const scored = gates.filter((g) => g.health != null);
   const gateHealthValue = scored.length ? Math.round(scored.reduce((n, g) => n + g.health!, 0) / scored.length) : null;
@@ -107,11 +112,12 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
     steps: computeStepMetrics({
       transitions,
       stepRuns,
-      stepNames: stepNames(db, templateId),
+      stepNames: currentStepNames,
       nowIso: now, period,
       calibration,
       scope,
       lineage,
+      requiresExecution,
     }),
     gates,
     policyGateway: buildPolicyGatewayMetrics(transitions),

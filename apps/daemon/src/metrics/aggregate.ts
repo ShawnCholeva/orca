@@ -221,6 +221,7 @@ export function computeStepMetrics(input: {
   calibration?: CalibrationEntry[];
   scope?: MetricScope;
   lineage?: Map<string, NodeVersionHistory>;
+  requiresExecution?: Set<string>;
 }): StepMetrics[] {
   // Scope to the CURRENT template's steps: a step id not in stepNames is a fossil
   // from a retired version, or the step-era of a node that is now a gate — either way
@@ -250,6 +251,7 @@ export function computeStepMetrics(input: {
 
   const steps: StepMetrics[] = [];
   for (const [stepTemplateId, ts] of byStep) {
+    const requiresExec = input.requiresExecution?.has(stepTemplateId) ?? false;
     const meta = input.stepNames.get(stepTemplateId) ?? { name: stepTemplateId, ordinal: 999 };
     const stepRuns = runsByStep.get(stepTemplateId) ?? [];
     const stepCompletes = ts.filter((t) => t.transition.boundary === "step_complete");
@@ -500,13 +502,20 @@ export function computeStepMetrics(input: {
     const concScores = conclusive.map((t) => scoreByCompletion.get(t)!).filter((s) => s.base !== 0);
     const scoredCount = concScores.length;
     const executableCount = concScores.filter((s) => s.verifiers.executable).length;
-    // Epistemic band = verification KIND (strong/weak/needs-evidence), ORTHOGONAL to the
-    // score magnitude: a high-scoring grounding-only step is honestly "Weakly verified".
+    // Ceiling-relative: a step that can't be executed is judged at its best-available
+    // verifier (grounding/review), not against an execution bar it could never meet.
+    const ceilingCount = requiresExec
+      ? executableCount
+      : concScores.filter((s) => s.verifiers.grounding || s.verifiers.independentReview).length;
     const bandLevel: "strong" | "weak" | "needs_evidence" =
       scoreValue == null ? "needs_evidence"
-      : executableCount > scoredCount / 2 ? "strong"
+      : ceilingCount > scoredCount / 2 ? "strong"
       : "weak";
-    const BAND_LABEL = { strong: "Strongly verified", weak: "Weakly verified", needs_evidence: "Needs more evidence" } as const;
+    const BAND_LABEL = {
+      strong: requiresExec ? "Run & tested" : "Reviewed",
+      weak: requiresExec ? "Not tested" : "Only self-reported",
+      needs_evidence: "Not checked yet",
+    } as const;
     const scoreBreakdown = {
       meanBase: mean(concScores.map((s) => s.base)),
       meanCoverage: mean(concScores.map((s) => s.coverage)),
