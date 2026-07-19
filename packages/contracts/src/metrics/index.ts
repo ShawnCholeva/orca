@@ -182,6 +182,8 @@ export const StepMetrics = z.object({
   stepTemplateId: z.string(),
   name: z.string(),
   ordinal: z.number().int(),
+  description: z.string().optional(),
+  completionPolicy: z.string().optional(),
   score: z.number().nullable(),
   sampleSize: z.number().int().nonnegative(),
   confidence: z.enum(["low", "ok"]),

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
 import { computeStepMetrics, deriveInsights } from "./aggregate.js";
 import type { CalibrationEntry } from "./verification.js";
+import { firstSentence } from "./usecases.js";
 
 function sc(id: string, runId: string, step: string, verdict: "passed" | "failed", oracleSufficient: boolean, at: string): TemplateTransition {
   return {
@@ -918,5 +919,46 @@ describe("computeStepMetrics: independent_review calibration never feeds the com
     ];
     const [step] = computeStepMetrics({ transitions: aiReviewedPasses, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
     expect(step.score).toBe(55);
+  });
+});
+
+describe("step description + completionPolicy", () => {
+  it("surfaces description (first sentence of instructions) + completionPolicy on the step metric", () => {
+    const ts = [sc("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z")];
+    const runs: TemplateStepRun[] = [
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 },
+    ];
+    const namesWithMeta = new Map([["s", { name: "Generate", ordinal: 2, description: "Assess the goal without changing code.", completionPolicy: "reasoning" }]]);
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: namesWithMeta, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.description).toBe("Assess the goal without changing code.");
+    expect(step.completionPolicy).toBe("reasoning");
+  });
+
+  it("leaves description/completionPolicy undefined when stepNames doesn't carry them", () => {
+    const ts = [sc("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z")];
+    const runs: TemplateStepRun[] = [
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 },
+    ];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+    expect(step.description).toBeUndefined();
+    expect(step.completionPolicy).toBeUndefined();
+  });
+});
+
+describe("firstSentence", () => {
+  it("takes the first sentence up to the first '. '", () => {
+    expect(firstSentence("A. B")).toBe("A.");
+  });
+
+  it("caps a no-period string over 140 chars at a word boundary with an ellipsis", () => {
+    const long = "word ".repeat(40).trim(); // 199 chars, no period
+    const result = firstSentence(long)!;
+    expect(result.length).toBeLessThanOrEqual(141);
+    expect(result.endsWith("…")).toBe(true);
+  });
+
+  it("returns undefined for empty or whitespace-only input", () => {
+    expect(firstSentence("")).toBeUndefined();
+    expect(firstSentence("   ")).toBeUndefined();
   });
 });

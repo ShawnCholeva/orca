@@ -215,7 +215,7 @@ export function deriveInsights(step: StepMetrics, calibration?: CalibrationEntry
 export function computeStepMetrics(input: {
   transitions: TemplateTransition[];
   stepRuns: TemplateStepRun[];
-  stepNames: Map<string, { name: string; ordinal: number }>;
+  stepNames: Map<string, { name: string; ordinal: number; description?: string; completionPolicy?: string }>;
   nowIso: string;
   period: MetricPeriod;
   calibration?: CalibrationEntry[];
@@ -530,6 +530,7 @@ export function computeStepMetrics(input: {
 
     const step: StepMetrics = {
       stepTemplateId, name: meta.name, ordinal: meta.ordinal,
+      description: meta.description, completionPolicy: meta.completionPolicy,
       score: scoreValue == null ? null : Math.round(scoreValue * 100), sampleSize, confidence: sampleSize < SAMPLE_MIN ? "low" : "ok",
       runs: finals.length, passedFirstTry, recovered, failed,
       quality: {

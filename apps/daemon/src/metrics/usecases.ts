@@ -57,14 +57,29 @@ export function getTemplateMetricsSummaries(db: Database.Database, period: Metri
   return listTemplatesWithRuns(db).map((t) => buildSummary(db, t, period, now));
 }
 
-interface StepDef { id: string; name: string }
+interface StepDef { id: string; name?: string; ordinal?: number; instructions?: string; completionPolicy?: string }
 
-function stepNames(db: Database.Database, templateId: string): Map<string, { name: string; ordinal: number }> {
+// First sentence of `text`, capped at `cap` chars (word-boundary + ellipsis if truncated).
+export function firstSentence(text: string, cap = 140): string | undefined {
+  const t = text.trim();
+  if (!t) return undefined;
+  const m = t.search(/\.\s/);
+  let s = m > 0 ? t.slice(0, m + 1) : t;
+  if (s.length > cap) s = s.slice(0, cap).replace(/\s+\S*$/, "") + "…";
+  return s;
+}
+
+function stepNames(db: Database.Database, templateId: string): Map<string, { name: string; ordinal: number; description?: string; completionPolicy?: string }> {
   const row = db.prepare(`SELECT steps_json FROM workflow_templates WHERE id = ?`).get(templateId) as { steps_json: string } | undefined;
-  const map = new Map<string, { name: string; ordinal: number }>();
+  const map = new Map<string, { name: string; ordinal: number; description?: string; completionPolicy?: string }>();
   if (!row) return map;
   const defs = JSON.parse(row.steps_json) as StepDef[];
-  defs.forEach((d, i) => map.set(d.id, { name: d.name ?? d.id, ordinal: i }));
+  defs.forEach((d, i) => map.set(d.id, {
+    name: d.name ?? d.id,
+    ordinal: i,
+    description: d.instructions ? firstSentence(d.instructions) : undefined,
+    completionPolicy: d.completionPolicy,
+  }));
   return map;
 }
 
