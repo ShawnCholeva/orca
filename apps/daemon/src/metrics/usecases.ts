@@ -31,15 +31,20 @@ function buildSummary(db: Database.Database, t: { templateId: string; name: stri
   const priorUntil = since;
   const priorSince = windowStart(since, period);
   const { runCount, versions } = versionsInWindow(db, t.templateId, since, until);
+  const isLatest = (v: { templateVersion: number }) => v.templateVersion === t.latestVersion;
+  const currentTransitions = listTransitionsByTemplate(db, t.templateId, since, until);
+  const currentStepRuns = listStepRunsByTemplate(db, t.templateId, since, until);
+  const priorTransitions = listTransitionsByTemplate(db, t.templateId, priorSince, priorUntil);
+  const priorStepRuns = listStepRunsByTemplate(db, t.templateId, priorSince, priorUntil);
   const summary = computeTemplateSummary({
     templateId: t.templateId, name: t.name, latestVersion: t.latestVersion, runCount, versions,
     current: {
-      transitions: listTransitionsByTemplate(db, t.templateId, since, until),
-      stepRuns: listStepRunsByTemplate(db, t.templateId, since, until),
+      transitions: scope === "latest" ? currentTransitions.filter(isLatest) : currentTransitions,
+      stepRuns: scope === "latest" ? currentStepRuns.filter(isLatest) : currentStepRuns,
     },
     prior: {
-      transitions: listTransitionsByTemplate(db, t.templateId, priorSince, priorUntil),
-      stepRuns: listStepRunsByTemplate(db, t.templateId, priorSince, priorUntil),
+      transitions: scope === "latest" ? priorTransitions.filter(isLatest) : priorTransitions,
+      stepRuns: scope === "latest" ? priorStepRuns.filter(isLatest) : priorStepRuns,
     },
   });
   return { ...summary, scope };

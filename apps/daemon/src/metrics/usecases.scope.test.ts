@@ -96,4 +96,42 @@ describe("getTemplateMetricsDetail — scope (current/latest/all)", () => {
     const stepA = detail!.steps.find((s) => s.stepTemplateId === "a");
     expect(stepA!.runs).toBe(1); // only the v2 run contributes, not the v1 run
   });
+
+  it("scope=latest also filters the SUMMARY (header KPI) tiles to the latest version, not just the step rows", () => {
+    // Add a third run on v1 (non-latest) where step "a" fails first try. Under
+    // scope="current" this run is in the window and drags firstPass down; under
+    // scope="latest" the summary must be built from v2-only runs, where step "a"
+    // still passed first try — so the two scopes must disagree.
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, started_at, traversal_seq) VALUES ('r3','g1','tpl',1,'completed',?,1)"
+    ).run(NOW);
+    db.prepare(
+      `INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint)
+       VALUES ('sr-a-v1b','g1','r3','a',0,1,'failed','[]','[]',NULL,?,?,'fp4')`
+    ).run(NOW, NOW);
+    const failedTelemetryJson = JSON.stringify({
+      cost: null, latency_ms: 100, model: null, provider_id: null, provider_version: null,
+      prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [],
+      outcome: { status: "failed", failure_code: "invalid_output" },
+    });
+    const failedEvidenceJson = JSON.stringify({
+      sensorsRun: [], verdict: "failed", untestedRegions: [], residualRisk: [],
+      oracleAdequacy: { sufficient: true, gaps: [] },
+    });
+    db.prepare(
+      `INSERT INTO harness_transitions (id, goal_id, workflow_run_id, workflow_step_run_id, boundary, risk_json, evidence_json, state_deps_json, telemetry_json, created_at)
+       VALUES ('ht-a-v1b','g1','r3','sr-a-v1b','step_complete',NULL,?,NULL,?,?)`
+    ).run(failedEvidenceJson, failedTelemetryJson, NOW);
+
+    const currentDetail = getTemplateMetricsDetail(db, "tpl", "7d", AFTER, "current");
+    const latestDetail = getTemplateMetricsDetail(db, "tpl", "7d", AFTER, "latest");
+    expect(currentDetail).not.toBeNull();
+    expect(latestDetail).not.toBeNull();
+
+    // current: 4 total finals across all steps/versions (a-v1 pass, z-v1 pass, a-v2 pass, a-v1b fail) -> 3/4 first-pass.
+    expect(currentDetail!.summary.firstPass).toBeCloseTo(0.75, 5);
+    // latest: only v2 runs contribute (a-v2 pass) -> 1/1 first-pass.
+    expect(latestDetail!.summary.firstPass).toBeCloseTo(1, 5);
+    expect(currentDetail!.summary.firstPass).not.toBe(latestDetail!.summary.firstPass);
+  });
 });
