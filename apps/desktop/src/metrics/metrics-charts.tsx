@@ -1,4 +1,5 @@
 import { useId, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import type { NodeVersionHistory } from "@orca/contracts";
 
 export function Panel({
   title,
@@ -182,5 +183,66 @@ export function StatTile({
         {spark && <Sparkline data={spark} color={sparkColor || "var(--text-3)"} w={64} h={24} />}
       </div>
     </div>
+  );
+}
+
+// Small "⤳" chips flagging that a node's identity changed shape or name during
+// the window — a step→gate change and a rename are different lineage events, so
+// both can render at once.
+export function VersionMarkerChips({ history }: { history?: NodeVersionHistory }): ReactElement | null {
+  if (!history) return null;
+  const chips: { key: string; label: string; title: string }[] = [];
+  if (history.changedFrom) {
+    chips.push({
+      key: "changed",
+      label: `⤳ was a ${history.changedFrom}`,
+      title: `This node was a ${history.changedFrom} earlier in this window — see the history below for details.`,
+    });
+  }
+  if (history.renamedFrom) {
+    chips.push({
+      key: "renamed",
+      label: `⤳ renamed from '${history.renamedFrom}'`,
+      title: `This node was called '${history.renamedFrom}' earlier in this window.`,
+    });
+  }
+  if (chips.length === 0) return null;
+  return (
+    <>
+      {chips.map((c) => (
+        <span key={c.key} className="mono" title={c.title}
+          style={{ fontSize: 9.5, color: "var(--accent-2)", background: "var(--accent-2-soft)", border: "1px solid var(--accent-2)", borderRadius: 999, padding: "1px 7px", whiteSpace: "nowrap", cursor: "help" }}>
+          {c.label}
+        </span>
+      ))}
+    </>
+  );
+}
+
+// The per-node history strip in the expanded drawer: one block per era (a
+// version span the node kept one shape for), with a short honest note about
+// whether the earlier-era runs count toward the score above.
+export function VersionHistoryStrip({ history }: { history?: NodeVersionHistory }): ReactElement | null {
+  if (!history || history.eras.length === 0) return null;
+  const sameType = history.eras.every((e) => e.type === history.eras[0]!.type);
+  return (
+    <>
+      <SectionLabel>History across versions</SectionLabel>
+      <div style={{ display: "flex", flexWrap: "wrap", border: "1px solid var(--hairline)", borderRadius: 8, overflow: "hidden" }}>
+        {history.eras.map((era, i) => (
+          <div key={i} style={{ flex: "1 1 130px", minWidth: 0, padding: "9px 11px", borderLeft: i > 0 ? "1px dashed var(--accent-2)" : "none", background: era.type === "gate" ? "var(--info-soft)" : "rgba(255,255,255,0.02)" }}>
+            <div className="mono" style={{ fontSize: 9, letterSpacing: 0.6, textTransform: "uppercase", color: era.type === "gate" ? "var(--info)" : "var(--text-4)", marginBottom: 3 }}>
+              {era.type === "gate" ? "Gate" : "Step"} · v{era.fromVersion}–v{era.toVersion}
+            </div>
+            <div className="mono" style={{ fontSize: 12, color: "var(--text-3)" }}>{era.runs} run{era.runs === 1 ? "" : "s"}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-3)" }}>
+        {sameType
+          ? "This was a rename, not a type change — the earlier-name runs are the same measurement and count toward the score above."
+          : "This node's type changed during this window — the earlier-era runs are shown here as history but aren't combined into the score above."}
+      </div>
+    </>
   );
 }

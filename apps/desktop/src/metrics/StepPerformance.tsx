@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { StepMetrics, TemplateMetricsDetail, TemplateMetricsSummary } from "@orca/contracts";
 import { Pill } from "../workspaces/primitives";
 import { bandMeta, gradeFor, latencyLabel, statusForStep, statusMeta } from "./metrics-data";
-import { OutcomeBar, Panel, SectionLabel, Sparkline } from "./metrics-charts";
+import { OutcomeBar, Panel, SectionLabel, Sparkline, VersionHistoryStrip, VersionMarkerChips } from "./metrics-charts";
 import { ChevronDown, ChevronRight, Sparkle, Workflow } from "./metrics-icons";
 
 const GRID = "34px minmax(0,1fr) 88px 64px 22px";
@@ -75,6 +75,7 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
             <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{step.name}</span>
             <Pill tone={bandMeta[step.verification.band.level].tone} size="xs">{step.verification.band.label}</Pill>
             {low && <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }} title={`Based on only ${step.sampleSize} run${step.sampleSize === 1 ? "" : "s"} — low confidence (fewer than 5). Scores here can swing as more runs accrue.`}>n={step.sampleSize}</span>}
+            <VersionMarkerChips history={step.versionHistory} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 7 }}>
             <div style={{ flex: 1, maxWidth: 220 }}><OutcomeBar passed={step.passedFirstTry} recovered={step.recovered} failed={step.failed} /></div>
@@ -173,6 +174,8 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
                 {step.recentReasons.map((r, i) => <div key={i} style={{ fontSize: 11.5, color: "var(--text-3)", padding: "2px 0" }}>{r.reason}</div>)}
               </div>
             )}
+
+            <VersionHistoryStrip history={step.versionHistory} />
           </div>
         </div>
       )}

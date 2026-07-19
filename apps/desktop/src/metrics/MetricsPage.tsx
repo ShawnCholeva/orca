@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { TemplateMetricsSummary, TemplateMetricsDetail } from "@orca/contracts";
+import type { MetricScope, TemplateMetricsSummary, TemplateMetricsDetail } from "@orca/contracts";
 import { getTemplateMetricsSummaries, getTemplateMetricsDetail } from "../api";
 import { gradeFor, workflowHealthFromSteps } from "./metrics-data";
 import { StatTile } from "./metrics-charts";
@@ -11,8 +11,15 @@ import { Workflow, Refresh } from "./metrics-icons";
 const PERIODS = ["24h", "7d", "30d"] as const;
 type Period = (typeof PERIODS)[number];
 
+const SCOPES: { id: MetricScope; label: string }[] = [
+  { id: "current", label: "Current shape" },
+  { id: "latest", label: "Latest only" },
+  { id: "all", label: "All versions" },
+];
+
 export function MetricsPage() {
   const [period, setPeriod] = useState<Period>("7d");
+  const [scope, setScope] = useState<MetricScope>("current");
   const [summaries, setSummaries] = useState<TemplateMetricsSummary[] | null>(null);
   const [error, setError] = useState(false);
   const [wfId, setWfId] = useState<string | null>(null);
@@ -32,11 +39,13 @@ export function MetricsPage() {
 
   useEffect(() => {
     setDetail(null);
+    setOpenStep(null);
+    setOpenGate(null);
     if (!wfId) { return; }
     let live = true;
-    getTemplateMetricsDetail(wfId, period).then((d) => { if (live) setDetail(d); }).catch(() => { if (live) setError(true); });
+    getTemplateMetricsDetail(wfId, period, scope).then((d) => { if (live) setDetail(d); }).catch(() => { if (live) setError(true); });
     return () => { live = false; };
-  }, [wfId, period, reloadKey]);
+  }, [wfId, period, scope, reloadKey]);
 
   if (error) {
     return <CenterNote>Couldn't load metrics. <button type="button" onClick={() => setReloadKey((k) => k + 1)} style={linkBtn}>Retry</button></CenterNote>;
@@ -64,6 +73,18 @@ export function MetricsPage() {
               <button key={p} type="button" onClick={() => setPeriod(p)} className="mono"
                 style={{ background: period === p ? "rgba(255,255,255,0.08)" : "transparent", color: period === p ? "var(--text)" : "var(--text-3)", border: "none", borderRadius: 6, padding: "4px 9px", cursor: "pointer", fontSize: 11 }}>
                 {p}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <span className="mono" style={{ fontSize: 10.5, letterSpacing: 1.1, textTransform: "uppercase", color: "var(--text-3)" }}>Version scope</span>
+          <div style={{ display: "flex", background: "rgba(255,255,255,0.03)", border: "1px solid var(--hairline)", borderRadius: 8, padding: 2 }}>
+            {SCOPES.map((s) => (
+              <button key={s.id} type="button" onClick={() => setScope(s.id)} aria-pressed={scope === s.id}
+                style={{ background: scope === s.id ? "var(--accent-2-soft)" : "transparent", color: scope === s.id ? "var(--accent-2)" : "var(--text-3)", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 11.5 }}>
+                {s.label}
               </button>
             ))}
           </div>

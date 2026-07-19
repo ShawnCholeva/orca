@@ -144,6 +144,7 @@ import {
   TemplateMetricsSummary,
   TemplateMetricsDetail,
   type MetricPeriod,
+  type MetricScope,
   TemplateInstructionProposal,
   LearningEvent,
 } from "@orca/contracts";
@@ -988,9 +989,9 @@ export async function getTemplateMetricsSummaries(period: MetricPeriod): Promise
   return body.summaries;
 }
 
-export async function getTemplateMetricsDetail(templateId: string, period: MetricPeriod): Promise<TemplateMetricsDetail> {
+export async function getTemplateMetricsDetail(templateId: string, period: MetricPeriod, scope: MetricScope = "current"): Promise<TemplateMetricsDetail> {
   const { baseUrl, token } = await loadConfig();
-  const res = await fetch(`${baseUrl}/v1/metrics/templates/${encodeURIComponent(templateId)}?period=${period}`, { headers: authHeaders(token) });
+  const res = await fetch(`${baseUrl}/v1/metrics/templates/${encodeURIComponent(templateId)}?period=${period}&scope=${scope}`, { headers: authHeaders(token) });
   const body = await parseResponse(res, z.object({ detail: TemplateMetricsDetail }));
   return body.detail;
 }

@@ -1,7 +1,7 @@
 import type { GateMetrics, TemplateMetricsDetail } from "@orca/contracts";
 import { Pill } from "../workspaces/primitives";
 import { gradeFor } from "./metrics-data";
-import { Panel, SectionLabel, Sparkline } from "./metrics-charts";
+import { Panel, SectionLabel, Sparkline, VersionHistoryStrip, VersionMarkerChips } from "./metrics-charts";
 import { ChevronRight } from "./metrics-icons";
 
 const GATE_GRID = "34px minmax(0,1fr) 96px 64px 22px";
@@ -20,6 +20,7 @@ export function GateRow({ gate, index, isLast, open, onToggle }: { gate: GateMet
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{gate.name}</span>
             <Pill tone="accent" size="xs">{gate.evalSubstrate === "worker" ? "Agent-reviewed" : "Quick review"}</Pill>
+            <VersionMarkerChips history={gate.versionHistory} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 7 }}>
             <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>
@@ -59,6 +60,7 @@ export function GateRow({ gate, index, isLast, open, onToggle }: { gate: GateMet
               {gate.cost.p50LatencyMs == null ? "—" : `${Math.round(gate.cost.p50LatencyMs)}ms`} · {gate.cost.meanTokens == null ? "—" : `${Math.round(gate.cost.meanTokens)} tok`} · {gate.cost.meanUsd == null ? "—" : `$${gate.cost.meanUsd.toFixed(3)}`}
               {gate.cost.tokensSpentOnOverturned ? ` · ${gate.cost.tokensSpentOnOverturned} tok spent on calls later sent back` : ""}
             </div>
+            <VersionHistoryStrip history={gate.versionHistory} />
           </div>
         </div>
       )}
