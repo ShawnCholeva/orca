@@ -1,7 +1,10 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { StepPerformancePanel, StepRow } from "./StepPerformance";
-import type { TemplateMetricsDetail, StepMetrics } from "@orca/contracts";
+import type { TemplateMetricsDetail, StepMetrics, SampleDetail } from "@orca/contracts";
+import * as api from "../api";
+
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const step: StepMetrics = {
   stepTemplateId: "verify", name: "Verify Proposal", ordinal: 3,
@@ -160,5 +163,41 @@ describe("diagnosis card", () => {
   it("moves the OutcomeBar into the drawer, reachable once expanded", () => {
     render(<StepRow step={step} index={0} isLast={false} open onToggle={() => {}} />);
     expect(screen.getByTestId("outcome-bar")).toBeInTheDocument();
+  });
+});
+
+describe("sample drill-through", () => {
+  const clusterStep: StepMetrics = {
+    ...step,
+    failureClusters: [{ failureCode: "evidence_veto", boundary: "step_complete", count: 3, sampleTransitionIds: ["t1", "t2"] }],
+  };
+
+  const sample: SampleDetail = {
+    transitionId: "t1", goalId: "g1", workflowRunId: "run-1", createdAt: "2026-07-01T00:00:00.000Z",
+    templateVersion: 4, failureCode: "evidence_veto", status: "failed",
+    checks: [{ label: "member_of on chosen_approach", detail: "value X not allowed", result: "failed" }],
+  };
+
+  it("renders the cluster label + count, fetches + shows samples on toggle, and opens the full run", async () => {
+    const getSampleDetail = vi.spyOn(api, "getSampleDetail").mockResolvedValue(sample);
+    const onOpenGoal = vi.fn();
+
+    render(<StepRow step={clusterStep} index={0} isLast open onToggle={() => {}} onOpenGoal={onOpenGoal} />);
+
+    expect(screen.getByText(/Automated checks failed, so the completion was rejected/i)).toBeInTheDocument();
+    expect(screen.getByText(/3×/)).toBeInTheDocument();
+    const toggle = screen.getByText(/view 2 samples/i);
+    expect(getSampleDetail).not.toHaveBeenCalled();
+
+    fireEvent.click(toggle);
+    expect(getSampleDetail).toHaveBeenCalledWith("t1");
+    expect(getSampleDetail).toHaveBeenCalledWith("t2");
+
+    await screen.findAllByText("member_of on chosen_approach"); // both t1 + t2 resolve to the same fixture
+    expect(screen.getAllByText("value X not allowed").length).toBeGreaterThan(0);
+
+    const openBtn = screen.getAllByText(/open full run/i)[0]!;
+    fireEvent.click(openBtn);
+    expect(onOpenGoal).toHaveBeenCalledWith("g1");
   });
 });

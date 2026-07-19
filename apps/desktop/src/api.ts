@@ -147,6 +147,7 @@ import {
   type MetricScope,
   TemplateInstructionProposal,
   LearningEvent,
+  SampleDetail,
 } from "@orca/contracts";
 
 export type {
@@ -994,6 +995,13 @@ export async function getTemplateMetricsDetail(templateId: string, period: Metri
   const res = await fetch(`${baseUrl}/v1/metrics/templates/${encodeURIComponent(templateId)}?period=${period}&scope=${scope}`, { headers: authHeaders(token) });
   const body = await parseResponse(res, z.object({ detail: TemplateMetricsDetail }));
   return body.detail;
+}
+
+export async function getSampleDetail(transitionId: string): Promise<SampleDetail> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/metrics/samples/${encodeURIComponent(transitionId)}`, { headers: authHeaders(token) });
+  const body = await parseResponse(res, z.object({ sample: SampleDetail }));
+  return body.sample;
 }
 
 export async function analyzeTemplate(templateId: string, period: MetricPeriod): Promise<TemplateInstructionProposal[]> {

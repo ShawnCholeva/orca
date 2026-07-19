@@ -17,7 +17,7 @@ const SCOPES: { id: MetricScope; label: string }[] = [
   { id: "all", label: "All versions" },
 ];
 
-export function MetricsPage() {
+export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => void } = {}) {
   const [period, setPeriod] = useState<Period>("7d");
   const [scope, setScope] = useState<MetricScope>("current");
   const [summaries, setSummaries] = useState<TemplateMetricsSummary[] | null>(null);
@@ -106,10 +106,11 @@ export function MetricsPage() {
             onToggleStep={(name) => setOpenStep((o) => (o === name ? null : name))}
             openGate={openGate}
             onToggleGate={(id) => setOpenGate((o) => (o === id ? null : id))}
+            onOpenGoal={onOpenGoal}
           />
         ) : (
           <>
-            <StepPerformancePanel detail={detail} loading={detail === null} openStep={openStep} onToggleStep={(name) => setOpenStep((o) => (o === name ? null : name))} />
+            <StepPerformancePanel detail={detail} loading={detail === null} openStep={openStep} onToggleStep={(name) => setOpenStep((o) => (o === name ? null : name))} onOpenGoal={onOpenGoal} />
             <GatePerformancePanel detail={detail} openGate={openGate} onToggleGate={(id) => setOpenGate((o) => (o === id ? null : id))} />
           </>
         )}

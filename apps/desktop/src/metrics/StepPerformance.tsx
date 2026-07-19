@@ -1,9 +1,89 @@
 import { useEffect, useRef, useState } from "react";
-import type { StepMetrics, TemplateMetricsDetail, TemplateMetricsSummary } from "@orca/contracts";
+import type { SampleDetail, StepMetrics, TemplateMetricsDetail, TemplateMetricsSummary } from "@orca/contracts";
+import { labelForFailure } from "@orca/contracts";
+import { getSampleDetail } from "../api";
 import { Pill } from "../workspaces/primitives";
 import { bandMeta, channelsFor, gradeFor, latencyLabel, statusForStep, statusMeta, toneColor, verdictFor } from "./metrics-data";
 import { OutcomeBar, Panel, SectionLabel, Sparkline, VersionHistoryStrip, VersionMarkerChips } from "./metrics-charts";
 import { ChevronDown, ChevronRight, Sparkle, Workflow } from "./metrics-icons";
+
+// Simple relative-time label — the desktop has no existing helper for this.
+function relativeTime(iso: string): string {
+  const diffSec = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  const abs = Math.abs(diffSec);
+  if (abs < 60) return "just now";
+  const diffMin = Math.round(diffSec / 60);
+  if (Math.abs(diffMin) < 60) return `${diffMin}m ago`;
+  const diffHr = Math.round(diffMin / 60);
+  if (Math.abs(diffHr) < 24) return `${diffHr}h ago`;
+  const diffDay = Math.round(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+
+type SampleState = { status: "loading" } | { status: "error" } | { status: "ok"; sample: SampleDetail };
+
+// Fetches each sample in the cluster, up to 3 at a time, tracking per-id loading/error state.
+function useSampleDetails(transitionIds: string[]): Record<string, SampleState> {
+  const [samples, setSamples] = useState<Record<string, SampleState>>({});
+  useEffect(() => {
+    let live = true;
+    setSamples(Object.fromEntries(transitionIds.map((id) => [id, { status: "loading" } as SampleState])));
+    let next = 0;
+    async function worker() {
+      while (next < transitionIds.length) {
+        const id = transitionIds[next++]!;
+        try {
+          const sample = await getSampleDetail(id);
+          if (live) setSamples((s) => ({ ...s, [id]: { status: "ok", sample } }));
+        } catch {
+          if (live) setSamples((s) => ({ ...s, [id]: { status: "error" } }));
+        }
+      }
+    }
+    for (let i = 0; i < Math.min(3, transitionIds.length); i++) worker();
+    return () => { live = false; };
+  }, [transitionIds]);
+  return samples;
+}
+
+function SamplePeek({ transitionIds, onOpenGoal }: { transitionIds: string[]; onOpenGoal?: (goalId: string) => void }) {
+  const samples = useSampleDetails(transitionIds);
+  return (
+    <div style={{ marginTop: 4, marginBottom: 6, background: "var(--accent-soft)", border: "1px solid var(--accent-line)", borderRadius: 8, overflow: "hidden" }}>
+      {transitionIds.map((id) => {
+        const state = samples[id];
+        if (!state || state.status === "loading") {
+          return <div key={id} style={{ padding: "8px 11px", fontSize: 11.5, color: "var(--text-3)", borderTop: "1px solid var(--hairline)" }}>Loading run {id.slice(0, 6)}…</div>;
+        }
+        if (state.status === "error") {
+          return <div key={id} style={{ padding: "8px 11px", fontSize: 11.5, color: "var(--err)", borderTop: "1px solid var(--hairline)" }}>Couldn't load this sample.</div>;
+        }
+        const { sample } = state;
+        return (
+          <div key={id} style={{ padding: "9px 11px", borderTop: "1px solid var(--hairline)" }}>
+            <div className="mono" style={{ fontSize: 10.5, color: "var(--text-3)", marginBottom: 5 }}>
+              run {sample.transitionId.slice(0, 6)} · {relativeTime(sample.createdAt)}{sample.templateVersion != null ? ` · v${sample.templateVersion}` : ""}
+            </div>
+            {sample.checks.map((c, i) => (
+              <div key={i} style={{ fontSize: 12, color: "var(--text-2)", display: "flex", gap: 6, flexWrap: "wrap", padding: "2px 0" }}>
+                <span style={{ fontWeight: 600 }}>{c.label}</span>
+                {c.detail && (<><span style={{ color: "var(--text-4)" }}>—</span><span style={{ color: "var(--text-3)" }}>{c.detail}</span></>)}
+              </div>
+            ))}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
+              <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{labelForFailure(sample.failureCode)}</span>
+              {onOpenGoal && (
+                <button type="button" onClick={() => onOpenGoal(sample.goalId)} style={{ background: "transparent", border: "none", color: "var(--accent)", fontSize: 11, cursor: "pointer", padding: 0 }}>
+                  open full run →
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 const GRID = "34px minmax(0,1fr) 88px 64px 22px";
 
@@ -58,7 +138,8 @@ function Chips({ label, items }: { label: string; items: string[] }) {
   );
 }
 
-export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMetrics; index: number; isLast: boolean; open: boolean; onToggle: () => void }) {
+export function StepRow({ step, index, isLast, open, onToggle, onOpenGoal }: { step: StepMetrics; index: number; isLast: boolean; open: boolean; onToggle: () => void; onOpenGoal?: (goalId: string) => void }) {
+  const [openClusterIdx, setOpenClusterIdx] = useState<number | null>(null);
   const status = statusForStep(step);
   const m = statusMeta[status];
   const low = step.confidence === "low";
@@ -137,11 +218,24 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
             })()}
 
             <SectionLabel style={{ paddingTop: 0 }}>What's going wrong</SectionLabel>
-            {step.failureModes.length === 0 && <div style={{ fontSize: 12, color: "var(--run)" }}>No problems detected this period.</div>}
-            {step.failureModes.map((f, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, color: "var(--text-2)", padding: "3px 0" }}>
-                <span>{f.label}</span>
-                <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>{f.count}× · {Math.round(f.pct * 100)}%</span>
+            {step.failureClusters.length === 0 && <div style={{ fontSize: 12, color: "var(--run)" }}>No problems detected this period.</div>}
+            {step.failureClusters.map((c, i) => (
+              <div key={i}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, color: "var(--text-2)", padding: "3px 0" }}>
+                  <span>{labelForFailure(c.failureCode)}</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>{c.count}×</span>
+                    {c.sampleTransitionIds.length > 0 && (
+                      <button type="button" onClick={() => setOpenClusterIdx((o) => (o === i ? null : i))}
+                        style={{ background: "transparent", border: "none", color: "var(--accent)", fontSize: 11, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+                        {openClusterIdx === i ? "hide samples" : `view ${c.sampleTransitionIds.length} samples`}
+                      </button>
+                    )}
+                  </span>
+                </div>
+                {openClusterIdx === i && c.sampleTransitionIds.length > 0 && (
+                  <SamplePeek transitionIds={c.sampleTransitionIds} onOpenGoal={onOpenGoal} />
+                )}
               </div>
             ))}
 
@@ -210,7 +304,7 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
   );
 }
 
-export function StepPerformancePanel({ detail, loading, openStep, onToggleStep }: { detail: TemplateMetricsDetail | null; loading: boolean; openStep: string | null; onToggleStep: (name: string) => void }) {
+export function StepPerformancePanel({ detail, loading, openStep, onToggleStep, onOpenGoal }: { detail: TemplateMetricsDetail | null; loading: boolean; openStep: string | null; onToggleStep: (name: string) => void; onOpenGoal?: (goalId: string) => void }) {
   const steps = detail?.steps ?? [];
   const attention = steps.filter((s) => { const st = statusForStep(s); return st === "watch" || st === "degraded" || st === "unverified"; }).length;
   return (
@@ -221,7 +315,7 @@ export function StepPerformancePanel({ detail, loading, openStep, onToggleStep }
         {loading && <div style={{ padding: 16, color: "var(--text-3)", fontSize: 12 }}>Loading steps…</div>}
         {!loading && steps.length === 0 && <div style={{ padding: 16, color: "var(--text-3)", fontSize: 12 }}>No step activity in this period.</div>}
         {steps.map((s, i) => (
-          <StepRow key={s.stepTemplateId} step={s} index={i} isLast={i === steps.length - 1} open={openStep === s.name} onToggle={() => onToggleStep(s.name)} />
+          <StepRow key={s.stepTemplateId} step={s} index={i} isLast={i === steps.length - 1} open={openStep === s.name} onToggle={() => onToggleStep(s.name)} onOpenGoal={onOpenGoal} />
         ))}
       </div>
     </Panel>

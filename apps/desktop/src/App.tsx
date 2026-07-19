@@ -456,7 +456,7 @@ export default function App() {
               </section>
             ) : activeTab === "reasoning" ? (
               <section className="reasoning-pane" role="tabpanel" aria-label="Metrics">
-                <MetricsPage />
+                <MetricsPage onOpenGoal={(goalId) => { setSelectedOrchestratorGoalId(goalId); setActiveTab("orchestrator"); }} />
               </section>
             ) : (
               <section className="workflows-pane" role="tabpanel" aria-label="Workflows">
