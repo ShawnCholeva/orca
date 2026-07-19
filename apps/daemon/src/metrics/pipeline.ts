@@ -15,7 +15,7 @@ export function buildPipeline(graphJson: string | null): PipelineNode[] | undefi
       const from = edges.find((e) => e.to === n.id)?.from;
       const gi = idx.get(n.id) ?? -1;
       const to = edges.filter((e) => e.from === n.id && (idx.get(e.to) ?? -1) > gi)
-        .sort((a, b) => (idx.get(b.to)! - idx.get(a.to)!))[0]?.to ?? edges.find((e) => e.from === n.id)?.to;
+        .sort((a, b) => (idx.get(b.to)! - idx.get(a.to)!))[0]?.to;
       return from && to ? { ...base, guards: { from, to } } : base;
     }
     if (n.type === "splitter") {

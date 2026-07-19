@@ -42,4 +42,20 @@ describe("buildPipeline", () => {
     expect(buildPipeline(null)).toBeUndefined();
     expect(buildPipeline("{not json")).toBeUndefined();
   });
+
+  it("omits guards when a gate has only a backward out-edge (no forward edge)", () => {
+    const backwardOnlyGraph = JSON.stringify({
+      nodes: [
+        { id: "a", type: "step", name: "A" },
+        { id: "g", type: "gate", name: "G" },
+        { id: "b", type: "step", name: "B" },
+      ],
+      edges: [
+        { from: "a", to: "g" },
+        { from: "g", to: "a" },
+      ],
+    });
+    const p = buildPipeline(backwardOnlyGraph)!;
+    expect(p.find((n) => n.nodeId === "g")!.guards).toBeUndefined();
+  });
 });
