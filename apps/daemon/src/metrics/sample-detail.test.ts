@@ -39,6 +39,12 @@ function seed(db: Database.Database) {
                 '2026-05-01T00:10:00.000Z')`).run();
   db.prepare(`INSERT INTO harness_transitions (id,goal_id,workflow_run_id,workflow_step_run_id,boundary,risk_json,evidence_json,state_deps_json,telemetry_json,created_at)
               VALUES ('t2','g1','r1',NULL,'step_complete',NULL,NULL,NULL,NULL,'2026-05-01T00:20:00.000Z')`).run();
+  db.prepare(`INSERT INTO harness_transitions (id,goal_id,workflow_run_id,workflow_step_run_id,boundary,risk_json,evidence_json,state_deps_json,telemetry_json,created_at)
+              VALUES ('t3','g1','r1',NULL,'step_complete',NULL,
+                '{"sensorsRun":[{"kind":"unit","command":"pnpm test","exitCode":1,"durationMs":100,"result":"failed","summary":"2 tests failed","artifactRef":null},{"kind":"lint","command":"pnpm lint","exitCode":0,"durationMs":50,"result":"passed","summary":"","artifactRef":null},{"kind":"typecheck","command":"pnpm typecheck","exitCode":0,"durationMs":50,"result":"skipped","summary":"","artifactRef":null}]}',
+                NULL,
+                '{"outcome":{"status":"failed","failure_code":"sensor_veto"}}',
+                '2026-05-01T00:30:00.000Z')`).run();
 }
 
 let db: Database.Database;
@@ -65,5 +71,12 @@ describe("getSampleDetail", () => {
   it("returns checks: [] with no throw when evidence_json is null", () => {
     const s = getSampleDetail(db, "t2")!;
     expect(s.checks).toEqual([]);
+  });
+
+  it("includes only the failed sensor from sensorsRun, using summary as detail and excluding passed/skipped", () => {
+    const s = getSampleDetail(db, "t3")!;
+    expect(s.checks).toEqual([
+      { label: "unit", detail: "2 tests failed", result: "failed" },
+    ]);
   });
 });

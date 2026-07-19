@@ -16,8 +16,8 @@ export function getSampleDetail(db: Database.Database, transitionId: string): Sa
       checks.push({ label: c.field ? `${c.rule} on ${c.field}` : String(c.rule ?? "check"), detail: c.detail ?? null, result: c.result });
   }
   for (const s of ev?.sensorsRun ?? []) {
-    if (s?.result && s.result !== "passed")
-      checks.push({ label: String(s.kind ?? "sensor"), detail: s.detail ?? null, result: s.result });
+    if (s?.result && s.result !== "passed" && s.result !== "skipped")
+      checks.push({ label: String(s.kind ?? "sensor"), detail: s.summary ?? null, result: s.result });
   }
   return {
     transitionId: row.id, goalId: row.goal_id, workflowRunId: row.workflow_run_id ?? null,
