@@ -255,11 +255,21 @@ export const StepMetrics = z.object({
 }).strict();
 export type StepMetrics = z.infer<typeof StepMetrics>;
 
+export const PipelineNode = z.object({
+  nodeId: z.string(),
+  name: z.string(),
+  type: z.enum(["step", "gate", "splitter"]),
+  guards: z.object({ from: z.string(), to: z.string() }).strict().optional(),
+  branchesTo: z.array(z.string()).optional(),
+}).strict();
+export type PipelineNode = z.infer<typeof PipelineNode>;
+
 export const TemplateMetricsDetail = z.object({
   summary: TemplateMetricsSummary,
   steps: z.array(StepMetrics),
   gates: z.array(GateMetrics),
   policyGateway: PolicyGatewayMetrics,
   completionGate: CompletionGateMetrics,
+  pipeline: z.array(PipelineNode).optional(),
 }).strict();
 export type TemplateMetricsDetail = z.infer<typeof TemplateMetricsDetail>;

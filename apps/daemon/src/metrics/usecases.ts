@@ -5,6 +5,7 @@ import { computeStepMetrics, computeTemplateSummary, windowStart } from "./aggre
 import { computeCalibration } from "./verification.js";
 import { buildCompletionGateMetrics, buildGateMetrics, buildPolicyGatewayMetrics } from "./gate-metrics.js";
 import { computeNodeLineage } from "./node-lineage.js";
+import { buildPipeline } from "./pipeline.js";
 import { stepRequiresExecution } from "../workflows/orchestrator/requires-execution.js";
 
 function nowOr(nowIso?: string): string {
@@ -122,6 +123,7 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
     delta: null, confidence: (scored.length >= 1 ? "ok" : "low") as "ok" | "low",
   };
   const summary = { ...buildSummary(db, info, period, now, scope), gateHealth };
+  const graphRow = db.prepare(`SELECT graph_json FROM workflow_templates WHERE id = ?`).get(templateId) as { graph_json: string | null } | undefined;
   return {
     summary,
     steps: computeStepMetrics({
@@ -137,5 +139,6 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
     gates,
     policyGateway: buildPolicyGatewayMetrics(transitions),
     completionGate: buildCompletionGateMetrics(transitions),
+    pipeline: buildPipeline(graphRow?.graph_json ?? null),
   };
 }
