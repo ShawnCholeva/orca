@@ -220,15 +220,23 @@ export function computeStepMetrics(input: {
   period: MetricPeriod;
   calibration?: CalibrationEntry[];
 }): StepMetrics[] {
+  // Scope to the CURRENT template's steps: a step id not in stepNames is a fossil
+  // from a retired version, or the step-era of a node that is now a gate — either way
+  // it isn't part of today's pipeline. If the step set is unknown (empty), don't filter.
+  const currentSteps = input.stepNames;
+  const inCurrentShape = (id: string) => currentSteps.size === 0 || currentSteps.has(id);
+
   const byStep = new Map<string, TemplateTransition[]>();
   for (const t of input.transitions) {
     if (!t.stepTemplateId) continue;
     if (t.stepTemplateId.startsWith("__gate__:")) continue;
+    if (!inCurrentShape(t.stepTemplateId)) continue;
     (byStep.get(t.stepTemplateId) ?? byStep.set(t.stepTemplateId, []).get(t.stepTemplateId)!).push(t);
   }
   const runsByStep = new Map<string, TemplateStepRun[]>();
   for (const r of input.stepRuns) {
     if (r.stepTemplateId.startsWith("__gate__:")) continue;
+    if (!inCurrentShape(r.stepTemplateId)) continue;
     (runsByStep.get(r.stepTemplateId) ?? runsByStep.set(r.stepTemplateId, []).get(r.stepTemplateId)!).push(r);
   }
 

@@ -601,6 +601,42 @@ describe("computeStepMetrics", () => {
     expect(step.verification.band.level).toBe("needs_evidence");
     expect(step.verification.band.label).toBe("Needs more evidence");
   });
+
+  it("shows only the current template's steps — fossils and retyped/renamed ids drop out", () => {
+    const at = "2026-05-01T00:00:00.000Z";
+    // three step_complete transitions: one current step, one retired step, one that is now a gate (plain step-era id)
+    const tx = (id: string, run: string) => ({
+      templateVersion: 1, stepTemplateId: id,
+      transition: { workflowRunId: run, boundary: "step_complete", createdAt: at,
+        evidence: { sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: false, gaps: [] } },
+        telemetry: { outcome: { status: "succeeded", failure_code: null } } } as never,
+    });
+    const run = (id: string, r: string): TemplateStepRun => ({ workflowRunId: r, stepTemplateId: id, attempt: 1, status: "passed", startedAt: at, finishedAt: at, blockedReason: null, templateVersion: 1 });
+    const stepNames = new Map([["triage", { name: "Triage", ordinal: 0 }]]); // current template has ONE step
+
+    const steps = computeStepMetrics({
+      transitions: [tx("triage", "r1"), tx("validate_build", "r2"), tx("critique", "r3")],
+      stepRuns: [run("triage", "r1"), run("validate_build", "r2"), run("critique", "r3")],
+      stepNames, nowIso: "2026-05-08T00:00:00.000Z", period: "7d",
+    });
+    expect(steps.map((s) => s.stepTemplateId)).toEqual(["triage"]); // fossil + now-a-gate id excluded
+  });
+
+  it("falls back to showing all steps when the template's step set is unknown (empty stepNames)", () => {
+    const at = "2026-05-01T00:00:00.000Z";
+    const tx = (id: string, run: string) => ({
+      templateVersion: 1, stepTemplateId: id,
+      transition: { workflowRunId: run, boundary: "step_complete", createdAt: at,
+        evidence: { sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: false, gaps: [] } },
+        telemetry: { outcome: { status: "succeeded", failure_code: null } } } as never,
+    });
+    const run = (id: string, r: string): TemplateStepRun => ({ workflowRunId: r, stepTemplateId: id, attempt: 1, status: "passed", startedAt: at, finishedAt: at, blockedReason: null, templateVersion: 1 });
+    const steps = computeStepMetrics({
+      transitions: [tx("a", "r1"), tx("b", "r2")], stepRuns: [run("a", "r1"), run("b", "r2")],
+      stepNames: new Map(), nowIso: "2026-05-08T00:00:00.000Z", period: "7d",
+    });
+    expect(steps.map((s) => s.stepTemplateId).sort()).toEqual(["a", "b"]); // no filtering when set is unknown
+  });
 });
 
 describe("deriveInsights", () => {
