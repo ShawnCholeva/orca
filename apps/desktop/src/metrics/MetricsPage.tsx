@@ -4,7 +4,7 @@ import { getTemplateMetricsSummaries, getTemplateMetricsDetail } from "../api";
 import { gradeFor, workflowHealthFromSteps } from "./metrics-data";
 import { StatTile } from "./metrics-charts";
 import { StepPerformancePanel, WorkflowDropdown } from "./StepPerformance";
-import { GatePerformancePanel, PolicyGatewayReadout, CompletionGateReadout } from "./GatePerformance";
+import { GatePerformancePanel, FusedPipelinePanel, PolicyGatewayReadout, CompletionGateReadout } from "./GatePerformance";
 import { SelfImprovementRail } from "./SelfImprovement";
 import { Workflow, Refresh } from "./metrics-icons";
 
@@ -98,8 +98,21 @@ export function MetricsPage() {
           <StatTile label="Escalated" value={rate(wf.escalated)} unit="%" accent="var(--err)" />
         </div>
 
-        <StepPerformancePanel detail={detail} loading={detail === null} openStep={openStep} onToggleStep={(name) => setOpenStep((o) => (o === name ? null : name))} />
-        <GatePerformancePanel detail={detail} openGate={openGate} onToggleGate={(id) => setOpenGate((o) => (o === id ? null : id))} />
+        {detail?.pipeline ? (
+          <FusedPipelinePanel
+            detail={detail}
+            loading={detail === null}
+            openStep={openStep}
+            onToggleStep={(name) => setOpenStep((o) => (o === name ? null : name))}
+            openGate={openGate}
+            onToggleGate={(id) => setOpenGate((o) => (o === id ? null : id))}
+          />
+        ) : (
+          <>
+            <StepPerformancePanel detail={detail} loading={detail === null} openStep={openStep} onToggleStep={(name) => setOpenStep((o) => (o === name ? null : name))} />
+            <GatePerformancePanel detail={detail} openGate={openGate} onToggleGate={(id) => setOpenGate((o) => (o === id ? null : id))} />
+          </>
+        )}
         <PolicyGatewayReadout detail={detail} />
         <CompletionGateReadout detail={detail} />
       </div>

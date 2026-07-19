@@ -1,10 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MetricsPage } from "./MetricsPage";
 import * as api from "../api";
-import type { GateMetrics } from "@orca/contracts";
+import type { GateMetrics, StepMetrics } from "@orca/contracts";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const summary = {
   templateId: "tpl", name: "Brainstorm", latestVersion: 1, scope: "current" as const, runs: 12,
@@ -18,6 +18,23 @@ const summary = {
   calibration: [],
   gateHealth: { value: 78, grade: "C" as const, delta: null, confidence: "ok" as const },
 };
+
+const step = (over: Partial<StepMetrics> = {}): StepMetrics => ({
+  stepTemplateId: "proposal", name: "Proposal", ordinal: 1,
+  score: 80, sampleSize: 10, confidence: "ok",
+  runs: 10, passedFirstTry: 8, recovered: 1, failed: 1,
+  quality: { verdictPassRate: 0.8, verifiedSampleSize: 10, scoredSampleSize: 10, sensorPassRate: 0.8, oracleSufficientRate: 0.5,
+    untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+  cost: { p50LatencyMs: 2000, meanTokens: 3000, meanUsd: 0.03, meanRetries: 1 },
+  risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
+  failureClusters: [],
+  verification: { tier: "ai_reviewed", tierLabel: "Reviewed, not proven", confidence: 0.7, falseAcceptanceRate: 0.1,
+    artifacts: [], recentRefuteReasons: [], band: { level: "weak", label: "Weakly verified" } },
+  failureModes: [],
+  reconciliation: null,
+  trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [],
+  recentReasons: [], ...over,
+});
 
 const gate = (over: Partial<GateMetrics> = {}): GateMetrics => ({
   nodeId: "review", name: "Review", evalSubstrate: "shadow", health: 72, grade: "C",
@@ -108,5 +125,57 @@ describe("MetricsPage", () => {
     expect(current).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Latest only" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "All versions" })).toBeInTheDocument();
+  });
+
+  it("renders one fused Pipeline panel with steps and gates interleaved in flow order, when detail.pipeline is present", async () => {
+    const proposal = step({ stepTemplateId: "proposal", name: "Proposal" });
+    const execution = step({ stepTemplateId: "execution", name: "Execution", ordinal: 2 });
+    const critique = gate({ nodeId: "critique", name: "Critique" });
+    const pipeline = [
+      { nodeId: "proposal", name: "Proposal", type: "step" as const },
+      { nodeId: "critique", name: "Critique", type: "gate" as const, guards: { from: "proposal", to: "execution" } },
+      { nodeId: "split", name: "Route", type: "splitter" as const, branchesTo: ["execution", "fastpath"] },
+      { nodeId: "execution", name: "Execution", type: "step" as const },
+      { nodeId: "fastpath", name: "Fast Path", type: "step" as const },
+    ];
+    vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({
+      summary, steps: [proposal, execution], gates: [critique], pipeline,
+      policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] },
+      completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } },
+    });
+    render(<MetricsPage />);
+    expect(await screen.findByText("Pipeline")).toBeInTheDocument();
+
+    const html = document.body.innerHTML;
+    const iProposal = html.indexOf("Proposal");
+    const iCritique = html.indexOf("Critique");
+    const iExecution = html.indexOf(">Execution<");
+    expect(iProposal).toBeGreaterThan(-1);
+    expect(iCritique).toBeGreaterThan(iProposal);
+    expect(iExecution).toBeGreaterThan(iCritique);
+
+    expect(screen.getByText(/guards Proposal → Execution/)).toBeInTheDocument();
+    const marker = screen.getByText(/branches to/i);
+    expect(marker.textContent).toContain("Execution");
+    expect(marker.textContent).toContain("Fast Path");
+
+    expect(screen.getByText(/no runs this period/i)).toBeInTheDocument();
+
+    expect(screen.queryByText("Step performance")).toBeNull();
+    expect(screen.queryByText("Gates")).toBeNull();
+  });
+
+  it("falls back to the two-panel layout when detail.pipeline is absent", async () => {
+    vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({
+      summary, steps: [step()], gates: [gate()],
+      policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] },
+      completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } },
+    });
+    render(<MetricsPage />);
+    expect(await screen.findByText("Gates")).toBeInTheDocument();
+    expect(screen.getByText("Step performance")).toBeInTheDocument();
+    expect(screen.queryByText("Pipeline")).toBeNull();
   });
 });
