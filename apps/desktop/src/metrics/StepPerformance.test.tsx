@@ -29,7 +29,9 @@ describe("StepPerformancePanel", () => {
     render(<StepPerformancePanel detail={detail} loading={false} openStep="Verify Proposal" onToggleStep={() => {}} />);
     expect(screen.getByText("Verify Proposal")).toBeInTheDocument();
     expect(screen.getByText("61")).toBeInTheDocument();
-    expect(screen.getByText(/invalid_output/)).toBeInTheDocument();
+    // "invalid_output" now shows up both in the collapsed row's "Anything wrong" channel
+    // and in the drawer's "What's going wrong" section — assert it renders at all.
+    expect(screen.getAllByText(/invalid_output/).length).toBeGreaterThan(0);
     expect(screen.getByText(/proration edge/)).toBeInTheDocument(); // untested region scope
     expect(screen.getByText(/Loops between failed strategies/)).toBeInTheDocument(); // insight
   });
@@ -113,5 +115,50 @@ describe("StepRow expanded", () => {
     render(<StepRow step={s} index={0} isLast open onToggle={() => {}} />);
     expect(screen.getByText("Weakly verified")).toBeInTheDocument();
     expect(screen.queryByText("Run & tested")).toBeNull(); // tier pill retired
+  });
+});
+
+describe("diagnosis card", () => {
+  it("renders a healthy grounded step: description, a 'Healthy' verdict, and the review framing", () => {
+    const s: StepMetrics = {
+      ...step, score: 95, failureModes: [],
+      description: "Assess the goal without interviewing the user or changing any code.",
+      verification: { ...step.verification, band: { level: "strong", label: "Reviewed" } },
+    };
+    render(<StepRow step={s} index={0} isLast open={false} onToggle={() => {}} />);
+    expect(screen.getByText("Assess the goal without interviewing the user or changing any code.")).toBeInTheDocument();
+    expect(screen.getByText(/Healthy/)).toBeInTheDocument();
+    expect(screen.getByText(/review is the right bar/)).toBeInTheDocument();
+  });
+
+  it("renders a failing step with a 'Needs attention' verdict naming the failure, and the wrong channel shows count × pct", () => {
+    const s: StepMetrics = {
+      ...step, score: 66,
+      failureModes: [{ label: "invalid_output", count: 3, pct: 0.15 }],
+    };
+    render(<StepRow step={s} index={0} isLast open={false} onToggle={() => {}} />);
+    expect(screen.getByText(/Needs attention/)).toBeInTheDocument();
+    expect(screen.getAllByText(/invalid_output/).length).toBeGreaterThanOrEqual(2); // verdict cause + wrong channel
+    expect(screen.getByText(/invalid_output 3× · 15%/)).toBeInTheDocument();
+  });
+
+  it("renders 'Not checked yet' and 'No score yet' for a null-score step awaiting evidence", () => {
+    const s: StepMetrics = {
+      ...step, score: null,
+      verification: { ...step.verification, band: { level: "needs_evidence", label: "Needs more evidence" } },
+    };
+    render(<StepRow step={s} index={0} isLast open={false} onToggle={() => {}} />);
+    expect(screen.getByText(/Not checked yet/)).toBeInTheDocument();
+    expect(screen.getByText(/No score yet/)).toBeInTheDocument();
+  });
+
+  it("does not render the OutcomeBar in the collapsed row", () => {
+    render(<StepRow step={step} index={0} isLast={false} open={false} onToggle={() => {}} />);
+    expect(screen.queryByTestId("outcome-bar")).not.toBeInTheDocument();
+  });
+
+  it("moves the OutcomeBar into the drawer, reachable once expanded", () => {
+    render(<StepRow step={step} index={0} isLast={false} open onToggle={() => {}} />);
+    expect(screen.getByTestId("outcome-bar")).toBeInTheDocument();
   });
 });

@@ -65,3 +65,82 @@ export function pctLabel(m: Metric): string {
 export function latencyLabel(ms: number | null): string {
   return ms == null ? "—" : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
+
+export type ChannelTone = "run" | "warn" | "err" | "accent";
+export type Chip = { text: string; tone: ChannelTone };
+
+export const toneColor: Record<ChannelTone, string> = {
+  run: "var(--run)", warn: "var(--warn)", err: "var(--err)", accent: "var(--accent)",
+};
+
+// The data-driven verdict line: a plain-language health read plus its limiting cause —
+// both derived from existing signals (band, score, failure modes). No new scoring.
+export function verdictFor(step: StepMetrics): { health: string; cause: string; tone: ChannelTone } {
+  const { score, failureModes, quality, verification } = step;
+  let health: string;
+  let tone: ChannelTone;
+  if (verification.band.level === "needs_evidence") {
+    health = "Not checked yet"; tone = "accent";
+  } else if (score == null) {
+    health = "Not scored yet"; tone = "accent";
+  } else if (failureModes.length > 0 || score < 60) {
+    health = "Needs attention"; tone = "err";
+  } else if (score < 70) {
+    health = "Holding, with gaps"; tone = "warn";
+  } else {
+    health = "Healthy"; tone = "run";
+  }
+  const cause = failureModes[0]?.label
+    ?? quality.limitingDimension
+    ?? (score != null && score < 70 ? `low score (${score})` : "nothing failing this period");
+  return { health, cause, tone };
+}
+
+const CHECK_TEXT: Record<string, string> = {
+  "Run & tested": "Ran the tests and they passed.",
+  "Reviewed": "Its claims are checked; no code to run, so review is the right bar.",
+  "Not tested": "Reviewed but not run — a step like this can be tested; it wasn't.",
+  "Only self-reported": "Nothing independent checked it — add a grounding check or a reviewer.",
+  "Not checked yet": "No check has run yet.",
+};
+// Band labels are a free string (daemon-produced); fall back on the band level for any
+// label this switch doesn't recognize, so the copy stays meaningful either way.
+const CHECK_FALLBACK: Record<"strong" | "weak" | "needs_evidence", string> = {
+  strong: "Checked and holding up.",
+  weak: "Only lightly checked so far.",
+  needs_evidence: "No check has run yet.",
+};
+
+// The three telemetry channels (paper §3.5.1): how it's doing, how we checked it, and
+// what's currently wrong — each a short plain-language line derived from existing signals.
+export function channelsFor(step: StepMetrics): { doing: Chip; check: Chip; wrong: Chip } {
+  const { score, runs, trend, verification, failureModes } = step;
+
+  let doing: Chip;
+  if (score == null) {
+    doing = { text: "No score yet — needs more runs", tone: "accent" };
+  } else {
+    const word = score >= 80 ? "Strong" : score >= 60 ? "Holding" : "Struggling";
+    const tone: ChannelTone = score >= 80 ? "run" : score >= 60 ? "warn" : "err";
+    let trendSuffix = "";
+    if (trend.length >= 2) {
+      const first = trend[0]!;
+      const last = trend[trend.length - 1]!;
+      if (last < first) trendSuffix = " · falling";
+      else if (last > first) trendSuffix = " · rising";
+    }
+    doing = { text: `${word} · ${score} across ${runs} runs${trendSuffix}`, tone };
+  }
+
+  const check: Chip = {
+    text: CHECK_TEXT[verification.band.label] ?? CHECK_FALLBACK[verification.band.level],
+    tone: bandMeta[verification.band.level].tone,
+  };
+
+  const top = failureModes[0];
+  const wrong: Chip = top
+    ? { text: `${top.label} ${top.count}× · ${Math.round(top.pct * 100)}%`, tone: "err" }
+    : { text: "Nothing this period", tone: "run" };
+
+  return { doing, check, wrong };
+}

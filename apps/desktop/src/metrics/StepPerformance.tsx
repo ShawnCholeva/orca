@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { StepMetrics, TemplateMetricsDetail, TemplateMetricsSummary } from "@orca/contracts";
 import { Pill } from "../workspaces/primitives";
-import { bandMeta, gradeFor, latencyLabel, statusForStep, statusMeta } from "./metrics-data";
+import { bandMeta, channelsFor, gradeFor, latencyLabel, statusForStep, statusMeta, toneColor, verdictFor } from "./metrics-data";
 import { OutcomeBar, Panel, SectionLabel, Sparkline, VersionHistoryStrip, VersionMarkerChips } from "./metrics-charts";
 import { ChevronDown, ChevronRight, Sparkle, Workflow } from "./metrics-icons";
 
@@ -62,6 +62,13 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
   const status = statusForStep(step);
   const m = statusMeta[status];
   const low = step.confidence === "low";
+  const verdict = verdictFor(step);
+  const channels = channelsFor(step);
+  const channelCells: [string, ReturnType<typeof channelsFor>["doing"]][] = [
+    ["How it's doing", channels.doing],
+    ["How we check it", channels.check],
+    ["Anything wrong", channels.wrong],
+  ];
   return (
     <div style={{ borderBottom: isLast ? "none" : "1px solid var(--hairline)", opacity: low ? 0.6 : 1 }}>
       <div onClick={onToggle} style={{ display: "grid", gridTemplateColumns: GRID, alignItems: "center", gap: 12, padding: "12px 14px", cursor: "pointer" }}>
@@ -77,9 +84,25 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
             {low && <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }} title={`Based on only ${step.sampleSize} run${step.sampleSize === 1 ? "" : "s"} — low confidence (fewer than 5). Scores here can swing as more runs accrue.`}>n={step.sampleSize}</span>}
             <VersionMarkerChips history={step.versionHistory} />
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 7 }}>
-            <div style={{ flex: 1, maxWidth: 220 }}><OutcomeBar passed={step.passedFirstTry} recovered={step.recovered} failed={step.failed} /></div>
-            <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{step.runs} runs · {latencyLabel(step.cost.p50LatencyMs)}</span>
+          {step.description && (
+            <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {step.description}
+            </div>
+          )}
+          <div style={{ marginTop: 6, fontSize: 12 }}>
+            <span style={{ fontWeight: 600, color: toneColor[verdict.tone] }}>{verdict.health}</span>
+            <span style={{ color: "var(--text-3)" }}> — {verdict.cause}</span>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+            {channelCells.map(([label, ch]) => (
+              <div key={label} style={{ flex: 1, minWidth: 0, background: "rgba(255,255,255,0.02)", border: "1px solid var(--hairline)", borderRadius: 7, padding: "5px 8px" }}>
+                <div className="mono" style={{ fontSize: 8.5, letterSpacing: 0.6, textTransform: "uppercase", color: "var(--text-4)", marginBottom: 3 }}>{label}</div>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 5 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: toneColor[ch.tone], marginTop: 4, flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, color: "var(--text-2)", lineHeight: 1.35, overflow: "hidden", textOverflow: "ellipsis" }}>{ch.text}</span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
         {step.trend.length > 0 ? <Sparkline data={step.trend} color={m.color} w={84} h={26} /> : <span className="mono" style={{ fontSize: 10, color: "var(--text-4)", textAlign: "center" }}>—</span>}
@@ -99,6 +122,10 @@ export function StepRow({ step, index, isLast, open, onToggle }: { step: StepMet
       {open && (
         <div style={{ padding: "2px 16px 16px 60px" }}>
           <div style={{ background: "var(--panel-2)", border: "1px solid var(--hairline)", borderRadius: 10, padding: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <div style={{ flex: 1, maxWidth: 220 }}><OutcomeBar passed={step.passedFirstTry} recovered={step.recovered} failed={step.failed} /></div>
+              <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{step.runs} runs · {latencyLabel(step.cost.p50LatencyMs)}</span>
+            </div>
             {(() => {
               const rank = { needs_evidence: 1, weak: 2, strong: 3 }[step.verification.band.level];
               const color = bandMeta[step.verification.band.level].color;

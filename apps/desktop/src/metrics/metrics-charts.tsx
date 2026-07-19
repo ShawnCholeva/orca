@@ -135,7 +135,7 @@ export function OutcomeBar({ passed, recovered, failed, height = 7 }: { passed: 
   const seg = (n: number, c: string) =>
     n > 0 ? <div style={{ width: `${(n / total) * 100}%`, background: c, height: "100%" }} /> : null;
   return (
-    <div style={{ display: "flex", width: "100%", height, borderRadius: 999, overflow: "hidden", background: "rgba(255,255,255,0.05)" }}>
+    <div data-testid="outcome-bar" style={{ display: "flex", width: "100%", height, borderRadius: 999, overflow: "hidden", background: "rgba(255,255,255,0.05)" }}>
       {seg(passed, "var(--run)")}
       {seg(recovered, "var(--warn)")}
       {seg(failed, "var(--err)")}
