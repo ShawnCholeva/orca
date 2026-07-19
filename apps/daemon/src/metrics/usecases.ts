@@ -4,6 +4,7 @@ import { listGateDecisionsByTemplate, listStepRunsByTemplate, listTemplatesWithR
 import { computeStepMetrics, computeTemplateSummary, windowStart } from "./aggregate.js";
 import { computeCalibration } from "./verification.js";
 import { buildCompletionGateMetrics, buildGateMetrics, buildPolicyGatewayMetrics } from "./gate-metrics.js";
+import { computeNodeLineage } from "./node-lineage.js";
 
 function nowOr(nowIso?: string): string {
   return nowIso ?? new Date().toISOString();
@@ -91,7 +92,8 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
   const gateDecisions = scope === "latest" ? allGateDecisions.filter((d) => d.templateVersion === info.latestVersion) : allGateDecisions;
   const stepRuns = scope === "latest" ? allStepRuns.filter((r) => r.templateVersion === info.latestVersion) : allStepRuns;
   const calibration = computeCalibration(transitions);
-  const gates = buildGateMetrics({ decisions: gateDecisions, transitions, names: gateNodeNames(db, templateId), period, calibration, scope });
+  const lineage = computeNodeLineage(db, templateId, since, now);
+  const gates = buildGateMetrics({ decisions: gateDecisions, transitions, names: gateNodeNames(db, templateId), period, calibration, scope, lineage });
   const scored = gates.filter((g) => g.health != null);
   const gateHealthValue = scored.length ? Math.round(scored.reduce((n, g) => n + g.health!, 0) / scored.length) : null;
   const gateHealth = {
@@ -109,6 +111,7 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
       nowIso: now, period,
       calibration,
       scope,
+      lineage,
     }),
     gates,
     policyGateway: buildPolicyGatewayMetrics(transitions),

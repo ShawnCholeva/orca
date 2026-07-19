@@ -96,6 +96,20 @@ export const GateFailureMode = z.object({
 }).strict();
 export type GateFailureMode = z.infer<typeof GateFailureMode>;
 
+// Cross-version node lineage derived from per-run template snapshots (id-keyed —
+// Orca renames nodes in place, so the node id is stable across renames/type changes).
+export const NodeVersionHistory = z.object({
+  changedFrom: z.enum(["step", "gate"]).optional(),
+  renamedFrom: z.string().optional(),
+  eras: z.array(z.object({
+    type: z.enum(["step", "gate"]),
+    fromVersion: z.number().int(),
+    toVersion: z.number().int(),
+    runs: z.number().int().nonnegative(),
+  }).strict()),
+}).strict();
+export type NodeVersionHistory = z.infer<typeof NodeVersionHistory>;
+
 export const GateMetrics = z.object({
   nodeId: z.string(),
   name: z.string(),
@@ -134,6 +148,7 @@ export const GateMetrics = z.object({
   }).strict(),
   trend: z.array(z.number()),
   versionBoundaries: z.array(z.number().int()),
+  versionHistory: NodeVersionHistory.optional(),
 }).strict();
 export type GateMetrics = z.infer<typeof GateMetrics>;
 
@@ -234,6 +249,7 @@ export const StepMetrics = z.object({
   versionInvalidOutputRateDelta: z.number().nullable(),
   insights: z.array(z.string()),
   recentReasons: z.array(z.object({ at: z.string(), reason: z.string() }).strict()),
+  versionHistory: NodeVersionHistory.optional(),
 }).strict();
 export type StepMetrics = z.infer<typeof StepMetrics>;
 

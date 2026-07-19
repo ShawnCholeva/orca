@@ -1,6 +1,6 @@
 import type { HarnessMetrics } from "../harness-metrics/usecases.js";
 import { computeHarnessMetricsFromTransitions } from "../harness-metrics/usecases.js";
-import type { MetricPeriod, MetricScope, TemplateMetricsSummary, StepMetrics } from "@orca/contracts";
+import type { MetricPeriod, MetricScope, TemplateMetricsSummary, StepMetrics, NodeVersionHistory } from "@orca/contracts";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
 import { classifyTier, strongestTier, TIER_LABEL, buildArtifacts, computeCalibration, CALIBRATION_DIVERGENCE, CALIBRATION_SCORE_MIN } from "./verification.js";
 import type { CalibrationEntry } from "./verification.js";
@@ -220,6 +220,7 @@ export function computeStepMetrics(input: {
   period: MetricPeriod;
   calibration?: CalibrationEntry[];
   scope?: MetricScope;
+  lineage?: Map<string, NodeVersionHistory>;
 }): StepMetrics[] {
   // Scope to the CURRENT template's steps: a step id not in stepNames is a fossil
   // from a retired version, or the step-era of a node that is now a gate — either way
@@ -551,6 +552,7 @@ export function computeStepMetrics(input: {
       reconciliation,
       trend, versionBoundaries, versionScoreDelta, versionScoreDeltaVersions,
       versionInvalidOutputRateDelta, insights: [], recentReasons,
+      versionHistory: input.lineage?.get(stepTemplateId),
     };
     step.insights = deriveInsights(step, input.calibration);
     steps.push(step);

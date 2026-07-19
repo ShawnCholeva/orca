@@ -1,4 +1,4 @@
-import type { CompletionGateMetrics, GateMetrics, GateFailureMode, MetricPeriod, MetricScope, PolicyGatewayMetrics } from "@orca/contracts";
+import type { CompletionGateMetrics, GateMetrics, GateFailureMode, MetricPeriod, MetricScope, NodeVersionHistory, PolicyGatewayMetrics } from "@orca/contracts";
 import { labelForGateFailure } from "@orca/contracts";
 import type { GateDecisionRow, TemplateTransition } from "./fetch.js";
 import { composedScore } from "./composed-score.js";
@@ -27,6 +27,7 @@ export function buildGateMetrics(input: {
   period: MetricPeriod;
   calibration?: CalibrationEntry[];
   scope?: MetricScope;
+  lineage?: Map<string, NodeVersionHistory>;
 }): GateMetrics[] {
   const calibration = input.calibration;
   const scope = input.scope ?? "current";
@@ -140,6 +141,7 @@ export function buildGateMetrics(input: {
         residualRiskBurden: null, recentRejectReasons,
       },
       trend: [], versionBoundaries: [],
+      versionHistory: input.lineage?.get(nodeId),
     });
   }
   return gates.sort((a, b) => a.name.localeCompare(b.name));
