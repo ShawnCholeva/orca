@@ -28,15 +28,17 @@ const step: StepMetrics = {
 const detail = { summary: { name: "Brainstorm" }, steps: [step] } as unknown as TemplateMetricsDetail;
 
 describe("StepPerformancePanel", () => {
-  it("renders a step row with its score and expands to show scope + clusters + insights", () => {
+  it("expands to show the What's-going-wrong failure drill", () => {
     render(<StepPerformancePanel detail={detail} loading={false} openStep="Verify Proposal" onToggleStep={() => {}} />);
     expect(screen.getByText("Verify Proposal")).toBeInTheDocument();
     expect(screen.getByText("61")).toBeInTheDocument();
-    // "invalid_output" now shows up both in the collapsed row's "Anything wrong" channel
-    // and in the drawer's "What's going wrong" section — assert it renders at all.
+    expect(screen.getByText(/What's going wrong/i)).toBeInTheDocument();
     expect(screen.getAllByText(/invalid_output/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/proration edge/)).toBeInTheDocument(); // untested region scope
-    expect(screen.getByText(/Loops between failed strategies/)).toBeInTheDocument(); // insight
+    // removed sections must be gone
+    expect(screen.queryByText(/Checks run/i)).toBeNull();
+    expect(screen.queryByText(/how this score was reached/i)).toBeNull();
+    expect(screen.queryByText(/proration edge/)).toBeNull();
+    expect(screen.queryByText(/Loops between failed strategies/)).toBeNull();
   });
 
   it("renders an unverified step as 'not verified' (neutral), never a failing grade", () => {
@@ -71,39 +73,13 @@ const reconciledStep: StepMetrics = {
 };
 
 describe("StepRow expanded", () => {
-  it("renders plain-language sections and no jargon", () => {
+  it("renders a healthy expanded drawer as one line, no mechanical sections, no jargon", () => {
     render(<StepRow step={reconciledStep} index={1} isLast open onToggle={() => {}} />);
-    expect(screen.getByText(/Checks run/i)).toBeTruthy();
-    expect(screen.getByText(/a second model reviewed/i)).toBeTruthy();
-    expect(screen.queryByText(/\b(oracle|sensor|verdict|refute|veto)\b/i)).toBeNull();
-  });
-
-  it("renders a plain-language 'how this score was reached' line from scoreBreakdown", () => {
-    const stepWithBreakdown: StepMetrics = {
-      ...step,
-      quality: {
-        ...step.quality,
-        scoreBreakdown: {
-          meanBase: 0.8, meanCoverage: 0.9, coverageLimited: 2,
-          verifierMix: { executable: 3, grounding: 1, independentReview: 0, selfReportOnly: 0 },
-        },
-      },
-    };
-    render(<StepRow step={stepWithBreakdown} index={0} isLast open onToggle={() => {}} />);
-    expect(screen.getByText(/how this score was reached/i)).toBeInTheDocument();
-    // no jargon
+    expect(screen.getByText(/What's going wrong/i)).toBeInTheDocument();
+    expect(screen.getByText(/No problems detected this period/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Checks run/i)).toBeNull();
+    expect(screen.queryByText(/a second model reviewed/i)).toBeNull();
     expect(document.body.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
-  });
-
-  it("renders the reviewer's reason when a claim was overturned", () => {
-    const s: StepMetrics = {
-      ...reconciledStep,
-      reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: true, refuteReason: "claimed tests ran but none exist" },
-    };
-    render(<StepRow step={s} index={0} isLast open onToggle={() => {}} />);
-    expect(screen.getByText(/claimed tests ran but none exist/)).toBeInTheDocument();
-    // Disambiguate from the existing "— but the independent check overturned it." copy above it.
-    expect(screen.getByText(/why it was overturned/i)).toBeInTheDocument();
   });
 
   it("renders 'needs a check' for a null score and a number for 0", () => {
@@ -155,14 +131,9 @@ describe("diagnosis card", () => {
     expect(screen.getByText(/No score yet/)).toBeInTheDocument();
   });
 
-  it("does not render the OutcomeBar in the collapsed row", () => {
-    render(<StepRow step={step} index={0} isLast={false} open={false} onToggle={() => {}} />);
-    expect(screen.queryByTestId("outcome-bar")).not.toBeInTheDocument();
-  });
-
-  it("moves the OutcomeBar into the drawer, reachable once expanded", () => {
+  it("does not render the OutcomeBar anywhere on the step row", () => {
     render(<StepRow step={step} index={0} isLast={false} open onToggle={() => {}} />);
-    expect(screen.getByTestId("outcome-bar")).toBeInTheDocument();
+    expect(screen.queryByTestId("outcome-bar")).not.toBeInTheDocument();
   });
 });
 

@@ -3,9 +3,9 @@ import type { SampleDetail, StepMetrics, TemplateMetricsDetail, TemplateMetricsS
 import { labelForFailure } from "@orca/contracts";
 import { getSampleDetail } from "../api";
 import { Pill } from "../workspaces/primitives";
-import { bandMeta, channelsFor, gradeFor, latencyLabel, statusForStep, statusMeta, toneColor, verdictFor } from "./metrics-data";
-import { OutcomeBar, Panel, SectionLabel, Sparkline, VersionHistoryStrip, VersionMarkerChips } from "./metrics-charts";
-import { ChevronDown, ChevronRight, Sparkle, Workflow } from "./metrics-icons";
+import { bandMeta, channelsFor, gradeFor, statusForStep, statusMeta, toneColor, verdictFor } from "./metrics-data";
+import { Panel, SectionLabel, Sparkline, VersionHistoryStrip, VersionMarkerChips } from "./metrics-charts";
+import { ChevronDown, ChevronRight, Workflow } from "./metrics-icons";
 
 // Simple relative-time label — the desktop has no existing helper for this.
 function relativeTime(iso: string): string {
@@ -126,18 +126,6 @@ export function WorkflowDropdown({ summaries, value, onChange }: { summaries: Te
   );
 }
 
-function Chips({ label, items }: { label: string; items: string[] }) {
-  if (items.length === 0) return null;
-  return (
-    <div style={{ marginTop: 8 }}>
-      <div className="mono" style={{ fontSize: 9.5, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--text-4)", marginBottom: 4 }}>{label}</div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-        {items.map((t, i) => <span key={i} style={{ fontSize: 11, color: "var(--text-2)", background: "rgba(255,255,255,0.04)", border: "1px solid var(--hairline)", borderRadius: 6, padding: "2px 6px" }}>{t}</span>)}
-      </div>
-    </div>
-  );
-}
-
 export function StepRow({ step, index, isLast, open, onToggle, onOpenGoal }: { step: StepMetrics; index: number; isLast: boolean; open: boolean; onToggle: () => void; onOpenGoal?: (goalId: string) => void }) {
   const [openClusterIdx, setOpenClusterIdx] = useState<number | null>(null);
   const status = statusForStep(step);
@@ -203,20 +191,6 @@ export function StepRow({ step, index, isLast, open, onToggle, onOpenGoal }: { s
       {open && (
         <div style={{ padding: "2px 16px 16px 60px" }}>
           <div style={{ background: "var(--panel-2)", border: "1px solid var(--hairline)", borderRadius: 10, padding: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-              <div style={{ flex: 1, maxWidth: 220 }}><OutcomeBar passed={step.passedFirstTry} recovered={step.recovered} failed={step.failed} /></div>
-              <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{step.runs} runs · {latencyLabel(step.cost.p50LatencyMs)}</span>
-            </div>
-            {(() => {
-              const rank = { needs_evidence: 1, weak: 2, strong: 3 }[step.verification.band.level];
-              const color = bandMeta[step.verification.band.level].color;
-              return (
-                <div style={{ display: "flex", gap: 3, marginBottom: 10 }}>
-                  {[0, 1, 2].map((i) => <div key={i} style={{ height: 6, flex: 1, borderRadius: 3, background: i < rank ? color : "rgba(255,255,255,0.08)" }} />)}
-                </div>
-              );
-            })()}
-
             <SectionLabel style={{ paddingTop: 0 }}>What's going wrong</SectionLabel>
             {step.failureClusters.length === 0 && <div style={{ fontSize: 12, color: "var(--run)" }}>No problems detected this period.</div>}
             {step.failureClusters.map((c, i) => (
@@ -238,64 +212,6 @@ export function StepRow({ step, index, isLast, open, onToggle, onOpenGoal }: { s
                 )}
               </div>
             ))}
-
-            <SectionLabel>Checks run</SectionLabel>
-            {step.verification.artifacts.map((a, i) => (
-              <div key={i} style={{ fontSize: 12, color: "var(--text-2)", padding: "2px 0" }}>
-                {a.verifies}{a.cannotVerify ? <span style={{ color: "var(--text-4)" }}> — couldn't check: {a.cannotVerify}</span> : null}
-              </div>
-            ))}
-
-            {step.quality.scoreBreakdown && (
-              <>
-                <SectionLabel>How this score was reached</SectionLabel>
-                <div className="mono" style={{ fontSize: 11.5, color: "var(--text-3)" }}>
-                  {step.quality.scoreBreakdown.meanCoverage != null && step.quality.scoreBreakdown.coverageLimited > 0
-                    ? `${step.quality.scoreBreakdown.coverageLimited} completion(s) capped by what wasn't covered · `
-                    : ""}
-                  {(() => { const m = step.quality.scoreBreakdown!.verifierMix;
-                    const parts = [m.executable && "ran & tested", m.grounding && "claims checked", m.independentReview && "second-model review"].filter(Boolean);
-                    return parts.length ? `verified by: ${parts.join(", ")}` : "self-reported only"; })()}
-                </div>
-              </>
-            )}
-
-            <Chips label="What we couldn't check" items={step.quality.untestedRegions} />
-            <Chips label="Remaining risks" items={step.quality.residualRisk} />
-
-            {step.risk.approvals.count > 0 && (
-              <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-2)" }}>
-                {step.risk.approvals.count} human approval(s) · {step.risk.hardConstraintViolations} hard-constraint violation(s)
-              </div>
-            )}
-
-            {step.insights.length > 0 && (
-              <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--hairline)" }}>
-                {step.insights.map((t, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                    <Sparkle size={14} color="var(--accent-2)" style={{ flexShrink: 0, marginTop: 1 }} />
-                    <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>{t}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {step.reconciliation && (
-              <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--hairline)", fontSize: 12, color: step.reconciliation.refuted ? "var(--err)" : "var(--text-2)" }}>
-                The AI <b>claimed</b> this step complete. Independently verified: <b>{step.reconciliation.verifiedTierLabel.toLowerCase()}</b>{step.reconciliation.refuted ? " — but the independent check overturned it." : "."}
-                {step.reconciliation.refuted && step.reconciliation.refuteReason && (
-                  <div style={{ marginTop: 4 }}>Why it was overturned: “{step.reconciliation.refuteReason}”</div>
-                )}
-              </div>
-            )}
-
-            {step.recentReasons.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <div className="mono" style={{ fontSize: 9.5, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--text-4)", marginBottom: 4 }}>Recent reasons</div>
-                {step.recentReasons.map((r, i) => <div key={i} style={{ fontSize: 11.5, color: "var(--text-3)", padding: "2px 0" }}>{r.reason}</div>)}
-              </div>
-            )}
-
             <VersionHistoryStrip history={step.versionHistory} />
           </div>
         </div>
