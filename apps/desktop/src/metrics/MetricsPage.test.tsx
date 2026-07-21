@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MetricsPage } from "./MetricsPage";
 import * as api from "../api";
@@ -18,6 +18,8 @@ const summary = {
   calibration: [],
   gateHealth: { value: 78, grade: "C" as const, delta: null, confidence: "ok" as const },
 };
+
+const summary2 = { ...summary, templateId: "tpl2", name: "Other Workflow" };
 
 const step = (over: Partial<StepMetrics> = {}): StepMetrics => ({
   stepTemplateId: "proposal", name: "Proposal", ordinal: 1,
@@ -71,6 +73,60 @@ describe("MetricsPage", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
+  it("keeps the review modal open and shows an error when applyProposal rejects (e.g. a stale proposal)", async () => {
+    vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [step()], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
+    vi.spyOn(api, "listProposals").mockResolvedValue([proposal()]);
+    vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
+    const applySpy = vi.spyOn(api, "applyProposal").mockRejectedValue(new api.ApiError("Stale proposal — template was modified."));
+    render(<MetricsPage />);
+
+    expect(await screen.findByText("Cuts vague-output failures")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Review change"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /^apply$/i }));
+
+    expect(await screen.findByText(/Stale proposal — template was modified\./i)).toBeInTheDocument();
+    // Rejection must not close the modal or be swallowed.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(applySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes undefined as editedInstructions to applyProposal when Apply is clicked unedited", async () => {
+    vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [step()], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
+    const prop = proposal();
+    vi.spyOn(api, "listProposals").mockResolvedValue([prop]);
+    vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
+    const applySpy = vi.spyOn(api, "applyProposal").mockResolvedValue({ ...prop, status: "applied", appliedAsVersion: 2 });
+    render(<MetricsPage />);
+
+    expect(await screen.findByText("Cuts vague-output failures")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Review change"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /^apply$/i }));
+    await waitFor(() => expect(applySpy).toHaveBeenCalledWith(prop.id, undefined));
+
+    // Success closes the modal.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("edits the proposal text before applying and sends the edited string", async () => {
+    vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [step()], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
+    const prop = proposal();
+    vi.spyOn(api, "listProposals").mockResolvedValue([prop]);
+    vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
+    const applySpy = vi.spyOn(api, "applyProposal").mockResolvedValue({ ...prop, status: "applied", appliedAsVersion: 2 });
+    render(<MetricsPage />);
+
+    expect(await screen.findByText("Cuts vague-output failures")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Review change"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Do the thing carefully and verify." } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^apply$/i }));
+    await waitFor(() => expect(applySpy).toHaveBeenCalledWith(prop.id, "Do the thing carefully and verify."));
+  });
 
   it("shows a loading state then renders the health tile", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
@@ -202,5 +258,45 @@ describe("MetricsPage", () => {
     expect(await screen.findByText("Gates")).toBeInTheDocument();
     expect(screen.getByText("Step performance")).toBeInTheDocument();
     expect(screen.queryByText("Pipeline")).toBeNull();
+  });
+
+  it("discards a stale refetchProposals response if the workflow was switched while it was in flight", async () => {
+    vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary, summary2]);
+    vi.spyOn(api, "getTemplateMetricsDetail").mockImplementation((wfId) =>
+      Promise.resolve({ summary: wfId === "tpl2" ? summary2 : summary, steps: [step()], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } }));
+    vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
+    vi.spyOn(api, "analyzeTemplate").mockResolvedValue([]);
+
+    let staleResolve!: (v: TemplateInstructionProposal[]) => void;
+    const stale = new Promise<TemplateInstructionProposal[]>((res) => { staleResolve = res; });
+    let tplCalls = 0;
+    vi.spyOn(api, "listProposals").mockImplementation((wfId) => {
+      if (wfId === "tpl") {
+        tplCalls++;
+        // First call (initial mount fetch) resolves right away; second call (the refetch
+        // triggered by Analyze) is held open so we can switch workflows mid-flight.
+        return tplCalls === 1 ? Promise.resolve([proposal({ id: "old", predictedImprovement: "OLD tpl proposal" })]) : stale;
+      }
+      return Promise.resolve([proposal({ id: "tpl2", stepTemplateId: "proposal", predictedImprovement: "tpl2 proposal" })]);
+    });
+
+    render(<MetricsPage />);
+    expect(await screen.findByText("OLD tpl proposal")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /analyze this template/i }));
+    await waitFor(() => expect(tplCalls).toBe(2)); // the in-flight, stale refetch has started
+
+    // Switch to the other workflow before the stale refetch resolves.
+    fireEvent.click(screen.getByRole("button", { name: /Brainstorm/ }));
+    fireEvent.click(await screen.findByText("Other Workflow"));
+    expect(await screen.findByText("tpl2 proposal")).toBeInTheDocument();
+
+    // Now let the stale "tpl" refetch resolve — it must not clobber tpl2's proposals.
+    await act(async () => {
+      staleResolve([proposal({ id: "stale-refetch", predictedImprovement: "STALE tpl refetch" })]);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(screen.queryByText("STALE tpl refetch")).toBeNull();
+    expect(screen.getByText("tpl2 proposal")).toBeInTheDocument();
   });
 });

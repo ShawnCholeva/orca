@@ -107,9 +107,9 @@ describe("SelfImprovementRail", () => {
     expect(dialog.getByText(/− Generate\./)).toBeTruthy();
     expect(dialog.getAllByText(/Generate and validate against schema\./).length).toBeGreaterThan(0);
     fireEvent.click(dialog.getByRole("button", { name: /^apply$/i }));
-    // The modal always sends its (possibly unedited) textarea value — unlike the card's own
-    // Apply, which applies unedited via applyProposal(id) with no second argument.
-    await waitFor(() => expect(applySpy).toHaveBeenCalledWith("p1", pending.afterInstructions));
+    // The modal only sends a second argument (marking humanEdited) when the textarea was
+    // actually changed — an unedited Apply must not read as human-edited.
+    await waitFor(() => expect(applySpy).toHaveBeenCalledWith("p1", undefined));
   });
 
   it("schema proposals render field chips, not raw JSON, in the summary", async () => {

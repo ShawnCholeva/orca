@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MetricScope, TemplateInstructionProposal, TemplateMetricsSummary, TemplateMetricsDetail } from "@orca/contracts";
 import { getTemplateMetricsSummaries, getTemplateMetricsDetail, listProposals, applyProposal, dismissProposal } from "../api";
 import { gradeFor, workflowHealthFromSteps } from "./metrics-data";
@@ -30,6 +30,8 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
   const [reloadKey, setReloadKey] = useState(0);
   const [proposals, setProposals] = useState<TemplateInstructionProposal[]>([]);
   const [reviewingProposalId, setReviewingProposalId] = useState<string | null>(null);
+  const wfIdRef = useRef(wfId);
+  wfIdRef.current = wfId;
 
   useEffect(() => {
     let live = true;
@@ -59,7 +61,12 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
   }, [wfId, period, reloadKey]);
 
   const refetchProposals = async () => {
-    if (wfId) { try { setProposals(await listProposals(wfId, period)); } catch { /* best-effort */ } }
+    if (!wfId) return;
+    const capturedId = wfId;
+    try {
+      const p = await listProposals(capturedId, period);
+      if (capturedId === wfIdRef.current) setProposals(p);
+    } catch { /* best-effort */ }
   };
   // Keyed for a later task (opening the review modal from the step drawer).
   const proposalsByStep = new Map<string, TemplateInstructionProposal>();

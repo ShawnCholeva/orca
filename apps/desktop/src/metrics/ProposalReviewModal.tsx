@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { TemplateInstructionProposal } from "@orca/contracts";
 import { Btn } from "../workspaces/primitives";
+import { toErrorMessage } from "../api";
 import { Sparkle, Close, Check } from "./metrics-icons";
 import { diffLines, schemaChips, type DiffLine, type SchemaChip } from "./proposal-diff";
 
@@ -32,15 +33,41 @@ function DiffBlock({ lines }: { lines: DiffLine[] }) {
 type Props = {
   proposal: TemplateInstructionProposal;
   stepName: string;
-  onApply: (edited: string) => void;
-  onDismiss: () => void;
+  onApply: (edited: string | undefined) => Promise<void>;
+  onDismiss: () => Promise<void>;
   onClose: () => void;
 };
 
 export function ProposalReviewModal({ proposal, stepName, onApply, onDismiss, onClose }: Props) {
   const [edited, setEdited] = useState(proposal.afterInstructions);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
   const diff = diffLines(proposal.beforeInstructions, proposal.afterInstructions);
   const chips = proposal.component === "step_output_schema" ? schemaChips(proposal.beforeInstructions, proposal.afterInstructions) : [];
+
+  const handleApply = async () => {
+    setError(null);
+    setPending(true);
+    try {
+      await onApply(edited === proposal.afterInstructions ? undefined : edited);
+    } catch (err) {
+      setError(toErrorMessage(err, "Failed to apply proposal."));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const handleDismiss = async () => {
+    setError(null);
+    setPending(true);
+    try {
+      await onDismiss();
+    } catch (err) {
+      setError(toErrorMessage(err, "Failed to dismiss proposal."));
+    } finally {
+      setPending(false);
+    }
+  };
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 40, background: "rgba(5,8,14,0.55)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -74,9 +101,10 @@ export function ProposalReviewModal({ proposal, stepName, onApply, onDismiss, on
         </div>
 
         <footer style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderTop: "1px solid var(--hairline)" }}>
+          {error && <div style={{ fontSize: 12, color: "var(--err)" }}>{error}</div>}
           <div style={{ flex: 1 }} />
-          <Btn kind="ghost" size="sm" onClick={onDismiss}>Dismiss</Btn>
-          <Btn kind="primary" size="sm" icon={<Check />} onClick={() => onApply(edited)}>Apply</Btn>
+          <Btn kind="ghost" size="sm" onClick={handleDismiss} disabled={pending}>Dismiss</Btn>
+          <Btn kind="primary" size="sm" icon={<Check />} onClick={handleApply} disabled={pending}>{pending ? "Applying…" : "Apply"}</Btn>
         </footer>
       </div>
     </div>
