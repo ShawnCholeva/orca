@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { SampleDetail, StepMetrics, TemplateMetricsDetail, TemplateMetricsSummary } from "@orca/contracts";
+import type { SampleDetail, StepMetrics, TemplateInstructionProposal, TemplateMetricsDetail, TemplateMetricsSummary } from "@orca/contracts";
 import { labelForFailure } from "@orca/contracts";
 import { getSampleDetail } from "../api";
 import { Pill } from "../workspaces/primitives";
 import { bandMeta, channelsFor, gradeFor, statusForStep, statusMeta, toneColor, verdictFor } from "./metrics-data";
 import { Panel, SectionLabel, Sparkline, VersionHistoryStrip, VersionMarkerChips } from "./metrics-charts";
-import { ChevronDown, ChevronRight, Workflow } from "./metrics-icons";
+import { ChevronDown, ChevronRight, Sparkle, Workflow } from "./metrics-icons";
 
 // Simple relative-time label — the desktop has no existing helper for this.
 function relativeTime(iso: string): string {
@@ -126,7 +126,7 @@ export function WorkflowDropdown({ summaries, value, onChange }: { summaries: Te
   );
 }
 
-export function StepRow({ step, index, isLast, open, onToggle, onOpenGoal }: { step: StepMetrics; index: number; isLast: boolean; open: boolean; onToggle: () => void; onOpenGoal?: (goalId: string) => void }) {
+export function StepRow({ step, index, isLast, open, onToggle, onOpenGoal, proposalForStep, onReviewProposal }: { step: StepMetrics; index: number; isLast: boolean; open: boolean; onToggle: () => void; onOpenGoal?: (goalId: string) => void; proposalForStep?: TemplateInstructionProposal; onReviewProposal?: (id: string) => void }) {
   const [openClusterIdx, setOpenClusterIdx] = useState<number | null>(null);
   const status = statusForStep(step);
   const m = statusMeta[status];
@@ -212,6 +212,20 @@ export function StepRow({ step, index, isLast, open, onToggle, onOpenGoal }: { s
                 )}
               </div>
             ))}
+            {step.failureClusters.length > 0 && proposalForStep && (
+              <div style={{ display: "flex", alignItems: "center", gap: 11, marginTop: 14, padding: "11px 12px", border: "1px solid var(--accent-line)", background: "var(--accent-2-soft)", borderRadius: 9 }}>
+                <Sparkle size={15} color="var(--accent-2)" style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, fontSize: 12, color: "var(--text-2)" }}>
+                  <b style={{ color: "var(--text)" }}>Orca drafted a fix:</b> {proposalForStep.predictedImprovement}
+                </div>
+                {onReviewProposal && (
+                  <button type="button" onClick={() => onReviewProposal(proposalForStep.id)}
+                    style={{ background: "transparent", border: "1px solid var(--accent-line)", color: "var(--accent-2)", borderRadius: 7, padding: "6px 11px", fontSize: 11, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit" }}>
+                    Review change →
+                  </button>
+                )}
+              </div>
+            )}
             <VersionHistoryStrip history={step.versionHistory} />
           </div>
         </div>
@@ -220,7 +234,7 @@ export function StepRow({ step, index, isLast, open, onToggle, onOpenGoal }: { s
   );
 }
 
-export function StepPerformancePanel({ detail, loading, openStep, onToggleStep, onOpenGoal }: { detail: TemplateMetricsDetail | null; loading: boolean; openStep: string | null; onToggleStep: (name: string) => void; onOpenGoal?: (goalId: string) => void }) {
+export function StepPerformancePanel({ detail, loading, openStep, onToggleStep, onOpenGoal, proposalsByStep, onReviewProposal }: { detail: TemplateMetricsDetail | null; loading: boolean; openStep: string | null; onToggleStep: (name: string) => void; onOpenGoal?: (goalId: string) => void; proposalsByStep?: Map<string, TemplateInstructionProposal>; onReviewProposal?: (id: string) => void }) {
   const steps = detail?.steps ?? [];
   const attention = steps.filter((s) => { const st = statusForStep(s); return st === "watch" || st === "degraded" || st === "unverified"; }).length;
   return (
@@ -231,7 +245,7 @@ export function StepPerformancePanel({ detail, loading, openStep, onToggleStep, 
         {loading && <div style={{ padding: 16, color: "var(--text-3)", fontSize: 12 }}>Loading steps…</div>}
         {!loading && steps.length === 0 && <div style={{ padding: 16, color: "var(--text-3)", fontSize: 12 }}>No step activity in this period.</div>}
         {steps.map((s, i) => (
-          <StepRow key={s.stepTemplateId} step={s} index={i} isLast={i === steps.length - 1} open={openStep === s.name} onToggle={() => onToggleStep(s.name)} onOpenGoal={onOpenGoal} />
+          <StepRow key={s.stepTemplateId} step={s} index={i} isLast={i === steps.length - 1} open={openStep === s.name} onToggle={() => onToggleStep(s.name)} onOpenGoal={onOpenGoal} proposalForStep={proposalsByStep?.get(s.stepTemplateId)} onReviewProposal={onReviewProposal} />
         ))}
       </div>
     </Panel>

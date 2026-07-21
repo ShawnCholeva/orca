@@ -1,4 +1,4 @@
-import type { GateMetrics, TemplateMetricsDetail } from "@orca/contracts";
+import type { GateMetrics, TemplateInstructionProposal, TemplateMetricsDetail } from "@orca/contracts";
 import { Pill } from "../workspaces/primitives";
 import { gradeFor } from "./metrics-data";
 import { Panel, SectionLabel, Sparkline, VersionHistoryStrip, VersionMarkerChips } from "./metrics-charts";
@@ -82,7 +82,7 @@ export function GatePerformancePanel({ detail, openGate, onToggleGate }: { detai
   );
 }
 
-export function FusedPipelinePanel({ detail, loading, openStep, onToggleStep, openGate, onToggleGate, onOpenGoal }: {
+export function FusedPipelinePanel({ detail, loading, openStep, onToggleStep, openGate, onToggleGate, onOpenGoal, proposalsByStep, onReviewProposal }: {
   detail: TemplateMetricsDetail | null;
   loading: boolean;
   openStep: string | null;
@@ -90,6 +90,8 @@ export function FusedPipelinePanel({ detail, loading, openStep, onToggleStep, op
   openGate: string | null;
   onToggleGate: (nodeId: string) => void;
   onOpenGoal?: (goalId: string) => void;
+  proposalsByStep?: Map<string, TemplateInstructionProposal>;
+  onReviewProposal?: (id: string) => void;
 }) {
   const pipeline = detail?.pipeline ?? [];
   const steps = detail?.steps ?? [];
@@ -112,7 +114,7 @@ export function FusedPipelinePanel({ detail, loading, openStep, onToggleStep, op
             if (!s) {
               return <div key={node.nodeId} style={{ borderBottom: border, padding: "12px 14px", fontSize: 12, color: "var(--text-4)" }}>{node.name} — no runs this period</div>;
             }
-            return <StepRow key={node.nodeId} step={s} index={idx} isLast={isLast} open={openStep === s.name} onToggle={() => onToggleStep(s.name)} onOpenGoal={onOpenGoal} />;
+            return <StepRow key={node.nodeId} step={s} index={idx} isLast={isLast} open={openStep === s.name} onToggle={() => onToggleStep(s.name)} onOpenGoal={onOpenGoal} proposalForStep={proposalsByStep?.get(s.stepTemplateId)} onReviewProposal={onReviewProposal} />;
           }
 
           if (node.type === "gate") {

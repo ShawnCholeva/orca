@@ -134,10 +134,12 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
             openGate={openGate}
             onToggleGate={(id) => setOpenGate((o) => (o === id ? null : id))}
             onOpenGoal={onOpenGoal}
+            proposalsByStep={proposalsByStep}
+            onReviewProposal={setReviewingProposalId}
           />
         ) : (
           <>
-            <StepPerformancePanel detail={detail} loading={detail === null} openStep={openStep} onToggleStep={(name) => setOpenStep((o) => (o === name ? null : name))} onOpenGoal={onOpenGoal} />
+            <StepPerformancePanel detail={detail} loading={detail === null} openStep={openStep} onToggleStep={(name) => setOpenStep((o) => (o === name ? null : name))} onOpenGoal={onOpenGoal} proposalsByStep={proposalsByStep} onReviewProposal={setReviewingProposalId} />
             <GatePerformancePanel detail={detail} openGate={openGate} onToggleGate={(id) => setOpenGate((o) => (o === id ? null : id))} />
           </>
         )}

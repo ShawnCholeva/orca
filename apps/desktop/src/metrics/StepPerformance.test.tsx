@@ -95,6 +95,24 @@ describe("StepRow expanded", () => {
     expect(screen.getByText("Weakly verified")).toBeInTheDocument();
     expect(screen.queryByText("Run & tested")).toBeNull(); // tier pill retired
   });
+
+  it("shows an inline drafted-fix card on a struggling step with a matching proposal", () => {
+    const proposal = { id: "p1", stepTemplateId: "verify", status: "pending",
+      predictedImprovement: "Require evidence_refs so a reviewer can check the work.",
+    } as unknown as import("@orca/contracts").TemplateInstructionProposal;
+    const onReviewProposal = vi.fn();
+    render(<StepRow step={step} index={0} isLast open onToggle={() => {}} proposalForStep={proposal} onReviewProposal={onReviewProposal} />);
+    expect(screen.getByText(/Orca drafted a fix/i)).toBeInTheDocument();
+    expect(screen.getByText(/Require evidence_refs/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/Review change/i));
+    expect(onReviewProposal).toHaveBeenCalledWith("p1");
+  });
+
+  it("shows no drafted-fix card on a healthy step (no clusters)", () => {
+    const proposal = { id: "p1", stepTemplateId: "s", status: "pending", predictedImprovement: "x" } as unknown as import("@orca/contracts").TemplateInstructionProposal;
+    render(<StepRow step={reconciledStep} index={0} isLast open onToggle={() => {}} proposalForStep={proposal} onReviewProposal={() => {}} />);
+    expect(screen.queryByText(/Orca drafted a fix/i)).toBeNull();
+  });
 });
 
 describe("diagnosis card", () => {
