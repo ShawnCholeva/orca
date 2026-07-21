@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import type { MetricScope, TemplateMetricsSummary, TemplateMetricsDetail } from "@orca/contracts";
-import { getTemplateMetricsSummaries, getTemplateMetricsDetail } from "../api";
+import type { MetricScope, TemplateInstructionProposal, TemplateMetricsSummary, TemplateMetricsDetail } from "@orca/contracts";
+import { getTemplateMetricsSummaries, getTemplateMetricsDetail, listProposals, applyProposal, dismissProposal } from "../api";
 import { gradeFor, workflowHealthFromSteps } from "./metrics-data";
 import { StatTile } from "./metrics-charts";
 import { StepPerformancePanel, WorkflowDropdown } from "./StepPerformance";
 import { GatePerformancePanel, FusedPipelinePanel, PolicyGatewayReadout, CompletionGateReadout } from "./GatePerformance";
 import { SelfImprovementRail } from "./SelfImprovement";
+import { ProposalReviewModal } from "./ProposalReviewModal";
 import { Workflow, Refresh } from "./metrics-icons";
 
 const PERIODS = ["24h", "7d", "30d"] as const;
@@ -27,6 +28,8 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
   const [openStep, setOpenStep] = useState<string | null>(null);
   const [openGate, setOpenGate] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [proposals, setProposals] = useState<TemplateInstructionProposal[]>([]);
+  const [reviewingProposalId, setReviewingProposalId] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -41,11 +44,27 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
     setDetail(null);
     setOpenStep(null);
     setOpenGate(null);
+    setReviewingProposalId(null);
     if (!wfId) { return; }
     let live = true;
     getTemplateMetricsDetail(wfId, period, scope).then((d) => { if (live) setDetail(d); }).catch(() => { if (live) setError(true); });
     return () => { live = false; };
   }, [wfId, period, scope, reloadKey]);
+
+  useEffect(() => {
+    let live = true;
+    if (!wfId) { setProposals([]); return; }
+    listProposals(wfId, period).then((p) => { if (live) setProposals(p); }).catch(() => {});
+    return () => { live = false; };
+  }, [wfId, period, reloadKey]);
+
+  const refetchProposals = async () => {
+    if (wfId) { try { setProposals(await listProposals(wfId, period)); } catch { /* best-effort */ } }
+  };
+  // Keyed for a later task (opening the review modal from the step drawer).
+  const proposalsByStep = new Map<string, TemplateInstructionProposal>();
+  for (const p of proposals) if (p.status === "pending" && !proposalsByStep.has(p.stepTemplateId)) proposalsByStep.set(p.stepTemplateId, p);
+  const reviewingProposal = proposals.find((p) => p.id === reviewingProposalId) ?? null;
 
   if (error) {
     return <CenterNote>Couldn't load metrics. <button type="button" onClick={() => setReloadKey((k) => k + 1)} style={linkBtn}>Retry</button></CenterNote>;
@@ -58,6 +77,7 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
   const healthColor = health == null ? "var(--text-3)" : health >= 80 ? "var(--run)" : health >= 60 ? "var(--warn)" : "var(--err)";
 
   return (
+    <>
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 340px", gap: 12, padding: 12, height: "100%", minHeight: 0, overflow: "hidden" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
@@ -125,9 +145,22 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
           templateId={wfId}
           period={period}
           onMutated={() => setReloadKey((k) => k + 1)}
+          proposals={proposals}
+          onReview={setReviewingProposalId}
+          refetchProposals={refetchProposals}
         />
       </div>
     </div>
+    {reviewingProposal && (
+      <ProposalReviewModal
+        proposal={reviewingProposal}
+        stepName={detail?.steps.find((s) => s.stepTemplateId === reviewingProposal.stepTemplateId)?.name ?? reviewingProposal.stepTemplateId}
+        onApply={async (edited) => { await applyProposal(reviewingProposal.id, edited); setReviewingProposalId(null); await refetchProposals(); setReloadKey((k) => k + 1); }}
+        onDismiss={async () => { await dismissProposal(reviewingProposal.id); setReviewingProposalId(null); await refetchProposals(); }}
+        onClose={() => setReviewingProposalId(null)}
+      />
+    )}
+    </>
   );
 }
 

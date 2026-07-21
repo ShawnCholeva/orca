@@ -1,11 +1,38 @@
+import { useEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { TemplateInstructionProposal } from "@orca/contracts";
 import { SelfImprovementRail } from "./SelfImprovement";
+import { ProposalReviewModal } from "./ProposalReviewModal";
 import * as api from "../api";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const detail = { summary: { templateId: "tpl", name: "Brainstorm" } } as never;
+
+// SelfImprovementRail is a controlled component (proposals/onReview/refetchProposals are
+// props owned by MetricsPage). This harness reproduces just enough of MetricsPage's
+// proposal-owning logic — fetch on mount, refetch after a mutation, render the modal keyed
+// off the reviewed id — so the rail + modal can still be exercised together in isolation.
+function Harness({ onMutated = () => {} }: { onMutated?: () => void }) {
+  const [proposals, setProposals] = useState<TemplateInstructionProposal[]>([]);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const refetchProposals = async () => { setProposals(await api.listProposals("tpl", "7d")); };
+  useEffect(() => { refetchProposals(); }, []);
+  const reviewing = proposals.find((p) => p.id === reviewingId) ?? null;
+  return (
+    <>
+      <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={onMutated}
+        proposals={proposals} onReview={setReviewingId} refetchProposals={refetchProposals} />
+      {reviewing && (
+        <ProposalReviewModal proposal={reviewing} stepName={reviewing.stepTemplateId}
+          onApply={async (edited) => { await api.applyProposal(reviewing.id, edited); setReviewingId(null); await refetchProposals(); }}
+          onDismiss={async () => { await api.dismissProposal(reviewing.id); setReviewingId(null); await refetchProposals(); }}
+          onClose={() => setReviewingId(null)} />
+      )}
+    </>
+  );
+}
 
 const pending = {
   id: "p1", templateId: "tpl", templateVersionAtProposal: 1, stepTemplateId: "s1", component: "step_instructions",
@@ -61,9 +88,9 @@ const appliedInstructionsNoCanary = {
 
 describe("SelfImprovementRail", () => {
   it("analyzes on click and renders a proposal card", async () => {
-    vi.spyOn(api, "listProposals").mockResolvedValue([]);
+    vi.spyOn(api, "listProposals").mockResolvedValueOnce([]).mockResolvedValue([pending as never]);
     const analyzeSpy = vi.spyOn(api, "analyzeTemplate").mockResolvedValue([pending as never]);
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     fireEvent.click(await screen.findByRole("button", { name: /analyze this template/i }));
     await waitFor(() => expect(analyzeSpy).toHaveBeenCalled());
     expect(await screen.findByText(/produced output that didn't match/i)).toBeTruthy();
@@ -73,26 +100,28 @@ describe("SelfImprovementRail", () => {
   it("pending card opens a review modal with the diff and keeps Apply/Dismiss", async () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([pending as never]);
     const applySpy = vi.spyOn(api, "applyProposal").mockResolvedValue({ ...pending, status: "applied", appliedAsVersion: 2 } as never);
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     expect(await screen.findByText(/produced output that didn't match/i)).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: /review change/i }));
     const dialog = within(await screen.findByRole("dialog"));
     expect(dialog.getByText(/− Generate\./)).toBeTruthy();
     expect(dialog.getAllByText(/Generate and validate against schema\./).length).toBeGreaterThan(0);
     fireEvent.click(dialog.getByRole("button", { name: /^apply$/i }));
-    await waitFor(() => expect(applySpy).toHaveBeenCalledWith("p1", undefined));
+    // The modal always sends its (possibly unedited) textarea value — unlike the card's own
+    // Apply, which applies unedited via applyProposal(id) with no second argument.
+    await waitFor(() => expect(applySpy).toHaveBeenCalledWith("p1", pending.afterInstructions));
   });
 
   it("schema proposals render field chips, not raw JSON, in the summary", async () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([schemaPending as never]);
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     expect(await screen.findByText(/\+ evidence_refs/i)).toBeTruthy();
     expect(screen.queryByText(/"key": "summary"/)).toBeNull();
   });
 
   it("schema proposal with no chips (description-only extension) shows a fallback line, not a blank summary", async () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([schemaDescriptionOnlyPending as never]);
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     expect(await screen.findByText(/Adds required structure — open Review change\./i)).toBeTruthy();
   });
 
@@ -100,16 +129,16 @@ describe("SelfImprovementRail", () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([pending as never]);
     const applySpy = vi.spyOn(api, "applyProposal").mockResolvedValue({ ...pending, status: "applied", appliedAsVersion: 2 } as never);
     const onMutated = vi.fn();
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={onMutated} />);
+    render(<Harness onMutated={onMutated} />);
     fireEvent.click(await screen.findByRole("button", { name: /^apply$/i }));
-    await waitFor(() => expect(applySpy).toHaveBeenCalledWith("p1", undefined));
+    await waitFor(() => expect(applySpy).toHaveBeenCalledWith("p1"));
     await waitFor(() => expect(onMutated).toHaveBeenCalled());
   });
 
   it("shows error message when applyProposal rejects", async () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([pending as never]);
     vi.spyOn(api, "applyProposal").mockRejectedValue(new api.ApiError("Stale proposal — template was modified."));
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     fireEvent.click(await screen.findByRole("button", { name: /^apply$/i }));
     expect(await screen.findByText(/Stale proposal — template was modified\./i)).toBeTruthy();
   });
@@ -124,7 +153,7 @@ describe("SelfImprovementRail", () => {
       },
     };
     vi.spyOn(api, "listProposals").mockResolvedValue([judged as never]);
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     expect(await screen.findByText(/regression risk/i)).toBeTruthy();
     expect(screen.getByText(/would drop the error-path check/i)).toBeTruthy();
     expect(await screen.findByRole("button", { name: /^apply$/i })).toBeEnabled();
@@ -141,7 +170,7 @@ describe("SelfImprovementRail", () => {
       },
     };
     vi.spyOn(api, "listProposals").mockResolvedValue([judged as never]);
-    const { container } = render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    const { container } = render(<Harness />);
     expect(await screen.findByText(/^pass/i)).toBeTruthy();
     expect(screen.getByText(/2 solved/i)).toBeTruthy();
     const summary = screen.getByText(/how the reviewer worked through it/i);
@@ -153,13 +182,17 @@ describe("SelfImprovementRail", () => {
 
   it("shows the Evaluate action when unjudged", async () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([pending as never]);
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     expect(await screen.findByRole("button", { name: /evaluate this edit/i })).toBeTruthy();
   });
 
-  it("review modal textarea is controlled — edits persist across close/reopen", async () => {
+  it("review modal textarea is controlled and initializes from afterInstructions", async () => {
+    // ProposalReviewModal now owns its edited-text state locally (init'd from
+    // proposal.afterInstructions) and is only mounted while open — so a close/reopen is a
+    // fresh mount that resets to the original text, rather than persisting the in-progress
+    // edit. This is an accepted behavior change from lifting the modal out of the rail.
     vi.spyOn(api, "listProposals").mockResolvedValue([pending as never]);
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     fireEvent.click(await screen.findByRole("button", { name: /review change/i }));
     const dialog = within(await screen.findByRole("dialog"));
     const textarea = dialog.getByRole("textbox") as HTMLTextAreaElement;
@@ -171,12 +204,12 @@ describe("SelfImprovementRail", () => {
     fireEvent.click(await screen.findByRole("button", { name: /review change/i }));
     const dialogReopened = within(await screen.findByRole("dialog"));
     const textareaReopened = dialogReopened.getByRole("textbox") as HTMLTextAreaElement;
-    expect(textareaReopened.value).toBe("edited text");
+    expect(textareaReopened.value).toBe(pending.afterInstructions);
   });
 
   it("applied card renders the falsifier line in all three states", async () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([appliedImproved, appliedNotImproved, appliedAwaiting] as never);
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     expect(await screen.findByText(/improved \+20 points \(v3→v4\)/i)).toBeTruthy();
     expect(await screen.findByText(/not improved \(-8 points, v3→v4\)/i)).toBeTruthy();
     expect(await screen.findByText(/awaiting data — needs 2 scored runs on each version/i)).toBeTruthy();
@@ -184,7 +217,7 @@ describe("SelfImprovementRail", () => {
 
   it("schema canary line renders when invalidOutputRateDelta exceeds the threshold", async () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([appliedSchemaCanary] as never);
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     expect(await screen.findByText(/new checks are rejecting output/i)).toBeTruthy();
     expect(screen.getByText(/\+50%/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /rollback/i })).toBeTruthy();
@@ -192,7 +225,7 @@ describe("SelfImprovementRail", () => {
 
   it("does not render the schema canary line for instructions proposals", async () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([appliedInstructionsNoCanary] as never);
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     await screen.findByText(/awaiting data/i);
     expect(screen.queryByText(/new checks are rejecting output/i)).toBeNull();
   });
@@ -208,7 +241,7 @@ describe("SelfImprovementRail", () => {
     };
     vi.spyOn(api, "listProposals").mockResolvedValue([]);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([analyzedWithSkips] as never);
-    const { container } = render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    const { container } = render(<Harness />);
     expect(await screen.findByText(/The last review flagged 3 steps but couldn't draft a change/i)).toBeTruthy();
     expect(screen.queryByText(/steps are healthy or below the sample threshold/i)).toBeNull();
     expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
@@ -222,7 +255,7 @@ describe("SelfImprovementRail", () => {
     };
     vi.spyOn(api, "listProposals").mockResolvedValue([]);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([analyzedClean] as never);
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     expect(await screen.findByText(/steps are healthy or below the sample threshold/i)).toBeTruthy();
   });
 
@@ -232,7 +265,7 @@ describe("SelfImprovementRail", () => {
     const orphan = { ...appliedNotImproved, id: "old-proposal", status: "dismissed" };
     vi.spyOn(api, "listProposals").mockResolvedValue([orphan] as never);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([newEvent, oldEvent] as never);
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     const heading = await screen.findByText("Learning");
     const section = heading.closest("section") as HTMLElement;
     const text = section.textContent ?? "";
@@ -254,7 +287,7 @@ describe("SelfImprovementRail", () => {
       analyzed("ev-3", "2026-07-06T22:41:00.000Z"),
       applied,
     ] as never);
-    render(<SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />);
+    render(<Harness />);
     const heading = await screen.findByText("Learning");
     const section = heading.closest("section") as HTMLElement;
     // Three identical adjacent lines render once, with the repeat count; the header keeps the true event count.

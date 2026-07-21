@@ -1,8 +1,8 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MetricsPage } from "./MetricsPage";
 import * as api from "../api";
-import type { GateMetrics, StepMetrics } from "@orca/contracts";
+import type { GateMetrics, StepMetrics, TemplateInstructionProposal } from "@orca/contracts";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -46,7 +46,32 @@ const gate = (over: Partial<GateMetrics> = {}): GateMetrics => ({
   trend: [], versionBoundaries: [], ...over,
 });
 
+const proposal = (over: Partial<TemplateInstructionProposal> = {}): TemplateInstructionProposal => ({
+  id: "prop-1", templateId: "tpl", templateVersionAtProposal: 1, stepTemplateId: "proposal",
+  component: "step_instructions", beforeInstructions: "Do the thing.", afterInstructions: "Do the thing carefully.",
+  targetedFailureMode: { rule: "R1", failureCode: "vague_output", clusterCount: 3, signalCount: null },
+  predictedImprovement: "Cuts vague-output failures", invariantsPreserved: [],
+  falsifier: "version_comparison", rollbackPlan: "revert_to_before",
+  evidence: { sampleTransitionIds: [], revisionSignalIds: [], metricSnapshot: { score: null, verdictPassRate: 0.5, oracleSufficientRate: null, versionDelta: null } },
+  rationale: "Steps were vague.", humanEdited: false, status: "pending",
+  createdAt: "2026-05-01T00:00:00.000Z", decidedAt: null, decidedBy: null, appliedAsVersion: null,
+  ...over,
+});
+
 describe("MetricsPage", () => {
+  it("renders a pending proposal in the rail and opens the review modal on 'Review change'", async () => {
+    vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [step()], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
+    vi.spyOn(api, "listProposals").mockResolvedValue([proposal()]);
+    vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
+    render(<MetricsPage />);
+
+    expect(await screen.findByText("Cuts vague-output failures")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Review change"));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+
   it("shows a loading state then renders the health tile", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
     vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });

@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { LearningEvent, TemplateInstructionProposal, TemplateMetricsDetail } from "@orca/contracts";
 import { labelForFailure } from "@orca/contracts";
-import { analyzeTemplate, applyProposal, dismissProposal, judgeProposal, listLearningEvents, listProposals, rollbackProposal, toErrorMessage } from "../api";
+import { analyzeTemplate, applyProposal, dismissProposal, judgeProposal, listLearningEvents, rollbackProposal, toErrorMessage } from "../api";
 import { Btn, Pill } from "../workspaces/primitives";
 import { eventLine, synthesizedLine, VERDICT_META } from "./learning-log";
 import { Panel } from "./metrics-charts";
 import { statusForStep, statusMeta } from "./metrics-data";
-import { Check, Close, Sparkle } from "./metrics-icons";
-import { diffLines, schemaChips, type DiffLine, type SchemaChip } from "./proposal-diff";
+import { Check, Sparkle } from "./metrics-icons";
+import { diffLines, schemaChips, type SchemaChip } from "./proposal-diff";
 
 // mock card + modal chrome uses the app's token set (workspaces/primitives ported the same
 // Btn/Pill from the design prototype these panels were mocked in).
@@ -27,33 +27,21 @@ function ChipRow({ chips }: { chips: SchemaChip[] }) {
   );
 }
 
-function DiffBlock({ lines }: { lines: DiffLine[] }) {
-  return (
-    <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 11.5, maxHeight: 240, overflow: "auto" }}>
-      {lines.map((l, i) => (
-        <div key={i} style={{ color: l.kind === "removed" ? "var(--err)" : l.kind === "added" ? "var(--run)" : "var(--text-3)" }}>
-          {l.kind === "removed" ? "− " : l.kind === "added" ? "+ " : "  "}{l.text}
-        </div>
-      ))}
-    </pre>
-  );
-}
-
 type Props = {
   detail: TemplateMetricsDetail | null;
   workflowName: string;
   templateId: string | null;
   period: "24h" | "7d" | "30d";
   onMutated: () => void;
+  proposals: TemplateInstructionProposal[];
+  onReview: (id: string) => void;
+  refetchProposals: () => Promise<void>;
 };
 
-export function SelfImprovementRail({ detail, workflowName, templateId, period, onMutated }: Props) {
-  const [proposals, setProposals] = useState<TemplateInstructionProposal[]>([]);
+export function SelfImprovementRail({ detail, workflowName, templateId, period, onMutated, proposals, onReview, refetchProposals }: Props) {
   const [events, setEvents] = useState<LearningEvent[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
-  const [editing, setEditing] = useState<Record<string, string>>({});
   const [judging, setJudging] = useState<Record<string, boolean>>({});
-  const [reviewing, setReviewing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -61,7 +49,6 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
   useEffect(() => {
     let live = true;
     if (templateId) {
-      listProposals(templateId, period).then((p) => { if (live) setProposals(p); }).catch(() => {});
       listLearningEvents(templateId).then((e) => { if (live) setEvents(e); }).catch(() => {});
     }
     return () => { live = false; };
@@ -70,8 +57,7 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
   const refresh = async () => {
     if (!templateId) return;
     const capturedId = templateId;
-    const ps = await listProposals(capturedId, period);
-    if (mountedRef.current && capturedId === templateId) setProposals(ps);
+    await refetchProposals();
     try {
       const evs = await listLearningEvents(capturedId);
       if (mountedRef.current && capturedId === templateId) setEvents(evs);
@@ -82,14 +68,17 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
     if (!templateId) return;
     setAnalyzing(true);
     try {
-      setProposals(await analyzeTemplate(templateId, period));
+      await analyzeTemplate(templateId, period);
+      await refetchProposals();
       // The run just wrote created/analyzed events — refetch or the log stays stale.
       const evs = await listLearningEvents(templateId).catch(() => null);
       if (evs && mountedRef.current) setEvents(evs);
     } finally { setAnalyzing(false); }
   };
   const onApply = async (p: TemplateInstructionProposal) => {
-    try { setError(null); await applyProposal(p.id, editing[p.id]); await refresh(); onMutated(); }
+    // Card-level Apply applies unedited — editing now lives in ProposalReviewModal (opened via
+    // onReview), which calls applyProposal(id, edited) itself. Noted behavior change.
+    try { setError(null); await applyProposal(p.id); await refresh(); onMutated(); }
     catch (err) { setError(toErrorMessage(err, "Failed to apply proposal.")); }
   };
   const onJudge = async (p: TemplateInstructionProposal) => {
@@ -189,50 +178,10 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
             <div style={{ color: "var(--text-3)", fontSize: 11.5 }}>Preserves: {p.invariantsPreserved.join(", ") || "—"}</div>
 
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <Btn kind="quiet" size="xs" onClick={() => setReviewing(p.id)}>Review change</Btn>
+              <Btn kind="quiet" size="xs" onClick={() => onReview(p.id)}>Review change</Btn>
               <Btn kind="primary" size="xs" icon={<Check />} onClick={() => onApply(p)}>Apply</Btn>
               <Btn kind="ghost" size="xs" onClick={() => onDismiss(p)}>Dismiss</Btn>
             </div>
-
-            {reviewing === p.id && (
-              <div style={{ position: "fixed", inset: 0, zIndex: 40, background: "rgba(5,8,14,0.55)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <div role="dialog" aria-modal="true" aria-label={`Review change — ${stepName(p.stepTemplateId)}`}
-                  style={{ width: "min(560px, 90vw)", maxHeight: "85vh", background: "var(--panel)", border: "1px solid var(--hairline-strong)", borderRadius: 14, boxShadow: "0 24px 80px rgba(0,0,0,0.55)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-                  <header style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: "1px solid var(--hairline)" }}>
-                    <div style={{ width: 30, height: 30, borderRadius: 7, background: "var(--accent-soft)", color: "var(--accent)", border: "1px solid var(--accent-line)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <Sparkle size={15} />
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="mono" style={{ fontSize: 10.5, color: "var(--accent)", textTransform: "uppercase", letterSpacing: 1.2 }}>Orca proposes</div>
-                      <div className="mono" style={{ fontSize: 11.5, color: "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{stepName(p.stepTemplateId)}</div>
-                    </div>
-                    <Btn icon={<Close />} size="xs" title="Close" onClick={() => setReviewing(null)} />
-                  </header>
-
-                  <div className="scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-                    <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", lineHeight: 1.35 }}>{p.predictedImprovement}</div>
-                    {p.component === "step_output_schema" && chips.length > 0 && <ChipRow chips={chips} />}
-                    <div>
-                      <div className="mono" style={{ fontSize: 9.5, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--text-4)", marginBottom: 6 }}>Proposed change</div>
-                      <div style={{ borderLeft: "2px solid var(--hairline-strong)", paddingLeft: 10 }}><DiffBlock lines={diff} /></div>
-                    </div>
-                    <div>
-                      <div className="mono" style={{ fontSize: 9.5, letterSpacing: 0.8, textTransform: "uppercase", color: "var(--run)", marginBottom: 6 }}>Edit before applying</div>
-                      <textarea value={editing[p.id] ?? p.afterInstructions} onChange={(e) => setEditing((s) => ({ ...s, [p.id]: e.target.value }))} rows={6}
-                        style={{ width: "100%", background: "var(--bg)", color: "var(--text)", border: "1px solid var(--hairline)", borderRadius: 6, fontFamily: "inherit", fontSize: 11.5, padding: "7px 10px", boxSizing: "border-box" }} />
-                    </div>
-                    <div style={{ color: "var(--text-2)" }}>Predicts: {p.predictedImprovement}</div>
-                    <div style={{ color: "var(--text-3)" }}>Preserves: {p.invariantsPreserved.join(", ") || "—"}</div>
-                  </div>
-
-                  <footer style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderTop: "1px solid var(--hairline)" }}>
-                    <div style={{ flex: 1 }} />
-                    <Btn kind="ghost" size="sm" onClick={() => onDismiss(p)}>Dismiss</Btn>
-                    <Btn kind="primary" size="sm" icon={<Check />} onClick={() => onApply(p)}>Apply</Btn>
-                  </footer>
-                </div>
-              </div>
-            )}
 
             {p.judgment ? (
               <div style={{ marginTop: 4, borderTop: "1px solid var(--hairline)", paddingTop: 8 }}>

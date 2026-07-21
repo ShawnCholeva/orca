@@ -93,20 +93,20 @@ const appliedSchemaCanary = {
 
 describe("no jargon in the self-improvement rail", () => {
   it("renders no 'oracle', 'sensor', 'verdict', 'refute', or 'veto' for a pending schema proposal or a judged proposal", async () => {
-    vi.spyOn(api, "listProposals").mockResolvedValue([pendingSchemaProposal, judgedProposal] as never);
     const detail = { summary: { templateId: "tpl", name: "Brainstorm" } } as never;
     const { container } = render(
-      <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />
+      <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}}
+        proposals={[pendingSchemaProposal, judgedProposal] as never} onReview={() => {}} refetchProposals={async () => {}} />
     );
     await screen.findByText(/\+ evidence_refs/i);
     expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 
   it("renders no 'oracle', 'sensor', 'verdict', 'refute', or 'veto' for an applied card with falsifier and canary lines", async () => {
-    vi.spyOn(api, "listProposals").mockResolvedValue([appliedSchemaCanary] as never);
     const detail = { summary: { templateId: "tpl", name: "Brainstorm" } } as never;
     const { container } = render(
-      <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />
+      <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}}
+        proposals={[appliedSchemaCanary] as never} onReview={() => {}} refetchProposals={async () => {}} />
     );
     await screen.findByText(/new checks are rejecting output/i);
     expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
@@ -114,10 +114,10 @@ describe("no jargon in the self-improvement rail", () => {
 
   it("renders the curated label for a targeted failureCode, never the raw code (e.g. 'evidence_veto' must not leak 'veto')", async () => {
     const proposal = { ...judgedProposal, id: "p3", judgment: undefined, targetedFailureMode: { rule: "R1", failureCode: "evidence_veto", clusterCount: 5, signalCount: null } };
-    vi.spyOn(api, "listProposals").mockResolvedValue([proposal] as never);
     const detail = { summary: { templateId: "tpl", name: "Brainstorm" } } as never;
     const { container } = render(
-      <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />
+      <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}}
+        proposals={[proposal] as never} onReview={() => {}} refetchProposals={async () => {}} />
     );
     expect(await screen.findByText(/Automated checks failed, so the completion was rejected/i)).toBeTruthy();
     expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
@@ -134,7 +134,6 @@ describe("no jargon in the self-improvement rail", () => {
       { id: "e7", templateId: "tpl", proposalId: null, stepTemplateId: null, eventType: "baseline_restored", templateVersion: 3, createdAt: "2026-07-01T06:00:00.000Z", payload: { kind: "baseline_restored", supersededCount: 1 } },
       { id: "e8", templateId: "tpl", proposalId: null, stepTemplateId: "s1", eventType: "analyzed", templateVersion: 3, createdAt: "2026-07-01T07:00:00.000Z", payload: { kind: "analyzed", stepsDiagnosed: 2, proposalsCreated: 0, skips: [{ stepTemplateId: "s1", reason: "below the sample threshold" }] } },
     ];
-    vi.spyOn(api, "listProposals").mockResolvedValue([]);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue(events as never);
     const detail = {
       summary: {
@@ -147,7 +146,8 @@ describe("no jargon in the self-improvement rail", () => {
       },
     } as never;
     const { container } = render(
-      <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}} />
+      <SelfImprovementRail detail={detail} workflowName="Brainstorm" templateId="tpl" period="7d" onMutated={() => {}}
+        proposals={[]} onReview={() => {}} refetchProposals={async () => {}} />
     );
     await screen.findByText("Learning");
     expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
