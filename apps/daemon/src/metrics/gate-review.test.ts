@@ -29,4 +29,17 @@ describe("gateApprovalsByStep", () => {
     const m = gateApprovalsByStep(graph, [{ nodeId: "unknown_gate", outcome: "approved", workflowRunId: "r1" }]);
     expect(m.size).toBe(0);
   });
+  it("skips a gate with multiple step predecessors (ambiguous → no credit)", () => {
+    const g2: WorkflowGraph = { nodes: [
+      { id: "a", type: "step", name: "A", stepId: "a" },
+      { id: "b", type: "step", name: "B", stepId: "b" },
+      { id: "gate", type: "gate", name: "G", instructions: "x" },
+      { id: "done", type: "step", name: "Done", stepId: "done", terminal: true },
+    ], edges: [
+      { from: "a", to: "gate" }, { from: "b", to: "gate" },
+      { from: "gate", to: "done", port: "approved" }, { from: "gate", to: "a", port: "rejected" },
+    ], positions: {} } as never;
+    const m = gateApprovalsByStep(g2, [{ nodeId: "gate", outcome: "approved", workflowRunId: "r1" }]);
+    expect(m.size).toBe(0);
+  });
 });

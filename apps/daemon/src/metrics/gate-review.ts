@@ -9,8 +9,14 @@ export function gateApprovalsByStep(
   const stepNodeIds = new Set(graph.nodes.filter((n) => n.type === "step").map((n) => n.id));
   for (const n of graph.nodes) {
     if (n.type !== "gate") continue;
-    const pred = graph.edges.find((e) => e.to === n.id && stepNodeIds.has(e.from));
-    if (pred) reviewedStepOf.set(n.id, pred.from);
+    // A gate reviews exactly one step — the step node whose edge feeds it. If a gate
+    // has zero or (in a future graph) multiple step predecessors, the reviewed step is
+    // ambiguous, so we attribute nothing rather than guess: the step degrades to its
+    // other evidence / unknown, never a mis-credit.
+    const stepPreds = [...new Set(
+      graph.edges.filter((e) => e.to === n.id && stepNodeIds.has(e.from)).map((e) => e.from)
+    )];
+    if (stepPreds.length === 1) reviewedStepOf.set(n.id, stepPreds[0]);
   }
   const out = new Map<string, Set<string>>();
   for (const d of gateDecisions) {
