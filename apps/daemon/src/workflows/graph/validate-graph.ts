@@ -1,6 +1,12 @@
-import type { WorkflowGraph, WorkflowStepTemplate, WorkflowTemplate as WorkflowTemplateT } from "@orca/contracts";
+import type {
+  WorkflowGraph,
+  WorkflowGuardrailConfig,
+  WorkflowStepTemplate,
+  WorkflowTemplate as WorkflowTemplateT,
+} from "@orca/contracts";
 import { findInitialStepNode } from "./graph-routing.js";
 import { delegationTargets } from "../composition/depth.js";
+import { stepRequiresExecution } from "../orchestrator/requires-execution.js";
 
 /**
  * Returns a list of human-readable rule violations for a graph against its step
@@ -183,6 +189,39 @@ export function validateGraph(
     }
   }
 
+  return errors;
+}
+
+/**
+ * Guaranteed-verifier invariant: every step node must have at least one way to
+ * be checked before it can be trusted as complete — enforce-mode grounding, a
+ * validation_rule guardrail, a gate successor, a human-authoritative completion
+ * policy (interview/handoff), or being terminal (human-authoritative mark_done).
+ * Returns human-readable violations; an empty list means every step is verified.
+ */
+export function validateStepVerifiers(
+  graph: WorkflowGraph,
+  steps: WorkflowStepTemplate[],
+  guardrails: WorkflowGuardrailConfig[]
+): string[] {
+  const errors: string[] = [];
+  const stepById = new Map(steps.map((s) => [s.id, s]));
+  const gateNodeIds = new Set(graph.nodes.filter((n) => n.type === "gate").map((n) => n.id));
+  for (const node of graph.nodes) {
+    if (node.type !== "step") continue;
+    const templateId = node.stepId ?? node.id;
+    const tpl = stepById.get(templateId);
+    const enforceGrounding = (tpl?.grounding ?? []).some((g) => (g as { mode?: string }).mode === "enforce");
+    const hasSensors = stepRequiresExecution(guardrails, templateId) != null;
+    const gateSuccessor = graph.edges.some((e) => e.from === node.id && gateNodeIds.has(e.to));
+    const humanPolicy = tpl?.completionPolicy === "interview" || tpl?.completionPolicy === "handoff";
+    const terminal = node.terminal === true;
+    if (!(enforceGrounding || hasSensors || gateSuccessor || humanPolicy || terminal)) {
+      errors.push(
+        `step '${node.id}' has no verifier: needs enforce grounding, a validation_rule, a gate, an interview/handoff policy, or terminal`
+      );
+    }
+  }
   return errors;
 }
 

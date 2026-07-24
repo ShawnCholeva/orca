@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { WorkflowGraph, WorkflowStepTemplate } from "@orca/contracts";
-import { validateGraph, validateSchemaReferences } from "./validate-graph.js";
+import type { WorkflowGraph, WorkflowGuardrailConfig, WorkflowStepTemplate } from "@orca/contracts";
+import { validateGraph, validateSchemaReferences, validateStepVerifiers } from "./validate-graph.js";
+import { BUILTIN_TEMPLATE_CATALOG } from "../templates/catalog.js";
 
 function step(id: string, ordinal: number): WorkflowStepTemplate {
   return {
@@ -247,5 +248,62 @@ describe("validateSchemaReferences", () => {
       positions: {},
     };
     expect(validateSchemaReferences(g, s)).toEqual([]);
+  });
+});
+
+describe("validateStepVerifiers", () => {
+  const g: WorkflowGraph = {
+    nodes: [
+      { id: "reason", type: "step", name: "Reason", stepId: "reason" },
+      { id: "gate", type: "gate", name: "Gate", instructions: "x" },
+      { id: "done", type: "step", name: "Done", stepId: "done", terminal: true },
+    ],
+    edges: [{ from: "reason", to: "gate" }, { from: "gate", to: "done", port: "approved" }, { from: "gate", to: "reason", port: "rejected" }],
+    positions: {},
+  } as never;
+
+  it("passes: gate successor + terminal", () => {
+    const steps = [step("reason", 0), step("done", 1)];
+    expect(validateStepVerifiers(g, steps, [])).toEqual([]);
+  });
+
+  it("fails a bare reasoning step with no verifier", () => {
+    const bare: WorkflowGraph = {
+      nodes: [{ id: "reason", type: "step", name: "Reason", stepId: "reason" }, { id: "done", type: "step", name: "Done", stepId: "done", terminal: true }],
+      edges: [{ from: "reason", to: "done" }],
+      positions: {},
+    } as never;
+    const steps = [step("reason", 0), step("done", 1)];
+    expect(validateStepVerifiers(bare, steps, [])).toContain(
+      "step 'reason' has no verifier: needs enforce grounding, a validation_rule, a gate, an interview/handoff policy, or terminal"
+    );
+  });
+
+  it("passes a bare step covered by a validation_rule guardrail", () => {
+    const bare: WorkflowGraph = {
+      nodes: [{ id: "reason", type: "step", name: "Reason", stepId: "reason" }, { id: "done", type: "step", name: "Done", stepId: "done", terminal: true }],
+      edges: [{ from: "reason", to: "done" }],
+      positions: {},
+    } as never;
+    const steps = [step("reason", 0), step("done", 1)];
+    const guardrails = [{ id: "v", kind: "validation_rule", label: "v", configJson: { appliesToSteps: ["reason"], required: ["unit_tests"] } }] as WorkflowGuardrailConfig[];
+    expect(validateStepVerifiers(bare, steps, guardrails)).toEqual([]);
+  });
+
+  it("passes a step with an enforce grounding check", () => {
+    const bare: WorkflowGraph = {
+      nodes: [{ id: "reason", type: "step", name: "Reason", stepId: "reason" }, { id: "done", type: "step", name: "Done", stepId: "done", terminal: true }],
+      edges: [{ from: "reason", to: "done" }],
+      positions: {},
+    } as never;
+    const grounded = { ...step("reason", 0), grounding: [{ rule: "paths_exist", field: "f", mode: "enforce" }] } as never;
+    expect(validateStepVerifiers(bare, [grounded, step("done", 1)], [])).toEqual([]);
+  });
+
+  it("the Adaptive Delivery template satisfies the verifier invariant", () => {
+    const tpl = BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === "orca/adaptive-delivery")!;
+    expect(
+      validateStepVerifiers(tpl.graph!, tpl.steps as WorkflowStepTemplate[], tpl.guardrails)
+    ).toEqual([]);
   });
 });
