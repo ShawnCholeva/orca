@@ -212,11 +212,11 @@ export function validateStepVerifiers(
     const templateId = node.stepId ?? node.id;
     const tpl = stepById.get(templateId);
     const enforceGrounding = (tpl?.grounding ?? []).some((g) => (g as { mode?: string }).mode === "enforce");
-    const hasSensors = stepRequiresExecution(guardrails, templateId) != null;
+    const hasValidationRule = stepRequiresExecution(guardrails, templateId) != null;
     const gateSuccessor = graph.edges.some((e) => e.from === node.id && gateNodeIds.has(e.to));
     const humanPolicy = tpl?.completionPolicy === "interview" || tpl?.completionPolicy === "handoff";
     const terminal = node.terminal === true;
-    if (!(enforceGrounding || hasSensors || gateSuccessor || humanPolicy || terminal)) {
+    if (!(enforceGrounding || hasValidationRule || gateSuccessor || humanPolicy || terminal)) {
       errors.push(
         `step '${node.id}' has no verifier: needs enforce grounding, a validation_rule, a gate, an interview/handoff policy, or terminal`
       );

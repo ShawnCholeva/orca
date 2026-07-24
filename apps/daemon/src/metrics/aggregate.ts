@@ -499,8 +499,9 @@ export function computeStepMetrics(input: {
     // see WHICH verifiers drove the score, not just the final number. Fail-edge
     // completions (composedScore's zero(), base===0) are excluded here: they aren't
     // "coverage-capped" or "self-reported", they're failures, and including them would
-    // mislabel a failed step as weakly-verified. A legitimate self-report floor is
-    // base===0.3, so base===0 uniquely marks a zero() fail-edge.
+    // mislabel a failed step as weakly-verified. Unknown (self-report-only) completions
+    // are already excluded upstream by `established` (Task 1/2), so among these
+    // conclusive rows base===0 marks only a refuted/evidence-failed zero() fail-edge.
     const concScores = conclusive.map((t) => scoreByCompletion.get(t)!).filter((s) => s.base !== 0);
     const scoredCount = concScores.length;
     const executableCount = concScores.filter((s) => s.verifiers.executable).length;

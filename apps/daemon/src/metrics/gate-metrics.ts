@@ -68,7 +68,7 @@ export function buildGateMetrics(input: {
     const groundednessOf = (d: GateDecisionRow): number => {
       const completes = stepCompletesByRun.get(d.workflowRunId) ?? [];
       const reviewed = [...completes].reverse().find((t) => t.transition.createdAt < d.createdAt);
-      return reviewed ? composedScore(reviewed, calibration).base : 0; // no reviewed step / refuted / failed ⇒ 0
+      return reviewed ? composedScore(reviewed, calibration).base : 0; // no reviewed step / refuted / failed / unevidenced (unknown) ⇒ 0
     };
     const isUngrounded = (d: GateDecisionRow): boolean => groundednessOf(d) <= GROUNDED_FLOOR;
     const groundedness = mean(decisions.map(groundednessOf)); // number | null (null only on empty — unreachable per node)

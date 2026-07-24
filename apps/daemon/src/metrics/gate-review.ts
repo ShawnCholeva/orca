@@ -4,9 +4,10 @@ export function gateApprovalsByStep(
   graph: WorkflowGraph,
   gateDecisions: { nodeId: string; outcome: "approved" | "rejected"; workflowRunId: string }[],
 ): Map<string, Set<string>> {
-  // gate node id -> reviewed step node id (the step whose edge feeds the gate)
+  // gate node id -> reviewed step's stepId (the identity a transition's stepTemplateId
+  // actually carries — matches validateStepVerifiers' node.stepId ?? node.id)
   const reviewedStepOf = new Map<string, string>();
-  const stepNodeIds = new Set(graph.nodes.filter((n) => n.type === "step").map((n) => n.id));
+  const stepNodesById = new Map(graph.nodes.filter((n) => n.type === "step").map((n) => [n.id, n]));
   for (const n of graph.nodes) {
     if (n.type !== "gate") continue;
     // A gate reviews exactly one step — the step node whose edge feeds it. If a gate
@@ -14,9 +15,12 @@ export function gateApprovalsByStep(
     // ambiguous, so we attribute nothing rather than guess: the step degrades to its
     // other evidence / unknown, never a mis-credit.
     const stepPreds = [...new Set(
-      graph.edges.filter((e) => e.to === n.id && stepNodeIds.has(e.from)).map((e) => e.from)
+      graph.edges.filter((e) => e.to === n.id && stepNodesById.has(e.from)).map((e) => e.from)
     )];
-    if (stepPreds.length === 1) reviewedStepOf.set(n.id, stepPreds[0]);
+    if (stepPreds.length === 1) {
+      const predNode = stepNodesById.get(stepPreds[0])!;
+      reviewedStepOf.set(n.id, predNode.stepId ?? predNode.id);
+    }
   }
   const out = new Map<string, Set<string>>();
   for (const d of gateDecisions) {
