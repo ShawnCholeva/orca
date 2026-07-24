@@ -18,6 +18,25 @@ const markDone = (runId: string, at: string) => ({ templateVersion: 1, stepTempl
   transition: { id: `${runId}-done-${at}`, workflowRunId: runId, boundary: "mark_done", createdAt: at } } as never);
 const gate = (runId: string, node: string, outcome: "approved" | "rejected", at: string) =>
   ({ id: `${runId}-${node}-${at}`, workflowRunId: runId, nodeId: node, traversalSeq: 1, outcome, reason: "", issueRefs: [], recommendedOutcome: null, recommendedReason: null, selectedEdgeTo: "", createdAt: at, templateVersion: 1 });
+const split = (runId: string, node: string, at: string) =>
+  ({ id: `${runId}-${node}-${at}`, workflowRunId: runId, nodeId: node, traversalSeq: 1, selectedBranch: "b", selectedEdgeTo: "x", createdAt: at, templateVersion: 1 });
+const delegateJoin = (runId: string, at: string) => ({ templateVersion: 1, stepTemplateId: null,
+  transition: { id: `${runId}-djoin-${at}`, workflowRunId: runId, boundary: "delegate_join", createdAt: at } } as never);
+
+const splitterGraph = { nodes: [
+  { id: "triage", type: "step", name: "T", stepId: "triage" },
+  { id: "route", type: "splitter", name: "R" },
+], edges: [{ from: "triage", to: "route" }], positions: {} } as never;
+
+const delegateGraph = { nodes: [
+  { id: "s", type: "step", name: "S", stepId: "s" },
+  { id: "d", type: "delegate", name: "D" },
+], edges: [{ from: "s", to: "d" }], positions: {} } as never;
+
+const stepGraph = { nodes: [
+  { id: "a", type: "step", name: "A", stepId: "a" },
+  { id: "b", type: "step", name: "B", stepId: "b", terminal: true },
+], edges: [{ from: "a", to: "b" }], positions: {} } as never;
 
 describe("deriveVindication", () => {
   it("gate-approved downstream → vindicated", () => {
@@ -51,5 +70,29 @@ describe("deriveVindication", () => {
     // execution's downstream is the 'review' gate:
     const m = deriveVindication({ transitions: [sc("r1", "execution", "t1")], gateDecisions: [gate("r1", "review", "approved", "t2")], splitDecisions: [], graph });
     expect(m.get("r1::execution")).toEqual({ outcome: "vindicated", byNodeId: "review" });
+  });
+  it("splitter downstream routed → vindicated", () => {
+    const m = deriveVindication({ transitions: [sc("r1", "triage", "t1")], gateDecisions: [], splitDecisions: [split("r1", "route", "t2")], graph: splitterGraph });
+    expect(m.get("r1::triage")).toEqual({ outcome: "vindicated", byNodeId: "route" });
+  });
+  it("splitter downstream not yet routed → pending", () => {
+    const m = deriveVindication({ transitions: [sc("r1", "triage", "t1")], gateDecisions: [], splitDecisions: [], graph: splitterGraph });
+    expect(m.get("r1::triage")).toEqual({ outcome: "pending", byNodeId: "route" });
+  });
+  it("delegate downstream joined → vindicated", () => {
+    const m = deriveVindication({ transitions: [sc("r1", "s", "t1"), delegateJoin("r1", "t2")], gateDecisions: [], splitDecisions: [], graph: delegateGraph });
+    expect(m.get("r1::s")).toEqual({ outcome: "vindicated", byNodeId: "d" });
+  });
+  it("delegate downstream not yet joined → pending", () => {
+    const m = deriveVindication({ transitions: [sc("r1", "s", "t1")], gateDecisions: [], splitDecisions: [], graph: delegateGraph });
+    expect(m.get("r1::s")).toEqual({ outcome: "pending", byNodeId: "d" });
+  });
+  it("downstream step completed → vindicated", () => {
+    const m = deriveVindication({ transitions: [sc("r1", "a", "t1"), sc("r1", "b", "t2")], gateDecisions: [], splitDecisions: [], graph: stepGraph });
+    expect(m.get("r1::a")).toEqual({ outcome: "vindicated", byNodeId: "b" });
+  });
+  it("downstream step not yet completed → pending", () => {
+    const m = deriveVindication({ transitions: [sc("r1", "a", "t1")], gateDecisions: [], splitDecisions: [], graph: stepGraph });
+    expect(m.get("r1::a")).toEqual({ outcome: "pending", byNodeId: "b" });
   });
 });
