@@ -24,7 +24,7 @@ export type GateDecisionRow = {
   traversalSeq: number;
   outcome: "approved" | "rejected";
   reason: string;
-  selectedEdgeTo: string;
+  selectedEdgeTo: string; // Phase 2b/3: staged for attribution; not yet consumed by deriveVindication
   issueRefs: string[];
   recommendedOutcome: "approved" | "rejected" | null;
   recommendedReason: string | null;
@@ -36,8 +36,8 @@ export type SplitDecisionRow = {
   workflowRunId: string;
   nodeId: string;
   traversalSeq: number;
-  selectedBranch: string;
-  selectedEdgeTo: string;
+  selectedBranch: string; // Phase 2b/3: staged for splitter misroute & backtrack detection; not yet consumed by deriveVindication
+  selectedEdgeTo: string; // Phase 2b/3: staged for attribution; not yet consumed by deriveVindication
   createdAt: string;
   templateVersion: number;
 };
