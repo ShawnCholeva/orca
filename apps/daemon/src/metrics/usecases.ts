@@ -131,7 +131,14 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
   // so a gate-approved completion scores as independent-review, not unknown. In the
   // Adaptive graph a step transition's stepTemplateId equals its graph node id.
   const graph = graphRow?.graph_json ? (JSON.parse(graphRow.graph_json) as WorkflowGraph) : null;
-  const approvals = graph ? gateApprovalsByStep(graph, gateDecisions) : new Map<string, Set<string>>();
+  // Only the latest template version's topology is ever persisted (templates are one
+  // row, overwritten on edit) — an older-version gate decision can land on a node id
+  // that a DIFFERENT step feeds under the current graph, mis-attributing an approval
+  // to a step it never reviewed. So gate credit is resolved against latest-version
+  // decisions ONLY, unconditionally of `scope`: older-version runs get no gate credit
+  // (safe under-credit) rather than a cross-version mis-credit.
+  const latestVersionGateDecisions = allGateDecisions.filter((d) => d.templateVersion === info.latestVersion);
+  const approvals = graph ? gateApprovalsByStep(graph, latestVersionGateDecisions) : new Map<string, Set<string>>();
   const gateApprovedByCompletion = (t: TemplateTransition) => {
     const runId = t.transition.workflowRunId;
     const stepNodeId = t.stepTemplateId;
