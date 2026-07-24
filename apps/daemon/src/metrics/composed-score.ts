@@ -34,8 +34,10 @@ export function composedScore(
   const cs: number[] = [];
   if (sp.executable) cs.push(effectiveSourceConfidence("executable", calibration));
   if (sp.grounding) cs.push(effectiveSourceConfidence("grounding", calibration));
-  if (sp.independentReview) cs.push(SOURCE_CONFIDENCE.independent_review); // never calibrated (circular)
-  if (gateApproved) cs.push(SOURCE_CONFIDENCE.independent_review); // second independent review — compounds
+  // A single independent-review credit whether it comes from the refute pass (upheld) or a
+  // worker-gate approval, or both — they do NOT compound (correlated LLM adversarial reviews;
+  // Phase 2 calibration can lift this once double-reviewed survival is measured). Never calibrated (circular).
+  if (independentReview) cs.push(SOURCE_CONFIDENCE.independent_review);
   if (cs.length === 0) return unknown(); // no passing verifier, not refuted/failed → unknown, excluded from the mean
   const base = 1 - cs.reduce((p, c) => p * (1 - c), 1);
 

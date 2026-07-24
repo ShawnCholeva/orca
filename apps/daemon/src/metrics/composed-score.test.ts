@@ -114,9 +114,9 @@ describe("composedScore — gate approval as evidence", () => {
     expect(r.verifiers.independentReview).toBe(true);
     expect(r.score).toBeCloseTo(0.55, 5);
   });
-  it("gate-approved + refute-upheld compound to ~0.7975", () => {
+  it("gate-approved + refute-upheld: single 0.55 independent-review credit (does NOT compound)", () => {
     const r = composedScore(tx({ refute: { verdict: "upheld" } }), undefined, { gateApproved: true });
-    expect(r.score).toBeCloseTo(0.7975, 4);
+    expect(r.score).toBeCloseTo(0.55, 5);
   });
   it("no gate approval → unchanged unknown", () => {
     const r = composedScore(tx({}), undefined, { gateApproved: false });
