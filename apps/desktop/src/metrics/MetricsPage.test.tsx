@@ -146,21 +146,6 @@ describe("MetricsPage", () => {
     expect(screen.queryByText("Workflow health")).toBeNull();
   });
 
-  it("renders the completion gate readout with the four verdict counts", async () => {
-    vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({
-      summary, steps: [], gates: [],
-      policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] },
-      completionGate: { verdictDist: { upheld: 3, escalated: 1, evidence_veto: 2, refute_veto: 0 }, vetoed: { count: 3, sampleTransitionIds: ["a", "b", "c"] } },
-    });
-    render(<MetricsPage />);
-    const readout = await screen.findByText(/3 upheld/);
-    expect(readout.textContent).toContain("3 upheld");
-    expect(readout.textContent).toContain("1 escalated");
-    expect(readout.textContent).toContain("2 vetoed");
-    expect(readout.textContent).toContain("0 overturned");
-  });
-
   it("shows the empty state when no templates have runs", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([]);
     render(<MetricsPage />);

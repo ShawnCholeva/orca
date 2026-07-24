@@ -4,7 +4,7 @@ import { getTemplateMetricsSummaries, getTemplateMetricsDetail, listProposals, a
 import { gradeFor, workflowHealthFromSteps } from "./metrics-data";
 import { StatTile } from "./metrics-charts";
 import { StepPerformancePanel, WorkflowDropdown } from "./StepPerformance";
-import { GatePerformancePanel, FusedPipelinePanel, PolicyGatewayReadout, CompletionGateReadout } from "./GatePerformance";
+import { GatePerformancePanel, FusedPipelinePanel } from "./GatePerformance";
 import { SelfImprovementRail } from "./SelfImprovement";
 import { ProposalReviewModal } from "./ProposalReviewModal";
 import { Workflow, Refresh } from "./metrics-icons";
@@ -143,8 +143,6 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
             <GatePerformancePanel detail={detail} openGate={openGate} onToggleGate={(id) => setOpenGate((o) => (o === id ? null : id))} />
           </>
         )}
-        <PolicyGatewayReadout detail={detail} />
-        <CompletionGateReadout detail={detail} />
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
