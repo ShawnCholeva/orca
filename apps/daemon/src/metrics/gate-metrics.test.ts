@@ -65,11 +65,11 @@ describe("buildGateMetrics", () => {
     });
     const exe = mk("r1", evf({ sensorsRun: [{ kind: "unit" }], oracleAdequacy: { sufficient: true, gaps: [] } })); // base 1.0
     const grd = mk("r2", evf({ grounding: groundingPassed }));                                                     // base 0.7
-    const slf = mk("r3", evf({}));                                                                                 // base 0.3
+    const slf = mk("r3", evf({}));                                                                                 // base 0 (self-report only, unknown)
     const gates = buildGateMetrics({
       decisions: [exe.d, grd.d, slf.d], transitions: [exe.t, grd.t, slf.t], names, period: "7d",
     });
-    expect(gates[0].scored.groundedness).toBeCloseTo((1.0 + 0.7 + 0.3) / 3, 5); // 0.6667 — graded, not 1/3
+    expect(gates[0].scored.groundedness).toBeCloseTo((1.0 + 0.7 + 0) / 3, 5); // graded mean of 1.0, 0.7, 0 — not a binary fraction
   });
 
   it("a strongly grounding-verified reviewed step is GROUNDED — not ungrounded, not blind (honesty fix)", () => {
