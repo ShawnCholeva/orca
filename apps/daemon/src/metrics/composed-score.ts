@@ -6,6 +6,7 @@ import { effectiveSourceConfidence, type CalibrationEntry } from "./verification
 const COVERAGE_FLOOR = 0.3;
 
 export type CompletionScore = {
+  established: boolean;
   score: number; base: number; coverage: number;
   verifiers: { executable: boolean; grounding: boolean; independentReview: boolean };
 };
@@ -13,12 +14,8 @@ export type CompletionScore = {
 export function composedScore(t: TemplateTransition, calibration?: CalibrationEntry[]): CompletionScore {
   const ev = t.transition.evidence;
   const rf = t.transition.refute;
-  const zero = (): CompletionScore => ({ score: 0, base: 0, coverage: 0, verifiers: { executable: false, grounding: false, independentReview: false } });
-  // A refuted completion scores 0 here even if its source (e.g. grounding) passed — but
-  // computeCalibration STILL counts it in that source's bucket (as the "overturned" side
-  // of upheld/(upheld+refuted)). So "bucketed as grounding-passed for calibration" and
-  // "credited grounding in the score" match on every NON-refuted completion; they differ
-  // exactly on the refuted rows, which is the survival measurement itself — not a divergence.
+  const zero = (): CompletionScore => ({ established: true, score: 0, base: 0, coverage: 0, verifiers: { executable: false, grounding: false, independentReview: false } });
+  const unknown = (): CompletionScore => ({ established: false, score: 0, base: 0, coverage: 0, verifiers: { executable: false, grounding: false, independentReview: false } });
   if (rf?.verdict === "refuted") return zero();
   if (ev?.verdict === "failed") return zero();
 
@@ -26,11 +23,12 @@ export function composedScore(t: TemplateTransition, calibration?: CalibrationEn
   const cs: number[] = [];
   if (executable) cs.push(effectiveSourceConfidence("executable", calibration));
   if (grounding) cs.push(effectiveSourceConfidence("grounding", calibration));
-  if (independentReview) cs.push(SOURCE_CONFIDENCE.independent_review); // never calibrated (circular)
-  const base = cs.length === 0 ? SOURCE_CONFIDENCE.self_report : 1 - cs.reduce((p, c) => p * (1 - c), 1);
+  if (independentReview) cs.push(SOURCE_CONFIDENCE.independent_review);
+  if (cs.length === 0) return unknown(); // no passing verifier, not refuted/failed → unknown, excluded from the mean
+  const base = 1 - cs.reduce((p, c) => p * (1 - c), 1);
 
   const coverage = computeCoverage(t, ev);
-  return { score: base * coverage, base, coverage, verifiers: { executable, grounding, independentReview } };
+  return { established: true, score: base * coverage, base, coverage, verifiers: { executable, grounding, independentReview } };
 }
 
 function computeCoverage(t: TemplateTransition, ev: TemplateTransition["transition"]["evidence"]): number {

@@ -25,28 +25,28 @@ describe("composedScore", () => {
   it("grounding only → 0.70", () => {
     expect(composedScore(tx({ evidence: ev({ grounding: groundingPassed }) })).score).toBeCloseTo(0.7, 5);
   });
-  it("verdict passed with only an observe-mode check → grounding not credited, self-report floor", () => {
+  it("verdict passed with only an observe-mode check → grounding not credited, unknown", () => {
     const r = composedScore(tx({ evidence: ev({ grounding: { verdict: "passed", checks: [{ mode: "observe", result: "passed" }] } }) }));
     expect(r.verifiers.grounding).toBe(false); // verdict alone isn't enough — must match classifyTier's enforce-mode requirement
-    expect(r.score).toBeCloseTo(0.3, 5);
+    expect(r.established).toBe(false);
   });
   it("verdict passed with an enforce-mode non-skipped check → grounding credited, base 0.7", () => {
     const r = composedScore(tx({ evidence: ev({ grounding: { verdict: "passed", checks: [{ mode: "enforce", result: "passed" }] } }) }));
     expect(r.verifiers.grounding).toBe(true);
     expect(r.base).toBeCloseTo(0.7, 5);
   });
-  it("self-report only (no verifiers) → 0.30 floor", () => {
-    expect(composedScore(tx({ evidence: ev({}) })).score).toBeCloseTo(0.3, 5);
+  it("self-report only (no verifiers) → unknown", () => {
+    expect(composedScore(tx({ evidence: ev({}) })).established).toBe(false);
   });
   it("partial oracle (sensors ran, sufficient=false) → executable excluded, grounding base × 1.0", () => {
     const r = composedScore(tx({ evidence: ev({ sensorsRun: [{ kind: "typecheck" }], verdict: "partial", grounding: groundingPassed }) }));
     expect(r.verifiers.executable).toBe(false); // sufficiency-gated
     expect(r.base).toBeCloseTo(0.7, 5); expect(r.coverage).toBe(1); expect(r.score).toBeCloseTo(0.7, 5);
   });
-  it("vacuous sufficiency (no required sensors, sensorsRun empty) → executable excluded, self-report floor", () => {
+  it("vacuous sufficiency (no required sensors, sensorsRun empty) → executable excluded, unknown", () => {
     const r = composedScore(tx({ evidence: ev({ sensorsRun: [], oracleAdequacy: { sufficient: true, gaps: [] } }) }));
     expect(r.verifiers.executable).toBe(false); // sufficient alone must not grant executable credit — match classifyTier
-    expect(r.score).toBeCloseTo(0.3, 5);
+    expect(r.established).toBe(false);
   });
   it("code change, no execution → coverage floors from per-file untested", () => {
     const r = composedScore(tx({
@@ -58,7 +58,7 @@ describe("composedScore", () => {
   });
   it("non-code write-set → coverage 1.0 (no double-penalty)", () => {
     const r = composedScore(tx({
-      evidence: ev({ grounding: { verdict: "passed" }, untestedRegions: ["semantic correctness — nothing was executed"] }),
+      evidence: ev({ grounding: groundingPassed, untestedRegions: ["semantic correctness — nothing was executed"] }),
       stateDeps: { write_set: [{ kind: "file", ref: "docs/x.md", change_kind: "modified" }] },
     }));
     expect(r.coverage).toBe(1);
@@ -81,5 +81,28 @@ describe("composedScore", () => {
     const noCal = composedScore(tx({ evidence: ev({ grounding: groundingPassed }) }));
     expect(noCal.base).toBeCloseTo(0.7, 5);   // designed prior (2b-i behavior preserved when no calibration)
     expect(r.base).toBeCloseTo(0.5, 5); // calibrated grounding survival feeds base
+  });
+});
+
+describe("composedScore — unknown state", () => {
+  it("no passing verifier, not refuted → unknown (established:false)", () => {
+    // bare evidence: no sensors, no grounding, no refute
+    const r = composedScore(tx({ evidence: ev({}) }));
+    expect(r.established).toBe(false);
+    expect(r.base).toBe(0);
+  });
+  it("no evidence and no refute → unknown (established:false)", () => {
+    const r = composedScore(tx({}));
+    expect(r.established).toBe(false);
+  });
+  it("refuted is a real zero, still established", () => {
+    const r = composedScore(tx({ refute: { verdict: "refuted" } }));
+    expect(r.established).toBe(true);
+    expect(r.score).toBe(0);
+  });
+  it("grounding pass is established at 0.70", () => {
+    const r = composedScore(tx({ evidence: ev({ grounding: groundingPassed }) }));
+    expect(r.established).toBe(true);
+    expect(r.score).toBeCloseTo(0.7, 5);
   });
 });
