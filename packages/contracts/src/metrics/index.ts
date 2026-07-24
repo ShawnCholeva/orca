@@ -252,6 +252,14 @@ export const StepMetrics = z.object({
   insights: z.array(z.string()),
   recentReasons: z.array(z.object({ at: z.string(), reason: z.string() }).strict()),
   versionHistory: NodeVersionHistory.optional(),
+  // Observational (Phase 2a): downstream-vindication tally over the step's final
+  // completions — does not feed score/band/calibration. Optional so existing
+  // fixtures without a vindicationByCompletion predicate stay unaffected.
+  vindication: z.object({
+    vindicated: z.number().int().nonnegative(),
+    bounced: z.number().int().nonnegative(),
+    pending: z.number().int().nonnegative(),
+  }).strict().optional(),
 }).strict();
 export type StepMetrics = z.infer<typeof StepMetrics>;
 

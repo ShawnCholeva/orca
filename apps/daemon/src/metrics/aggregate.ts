@@ -2,6 +2,7 @@ import type { HarnessMetrics } from "../harness-metrics/usecases.js";
 import { computeHarnessMetricsFromTransitions } from "../harness-metrics/usecases.js";
 import type { MetricPeriod, MetricScope, TemplateMetricsSummary, StepMetrics, NodeVersionHistory } from "@orca/contracts";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
+import type { VindicationOutcome } from "./vindication.js";
 import { classifyTier, strongestTier, TIER_LABEL, buildArtifacts, computeCalibration, CALIBRATION_DIVERGENCE, CALIBRATION_SCORE_MIN } from "./verification.js";
 import type { CalibrationEntry } from "./verification.js";
 import { labelForFailure } from "./failure-labels.js";
@@ -223,6 +224,7 @@ export function computeStepMetrics(input: {
   lineage?: Map<string, NodeVersionHistory>;
   requiresExecution?: Set<string>;
   gateApprovedByCompletion?: (t: TemplateTransition) => boolean;
+  vindicationByCompletion?: (t: TemplateTransition) => VindicationOutcome | undefined;
 }): StepMetrics[] {
   // Scope to the CURRENT template's steps: a step id not in stepNames is a fossil
   // from a retired version, or the step-era of a node that is now a gate — either way
@@ -531,6 +533,14 @@ export function computeStepMetrics(input: {
       },
     };
 
+    const vindTally = { vindicated: 0, bounced: 0, pending: 0 };
+    for (const t of finalStepCompletes) {
+      const o = input.vindicationByCompletion?.(t);
+      if (o === "vindicated") vindTally.vindicated++;
+      else if (o === "bounced") vindTally.bounced++;
+      else vindTally.pending++;
+    }
+
     const step: StepMetrics = {
       stepTemplateId, name: meta.name, ordinal: meta.ordinal,
       description: meta.description, completionPolicy: meta.completionPolicy,
@@ -566,6 +576,7 @@ export function computeStepMetrics(input: {
       trend, versionBoundaries, versionScoreDelta, versionScoreDeltaVersions,
       versionInvalidOutputRateDelta, insights: [], recentReasons,
       versionHistory: input.lineage?.get(stepTemplateId),
+      vindication: input.vindicationByCompletion ? vindTally : undefined,
     };
     step.insights = deriveInsights(step, input.calibration);
     steps.push(step);

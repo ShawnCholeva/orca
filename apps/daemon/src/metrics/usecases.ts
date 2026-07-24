@@ -1,8 +1,10 @@
 import type Database from "better-sqlite3";
 import type { MetricPeriod, MetricScope, TemplateMetricsDetail, TemplateMetricsSummary, WorkflowGraph, WorkflowGuardrailConfig } from "@orca/contracts";
-import { listGateDecisionsByTemplate, listStepRunsByTemplate, listTemplatesWithRuns, listTransitionsByTemplate } from "./fetch.js";
+import { listGateDecisionsByTemplate, listSplitDecisionsByTemplate, listStepRunsByTemplate, listTemplatesWithRuns, listTransitionsByTemplate } from "./fetch.js";
 import type { TemplateTransition } from "./fetch.js";
 import { computeStepMetrics, computeTemplateSummary, windowStart } from "./aggregate.js";
+import { deriveVindication } from "./vindication.js";
+import type { VindicationOutcome } from "./vindication.js";
 import { computeCalibration } from "./verification.js";
 import { gateApprovalsByStep } from "./gate-review.js";
 import { buildCompletionGateMetrics, buildGateMetrics, buildPolicyGatewayMetrics } from "./gate-metrics.js";
@@ -144,6 +146,21 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
     const stepNodeId = t.stepTemplateId;
     return runId != null && stepNodeId != null && (approvals.get(stepNodeId)?.has(runId) ?? false);
   };
+  // Downstream-vindication tally (Phase 2a, observational — no score/band change).
+  // Same version-safety rule as gate credit above: only latest-version gate/split
+  // decisions feed the derivation (older-version decisions can land on a node id a
+  // DIFFERENT step feeds under the current graph), and only latest-version completions
+  // are labeled — an older-version completion is credited to neither bucket.
+  const splitDecisions = listSplitDecisionsByTemplate(db, templateId, since, now);
+  const latestSplits = splitDecisions.filter((d) => d.templateVersion === info.latestVersion);
+  const vindication = graph
+    ? deriveVindication({ transitions, gateDecisions: latestVersionGateDecisions, splitDecisions: latestSplits, graph })
+    : new Map<string, { outcome: VindicationOutcome; byNodeId: string | null }>();
+  const vindicationByCompletion = (t: TemplateTransition) => {
+    const runId = t.transition.workflowRunId;
+    if (runId == null || t.stepTemplateId == null || t.templateVersion !== info.latestVersion) return undefined;
+    return vindication.get(`${runId}::${t.stepTemplateId}`)?.outcome;
+  };
   return {
     summary,
     steps: computeStepMetrics({
@@ -156,6 +173,7 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
       lineage,
       requiresExecution,
       gateApprovedByCompletion,
+      vindicationByCompletion,
     }),
     gates,
     policyGateway: buildPolicyGatewayMetrics(transitions),

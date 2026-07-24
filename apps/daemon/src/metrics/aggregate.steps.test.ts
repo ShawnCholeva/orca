@@ -714,6 +714,21 @@ describe("computeStepMetrics", () => {
     });
   });
 
+  it("tallies vindication outcomes over the step's final completions (Task 3, observational)", () => {
+    const vindicationByCompletion = (t: TemplateTransition) =>
+      t.transition.workflowRunId === "r0" ? "vindicated" as const : t.transition.workflowRunId === "r1" ? "bounced" as const : undefined;
+    const [step] = computeStepMetrics({
+      transitions: selfReportTxs("s", 2), stepRuns: passRuns("s", 2), stepNames: names, nowIso, period: "7d",
+      vindicationByCompletion,
+    });
+    expect(step.vindication).toEqual({ vindicated: 1, bounced: 1, pending: 0 });
+  });
+
+  it("omits vindication entirely when no vindicationByCompletion predicate is supplied", () => {
+    const [step] = computeStepMetrics({ transitions: selfReportTxs("s", 1), stepRuns: passRuns("s", 1), stepNames: names, nowIso, period: "7d" });
+    expect(step.vindication).toBeUndefined();
+  });
+
   it("shows only the current template's steps — fossils and retyped/renamed ids drop out", () => {
     const at = "2026-05-01T00:00:00.000Z";
     // three step_complete transitions: one current step, one retired step, one that is now a gate (plain step-era id)
