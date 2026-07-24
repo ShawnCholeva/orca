@@ -16,6 +16,11 @@ export function composedScore(t: TemplateTransition, calibration?: CalibrationEn
   const rf = t.transition.refute;
   const zero = (): CompletionScore => ({ established: true, score: 0, base: 0, coverage: 0, verifiers: { executable: false, grounding: false, independentReview: false } });
   const unknown = (): CompletionScore => ({ established: false, score: 0, base: 0, coverage: 0, verifiers: { executable: false, grounding: false, independentReview: false } });
+  // A refuted completion scores 0 here even if its source (e.g. grounding) passed — but
+  // computeCalibration STILL counts it in that source's bucket (as the "overturned" side
+  // of upheld/(upheld+refuted)). So "bucketed as grounding-passed for calibration" and
+  // "credited grounding in the score" match on every NON-refuted completion; they differ
+  // exactly on the refuted rows, which is the survival measurement itself — not a divergence.
   if (rf?.verdict === "refuted") return zero();
   if (ev?.verdict === "failed") return zero();
 
@@ -23,7 +28,7 @@ export function composedScore(t: TemplateTransition, calibration?: CalibrationEn
   const cs: number[] = [];
   if (executable) cs.push(effectiveSourceConfidence("executable", calibration));
   if (grounding) cs.push(effectiveSourceConfidence("grounding", calibration));
-  if (independentReview) cs.push(SOURCE_CONFIDENCE.independent_review);
+  if (independentReview) cs.push(SOURCE_CONFIDENCE.independent_review); // never calibrated (circular)
   if (cs.length === 0) return unknown(); // no passing verifier, not refuted/failed → unknown, excluded from the mean
   const base = 1 - cs.reduce((p, c) => p * (1 - c), 1);
 
