@@ -693,6 +693,20 @@ describe("computeStepMetrics", () => {
       expect(step.verification.band.label).toBe("Not checked yet");
     });
 
+    it("a self-reported step reviewed by an APPROVING gate scores ~55, not unknown (Task 5)", () => {
+      // Same bare self-report shape as selfReportTxs (no sensors, no grounding, no
+      // refute) — normally unknown/null. gateApprovedByCompletion supplies the
+      // real gate-approval signal (Task 3's gateApprovalsByStep, threaded read-time);
+      // composedScore compounds it as a second independent review (Task 4).
+      const gateApprovedByCompletion = (t: TemplateTransition) =>
+        t.stepTemplateId === "s" && t.transition.workflowRunId === "r0";
+      const [step] = computeStepMetrics({
+        transitions: selfReportTxs("s", 1), stepRuns: passRuns("s", 1), stepNames: names, nowIso, period: "7d",
+        gateApprovedByCompletion,
+      });
+      expect(step.score).toBe(55);
+    });
+
     it("no conclusive verification → needs_evidence 'Not checked yet'", () => {
       const [step] = computeStepMetrics({ transitions: unverifiedTxs("s", 1), stepRuns: passRuns("s", 1), stepNames: names, nowIso, period: "7d" });
       expect(step.verification.band.level).toBe("needs_evidence");

@@ -222,6 +222,7 @@ export function computeStepMetrics(input: {
   scope?: MetricScope;
   lineage?: Map<string, NodeVersionHistory>;
   requiresExecution?: Set<string>;
+  gateApprovedByCompletion?: (t: TemplateTransition) => boolean;
 }): StepMetrics[] {
   // Scope to the CURRENT template's steps: a step id not in stepNames is a fossil
   // from a retired version, or the step-era of a node that is now a gate — either way
@@ -327,7 +328,8 @@ export function computeStepMetrics(input: {
         .map((r) => r.workflowRunId)
     );
     const tierByCompletion = new Map(finalStepCompletes.map((t) => [t, classifyTier(t)] as const));
-    const scoreByCompletion = new Map(finalStepCompletes.map((t) => [t, composedScore(t, input.calibration)] as const));
+    const scoreByCompletion = new Map(finalStepCompletes.map((t) =>
+      [t, composedScore(t, input.calibration, { gateApproved: input.gateApprovedByCompletion?.(t) ?? false })] as const));
     const isConclusive = (t: (typeof finalStepCompletes)[number]) =>
       scoreByCompletion.get(t)!.established && !isUnverifiedEval(t) && !supersededByHardFail.has(t.transition.workflowRunId ?? "");
     const conclusive = finalStepCompletes.filter(isConclusive);

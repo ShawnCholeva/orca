@@ -1,8 +1,10 @@
 import type Database from "better-sqlite3";
-import type { MetricPeriod, MetricScope, TemplateMetricsDetail, TemplateMetricsSummary, WorkflowGuardrailConfig } from "@orca/contracts";
+import type { MetricPeriod, MetricScope, TemplateMetricsDetail, TemplateMetricsSummary, WorkflowGraph, WorkflowGuardrailConfig } from "@orca/contracts";
 import { listGateDecisionsByTemplate, listStepRunsByTemplate, listTemplatesWithRuns, listTransitionsByTemplate } from "./fetch.js";
+import type { TemplateTransition } from "./fetch.js";
 import { computeStepMetrics, computeTemplateSummary, windowStart } from "./aggregate.js";
 import { computeCalibration } from "./verification.js";
+import { gateApprovalsByStep } from "./gate-review.js";
 import { buildCompletionGateMetrics, buildGateMetrics, buildPolicyGatewayMetrics } from "./gate-metrics.js";
 import { computeNodeLineage } from "./node-lineage.js";
 import { buildPipeline } from "./pipeline.js";
@@ -124,6 +126,17 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
   };
   const summary = { ...buildSummary(db, info, period, now, scope), gateHealth };
   const graphRow = db.prepare(`SELECT graph_json FROM workflow_templates WHERE id = ?`).get(templateId) as { graph_json: string | null } | undefined;
+  // Read-time gate→step credit (no migration): resolve the reviewed step from graph
+  // topology (Task 3's gateApprovalsByStep) and thread it into composedScore (Task 4)
+  // so a gate-approved completion scores as independent-review, not unknown. In the
+  // Adaptive graph a step transition's stepTemplateId equals its graph node id.
+  const graph = graphRow?.graph_json ? (JSON.parse(graphRow.graph_json) as WorkflowGraph) : null;
+  const approvals = graph ? gateApprovalsByStep(graph, gateDecisions) : new Map<string, Set<string>>();
+  const gateApprovedByCompletion = (t: TemplateTransition) => {
+    const runId = t.transition.workflowRunId;
+    const stepNodeId = t.stepTemplateId;
+    return runId != null && stepNodeId != null && (approvals.get(stepNodeId)?.has(runId) ?? false);
+  };
   return {
     summary,
     steps: computeStepMetrics({
@@ -135,6 +148,7 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
       scope,
       lineage,
       requiresExecution,
+      gateApprovedByCompletion,
     }),
     gates,
     policyGateway: buildPolicyGatewayMetrics(transitions),
