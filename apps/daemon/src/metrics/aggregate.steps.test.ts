@@ -322,7 +322,10 @@ describe("computeStepMetrics", () => {
     expect(step.quality.scoredSampleSize).toBe(0);
   });
 
-  it("a self_reported completion (inconclusive refute) scores 0.3, not dropped", () => {
+  it("a self_reported completion (inconclusive refute) is unknown, dropped from the mean (T2)", () => {
+    // Refute ran but was inconclusive ("unavailable") — no passing verifier, so
+    // composedScore marks it established:false (unknown). Previously this floored
+    // to the self_report confidence (0.3); now it's excluded from the score mean.
     const ts: TemplateTransition[] = [{
       templateVersion: 1, stepTemplateId: "s",
       transition: {
@@ -335,8 +338,8 @@ describe("computeStepMetrics", () => {
     }];
     const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
-    expect(step.score).toBe(30);
-    expect(step.verification.tier).toBe("self_reported");
+    expect(step.score).toBeNull();
+    expect(step.verification.tier).toBe("unverified");
   });
 
   it("oracleSufficientRate is null (not 0) when no evidence completions exist", () => {
@@ -436,11 +439,15 @@ describe("computeStepMetrics", () => {
   });
 
   it("versionScoreDelta sees an all-hard-fail version even though it has no step_complete (I1)", () => {
-    // v1: two scored completions (ai_reviewed passes, evidence present, no sensors → 0.55 each).
+    // v1: two scored completions (evidence present, no sensors, refute upheld →
+    // independent review confidence 0.55 each; established, unlike a bare self-report).
     const ts = [
       sc("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z"),
       sc("b", "r2", "s", "passed", true, "2026-05-01T01:00:00.000Z"),
     ];
+    for (const t of ts) {
+      t.transition.refute = { verdict: "upheld", triggered_by: ["no_oracle"], risk_class: "low", reason: null, issue_refs: [] };
+    }
     const runsV1: TemplateStepRun[] = ts.map((t) => ({
       workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1,
       status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z",
@@ -650,6 +657,15 @@ describe("computeStepMetrics", () => {
     expect(step.verification.band.label).toBe("Not checked yet");
   });
 
+  it("a step with only self-reported completions scores unknown (null / needs_evidence)", () => {
+    // Bare completions: no sensors, no grounding, no refute — established:false
+    // (unknown) per composedScore (Task 1). Must be excluded from the score mean,
+    // not floored to the old self_report confidence.
+    const [step] = computeStepMetrics({ transitions: selfReportTxs("s", 2), stepRuns: passRuns("s", 2), stepNames: names, nowIso, period: "7d" });
+    expect(step.score).toBeNull();
+    expect(step.verification.band.level).toBe("needs_evidence");
+  });
+
   describe("step-type-aware band (Phase B1: ceiling-relative level + honest label)", () => {
     it("no-code step at its ceiling (grounding-majority) bands STRONG 'Reviewed'", () => {
       const [step] = computeStepMetrics({ transitions: groundingPassedTxs("s", 3), stepRuns: passRuns("s", 3), stepNames: names, nowIso, period: "7d" });
@@ -669,10 +685,12 @@ describe("computeStepMetrics", () => {
       expect(step.verification.band.label).toBe("Run & tested");
     });
 
-    it("self-report-only no-code step bands WEAK 'Only self-reported'", () => {
+    it("self-report-only no-code step bands 'needs_evidence' — unknown, not floored WEAK (T2)", () => {
+      // No sensors, no grounding, no refute: established:false (unknown), excluded
+      // from the score mean → score null, band needs_evidence, not a floored WEAK.
       const [step] = computeStepMetrics({ transitions: selfReportTxs("s", 3), stepRuns: passRuns("s", 3), stepNames: names, nowIso, period: "7d" });
-      expect(step.verification.band.level).toBe("weak");
-      expect(step.verification.band.label).toBe("Only self-reported");
+      expect(step.verification.band.level).toBe("needs_evidence");
+      expect(step.verification.band.label).toBe("Not checked yet");
     });
 
     it("no conclusive verification → needs_evidence 'Not checked yet'", () => {

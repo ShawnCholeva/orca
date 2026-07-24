@@ -329,14 +329,14 @@ export function computeStepMetrics(input: {
     const tierByCompletion = new Map(finalStepCompletes.map((t) => [t, classifyTier(t)] as const));
     const scoreByCompletion = new Map(finalStepCompletes.map((t) => [t, composedScore(t, input.calibration)] as const));
     const conclusive = finalStepCompletes.filter((t) =>
-      tierByCompletion.get(t) !== "unverified" && !supersededByHardFail.has(t.transition.workflowRunId ?? ""));
+      scoreByCompletion.get(t)!.established && !isUnverifiedEval(t) && !supersededByHardFail.has(t.transition.workflowRunId ?? ""));
     const completeRunIds = new Set(finalStepCompletes.map((t) => t.transition.workflowRunId).filter((x): x is string => x != null));
     const hardFailedFinals = finals.filter((r) =>
       FAILED_STATUSES.has(r.status) && (!completeRunIds.has(r.workflowRunId) || supersededByHardFail.has(r.workflowRunId)));
     const contribution = (t: (typeof stepCompletes)[number]) => scoreByCompletion.get(t)!.score;
     const scoreOver = (completes: typeof finalStepCompletes, hardFails: number): { n: number; value: number | null } => {
       const conc = completes.filter((t) =>
-        tierByCompletion.get(t) !== "unverified" && !supersededByHardFail.has(t.transition.workflowRunId ?? ""));
+        scoreByCompletion.get(t)!.established && !isUnverifiedEval(t) && !supersededByHardFail.has(t.transition.workflowRunId ?? ""));
       const n = conc.length + hardFails;
       return n === 0 ? { n, value: null } : { n, value: conc.reduce((acc, t) => acc + contribution(t), 0) / n };
     };
