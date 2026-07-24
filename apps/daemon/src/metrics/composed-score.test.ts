@@ -106,3 +106,20 @@ describe("composedScore — unknown state", () => {
     expect(r.score).toBeCloseTo(0.7, 5);
   });
 });
+
+describe("composedScore — gate approval as evidence", () => {
+  it("gate-approved, otherwise self-report → established 0.55", () => {
+    const r = composedScore(tx({}), undefined, { gateApproved: true });
+    expect(r.established).toBe(true);
+    expect(r.verifiers.independentReview).toBe(true);
+    expect(r.score).toBeCloseTo(0.55, 5);
+  });
+  it("gate-approved + refute-upheld compound to ~0.7975", () => {
+    const r = composedScore(tx({ refute: { verdict: "upheld" } }), undefined, { gateApproved: true });
+    expect(r.score).toBeCloseTo(0.7975, 4);
+  });
+  it("no gate approval → unchanged unknown", () => {
+    const r = composedScore(tx({}), undefined, { gateApproved: false });
+    expect(r.established).toBe(false);
+  });
+});

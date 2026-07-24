@@ -11,7 +11,11 @@ export type CompletionScore = {
   verifiers: { executable: boolean; grounding: boolean; independentReview: boolean };
 };
 
-export function composedScore(t: TemplateTransition, calibration?: CalibrationEntry[]): CompletionScore {
+export function composedScore(
+  t: TemplateTransition,
+  calibration?: CalibrationEntry[],
+  opts?: { gateApproved?: boolean },
+): CompletionScore {
   const ev = t.transition.evidence;
   const rf = t.transition.refute;
   const zero = (): CompletionScore => ({ established: true, score: 0, base: 0, coverage: 0, verifiers: { executable: false, grounding: false, independentReview: false } });
@@ -24,16 +28,19 @@ export function composedScore(t: TemplateTransition, calibration?: CalibrationEn
   if (rf?.verdict === "refuted") return zero();
   if (ev?.verdict === "failed") return zero();
 
-  const { executable, grounding, independentReview } = sourcesPassed(ev, rf);
+  const sp = sourcesPassed(ev, rf);
+  const gateApproved = opts?.gateApproved === true;
+  const independentReview = sp.independentReview || gateApproved;
   const cs: number[] = [];
-  if (executable) cs.push(effectiveSourceConfidence("executable", calibration));
-  if (grounding) cs.push(effectiveSourceConfidence("grounding", calibration));
-  if (independentReview) cs.push(SOURCE_CONFIDENCE.independent_review); // never calibrated (circular)
+  if (sp.executable) cs.push(effectiveSourceConfidence("executable", calibration));
+  if (sp.grounding) cs.push(effectiveSourceConfidence("grounding", calibration));
+  if (sp.independentReview) cs.push(SOURCE_CONFIDENCE.independent_review); // never calibrated (circular)
+  if (gateApproved) cs.push(SOURCE_CONFIDENCE.independent_review); // second independent review — compounds
   if (cs.length === 0) return unknown(); // no passing verifier, not refuted/failed → unknown, excluded from the mean
   const base = 1 - cs.reduce((p, c) => p * (1 - c), 1);
 
   const coverage = computeCoverage(t, ev);
-  return { established: true, score: base * coverage, base, coverage, verifiers: { executable, grounding, independentReview } };
+  return { established: true, score: base * coverage, base, coverage, verifiers: { executable: sp.executable, grounding: sp.grounding, independentReview } };
 }
 
 function computeCoverage(t: TemplateTransition, ev: TemplateTransition["transition"]["evidence"]): number {
