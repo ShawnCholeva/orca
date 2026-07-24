@@ -24,9 +24,20 @@ export type GateDecisionRow = {
   traversalSeq: number;
   outcome: "approved" | "rejected";
   reason: string;
+  selectedEdgeTo: string;
   issueRefs: string[];
   recommendedOutcome: "approved" | "rejected" | null;
   recommendedReason: string | null;
+  createdAt: string;
+  templateVersion: number;
+};
+export type SplitDecisionRow = {
+  id: string;
+  workflowRunId: string;
+  nodeId: string;
+  traversalSeq: number;
+  selectedBranch: string;
+  selectedEdgeTo: string;
   createdAt: string;
   templateVersion: number;
 };
@@ -96,7 +107,7 @@ export function listGateDecisionsByTemplate(
 ): GateDecisionRow[] {
   const rows = db.prepare(
     `SELECT gd.id, gd.workflow_run_id, gd.node_id, gd.traversal_seq, gd.outcome, gd.reason,
-            gd.issue_refs_json, gd.recommended_outcome, gd.recommended_reason,
+            gd.selected_edge_to, gd.issue_refs_json, gd.recommended_outcome, gd.recommended_reason,
             gd.created_at, wr.template_version
      FROM workflow_gate_decisions gd
      JOIN workflow_runs wr ON wr.id = gd.workflow_run_id
@@ -104,14 +115,36 @@ export function listGateDecisionsByTemplate(
      ORDER BY gd.created_at ASC, gd.id ASC`
   ).all(templateId, sinceIso, untilIso) as {
     id: string; workflow_run_id: string; node_id: string; traversal_seq: number;
-    outcome: "approved" | "rejected"; reason: string; issue_refs_json: string;
+    outcome: "approved" | "rejected"; reason: string; selected_edge_to: string; issue_refs_json: string;
     recommended_outcome: "approved" | "rejected" | null; recommended_reason: string | null;
     created_at: string; template_version: number;
   }[];
   return rows.map((r) => ({
     id: r.id, workflowRunId: r.workflow_run_id, nodeId: r.node_id, traversalSeq: r.traversal_seq,
-    outcome: r.outcome, reason: r.reason, issueRefs: JSON.parse(r.issue_refs_json) as string[],
+    outcome: r.outcome, reason: r.reason, selectedEdgeTo: r.selected_edge_to,
+    issueRefs: JSON.parse(r.issue_refs_json) as string[],
     recommendedOutcome: r.recommended_outcome, recommendedReason: r.recommended_reason,
+    createdAt: r.created_at, templateVersion: r.template_version,
+  }));
+}
+
+export function listSplitDecisionsByTemplate(
+  db: Database.Database, templateId: string, sinceIso: string, untilIso: string
+): SplitDecisionRow[] {
+  const rows = db.prepare(
+    `SELECT sd.id, sd.workflow_run_id, sd.node_id, sd.traversal_seq, sd.selected_branch,
+            sd.selected_edge_to, sd.created_at, wr.template_version
+     FROM workflow_split_decisions sd
+     JOIN workflow_runs wr ON wr.id = sd.workflow_run_id
+     WHERE wr.template_id = ? AND sd.created_at >= ? AND sd.created_at < ?
+     ORDER BY sd.created_at ASC, sd.id ASC`
+  ).all(templateId, sinceIso, untilIso) as Array<{
+    id: string; workflow_run_id: string; node_id: string; traversal_seq: number;
+    selected_branch: string; selected_edge_to: string; created_at: string; template_version: number;
+  }>;
+  return rows.map((r) => ({
+    id: r.id, workflowRunId: r.workflow_run_id, nodeId: r.node_id, traversalSeq: r.traversal_seq,
+    selectedBranch: r.selected_branch, selectedEdgeTo: r.selected_edge_to,
     createdAt: r.created_at, templateVersion: r.template_version,
   }));
 }

@@ -5,7 +5,7 @@ import type { GateDecisionRow, TemplateTransition } from "./fetch.js";
 const names = new Map([["review", { name: "Review", evalSubstrate: "shadow" as const }]]);
 const decision = (over: Partial<GateDecisionRow>): GateDecisionRow => ({
   id: "d", workflowRunId: "r1", nodeId: "review", traversalSeq: 1, outcome: "approved",
-  reason: "ok", issueRefs: [], recommendedOutcome: "approved", recommendedReason: null,
+  reason: "ok", selectedEdgeTo: "next", issueRefs: [], recommendedOutcome: "approved", recommendedReason: null,
   createdAt: "2026-07-16T00:00:00.000Z", templateVersion: 1, ...over,
 });
 
