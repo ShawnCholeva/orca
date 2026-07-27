@@ -77,6 +77,17 @@ interface GoalRow {
   archived_at: string | null;
   worker_permission_mode: string;
   operating_mode: string;
+  success_criteria: string | null;
+}
+
+function parseSuccessCriteria(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function rowToGoal(row: GoalRow): Goal {
@@ -94,6 +105,7 @@ function rowToGoal(row: GoalRow): Goal {
     archivedAt: row.archived_at,
     workerPermissionMode: row.worker_permission_mode,
     operatingMode: row.operating_mode,
+    successCriteria: parseSuccessCriteria(row.success_criteria),
   });
 }
 
@@ -117,7 +129,7 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
         "INSERT INTO events (id, type, goal_id, payload, created_at) VALUES (?, ?, ?, ?, ?)"
       ),
       insertGoal: db.prepare(
-        "INSERT INTO goals (id, title, intent, status, autonomy_level, orchestrator_provider, orchestrator_model, worker_permission_mode, operating_mode, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, ?, ?, 'ask', ?, ?, ?)"
+        "INSERT INTO goals (id, title, intent, success_criteria, status, autonomy_level, orchestrator_provider, orchestrator_model, worker_permission_mode, operating_mode, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', 1, ?, ?, 'ask', ?, ?, ?)"
       ),
       selectGoals: db.prepare(
         "SELECT * FROM goals WHERE archived_at IS NULL ORDER BY updated_at DESC"
@@ -144,6 +156,7 @@ type CreateGoalInput = {
   workspaces?: Array<{ inputPath: string; name?: string }>;
   documents?: Array<{ kind: "file" | "url"; ref: string; name?: string }>;
   orchestratorModel?: OrchestratorModelChoice;
+  successCriteria?: string[];
 };
 
 type GoalOrigin = {
@@ -187,6 +200,9 @@ function resolveGoalOrigin(
 
 export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Promise<Goal> {
   const { refined, workspaces, documents } = input;
+  const successCriteria = (input.successCriteria ?? [])
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0);
 
   let validatedRefined: GuidedRefinementOutput | undefined;
   if (refined !== undefined) {
@@ -276,6 +292,7 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
       goalId,
       title,
       intent,
+      JSON.stringify(successCriteria),
       validatedOrchestratorModel?.providerId ?? null,
       validatedOrchestratorModel?.modelId ?? null,
       operatingMode,
@@ -368,6 +385,7 @@ export async function createGoal(input: CreateGoalInput, ctx: CreateGoalCtx): Pr
     archivedAt: null,
     workerPermissionMode: "ask",
     operatingMode,
+    successCriteria,
   };
 }
 
