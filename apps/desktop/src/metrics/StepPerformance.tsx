@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SampleDetail, StepMetrics, TemplateInstructionProposal, TemplateMetricsDetail, TemplateMetricsSummary } from "@orca/contracts";
-import { labelForFailure } from "@orca/contracts";
+import { labelForFailure, labelForConfidenceReason } from "@orca/contracts";
 import { getSampleDetail } from "../api";
 import { Pill } from "../workspaces/primitives";
 import { bandMeta, channelsFor, gradeFor, statusForStep, statusMeta, toneColor, verdictFor } from "./metrics-data";
@@ -192,7 +192,11 @@ export function StepRow({ step, index, isLast, open, onToggle, onOpenGoal, propo
         <div style={{ padding: "2px 16px 16px 60px" }}>
           <div style={{ background: "var(--panel-2)", border: "1px solid var(--hairline)", borderRadius: 10, padding: 12 }}>
             <SectionLabel style={{ paddingTop: 0 }}>What's going wrong</SectionLabel>
-            {step.failureClusters.length === 0 && <div style={{ fontSize: 12, color: "var(--run)" }}>No problems detected this period.</div>}
+            {step.failureClusters.length === 0 && (
+              step.confidenceReason
+                ? <div style={{ fontSize: 12, color: "var(--warn)" }}>{labelForConfidenceReason(step.confidenceReason)}</div>
+                : <div style={{ fontSize: 12, color: "var(--run)" }}>No problems detected this period.</div>
+            )}
             {step.failureClusters.map((c, i) => (
               <div key={i}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, color: "var(--text-2)", padding: "3px 0" }}>

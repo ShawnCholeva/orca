@@ -24,12 +24,19 @@ const step: StepMetrics = {
   reconciliation: { claimedComplete: true, verifiedTierLabel: "Reviewed, not proven", refuted: false, refuteReason: null },
   trend: [], versionBoundaries: [], versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: ["Loops between failed strategies — high retry churn."],
   recentReasons: [{ at: "2026-05-01T00:00:00.000Z", reason: "constraint X violated" }],
+  confidenceReason: { code: "weak_verifier", nodeName: "Critique" },
 };
 
 describe("no jargon in the metrics step detail", () => {
   it("renders no 'oracle', 'sensor', 'verdict', 'refute', or 'veto'", () => {
     const { container } = render(<StepRow step={step} index={0} isLast open onToggle={() => {}} />);
     expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
+  });
+
+  it("renders the confidence-reason line naming the real node, not the empty fallback", () => {
+    render(<StepRow step={{ ...step, failureClusters: [], confidenceReason: { code: "weak_verifier", nodeName: "Critique" } }} index={0} isLast open onToggle={() => {}} />);
+    expect(screen.getByText(/Critique approved this, but that hasn't held up downstream yet\./i)).toBeTruthy();
+    expect(screen.queryByText(/No problems detected this period\./i)).toBeNull();
   });
 });
 
