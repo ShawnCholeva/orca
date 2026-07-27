@@ -182,8 +182,8 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
   const requiresExecution = new Set([...currentStepNames.keys()].filter((id) => stepRequiresExecution(guardrails, id) !== null));
   // Decision-correctness confidence (Phase 3, T4). Same version-safety rule as gate credit
   // and downstream-vindication above: fed only latest-version decisions.
-  const gateVindication = graph ? deriveGateVindication({ transitions, gateDecisions: latestVersionGateDecisions, graph }) : undefined;
-  const splitterVindication = graph ? deriveSplitterVindication({ transitions, splitDecisions: latestSplits, graph }) : undefined;
+  const gateVindication = graph ? deriveGateVindication({ transitions: latestVersionTransitions, gateDecisions: latestVersionGateDecisions, graph }) : undefined;
+  const splitterVindication = graph ? deriveSplitterVindication({ transitions: latestVersionTransitions, splitDecisions: latestSplits, graph }) : undefined;
   const gates = buildGateMetrics({ decisions: gateDecisions, transitions, names: gateNodeNames(db, templateId), period, calibration, scope, lineage, gateVindication });
   const scored = gates.filter((g) => g.health != null);
   const gateHealthValue = scored.length ? Math.round(scored.reduce((n, g) => n + g.health!, 0) / scored.length) : null;

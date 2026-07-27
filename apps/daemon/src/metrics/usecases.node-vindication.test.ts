@@ -258,6 +258,7 @@ describe("getTemplateMetricsDetail — splitter misrouteRate end-to-end (Task 4 
     const splitter = detail!.splitters.find((s) => s.nodeId === "route");
     expect(splitter).toBeDefined();
     // Unaffected by the older-version run — same as the no-noise scenario above.
+    expect(splitter!.decisions).toBe(3); // sd1, sd2, sd3 (sdold1, sdold2 excluded as v1)
     expect(splitter!.confidence.sampleSize).toBe(2);
     expect(splitter!.misrouteRate).toBeCloseTo(0.5, 5);
   });
