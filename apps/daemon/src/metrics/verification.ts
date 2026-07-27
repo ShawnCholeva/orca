@@ -196,8 +196,17 @@ export function computeCalibration(
     }
 
     const sampleSize = alpha + beta;
+    // independent_review is vindication-only: an older-version (or otherwise unresolved)
+    // completion has no vindication map entry at all and can never be labeled, so it must
+    // not dilute the coverage denominator (it isn't "labelable evidence we're missing" —
+    // it's simply out of scope). Fall back to the full bucket when no vindication map was
+    // supplied at all (backward-compat / no-vindication callers keep prior behavior).
+    // executable/grounding stay refute-based over the full bucket, unchanged.
+    const coverageBucket = source === "independent_review" && opts?.vindication
+      ? bucket.filter((t) => opts.vindication!.get(`${t.transition.workflowRunId}::${t.stepTemplateId}`) !== undefined)
+      : bucket;
     let state: CalibrationEntry["state"];
-    if (bucket.length > 0 && labeled / bucket.length < CALIBRATION_COVERAGE) state = "unmeasurable";
+    if (coverageBucket.length > 0 && labeled / coverageBucket.length < CALIBRATION_COVERAGE) state = "unmeasurable";
     else if (sampleSize < CALIBRATION_MIN) state = "insufficient";
     else state = "measured";
 

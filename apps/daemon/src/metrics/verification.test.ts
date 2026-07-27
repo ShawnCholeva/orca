@@ -340,6 +340,30 @@ describe("computeCalibration", () => {
   it("PRIOR_STRENGTH constant is 4 (K pseudo-count weight)", () => {
     expect(PRIOR_STRENGTH).toBe(4);
   });
+
+  // Fix 2 (Phase 2b follow-up): independent_review's coverage denominator must count only
+  // LABELABLE completions (those with a vindication map entry) — unlabelable completions
+  // (older-version runs, absent from the map entirely) must not dilute coverage.
+  it("coverage-denominator dilution fix: unlabelable completions (no vindication key) don't dilute independent_review coverage", () => {
+    // 10 labelable completions (all vindicated, weight 1.0 — terminal/anchor) + 15
+    // unlabelable completions with NO entry in the vindication map at all (as an
+    // older-version completion would be). Pre-fix, coverage = labeled/bucket.length =
+    // 10/25 = 0.4 < CALIBRATION_COVERAGE(0.5) -> unmeasurable. Post-fix, coverage is
+    // computed over the 10 labelable completions only: 10/10 = 1.0 -> measured.
+    const labelable = Array.from({ length: 10 }, (_, i) => txc(`lbl${i}`, { evidence: null }));
+    const unlabelable = Array.from({ length: 15 }, (_, i) => txc(`unl${i}`, { evidence: null }));
+    const vindication = new Map(labelable.map((t) => [
+      `${t.transition.workflowRunId}::${t.stepTemplateId}`,
+      { outcome: "vindicated" as const, byNodeId: null },
+    ]));
+    const cal = computeCalibration([...labelable, ...unlabelable], { vindication, gateApprovedByCompletion: () => true });
+    const entry = cal.find((c) => c.source === "independent_review")!;
+    // alpha0=2.2, beta0=1.8 (prior 0.55, K=4); alpha=10 (all vindicated, weight 1.0), beta=0.
+    // measured = (2.2+10)/(4+10) = 12.2/14
+    expect(entry.state).toBe("measured");
+    expect(entry.sampleSize).toBe(10);
+    expect(entry.measured).toBeCloseTo(12.2 / 14, 5);
+  });
 });
 
 describe("effectiveSourceConfidence", () => {
