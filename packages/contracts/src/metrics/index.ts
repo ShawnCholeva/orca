@@ -2,6 +2,9 @@ import { z } from "zod";
 
 export { labelForFailure } from "./failure-labels.js";
 export { labelForGateFailure, GATE_FAILURE_CODES } from "./gate-failure-labels.js";
+import { CONFIDENCE_REASON_CODES } from "./confidence-reasons.js";
+export { labelForConfidenceReason, CONFIDENCE_REASON_CODES } from "./confidence-reasons.js";
+export type { ConfidenceReasonCode } from "./confidence-reasons.js";
 
 export const MetricPeriod = z.enum(["24h", "7d", "30d"]);
 export type MetricPeriod = z.infer<typeof MetricPeriod>;
@@ -36,6 +39,12 @@ export const VerificationTier = z.enum([
   "verified_executed", "partially_verified", "ai_reviewed", "self_reported", "unverified",
 ]);
 export type VerificationTier = z.infer<typeof VerificationTier>;
+
+export const ConfidenceReason = z.object({
+  code: z.enum(CONFIDENCE_REASON_CODES),
+  nodeName: z.string().optional(),
+}).strict();
+export type ConfidenceReason = z.infer<typeof ConfidenceReason>;
 
 export const TemplateMetricsSummary = z.object({
   templateId: z.string(),
@@ -300,6 +309,12 @@ export const StepMetrics = z.object({
     bounced: z.number().int().nonnegative(),
     pending: z.number().int().nonnegative(),
   }).strict().optional(),
+  // Phase 4 (display-only): the derived reason the step's confidence is below full —
+  // rendered through labelForConfidenceReason, naming the real verifying node where
+  // relevant. Derived from the score's own evidence (band, verifierMix, vindication);
+  // does not move the score. Absent/undefined ⇔ nothing is limiting (strong & clean,
+  // or hard failures already listed in failureClusters).
+  confidenceReason: ConfidenceReason.optional(),
 }).strict();
 export type StepMetrics = z.infer<typeof StepMetrics>;
 
