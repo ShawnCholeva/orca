@@ -176,7 +176,8 @@ export const SplitterMetrics = z.object({
   misrouteRate: z.number().nullable(), // false_accept / labeled
   retrospectiveOnly: z.literal(true),  // honest marker: evaluate_split unwired
   deterministic: z.boolean(),          // branchKey set → forwards an upstream field
-  // T4: deterministic → the upstream decision-maker step's node id; llm-routed → null (self).
+  // T4: deterministic → the upstream decision-maker step's stepId ?? id (matching
+  // StepMetrics.stepTemplateId, not the raw graph node id); llm-routed → null (self).
   attributedToNodeId: z.string().nullable(),
   versionHistory: NodeVersionHistory.optional(),
 }).strict();

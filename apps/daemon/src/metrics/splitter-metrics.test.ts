@@ -112,6 +112,31 @@ describe("buildSplitterMetrics", () => {
     expect(m.attributedToNodeId).toBe("triage");
   });
 
+  it("predecessor step's node id !== stepId ⇒ attributedToNodeId is the stepId (join key), not the raw node id", () => {
+    // Regression for the carried-over identity bug: attributedToNodeId must match the
+    // identity a transition's stepTemplateId carries (stepId ?? id), not the graph node id.
+    const graph = {
+      nodes: [
+        { id: "triage-node-1", type: "step", name: "T", stepId: "triage" },
+        { id: "route", type: "splitter", name: "R", branchKey: "recommended_tier" },
+        { id: "fast", type: "step", name: "F", stepId: "fast", terminal: true },
+        { id: "slow", type: "step", name: "S", stepId: "slow", terminal: true },
+      ],
+      edges: [
+        { from: "triage-node-1", to: "route" },
+        { from: "route", to: "fast", port: "fast" },
+        { from: "route", to: "slow", port: "slow" },
+      ],
+      positions: {},
+    } as unknown as WorkflowGraph;
+    const decisions = [split({ id: "d1", traversalSeq: 1 })];
+    const vindication = new Map<string, NodeVindicationResult>([["r1::route::1", { outcome: "vindicated", byNodeId: "fast" }]]);
+    const [m] = buildSplitterMetrics({ splitDecisions: decisions, splitterVindication: vindication, graph, names });
+    expect(m.deterministic).toBe(true);
+    expect(m.attributedToNodeId).toBe("triage");
+    expect(m.attributedToNodeId).not.toBe("triage-node-1");
+  });
+
   it("nodeId + name pass through from `names`", () => {
     const decisions = [split({ id: "d1", traversalSeq: 1 })];
     const [m] = buildSplitterMetrics({ splitDecisions: decisions, splitterVindication: new Map(), graph: llmGraph, names });

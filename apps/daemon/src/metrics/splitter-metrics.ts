@@ -11,13 +11,15 @@ export const SPLITTER_CONFIDENCE_PRIOR = 0.5;
 
 // Resolve a splitter's predecessor step the way gate-review.ts resolves a gate's reviewed
 // step: the step node with an edge INTO the splitter. Zero or >1 step predecessors is
-// ambiguous, so attribution stays null rather than guessing.
+// ambiguous, so attribution stays null rather than guessing. The returned id must be the
+// identity a transition's stepTemplateId/StepMetrics.stepTemplateId carries (stepId ?? id) —
+// matching gate-review.ts:22 and vindication.ts:25 — not the raw graph node id.
 function predecessorStepId(graph: WorkflowGraph, nodeId: string): string | null {
   const stepNodesById = new Map(graph.nodes.filter((n) => n.type === "step").map((n) => [n.id, n]));
   const stepPreds = [...new Set(
     graph.edges.filter((e) => e.to === nodeId && stepNodesById.has(e.from)).map((e) => e.from)
   )];
-  return stepPreds.length === 1 ? stepPreds[0] : null;
+  return stepPreds.length === 1 ? (stepNodesById.get(stepPreds[0])!.stepId ?? stepPreds[0]) : null;
 }
 
 export function buildSplitterMetrics(input: {
