@@ -1961,5 +1961,10 @@ describe("Goal successCriteria", () => {
     expect(GateEvaluationRequest.safeParse(base).success).toBe(true);
     expect(GateEvaluationRequest.safeParse({ ...base, goal: { ...base.goal, successCriteria: ["goal succeeded"] } }).success).toBe(true);
     expect(GateEvaluationRequest.safeParse({ ...base, goal: { ...base.goal, successCriteria: [] } }).success).toBe(true);
+    // Load-bearing for empty-list parity: when omitted the key must be ABSENT from
+    // the parsed goal (optional, no .default([])) so it never appears in JSON.stringify.
+    const parsed = GateEvaluationRequest.parse(base);
+    expect("successCriteria" in parsed.goal).toBe(false);
+    expect(JSON.stringify(parsed)).not.toContain("successCriteria");
   });
 });
