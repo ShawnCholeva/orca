@@ -5,10 +5,12 @@ import type { TemplateTransition } from "./fetch.js";
 import { computeStepMetrics, computeTemplateSummary, windowStart } from "./aggregate.js";
 import { deriveVindication } from "./vindication.js";
 import type { VindicationOutcome } from "./vindication.js";
+import { deriveGateVindication, deriveSplitterVindication } from "./node-vindication.js";
 import { computeCalibration } from "./verification.js";
 import type { CalibrationEntry } from "./verification.js";
 import { gateApprovalsByStep } from "./gate-review.js";
 import { buildCompletionGateMetrics, buildGateMetrics, buildPolicyGatewayMetrics } from "./gate-metrics.js";
+import { buildSplitterMetrics } from "./splitter-metrics.js";
 import { computeNodeLineage } from "./node-lineage.js";
 import { buildPipeline } from "./pipeline.js";
 import { stepRequiresExecution } from "../workflows/orchestrator/requires-execution.js";
@@ -59,6 +61,11 @@ function buildSummary(db: Database.Database, t: { templateId: string; name: stri
   return { ...summary, scope };
 }
 
+// gateHealth stays the computeTemplateSummary stub ({value:null,...}) here: populating it
+// needs the graph + latest-version gate decisions + gateVindication (getTemplateMetricsDetail's
+// wiring), which this list path doesn't load per-template — that's O(templates) extra queries
+// for a summaries-list response. The detail endpoint (one template) pays that cost and
+// overrides gateHealth after buildSummary; this stays honestly null rather than paying it here.
 export function getTemplateMetricsSummaries(db: Database.Database, period: MetricPeriod, nowIso?: string): TemplateMetricsSummary[] {
   const now = nowOr(nowIso);
   return listTemplatesWithRuns(db).map((t) => buildSummary(db, t, period, now));
@@ -98,6 +105,18 @@ export function gateNodeNames(db: Database.Database, templateId: string): Map<st
   for (const n of graph.nodes) {
     if (n.type !== "gate") continue;
     map.set(n.id, { name: n.name || n.id, evalSubstrate: n.evalSubstrate ?? "shadow" });
+  }
+  return map;
+}
+
+export function splitterNodeNames(db: Database.Database, templateId: string): Map<string, { name: string }> {
+  const row = db.prepare(`SELECT graph_json FROM workflow_templates WHERE id = ?`).get(templateId) as { graph_json: string | null } | undefined;
+  const map = new Map<string, { name: string }>();
+  if (!row?.graph_json) return map;
+  const graph = JSON.parse(row.graph_json) as { nodes: { id: string; type: string; name?: string }[] };
+  for (const n of graph.nodes) {
+    if (n.type !== "splitter") continue;
+    map.set(n.id, { name: n.name || n.id });
   }
   return map;
 }
@@ -161,7 +180,11 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
   const gRow = db.prepare(`SELECT guardrails_json FROM workflow_templates WHERE id = ?`).get(templateId) as { guardrails_json: string } | undefined;
   const guardrails = gRow ? (JSON.parse(gRow.guardrails_json) as WorkflowGuardrailConfig[]) : [];
   const requiresExecution = new Set([...currentStepNames.keys()].filter((id) => stepRequiresExecution(guardrails, id) !== null));
-  const gates = buildGateMetrics({ decisions: gateDecisions, transitions, names: gateNodeNames(db, templateId), period, calibration, scope, lineage });
+  // Decision-correctness confidence (Phase 3, T4). Same version-safety rule as gate credit
+  // and downstream-vindication above: fed only latest-version decisions.
+  const gateVindication = graph ? deriveGateVindication({ transitions, gateDecisions: latestVersionGateDecisions, graph }) : undefined;
+  const splitterVindication = graph ? deriveSplitterVindication({ transitions, splitDecisions: latestSplits, graph }) : undefined;
+  const gates = buildGateMetrics({ decisions: gateDecisions, transitions, names: gateNodeNames(db, templateId), period, calibration, scope, lineage, gateVindication });
   const scored = gates.filter((g) => g.health != null);
   const gateHealthValue = scored.length ? Math.round(scored.reduce((n, g) => n + g.health!, 0) / scored.length) : null;
   const gateHealth = {
@@ -185,8 +208,9 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
       vindicationByCompletion,
     }),
     gates,
-    // TODO(splitter-metrics): populated in the splitter-wiring task (Task 4)
-    splitters: [],
+    splitters: graph
+      ? buildSplitterMetrics({ splitDecisions: latestSplits, splitterVindication: splitterVindication ?? new Map(), graph, names: splitterNodeNames(db, templateId), lineage })
+      : [],
     policyGateway: buildPolicyGatewayMetrics(transitions),
     completionGate: buildCompletionGateMetrics(transitions),
     pipeline: buildPipeline(graphRow?.graph_json ?? null),
