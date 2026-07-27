@@ -57,6 +57,12 @@ export function GateRow({ gate, index, isLast, open, onToggle, guards }: { gate:
             ))}
             <SectionLabel>Grounded in checks</SectionLabel>
             <div style={{ fontSize: 12, color: "var(--text-2)" }}>{pct(gate.scored.groundedness)} average strength of the evidence behind gate calls.</div>
+            <SectionLabel>Do its approvals hold up?</SectionLabel>
+            <div style={{ fontSize: 12, color: "var(--text-2)" }}>
+              {gate.decisionConfidence.state === "measured" && gate.decisionConfidence.value != null
+                ? `${Math.round(gate.decisionConfidence.value * 100)}% of its approvals held up downstream (${gate.decisionConfidence.sampleSize} checked).`
+                : "Not enough decisions yet to tell whether its approvals hold up."}
+            </div>
             <SectionLabel>Cost</SectionLabel>
             <div className="mono" style={{ fontSize: 11.5, color: "var(--text-3)" }}>
               {gate.cost.p50LatencyMs == null ? "—" : `${Math.round(gate.cost.p50LatencyMs)}ms`} · {gate.cost.meanTokens == null ? "—" : `${Math.round(gate.cost.meanTokens)} tok`} · {gate.cost.meanUsd == null ? "—" : `$${gate.cost.meanUsd.toFixed(3)}`}
@@ -126,11 +132,21 @@ export function FusedPipelinePanel({ detail, loading, openStep, onToggleStep, op
             return <GateRow key={node.nodeId} gate={g} index={i} isLast={isLast} open={openGate === g.nodeId} onToggle={() => onToggleGate(g.nodeId)} guards={guards} />;
           }
 
-          // Splitter: a thin marker showing where the flow branches, not a scored node.
+          // Splitter: a marker showing where the flow branches, plus its routing confidence.
           const branches = (node.branchesTo ?? []).map((id) => nameById.get(id) ?? id).join(" · ");
+          const sp = (detail?.splitters ?? []).find((x) => x.nodeId === node.nodeId);
+          const routeLine = sp
+            ? (sp.confidence.state === "measured" && sp.confidence.value != null
+                ? `${Math.round(sp.confidence.value * 100)}% of routes weren't walked back`
+                : "not enough routes yet to rate")
+            : null;
+          const creditLine = sp?.deterministic && sp.attributedToNodeId
+            ? ` · routing decided by ${nameById.get(sp.attributedToNodeId) ?? sp.attributedToNodeId}`
+            : "";
           return (
             <div key={node.nodeId} className="mono" style={{ borderBottom: border, padding: "8px 14px", fontSize: 10.5, color: "var(--text-3)", background: "rgba(255,255,255,0.015)" }}>
               {node.name} — branches to {branches}
+              {routeLine && <span style={{ color: "var(--text-4)" }}> · {routeLine}{creditLine}</span>}
             </div>
           );
         })}

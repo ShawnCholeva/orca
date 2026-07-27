@@ -13,6 +13,8 @@ const gate = (over: Partial<GateMetrics> = {}): GateMetrics => ({
   trend: [], versionBoundaries: [], decisionConfidence: { value: null, sampleSize: 0, state: "insufficient" }, ...over,
 });
 
+const baseGate = gate();
+
 describe("GateRow", () => {
   it("renders the resolved gate name, grade, and expands to cost + failure modes — no jargon or raw id", () => {
     const { container } = render(<GateRow gate={gate()} index={0} isLast open onToggle={() => {}} />);
@@ -26,5 +28,24 @@ describe("GateRow", () => {
   it("shows 'unproven' when health is null instead of a failing grade", () => {
     render(<GateRow gate={gate({ health: null, grade: null, scored: { ...gate().scored, overturnRate: null } })} index={0} isLast open onToggle={() => {}} />);
     expect(screen.getByText(/unproven/i)).toBeInTheDocument();
+  });
+
+  it("shows the decision-confidence percentage only when measured", () => {
+    const measured = { ...baseGate, decisionConfidence: { value: 0.82, sampleSize: 12, state: "measured" as const } };
+    render(<GateRow gate={measured} index={0} isLast open onToggle={() => {}} />);
+    expect(screen.getByText(/82% of its approvals held up downstream/i)).toBeTruthy();
+  });
+
+  it("hides the number and shows an honest line when sample is insufficient", () => {
+    const thin = { ...baseGate, decisionConfidence: { value: 0.9, sampleSize: 1, state: "insufficient" as const } };
+    render(<GateRow gate={thin} index={0} isLast open onToggle={() => {}} />);
+    expect(screen.queryByText(/90%/)).toBeNull();
+    expect(screen.getByText(/Not enough decisions yet to tell whether its approvals hold up\./i)).toBeTruthy();
+  });
+
+  it("gate confidence copy stays jargon-free", () => {
+    const measured = { ...baseGate, decisionConfidence: { value: 0.82, sampleSize: 12, state: "measured" as const } };
+    const { container } = render(<GateRow gate={measured} index={0} isLast open onToggle={() => {}} />);
+    expect(container.textContent).not.toMatch(/\b(oracle|sensor|verdict|refute|veto)\b/i);
   });
 });
