@@ -144,6 +144,103 @@ describe("getTemplateMetricsDetail — gate decisionConfidence end-to-end (Task 
   });
 });
 
+// Phase 4 (confidence reason): a step credited ONLY via gate approval (independent
+// review), whose completion is not yet vindicated downstream (no mark_done/terminal
+// outcome after the gate's decision), surfaces weak_verifier naming the gate — and,
+// critically, the score is IDENTICAL to the pre-Phase-4 value (usecases.gate.test.ts's
+// "credits its reviewed step's score (~55)" fixture): this is display-only, it must not
+// move the score. Forcing requiresExecution=true on the step (via a validation_rule
+// guardrail) makes the band "weak" (ceiling-relative: review alone can't meet an
+// execution ceiling) without touching composedScore's inputs at all.
+describe("getTemplateMetricsDetail — confidenceReason end-to-end (Phase 4, display-only)", () => {
+  let db: Database.Database;
+  beforeEach(() => {
+    db = new Database(":memory:");
+    runMigrations(db, defaultMigrationsDir());
+  });
+
+  const ROW_AT = "2026-07-16T12:00:00.000Z";
+  const AFTER = "2026-07-17T00:00:00.000Z";
+  // Graph: proposal --> critique(gate) --approved--> execution; --rejected--> proposal.
+  const graphJson = JSON.stringify({
+    nodes: [
+      { id: "proposal", type: "step", name: "Proposal", stepId: "proposal" },
+      { id: "critique", type: "gate", name: "Critique", instructions: "x" },
+      { id: "execution", type: "step", name: "Execution", stepId: "execution", terminal: true },
+    ],
+    edges: [
+      { from: "proposal", to: "critique" },
+      { from: "critique", to: "execution", port: "approved" },
+      { from: "critique", to: "proposal", port: "rejected" },
+    ],
+    positions: {},
+  });
+  // Bare self-report evidence (no sensors, no grounding, no refute) — gate credit is
+  // the only thing that establishes a score for it.
+  const selfReportEvidenceJson = JSON.stringify({
+    sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [],
+    oracleAdequacy: { sufficient: false, gaps: ["no integration test"] },
+  });
+  const telemetryJson = JSON.stringify({
+    cost: null, latency_ms: 100, model: null, provider_id: null, provider_version: null,
+    prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [],
+    outcome: { status: "succeeded", failure_code: null },
+  });
+  const guardrailsJson = JSON.stringify([
+    { id: "validation_required", kind: "validation_rule", label: "Require tests", configJson: { appliesToSteps: ["proposal"], required: ["unit_tests"] } },
+  ]);
+
+  function seedTemplate() {
+    db.prepare(
+      "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at) VALUES ('g1','G','','active',1,?,?)"
+    ).run(ROW_AT, ROW_AT);
+    db.prepare(
+      `INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, graph_json, created_at, updated_at)
+       VALUES ('tpl','T','',2,0,0,'[{"id":"proposal","name":"Proposal"}]',?,?,?,?)`
+    ).run(guardrailsJson, graphJson, ROW_AT, ROW_AT);
+  }
+
+  function seedRun(runId: string) {
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, started_at, traversal_seq) VALUES (?,'g1','tpl',2,'completed',?,1)"
+    ).run(runId, ROW_AT);
+    const srId = `sr-${runId}`;
+    db.prepare(
+      `INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint)
+       VALUES (?,'g1',?,'proposal',0,1,'passed','[]','[]',NULL,?,?,?)`
+    ).run(srId, runId, ROW_AT, ROW_AT, `fp-${runId}`);
+    db.prepare(
+      `INSERT INTO harness_transitions (id, goal_id, workflow_run_id, workflow_step_run_id, boundary, risk_json, evidence_json, state_deps_json, telemetry_json, created_at)
+       VALUES (?,'g1',?,?,'step_complete',NULL,?,NULL,?,?)`
+    ).run(`ht-${runId}`, runId, srId, selfReportEvidenceJson, telemetryJson, ROW_AT);
+  }
+
+  function seedGateDecision(id: string, runId: string) {
+    db.prepare(
+      `INSERT INTO workflow_gate_decisions
+         (id, goal_id, workflow_run_id, node_id, traversal_seq, outcome, reason, selected_edge_to,
+          inputs_considered_json, issue_refs_json, ledger_version, created_at)
+       VALUES (?,'g1',?,'critique',1,'approved','ok','execution','[]','[]',0,?)`
+    ).run(id, runId, ROW_AT);
+  }
+
+  it("surfaces weak_verifier naming the gate, without moving the score", () => {
+    seedTemplate();
+    seedRun("r1");
+    seedGateDecision("gd1", "r1");
+
+    const detail = getTemplateMetricsDetail(db, "tpl", "7d", AFTER);
+    expect(detail).not.toBeNull();
+    const proposal = detail!.steps.find((s) => s.stepTemplateId === "proposal");
+    expect(proposal).toBeDefined();
+    // Same value as usecases.gate.test.ts's un-gated-execution fixture — gate credit
+    // (independent_review confidence 0.55, full coverage) establishes it at 55,
+    // regardless of confidenceReason derivation running alongside it.
+    expect(proposal!.score).toBe(55);
+    expect(proposal!.confidenceReason).toEqual({ code: "weak_verifier", nodeName: "Critique" });
+  });
+});
+
 // Real DB -> graph -> deriveSplitterVindication -> buildSplitterMetrics ->
 // TemplateMetricsDetail.splitters[] chain (Task 4 wiring), plus the attributedToNodeId
 // identity fix (Task 4, own commit): the upstream decision-maker step's stepId, not the

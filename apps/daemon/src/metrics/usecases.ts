@@ -147,6 +147,24 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
   // (safe under-credit) rather than a cross-version mis-credit.
   const latestVersionGateDecisions = allGateDecisions.filter((d) => d.templateVersion === info.latestVersion);
   const approvals = graph ? gateApprovalsByStep(graph, latestVersionGateDecisions) : new Map<string, Set<string>>();
+  // Phase 4: name the gate that verifies each step, for the weak_verifier confidence
+  // reason. Purely structural (mirrors gateApprovalsByStep's "a gate reviews exactly
+  // one step" topology walk) — not gated on approvals/decisions, since which gate
+  // checks a step doesn't depend on whether any run has been approved yet.
+  const verifyingGateNameByStep = new Map<string, string>();
+  if (graph) {
+    const stepNodesById = new Map(graph.nodes.filter((n) => n.type === "step").map((n) => [n.id, n]));
+    for (const n of graph.nodes) {
+      if (n.type !== "gate") continue;
+      const stepPreds = [...new Set(
+        graph.edges.filter((e) => e.to === n.id && stepNodesById.has(e.from)).map((e) => e.from)
+      )];
+      if (stepPreds.length === 1) {
+        const predNode = stepNodesById.get(stepPreds[0])!;
+        verifyingGateNameByStep.set(predNode.stepId ?? predNode.id, n.name || n.id);
+      }
+    }
+  }
   const gateApprovedByCompletion = (t: TemplateTransition) => {
     const runId = t.transition.workflowRunId;
     const stepNodeId = t.stepTemplateId;
@@ -206,6 +224,7 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
       requiresExecution,
       gateApprovedByCompletion,
       vindicationByCompletion,
+      verifyingGateNameByStep,
     }),
     gates,
     splitters: graph

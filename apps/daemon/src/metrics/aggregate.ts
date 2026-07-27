@@ -7,6 +7,7 @@ import { classifyTier, strongestTier, TIER_LABEL, buildArtifacts, computeCalibra
 import type { CalibrationEntry } from "./verification.js";
 import { labelForFailure } from "./failure-labels.js";
 import { composedScore } from "./composed-score.js";
+import { deriveConfidenceReason } from "./confidence-reason.js";
 
 export const SAMPLE_MIN = 5;
 // Per-side minimum of SCORED samples before a per-step version delta is emitted.
@@ -231,6 +232,7 @@ export function computeStepMetrics(input: {
   requiresExecution?: Set<string>;
   gateApprovedByCompletion?: (t: TemplateTransition) => boolean;
   vindicationByCompletion?: (t: TemplateTransition) => VindicationOutcome | "excluded" | undefined;
+  verifyingGateNameByStep?: Map<string, string>;
 }): StepMetrics[] {
   // Scope to the CURRENT template's steps: a step id not in stepNames is a fossil
   // from a retired version, or the step-era of a node that is now a gate — either way
@@ -556,6 +558,15 @@ export function computeStepMetrics(input: {
       else vindTally.pending++;
     }
 
+    const confidenceReason = deriveConfidenceReason({
+      bandLevel,
+      verifierMix: scoreBreakdown.verifierMix,
+      verifiedSampleSize: verifiedCompletes.length,
+      vindication: input.vindicationByCompletion ? vindTally : undefined,
+      hasFailureClusters: failureClusters.length > 0,
+      verifyingGateName: input.verifyingGateNameByStep?.get(stepTemplateId),
+    });
+
     const step: StepMetrics = {
       stepTemplateId, name: meta.name, ordinal: meta.ordinal,
       description: meta.description, completionPolicy: meta.completionPolicy,
@@ -592,6 +603,7 @@ export function computeStepMetrics(input: {
       versionInvalidOutputRateDelta, insights: [], recentReasons,
       versionHistory: input.lineage?.get(stepTemplateId),
       vindication: input.vindicationByCompletion ? vindTally : undefined,
+      confidenceReason: confidenceReason ?? undefined,
     };
     step.insights = deriveInsights(step, input.calibration);
     steps.push(step);
