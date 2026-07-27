@@ -78,6 +78,7 @@ describe("metrics contracts", () => {
         versionScoreDelta: null, versionInvalidOutputRateDelta: null,
       }],
       gates: [],
+      splitters: [],
       policyGateway: {
         decisionDist: { allow: 0, require_approval: 0, deny: 0 },
         overPermissive: { count: 0, sampleTransitionIds: [] },

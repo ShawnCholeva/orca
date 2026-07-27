@@ -32,6 +32,7 @@ function detail(steps: StepMetrics[]): TemplateMetricsDetail {
     steps,
     // TODO(gate-metrics): populated in the gates-wiring task
     gates: [],
+    splitters: [],
     policyGateway: {
       decisionDist: { allow: 0, require_approval: 0, deny: 0 },
       overPermissive: { count: 0, sampleTransitionIds: [] },

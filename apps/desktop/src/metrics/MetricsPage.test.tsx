@@ -63,7 +63,7 @@ const proposal = (over: Partial<TemplateInstructionProposal> = {}): TemplateInst
 describe("MetricsPage", () => {
   it("renders a pending proposal in the rail and opens the review modal on 'Review change'", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [step()], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [step()], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
     vi.spyOn(api, "listProposals").mockResolvedValue([proposal()]);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
     render(<MetricsPage />);
@@ -75,7 +75,7 @@ describe("MetricsPage", () => {
 
   it("keeps the review modal open and shows an error when applyProposal rejects (e.g. a stale proposal)", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [step()], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [step()], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
     vi.spyOn(api, "listProposals").mockResolvedValue([proposal()]);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
     const applySpy = vi.spyOn(api, "applyProposal").mockRejectedValue(new api.ApiError("Stale proposal — template was modified."));
@@ -94,7 +94,7 @@ describe("MetricsPage", () => {
 
   it("passes undefined as editedInstructions to applyProposal when Apply is clicked unedited", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [step()], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [step()], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
     const prop = proposal();
     vi.spyOn(api, "listProposals").mockResolvedValue([prop]);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
@@ -113,7 +113,7 @@ describe("MetricsPage", () => {
 
   it("edits the proposal text before applying and sends the edited string", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [step()], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [step()], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
     const prop = proposal();
     vi.spyOn(api, "listProposals").mockResolvedValue([prop]);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
@@ -130,7 +130,7 @@ describe("MetricsPage", () => {
 
   it("shows a loading state then renders the health tile", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
     render(<MetricsPage />);
     expect(screen.getByText(/Loading/i)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Step health")).toBeInTheDocument());
@@ -139,7 +139,7 @@ describe("MetricsPage", () => {
 
   it("shows Step health and Gate health as two distinct readouts", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
     render(<MetricsPage />);
     expect(await screen.findByText("Step health")).toBeInTheDocument();
     expect(screen.getByText("Gate health")).toBeInTheDocument();
@@ -165,7 +165,7 @@ describe("MetricsPage", () => {
       firstPass: null, confidence: "ok" as const,
     };
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([nullSummary]);
-    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary: nullSummary, steps: [], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary: nullSummary, steps: [], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
     render(<MetricsPage />);
     await waitFor(() => expect(screen.getByText("Step health")).toBeInTheDocument());
     const dashes = screen.getAllByText("—");
@@ -178,7 +178,7 @@ describe("MetricsPage", () => {
     const gateRenamed = gate({ nodeId: "verify", name: "Verify", versionHistory: { renamedFrom: "Release Readiness", eras: [{ type: "gate", fromVersion: 8, toVersion: 12, runs: 7 }, { type: "gate", fromVersion: 13, toVersion: 13, runs: 1 }] } });
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
     vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({
-      summary, steps: [], gates: [gateChangedShape, gateRenamed],
+      summary, steps: [], gates: [gateChangedShape, gateRenamed], splitters: [],
       policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] },
       completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } },
     });
@@ -206,7 +206,7 @@ describe("MetricsPage", () => {
     ];
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
     vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({
-      summary, steps: [proposal, execution], gates: [critique], pipeline,
+      summary, steps: [proposal, execution], gates: [critique], splitters: [], pipeline,
       policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] },
       completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } },
     });
@@ -235,7 +235,7 @@ describe("MetricsPage", () => {
   it("falls back to the two-panel layout when detail.pipeline is absent", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
     vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({
-      summary, steps: [step()], gates: [gate()],
+      summary, steps: [step()], gates: [gate()], splitters: [],
       policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] },
       completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } },
     });
@@ -248,7 +248,7 @@ describe("MetricsPage", () => {
   it("discards a stale refetchProposals response if the workflow was switched while it was in flight", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary, summary2]);
     vi.spyOn(api, "getTemplateMetricsDetail").mockImplementation((wfId) =>
-      Promise.resolve({ summary: wfId === "tpl2" ? summary2 : summary, steps: [step()], gates: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } }));
+      Promise.resolve({ summary: wfId === "tpl2" ? summary2 : summary, steps: [step()], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } }));
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
     vi.spyOn(api, "analyzeTemplate").mockResolvedValue([]);
 

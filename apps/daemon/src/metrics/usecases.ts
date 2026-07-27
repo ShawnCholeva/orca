@@ -185,6 +185,8 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
       vindicationByCompletion,
     }),
     gates,
+    // TODO(splitter-metrics): populated in the splitter-wiring task (Task 4)
+    splitters: [],
     policyGateway: buildPolicyGatewayMetrics(transitions),
     completionGate: buildCompletionGateMetrics(transitions),
     pipeline: buildPipeline(graphRow?.graph_json ?? null),

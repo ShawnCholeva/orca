@@ -161,6 +161,27 @@ export const GateMetrics = z.object({
 }).strict();
 export type GateMetrics = z.infer<typeof GateMetrics>;
 
+// Splitter routing confidence (Phase 3): retrospective-only (evaluate_split isn't wired
+// yet, so there's no in-band correctness verdict at decision time) — this is a downstream-
+// vindication tally over past decisions, mirroring GateMetrics.decisionConfidence's shape.
+export const SplitterMetrics = z.object({
+  nodeId: z.string(),
+  name: z.string(),
+  confidence: z.object({
+    value: z.number().nullable(),
+    sampleSize: z.number().int().nonnegative(),
+    state: z.enum(["measured", "insufficient"]),
+  }).strict(),
+  decisions: z.number().int().nonnegative(),
+  misrouteRate: z.number().nullable(), // false_accept / labeled
+  retrospectiveOnly: z.literal(true),  // honest marker: evaluate_split unwired
+  deterministic: z.boolean(),          // branchKey set → forwards an upstream field
+  // T4: deterministic → the upstream decision-maker step's node id; llm-routed → null (self).
+  attributedToNodeId: z.string().nullable(),
+  versionHistory: NodeVersionHistory.optional(),
+}).strict();
+export type SplitterMetrics = z.infer<typeof SplitterMetrics>;
+
 export const PolicyGatewayMetrics = z.object({
   decisionDist: z.object({ allow: z.number(), require_approval: z.number(), deny: z.number() }).strict(),
   overPermissive: z.object({ count: z.number().int().nonnegative(), sampleTransitionIds: z.array(z.string()) }).strict(),
@@ -306,6 +327,7 @@ export const TemplateMetricsDetail = z.object({
   summary: TemplateMetricsSummary,
   steps: z.array(StepMetrics),
   gates: z.array(GateMetrics),
+  splitters: z.array(SplitterMetrics),
   policyGateway: PolicyGatewayMetrics,
   completionGate: CompletionGateMetrics,
   pipeline: z.array(PipelineNode).optional(),
