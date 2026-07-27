@@ -49,7 +49,8 @@ export const Goal = z.object({
   activeWorkflowRunId: z.string().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
-  archivedAt: z.string().datetime().nullable()
+  archivedAt: z.string().datetime().nullable(),
+  successCriteria: z.array(z.string().min(1).max(200)).max(20).default([])
 });
 export type Goal = z.infer<typeof Goal>;
 
@@ -102,6 +103,7 @@ const GoalDocumentAttachmentInput = z.object({
 export const CreateGoalRequest = z.object({
   title: z.string().min(1).max(200),
   intent: z.string().min(1).max(4000),
+  successCriteria: z.array(z.string().min(1).max(200)).min(1).max(20),
   refined: GuidedRefinementOutput.optional(),
   workspaces: z.array(WorkspaceAttachmentInput).optional(),
   documents: z.array(GoalDocumentAttachmentInput).max(20).optional(),
@@ -117,6 +119,7 @@ export type CreateGoalResponse = z.infer<typeof CreateGoalResponse>;
 export const CreateGoalAndStartWorkflowRequest = z.object({
   title: z.string().min(1).max(200),
   intent: z.string().min(1).max(4000),
+  successCriteria: z.array(z.string().min(1).max(200)).min(1).max(20),
   workspaces: z.array(WorkspaceAttachmentInput).optional(),
   documents: z.array(GoalDocumentAttachmentInput).max(20).optional(),
   orchestratorModel: OrchestratorModelChoice.optional(),

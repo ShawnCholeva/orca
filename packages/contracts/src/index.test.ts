@@ -110,6 +110,7 @@ import {
   CreateGoalAndStartWorkflowRequest,
   CreateGoalAndStartWorkflowResponse,
 } from "./index.js";
+import { GateEvaluationRequest } from "./workflows/index.js";
 
 const now = "2026-01-01T00:00:00.000Z";
 
@@ -278,13 +279,14 @@ describe("goal refinement and workspace contracts", () => {
   it("keeps legacy create request body valid and supports refined workspace fields", () => {
     expectRoundTrip(
       CreateGoalRequest.parse,
-      { title: "Legacy create", intent: "Ship the legacy flow" },
-      { title: "Legacy create", intent: "Ship the legacy flow" }
+      { title: "Legacy create", intent: "Ship the legacy flow", successCriteria: ["works"] },
+      { title: "Legacy create", intent: "Ship the legacy flow", successCriteria: ["works"] }
     );
 
     const request = {
       title: "Refined create",
       intent: "Ship the refined flow",
+      successCriteria: ["complete"],
       refined: guidedOutputFixture,
       workspaces: [{ inputPath: "/tmp/ws", name: "workspace" }]
     };
@@ -295,7 +297,7 @@ describe("goal refinement and workspace contracts", () => {
   it("CreateGoalRequest requires a non-empty intent", () => {
     expect(() => CreateGoalRequest.parse({ title: "T" })).toThrow(); // intent missing
     expect(() => CreateGoalRequest.parse({ title: "T", intent: "" })).toThrow(); // empty
-    const ok = CreateGoalRequest.parse({ title: "T", intent: "Ship the feature" });
+    const ok = CreateGoalRequest.parse({ title: "T", intent: "Ship the feature", successCriteria: ["done"] });
     expect(ok.intent).toBe("Ship the feature");
   });
 
@@ -309,6 +311,7 @@ describe("goal refinement and workspace contracts", () => {
     const ok = CreateGoalAndStartWorkflowRequest.parse({
       title: "T",
       intent: "Do the thing",
+      successCriteria: ["done"],
       workflowTemplateId: "wf",
     });
     expect(ok.intent).toBe("Do the thing");
@@ -1595,6 +1598,7 @@ describe("CreateGoalAndStartWorkflowRequest", () => {
     const result = CreateGoalAndStartWorkflowRequest.safeParse({
       title: "My Goal",
       intent: "Ship the engineering workflow",
+      successCriteria: ["feature works"],
       workflowTemplateId: "orca/engineering",
     });
     expect(result.success).toBe(true);
@@ -1608,6 +1612,8 @@ describe("CreateGoalAndStartWorkflowRequest", () => {
   it("rejects empty workflowTemplateId", () => {
     const result = CreateGoalAndStartWorkflowRequest.safeParse({
       title: "My Goal",
+      intent: "Ship it",
+      successCriteria: ["works"],
       workflowTemplateId: "",
     });
     expect(result.success).toBe(false);
@@ -1913,5 +1919,47 @@ describe("first-class workspace contracts", () => {
 
   it("ListWorkspacesResponse parses", () => {
     expect(ListWorkspacesResponse.parse({ workspaces: [] }).workspaces).toEqual([]);
+  });
+});
+
+describe("Goal successCriteria", () => {
+  it("defaults to [] when absent (back-compat for existing rows)", () => {
+    const g = Goal.parse({
+      id: "g1", title: "T", intent: "I", status: "active",
+      createdAt: "2026-07-27T00:00:00.000Z", updatedAt: "2026-07-27T00:00:00.000Z",
+      archivedAt: null,
+    });
+    expect(g.successCriteria).toEqual([]);
+  });
+
+  it("CreateGoalRequest requires at least one criterion", () => {
+    const base = { title: "T", intent: "I" };
+    expect(CreateGoalRequest.safeParse({ ...base, successCriteria: [] }).success).toBe(false);
+    expect(CreateGoalRequest.safeParse({ ...base, successCriteria: ["all tests pass"] }).success).toBe(true);
+  });
+
+  it("CreateGoalRequest rejects >20 or >200-char criteria", () => {
+    const base = { title: "T", intent: "I" };
+    expect(CreateGoalRequest.safeParse({ ...base, successCriteria: Array(21).fill("x") }).success).toBe(false);
+    expect(CreateGoalRequest.safeParse({ ...base, successCriteria: ["x".repeat(201)] }).success).toBe(false);
+  });
+
+  it("CreateGoalAndStartWorkflowRequest requires ≥1 criterion", () => {
+    const base = { title: "T", intent: "I", workflowTemplateId: "wf1" };
+    expect(CreateGoalAndStartWorkflowRequest.safeParse({ ...base, successCriteria: [] }).success).toBe(false);
+    expect(CreateGoalAndStartWorkflowRequest.safeParse({ ...base, successCriteria: ["done"] }).success).toBe(true);
+  });
+
+  it("GateEvaluationRequest.goal.successCriteria is optional", () => {
+    const base = {
+      gate: { nodeId: "n1", name: "approve", instructions: "check it" },
+      goal: { id: "g1", intent: "do work" },
+      sourceStepOutput: null,
+      priorGateDecisions: [],
+      availableOutcomes: ["approved"],
+    };
+    expect(GateEvaluationRequest.safeParse(base).success).toBe(true);
+    expect(GateEvaluationRequest.safeParse({ ...base, goal: { ...base.goal, successCriteria: ["goal succeeded"] } }).success).toBe(true);
+    expect(GateEvaluationRequest.safeParse({ ...base, goal: { ...base.goal, successCriteria: [] } }).success).toBe(true);
   });
 });
