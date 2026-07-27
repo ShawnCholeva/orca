@@ -239,6 +239,47 @@ describe("getTemplateMetricsDetail — confidenceReason end-to-end (Phase 4, dis
     expect(proposal!.score).toBe(55);
     expect(proposal!.confidenceReason).toEqual({ code: "weak_verifier", nodeName: "Critique" });
   });
+
+  // M1: independent_review credit can come from a refute-upheld pass, not only a gate
+  // approval (composed-score.ts: `independentReview = sp.independentReview || gateApproved`).
+  // A review-verified step whose downstream gate never approved must NOT be labelled
+  // "Critique approved this…" — verifyingGateNameByStep is gated on real approvals, so the
+  // gate is never named here (contrast the gate-approved case above, which IS named).
+  function seedRunRefuteUpheld(runId: string) {
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, started_at, traversal_seq) VALUES (?,'g1','tpl',2,'completed',?,1)"
+    ).run(runId, ROW_AT);
+    const srId = `sr-${runId}`;
+    db.prepare(
+      `INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint)
+       VALUES (?,'g1',?,'proposal',0,1,'passed','[]','[]',NULL,?,?,?)`
+    ).run(srId, runId, ROW_AT, ROW_AT, `fp-${runId}`);
+    // evidence NULL + refute upheld ⇒ conclusive, independent_review-verified, no gate approval.
+    const refuteUpheldJson = JSON.stringify({
+      verdict: "upheld", triggered_by: ["no_oracle"], risk_class: "low", reason: "held", issue_refs: [],
+    });
+    db.prepare(
+      `INSERT INTO harness_transitions (id, goal_id, workflow_run_id, workflow_step_run_id, boundary, risk_json, evidence_json, refute_json, state_deps_json, telemetry_json, created_at)
+       VALUES (?,'g1',?,?,'step_complete',NULL,NULL,?,NULL,?,?)`
+    ).run(`ht-${runId}`, runId, srId, refuteUpheldJson, telemetryJson, ROW_AT);
+  }
+
+  it("does NOT name the gate when review credit came from a refute pass, not a gate approval (M1)", () => {
+    seedTemplate();
+    seedRunRefuteUpheld("r2"); // NO gate decision → proposal not in `approvals`
+
+    const detail = getTemplateMetricsDetail(db, "tpl", "7d", AFTER);
+    const proposal = detail!.steps.find((s) => s.stepTemplateId === "proposal");
+    expect(proposal).toBeDefined();
+    // Non-triviality: the refute pass DID establish an independent-review score (not a
+    // coverage gap) — so `onlyReview` is true and, without the approvals guard, this
+    // would render weak_verifier / "Critique".
+    expect(proposal!.score).not.toBeNull();
+    expect(proposal!.confidenceReason?.code).not.toBe("no_check_yet");
+    // The truthful property: the gate is never falsely named.
+    expect(proposal!.confidenceReason?.code).not.toBe("weak_verifier");
+    expect(proposal!.confidenceReason?.nodeName).toBeUndefined();
+  });
 });
 
 // Real DB -> graph -> deriveSplitterVindication -> buildSplitterMetrics ->

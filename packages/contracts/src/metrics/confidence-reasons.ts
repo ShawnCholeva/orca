@@ -16,7 +16,7 @@ export function labelForConfidenceReason(reason: { code: ConfidenceReasonCode; n
     case "no_check_yet":
       return "Nothing independent has checked this step yet.";
     case "review_only":
-      return "Only lightly checked — nothing has run to confirm it.";
+      return "A review is the only thing backing this — no test has run to confirm it.";
     case "weak_verifier":
       return `${reason.nodeName ?? "A review"} approved this, but that hasn't held up downstream yet.`;
     case "vindication_pending":

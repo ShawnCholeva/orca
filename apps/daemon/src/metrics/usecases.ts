@@ -148,9 +148,13 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
   const latestVersionGateDecisions = allGateDecisions.filter((d) => d.templateVersion === info.latestVersion);
   const approvals = graph ? gateApprovalsByStep(graph, latestVersionGateDecisions) : new Map<string, Set<string>>();
   // Phase 4: name the gate that verifies each step, for the weak_verifier confidence
-  // reason. Purely structural (mirrors gateApprovalsByStep's "a gate reviews exactly
-  // one step" topology walk) — not gated on approvals/decisions, since which gate
-  // checks a step doesn't depend on whether any run has been approved yet.
+  // reason. Structural (mirrors gateApprovalsByStep's "a gate reviews exactly one step"
+  // topology walk), but ONLY for steps that actually received a gate approval. A step's
+  // independent_review credit can also come from a refute-upheld pass (composed-score.ts:
+  // `independentReview = sp.independentReview || gateApproved`), so a step could be
+  // review-verified while its downstream gate never approved anything — naming that gate
+  // ("Critique approved this…") would be a false claim. Gating on `approvals` keeps the
+  // named gate truthful: it's named only when it did approve this step's work.
   const verifyingGateNameByStep = new Map<string, string>();
   if (graph) {
     const stepNodesById = new Map(graph.nodes.filter((n) => n.type === "step").map((n) => [n.id, n]));
@@ -161,7 +165,8 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
       )];
       if (stepPreds.length === 1) {
         const predNode = stepNodesById.get(stepPreds[0])!;
-        verifyingGateNameByStep.set(predNode.stepId ?? predNode.id, n.name || n.id);
+        const stepKey = predNode.stepId ?? predNode.id;
+        if (approvals.has(stepKey)) verifyingGateNameByStep.set(stepKey, n.name || n.id);
       }
     }
   }
