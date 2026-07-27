@@ -796,6 +796,7 @@ describe('server orchestrator bootstrap routing', () => {
         payload: {
           title: 'antigravity-bootstrap',
           intent: 'test intent',
+          successCriteria: ['ship it'],
           workflowTemplateId: 'orca/engineering',
           orchestratorModel: {
             providerId: 'orca/google',

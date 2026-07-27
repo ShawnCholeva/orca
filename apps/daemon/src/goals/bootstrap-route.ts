@@ -10,6 +10,7 @@ export interface GoalBootstrapRouteDeps {
   createGoalFn: (input: {
     title: string;
     intent: string;
+    successCriteria?: string[];
     workspaces?: { inputPath: string; name?: string }[];
     documents?: { kind: "file" | "url"; ref: string; name?: string }[];
     orchestratorModel?: OrchestratorModelChoice;
@@ -38,12 +39,12 @@ export function registerGoalBootstrapRoute(
       return { error: "validation_failed", issues: parsed.error.issues };
     }
 
-    const { title, intent, workspaces, documents, orchestratorModel, workflowTemplateId } = parsed.data;
+    const { title, intent, successCriteria, workspaces, documents, orchestratorModel, workflowTemplateId } = parsed.data;
 
     // Phase 1: create the goal — any failure propagates as a normal HTTP error
     let goal: Goal;
     try {
-      goal = await deps.createGoalFn({ title, intent, workspaces, documents, orchestratorModel });
+      goal = await deps.createGoalFn({ title, intent, successCriteria, workspaces, documents, orchestratorModel });
     } catch (err) {
       if (err instanceof ValidationError) {
         reply.status(400);

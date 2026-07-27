@@ -22,6 +22,7 @@ async function buildServer(deps: GoalBootstrapRouteDeps) {
 const VALID_BODY = {
   title: "My Goal",
   intent: "test intent",
+  successCriteria: ["ship it"],
   workflowTemplateId: "orca/engineering",
 };
 
@@ -116,6 +117,19 @@ describe("POST /v1/goals/create-and-start-workflow", () => {
     expect(
       (deps.startWorkflowFirstStepFn as ReturnType<typeof vi.fn>).mock.calls.length
     ).toBe(1);
+  });
+
+  it("forwards successCriteria to createGoalFn", async () => {
+    const deps = makeDeps();
+    const server = await buildServer(deps);
+    await server.inject({
+      method: "POST",
+      url: "/v1/goals/create-and-start-workflow",
+      payload: VALID_BODY,
+    });
+    expect(deps.createGoalFn).toHaveBeenCalledWith(
+      expect.objectContaining({ successCriteria: ["ship it"] })
+    );
   });
 
   it("propagates createGoal validation errors as 400", async () => {
