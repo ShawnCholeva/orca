@@ -55,15 +55,17 @@ export function deriveSplitterVindication(input: {
 
 **Gate decision semantics (false-accept primary, anchored at `mark_done`):** for each gate decision `d` with `outcome === "approved"`:
 - **vindicated** — a `mark_done` transition exists in the run at `createdAt > d.createdAt` (the approved work ultimately shipped);
-- **false_accept** — no `mark_done` after `d`, but the run *terminally failed* after `d` (a `step_complete` with `telemetry.outcome.status === "failed"`, or a failed final step-run — reuse the existing hard-fail notion) at `createdAt > d.createdAt`;
+- **false_accept** — no `mark_done` after `d`, but the run terminally *failed or was abandoned* after `d` (a hard-fail `step_complete`/failed final step-run, OR a `goal_archived`/`session_archived` failure code — abandonment matters: a bad approval that causes an endless Verify-reject loop often just *stops* without a "failed" status, and would otherwise be invisible) at `createdAt > d.createdAt`;
 - **pending** — otherwise (run still in progress / no terminal signal).
 `byNodeId` = `resolveGateNext(graph, d.nodeId, "approved")`'s node id (the gate's own downstream on approval), or `null` if that resolves to a terminal. Rejected decisions are **not** labeled here (false-reject deferred) — they're already covered by `overturnRate`/`rejectRate` context.
 
-**Splitter decision semantics (coarse backtrack, anchored at `mark_done`):** for each split decision `d`:
-- **vindicated** — a `mark_done` after `d` AND no *later* split decision for the same `(run, nodeId)` with a **different** `selectedBranch` (the branch wasn't re-decided);
-- **false_accept** (misroute) — a later split decision for the same `(run, nodeId)` with a different `selectedBranch` (the splitter re-routed → the first branch was abandoned), OR the run terminally failed after `d`;
+**Splitter decision semantics (coarse backtrack, anchored at `mark_done`) — and T4 attribution:** for each split decision `d`, the *route-correctness* label is:
+- **vindicated** — a `mark_done` after `d` AND no *later* split decision for the same `(run, nodeId)` with a **different** `selectedBranch` (the branch wasn't re-decided/walked back);
+- **false_accept** (misroute) — a later split decision for the same `(run, nodeId)` with a different `selectedBranch`, OR the run terminally failed/was abandoned after `d`;
 - **pending** — otherwise.
-`byNodeId` = `resolveSplitterNext(graph, d.nodeId, d.selectedBranch)`'s node id.
+`byNodeId` = `resolveSplitterNext(graph, d.nodeId, d.selectedBranch)`'s node id (the branch destination — the propagation edge).
+
+> **T4 attribution (important):** a **deterministic** splitter (`branchKey` set — the only kind in production; `evaluate_split` is unwired) merely *forwards* an upstream step's structured field, so per spec §T4 a misroute is the **upstream decision-maker's** error, not the splitter's. The derivation therefore also resolves `attributedToNodeId` = the splitter's predecessor step node (the node with an edge INTO the splitter — resolve like `gate-review` resolves a gate's predecessor). For a deterministic splitter this route-correctness signal is *about that upstream step*, and the SplitterMetrics must mark it so (`deterministic: true`, `attributedToNodeId`). Only a future LLM `evaluate_split` splitter would own its route-correctness (`deterministic: false`, `attributedToNodeId: null`). **Consequence to state honestly:** for today's deterministic splitters, the splitter node's own confidence is near-inert / attributed upstream — Phase 3 surfaces the signal and its ownership, but does not pretend a deterministic splitter has independent judgment.
 
 - [ ] **Step 1: failing tests** — build a small graph (proposal→critique(gate)→execution→review(gate)→done + a triage→route(splitter)→… slice) and per-run transitions/decisions using the `as never` fixture idiom (mirror `vindication.test.ts`). Cover, for gates: approval→mark_done ⇒ vindicated; approval→terminal-fail ⇒ false_accept; approval, run in progress ⇒ pending; rejection ⇒ not in map. For splitters: route→mark_done, no re-decide ⇒ vindicated; two split decisions same run/node different branch ⇒ false_accept; route, in progress ⇒ pending. Assert `byNodeId` is the resolved downstream in each.
 - [ ] **Step 2: RED** — `npx vitest run src/metrics/node-vindication.test.ts`.
@@ -108,12 +110,14 @@ export const SplitterMetrics = z.object({
   decisions: z.number().int().nonnegative(),
   misrouteRate: z.number().nullable(),        // false_accept / labeled
   retrospectiveOnly: z.literal(true),         // honest marker: evaluate_split unwired
+  deterministic: z.boolean(),                 // branchKey set → forwards an upstream field
+  attributedToNodeId: z.string().nullable(),  // T4: deterministic → the upstream decision-maker step; llm → null (self)
   versionHistory: NodeVersionHistory.optional(),
 }).strict();
 ```
-`buildSplitterMetrics(input: { splitDecisions, splitterVindication, names, lineage? }): SplitterMetrics[]` — per splitter node: `value = betaMean(SPLITTER_CONFIDENCE_PRIOR, K, #vindicated, #false_accept)`, `misrouteRate = false_accept/labeled`.
+`buildSplitterMetrics(input: { splitDecisions, splitterVindication, graph, names, lineage? }): SplitterMetrics[]` — per splitter node: `value = betaMean(SPLITTER_CONFIDENCE_PRIOR, K, #vindicated, #false_accept)`, `misrouteRate = false_accept/labeled`. From the `graph`: `deterministic = node.branchKey != null`; `attributedToNodeId = deterministic ? <predecessor step node id> : null` (resolve the splitter's predecessor step the way `gate-review` resolves a gate's predecessor — the node with an edge INTO the splitter).
 
-- [ ] **Step 1: failing tests** — a splitter with mostly-`false_accept` decisions → low `confidence.value`, `misrouteRate` high; mostly `vindicated` → high; assert `retrospectiveOnly: true`.
+- [ ] **Step 1: failing tests** — a splitter with mostly-`false_accept` decisions → low `confidence.value`, `misrouteRate` high; mostly `vindicated` → high; assert `retrospectiveOnly: true`. **T4:** a `branchKey`-set splitter (e.g. `route`, fed by `triage`) → `deterministic: true`, `attributedToNodeId: "triage"` (its predecessor step); a hypothetical splitter with no `branchKey` → `deterministic: false`, `attributedToNodeId: null`.
 - [ ] **Step 2: RED.**
 - [ ] **Step 3: implement** `splitter-metrics.ts` + the contract type + `TemplateMetricsDetail.splitters: z.array(SplitterMetrics)` (optional or required-with-default — match how `gates` is typed).
 - [ ] **Step 4: GREEN** + full `src/metrics` + `npx tsc --noEmit`.
@@ -138,6 +142,8 @@ export const SplitterMetrics = z.object({
 ## Governance & alignment (agent-harness.pdf)
 
 Consistent with Phase 2b's stance: the gate/splitter confidence is **advisory** (Metrics tab / drawer only — never a gate/route/completion decision), **bounded** (Beta over anchored labels, sample-floored), and **inspectable** (`decisionConfidence`/`misrouteRate` + sample sizes exposed). Paper §5.2.2: *verification strength incl. **rate of false acceptance*** is an explicit evaluation dimension — a gate's false-accept rate is exactly that signal made first-class. §5.2.2: *"each feedback signal should expose its scope and uncertainty"* — the `retrospectiveOnly` marker + `state`/`sampleSize` do this honestly for the coarse splitter signal. Do NOT wire any of these confidences into an advancement/completion/permission path.
+
+**Statistical, not per-instance (spec §T4):** a single "gate approved → downstream failed" is *ambiguous* per instance — the approved work may have been fine and the downstream botched it. Phase 3 makes **no per-decision root-cause claim**; the gate's confidence is the *aggregate* false-accept **rate** over many decisions (a gate whose approvals systematically precede failure is a rubber-stamp), and the sample-floor (`state`) gates when that rate is trustworthy. This is exactly §T4's "attribution emerges statistically, never asserted per instance" — and why the `decisionConfidence.state`/`sampleSize` must be surfaced so a thin-sample rate isn't over-read.
 
 ## Final verification
 - [ ] Full `src/metrics` + `src/workflows` + `tsc` (daemon/contracts/desktop) green. A template with no gate/split decisions yields empty/`insufficient` node confidences (no crash), and existing step scores are **unchanged** (Phase 3 adds node scoring; it must not touch `composedScore`/step calibration).
