@@ -364,6 +364,19 @@ describe("computeCalibration", () => {
     expect(entry.sampleSize).toBe(10);
     expect(entry.measured).toBeCloseTo(12.2 / 14, 5);
   });
+
+  it("empty vindication map → independent_review bucket non-empty but labelable bucket empty → unmeasurable, not insufficient", () => {
+    // 10 refute-upheld completions (no evidence), but vindication map is defined yet empty.
+    // bucket = all 10 (they pass independentReview via refute:upheld), but coverageBucket is
+    // empty (no entries in the vindication map). This is 0% coverage of labelable completions
+    // → unmeasurable (genuinely cannot measure), not "insufficient (will resolve with more data)".
+    const txs = Array.from({ length: 10 }, (_, i) => txc(`empty-vin-${i}`, { evidence: null, refute: { verdict: "upheld" } }));
+    const vindication = new Map(); // defined but empty — the real production graph-less path
+    const cal = computeCalibration(txs, { vindication });
+    const entry = cal.find((c) => c.source === "independent_review")!;
+    expect(entry.state).toBe("unmeasurable");
+    expect(entry.measured).toBeNull();
+  });
 });
 
 describe("effectiveSourceConfidence", () => {

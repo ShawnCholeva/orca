@@ -207,6 +207,7 @@ export function computeCalibration(
       : bucket;
     let state: CalibrationEntry["state"];
     if (coverageBucket.length > 0 && labeled / coverageBucket.length < CALIBRATION_COVERAGE) state = "unmeasurable";
+    else if (source === "independent_review" && bucket.length > 0 && coverageBucket.length === 0) state = "unmeasurable";
     else if (sampleSize < CALIBRATION_MIN) state = "insufficient";
     else state = "measured";
 
