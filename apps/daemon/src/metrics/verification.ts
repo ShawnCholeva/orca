@@ -18,6 +18,18 @@ export const CALIBRATION_DIVERGENCE = 0.2;
 export const CALIBRATION_SCORE_MIN = 10; // min measured claims before calibration adjusts scoring
 export const PRIOR_STRENGTH = 4; // K: pseudo-count weight of the designed prior in the Beta posterior
 
+// Beta(alpha0+pos, beta0+neg) posterior mean, seeded by `prior` as `k` pseudo-counts split
+// alpha0 = prior*k / beta0 = (1-prior)*k. Pure; shared by any per-node/per-source Beta calibration.
+export function betaMean(prior: number, k: number, pos: number, neg: number): number {
+  return (prior * k + pos) / (k + pos + neg);
+}
+
+// The weighted effective observed count backing a betaMean call (excludes the prior's
+// pseudo-counts) — what state gates (e.g. CALIBRATION_MIN) are measured against.
+export function betaSampleSize(pos: number, neg: number): number {
+  return pos + neg;
+}
+
 export type CalibrationEntry = {
   source: CalibrationSource;
   assumed: number;
@@ -195,7 +207,7 @@ export function computeCalibration(
       if (hasLabel) labeled++;
     }
 
-    const sampleSize = alpha + beta;
+    const sampleSize = betaSampleSize(alpha, beta);
     // independent_review is vindication-only: an older-version (or otherwise unresolved)
     // completion has no vindication map entry at all and can never be labeled, so it must
     // not dilute the coverage denominator (it isn't "labelable evidence we're missing" —
@@ -211,9 +223,7 @@ export function computeCalibration(
     else if (sampleSize < CALIBRATION_MIN) state = "insufficient";
     else state = "measured";
 
-    const alpha0 = assumed * PRIOR_STRENGTH;
-    const beta0 = (1 - assumed) * PRIOR_STRENGTH;
-    const measured = state === "measured" ? (alpha0 + alpha) / (alpha0 + beta0 + alpha + beta) : null;
+    const measured = state === "measured" ? betaMean(assumed, PRIOR_STRENGTH, alpha, beta) : null;
     return { source, assumed, sampleSize, measured, state };
   });
 }
