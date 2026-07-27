@@ -105,6 +105,12 @@ export function computeTemplateSummary(input: {
   versions: { version: number; runs: number; firstSeenAt: string }[];
   current: { transitions: TemplateTransition[]; stepRuns: TemplateStepRun[] };
   prior: { transitions: TemplateTransition[]; stepRuns: TemplateStepRun[] };
+  // Pre-computed calibration to share with a caller (e.g. getTemplateMetricsDetail)
+  // that already computed a vindication-aware calibration for the same transitions —
+  // keeps the summary's calibration readout from diverging from the step scores'.
+  // Omitted (undefined) by standalone callers (e.g. the summaries-list endpoint),
+  // which keep computing it here, prior-based, exactly as before.
+  calibration?: CalibrationEntry[];
 }): Omit<TemplateMetricsSummary, "scope"> {
   // Gate surrogate transitions (__gate__:*) are steps only for tile-rate/escalation
   // purposes (computeStepMetrics already excludes them there); they must not feed the
@@ -159,7 +165,7 @@ export function computeTemplateSummary(input: {
     versionComparison,
     versions: input.versions,
     confidence: input.runCount < SAMPLE_MIN ? "low" : "ok",
-    calibration: computeCalibration(input.current.transitions),
+    calibration: input.calibration ?? computeCalibration(input.current.transitions),
     // TODO(gate-metrics): populated in the gates-wiring task
     gateHealth: { value: null, grade: null, delta: null, confidence: "low" },
   };

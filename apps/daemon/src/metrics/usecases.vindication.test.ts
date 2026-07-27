@@ -237,4 +237,27 @@ describe("getTemplateMetricsDetail — independent_review calibration is load-be
     expect(mix.measured).toBeCloseTo(expectedMeasured, 5);
     expect(step.score).toBe(Math.round(expectedMeasured * 100));
   });
+
+  // Fix 1 (Phase 2b follow-up): within a single getTemplateMetricsDetail response, the
+  // step's calibrationMix and the summary's calibration readout must agree — both are
+  // views over the SAME vindication-aware calibration, computed once and shared.
+  it("summary.calibration.independent_review agrees with the step's calibrationMix (no longer 'unmeasurable' in the summary)", () => {
+    seedTemplate(2);
+    for (let i = 0; i < 19; i++) {
+      const runId = `r${i}`;
+      seedCompletion(runId, 2);
+      seedGateDecision(`gd${i}`, runId, i < 17 ? "rejected" : "approved"); // 17 bounced, 2 vindicated
+    }
+
+    const detail = getTemplateMetricsDetail(db, "tpl", "7d", AFTER);
+    expect(detail).not.toBeNull();
+    const step = detail!.steps.find((s) => s.stepTemplateId === "execution")!;
+    const stepMix = step.quality.scoreBreakdown!.calibrationMix!.independent_review;
+    expect(stepMix.state).toBe("measured"); // sanity: the detail path already calibrates this
+
+    const summaryEntry = detail!.summary.calibration.find((c) => c.source === "independent_review")!;
+    expect(summaryEntry.state).toBe("measured");
+    expect(summaryEntry.measured).toBeCloseTo(stepMix.measured!, 5);
+    expect(summaryEntry.sampleSize).toBeCloseTo(stepMix.sampleSize, 5);
+  });
 });

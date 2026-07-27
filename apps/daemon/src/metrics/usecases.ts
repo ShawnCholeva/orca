@@ -6,6 +6,7 @@ import { computeStepMetrics, computeTemplateSummary, windowStart } from "./aggre
 import { deriveVindication } from "./vindication.js";
 import type { VindicationOutcome } from "./vindication.js";
 import { computeCalibration } from "./verification.js";
+import type { CalibrationEntry } from "./verification.js";
 import { gateApprovalsByStep } from "./gate-review.js";
 import { buildCompletionGateMetrics, buildGateMetrics, buildPolicyGatewayMetrics } from "./gate-metrics.js";
 import { computeNodeLineage } from "./node-lineage.js";
@@ -32,7 +33,7 @@ function versionsInWindow(db: Database.Database, templateId: string, sinceIso: s
   return { runCount: rows.length, versions: [...byVersion.values()].sort((a, b) => b.version - a.version) };
 }
 
-function buildSummary(db: Database.Database, t: { templateId: string; name: string; latestVersion: number }, period: MetricPeriod, nowIso: string, scope: MetricScope = "current"): TemplateMetricsSummary {
+function buildSummary(db: Database.Database, t: { templateId: string; name: string; latestVersion: number }, period: MetricPeriod, nowIso: string, scope: MetricScope = "current", calibration?: CalibrationEntry[]): TemplateMetricsSummary {
   const until = nowIso;
   const since = windowStart(nowIso, period);
   const priorUntil = since;
@@ -53,6 +54,7 @@ function buildSummary(db: Database.Database, t: { templateId: string; name: stri
       transitions: scope === "latest" ? priorTransitions.filter(isLatest) : priorTransitions,
       stepRuns: scope === "latest" ? priorStepRuns.filter(isLatest) : priorStepRuns,
     },
+    calibration,
   });
   return { ...summary, scope };
 }
@@ -167,7 +169,7 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
     grade: gateHealthValue == null ? null : (gateHealthValue >= 90 ? "A" : gateHealthValue >= 80 ? "B" : gateHealthValue >= 70 ? "C" : gateHealthValue >= 60 ? "D" : "F") as "A" | "B" | "C" | "D" | "F",
     delta: null, confidence: (scored.length >= 1 ? "ok" : "low") as "ok" | "low",
   };
-  const summary = { ...buildSummary(db, info, period, now, scope), gateHealth };
+  const summary = { ...buildSummary(db, info, period, now, scope, calibration), gateHealth };
   return {
     summary,
     steps: computeStepMetrics({
