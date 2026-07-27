@@ -1,6 +1,8 @@
-import type { VerificationTier, EvidenceArtifact } from "@orca/contracts";
+import type { VerificationTier, EvidenceArtifact, WorkflowGraph } from "@orca/contracts";
 import type { TemplateTransition } from "./fetch.js";
 import { sourcesPassed, SOURCE_CONFIDENCE, type CalibrationSource } from "./source-signals.js";
+import { vindicatorWeight } from "./vindicator-weight.js";
+import type { VindicationResult } from "./vindication.js";
 
 export const TIER_CONFIDENCE: Record<VerificationTier, number> = {
   verified_executed: 1.0, partially_verified: 0.7, ai_reviewed: 0.55, self_reported: 0.3, unverified: 0,
@@ -14,6 +16,7 @@ export const CALIBRATION_MIN = 5; // min independently-concluded claims per sour
 export const CALIBRATION_COVERAGE = 0.5; // refutes-run / passes floor before we trust the rate
 export const CALIBRATION_DIVERGENCE = 0.2;
 export const CALIBRATION_SCORE_MIN = 10; // min measured claims before calibration adjusts scoring
+export const PRIOR_STRENGTH = 4; // K: pseudo-count weight of the designed prior in the Beta posterior
 
 export type CalibrationEntry = {
   source: CalibrationSource;
@@ -124,32 +127,80 @@ function finalCompletions(ts: TemplateTransition[]): TemplateTransition[] {
 }
 
 const CALIBRATABLE: CalibrationSource[] = ["executable", "grounding"];
+// independent_review joins the calibratable set here (vindication-only — see below); this
+// set is used by computeCalibration only. effectiveSourceConfidence keeps using CALIBRATABLE
+// above (executable/grounding only) so independent_review does not move scoring yet.
+const VINDICATION_CALIBRATABLE: CalibrationSource[] = ["executable", "grounding", "independent_review"];
 const ALL_SOURCES: CalibrationSource[] = ["executable", "grounding", "independent_review", "self_report"];
 
-// Per source: how often does an independently-concluded claim from a completion that
-// PASSED this source actually survive an independent refute, versus the designed
-// prior (SOURCE_CONFIDENCE) assumed for that source? independent_review is the refute
-// signal itself (circular to calibrate against itself) and self_report has no
-// independent check at all — both are always unmeasurable. Pure; consumed for display
-// and, once measured over enough claims, by effectiveSourceConfidence scoring.
-export function computeCalibration(transitions: TemplateTransition[]): CalibrationEntry[] {
+// Per source: an empirical-Bayes Beta(alpha, beta) posterior over "does a claim from a
+// completion that PASSED this source hold up?", seeded by the designed prior (SOURCE_CONFIDENCE)
+// as low-weight pseudo-counts (K = PRIOR_STRENGTH) and updated by two kinds of labels:
+//   - refute verdicts (weight 1.0 — a direct adversarial verdict on THIS completion).
+//     executable/grounding only: independent_review IS the refute signal, so refute can
+//     never label it (that would be circular).
+//   - downstream vindication (weight = vindicatorWeight(...) in (0,1] — an indirect proxy,
+//     attenuated by how strong the vindicating node is; `pending` contributes nothing).
+// sampleSize is the SUM of label weights (the weighted effective observed count, excluding
+// the prior pseudo-counts) — this is what gates state and, downstream, CALIBRATION_SCORE_MIN:
+// a source vindicated only by weak vindicators needs proportionally more labels to reach the
+// same effective evidence as one anchored by strong verifiers. self_report has no independent
+// check at all and is always unmeasurable. Pure; consumed for display and, once measured over
+// enough claims, by effectiveSourceConfidence scoring.
+export function computeCalibration(
+  transitions: TemplateTransition[],
+  opts?: {
+    vindication?: Map<string, VindicationResult>;
+    graph?: WorkflowGraph;
+    gateApprovedByCompletion?: (t: TemplateTransition) => boolean;
+  },
+): CalibrationEntry[] {
   const finals = finalCompletions(transitions);
   return ALL_SOURCES.map((source): CalibrationEntry => {
     const assumed = SOURCE_CONFIDENCE[source];
-    if (!CALIBRATABLE.includes(source)) {
-      // review is the independent signal itself (circular); self-report has no independent check.
+    if (!VINDICATION_CALIBRATABLE.includes(source)) {
+      // self-report has no independent check at all.
       return { source, assumed, measured: null, sampleSize: 0, state: "unmeasurable" };
     }
-    const passedKey = source === "executable" ? "executable" : "grounding";
-    const bucket = finals.filter((t) => sourcesPassed(t.transition.evidence, t.transition.refute)[passedKey]);
-    const withRefute = bucket.filter((t) => t.transition.refute?.verdict === "upheld" || t.transition.refute?.verdict === "refuted");
-    const upheld = withRefute.filter((t) => t.transition.refute?.verdict === "upheld").length;
-    const claims = withRefute.length;
+    const bucket = finals.filter((t) => {
+      const sp = sourcesPassed(t.transition.evidence, t.transition.refute);
+      if (source === "executable") return sp.executable;
+      if (source === "grounding") return sp.grounding;
+      return sp.independentReview || opts?.gateApprovedByCompletion?.(t) === true;
+    });
+
+    let alpha = 0;
+    let beta = 0;
+    let labeled = 0;
+    for (const t of bucket) {
+      let hasLabel = false;
+      // Refute labels never apply to independent_review — it IS the refute signal (circular).
+      if (source !== "independent_review") {
+        const verdict = t.transition.refute?.verdict;
+        if (verdict === "upheld") { alpha += 1; hasLabel = true; }
+        else if (verdict === "refuted") { beta += 1; hasLabel = true; }
+      }
+      const key = `${t.transition.workflowRunId}::${t.stepTemplateId}`;
+      const v = opts?.vindication?.get(key);
+      const graph = opts?.graph;
+      if (v && v.outcome !== "pending") {
+        const w = graph ? vindicatorWeight(v.byNodeId, graph) : 1.0;
+        if (v.outcome === "vindicated") alpha += w; else beta += w;
+        hasLabel = true;
+      }
+      if (hasLabel) labeled++;
+    }
+
+    const sampleSize = alpha + beta;
     let state: CalibrationEntry["state"];
-    if (bucket.length > 0 && withRefute.length / bucket.length < CALIBRATION_COVERAGE) state = "unmeasurable";
-    else if (claims < CALIBRATION_MIN) state = "insufficient";
+    if (bucket.length > 0 && labeled / bucket.length < CALIBRATION_COVERAGE) state = "unmeasurable";
+    else if (sampleSize < CALIBRATION_MIN) state = "insufficient";
     else state = "measured";
-    return { source, assumed, sampleSize: claims, measured: state === "measured" ? upheld / claims : null, state };
+
+    const alpha0 = assumed * PRIOR_STRENGTH;
+    const beta0 = (1 - assumed) * PRIOR_STRENGTH;
+    const measured = state === "measured" ? (alpha0 + alpha) / (alpha0 + beta0 + alpha + beta) : null;
+    return { source, assumed, sampleSize, measured, state };
   });
 }
 
