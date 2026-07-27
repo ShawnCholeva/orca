@@ -916,12 +916,12 @@ describe("computeStepMetrics: calibration divergence insight", () => {
   });
 });
 
-describe("computeStepMetrics: independent_review calibration never feeds the composed score", () => {
+describe("computeStepMetrics: independent_review calibration feeds the composed score (Task 3)", () => {
   // No evidence, refute upheld → ai_reviewed passes (independent_review prior 0.55
-  // each). Calibration feeds the composed score for executable/grounding sources
-  // (Phase 2b-ii Task 3), but independent_review is never calibrated (it IS the
-  // refute signal—circular), so these completions keep the 0.55 designed prior
-  // regardless of what calibration measures.
+  // each). independent_review is calibrated via vindication only (never against refute
+  // — it IS the refute signal, circular) — but once a vindication-derived posterior is
+  // `measured` past CALIBRATION_SCORE_MIN, it DOES move the score (Task 3), same as
+  // executable/grounding already did.
   const aiReviewedPasses: TemplateTransition[] = ["r1", "r2", "r3"].map((r, i) => ({
     templateVersion: 1, stepTemplateId: "s",
     transition: {
@@ -937,12 +937,12 @@ describe("computeStepMetrics: independent_review calibration never feeds the com
     startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1,
   }));
 
-  it("a fully-upheld ai_reviewed step keeps the 0.55 design prior even with a high measured calibration (70 no longer applies)", () => {
+  it("a fully-upheld ai_reviewed step rises to the measured calibration when past threshold (100 now applies, Task 3)", () => {
     const calibration: CalibrationEntry[] = [
       { source: "independent_review", assumed: 0.55, measured: 1.0, sampleSize: 12, state: "measured" },
     ];
     const [step] = computeStepMetrics({ transitions: aiReviewedPasses, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
-    expect(step.score).toBe(55);
+    expect(step.score).toBe(100);
     expect(step.verification.tier).toBe("ai_reviewed");
     expect(step.verification.tierLabel).toBe("Reviewed, not proven");
   });
@@ -952,7 +952,7 @@ describe("computeStepMetrics: independent_review calibration never feeds the com
     expect(step.score).toBe(55);
   });
 
-  it("a small measured sample (below CALIBRATION_SCORE_MIN) does not move the score", () => {
+  it("NO-MOVEMENT: a small measured sample (below CALIBRATION_SCORE_MIN) does not move the score", () => {
     const calibration: CalibrationEntry[] = [
       { source: "independent_review", assumed: 0.55, measured: 1.0, sampleSize: 6, state: "measured" },
     ];
@@ -960,12 +960,12 @@ describe("computeStepMetrics: independent_review calibration never feeds the com
     expect(step.score).toBe(55);
   });
 
-  it("a low measured rate does not lower the score below the prior anymore (30 no longer applies)", () => {
+  it("a low measured rate now lowers the score below the prior (30 applies, Task 3)", () => {
     const calibration: CalibrationEntry[] = [
       { source: "independent_review", assumed: 0.55, measured: 0.3, sampleSize: 12, state: "measured" },
     ];
     const [step] = computeStepMetrics({ transitions: aiReviewedPasses, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", calibration });
-    expect(step.score).toBe(55);
+    expect(step.score).toBe(30);
   });
 });
 

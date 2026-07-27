@@ -1,6 +1,6 @@
 import type { TemplateTransition } from "./fetch.js";
 import { isCodeFile } from "../harness-sensors/code-files.js";
-import { sourcesPassed, SOURCE_CONFIDENCE } from "./source-signals.js";
+import { sourcesPassed } from "./source-signals.js";
 import { effectiveSourceConfidence, type CalibrationEntry } from "./verification.js";
 
 const COVERAGE_FLOOR = 0.3;
@@ -35,9 +35,9 @@ export function composedScore(
   if (sp.executable) cs.push(effectiveSourceConfidence("executable", calibration));
   if (sp.grounding) cs.push(effectiveSourceConfidence("grounding", calibration));
   // A single independent-review credit whether it comes from the refute pass (upheld) or a
-  // worker-gate approval, or both — they do NOT compound (correlated LLM adversarial reviews;
-  // Phase 2 calibration can lift this once double-reviewed survival is measured). Never calibrated (circular).
-  if (independentReview) cs.push(SOURCE_CONFIDENCE.independent_review);
+  // worker-gate approval, or both — they do NOT compound (correlated LLM adversarial reviews).
+  // Calibrated via vindication only (Task 3) — never against refute, which IS this signal.
+  if (independentReview) cs.push(effectiveSourceConfidence("independent_review", calibration));
   if (cs.length === 0) return unknown(); // no passing verifier, not refuted/failed → unknown, excluded from the mean
   const base = 1 - cs.reduce((p, c) => p * (1 - c), 1);
 

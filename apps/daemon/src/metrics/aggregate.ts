@@ -224,7 +224,7 @@ export function computeStepMetrics(input: {
   lineage?: Map<string, NodeVersionHistory>;
   requiresExecution?: Set<string>;
   gateApprovedByCompletion?: (t: TemplateTransition) => boolean;
-  vindicationByCompletion?: (t: TemplateTransition) => VindicationOutcome | undefined;
+  vindicationByCompletion?: (t: TemplateTransition) => VindicationOutcome | "excluded" | undefined;
 }): StepMetrics[] {
   // Scope to the CURRENT template's steps: a step id not in stepNames is a fossil
   // from a retired version, or the step-era of a node that is now a gate — either way
@@ -521,6 +521,13 @@ export function computeStepMetrics(input: {
       weak: requiresExec ? "Not tested" : "Only self-reported",
       needs_evidence: "Not checked yet",
     } as const;
+    // Uncertainty readout: per-source assumed-vs-measured + sample size, straight from
+    // computeCalibration — lets a human audit WHY the score moved (paper §5.2.2: expose
+    // scope and uncertainty). Template-wide (not step-scoped); omitted when no calibration
+    // was supplied, same as vindication below.
+    const calibrationMix = input.calibration && Object.fromEntries(
+      input.calibration.map((c) => [c.source, { assumed: c.assumed, measured: c.measured, sampleSize: c.sampleSize, state: c.state }])
+    );
     const scoreBreakdown = {
       meanBase: mean(concScores.map((s) => s.base)),
       meanCoverage: mean(concScores.map((s) => s.coverage)),
@@ -531,11 +538,13 @@ export function computeStepMetrics(input: {
         independentReview: concScores.filter((s) => s.verifiers.independentReview).length,
         selfReportOnly: concScores.filter((s) => !s.verifiers.executable && !s.verifiers.grounding && !s.verifiers.independentReview).length,
       },
+      calibrationMix: calibrationMix || undefined,
     };
 
     const vindTally = { vindicated: 0, bounced: 0, pending: 0 };
     for (const t of finalStepCompletes) {
       const o = input.vindicationByCompletion?.(t);
+      if (o === "excluded") continue; // version-mismatched completion — counts toward no bucket
       if (o === "vindicated") vindTally.vindicated++;
       else if (o === "bounced") vindTally.bounced++;
       else vindTally.pending++;

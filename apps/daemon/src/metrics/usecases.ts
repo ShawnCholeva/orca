@@ -112,26 +112,11 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
   const transitions = scope === "latest" ? allTransitions.filter((t) => t.templateVersion === info.latestVersion) : allTransitions;
   const gateDecisions = scope === "latest" ? allGateDecisions.filter((d) => d.templateVersion === info.latestVersion) : allGateDecisions;
   const stepRuns = scope === "latest" ? allStepRuns.filter((r) => r.templateVersion === info.latestVersion) : allStepRuns;
-  const calibration = computeCalibration(transitions);
-  const lineage = computeNodeLineage(db, templateId, since, now);
-  const currentStepNames = stepNames(db, templateId);
-  const gRow = db.prepare(`SELECT guardrails_json FROM workflow_templates WHERE id = ?`).get(templateId) as { guardrails_json: string } | undefined;
-  const guardrails = gRow ? (JSON.parse(gRow.guardrails_json) as WorkflowGuardrailConfig[]) : [];
-  const requiresExecution = new Set([...currentStepNames.keys()].filter((id) => stepRequiresExecution(guardrails, id) !== null));
-  const gates = buildGateMetrics({ decisions: gateDecisions, transitions, names: gateNodeNames(db, templateId), period, calibration, scope, lineage });
-  const scored = gates.filter((g) => g.health != null);
-  const gateHealthValue = scored.length ? Math.round(scored.reduce((n, g) => n + g.health!, 0) / scored.length) : null;
-  const gateHealth = {
-    value: gateHealthValue,
-    grade: gateHealthValue == null ? null : (gateHealthValue >= 90 ? "A" : gateHealthValue >= 80 ? "B" : gateHealthValue >= 70 ? "C" : gateHealthValue >= 60 ? "D" : "F") as "A" | "B" | "C" | "D" | "F",
-    delta: null, confidence: (scored.length >= 1 ? "ok" : "low") as "ok" | "low",
-  };
-  const summary = { ...buildSummary(db, info, period, now, scope), gateHealth };
   const graphRow = db.prepare(`SELECT graph_json FROM workflow_templates WHERE id = ?`).get(templateId) as { graph_json: string | null } | undefined;
   // Read-time gate→step credit (no migration): resolve the reviewed step from graph
-  // topology (Task 3's gateApprovalsByStep) and thread it into composedScore (Task 4)
-  // so a gate-approved completion scores as independent-review, not unknown. In the
-  // Adaptive graph a step transition's stepTemplateId equals its graph node id.
+  // topology (gateApprovalsByStep) and thread it into composedScore so a gate-approved
+  // completion scores as independent-review, not unknown. In the Adaptive graph a step
+  // transition's stepTemplateId equals its graph node id.
   const graph = graphRow?.graph_json ? (JSON.parse(graphRow.graph_json) as WorkflowGraph) : null;
   // Only the latest template version's topology is ever persisted (templates are one
   // row, overwritten on edit) — an older-version gate decision can land on a node id
@@ -146,21 +131,43 @@ export function getTemplateMetricsDetail(db: Database.Database, templateId: stri
     const stepNodeId = t.stepTemplateId;
     return runId != null && stepNodeId != null && (approvals.get(stepNodeId)?.has(runId) ?? false);
   };
-  // Downstream-vindication tally (Phase 2a, observational — no score/band change).
-  // Same version-safety rule as gate credit above: only latest-version gate/split
-  // decisions feed the derivation (older-version decisions can land on a node id a
-  // DIFFERENT step feeds under the current graph), and only latest-version completions
-  // are labeled — an older-version completion is credited to neither bucket.
+  // Downstream-vindication feed. Same version-safety rule as gate credit above: only
+  // latest-version transitions/gate/split decisions feed the derivation (older-version
+  // decisions/completions can land on a node id a DIFFERENT step feeds under the current
+  // graph) — deriveVindication's own input is latest-version-only, so the resulting map
+  // never contains a key for an older-version run, which is what keeps computeCalibration
+  // (below) from calibrating against older-version vindication labels.
   const splitDecisions = listSplitDecisionsByTemplate(db, templateId, since, now);
   const latestSplits = splitDecisions.filter((d) => d.templateVersion === info.latestVersion);
+  const latestVersionTransitions = transitions.filter((t) => t.templateVersion === info.latestVersion);
   const vindication = graph
-    ? deriveVindication({ transitions, gateDecisions: latestVersionGateDecisions, splitDecisions: latestSplits, graph })
+    ? deriveVindication({ transitions: latestVersionTransitions, gateDecisions: latestVersionGateDecisions, splitDecisions: latestSplits, graph })
     : new Map<string, { outcome: VindicationOutcome; byNodeId: string | null }>();
-  const vindicationByCompletion = (t: TemplateTransition) => {
+  // Split version-excluded out of "pending": a version-mismatched completion returns
+  // "excluded" (skip — counts toward no bucket in aggregate.ts's tally) instead of
+  // falling through to "pending", so pending means only "latest-version completion,
+  // downstream hasn't ruled yet".
+  const vindicationByCompletion = (t: TemplateTransition): VindicationOutcome | "excluded" | undefined => {
     const runId = t.transition.workflowRunId;
-    if (runId == null || t.stepTemplateId == null || t.templateVersion !== info.latestVersion) return undefined;
+    if (runId == null || t.stepTemplateId == null) return undefined;
+    if (t.templateVersion !== info.latestVersion) return "excluded";
     return vindication.get(`${runId}::${t.stepTemplateId}`)?.outcome;
   };
+  const calibration = computeCalibration(transitions, { vindication, graph: graph ?? undefined, gateApprovedByCompletion });
+  const lineage = computeNodeLineage(db, templateId, since, now);
+  const currentStepNames = stepNames(db, templateId);
+  const gRow = db.prepare(`SELECT guardrails_json FROM workflow_templates WHERE id = ?`).get(templateId) as { guardrails_json: string } | undefined;
+  const guardrails = gRow ? (JSON.parse(gRow.guardrails_json) as WorkflowGuardrailConfig[]) : [];
+  const requiresExecution = new Set([...currentStepNames.keys()].filter((id) => stepRequiresExecution(guardrails, id) !== null));
+  const gates = buildGateMetrics({ decisions: gateDecisions, transitions, names: gateNodeNames(db, templateId), period, calibration, scope, lineage });
+  const scored = gates.filter((g) => g.health != null);
+  const gateHealthValue = scored.length ? Math.round(scored.reduce((n, g) => n + g.health!, 0) / scored.length) : null;
+  const gateHealth = {
+    value: gateHealthValue,
+    grade: gateHealthValue == null ? null : (gateHealthValue >= 90 ? "A" : gateHealthValue >= 80 ? "B" : gateHealthValue >= 70 ? "C" : gateHealthValue >= 60 ? "D" : "F") as "A" | "B" | "C" | "D" | "F",
+    delta: null, confidence: (scored.length >= 1 ? "ok" : "low") as "ok" | "low",
+  };
+  const summary = { ...buildSummary(db, info, period, now, scope), gateHealth };
   return {
     summary,
     steps: computeStepMetrics({

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { composedScore } from "./composed-score.js";
 import type { TemplateTransition } from "./fetch.js";
+import { SOURCE_CONFIDENCE } from "./source-signals.js";
 
 const tx = (over: Record<string, unknown>): TemplateTransition => ({
   templateVersion: 1, stepTemplateId: "s",
@@ -121,5 +122,50 @@ describe("composedScore — gate approval as evidence", () => {
   it("no gate approval → unchanged unknown", () => {
     const r = composedScore(tx({}), undefined, { gateApproved: false });
     expect(r.established).toBe(false);
+  });
+});
+
+describe("composedScore — independent_review calibration is load-bearing (Task 3)", () => {
+  it("mostly-bounced downstream calibration drops base below the raw 0.55 prior", () => {
+    const calibration = [
+      { source: "independent_review", assumed: 0.55, measured: 4.2 / 14, sampleSize: 10, state: "measured" },
+    ] as never;
+    const r = composedScore(tx({ refute: { verdict: "upheld" } }), calibration);
+    expect(r.base).toBeCloseTo(4.2 / 14, 5);
+    expect(r.base).toBeLessThan(SOURCE_CONFIDENCE.independent_review);
+  });
+
+  it("mostly-vindicated downstream calibration raises base toward 1.0", () => {
+    const calibration = [
+      { source: "independent_review", assumed: 0.55, measured: 0.9, sampleSize: 10, state: "measured" },
+    ] as never;
+    const r = composedScore(tx({ refute: { verdict: "upheld" } }), calibration);
+    expect(r.base).toBeCloseTo(0.9, 5);
+    expect(r.base).toBeGreaterThan(SOURCE_CONFIDENCE.independent_review);
+  });
+
+  it("gate-approved-only (no refute) also moves with calibration", () => {
+    const calibration = [
+      { source: "independent_review", assumed: 0.55, measured: 0.2, sampleSize: 10, state: "measured" },
+    ] as never;
+    const r = composedScore(tx({}), calibration, { gateApproved: true });
+    expect(r.base).toBeCloseTo(0.2, 5);
+  });
+
+  it("NO-MOVEMENT: no calibration supplied at all → base identical to the pre-2b raw prior", () => {
+    const r = composedScore(tx({ refute: { verdict: "upheld" } }));
+    expect(r.base).toBeCloseTo(SOURCE_CONFIDENCE.independent_review, 5);
+  });
+
+  it("NO-MOVEMENT: independent_review not measured for this template (other sources measured elsewhere) → base unchanged at the raw prior", () => {
+    // Proves the calibration flip doesn't leak across sources: independent_review stays
+    // "insufficient" (no refute/vindication labels of its own) even though grounding IS
+    // measured in the same calibration array.
+    const calibration = [
+      { source: "grounding", assumed: 0.7, measured: 0.95, sampleSize: 20, state: "measured" },
+      { source: "independent_review", assumed: 0.55, measured: null, sampleSize: 2, state: "insufficient" },
+    ] as never;
+    const r = composedScore(tx({ refute: { verdict: "upheld" } }), calibration);
+    expect(r.base).toBeCloseTo(SOURCE_CONFIDENCE.independent_review, 5);
   });
 });

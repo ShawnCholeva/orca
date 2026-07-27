@@ -343,13 +343,34 @@ describe("computeCalibration", () => {
 });
 
 describe("effectiveSourceConfidence", () => {
-  it("effectiveSourceConfidence: measured feeds in past threshold; executable capped-down; review/self fixed", () => {
+  it("effectiveSourceConfidence: measured feeds in past threshold; executable capped-down; self_report fixed", () => {
     const measuredCal = [{ source: "grounding", assumed: 0.7, measured: 0.5, sampleSize: CALIBRATION_SCORE_MIN, state: "measured" }] as never;
     expect(effectiveSourceConfidence("grounding", measuredCal)).toBe(0.5);           // measured used
     expect(effectiveSourceConfidence("grounding", undefined)).toBe(0.7);             // prior when no cal
     const exeCal = [{ source: "executable", assumed: 1.0, measured: 1.3, sampleSize: CALIBRATION_SCORE_MIN, state: "measured" }] as never;
     expect(effectiveSourceConfidence("executable", exeCal)).toBe(1.0);              // capped at prior (can't exceed)
-    expect(effectiveSourceConfidence("independent_review", measuredCal)).toBe(0.55); // never calibrated
+    // Boundary check: even a manufactured self_report entry claiming "measured" must not
+    // move the score — self_report is not in the score-applied set at all (computeCalibration
+    // never actually produces this shape for self_report; this proves the gate itself, not
+    // just the absence of data).
+    const selfCal = [{ source: "self_report", assumed: 0.3, measured: 0.9, sampleSize: 50, state: "measured" }] as never;
+    expect(effectiveSourceConfidence("self_report", selfCal)).toBe(SOURCE_CONFIDENCE.self_report);
+  });
+
+  it("Task 3: independent_review moves off the prior once measured past CALIBRATION_SCORE_MIN (down and up)", () => {
+    const down = [{ source: "independent_review", assumed: 0.55, measured: 4.2 / 14, sampleSize: 10, state: "measured" }] as never;
+    expect(effectiveSourceConfidence("independent_review", down)).toBeCloseTo(4.2 / 14, 5);
+    expect(effectiveSourceConfidence("independent_review", down)).toBeLessThan(SOURCE_CONFIDENCE.independent_review);
+    const up = [{ source: "independent_review", assumed: 0.55, measured: 0.9, sampleSize: 10, state: "measured" }] as never;
+    expect(effectiveSourceConfidence("independent_review", up)).toBeCloseTo(0.9, 5);
+    expect(effectiveSourceConfidence("independent_review", up)).toBeGreaterThan(SOURCE_CONFIDENCE.independent_review);
+  });
+
+  it("NO-MOVEMENT: independent_review below CALIBRATION_SCORE_MIN or not measured stays at the prior", () => {
+    const belowThreshold = [{ source: "independent_review", assumed: 0.55, measured: 0.9, sampleSize: CALIBRATION_SCORE_MIN - 1, state: "measured" }] as never;
+    expect(effectiveSourceConfidence("independent_review", belowThreshold)).toBe(SOURCE_CONFIDENCE.independent_review);
+    const unmeasured = [{ source: "independent_review", assumed: 0.55, measured: null, sampleSize: 0, state: "unmeasurable" }] as never;
+    expect(effectiveSourceConfidence("independent_review", unmeasured)).toBe(SOURCE_CONFIDENCE.independent_review);
   });
 
   it("returns the prior when no calibration is provided", () => {

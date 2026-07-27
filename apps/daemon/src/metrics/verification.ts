@@ -126,10 +126,14 @@ function finalCompletions(ts: TemplateTransition[]): TemplateTransition[] {
   return [...byKey.values()];
 }
 
-const CALIBRATABLE: CalibrationSource[] = ["executable", "grounding"];
-// independent_review joins the calibratable set here (vindication-only — see below); this
-// set is used by computeCalibration only. effectiveSourceConfidence keeps using CALIBRATABLE
-// above (executable/grounding only) so independent_review does not move scoring yet.
+// Score-applied set: sources whose confidence effectiveSourceConfidence will move off the
+// designed prior once independently measured. independent_review joins here in Task 3 —
+// vindication-calibrated only (never refute-calibrated, see computeCalibration below); never
+// self_report (no independent check exists for it at all).
+const CALIBRATABLE: CalibrationSource[] = ["executable", "grounding", "independent_review"];
+// computeCalibration's own calibratable set (currently the same three sources) — kept as a
+// separate constant from CALIBRATABLE since "do we compute a posterior for this source?" and
+// "does the posterior move the score?" are conceptually independent questions.
 const VINDICATION_CALIBRATABLE: CalibrationSource[] = ["executable", "grounding", "independent_review"];
 const ALL_SOURCES: CalibrationSource[] = ["executable", "grounding", "independent_review", "self_report"];
 
@@ -207,7 +211,8 @@ export function computeCalibration(
 // Confidence for a source: designed prior until an independent measurement is strong
 // enough (measured, ≥ CALIBRATION_SCORE_MIN claims), then the measured survival rate.
 // executable is capped at its 1.0 prior — measurement can only LOWER it (a passing check
-// that later got refuted was weak; nothing exceeds certainty). review/self never move.
+// that later got refuted was weak; nothing exceeds certainty). grounding/independent_review
+// move freely (up or down); self_report never moves (no independent check exists for it).
 export function effectiveSourceConfidence(source: CalibrationSource, calibration?: CalibrationEntry[]): number {
   const prior = SOURCE_CONFIDENCE[source];
   if (!CALIBRATABLE.includes(source)) return prior;

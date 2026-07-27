@@ -213,6 +213,15 @@ export const StepMetrics = z.object({
         independentReview: z.number().int().nonnegative(),
         selfReportOnly: z.number().int().nonnegative(),
       }).strict(),
+      // Uncertainty readout (Phase 2b Task 3): per-source assumed-vs-measured calibration,
+      // straight from computeCalibration — inspectable evidence for WHY the score moved.
+      // Optional: omitted when no calibration was supplied to computeStepMetrics.
+      calibrationMix: z.record(z.string(), z.object({
+        assumed: z.number(),
+        measured: z.number().nullable(),
+        sampleSize: z.number(),
+        state: z.enum(["measured", "insufficient", "unmeasurable"]),
+      }).strict()).optional(),
     }).strict().optional(),
   }).strict(),
   cost: z.object({
