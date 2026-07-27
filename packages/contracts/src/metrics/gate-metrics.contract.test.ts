@@ -8,6 +8,7 @@ const validGate = {
   cost: { p50LatencyMs: null, meanTokens: null, meanUsd: null, tokensSpentOnOverturned: null },
   failureModes: [], context: { approvalRate: 1, rejectRate: 0, decisions: 3, meanLoops: 1, capHitRate: 0, stagnationRate: 0, parkRate: 0, residualRiskBurden: null, recentRejectReasons: [] },
   trend: [], versionBoundaries: [],
+  decisionConfidence: { value: null, sampleSize: 0, state: "insufficient" as const },
 };
 
 describe("GateMetrics contract", () => {

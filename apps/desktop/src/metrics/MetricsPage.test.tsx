@@ -45,7 +45,7 @@ const gate = (over: Partial<GateMetrics> = {}): GateMetrics => ({
   cost: { p50LatencyMs: 1200, meanTokens: 3400, meanUsd: 0.02, tokensSpentOnOverturned: 800 },
   failureModes: [],
   context: { approvalRate: 0.75, rejectRate: 0.25, decisions: 8, meanLoops: 1.4, capHitRate: 0, stagnationRate: 0, parkRate: null, residualRiskBurden: null, recentRejectReasons: [] },
-  trend: [], versionBoundaries: [], ...over,
+  trend: [], versionBoundaries: [], decisionConfidence: { value: null, sampleSize: 0, state: "insufficient" }, ...over,
 });
 
 const proposal = (over: Partial<TemplateInstructionProposal> = {}): TemplateInstructionProposal => ({

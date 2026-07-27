@@ -10,7 +10,7 @@ const gate = (over: Partial<GateMetrics> = {}): GateMetrics => ({
   cost: { p50LatencyMs: 1200, meanTokens: 3400, meanUsd: 0.02, tokensSpentOnOverturned: 800 },
   failureModes: [{ label: "Approved work a person then sent back", count: 2, pct: 0.25, sampleDecisionIds: ["d1"] }],
   context: { approvalRate: 0.75, rejectRate: 0.25, decisions: 8, meanLoops: 1.4, capHitRate: 0, stagnationRate: 0, parkRate: null, residualRiskBurden: null, recentRejectReasons: [{ at: "2026-07-16", reason: "missing test", issueRefs: ["t1"] }] },
-  trend: [], versionBoundaries: [], ...over,
+  trend: [], versionBoundaries: [], decisionConfidence: { value: null, sampleSize: 0, state: "insufficient" }, ...over,
 });
 
 describe("GateRow", () => {

@@ -3,7 +3,8 @@ import { labelForGateFailure } from "@orca/contracts";
 import type { GateDecisionRow, TemplateTransition } from "./fetch.js";
 import { composedScore } from "./composed-score.js";
 import { SOURCE_CONFIDENCE } from "./source-signals.js";
-import type { CalibrationEntry } from "./verification.js";
+import { betaMean, betaSampleSize, type CalibrationEntry } from "./verification.js";
+import type { NodeVindicationResult } from "./node-vindication.js";
 
 export const GATE_OVERTURN_MIN = 5;   // supervised-with-recommendation decisions before overturnRate is non-null
 export const GATE_SAMPLE_CAP = 5;     // max artifact ids per drill-through list
@@ -11,6 +12,12 @@ export const GATE_REJECT_CAP = 3;     // mirrors gate-evaluation.ts:12
 export const W_OVERTURN = 0.5;
 export const W_GROUNDED = 0.3;
 export const W_CONVERGE = 0.2;
+
+// Decision-correctness confidence (Phase 3): designed priors ("did this gate's approval
+// hold up downstream?") by evalSubstrate, mirroring SOURCE_CONFIDENCE's role for calibration.
+export const GATE_CONFIDENCE_PRIOR: Record<"worker" | "shadow", number> = { worker: 0.7, shadow: 0.55 };
+export const NODE_PRIOR_STRENGTH = 4;   // K: pseudo-count weight of the prior in the Beta posterior
+export const NODE_CONFIDENCE_MIN = 5;   // min labeled (non-pending) approvals before decisionConfidence is "measured"
 
 const grade = (s: number): GateMetrics["grade"] => (s >= 90 ? "A" : s >= 80 ? "B" : s >= 70 ? "C" : s >= 60 ? "D" : "F");
 const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
@@ -28,6 +35,7 @@ export function buildGateMetrics(input: {
   calibration?: CalibrationEntry[];
   scope?: MetricScope;
   lineage?: Map<string, NodeVersionHistory>;
+  gateVindication?: Map<string, NodeVindicationResult>;
 }): GateMetrics[] {
   const calibration = input.calibration;
   const scope = input.scope ?? "current";
@@ -126,6 +134,22 @@ export function buildGateMetrics(input: {
     const recentRejectReasons = decisions.filter((d) => d.outcome === "rejected").slice(-3)
       .map((d) => ({ at: d.createdAt, reason: d.reason, issueRefs: d.issueRefs }));
 
+    // --- Decision-correctness confidence: Beta over false-accept among labeled approvals ---
+    let dcPos = 0;
+    let dcNeg = 0;
+    for (const d of decisions) {
+      if (d.outcome !== "approved") continue;
+      const v = input.gateVindication?.get(`${d.workflowRunId}::${nodeId}::${d.traversalSeq}`);
+      if (!v || v.outcome === "pending") continue;
+      if (v.outcome === "vindicated") dcPos++; else dcNeg++;
+    }
+    const dcSampleSize = betaSampleSize(dcPos, dcNeg);
+    const decisionConfidence: GateMetrics["decisionConfidence"] = {
+      value: dcSampleSize === 0 ? null : betaMean(GATE_CONFIDENCE_PRIOR[meta.evalSubstrate], NODE_PRIOR_STRENGTH, dcPos, dcNeg),
+      sampleSize: dcSampleSize,
+      state: dcSampleSize >= NODE_CONFIDENCE_MIN ? "measured" : "insufficient",
+    };
+
     gates.push({
       nodeId, name: meta.name, evalSubstrate: meta.evalSubstrate,
       health, grade: health == null ? null : grade(health),
@@ -142,6 +166,7 @@ export function buildGateMetrics(input: {
       },
       trend: [], versionBoundaries: [],
       versionHistory: input.lineage?.get(nodeId),
+      decisionConfidence,
     });
   }
   return gates.sort((a, b) => a.name.localeCompare(b.name));

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildCompletionGateMetrics, buildGateMetrics, buildPolicyGatewayMetrics } from "./gate-metrics.js";
 import type { GateDecisionRow, TemplateTransition } from "./fetch.js";
+import { betaMean } from "./verification.js";
+import type { NodeVindicationResult } from "./node-vindication.js";
 
 const names = new Map([["review", { name: "Review", evalSubstrate: "shadow" as const }]]);
 const decision = (over: Partial<GateDecisionRow>): GateDecisionRow => ({
@@ -113,6 +115,58 @@ describe("buildGateMetrics", () => {
     const decisions = [decision({ id: "d1", nodeId: "review", workflowRunId: "r1", recommendedOutcome: null })];
     const gates = buildGateMetrics({ decisions, transitions: [], names: new Map(), period: "7d" });
     expect(gates.map((g) => g.nodeId)).toEqual(["review"]); // no filtering when the set is unknown
+  });
+
+  describe("decisionConfidence", () => {
+    const workerNames = new Map([["review", { name: "Review", evalSubstrate: "worker" as const }]]);
+    // 5 approved decisions across 5 runs, traversalSeq=1 each — one vindication-map entry per decision.
+    const approvedDecisions = (n: number) => Array.from({ length: n }, (_, i) =>
+      decision({ id: `d${i}`, workflowRunId: `r${i}`, traversalSeq: 1, outcome: "approved", recommendedOutcome: null }));
+    const vindicationMap = (nodeId: string, outcomes: NodeVindicationResult["outcome"][]) => {
+      const m = new Map<string, NodeVindicationResult>();
+      outcomes.forEach((outcome, i) => m.set(`r${i}::${nodeId}::1`, { outcome, byNodeId: null }));
+      return m;
+    };
+
+    it("no gateVindication supplied → decisionConfidence is {value:null, sampleSize:0, state:'insufficient'}", () => {
+      const gates = buildGateMetrics({ decisions: approvedDecisions(5), transitions: [], names: workerNames, period: "7d" });
+      expect(gates[0].decisionConfidence).toEqual({ value: null, sampleSize: 0, state: "insufficient" });
+    });
+
+    it("mostly false_accept approvals pull decisionConfidence.value below the worker prior (0.7)", () => {
+      const gateVindication = vindicationMap("review", ["false_accept", "false_accept", "false_accept", "false_accept", "vindicated"]);
+      const gates = buildGateMetrics({ decisions: approvedDecisions(5), transitions: [], names: workerNames, period: "7d", gateVindication });
+      // Hand-verified: betaMean(0.7, 4, pos=1, neg=4) = (0.7*4 + 1) / (4 + 1 + 4) = 3.8/9 ≈ 0.42222
+      expect(gates[0].decisionConfidence.value).toBeCloseTo(betaMean(0.7, 4, 1, 4), 10);
+      expect(gates[0].decisionConfidence.value).toBeCloseTo(3.8 / 9, 10);
+      expect(gates[0].decisionConfidence.value!).toBeLessThan(0.7);
+      expect(gates[0].decisionConfidence.sampleSize).toBe(5);
+      expect(gates[0].decisionConfidence.state).toBe("measured");
+    });
+
+    it("mostly vindicated approvals push decisionConfidence.value above the worker prior (0.7)", () => {
+      const gateVindication = vindicationMap("review", ["vindicated", "vindicated", "vindicated", "vindicated", "false_accept"]);
+      const gates = buildGateMetrics({ decisions: approvedDecisions(5), transitions: [], names: workerNames, period: "7d", gateVindication });
+      expect(gates[0].decisionConfidence.value).toBeCloseTo(betaMean(0.7, 4, 4, 1), 10);
+      expect(gates[0].decisionConfidence.value!).toBeGreaterThan(0.7);
+      expect(gates[0].decisionConfidence.sampleSize).toBe(5);
+      expect(gates[0].decisionConfidence.state).toBe("measured");
+    });
+
+    it("fewer than 5 labeled decisions → state 'insufficient' even though value is computed", () => {
+      const gateVindication = vindicationMap("review", ["vindicated", "vindicated", "false_accept"]);
+      const gates = buildGateMetrics({ decisions: approvedDecisions(3), transitions: [], names: workerNames, period: "7d", gateVindication });
+      expect(gates[0].decisionConfidence.sampleSize).toBe(3);
+      expect(gates[0].decisionConfidence.state).toBe("insufficient");
+      expect(gates[0].decisionConfidence.value).toBeCloseTo(betaMean(0.7, 4, 2, 1), 10);
+    });
+
+    it("pending vindication entries are not labeled (excluded from pos/neg/sampleSize)", () => {
+      const gateVindication = vindicationMap("review", ["vindicated", "vindicated", "vindicated", "vindicated", "pending"]);
+      const gates = buildGateMetrics({ decisions: approvedDecisions(5), transitions: [], names: workerNames, period: "7d", gateVindication });
+      expect(gates[0].decisionConfidence.sampleSize).toBe(4); // the pending one is excluded
+      expect(gates[0].decisionConfidence.state).toBe("insufficient"); // 4 < NODE_CONFIDENCE_MIN (5)
+    });
   });
 });
 

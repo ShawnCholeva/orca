@@ -149,6 +149,15 @@ export const GateMetrics = z.object({
   trend: z.array(z.number()),
   versionBoundaries: z.array(z.number().int()),
   versionHistory: NodeVersionHistory.optional(),
+  // Decision-correctness confidence (Phase 3): Beta posterior over "did this gate's
+  // approvals hold up downstream?", seeded by GATE_CONFIDENCE_PRIOR and updated by
+  // deriveGateVindication's vindicated/false_accept labels. Distinct from `confidence`
+  // above (overturn-sample adequacy) — this is about approval correctness, not review volume.
+  decisionConfidence: z.object({
+    value: z.number().nullable(),
+    sampleSize: z.number().int().nonnegative(),
+    state: z.enum(["measured", "insufficient"]),
+  }).strict(),
 }).strict();
 export type GateMetrics = z.infer<typeof GateMetrics>;
 
