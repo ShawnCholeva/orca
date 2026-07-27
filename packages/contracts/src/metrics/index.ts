@@ -72,7 +72,11 @@ export const TemplateMetricsSummary = z.object({
   calibration: z.array(z.object({
     source: z.enum(["executable", "grounding", "independent_review", "self_report"]),
     assumed: z.number(), measured: z.number().nullable(),
-    sampleSize: z.number().int().nonnegative(),
+    // Σ vindicator label weights — a weighted effective-n, fractional by design (a
+    // weak vindicator contributes <1). NOT an integer count; mirrors the sibling
+    // scoreBreakdown.calibrationMix.sampleSize (z.number()). The prior .int() rejected
+    // real 30d payloads (e.g. 27.7) and broke the whole metrics tab.
+    sampleSize: z.number().nonnegative(),
     state: z.enum(["measured", "insufficient", "unmeasurable"]),
   }).strict()),
   gateHealth: z.object({

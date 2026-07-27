@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { StepMetrics } from "./index.js";
+import { StepMetrics, TemplateMetricsSummary } from "./index.js";
 
 const base = {
   stepTemplateId: "s", name: "X", ordinal: 0, score: 58, sampleSize: 3, confidence: "ok" as const,
@@ -29,5 +29,33 @@ describe("StepMetrics contract", () => {
   });
   it("allows null reconciliation", () => {
     expect(() => StepMetrics.parse({ ...base, reconciliation: null })).not.toThrow();
+  });
+});
+
+const summaryBase = {
+  templateId: "t", name: "T", latestVersion: 1, scope: "current" as const, runs: 3,
+  dimensions: {
+    trajectoryEfficiency: { value: 1 }, verificationStrength: { value: 1 }, recovery: { value: null },
+    stateConsistency: { value: 1 }, safetyCompliance: { value: 1 }, replayability: { value: 1 },
+  },
+  firstPass: null, recovered: null, escalated: null, latencyP50Ms: null,
+  deltas: { trajectoryEfficiency: null, verificationStrength: null, recovery: null, stateConsistency: null, safetyCompliance: null, replayability: null, latencyP50Ms: null },
+  versionComparison: null, versions: [], confidence: "ok" as const,
+  calibration: [{ source: "grounding" as const, assumed: 0.7, measured: 0.62, sampleSize: 27.7, state: "measured" as const }],
+  gateHealth: { value: null, grade: null, delta: null, confidence: "low" as const },
+};
+
+describe("TemplateMetricsSummary calibration contract", () => {
+  // Regression: calibration sampleSize is Σ vindicator weights (a weighted effective-n),
+  // fractional by design — a 30d payload sends e.g. 27.7. The .int() constraint here
+  // rejected the whole detail payload → "Couldn't load metrics" on the tab. Mirror the
+  // sibling scoreBreakdown.calibrationMix.sampleSize (z.number()).
+  it("accepts a fractional calibration sampleSize (weighted effective-n)", () => {
+    expect(() => TemplateMetricsSummary.parse(summaryBase)).not.toThrow();
+    expect(TemplateMetricsSummary.parse(summaryBase).calibration[0]!.sampleSize).toBe(27.7);
+  });
+  it("still rejects a negative calibration sampleSize", () => {
+    const bad = { ...summaryBase, calibration: [{ ...summaryBase.calibration[0]!, sampleSize: -1 }] };
+    expect(() => TemplateMetricsSummary.parse(bad)).toThrow();
   });
 });
