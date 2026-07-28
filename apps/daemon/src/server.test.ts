@@ -247,7 +247,7 @@ describe('server routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'first', intent: 'desc' }
+      payload: { title: 'first', intent: 'desc', successCriteria: ['ship it'] }
     });
 
     expect(response.statusCode).toBe(201);
@@ -265,6 +265,7 @@ describe('server routes', () => {
       payload: {
         title: 'with-orchestrator',
         intent: 'test intent',
+        successCriteria: ['ship it'],
         orchestratorModel: {
           providerId: 'orca/openai',
           modelId: 'gpt-5',
@@ -286,6 +287,7 @@ describe('server routes', () => {
       payload: {
         title: 'with-codex-model',
         intent: 'test intent',
+        successCriteria: ['ship it'],
         orchestratorModel: {
           providerId: 'orca/openai',
           modelId: 'gpt-5.5',
@@ -322,7 +324,7 @@ describe('server routes', () => {
             method: 'POST',
             url: '/v1/goals',
             headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-            payload: { title: 'orig', intent: 'test intent' }
+            payload: { title: 'orig', intent: 'test intent', successCriteria: ['ship it'] }
           })
         ).body
       )
@@ -359,7 +361,7 @@ describe('server routes', () => {
             method: 'POST',
             url: '/v1/goals',
             headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-            payload: { title: 'orchestrator-target', intent: 'test intent' },
+            payload: { title: 'orchestrator-target', intent: 'test intent', successCriteria: ['ship it'] },
           })
         ).body
       )
@@ -387,7 +389,7 @@ describe('server routes', () => {
             method: 'POST',
             url: '/v1/goals',
             headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-            payload: { title: 'orchestrator-target-2', intent: 'test intent' },
+            payload: { title: 'orchestrator-target-2', intent: 'test intent', successCriteria: ['ship it'] },
           })
         ).body
       )
@@ -413,7 +415,7 @@ describe('server routes', () => {
             method: 'POST',
             url: '/v1/goals',
             headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-            payload: { title: 'orig', intent: 'test intent' }
+            payload: { title: 'orig', intent: 'test intent', successCriteria: ['ship it'] }
           })
         ).body
       )
@@ -436,7 +438,7 @@ describe('server routes', () => {
             method: 'POST',
             url: '/v1/goals',
             headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-            payload: { title: 'to-archive', intent: 'test intent' }
+            payload: { title: 'to-archive', intent: 'test intent', successCriteria: ['ship it'] }
           })
         ).body
       )
@@ -605,7 +607,7 @@ describe('server routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'operators', intent: 'test intent' },
+      payload: { title: 'operators', intent: 'test intent', successCriteria: ['ship it'] },
     });
     expect(created.statusCode).toBe(201);
 
@@ -641,7 +643,7 @@ describe('server routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'second', intent: 'test intent' }
+      payload: { title: 'second', intent: 'test intent', successCriteria: ['ship it'] }
     });
     expect(postResponse.statusCode).toBe(201);
     const created = CreateGoalResponse.parse(JSON.parse(postResponse.body));
@@ -667,7 +669,7 @@ describe('server routes', () => {
             method: 'POST',
             url: '/v1/goals',
             headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-            payload: { title: 'will-archive', intent: 'test intent' }
+            payload: { title: 'will-archive', intent: 'test intent', successCriteria: ['ship it'] }
           })
         ).body
       )
@@ -980,7 +982,7 @@ describe('WebSocket /v1/events', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'ws-goal', intent: 'test intent' }
+      payload: { title: 'ws-goal', intent: 'test intent', successCriteria: ['ship it'] }
     });
 
     const event = await Promise.race([
@@ -1056,7 +1058,7 @@ describe('GET /v1/events (replay)', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title, intent: 'test intent' }
+      payload: { title, intent: 'test intent', successCriteria: ['ship it'] }
     });
     expect(res.statusCode).toBe(201);
   }
@@ -1220,6 +1222,7 @@ describe('goal refinement and workspace routes', () => {
       payload: {
         title: DRAFT.title,
         intent: DRAFT.intent,
+        successCriteria: ['ship it'],
         refined: DRAFT,
         workspaces: [{ inputPath: wsDir }, { inputPath: wsDir2 }]
       }
@@ -1248,6 +1251,7 @@ describe('goal refinement and workspace routes', () => {
       payload: {
         title: 'g',
         intent: 'test intent',
+        successCriteria: ['ship it'],
         refined: DRAFT,
         workspaces: [{ inputPath: '/this/does/not/exist/ever/goal-workspace' }]
       }
@@ -1268,6 +1272,7 @@ describe('goal refinement and workspace routes', () => {
       payload: {
         title: 'g',
         intent: 'test intent',
+        successCriteria: ['ship it'],
         refined: DRAFT,
         workspaces: [{ inputPath: wsDir }, { inputPath: wsDir }]
       }
@@ -1292,7 +1297,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'to-archive', intent: 'test intent' }
+        payload: { title: 'to-archive', intent: 'test intent', successCriteria: ['ship it'] }
       })).body
     ));
     await server.inject({ method: 'POST', url: `/v1/goals/${created.goal.id}/archive`, headers: AUTH_HEADERS });
@@ -1309,6 +1314,7 @@ describe('goal refinement and workspace routes', () => {
         payload: {
           title: DRAFT.title,
           intent: DRAFT.intent,
+          successCriteria: ['ship it'],
           refined: DRAFT,
           workspaces: [{ inputPath: wsDir }, { inputPath: wsDir2 }]
         }
@@ -1334,7 +1340,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'quick', intent: 'no refine' }
+        payload: { title: 'quick', intent: 'no refine', successCriteria: ['ship it'] }
       })).body
     ));
 
@@ -1356,7 +1362,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'ws-goal', intent: 'test intent' }
+        payload: { title: 'ws-goal', intent: 'test intent', successCriteria: ['ship it'] }
       })).body
     ));
 
@@ -1377,7 +1383,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'ws-goal', intent: 'test intent' }
+        payload: { title: 'ws-goal', intent: 'test intent', successCriteria: ['ship it'] }
       })).body
     ));
 
@@ -1421,7 +1427,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'ws-goal', intent: 'test intent' }
+        payload: { title: 'ws-goal', intent: 'test intent', successCriteria: ['ship it'] }
       })).body
     ));
     const attached = JSON.parse(
@@ -1443,10 +1449,10 @@ describe('goal refinement and workspace routes', () => {
 
   it('DELETE /v1/goals/:id/workspaces/:workspaceId returns 404 for mismatched goal/workspace ids', async () => {
     const goal1 = CreateGoalResponse.parse(JSON.parse(
-      (await server.inject({ method: 'POST', url: '/v1/goals', headers: { 'content-type': 'application/json', ...AUTH_HEADERS }, payload: { title: 'g1', intent: 'test intent' } })).body
+      (await server.inject({ method: 'POST', url: '/v1/goals', headers: { 'content-type': 'application/json', ...AUTH_HEADERS }, payload: { title: 'g1', intent: 'test intent', successCriteria: ['ship it'] } })).body
     ));
     const goal2 = CreateGoalResponse.parse(JSON.parse(
-      (await server.inject({ method: 'POST', url: '/v1/goals', headers: { 'content-type': 'application/json', ...AUTH_HEADERS }, payload: { title: 'g2', intent: 'test intent' } })).body
+      (await server.inject({ method: 'POST', url: '/v1/goals', headers: { 'content-type': 'application/json', ...AUTH_HEADERS }, payload: { title: 'g2', intent: 'test intent', successCriteria: ['ship it'] } })).body
     ));
     const attached = JSON.parse(
       (await server.inject({
@@ -1476,7 +1482,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'ws-goal', intent: 'test intent' }
+        payload: { title: 'ws-goal', intent: 'test intent', successCriteria: ['ship it'] }
       })).body
     ));
     const attached = JSON.parse(
@@ -1507,7 +1513,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'ws-goal', intent: 'test intent' }
+        payload: { title: 'ws-goal', intent: 'test intent', successCriteria: ['ship it'] }
       })).body
     ));
     const attached = JSON.parse(
@@ -1668,7 +1674,7 @@ describe('goal refinement and workspace routes', () => {
       (await server.inject({
         method: 'POST', url: '/v1/goals',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        payload: { title: 'ws-goal', intent: 'test intent', workspaces: [{ inputPath: wsDir }] }
+        payload: { title: 'ws-goal', intent: 'test intent', successCriteria: ['ship it'], workspaces: [{ inputPath: wsDir }] }
       })).body
     ));
 
@@ -1711,7 +1717,7 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'session-goal', intent: 'test intent' }
+      payload: { title: 'session-goal', intent: 'test intent', successCriteria: ['ship it'] }
     });
     goalId = (CreateGoalResponse.parse(JSON.parse(goalRes.body))).goal.id;
 
@@ -1941,7 +1947,7 @@ describe('session and adapter routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'Test Goal', intent: 'test intent' },
+      payload: { title: 'Test Goal', intent: 'test intent', successCriteria: ['ship it'] },
     });
     return (CreateGoalResponse.parse(JSON.parse(res.body))).goal.id;
   }
@@ -2368,7 +2374,7 @@ describe('session summary and extract-memory routes', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'memory-routes-goal', intent: 'test intent' },
+      payload: { title: 'memory-routes-goal', intent: 'test intent', successCriteria: ['ship it'] },
     });
     goalId = CreateGoalResponse.parse(JSON.parse(goalRes.body)).goal.id;
 

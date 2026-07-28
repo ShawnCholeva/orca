@@ -182,6 +182,7 @@ describe.sequential('context package proof loop', () => {
       payload: {
         title: 'Context proof loop',
         intent: 'test intent',
+        successCriteria: ['ship it'],
         refined: draft,
         workspaces: [{ inputPath: workspaceDir }],
       },

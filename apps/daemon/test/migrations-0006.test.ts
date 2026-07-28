@@ -200,6 +200,7 @@ describe('context migration 0006_context.sql', () => {
       '0060_orchestrator_phase.sql',
       '0061_step_run_pending_worker_hitl.sql',
       '0062_gate_recommended_outcome.sql',
+      '0063_goal_success_criteria.sql',
     ]);
 
     const tables = (
@@ -329,6 +330,7 @@ describe('context migration 0006_context.sql', () => {
       '0060_orchestrator_phase.sql',
       '0061_step_run_pending_worker_hitl.sql',
       '0062_gate_recommended_outcome.sql',
+      '0063_goal_success_criteria.sql',
     ]);
 
     const counts = {
