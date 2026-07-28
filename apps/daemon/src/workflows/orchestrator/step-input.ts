@@ -3,7 +3,7 @@ import type { InterviewTurn, WorkflowArtifact, WorkflowStepTemplate } from "@orc
 import type { WorkspaceContextOutput } from "./workspace-context.js";
 
 export interface StepExecutionInput {
-  goal: { id: string; intent: string };
+  goal: { id: string; intent: string; successCriteria?: string[] };
   currentStep: Pick<WorkflowStepTemplate, "id" | "ordinal" | "name" | "instructions" | "outputSchema">;
   previousStepOutput: unknown | null;
   priorStepOutputs: Array<{ stepId: string; stepName: string; output: unknown }>;
@@ -16,7 +16,7 @@ function parseOutput(body: string): unknown {
 }
 
 export function buildStepExecutionInput(args: {
-  goal: { id: string; intent: string };
+  goal: { id: string; intent: string; successCriteria?: string[] };
   steps: WorkflowStepTemplate[];
   currentStep: WorkflowStepTemplate;
   artifacts: WorkflowArtifact[];
