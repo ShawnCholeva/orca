@@ -84,6 +84,7 @@ const goal: Goal = {
   id: "goal-1",
   title: "Ship Engineering workflow chat",
   intent: "Goal description",
+  successCriteria: [],
   status: "active",
   autonomyLevel: 1,
   workerPermissionMode: "ask",

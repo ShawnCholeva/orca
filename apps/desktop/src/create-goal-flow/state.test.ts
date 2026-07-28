@@ -27,7 +27,7 @@ function dispatch(state: FlowState, action: FlowAction): FlowState {
 describe("reducer — rough phase", () => {
   it("setTitle updates title and clears error", () => {
     const s = dispatch(
-      { phase: "rough", title: "", intent: "", error: "oops" },
+      { phase: "rough", title: "", intent: "", successCriteria: ["ship it"], error: "oops" },
       { type: "setTitle", title: "New Title" },
     );
     expect(s).toMatchObject({ phase: "rough", title: "New Title", error: undefined });
@@ -45,12 +45,18 @@ describe("reducer — rough phase", () => {
   });
 
   it("proceedToCoordinate transitions rough → coordinate with empty workspaces", () => {
-    const rough: FlowState = { phase: "rough", title: "My Goal", intent: "some desc" };
+    const rough: FlowState = {
+      phase: "rough",
+      title: "My Goal",
+      intent: "some desc",
+      successCriteria: ["ship it"],
+    };
     const s = dispatch(rough, { type: "proceedToCoordinate" });
     expect(s).toEqual({
       phase: "coordinate",
       title: "My Goal",
       intent: "some desc",
+      successCriteria: ["ship it"],
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel: null,
@@ -83,6 +89,7 @@ describe("reducer — rough phase", () => {
       phase: "coordinate",
       title: "T",
       intent: "",
+      successCriteria: ["ship it"],
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel: null,
@@ -97,6 +104,7 @@ describe("reducer — coordinate phase", () => {
     phase: "coordinate",
     title: "T",
     intent: "D",
+    successCriteria: ["ship it"],
     pendingWorkspaces: [],
     pendingDocuments: [],
     orchestratorModel: null,
@@ -239,6 +247,7 @@ describe("reducer — submitting phase", () => {
     phase: "submitting",
     title: "T",
     intent: "D",
+    successCriteria: ["ship it"],
     orchestratorModel,
     workflowTemplateId: "wf-1",
     pendingWorkspaces: [],
@@ -267,6 +276,7 @@ describe("reducer — workflowFailed phase", () => {
     phase: "submitting",
     title: "T",
     intent: "D",
+    successCriteria: ["ship it"],
     orchestratorModel,
     workflowTemplateId: "wf-1",
     pendingWorkspaces: [],
@@ -310,6 +320,7 @@ describe("reducer — workflowFailed phase", () => {
       goalId: "g-1",
       title: "T",
       intent: "D",
+      successCriteria: ["ship it"],
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel,
@@ -334,6 +345,7 @@ describe("reducer — workflowFailed phase", () => {
       workflowRunId: "r-1",
       title: "T",
       intent: "D",
+      successCriteria: ["ship it"],
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel,
@@ -364,6 +376,7 @@ describe("reducer — workflowFailed phase", () => {
       phase: "coordinate",
       title: "T",
       intent: "D",
+      successCriteria: ["ship it"],
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel: null,
@@ -388,6 +401,7 @@ describe("reducer — cross-phase no-ops", () => {
       phase: "coordinate",
       title: "T",
       intent: "D",
+      successCriteria: ["ship it"],
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel: null,

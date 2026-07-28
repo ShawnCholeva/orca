@@ -412,6 +412,7 @@ describe("desktop api client", () => {
     const response = await api.createGoal({
       title: "Ship guided goal flow",
       intent: "Refine and attach workspace",
+      successCriteria: ["ship it"],
       refined: draft,
       workspaces: [{ inputPath: "/tmp/workspace", name: "workspace" }],
     });
@@ -423,6 +424,7 @@ describe("desktop api client", () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       title: "Ship guided goal flow",
       intent: "Refine and attach workspace",
+      successCriteria: ["ship it"],
       refined: draft,
       workspaces: [{ inputPath: "/tmp/workspace", name: "workspace" }],
     });
@@ -434,6 +436,7 @@ describe("desktop api client", () => {
     await api.createGoal({
       title: "Workflow goal",
       intent: "Has orchestrator model",
+      successCriteria: ["ship it"],
       orchestratorModel: {
         providerId: "orca/openai",
         modelId: "gpt-5",
@@ -444,6 +447,7 @@ describe("desktop api client", () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       title: "Workflow goal",
       intent: "Has orchestrator model",
+      successCriteria: ["ship it"],
       orchestratorModel: {
         providerId: "orca/openai",
         modelId: "gpt-5",

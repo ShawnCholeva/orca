@@ -15,6 +15,7 @@ const goal = {
   id: "goal-1",
   title: "Ship guided goal flow",
   intent: "Guided goal implementation",
+  successCriteria: [],
   status: "active" as const,
   autonomyLevel: 1,
   workerPermissionMode: "ask" as const,
