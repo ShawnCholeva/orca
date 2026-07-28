@@ -40,3 +40,21 @@ describe("gate-worker", () => {
     expect(parseGateDecision(out)).toBeNull();
   });
 });
+
+const req = {
+  gate: { nodeId: "n1", name: "G", instructions: "verify" },
+  goal: { id: "g1", intent: "x" },
+  sourceStepOutput: null, priorGateDecisions: [], availableOutcomes: ["approved"], committedLedger: [],
+} as any;
+
+describe("composeGateWorkerPrompt success criteria hint", () => {
+  it("worker prompt byte-identical when no criteria (parity)", () => {
+    expect(composeGateWorkerPrompt({ ...req, goal: { ...req.goal, successCriteria: [] } }))
+      .toBe(composeGateWorkerPrompt(req));
+  });
+
+  it("prepends hint when criteria present", () => {
+    const withSc = composeGateWorkerPrompt({ ...req, goal: { ...req.goal, successCriteria: ["done"] } });
+    expect(withSc.startsWith("The goal's successCriteria")).toBe(true);
+  });
+});

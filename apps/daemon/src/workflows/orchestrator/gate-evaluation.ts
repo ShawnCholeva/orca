@@ -1,6 +1,7 @@
 import { GateEvaluationProposal, type GateEvaluationRequest } from "@orca/contracts";
 import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
 import type { ShadowAsk } from "./recover-step-scoring.js";
+import { successCriteriaHint } from "./success-criteria-prompt.js";
 
 /**
  * Deterministic bound on how many times one gate node may reject and re-route
@@ -39,7 +40,18 @@ export function composeGateEvaluationPrompt(
     '{ "reasoning": "...", "outcome": "...", "reason": "...", "residualRisks": [{ "risk": "...", "severity": "low|medium|high" }], "issueRefs": [...], "inputsConsidered": [...] }',
     "```",
   ].join("\n");
-  return { systemPrompt, userPrompt: JSON.stringify(request) };
+  const successCriteria = request.goal.successCriteria;
+  // Normalize an explicit empty successCriteria to the same shape as an omitted
+  // one (JSON.stringify drops undefined-valued keys) so the serialized request is
+  // byte-identical either way — parity for goals without success criteria must
+  // not depend on whether the caller passed [] or left the key out.
+  const requestForPrompt = successCriteria?.length
+    ? request
+    : { ...request, goal: { ...request.goal, successCriteria: undefined } };
+  return {
+    systemPrompt,
+    userPrompt: successCriteriaHint(successCriteria) + JSON.stringify(requestForPrompt),
+  };
 }
 
 /**

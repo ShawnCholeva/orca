@@ -69,7 +69,7 @@ import { composeGateWorkerPrompt, parseGateDecision } from "./gate-worker.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import { createStepOutputArtifact } from "./ledger-commit.js";
 import { scoreCompletedStepResult } from "./step-result-builder.js";
-import { type GoalRow, type StepRunRow, readGoal, readStepRun, preferencesForGoal, OrchestratorStepNotFoundError } from "./db-rows.js";
+import { type GoalRow, type StepRunRow, readGoal, readStepRun, preferencesForGoal, goalSuccessCriteria, OrchestratorStepNotFoundError } from "./db-rows.js";
 import {
   stepRunIdsByTemplateId,
   hasActiveUnansweredQuestion,
@@ -2090,9 +2090,12 @@ export class DispatchEngine {
         status: r.status.slice(0, 64),
         note: r.note.slice(0, 500),
       }));
+    const successCriteria = goalSuccessCriteria(goal);
     return GateEvaluationRequest.parse({
       gate: { nodeId: gateNode.id, name: gateNode.name, instructions: gateNode.instructions ?? "" },
-      goal: { id: goal.id, intent: goal.intent },
+      goal: successCriteria.length
+        ? { id: goal.id, intent: goal.intent, successCriteria }
+        : { id: goal.id, intent: goal.intent },
       sourceStepOutput: readStepOutputAsRecord(db, run.id, stepRun.id),
       priorGateDecisions,
       availableOutcomes,

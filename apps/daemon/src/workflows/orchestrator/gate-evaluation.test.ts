@@ -136,3 +136,26 @@ describe("reviewer prompts request residual risks", () => {
     expect(systemPrompt).toMatch(/severity/i);
   });
 });
+
+const baseReq = {
+  gate: { nodeId: "n1", name: "Gate", instructions: "check" },
+  goal: { id: "g1", intent: "ship it" },
+  sourceStepOutput: null, priorGateDecisions: [], availableOutcomes: ["approved", "rejected"], committedLedger: [],
+} as any;
+
+describe("composeGateEvaluationPrompt success criteria hint", () => {
+  it("prompt is byte-identical when no successCriteria (parity)", () => {
+    const withKey = composeGateEvaluationPrompt({ ...baseReq, goal: { ...baseReq.goal } });
+    const withEmpty = composeGateEvaluationPrompt({ ...baseReq, goal: { ...baseReq.goal, successCriteria: [] } });
+    expect(withEmpty.systemPrompt).toBe(withKey.systemPrompt);
+    expect(withEmpty.userPrompt).toBe(withKey.userPrompt);
+  });
+
+  it("prepends the criteria hint when present; systemPrompt unchanged", () => {
+    const bare = composeGateEvaluationPrompt(baseReq);
+    const withSc = composeGateEvaluationPrompt({ ...baseReq, goal: { ...baseReq.goal, successCriteria: ["all tests pass"] } });
+    expect(withSc.systemPrompt).toBe(bare.systemPrompt);
+    expect(withSc.userPrompt.startsWith("The goal's successCriteria")).toBe(true);
+    expect(withSc.userPrompt).toContain(JSON.stringify({ ...baseReq, goal: { ...baseReq.goal, successCriteria: ["all tests pass"] } }));
+  });
+});
