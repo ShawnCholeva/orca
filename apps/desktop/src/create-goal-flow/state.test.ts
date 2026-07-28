@@ -58,6 +58,26 @@ describe("reducer — rough phase", () => {
     });
   });
 
+  it("starts with one empty criterion row", () => {
+    expect(initialState).toMatchObject({ phase: "rough", successCriteria: [""] });
+  });
+
+  it("adds, edits, and removes criteria", () => {
+    let s = reducer(initialState, { type: "editSuccessCriterion", index: 0, value: "a" });
+    s = reducer(s, { type: "addSuccessCriterion" });
+    s = reducer(s, { type: "editSuccessCriterion", index: 1, value: "b" });
+    expect((s as any).successCriteria).toEqual(["a", "b"]);
+    s = reducer(s, { type: "removeSuccessCriterion", index: 0 });
+    expect((s as any).successCriteria).toEqual(["b"]);
+  });
+
+  it("carries successCriteria into the coordinate phase and back", () => {
+    let s = reducer({ ...initialState, title: "T", intent: "I", successCriteria: ["a"] } as any, { type: "proceedToCoordinate" });
+    expect((s as any).successCriteria).toEqual(["a"]);
+    s = reducer(s, { type: "backToDescribe" });
+    expect((s as any).successCriteria).toEqual(["a"]);
+  });
+
   it("setTitle is no-op in non-rough phase", () => {
     const coord: FlowState = {
       phase: "coordinate",

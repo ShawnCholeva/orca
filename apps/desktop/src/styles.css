@@ -186,6 +186,48 @@ h2 {
   color: #6b7280;
 }
 
+.criterion-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.criterion-row input {
+  flex: 1;
+}
+
+.criterion-remove {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #6b7280;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.criterion-remove:hover {
+  background: #f9fafb;
+  color: #dc2626;
+}
+
+.criterion-add {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 6px 10px;
+  border: 1px dashed #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #6366f1;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.criterion-add:hover {
+  background: #eef2ff;
+}
+
 .orchestrator-provider-readiness {
   display: flex;
   flex-direction: column;
