@@ -1938,6 +1938,13 @@ describe("Goal successCriteria", () => {
     expect(CreateGoalRequest.safeParse({ ...base, successCriteria: ["all tests pass"] }).success).toBe(true);
   });
 
+  it("CreateGoalRequest rejects whitespace-only criteria and trims stored values", () => {
+    const base = { title: "T", intent: "I" };
+    expect(CreateGoalRequest.safeParse({ ...base, successCriteria: ["   "] }).success).toBe(false);
+    const parsed = CreateGoalRequest.parse({ ...base, successCriteria: ["  ok  "] });
+    expect(parsed.successCriteria).toEqual(["ok"]);
+  });
+
   it("CreateGoalRequest rejects >20 or >200-char criteria", () => {
     const base = { title: "T", intent: "I" };
     expect(CreateGoalRequest.safeParse({ ...base, successCriteria: Array(21).fill("x") }).success).toBe(false);

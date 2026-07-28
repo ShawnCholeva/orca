@@ -55,6 +55,7 @@ export function RoughGoalStep({ state, dispatch }: Props) {
               onChange={(e) => dispatch({ type: "editSuccessCriterion", index: i, value: e.target.value })}
               maxLength={200}
               placeholder="e.g. All tests pass in CI"
+              aria-label={`Success criterion ${i + 1}`}
             />
             {state.successCriteria.length > 1 && (
               <button
