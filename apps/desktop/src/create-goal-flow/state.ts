@@ -23,6 +23,7 @@ type RoughState = {
   phase: "rough";
   title: string;
   intent: string;
+  successCriteria: string[];
   error?: string;
 };
 
@@ -30,6 +31,7 @@ type CoordinateState = {
   phase: "coordinate";
   title: string;
   intent: string;
+  successCriteria: string[];
   pendingWorkspaces: PendingWorkspace[];
   pendingDocuments: PendingDocument[];
   orchestratorModel: OrchestratorModelChoice | null;
@@ -42,6 +44,7 @@ type SubmittingState = {
   phase: "submitting";
   title: string;
   intent: string;
+  successCriteria: string[];
   pendingWorkspaces: PendingWorkspace[];
   pendingDocuments: PendingDocument[];
   orchestratorModel: OrchestratorModelChoice | null;
@@ -59,6 +62,7 @@ export type WorkflowFailedState = {
   workflowRunId?: string;
   title: string;
   intent: string;
+  successCriteria: string[];
   pendingWorkspaces: PendingWorkspace[];
   pendingDocuments: PendingDocument[];
   orchestratorModel: OrchestratorModelChoice | null;
@@ -82,11 +86,15 @@ export const initialState: FlowState = {
   phase: "rough",
   title: "",
   intent: "",
+  successCriteria: [""],
 };
 
 export type FlowAction =
   | { type: "setTitle"; title: string }
   | { type: "setIntent"; intent: string }
+  | { type: "addSuccessCriterion" }
+  | { type: "editSuccessCriterion"; index: number; value: string }
+  | { type: "removeSuccessCriterion"; index: number }
   | { type: "proceedToCoordinate" }
   | { type: "backToDescribe" }
   | { type: "setOrchestratorModel"; orchestratorModel: OrchestratorModelChoice | null }
@@ -118,12 +126,36 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
       }
       return state;
 
+    case "addSuccessCriterion":
+      if (state.phase === "rough") {
+        return { ...state, successCriteria: [...state.successCriteria, ""] };
+      }
+      return state;
+
+    case "editSuccessCriterion":
+      if (state.phase === "rough") {
+        return {
+          ...state,
+          successCriteria: state.successCriteria.map((c, i) => (i === action.index ? action.value : c)),
+        };
+      }
+      return state;
+
+    case "removeSuccessCriterion":
+      if (state.phase === "rough") {
+        // keep at least one row so the UI always shows an input
+        const next = state.successCriteria.filter((_, i) => i !== action.index);
+        return { ...state, successCriteria: next.length > 0 ? next : [""] };
+      }
+      return state;
+
     case "proceedToCoordinate":
       if (state.phase === "rough") {
         return {
           phase: "coordinate",
           title: state.title,
           intent: state.intent,
+          successCriteria: state.successCriteria,
           pendingWorkspaces: [],
           pendingDocuments: [],
           orchestratorModel: null,
@@ -138,6 +170,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           phase: "rough",
           title: state.title,
           intent: state.intent,
+          successCriteria: state.successCriteria,
         };
       }
       return state;
@@ -228,6 +261,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           phase: "submitting",
           title: state.title,
           intent: state.intent,
+          successCriteria: state.successCriteria,
           pendingWorkspaces: state.pendingWorkspaces,
           pendingDocuments: state.pendingDocuments,
           orchestratorModel: state.orchestratorModel,
@@ -248,6 +282,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           phase: "coordinate",
           title: state.title,
           intent: state.intent,
+          successCriteria: state.successCriteria,
           pendingWorkspaces: state.pendingWorkspaces,
           pendingDocuments: state.pendingDocuments,
           orchestratorModel: state.orchestratorModel,
@@ -265,6 +300,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           workflowRunId: action.workflowRunId,
           title: state.title,
           intent: state.intent,
+          successCriteria: state.successCriteria,
           pendingWorkspaces: state.pendingWorkspaces,
           pendingDocuments: state.pendingDocuments,
           orchestratorModel: state.orchestratorModel,
@@ -280,6 +316,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           phase: "submitting",
           title: state.title,
           intent: state.intent,
+          successCriteria: state.successCriteria,
           pendingWorkspaces: state.pendingWorkspaces,
           pendingDocuments: state.pendingDocuments,
           orchestratorModel: state.orchestratorModel,

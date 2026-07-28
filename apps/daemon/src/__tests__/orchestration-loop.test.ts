@@ -280,6 +280,7 @@ describe.sequential('orchestration proof loop', () => {
       payload: {
         title: 'Orchestration proof loop',
         intent: 'test intent',
+        successCriteria: ['ship it'],
         refined: draft,
         workspaces: [{ inputPath: workspaceDir }],
       },
@@ -603,7 +604,7 @@ describe.sequential('orchestration proof loop', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: AUTH,
-      payload: { title: 'Content-free test', intent: 'test intent', refined: draft, workspaces: [{ inputPath: workspaceDir }] },
+      payload: { title: 'Content-free test', intent: 'test intent', successCriteria: ['ship it'], refined: draft, workspaces: [{ inputPath: workspaceDir }] },
     });
     expect(createGoalRes.statusCode).toBe(201);
     const { goal } = CreateGoalResponse.parse(JSON.parse(createGoalRes.body));
@@ -670,7 +671,7 @@ describe.sequential('orchestration proof loop', () => {
       method: 'POST',
       url: '/v1/goals',
       headers: AUTH,
-      payload: { title: 'No-auto-launch test', intent: 'test intent', refined: draft, workspaces: [{ inputPath: workspaceDir }] },
+      payload: { title: 'No-auto-launch test', intent: 'test intent', successCriteria: ['ship it'], refined: draft, workspaces: [{ inputPath: workspaceDir }] },
     });
     expect(createGoalRes.statusCode).toBe(201);
     const { goal } = CreateGoalResponse.parse(JSON.parse(createGoalRes.body));

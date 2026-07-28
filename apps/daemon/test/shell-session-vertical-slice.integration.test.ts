@@ -179,6 +179,7 @@ describe.sequential('real shell session vertical slice', () => {
       const goalResponse = await postJson(boot1.baseUrl, '/v1/goals', {
         title: 'Shell Session Goal',
         intent: 'real shell vertical slice',
+        successCriteria: ['ship it'],
         workspaces: [{ inputPath: workspaceDir }],
       });
       expect(goalResponse.status).toBe(201);
@@ -302,6 +303,7 @@ describe.sequential('real shell session vertical slice', () => {
       const goalResponse = await postJson(boot1.baseUrl, '/v1/goals', {
         title: 'Shell Session Reconcile Goal',
         intent: 'test intent',
+        successCriteria: ['ship it'],
         workspaces: [{ inputPath: workspaceDir }],
       });
       const goalId = CreateGoalResponse.parse(await goalResponse.json()).goal.id;

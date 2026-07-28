@@ -7,7 +7,11 @@ type Props = {
 };
 
 export function RoughGoalStep({ state, dispatch }: Props) {
-  const canProceed = state.title.trim().length > 0 && state.intent.trim().length > 0;
+  const trimmedCriteria = state.successCriteria.map((c) => c.trim()).filter((c) => c.length > 0);
+  const canProceed =
+    state.title.trim().length > 0 &&
+    state.intent.trim().length > 0 &&
+    trimmedCriteria.length > 0;
 
   return (
     <div className="flow-step">
@@ -36,6 +40,42 @@ export function RoughGoalStep({ state, dispatch }: Props) {
           placeholder={"What do you want to achieve and why? Describe the outcome, not the steps.\n\nOptionally include sections like:\nGoals:\n  - ...\nConstraints:\n  - ...\nAssumptions:\n  - ..."}
           rows={7}
         />
+      </div>
+
+      <div className="form-field">
+        <label>Success Criteria</label>
+        <p className="form-hint">
+          What makes this goal complete? The workflow gates judge success against these.
+        </p>
+        {state.successCriteria.map((criterion, i) => (
+          <div key={i} className="criterion-row">
+            <input
+              type="text"
+              value={criterion}
+              onChange={(e) => dispatch({ type: "editSuccessCriterion", index: i, value: e.target.value })}
+              maxLength={200}
+              placeholder="e.g. All tests pass in CI"
+              aria-label={`Success criterion ${i + 1}`}
+            />
+            {state.successCriteria.length > 1 && (
+              <button
+                type="button"
+                className="criterion-remove"
+                aria-label="Remove criterion"
+                onClick={() => dispatch({ type: "removeSuccessCriterion", index: i })}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        ))}
+        <button
+          type="button"
+          className="criterion-add"
+          onClick={() => dispatch({ type: "addSuccessCriterion" })}
+        >
+          + Add criterion
+        </button>
       </div>
 
       {state.error && <div className="form-error">{state.error}</div>}

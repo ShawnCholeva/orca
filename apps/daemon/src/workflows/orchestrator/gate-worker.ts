@@ -1,7 +1,15 @@
 import { GateEvaluationProposal, type GateEvaluationRequest } from "@orca/contracts";
+import { successCriteriaHint } from "./success-criteria-prompt.js";
 
 export function composeGateWorkerPrompt(request: GateEvaluationRequest): string {
-  return [
+  // Normalize an explicit empty successCriteria to the same shape as an omitted
+  // one (JSON.stringify drops undefined-valued keys) so the serialized EVIDENCE
+  // goal is byte-identical whether the caller passed [] or left the key out —
+  // parity for goals without success criteria must not depend on that.
+  const goalForEvidence = request.goal.successCriteria?.length
+    ? request.goal
+    : { ...request.goal, successCriteria: undefined };
+  return successCriteriaHint(request.goal.successCriteria) + [
     request.gate.instructions,
     "",
     "Judge the SOURCE STEP OUTPUT against the goal and the instructions above,",
@@ -18,7 +26,7 @@ export function composeGateWorkerPrompt(request: GateEvaluationRequest): string 
     "",
     "EVIDENCE:",
     JSON.stringify({
-      goal: request.goal,
+      goal: goalForEvidence,
       sourceStepOutput: request.sourceStepOutput,
       committedLedger: request.committedLedger,
       priorGateDecisions: request.priorGateDecisions,

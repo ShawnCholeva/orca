@@ -135,7 +135,7 @@ describe.sequential('daemon integration loop', () => {
       const response = await fetch(`${baseUrl}/v1/goals`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        body: JSON.stringify({ title: 'Daemon integration Goal', intent: 'integration' })
+        body: JSON.stringify({ title: 'Daemon integration Goal', intent: 'integration', successCriteria: ['ship it'] })
       });
 
       expect(response.status).toBe(201);
@@ -198,7 +198,7 @@ describe.sequential('daemon integration loop', () => {
       const response = await fetch(`${baseUrl}/v1/goals`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        body: JSON.stringify({ title: 'WS Delivery Goal', intent: 'test intent' })
+        body: JSON.stringify({ title: 'WS Delivery Goal', intent: 'test intent', successCriteria: ['ship it'] })
       });
 
       expect(response.status).toBe(201);
@@ -225,7 +225,7 @@ describe.sequential('daemon integration loop', () => {
     const createResponse = await fetch(`${firstBoot.baseUrl}/v1/goals`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      body: JSON.stringify({ title: 'Persisted Goal', intent: 'survives reboot' })
+      body: JSON.stringify({ title: 'Persisted Goal', intent: 'survives reboot', successCriteria: ['ship it'] })
     });
     expect(createResponse.status).toBe(201);
     const created = CreateGoalResponse.parse(await createResponse.json());
@@ -264,7 +264,7 @@ describe.sequential('daemon integration loop', () => {
       const response = await fetch(`${baseUrl}/v1/goals`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-        body: JSON.stringify({ title: 'Should Roll Back', intent: 'test intent' })
+        body: JSON.stringify({ title: 'Should Roll Back', intent: 'test intent', successCriteria: ['ship it'] })
       });
 
       expect(response.status).toBe(500);

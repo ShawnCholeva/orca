@@ -208,6 +208,7 @@ describe.sequential('shared memory daemon proof-loop integration', () => {
       const createGoalResp = await postJson(baseUrl, '/v1/goals', {
         title: draft.title,
         intent: draft.intent,
+        successCriteria: ['ship it'],
         refined: draft,
         workspaces: [{ inputPath: workspaceDir }],
       });
@@ -412,6 +413,7 @@ describe.sequential('memory privacy redaction integration', () => {
       const createGoalResp = await postJson(baseUrl, '/v1/goals', {
         title: 'Memory redaction Goal',
         intent: 'test intent',
+        successCriteria: ['ship it'],
         workspaces: [{ inputPath: workspaceDir }],
       });
       expect(createGoalResp.status).toBe(201);

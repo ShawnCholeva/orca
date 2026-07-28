@@ -184,6 +184,7 @@ Constraints:
           body: JSON.stringify({
             title: draft.title,
             intent: draft.intent,
+            successCriteria: ['ship it'],
             refined: draft,
             workspaces: [
               { inputPath: gitRepoDir },

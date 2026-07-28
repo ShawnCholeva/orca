@@ -69,7 +69,7 @@ import { composeGateWorkerPrompt, parseGateDecision } from "./gate-worker.js";
 import { latestCommittedLedger } from "../ledger/projection.js";
 import { createStepOutputArtifact } from "./ledger-commit.js";
 import { scoreCompletedStepResult } from "./step-result-builder.js";
-import { type GoalRow, type StepRunRow, readGoal, readStepRun, preferencesForGoal, OrchestratorStepNotFoundError } from "./db-rows.js";
+import { type GoalRow, type StepRunRow, readGoal, readStepRun, preferencesForGoal, goalSuccessCriteria, OrchestratorStepNotFoundError } from "./db-rows.js";
 import {
   stepRunIdsByTemplateId,
   hasActiveUnansweredQuestion,
@@ -584,8 +584,11 @@ export class DispatchEngine {
       snippets: [],
       payloadBudget: Math.floor(ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES * 0.25),
     });
+    const stepSuccessCriteria = goalSuccessCriteria(goal);
     const input = buildStepExecutionInput({
-      goal: { id: goal.id, intent: goal.intent },
+      goal: stepSuccessCriteria.length
+        ? { id: goal.id, intent: goal.intent, successCriteria: stepSuccessCriteria }
+        : { id: goal.id, intent: goal.intent },
       steps: template.steps,
       currentStep: stepTpl,
       artifacts,
@@ -820,7 +823,10 @@ export class DispatchEngine {
     }
 
     // (c) build objective
-    const objective = buildAgentObjective(stepTpl, { goal, stepRun });
+    const objective = buildAgentObjective(stepTpl, {
+      goal: { intent: goal.intent, successCriteria: goalSuccessCriteria(goal) },
+      stepRun,
+    });
 
     // (c2) budget pre-check (control-plane spend gate). A runaway step otherwise
     // has no spend floor. Over-budget is a hard cap, routed by operating_mode:
@@ -2090,9 +2096,12 @@ export class DispatchEngine {
         status: r.status.slice(0, 64),
         note: r.note.slice(0, 500),
       }));
+    const successCriteria = goalSuccessCriteria(goal);
     return GateEvaluationRequest.parse({
       gate: { nodeId: gateNode.id, name: gateNode.name, instructions: gateNode.instructions ?? "" },
-      goal: { id: goal.id, intent: goal.intent },
+      goal: successCriteria.length
+        ? { id: goal.id, intent: goal.intent, successCriteria }
+        : { id: goal.id, intent: goal.intent },
       sourceStepOutput: readStepOutputAsRecord(db, run.id, stepRun.id),
       priorGateDecisions,
       availableOutcomes,

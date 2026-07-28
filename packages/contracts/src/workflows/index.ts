@@ -913,7 +913,7 @@ export type GateEvaluationProposal = z.infer<typeof GateEvaluationProposal>;
 export const GateEvaluationRequest = z
   .object({
     gate: z.object({ nodeId: Id100, name: z.string().max(100), instructions: z.string().max(WORKFLOW_GATE_MAX_INSTRUCTIONS_CHARS) }).strict(),
-    goal: z.object({ id: Id, intent: z.string().max(4000) }).strict(),
+    goal: z.object({ id: Id, intent: z.string().max(4000), successCriteria: z.array(z.string().min(1).max(200)).max(20).optional() }).strict(),
     sourceStepOutput: z.record(z.string(), z.unknown()).nullable(),
     priorGateDecisions: z.array(z.object({ nodeId: Id100, outcome: z.enum(["approved", "rejected"]), reason: z.string().max(1024) }).strict()).max(50),
     availableOutcomes: z.array(z.enum(["approved", "rejected"])).min(1).max(2),

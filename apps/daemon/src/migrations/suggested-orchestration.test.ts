@@ -190,7 +190,8 @@ describe("suggested orchestration migration schema", () => {
       "0059_goal_intent_rename.sql",
       "0060_orchestrator_phase.sql",
       "0061_step_run_pending_worker_hitl.sql",
-      "0062_gate_recommended_outcome.sql"
+      "0062_gate_recommended_outcome.sql",
+      "0063_goal_success_criteria.sql"
     ]);
 
     const postCounts = {

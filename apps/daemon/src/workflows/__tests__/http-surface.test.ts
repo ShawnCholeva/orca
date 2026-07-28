@@ -78,7 +78,7 @@ describe("M8 HTTP surface", () => {
       method: "POST",
       url: "/v1/goals",
       headers: { "content-type": "application/json", ...AUTH_HEADERS },
-      payload: { title: "m8-http-goal", intent: "route test" },
+      payload: { title: "m8-http-goal", intent: "route test", successCriteria: ["ship it"] },
     });
     expect(goalResp.statusCode).toBe(201);
     const goal = CreateGoalResponse.parse(JSON.parse(goalResp.body)).goal;

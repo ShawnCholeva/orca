@@ -27,7 +27,7 @@ function dispatch(state: FlowState, action: FlowAction): FlowState {
 describe("reducer — rough phase", () => {
   it("setTitle updates title and clears error", () => {
     const s = dispatch(
-      { phase: "rough", title: "", intent: "", error: "oops" },
+      { phase: "rough", title: "", intent: "", successCriteria: ["ship it"], error: "oops" },
       { type: "setTitle", title: "New Title" },
     );
     expect(s).toMatchObject({ phase: "rough", title: "New Title", error: undefined });
@@ -45,12 +45,18 @@ describe("reducer — rough phase", () => {
   });
 
   it("proceedToCoordinate transitions rough → coordinate with empty workspaces", () => {
-    const rough: FlowState = { phase: "rough", title: "My Goal", intent: "some desc" };
+    const rough: FlowState = {
+      phase: "rough",
+      title: "My Goal",
+      intent: "some desc",
+      successCriteria: ["ship it"],
+    };
     const s = dispatch(rough, { type: "proceedToCoordinate" });
     expect(s).toEqual({
       phase: "coordinate",
       title: "My Goal",
       intent: "some desc",
+      successCriteria: ["ship it"],
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel: null,
@@ -58,11 +64,32 @@ describe("reducer — rough phase", () => {
     });
   });
 
+  it("starts with one empty criterion row", () => {
+    expect(initialState).toMatchObject({ phase: "rough", successCriteria: [""] });
+  });
+
+  it("adds, edits, and removes criteria", () => {
+    let s = reducer(initialState, { type: "editSuccessCriterion", index: 0, value: "a" });
+    s = reducer(s, { type: "addSuccessCriterion" });
+    s = reducer(s, { type: "editSuccessCriterion", index: 1, value: "b" });
+    expect((s as any).successCriteria).toEqual(["a", "b"]);
+    s = reducer(s, { type: "removeSuccessCriterion", index: 0 });
+    expect((s as any).successCriteria).toEqual(["b"]);
+  });
+
+  it("carries successCriteria into the coordinate phase and back", () => {
+    let s = reducer({ ...initialState, title: "T", intent: "I", successCriteria: ["a"] } as any, { type: "proceedToCoordinate" });
+    expect((s as any).successCriteria).toEqual(["a"]);
+    s = reducer(s, { type: "backToDescribe" });
+    expect((s as any).successCriteria).toEqual(["a"]);
+  });
+
   it("setTitle is no-op in non-rough phase", () => {
     const coord: FlowState = {
       phase: "coordinate",
       title: "T",
       intent: "",
+      successCriteria: ["ship it"],
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel: null,
@@ -77,6 +104,7 @@ describe("reducer — coordinate phase", () => {
     phase: "coordinate",
     title: "T",
     intent: "D",
+    successCriteria: ["ship it"],
     pendingWorkspaces: [],
     pendingDocuments: [],
     orchestratorModel: null,
@@ -219,6 +247,7 @@ describe("reducer — submitting phase", () => {
     phase: "submitting",
     title: "T",
     intent: "D",
+    successCriteria: ["ship it"],
     orchestratorModel,
     workflowTemplateId: "wf-1",
     pendingWorkspaces: [],
@@ -247,6 +276,7 @@ describe("reducer — workflowFailed phase", () => {
     phase: "submitting",
     title: "T",
     intent: "D",
+    successCriteria: ["ship it"],
     orchestratorModel,
     workflowTemplateId: "wf-1",
     pendingWorkspaces: [],
@@ -290,6 +320,7 @@ describe("reducer — workflowFailed phase", () => {
       goalId: "g-1",
       title: "T",
       intent: "D",
+      successCriteria: ["ship it"],
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel,
@@ -314,6 +345,7 @@ describe("reducer — workflowFailed phase", () => {
       workflowRunId: "r-1",
       title: "T",
       intent: "D",
+      successCriteria: ["ship it"],
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel,
@@ -344,6 +376,7 @@ describe("reducer — workflowFailed phase", () => {
       phase: "coordinate",
       title: "T",
       intent: "D",
+      successCriteria: ["ship it"],
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel: null,
@@ -368,6 +401,7 @@ describe("reducer — cross-phase no-ops", () => {
       phase: "coordinate",
       title: "T",
       intent: "D",
+      successCriteria: ["ship it"],
       pendingWorkspaces: [],
     pendingDocuments: [],
       orchestratorModel: null,

@@ -8,6 +8,7 @@ export interface GoalRow {
   intent: string;
   orchestrator_provider: ModelProviderId | null;
   orchestrator_model: string | null;
+  success_criteria: string | null;
 }
 
 export interface StepRunRow {
@@ -61,11 +62,21 @@ export function readStepRun(db: Database.Database, stepRunId: string | null): St
 export function readGoal(db: Database.Database, goalId: string): GoalRow {
   const row = db
     .prepare(
-      "SELECT id, title, intent, orchestrator_provider, orchestrator_model FROM goals WHERE id = ?",
+      "SELECT id, title, intent, orchestrator_provider, orchestrator_model, success_criteria FROM goals WHERE id = ?",
     )
     .get(goalId) as GoalRow | undefined;
   if (!row) throw new OrchestratorGoalNotFoundError(goalId);
   return row;
+}
+
+export function goalSuccessCriteria(row: Pick<GoalRow, "success_criteria">): string[] {
+  if (!row.success_criteria) return [];
+  try {
+    const v = JSON.parse(row.success_criteria);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 export function preferencesForGoal(

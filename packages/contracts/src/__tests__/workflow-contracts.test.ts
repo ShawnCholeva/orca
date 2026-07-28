@@ -484,6 +484,7 @@ describe("workflow contracts", () => {
       CreateGoalRequest.parse({
         title: "Goal",
         intent: "Ship the goal",
+        successCriteria: ["Goal is shipped"],
         orchestratorModel: { providerId: "orca/anthropic", modelId: "claude-sonnet-4-6" }
       })
     ).toMatchObject({

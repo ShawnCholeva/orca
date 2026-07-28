@@ -84,6 +84,7 @@ function makeGoal(overrides: Partial<GoalListItem> = {}): GoalListItem {
     id: "goal-1",
     title: "Existing Goal",
     intent: "An existing goal",
+    successCriteria: [],
     status: "active",
     autonomyLevel: 1,
     workerPermissionMode: "ask",

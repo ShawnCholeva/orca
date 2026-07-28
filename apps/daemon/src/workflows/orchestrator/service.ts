@@ -78,6 +78,7 @@ import {
   readGoal,
   readStepRun,
   preferencesForGoal,
+  goalSuccessCriteria,
 } from "./db-rows.js";
 import {
   stepRunIdsByTemplateId,
@@ -368,8 +369,11 @@ export class OrchestratorService {
     const artifacts = listArtifactsForRun(db, run.id);
     const transcript = reconstructTranscript(artifacts.filter((a) => a.stepRunId === stepRun.id));
     const stepRunByStepId = stepRunIdsByTemplateId(db, run.id);
+    const svcSuccessCriteria = goalSuccessCriteria(goal);
     const stepInput = buildStepExecutionInput({
-      goal: { id: goal.id, intent: goal.intent },
+      goal: svcSuccessCriteria.length
+        ? { id: goal.id, intent: goal.intent, successCriteria: svcSuccessCriteria }
+        : { id: goal.id, intent: goal.intent },
       steps: template.steps,
       currentStep: stepTpl,
       artifacts,

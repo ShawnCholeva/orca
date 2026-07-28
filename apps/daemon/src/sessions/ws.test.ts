@@ -95,7 +95,7 @@ describe('session WS frames', () => {
     const goalRes = await server.inject({
       method: 'POST', url: '/v1/goals',
       headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
-      payload: { title: 'ws-test-goal', intent: 'test intent' },
+      payload: { title: 'ws-test-goal', intent: 'test intent', successCriteria: ['ship it'] },
     });
     goalId = CreateGoalResponse.parse(JSON.parse(goalRes.body)).goal.id;
 

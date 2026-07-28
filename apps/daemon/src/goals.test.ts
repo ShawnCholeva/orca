@@ -196,6 +196,24 @@ describe("createGoal", () => {
     expect(publishSpy).not.toHaveBeenCalled();
   });
 
+  it("persists and round-trips successCriteria", async () => {
+    const { ctx } = setup();
+    const goal = await createGoal(
+      { title: "T", intent: "do the thing", successCriteria: ["  all tests pass  ", "", "docs updated"] },
+      ctx,
+    );
+    // blanks filtered, entries trimmed
+    expect(goal.successCriteria).toEqual(["all tests pass", "docs updated"]);
+    const fetched = getGoalById(ctx.db, goal.id);
+    expect(fetched?.successCriteria).toEqual(["all tests pass", "docs updated"]);
+  });
+
+  it("defaults successCriteria to [] for a goal created without it (legacy path)", async () => {
+    const { ctx } = setup();
+    const goal = await createGoal({ title: "T", intent: "x" }, ctx);
+    expect(goal.successCriteria).toEqual([]);
+  });
+
   it("publishes skill.invoked then goal.created on success, both with numeric seqs", async () => {
     const { ctx } = setup();
     const publishSpy = vi.spyOn(eventBus, "publish");
