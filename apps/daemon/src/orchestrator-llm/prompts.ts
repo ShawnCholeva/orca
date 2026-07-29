@@ -1,5 +1,5 @@
 import type { OrchestratorInvocationContext } from "./context.js";
-import type { WorkflowStepOutputSchema } from "@orca/contracts";
+import type { PendingQuestionItem as AskUserQuestionItemT, WorkflowStepOutputSchema } from "@orca/contracts";
 import { SENTINEL_INSTRUCTION } from "./sentinel.js";
 
 export interface AgentInitialPromptInput {
@@ -110,6 +110,9 @@ export interface OrchestratorPromptInput {
     schemaValidationError?: string;
     userMessage?: string;
     crashReason?: string;
+    // Set when a question is already open on the chat surface: the user's free
+    // text is then ambiguous (their answer, or a question about the options).
+    openWorkerQuestion?: { questionId: string; questions: AskUserQuestionItemT[] };
   };
 }
 
@@ -132,6 +135,7 @@ export function composeOrchestratorPrompt(input: OrchestratorPromptInput): Orche
     '- {"kind":"revise_step","feedback":"<concrete feedback; the agent\'s proposal is insufficient>"}',
     '- {"kind":"escalate_to_user","body":"<describe the failure and ask for guidance>"}',
     '- {"kind":"ask_user","body":"<short framing of the decision needed, e.g. \'A decision is needed before this can continue\'>","questions":[{"header":"<chip ≤12 chars>","question":"<the decision to make>","multiSelect":false,"options":[{"label":"<choice>","description":"<what it means>"}]}]}  (a DECISION from the user is needed — present concrete choices)',
+    '- {"kind":"answer_open_question","answerText":"<the user\'s decision, stated plainly>"}  (ONLY when trigger.openWorkerQuestion is present and the user\'s text settles it — consumes that open question)',
     "When you approve_step_complete you MUST score the completed step. All scoring numbers are 0..1.",
     "successScore and each quality dimension: 1 = best. riskLevel is inverted: 0 = no risk, 1 = severe risk.",
     "In scoring, fill reasoning FIRST — reason through the evidence before choosing the numbers; then successScore/quality, then the concise reason.",
@@ -144,7 +148,11 @@ export function composeOrchestratorPrompt(input: OrchestratorPromptInput): Orche
     "When forward_to_agent succeeds, the application may show no immediate chat reply until agent hooks report a response.",
     'Use ask_user whenever the step agent has asked the user a question or cannot proceed without a user decision: present the concrete choices as structured options. Never paraphrase a question as prose, and never narrate the step as finished or claim it "has a complete picture" while it is waiting on the user — a step blocked on the user is waiting, not done.',
     "If your reply asks the user anything — any decision, choice, or clarification, including anything you would phrase ending in a '?' — you MUST return ask_user with structured options. Never place a question to the user in the body of paraphrase_agent_message, answer_user_directly, or escalate_to_user; those bodies are statements, not questions.",
-    "When the user answers an ask_user, you receive it as a user_message; forward_to_agent so the answer reaches the step agent.",
+    "When trigger.openWorkerQuestion is present, a question is ALREADY open on the chat surface and the user's free text is ambiguous — it is either their answer, or a question about the choices. Decide which:",
+    "- It reads as their decision (names or paraphrases an option, or states a preference that settles it) → answer_open_question. This consumes the question and unblocks the step, so only choose it when the text really does settle the matter.",
+    '- It asks about the question (wants the options explained, compared, or their tradeoffs spelled out) → answer_user_directly, explaining from trigger.openWorkerQuestion.questions and the step context. The question STAYS OPEN and the user still decides — so do NOT re-ask it, and do NOT return ask_user: re-asking a question the user just asked you to explain is the exact failure to avoid.',
+    "- Genuinely unsure → answer_user_directly. Leaving the question open is recoverable (the user can still answer); consuming a request for clarification as if it were a decision is not.",
+    "When the user answers an ask_user YOU raised (no trigger.openWorkerQuestion), you receive it as a user_message; forward_to_agent so the answer reaches the step agent.",
     "Honor the current step's completionPolicy (context.currentStep.completionPolicy):",
     "- interview: never approve_step_complete while the step output's open_questions is non-empty — use ask_user (one decision at a time, with a recommended answer) until the queue is drained, then approve_step_complete. The user confirms or revises the synthesized result on the completion card, so do not ask a separate confirmation question.",
     "- reasoning: pause at any material fork (options that genuinely diverge and are the user's to decide) via ask_user; never approve_step_complete while such a decision is pending.",
