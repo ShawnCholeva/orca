@@ -14,6 +14,13 @@ export const SAMPLE_MIN = 5;
 // A designed floor (not a significance test) — same spirit as SAMPLE_MIN.
 export const VERSION_MIN = 2;
 
+/**
+ * What one rescue costs, relative to a whole completion, in the score denominator.
+ * A step the system had to restart to get through is less trustworthy than one that
+ * ran clean — but it did deliver, so it is not a whole failure either.
+ */
+export const STALL_WEIGHT = 0.5;
+
 const PERIOD_MS: Record<MetricPeriod, number> = {
   "24h": 24 * 60 * 60 * 1000,
   "7d": 7 * 24 * 60 * 60 * 1000,
@@ -346,13 +353,20 @@ export function computeStepMetrics(input: {
     const completeRunIds = new Set(finalStepCompletes.map((t) => t.transition.workflowRunId).filter((x): x is string => x != null));
     const hardFailedFinals = finals.filter((r) =>
       FAILED_STATUSES.has(r.status) && (!completeRunIds.has(r.workflowRunId) || supersededByHardFail.has(r.workflowRunId)));
+    // Rescues are counted across EVERY attempt, not just finals: a run that stalled
+    // twice and then passed still cost two rescues, and `finalAttempts` would hide them.
+    const rescueCount = stepRuns.reduce((acc, r) => acc + (r.stallRescues ?? 0), 0);
     const contribution = (t: (typeof stepCompletes)[number]) => scoreByCompletion.get(t)!.score;
-    const scoreOver = (completes: typeof finalStepCompletes, hardFails: number): { n: number; value: number | null } => {
+    const scoreOver = (
+      completes: typeof finalStepCompletes,
+      hardFails: number,
+      rescues: number
+    ): { n: number; value: number | null } => {
       const conc = completes.filter(isConclusive);
-      const n = conc.length + hardFails;
+      const n = conc.length + hardFails + STALL_WEIGHT * rescues;
       return n === 0 ? { n, value: null } : { n, value: conc.reduce((acc, t) => acc + contribution(t), 0) / n };
     };
-    const headline = scoreOver(finalStepCompletes, hardFailedFinals.length);
+    const headline = scoreOver(finalStepCompletes, hardFailedFinals.length, rescueCount);
     const scoreValue = headline.value;
     const scoredSampleSize = headline.n;
     const stepTier = strongestTier(conclusive.map((t) => tierByCompletion.get(t)!));
@@ -376,6 +390,7 @@ export function computeStepMetrics(input: {
       const forVersion = (v: number) => scoreOver(
         finalStepCompletes.filter((t) => t.templateVersion === v),
         hardFailedFinals.filter((r) => r.templateVersion === v).length,
+        stepRuns.filter((r) => r.templateVersion === v).reduce((acc, r) => acc + (r.stallRescues ?? 0), 0),
       );
       const a = forVersion(latestV), b = forVersion(priorV);
       if (a.n >= VERSION_MIN && b.n >= VERSION_MIN && a.value != null && b.value != null) {

@@ -65,6 +65,13 @@ describe("metrics fetch", () => {
     expect(rows[0].stepTemplateId).toBe("define-intent");
     expect(rows[0].attempt).toBe(1);
     expect(rows[0].status).toBe("passed");
+    expect(rows[0].stallRescues).toBe(0);
+  });
+
+  it("carries a non-zero stall_rescues count through", () => {
+    db.prepare(`UPDATE workflow_step_runs SET stall_rescues = 2 WHERE id = 'sr1'`).run();
+    const rows = listStepRunsByTemplate(db, "tpl", "2026-05-01T00:00:00.000Z", "2026-05-02T00:00:00.000Z");
+    expect(rows[0].stallRescues).toBe(2);
   });
 
   it("lists templates that have at least one run", () => {

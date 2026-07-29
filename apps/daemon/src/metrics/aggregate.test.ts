@@ -25,6 +25,7 @@ function stepRun(runId: string, step: string, attempt: number, status: "passed" 
     finishedAt: "2026-05-01T00:01:00.000Z",
     blockedReason: status === "blocked" ? "blocked" : null,
     templateVersion: version,
+    stallRescues: 0,
   };
 }
 
@@ -76,9 +77,9 @@ describe("medianLatencyMs", () => {
 describe("firstPassRate", () => {
   it("counts distinct (run, step) passing on attempt 1", () => {
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:01:00.000Z", blockedReason: null, templateVersion: 1 },
-      { workflowRunId: "r2", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:01:00.000Z", blockedReason: "boom", templateVersion: 1 },
-      { workflowRunId: "r2", stepTemplateId: "s", attempt: 2, status: "passed", startedAt: "2026-05-01T00:02:00.000Z", finishedAt: "2026-05-01T00:03:00.000Z", blockedReason: null, templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:01:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
+      { workflowRunId: "r2", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:01:00.000Z", blockedReason: "boom", templateVersion: 1, stallRescues: 0 },
+      { workflowRunId: "r2", stepTemplateId: "s", attempt: 2, status: "passed", startedAt: "2026-05-01T00:02:00.000Z", finishedAt: "2026-05-01T00:03:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
     ];
     expect(firstPassRate(runs)).toBeCloseTo(0.5); // r1 first-pass; r2 recovered (not first-pass)
   });

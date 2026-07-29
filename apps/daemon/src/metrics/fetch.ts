@@ -15,6 +15,7 @@ export type TemplateStepRun = {
   finishedAt: string | null;
   blockedReason: string | null;
   templateVersion: number;
+  stallRescues: number;
 };
 export type TemplateRunInfo = { templateId: string; name: string; latestVersion: number };
 export type GateDecisionRow = {
@@ -86,19 +87,20 @@ export function listStepRunsByTemplate(
 ): TemplateStepRun[] {
   const rows = db.prepare(
     `SELECT wsr.workflow_run_id, wsr.step_template_id, wsr.attempt, wsr.status,
-            wsr.started_at, wsr.finished_at, wsr.blocked_reason, wr.template_version
+            wsr.started_at, wsr.finished_at, wsr.blocked_reason, wsr.stall_rescues, wr.template_version
      FROM workflow_step_runs wsr
      JOIN workflow_runs wr ON wr.id = wsr.workflow_run_id
      WHERE wr.template_id = ? AND wsr.started_at >= ? AND wsr.started_at < ?
      ORDER BY wsr.started_at ASC, wsr.id ASC`
   ).all(templateId, sinceIso, untilIso) as {
     workflow_run_id: string; step_template_id: string; attempt: number; status: string;
-    started_at: string | null; finished_at: string | null; blocked_reason: string | null; template_version: number;
+    started_at: string | null; finished_at: string | null; blocked_reason: string | null;
+    stall_rescues: number; template_version: number;
   }[];
   return rows.map((r) => ({
     workflowRunId: r.workflow_run_id, stepTemplateId: r.step_template_id, attempt: r.attempt,
     status: r.status, startedAt: r.started_at, finishedAt: r.finished_at,
-    blockedReason: r.blocked_reason, templateVersion: r.template_version,
+    blockedReason: r.blocked_reason, templateVersion: r.template_version, stallRescues: r.stall_rescues,
   }));
 }
 

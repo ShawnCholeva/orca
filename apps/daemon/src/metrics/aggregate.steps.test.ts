@@ -58,7 +58,7 @@ function unverifiedTxs(step: string, n: number): TemplateTransition[] {
 function passRuns(step: string, n: number): TemplateStepRun[] {
   return Array.from({ length: n }, (_, i) => ({
     workflowRunId: `r${i}`, stepTemplateId: step, attempt: 1, status: "passed",
-    startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1,
+    startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0,
   }));
 }
 
@@ -73,7 +73,7 @@ describe("computeStepMetrics", () => {
       workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1,
       status: t.transition.evidence!.verdict === "passed" ? "passed" : "failed",
       startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z",
-      blockedReason: t.transition.evidence!.verdict === "passed" ? null : `fail ${i}`, templateVersion: 1,
+      blockedReason: t.transition.evidence!.verdict === "passed" ? null : `fail ${i}`, templateVersion: 1, stallRescues: 0,
     }));
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.stepTemplateId).toBe("s");
@@ -101,8 +101,8 @@ describe("computeStepMetrics", () => {
       p1,
     ];
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "vetoed", templateVersion: 1 },
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "passed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: "2026-05-01T00:10:00.000Z", blockedReason: null, templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "vetoed", templateVersion: 1, stallRescues: 0 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "passed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: "2026-05-01T00:10:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     // The delivered state is the final (passed) attempt; the intermediate veto is
@@ -130,7 +130,7 @@ describe("computeStepMetrics", () => {
       },
     ];
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:01:00.000Z", blockedReason: null, templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:01:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.quality.verifiedSampleSize).toBe(0);
@@ -149,7 +149,7 @@ describe("computeStepMetrics", () => {
         createdAt: `2026-05-01T0${i}:00:00.000Z`,
       },
     }));
-    const runs: TemplateStepRun[] = ts.map((t) => ({ workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }));
+    const runs: TemplateStepRun[] = ts.map((t) => ({ workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 }));
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBe(55); // round(0.55 * 100)
     expect(step.verification.tier).toBe("ai_reviewed");
@@ -158,7 +158,7 @@ describe("computeStepMetrics", () => {
 
   it("does not report sensorPassRate=1 when no sensors ran", () => {
     const ts = [sc("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z")]; // sc builds evidence with sensorsRun: []
-    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 }];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.quality.sensorPassRate).toBeNull();
   });
@@ -171,7 +171,7 @@ describe("computeStepMetrics", () => {
         telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
         createdAt: "2026-05-01T00:00:00.000Z" },
     }];
-    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 }];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.verification.falseAcceptanceRate).toBe(1);
     expect(step.score).toBe(0); // refuted → isFail → contributes 0
@@ -179,7 +179,7 @@ describe("computeStepMetrics", () => {
 
   it("is replayable: same evidence yields the same score twice", () => {
     const ts = [sc("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z")];
-    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 }];
     const args = { transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" as const };
     expect(computeStepMetrics(args)[0].score).toBe(computeStepMetrics(args)[0].score);
   });
@@ -192,7 +192,7 @@ describe("computeStepMetrics", () => {
         telemetry: { cost: null, latency_ms: 1, model: null, provider_id: null, provider_version: null, prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [], outcome: { status: "succeeded", failure_code: null } },
         createdAt: "2026-05-01T00:00:00.000Z" },
     }];
-    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 }];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.failureModes.some((f) => /overturned|independent check/i.test(f.label))).toBe(true);
     expect(step.reconciliation?.refuted).toBe(true);
@@ -205,8 +205,8 @@ describe("computeStepMetrics", () => {
       { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
     ];
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 },
-      { workflowRunId: "r2", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T01:00:00.000Z", finishedAt: "2026-05-01T01:05:00.000Z", blockedReason: "provider crashed", templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
+      { workflowRunId: "r2", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T01:00:00.000Z", finishedAt: "2026-05-01T01:05:00.000Z", blockedReason: "provider crashed", templateVersion: 1, stallRescues: 0 },
     ];
     const [step] = computeStepMetrics({ transitions: [p1], stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBe(50); // (1.0 + 0) / 2 — not 100
@@ -223,8 +223,8 @@ describe("computeStepMetrics", () => {
       { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
     ];
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 },
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "failed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: "2026-05-01T01:00:00.000Z", blockedReason: "regressed after the recorded pass", templateVersion: 1 }, // T2 > T1
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "failed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: "2026-05-01T01:00:00.000Z", blockedReason: "regressed after the recorded pass", templateVersion: 1, stallRescues: 0 }, // T2 > T1
     ];
     const [step] = computeStepMetrics({ transitions: [p1], stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBe(0);
@@ -243,8 +243,8 @@ describe("computeStepMetrics", () => {
       p1,
     ];
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "vetoed", templateVersion: 1 },
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "passed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: "2026-05-01T00:10:00.000Z", blockedReason: null, templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "vetoed", templateVersion: 1, stallRescues: 0 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "passed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: "2026-05-01T00:10:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBe(100);
@@ -261,7 +261,7 @@ describe("computeStepMetrics", () => {
       },
     }];
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "provider crashed", templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "provider crashed", templateVersion: 1, stallRescues: 0 },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBe(0);
@@ -274,8 +274,8 @@ describe("computeStepMetrics", () => {
       { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
     ];
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 },
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "failed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: null, blockedReason: "still running when sampled", templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "failed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: null, blockedReason: "still running when sampled", templateVersion: 1, stallRescues: 0 },
     ];
     const [step] = computeStepMetrics({ transitions: [p1], stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBe(100);
@@ -297,8 +297,8 @@ describe("computeStepMetrics", () => {
       },
     }];
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "provider crashed", templateVersion: 1 },
-      { workflowRunId: "r2", stepTemplateId: "s", attempt: 1, status: "blocked", startedAt: "2026-05-01T01:00:00.000Z", finishedAt: "2026-05-01T01:05:00.000Z", blockedReason: "waiting on approval", templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "provider crashed", templateVersion: 1, stallRescues: 0 },
+      { workflowRunId: "r2", stepTemplateId: "s", attempt: 1, status: "blocked", startedAt: "2026-05-01T01:00:00.000Z", finishedAt: "2026-05-01T01:05:00.000Z", blockedReason: "waiting on approval", templateVersion: 1, stallRescues: 0 },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBe(0);
@@ -316,7 +316,7 @@ describe("computeStepMetrics", () => {
         createdAt: "2026-05-01T00:00:00.000Z",
       },
     }];
-    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:01:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:01:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 }];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBeNull();
     expect(step.quality.scoredSampleSize).toBe(0);
@@ -336,7 +336,7 @@ describe("computeStepMetrics", () => {
         createdAt: "2026-05-01T00:00:00.000Z",
       },
     }];
-    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 }];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBeNull();
     expect(step.verification.tier).toBe("unverified");
@@ -353,7 +353,7 @@ describe("computeStepMetrics", () => {
         createdAt: "2026-05-01T00:00:00.000Z",
       },
     }];
-    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 }];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.quality.oracleSufficientRate).toBeNull();
   });
@@ -367,7 +367,7 @@ describe("computeStepMetrics", () => {
       checks: [{ rule: "paths_exist", field: "files_in_scope", mode: "enforce", result: "passed", detail: "" }],
       verdict: "passed",
     };
-    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 }];
     const [step] = computeStepMetrics({ transitions: [t], stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.quality.oracleSufficientRate).toBeNull();
     expect(step.verification.tier).toBe("partially_verified");
@@ -379,8 +379,8 @@ describe("computeStepMetrics", () => {
     const p1 = sc("p1", "r1", "s", "passed", true, "2026-05-01T00:10:00.000Z");
     const ts = [sc("v1", "r1", "s", "failed", true, "2026-05-01T00:00:00.000Z"), p1];
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "vetoed", templateVersion: 1 },
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "passed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: "2026-05-01T00:10:00.000Z", blockedReason: null, templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: "vetoed", templateVersion: 1, stallRescues: 0 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 2, status: "passed", startedAt: "2026-05-01T00:06:00.000Z", finishedAt: "2026-05-01T00:10:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     // The vetoed attempt "v1" was recovered; it must not survive as a failure cluster.
@@ -398,7 +398,7 @@ describe("computeStepMetrics", () => {
         createdAt: "2026-05-01T00:00:00.000Z",
       },
     }];
-    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 }];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.verification.recentRefuteReasons).toEqual(["claimed tests ran but none exist"]);
     expect(step.reconciliation?.refuteReason).toBe("claimed tests ran but none exist");
@@ -431,7 +431,7 @@ describe("computeStepMetrics", () => {
       workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1,
       status: t.transition.evidence!.verdict === "passed" ? "passed" : "failed",
       startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z",
-      blockedReason: null, templateVersion: t.templateVersion,
+      blockedReason: null, templateVersion: t.templateVersion, stallRescues: 0,
     }));
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     // v2 mean = 1.0 (composed executable score), v1 mean = 0 → delta 1.0
@@ -451,12 +451,12 @@ describe("computeStepMetrics", () => {
     const runsV1: TemplateStepRun[] = ts.map((t) => ({
       workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1,
       status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z",
-      blockedReason: null, templateVersion: 1,
+      blockedReason: null, templateVersion: 1, stallRescues: 0,
     }));
     // v2: two runs that hard-fail — never emit a step_complete at all.
     const runsV2: TemplateStepRun[] = [
-      { workflowRunId: "r3", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-02T00:00:00.000Z", finishedAt: "2026-05-02T00:05:00.000Z", blockedReason: "provider crashed", templateVersion: 2 },
-      { workflowRunId: "r4", stepTemplateId: "s", attempt: 1, status: "blocked", startedAt: "2026-05-02T01:00:00.000Z", finishedAt: "2026-05-02T01:05:00.000Z", blockedReason: "timed out", templateVersion: 2 },
+      { workflowRunId: "r3", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-02T00:00:00.000Z", finishedAt: "2026-05-02T00:05:00.000Z", blockedReason: "provider crashed", templateVersion: 2, stallRescues: 0 },
+      { workflowRunId: "r4", stepTemplateId: "s", attempt: 1, status: "blocked", startedAt: "2026-05-02T01:00:00.000Z", finishedAt: "2026-05-02T01:05:00.000Z", blockedReason: "timed out", templateVersion: 2, stallRescues: 0 },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: [...runsV1, ...runsV2], stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     // v2 (all hard-fail) scores 0, v1 scores 0.55 → delta is negative, and the pair
@@ -479,7 +479,7 @@ describe("computeStepMetrics", () => {
     ];
     const runs: TemplateStepRun[] = ts.map((t) => ({
       workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "passed",
-      startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: t.templateVersion,
+      startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: t.templateVersion, stallRescues: 0,
     }));
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.versionInvalidOutputRateDelta).toBeCloseTo(0.5); // v2: 1/2, v1: 0/2
@@ -500,7 +500,7 @@ describe("computeStepMetrics", () => {
       },
     });
     const ts = [mk("a", "r1"), mk("b", "r2")];
-    const runs: TemplateStepRun[] = ts.map((t) => ({ workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }));
+    const runs: TemplateStepRun[] = ts.map((t) => ({ workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 }));
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBe(0); // both failed grounding → 0, no split by verification tier
   });
@@ -510,7 +510,7 @@ describe("computeStepMetrics", () => {
     t.transition.evidence!.sensorsRun = [
       { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
     ];
-    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 }];
     const [step] = computeStepMetrics({ transitions: [t], stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.quality.scoreBreakdown?.meanBase).toBe(1);
     expect(step.quality.scoreBreakdown?.meanCoverage).toBe(1);
@@ -554,8 +554,8 @@ describe("computeStepMetrics", () => {
     // mechanism for a later attempt superseding a stale earlier pass) does not
     // kick in here — this test isolates the scoreBreakdown fail-edge filter itself.
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:00:00.000Z", blockedReason: null, templateVersion: 1 },
-      { workflowRunId: "r2", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:01:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:00:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
+      { workflowRunId: "r2", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:01:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.quality.scoreBreakdown?.coverageLimited).toBe(0);
@@ -575,7 +575,7 @@ describe("computeStepMetrics", () => {
       },
     };
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:00:00.000Z", blockedReason: null, templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:00:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
     ];
     const [step] = computeStepMetrics({ transitions: [failed], stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.quality.scoreBreakdown?.meanBase).toBeNull();
@@ -605,7 +605,7 @@ describe("computeStepMetrics", () => {
     const ts = [exec1, exec2, grounding];
     const runs: TemplateStepRun[] = ts.map((t) => ({
       workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "passed",
-      startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1,
+      startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0,
     }));
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d", requiresExecution: new Set(["s"]) });
     expect(step.verification.band).toEqual({ level: "strong", label: "Run & tested" });
@@ -631,7 +631,7 @@ describe("computeStepMetrics", () => {
     const ts = [g1, g2];
     const runs: TemplateStepRun[] = ts.map((t) => ({
       workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "passed",
-      startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1,
+      startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0,
     }));
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBeGreaterThanOrEqual(70); // grounding base 0.7 × full coverage — a HIGH score
@@ -650,7 +650,7 @@ describe("computeStepMetrics", () => {
         createdAt: "2026-05-01T00:00:00.000Z",
       },
     }];
-    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:01:00.000Z", blockedReason: null, templateVersion: 1 }];
+    const runs: TemplateStepRun[] = [{ workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:01:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 }];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.score).toBeNull();
     expect(step.verification.band.level).toBe("needs_evidence");
@@ -738,7 +738,7 @@ describe("computeStepMetrics", () => {
         evidence: { sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: false, gaps: [] } },
         telemetry: { outcome: { status: "succeeded", failure_code: null } } } as never,
     });
-    const run = (id: string, r: string): TemplateStepRun => ({ workflowRunId: r, stepTemplateId: id, attempt: 1, status: "passed", startedAt: at, finishedAt: at, blockedReason: null, templateVersion: 1 });
+    const run = (id: string, r: string): TemplateStepRun => ({ workflowRunId: r, stepTemplateId: id, attempt: 1, status: "passed", startedAt: at, finishedAt: at, blockedReason: null, templateVersion: 1, stallRescues: 0 });
     const stepNames = new Map([["triage", { name: "Triage", ordinal: 0 }]]); // current template has ONE step
 
     const steps = computeStepMetrics({
@@ -757,7 +757,7 @@ describe("computeStepMetrics", () => {
         evidence: { sensorsRun: [], verdict: "passed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: false, gaps: [] } },
         telemetry: { outcome: { status: "succeeded", failure_code: null } } } as never,
     });
-    const run = (id: string, r: string): TemplateStepRun => ({ workflowRunId: r, stepTemplateId: id, attempt: 1, status: "passed", startedAt: at, finishedAt: at, blockedReason: null, templateVersion: 1 });
+    const run = (id: string, r: string): TemplateStepRun => ({ workflowRunId: r, stepTemplateId: id, attempt: 1, status: "passed", startedAt: at, finishedAt: at, blockedReason: null, templateVersion: 1, stallRescues: 0 });
     const steps = computeStepMetrics({
       transitions: [tx("a", "r1"), tx("b", "r2")], stepRuns: [run("a", "r1"), run("b", "r2")],
       stepNames: new Map(), nowIso: "2026-05-08T00:00:00.000Z", period: "7d",
@@ -884,7 +884,7 @@ describe("computeStepMetrics: calibration divergence insight", () => {
   const runs: TemplateStepRun[] = [{
     workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed",
     startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z",
-    blockedReason: null, templateVersion: 1,
+    blockedReason: null, templateVersion: 1, stallRescues: 0,
   }];
 
   it("reports the divergence observationally, without claiming it moved the score", () => {
@@ -934,7 +934,7 @@ describe("computeStepMetrics: independent_review calibration feeds the composed 
   }));
   const runs: TemplateStepRun[] = aiReviewedPasses.map((t) => ({
     workflowRunId: t.transition.workflowRunId!, stepTemplateId: "s", attempt: 1, status: "passed",
-    startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1,
+    startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0,
   }));
 
   it("a fully-upheld ai_reviewed step rises to the measured calibration when past threshold (100 now applies, Task 3)", () => {
@@ -973,7 +973,7 @@ describe("step description + completionPolicy", () => {
   it("surfaces description (first sentence of instructions) + completionPolicy on the step metric", () => {
     const ts = [sc("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z")];
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
     ];
     const namesWithMeta = new Map([["s", { name: "Generate", ordinal: 2, description: "Assess the goal without changing code.", completionPolicy: "reasoning" }]]);
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: namesWithMeta, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
@@ -984,7 +984,7 @@ describe("step description + completionPolicy", () => {
   it("leaves description/completionPolicy undefined when stepNames doesn't carry them", () => {
     const ts = [sc("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z")];
     const runs: TemplateStepRun[] = [
-      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1 },
+      { workflowRunId: "r1", stepTemplateId: "s", attempt: 1, status: "passed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
     ];
     const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
     expect(step.description).toBeUndefined();
@@ -1007,5 +1007,71 @@ describe("firstSentence", () => {
   it("returns undefined for empty or whitespace-only input", () => {
     expect(firstSentence("")).toBeUndefined();
     expect(firstSentence("   ")).toBeUndefined();
+  });
+});
+
+describe("rescued steps cost the score", () => {
+  const sr = (runId: string, over: Partial<TemplateStepRun> = {}): TemplateStepRun => ({
+    workflowRunId: runId, stepTemplateId: "s", attempt: 1, status: "passed",
+    startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z",
+    blockedReason: null, templateVersion: 1, stallRescues: 0, ...over,
+  });
+  // sc() alone leaves a completion unestablished (composed-score.ts requires an actual
+  // passing verifier — sensorsRun.length > 0 for "executable" — not just oracleSufficient);
+  // attach a passing sensor so these completions reach verified_executed (score 1) and the
+  // rescue-weight math in the denominator is the only thing under test here.
+  const scExecuted = (...args: Parameters<typeof sc>): TemplateTransition => {
+    const t = sc(...args);
+    t.transition.evidence!.sensorsRun = [
+      { kind: "unit", command: "npm test", exitCode: 0, durationMs: 500, result: "passed", summary: "ok", artifactRef: null },
+    ];
+    return t;
+  };
+
+  it("a step that needed one rescue scores below three clean passes", () => {
+    const ts = [
+      scExecuted("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z"),
+      scExecuted("b", "r2", "s", "passed", true, "2026-05-01T01:00:00.000Z"),
+      scExecuted("c", "r3", "s", "passed", true, "2026-05-01T02:00:00.000Z"),
+    ];
+    const clean = computeStepMetrics({
+      transitions: ts, stepRuns: [sr("r1"), sr("r2"), sr("r3")],
+      stepNames: names, nowIso, period: "30d",
+    })[0]!;
+    const rescued = computeStepMetrics({
+      transitions: ts, stepRuns: [sr("r1"), sr("r2"), sr("r3", { stallRescues: 1 })],
+      stepNames: names, nowIso, period: "30d",
+    })[0]!;
+
+    expect(clean.verification.confidence).toBe(1);
+    // n = 3 + 0.5 → 3.0 / 3.5
+    expect(rescued.verification.confidence).toBeCloseTo(3 / 3.5, 6);
+    expect(rescued.verification.confidence).toBeLessThan(clean.verification.confidence);
+  });
+
+  it("counts rescues from every attempt, not just the final one", () => {
+    const ts = [scExecuted("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z")];
+    const step = computeStepMetrics({
+      transitions: ts,
+      stepRuns: [
+        sr("r1", { attempt: 1, status: "blocked", stallRescues: 2, blockedReason: "no progress" }),
+        sr("r1", { attempt: 2, status: "passed", stallRescues: 0 }),
+      ],
+      stepNames: names, nowIso, period: "30d",
+    })[0]!;
+    // one conclusive pass, two rescues → 1.0 / (1 + 1.0)
+    expect(step.verification.confidence).toBeCloseTo(0.5, 6);
+  });
+
+  it("a blocked final with no completion is a hard zero", () => {
+    const step = computeStepMetrics({
+      transitions: [scExecuted("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z")],
+      stepRuns: [
+        sr("r1"),
+        sr("r2", { status: "blocked", blockedReason: "run_cancelled", finishedAt: "2026-05-01T01:00:00.000Z" }),
+      ],
+      stepNames: names, nowIso, period: "30d",
+    })[0]!;
+    expect(step.verification.confidence).toBeCloseTo(0.5, 6);
   });
 });
