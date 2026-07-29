@@ -1081,4 +1081,44 @@ describe("rescued steps cost the score", () => {
     // → 1.0 / (1 + 1 + 0.5*1) = 0.4
     expect(step.verification.confidence).toBeCloseTo(0.4, 6);
   });
+
+  // Round-2 fix (Finding 1): a rescue must not turn an otherwise-empty scoreable
+  // population into a scored one. With zero conclusive completions and zero hard
+  // fails, the sentinel must key off the UNWEIGHTED count — a rescue on a bare
+  // self-reported completion must not manufacture a score of 0 (a failing grade)
+  // out of "nothing was verified" (unknown).
+  it("a rescue does not turn an unknown (no conclusive verdict) step into a hard zero", () => {
+    const step = computeStepMetrics({
+      transitions: [sc("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z")],
+      stepRuns: [sr("r1", { stallRescues: 1 })],
+      stepNames: names, nowIso, period: "30d",
+    })[0]!;
+    expect(step.score).toBeNull();
+    expect(step.quality.scoredSampleSize).toBe(0);
+    expect(step.verification.band.level).toBe("needs_evidence");
+  });
+
+  // Round-2 fix (Finding 2): VERSION_MIN must gate on the unweighted scored-sample
+  // count, not the rescue-weighted denominator — otherwise two rescues alone (with
+  // no completion at all) can clear the floor and fire a false version-regression
+  // signal from under-powered data.
+  it("rescues alone cannot clear the VERSION_MIN sample floor for the per-step version delta", () => {
+    const v1a = scExecuted("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z");
+    const v1b = scExecuted("b", "r2", "s", "passed", true, "2026-05-01T01:00:00.000Z");
+    const v2a = scExecuted("c", "r3", "s", "passed", true, "2026-05-02T00:00:00.000Z");
+    v2a.templateVersion = 2;
+    const step = computeStepMetrics({
+      transitions: [v1a, v1b, v2a],
+      stepRuns: [
+        sr("r1"), sr("r2"),
+        sr("r3", { templateVersion: 2, stallRescues: 2 }),
+      ],
+      stepNames: names, nowIso, period: "30d",
+    })[0]!;
+    // v2 has exactly ONE scored completion — below VERSION_MIN (2). Two rescues alone
+    // would push v2's weighted n to 1 + 0.5*2 = 2, clearing the old (buggy) n-based
+    // floor and firing a delta of -0.5 purely from rescue weight, not a quality change.
+    expect(step.versionScoreDelta).toBeNull();
+    expect(step.versionScoreDeltaVersions).toBeNull();
+  });
 });

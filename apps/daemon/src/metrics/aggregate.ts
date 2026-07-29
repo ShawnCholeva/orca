@@ -361,10 +361,16 @@ export function computeStepMetrics(input: {
       completes: typeof finalStepCompletes,
       hardFails: number,
       rescues: number
-    ): { n: number; value: number | null } => {
+    ): { n: number; count: number; value: number | null } => {
       const conc = completes.filter(isConclusive);
-      const n = conc.length + hardFails + STALL_WEIGHT * rescues;
-      return n === 0 ? { n, value: null } : { n, value: conc.reduce((acc, t) => acc + contribution(t), 0) / n };
+      // The null/needs_evidence sentinel and the VERSION_MIN sample floor must both key
+      // off the UNWEIGHTED population (count) — a rescue discounts a delivered result,
+      // it must never manufacture a scoreable population (or clear the version-delta
+      // floor) out of one that was otherwise empty.
+      const count = conc.length + hardFails;
+      if (count === 0) return { n: 0, count, value: null };
+      const n = count + STALL_WEIGHT * rescues;
+      return { n, count, value: conc.reduce((acc, t) => acc + contribution(t), 0) / n };
     };
     const headline = scoreOver(finalStepCompletes, hardFailedFinals.length, rescueCount);
     const scoreValue = headline.value;
@@ -393,7 +399,9 @@ export function computeStepMetrics(input: {
         stepRuns.filter((r) => r.templateVersion === v).reduce((acc, r) => acc + (r.stallRescues ?? 0), 0),
       );
       const a = forVersion(latestV), b = forVersion(priorV);
-      if (a.n >= VERSION_MIN && b.n >= VERSION_MIN && a.value != null && b.value != null) {
+      // Gate on `count` (unweighted scored samples), not `n` (rescue-weighted): rescues
+      // alone must not clear the floor and let an under-powered comparison fire.
+      if (a.count >= VERSION_MIN && b.count >= VERSION_MIN && a.value != null && b.value != null) {
         versionScoreDelta = a.value - b.value;
         versionScoreDeltaVersions = { latest: latestV, prior: priorV };
       }
