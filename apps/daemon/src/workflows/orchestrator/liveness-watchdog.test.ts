@@ -605,5 +605,14 @@ describe("stall recovery accounting", () => {
     expect(stepRun.finished_at).not.toBeNull();
     const run = db.prepare("SELECT status FROM workflow_runs WHERE id = ?").get(runId) as { status: string };
     expect(run.status).toBe("blocked");
+
+    // The workflow.run.blocked event must carry the injected clock, not the real
+    // wall clock markWorkflowRunBlocked falls back to when `now` is omitted.
+    const event = db
+      .prepare(
+        "SELECT created_at AS c FROM events WHERE type = 'workflow.run.blocked' AND goal_id = ?"
+      )
+      .get(goalId) as { c: string } | undefined;
+    expect(event?.c).toBe(NOW);
   });
 });

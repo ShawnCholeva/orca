@@ -370,7 +370,7 @@ export class OrchestratorService {
           options
         );
         markStepBlocked(db, now, stepRun.id, reason, options);
-        markWorkflowRunBlocked({ db, bus: options.bus ?? new EventBus(), idFactory: options.idFactory }, run.id, reason);
+        markWorkflowRunBlocked({ db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory }, run.id, reason);
       } else {
         if (stalled) {
           postOrchestratorMessage(
