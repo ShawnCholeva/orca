@@ -571,7 +571,9 @@ export const SessionFailureReason = z.enum([
   "workspace_unavailable",
   "spawn_failed",
   "daemon_restart",
-  "internal_error"
+  "internal_error",
+  "worker_stalled",
+  "user_declared_stuck"
 ]);
 export type SessionFailureReason = z.infer<typeof SessionFailureReason>;
 

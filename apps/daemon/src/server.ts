@@ -205,7 +205,7 @@ declare module 'fastify' {
     otlpAccumulator: SessionCostAccumulator;
   }
 }
-import { resolvePermissionDecision } from './permission-gate.js';
+import { resolvePermissionDecision, resolveToolPolicyDenial } from './permission-gate.js';
 import { classifyToolAction } from './harness-risk/classify.js';
 import {
   actionClassOf,
@@ -228,7 +228,11 @@ import {
   pauseForProviderRecovery as pauseForProviderRecoveryActivity,
 } from './activities/store.js';
 import { resumeActiveRuns } from './workflows/orchestrator/resume.js';
-import { buildLivenessWatchdogDeps, livenessWatchdogTick } from './workflows/orchestrator/liveness-watchdog.js';
+import {
+  buildLivenessWatchdogDeps,
+  livenessWatchdogTick,
+  type ProgressMark,
+} from './workflows/orchestrator/liveness-watchdog.js';
 import { joinChildRun } from './workflows/composition/join.js';
 import { realVersionProbe } from './harness-state/workspace-version.js';
 import { registerWorkflowTemplateRoutes } from './workflows/templates/routes.js';
@@ -1028,10 +1032,14 @@ export function createServer(
   if (deps?.resumeActiveRunsOnBoot) {
     const watchdogMs = Number(process.env["ORCA_LIVENESS_WATCHDOG_MS"] ?? 5000);
     const watchdogGraceMs = Number(process.env["ORCA_LIVENESS_GRACE_MS"] ?? 15000);
+    const stallMs = Number(process.env["ORCA_STALL_MS"] ?? 600000);
+    const watchdogProgress = new Map<string, ProgressMark>();
     const watchdogDeps = buildLivenessWatchdogDeps(db, eventBus, {
       isTmuxAlive: (sessionId) => workerSessions.isTmuxAlive(sessionId),
       now: daemonContext.now ?? (() => new Date().toISOString()),
       graceMs: watchdogGraceMs,
+      stallMs,
+      progress: watchdogProgress,
     });
     const watchdogTimer = setInterval(() => {
       void livenessWatchdogTick(watchdogDeps).catch((err) =>
@@ -1745,6 +1753,12 @@ export function createServer(
         toolUseId: payload.toolUseId || null,
       });
     },
+    onToolGate: async (sessionId, payload) =>
+      resolveToolPolicyDenial(
+        { db, bus: eventBus, now: daemonContext.now, idFactory: daemonContext.idFactory },
+        sessionId,
+        payload
+      ),
     onPermissionRequest: async (sessionId, payload) => {
       const decision = resolvePermissionDecision(
         { db, bus: eventBus, now: daemonContext.now, idFactory: daemonContext.idFactory },
