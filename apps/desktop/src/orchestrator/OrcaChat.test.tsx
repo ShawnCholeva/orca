@@ -15,6 +15,7 @@ vi.mock("../theme/ThemeProvider", () => ({
 const confirmSplitMock = vi.fn();
 const confirmStepMock = vi.fn();
 const createOrchestratorMessageMock = vi.fn();
+const runGoalCommandMock = vi.fn();
 const getGoalDetailMock = vi.fn();
 const getWorkflowRunMock = vi.fn();
 const getWorkflowStepRunMock = vi.fn();
@@ -47,6 +48,7 @@ vi.mock("../api", () => ({
   confirmSplit: (...args: unknown[]) => confirmSplitMock(...args),
   confirmStep: (...args: unknown[]) => confirmStepMock(...args),
   createOrchestratorMessage: (...args: unknown[]) => createOrchestratorMessageMock(...args),
+  runGoalCommand: (...args: unknown[]) => runGoalCommandMock(...args),
   getGoalDetail: (...args: unknown[]) => getGoalDetailMock(...args),
   getWorkflowRun: (...args: unknown[]) => getWorkflowRunMock(...args),
   listWorkflowRuns: (...args: unknown[]) => listWorkflowRunsMock(...args),
@@ -212,6 +214,7 @@ describe("OrcaChat", () => {
     confirmStepMock.mockReset();
     confirmStepMock.mockResolvedValue(undefined);
     createOrchestratorMessageMock.mockReset();
+    runGoalCommandMock.mockReset();
     getGoalDetailMock.mockReset();
     getWorkflowRunMock.mockReset();
     getWorkflowStepRunMock.mockReset();
@@ -774,6 +777,42 @@ describe("OrcaChat", () => {
     expect(await screen.findByText("I will keep it bounded.")).toBeInTheDocument();
   });
 
+  it("sends /stuck as a command instead of a chat message", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    runGoalCommandMock.mockResolvedValue({ ok: true, message: "Thanks — restarting the agent on this step." });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const input = await screen.findByRole("textbox");
+    fireEvent.change(input, { target: { value: "/stuck going in circles" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => expect(runGoalCommandMock).toHaveBeenCalledWith("goal-1", {
+      command: "stuck",
+      args: "going in circles",
+    }));
+    expect(createOrchestratorMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("sends an unknown slash command as an ordinary message", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    createOrchestratorMessageMock.mockResolvedValue({
+      message: { ...userMessage, id: "msg-user-3", body: "/nope" },
+      reply: null,
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const input = await screen.findByRole("textbox");
+    fireEvent.change(input, { target: { value: "/nope" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => expect(createOrchestratorMessageMock).toHaveBeenCalled());
+    expect(runGoalCommandMock).not.toHaveBeenCalled();
+  });
+
   it("interleaves step-result cards with messages in createdAt order", async () => {
     getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
     listOrchestratorMessagesMock.mockResolvedValue({
@@ -1212,14 +1251,16 @@ describe("OrcaChat", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
 
+    // Free text is ambiguous (an answer, or a question about the options), so it
+    // goes to chat for the orchestrator to resolve — not straight to the worker.
     await waitFor(() =>
-      expect(submitWorkerFreeTextMock).toHaveBeenCalledWith(
-        "goal-1",
-        "question-1",
-        "a dedicated workspaces tab",
-        expect.anything(),
-      ),
+      expect(createOrchestratorMessageMock).toHaveBeenCalledWith("goal-1", {
+        body: "a dedicated workspaces tab",
+      }),
     );
+    expect(submitWorkerFreeTextMock).not.toHaveBeenCalled();
+    // The question stays live until the orchestrator says the text settled it.
+    expect(screen.getByRole("radio", { name: "Use hooks" })).not.toBeDisabled();
   });
 
   it("answers an orchestrator ask_user via the orchestrator-answer endpoint, with no user bubble and a Thinking row", async () => {
@@ -2303,7 +2344,7 @@ describe("OrcaChat", () => {
     );
   });
 
-  it("composer answers the pending worker question via submitWorkerFreeText and shows Thinking…", async () => {
+  it("sends composer text to the orchestrator instead of consuming the open worker question", async () => {
     setupRunLoad();
     listOrchestratorMessagesMock.mockResolvedValue({
       messages: [
@@ -2328,23 +2369,31 @@ describe("OrcaChat", () => {
     render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
 
     await screen.findByText("Which approach should I use?");
+    // The orchestrator replies asynchronously while a run is active (reply: null).
+    createOrchestratorMessageMock.mockResolvedValue({
+      message: {
+        id: "msg-user-1", goalId: "goal-1", role: "user", kind: "message",
+        body: "Can you explain these options more?", correlationId: null, createdAt: now,
+      },
+      reply: null,
+    });
+
+    // "Can you explain these options more?" must not be swallowed as the answer:
+    // an open question no longer hijacks the composer, so the text reaches the
+    // orchestrator, which decides whether it settles the question.
     fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
-      target: { value: "a dedicated workspaces tab" },
+      target: { value: "Can you explain these options more?" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     await waitFor(() =>
-      expect(submitWorkerFreeTextMock).toHaveBeenCalledWith(
-        "goal-1",
-        "question-1",
-        "a dedicated workspaces tab",
-        { fromChat: true },
-      ),
+      expect(createOrchestratorMessageMock).toHaveBeenCalledWith("goal-1", {
+        body: "Can you explain these options more?",
+      }),
     );
-    expect(createOrchestratorMessageMock).not.toHaveBeenCalled();
-    // The transient "Thinking…" indicator should appear after answering.
-    expect(await screen.findByTestId("answer-thinking")).toBeInTheDocument();
-    expect(screen.getByTestId("answer-thinking")).toHaveTextContent("Thinking…");
+    expect(submitWorkerFreeTextMock).not.toHaveBeenCalled();
+    // The question stays answerable while the orchestrator replies.
+    expect(screen.getByRole("radio", { name: "Use hooks" })).not.toBeDisabled();
   });
 
   it("keeps the Thinking… row when an invisible activity lands, and clears it only once a visible card arrives", async () => {
@@ -2384,10 +2433,8 @@ describe("OrcaChat", () => {
     await screen.findByText("Which approach should I use?");
     await waitFor(() => expect(listActivitiesMock).toHaveBeenCalledTimes(1));
 
-    fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
-      target: { value: "use hooks" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Use hooks" }));
+    fireEvent.click(screen.getByRole("button", { name: /send answer/i }));
 
     expect(await screen.findByTestId("answer-thinking")).toBeInTheDocument();
 

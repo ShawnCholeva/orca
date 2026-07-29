@@ -99,6 +99,8 @@ import {
   ResolveConflictRequest,
   ResolveConflictResponse,
   RequestNextOrchestratorDecisionRequest,
+  RunGoalCommandRequest,
+  RunGoalCommandResponse,
   SessionErrorFrame,
   SessionMemorySummary,
   SessionOutputFrame,
@@ -1171,6 +1173,23 @@ export async function createOrchestratorMessage(
     },
     CreateOrchestratorMessageResponse,
     "Create orchestrator message failed",
+  );
+}
+
+export async function runGoalCommand(
+  goalId: string,
+  body: RunGoalCommandRequest,
+): Promise<RunGoalCommandResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/commands`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify(RunGoalCommandRequest.parse(body)),
+    },
+    RunGoalCommandResponse,
+    "Run goal command failed",
   );
 }
 

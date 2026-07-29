@@ -34,9 +34,9 @@ import {
   openEventStream,
   requestNextOrchestratorDecision,
   requestStepRevision,
+  runGoalCommand,
   submitStepRevision,
   submitWorkerAnswers,
-  submitWorkerFreeText,
   submitOrchestratorAnswer,
   startWorkflowRun,
   toErrorMessage,
@@ -55,6 +55,7 @@ import { PermissionApprovalCard } from "./PermissionApprovalCard";
 import { ProviderRecoveryCard } from "./ProviderRecoveryCard";
 import { WorkerPermissionToggle } from "./WorkerPermissionToggle";
 import { WorkflowTracker, type TrackerStep } from "./components/WorkflowTracker";
+import { matchSlashCommands, parseSlashCommand } from "./slash-commands";
 import "./orca-chat.css";
 
 type Props = {
@@ -535,17 +536,10 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     !hasLiveActivity &&
     !hasAgentActivityCard;
 
-  // The latest unanswered worker question in the message list — the composer
-  // routes its text here instead of to the orchestrator when this is non-null.
-  const pendingWorkerQuestionId =
-    [...messages].reverse().find(
-      (m) => m.pendingQuestion?.source === "worker" && m.pendingQuestion.answer == null && !m.pendingQuestion.withdrawn,
-    )?.pendingQuestion?.questionId ?? null;
   // ANY unanswered pending question (worker OR orchestrator source) means the step
-  // is parked on the human, not working. The composer-routing above cares which
-  // source it is; the "Working on {step}…" honest-status suppression does not — a
-  // step's AskUserQuestion can surface as "orchestrator" source (observed live),
-  // and claiming it is "working" while it waits on the user is dishonest.
+  // is parked on the human, not working — a step's AskUserQuestion can surface as
+  // "orchestrator" source (observed live), and claiming it is "working" while it
+  // waits on the user is dishonest.
   const pendingAnyQuestionId =
     [...messages].reverse().find(
       (m) => m.pendingQuestion != null && m.pendingQuestion.answer == null && !m.pendingQuestion.withdrawn,
@@ -935,22 +929,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     const body = messageDraft.trim();
     if (!body) return;
 
-    const liveQuestionId = pendingWorkerQuestionId;
-    if (liveQuestionId) {
-      setSendingMessage(true);
-      setMessageError(null);
-      try {
-        await submitWorkerFreeText(selectedGoalId, liveQuestionId, body, { fromChat: true });
-        markAnswerPending();
-        setMessageDraft("");
-      } catch (err) {
-        setMessageError(toErrorMessage(err, "Failed to send your answer."));
-      } finally {
-        setSendingMessage(false);
-      }
-      return;
-    }
-
     if (pendingRevisionRunId) {
       setSendingMessage(true);
       setMessageError(null);
@@ -960,6 +938,21 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
         setMessageDraft("");
       } catch (err) {
         setMessageError(toErrorMessage(err, "Failed to send your revision."));
+      } finally {
+        setSendingMessage(false);
+      }
+      return;
+    }
+
+    const command = parseSlashCommand(body);
+    if (command) {
+      setSendingMessage(true);
+      setMessageError(null);
+      try {
+        await runGoalCommand(selectedGoalId, command);
+        setMessageDraft("");
+      } catch {
+        setMessageError("Failed to run that command.");
       } finally {
         setSendingMessage(false);
       }
@@ -1278,6 +1271,21 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
           className="orca-chat-composer"
           onSubmit={(event) => void handleSendMessage(event)}
         >
+          {matchSlashCommands(messageDraft).length > 0 && (
+            <ul className="orca-chat-command-list" role="listbox" aria-label="Commands">
+              {matchSlashCommands(messageDraft).map((c) => (
+                <li key={c.name}>
+                  <button
+                    type="button"
+                    onClick={() => setMessageDraft(`/${c.name} `)}
+                  >
+                    <span>/{c.name} {c.args}</span>
+                    <span>{c.describe}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="orca-chat-input-wrapper">
             <svg
               className="orca-chat-input-icon"
@@ -1379,10 +1387,16 @@ export function ChatMessageRow({ message, goalId, onWorkerAnswered }: { message:
               await submitWorkerAnswers(message.goalId, message.pendingQuestion!.questionId, answers);
               onWorkerAnswered?.();
             }}
+            // "Something else" is free text, so it is ambiguous the same way
+            // composer text is — it may settle the question or ask about it.
+            // Post it as chat and let the orchestrator decide; it consumes the
+            // question only if the text actually answers it, which is what
+            // drives this card into its answered state.
             onSubmitFreeText={async (text) => {
-              await submitWorkerFreeText(message.goalId, message.pendingQuestion!.questionId, text, { fromChat: false });
+              await createOrchestratorMessage(message.goalId, { body: text });
               onWorkerAnswered?.();
             }}
+            freeTextDeferred
           />
         ) : message.pendingQuestion ? (
           // Orchestrator ask_user: persist the answer on the question and forward
@@ -1415,6 +1429,7 @@ function WorkerQuestionForm({
   pending,
   onSubmitAnswers,
   onSubmitFreeText,
+  freeTextDeferred,
 }: {
   goalId: string;
   pending: NonNullable<OrchestratorChatMessage["pendingQuestion"]>;
@@ -1425,6 +1440,10 @@ function WorkerQuestionForm({
   // Both worker and orchestrator questions accept a free-text answer
   // ("Something else"), so the user is never boxed into the offered options.
   onSubmitFreeText?: (text: string) => Promise<void>;
+  // True when free text is routed through chat rather than answering directly
+  // (worker questions): the orchestrator decides whether it settles the question,
+  // so the card must stay live until a persisted answer says otherwise.
+  freeTextDeferred?: boolean;
 }) {
   // Once a question carries a persisted answer it renders read-only, driven by
   // that answer — so the answered state survives reloads and goal switches and
@@ -1477,11 +1496,19 @@ function WorkerQuestionForm({
 
   async function handleSubmit() {
     const answers = pending.questions.map((_, i) => ({ questionIndex: i, selectedLabels: selections[i] ?? [] }));
-    setLocalSubmitted(true);
+    // Deferred free text isn't an answer yet, so don't lock the card on it —
+    // only a persisted answer (or an option submit, which is unambiguous) does.
+    const deferred = freeTextSelected && onSubmitFreeText != null && freeTextDeferred === true;
+    if (!deferred) setLocalSubmitted(true);
     try {
       if (freeTextSelected && onSubmitFreeText) await onSubmitFreeText(freeText.trim());
       else if (onSubmitAnswers) await onSubmitAnswers(answers);
       else await submitWorkerAnswers(goalId, pending.questionId, answers);
+      if (deferred) {
+        // Hand the text off to chat and reset the box, leaving the options live.
+        setFreeText("");
+        setFreeTextSelected(false);
+      }
     } catch {
       setLocalSubmitted(false);
       setSubmitError(true);
