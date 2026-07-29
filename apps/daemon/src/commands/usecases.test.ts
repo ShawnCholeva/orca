@@ -19,7 +19,7 @@ import {
   fakeRegistry,
   fakeStepDispatch,
 } from "../workflows/orchestrator/skill-step-test-helpers.js";
-import { runGoalCommand, UnknownCommandError } from "./usecases.js";
+import { GoalCommandGoalNotFoundError, runGoalCommand, UnknownCommandError } from "./usecases.js";
 
 const PROVIDER = "orca/anthropic" as const;
 const MODEL = "claude-sonnet-4-6";
@@ -220,5 +220,36 @@ describe("runGoalCommand", () => {
 
     const result = await runGoalCommand({ db, bus, now: () => NOW, idFactory }, goalId, { command: "stuck" });
     expect(result.message).toContain("no agent running");
+  });
+
+  it("rejects a nonexistent goal before writing anything to the chat thread", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    seedRunningWorkerStep(db); // seeds goal-1; "no-such-goal" is never inserted
+
+    await expect(
+      runGoalCommand({ db, bus, now: () => NOW, idFactory }, "no-such-goal", { command: "stuck" })
+    ).rejects.toBeInstanceOf(GoalCommandGoalNotFoundError);
+
+    // The guard must run BEFORE postOrchestratorMessage's insert, not merely
+    // convert an FK-constraint error afterwards — so nothing is written.
+    const rows = db
+      .prepare("SELECT COUNT(*) AS c FROM orchestrator_messages WHERE goal_id = ?")
+      .get("no-such-goal") as { c: number };
+    expect(rows.c).toBe(0);
+  });
+
+  it("rejects an archived goal the same way", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { goalId } = seedRunningWorkerStep(db);
+    db.prepare("UPDATE goals SET archived_at = ? WHERE id = ?").run(NOW, goalId);
+
+    await expect(
+      runGoalCommand({ db, bus, now: () => NOW, idFactory }, goalId, { command: "stuck" })
+    ).rejects.toBeInstanceOf(GoalCommandGoalNotFoundError);
+
+    const rows = db
+      .prepare("SELECT COUNT(*) AS c FROM orchestrator_messages WHERE goal_id = ?")
+      .get(goalId) as { c: number };
+    expect(rows.c).toBe(0);
   });
 });
