@@ -64,12 +64,19 @@ Using both matters: a redrawing TUI keeps `output_seq` climbing even when parked
 silent-but-working agent may produce no output while hooks fire. Requiring *both* to be
 static is the conservative combination.
 
-**System-turn gate** — the clock accrues only while the step's `activities` row has
-`status = 'active'`. Any of these suspends it *and resets the accumulated time*:
-- `activities.status = 'paused_for_input'` in any of its source kinds —
-  `question_pending`, `step_confirmation_pending`, `gate_decision_pending`,
-  `mark_done_pending`, `provider_recovery_pending`
-- a pending permission approval for the session (`agent.permission_pending`)
+**System-turn gate** — the clock accrues only while Orca owes the next move. Either of
+these suspends it *and resets the accumulated time*:
+- `activities.status = 'paused_for_input'` — written by `question_pending`,
+  `step_confirmation_pending`, `gate_decision_pending`, `mark_done_pending`, and
+  `provider_recovery_pending`
+- `activities.source_kind = 'permission_pending'` — **this one keeps
+  `status = 'active'`** (`activities/store.ts:233` inserts every opened activity as
+  `active`; only the explicit park paths flip the status), so checking the status alone
+  would let a worker awaiting your tool approval trip the stall sensor. Both conditions
+  are required.
+
+A step run with no live activity row is treated as the system's turn: its worker is
+running and nothing is waiting on the user.
 
 The unique partial index `idx_activities_one_live_per_step` guarantees at most one live
 activity per step run, so this is a single lookup.
@@ -189,7 +196,8 @@ execution-plane split: under the Runner Protocol, "has this runner made progress
 
 Unit — stall sensor:
 - system-turn suppression: `paused_for_input` (each source kind) never trips, regardless
-  of elapsed time; pending permission approval never trips
+  of elapsed time; a `permission_pending` activity never trips **despite its `active`
+  status** — the regression this design would otherwise ship
 - clock resets when `output_seq` advances; resets when `activities.updated_at` advances;
   trips only when both are static past `ORCA_STALL_MS`
 - existing behavior preserved: grace window, `hasStepOutput` skip, dead-tmux reap
