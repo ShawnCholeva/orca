@@ -25,7 +25,10 @@ export function parseSlashCommand(draft: string): { command: string; args: strin
 
 /** Commands to offer for the current draft — only while the name is still being typed. */
 export function matchSlashCommands(draft: string): SlashCommand[] {
-  const trimmed = draft.trim();
+  // Left-trim only: a trailing space (e.g. after clicking a suggestion, which
+  // sets the draft to "/stuck ") means the name is done, not still being typed,
+  // so it must not be trimmed away before the whitespace check below.
+  const trimmed = draft.trimStart();
   if (!trimmed.startsWith("/") || /\s/.test(trimmed)) return [];
   const prefix = trimmed.slice(1);
   return SLASH_COMMANDS.filter((c) => c.name.startsWith(prefix));

@@ -36,4 +36,7 @@ describe("matchSlashCommands", () => {
   it("offers nothing for ordinary text", () => {
     expect(matchSlashCommands("hello")).toEqual([]);
   });
+  it("closes once the command name is complete and trailed by a space (e.g. after selecting a suggestion), even with no reason typed yet", () => {
+    expect(matchSlashCommands("/stuck ")).toEqual([]);
+  });
 });
