@@ -250,6 +250,7 @@ import { ActivityUpdater } from './activities/updater.js';
 import { reconcileStepResultActivities } from './activities/step-result-activity.js';
 import { registerOrchestratorRoutes } from './workflows/orchestrator/routes.js';
 import { registerOrchestratorChatRoutes } from './orchestrator-chat/routes.js';
+import { registerGoalCommandRoutes } from './commands/routes.js';
 import { deletePendingApprovalMessage, insertMessageWithEvent, recordWorkerQuestionAnswer, withdrawOrchestratorPromptsForStepRun } from './orchestrator-chat/usecases.js';
 import { registerShadowHookRoutes } from './shadow-hooks/routes.js';
 import { ShadowSessionManager, shadowSessionId, type ShadowAdapterId } from './orchestrator-llm/shadow-session.js';
@@ -2375,6 +2376,15 @@ export function createServer(
         { bus: eventBus, idFactory: daemonContext.idFactory }
       );
     },
+  });
+
+  // ---- Goal command routes (deterministic, no orchestrator LLM) ----
+
+  registerGoalCommandRoutes(server, {
+    db,
+    bus: eventBus,
+    now: daemonContext.now,
+    idFactory: daemonContext.idFactory,
   });
 
   // ---- Orchestrator hook endpoint ----

@@ -3567,6 +3567,20 @@ export type SystemReadinessReport = z.infer<typeof SystemReadinessReport>;
 export const CheckSystemReadinessResponse = z.object({ report: SystemReadinessReport });
 export type CheckSystemReadinessResponse = z.infer<typeof CheckSystemReadinessResponse>;
 
+// ---------- goal commands (deterministic, no orchestrator LLM) ----------
+
+export const RunGoalCommandRequest = z.object({
+  command: z.string().min(1),
+  args: z.string().optional(),
+});
+export type RunGoalCommandRequest = z.infer<typeof RunGoalCommandRequest>;
+
+export const RunGoalCommandResponse = z.object({
+  ok: z.literal(true),
+  message: z.string(),
+});
+export type RunGoalCommandResponse = z.infer<typeof RunGoalCommandResponse>;
+
 export {
   ExecutionMode,
   EnabledExecutionModeEntry,
