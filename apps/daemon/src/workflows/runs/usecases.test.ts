@@ -6,7 +6,7 @@ import type Database from "better-sqlite3";
 import type { DomainEvent } from "@orca/contracts";
 import type { Config } from "../../config.js";
 import { closeDatabase, openDatabase } from "../../db.js";
-import { EventBus } from "../../events.js";
+import { EventBus, eventBus } from "../../events.js";
 import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
 import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { resetPreparedStatements as resetRunProjectionPreparedStatements } from "./projection.js";
@@ -285,12 +285,13 @@ describe("workflow run usecases", () => {
     expect(events.map((event) => event.type)).toEqual([
       "workflow.run.started",
       "workflow.step.started",
+      "workflow.step.blocked",
       "workflow.run.cancelled",
     ]);
   });
 
   it("cancelling a run closes the step that was in flight", () => {
-    const { db, ctx } = setup();
+    const { db, events, ctx } = setup();
     const { runId, stepRunId } = seedActiveRunOnStep(ctx);
 
     cancelWorkflowRun(ctx, runId);
@@ -301,6 +302,11 @@ describe("workflow run usecases", () => {
     expect(stepRun.status).toBe("blocked");
     expect(stepRun.finished_at).not.toBeNull();
     expect(stepRun.blocked_reason).toBe("run_cancelled");
+
+    // Not just persisted — must actually reach the bus, alongside workflow.run.cancelled.
+    const blockedEvent = events.find((event) => event.type === "workflow.step.blocked");
+    expect(blockedEvent).toBeDefined();
+    expect(blockedEvent?.payload).toMatchObject({ stepRunId });
   });
 
   it("cancelling leaves already-finished step runs untouched", () => {
@@ -320,11 +326,25 @@ describe("workflow run usecases", () => {
     const { db, ctx } = setup();
     const { goalId, stepRunId } = seedActiveRunOnStep(ctx);
 
-    archiveGoal(goalId);
+    // archiveGoal publishes on the module-level eventBus singleton, not ctx.bus.
+    const published: DomainEvent[] = [];
+    const unsubscribe = eventBus.subscribe((event) => {
+      published.push(event);
+    });
+    try {
+      archiveGoal(goalId);
+    } finally {
+      unsubscribe();
+    }
 
     const stepRun = db.prepare("SELECT status, blocked_reason FROM workflow_step_runs WHERE id = ?")
       .get(stepRunId) as { status: string; blocked_reason: string | null };
     expect(stepRun.status).toBe("blocked");
     expect(stepRun.blocked_reason).toBe("goal_archived");
+
+    // Not just persisted — must actually reach the bus, alongside goal.archived.
+    const blockedEvent = published.find((event) => event.type === "workflow.step.blocked");
+    expect(blockedEvent).toBeDefined();
+    expect(blockedEvent?.payload).toMatchObject({ stepRunId });
   });
 });

@@ -444,6 +444,7 @@ export function archiveGoal(id: string): Goal {
 
   let seq = 0;
   let updatedRow: GoalRow | undefined;
+  const stepBlockedEvents: DomainEvent[] = [];
 
   db.transaction(() => {
     const existing = stmts.selectGoalById.get(id) as GoalRow | undefined;
@@ -464,7 +465,7 @@ export function archiveGoal(id: string): Goal {
       )
       .all(id) as { id: string }[];
     for (const s of inFlight) {
-      markStepBlocked(db, () => now, s.id, "goal_archived");
+      markStepBlocked(db, () => now, s.id, "goal_archived", { stagedEvents: stepBlockedEvents });
     }
 
     updatedRow = stmts.selectGoalById.get(id) as GoalRow;
@@ -478,6 +479,9 @@ export function archiveGoal(id: string): Goal {
     payload: {},
     createdAt: now,
   });
+  for (const event of stepBlockedEvents) {
+    eventBus.publish(event);
+  }
 
   return rowToGoal(updatedRow!);
 }

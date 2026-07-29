@@ -280,6 +280,7 @@ export function cancelWorkflowRun(
     // Abandoning a run must leave a terminal fact behind: an in-flight step run left
     // `active` forever is invisible to scoring, so giving up on a stuck step would
     // cost nothing.
+    const stagedEvents: DomainEvent[] = [];
     const inFlight = ctx.db
       .prepare(
         `SELECT id FROM workflow_step_runs
@@ -287,7 +288,10 @@ export function cancelWorkflowRun(
       )
       .all(...cancelledSet) as { id: string }[];
     for (const s of inFlight) {
-      markStepBlocked(ctx.db, () => now, s.id, "run_cancelled");
+      markStepBlocked(ctx.db, () => now, s.id, "run_cancelled", {
+        idFactory: ctx.idFactory,
+        stagedEvents,
+      });
     }
 
     const event = appendWorkflowEvent(
@@ -297,7 +301,8 @@ export function cancelWorkflowRun(
       now,
       ctx.idFactory
     );
-    return [event];
+    stagedEvents.push(event);
+    return stagedEvents;
   })();
 
   publishStagedWorkflowEvents(ctx.bus, staged);
