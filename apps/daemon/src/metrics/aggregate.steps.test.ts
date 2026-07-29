@@ -1063,15 +1063,22 @@ describe("rescued steps cost the score", () => {
     expect(step.verification.confidence).toBeCloseTo(0.5, 6);
   });
 
-  it("a blocked final with no completion is a hard zero", () => {
+  // The brief's original version of this test left stallRescues at its default (0) on
+  // both step runs, so it passed identically whether or not STALL_WEIGHT was wired into
+  // the denominator — it was proving the pre-existing hardFailedFinals path, not this
+  // feature. Adding a rescue to the cancelled run makes the hard-fail and rescue
+  // channels compound in one assertion, so this test actually depends on STALL_WEIGHT.
+  it("a blocked final with no completion is a hard zero, and rescues on it still add weight", () => {
     const step = computeStepMetrics({
       transitions: [scExecuted("a", "r1", "s", "passed", true, "2026-05-01T00:00:00.000Z")],
       stepRuns: [
         sr("r1"),
-        sr("r2", { status: "blocked", blockedReason: "run_cancelled", finishedAt: "2026-05-01T01:00:00.000Z" }),
+        sr("r2", { status: "blocked", blockedReason: "run_cancelled", finishedAt: "2026-05-01T01:00:00.000Z", stallRescues: 1 }),
       ],
       stepNames: names, nowIso, period: "30d",
     })[0]!;
-    expect(step.verification.confidence).toBeCloseTo(0.5, 6);
+    // one conclusive pass, one hard-failed run, one rescue on that same run
+    // → 1.0 / (1 + 1 + 0.5*1) = 0.4
+    expect(step.verification.confidence).toBeCloseTo(0.4, 6);
   });
 });

@@ -237,9 +237,14 @@ export const StepMetrics = z.object({
   failed: z.number().int().nonnegative(),
   quality: z.object({
     verdictPassRate: z.number(), sensorPassRate: z.number().nullable(), oracleSufficientRate: z.number().nullable(),
-    // Denominator of `score`: conclusive completions + hard-failed runs. Workflow
-    // health must weight by THIS, not sampleSize — the score was computed over it.
-    scoredSampleSize: z.number().int().nonnegative(),
+    // Denominator of `score`: conclusive completions + hard-failed runs, plus a
+    // STALL_WEIGHT-weighted count of stall rescues — a weighted effective-n,
+    // fractional by design (a rescued-then-passed run counts as less than a whole
+    // completion). NOT an integer count; mirrors the sibling
+    // scoreBreakdown.calibrationMix.sampleSize (z.number()). The prior .int() rejected
+    // real rescue-bearing payloads (e.g. 3.5) and broke the whole metrics tab.
+    // Workflow health must weight by THIS, not sampleSize — the score was computed over it.
+    scoredSampleSize: z.number().nonnegative(),
     // Count of completions that produced a CONCLUSIVE verdict (evidence or refute).
     // 0 means the step's delivery was never independently verified — low verification
     // COVERAGE, distinct from low quality. The score reflects verification strength, so

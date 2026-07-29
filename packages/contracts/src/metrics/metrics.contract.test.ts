@@ -30,6 +30,16 @@ describe("StepMetrics contract", () => {
   it("allows null reconciliation", () => {
     expect(() => StepMetrics.parse({ ...base, reconciliation: null })).not.toThrow();
   });
+  // Regression: quality.scoredSampleSize is `n` from scoreOver — conclusive completions
+  // + hard fails + STALL_WEIGHT * rescues (Task 5). A rescued-then-passed run makes it
+  // fractional (e.g. 3.5), a weighted effective-n, not a plain count. The .int()
+  // constraint here rejected any rescue-bearing payload → "Couldn't load metrics" on
+  // the tab, same failure mode as the calibration sampleSize regression below.
+  it("accepts a fractional scoredSampleSize (rescue-weighted denominator)", () => {
+    const withRescue = { ...base, quality: { ...base.quality, scoredSampleSize: 3.5 } };
+    expect(() => StepMetrics.parse(withRescue)).not.toThrow();
+    expect(StepMetrics.parse(withRescue).quality.scoredSampleSize).toBe(3.5);
+  });
 });
 
 const summaryBase = {
