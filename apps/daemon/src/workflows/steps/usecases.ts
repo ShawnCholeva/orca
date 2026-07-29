@@ -179,7 +179,7 @@ function materializeStepResultSafely(
   }
 }
 
-function insertStep(
+export function insertStep(
   db: Database.Database,
   now: () => string,
   goalId: string,

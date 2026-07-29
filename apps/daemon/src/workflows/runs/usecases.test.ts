@@ -10,10 +10,12 @@ import { EventBus } from "../../events.js";
 import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
 import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { resetPreparedStatements as resetRunProjectionPreparedStatements } from "./projection.js";
+import { markStepBlocked } from "../steps/usecases.js";
 import {
   ActiveWorkflowRunExistsError,
   cancelWorkflowRun,
   completeWorkflowRun,
+  markWorkflowRunBlocked,
   pauseWorkflowRun,
   resumeWorkflowRun,
   startWorkflowRun,
@@ -181,6 +183,34 @@ describe("workflow run usecases", () => {
       "workflow.run.started",
     ]);
     expect(events[3]?.payload).toMatchObject({ workflowRunId: run.id, resumed: true });
+  });
+
+  it("resuming a blocked run starts a fresh attempt of the same step", () => {
+    const { db, ctx } = setup();
+    seedGoal(db, "goal-1");
+    seedTemplate(db, "orca/engineering", 1);
+
+    const run = startWorkflowRun(ctx, { goalId: "goal-1", templateId: "orca/engineering" });
+    const stepRunId = run.currentStepRunId!;
+
+    markStepBlocked(db, () => NOW, stepRunId, "no progress after 3 restarts");
+    markWorkflowRunBlocked(ctx, run.id, "no progress after 3 restarts");
+
+    const resumed = resumeWorkflowRun(ctx, run.id);
+    expect(resumed.status).toBe("active");
+    expect(resumed.currentStepRunId).not.toBe(stepRunId);
+
+    const fresh = db
+      .prepare("SELECT attempt, status, step_template_id FROM workflow_step_runs WHERE id = ?")
+      .get(resumed.currentStepRunId) as { attempt: number; status: string; step_template_id: string };
+    expect(fresh.status).toBe("active");
+    expect(fresh.attempt).toBe(2);
+    expect(fresh.step_template_id).toBe("intake");
+
+    const old = db
+      .prepare("SELECT status FROM workflow_step_runs WHERE id = ?")
+      .get(stepRunId) as { status: string };
+    expect(old.status).toBe("blocked");
   });
 
   it("completing a run marks the goal completed", () => {

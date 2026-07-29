@@ -8,7 +8,7 @@ import {
 import type { EventBus } from "../../events.js";
 import { redactSecrets } from "../../memory/normalize.js";
 import { appendWorkflowEvent, publishStagedWorkflowEvents } from "../events.js";
-import { createInitialStep } from "../steps/usecases.js";
+import { createInitialStep, insertStep } from "../steps/usecases.js";
 import { getTemplateById } from "../templates/projection.js";
 import { getWorkflowRunById } from "./projection.js";
 import { descendantRunIds } from "../composition/store.js";
@@ -192,14 +192,41 @@ export function resumeWorkflowRun(
         "UPDATE workflow_runs SET status = 'active', blocked_reason = NULL WHERE id = ?"
       )
       .run(runId);
-    const event = appendWorkflowEvent(
-      ctx.db,
-      "workflow.run.started",
-      { goalId: run.goalId, workflowRunId: runId, status: "active", resumed: true },
-      now,
-      ctx.idFactory
+    const stagedEvents: DomainEvent[] = [];
+    stagedEvents.push(
+      appendWorkflowEvent(
+        ctx.db,
+        "workflow.run.started",
+        { goalId: run.goalId, workflowRunId: runId, status: "active", resumed: true },
+        now,
+        ctx.idFactory
+      )
     );
-    return [event];
+
+    // A run blocked at the rescue cap has a TERMINAL step run (finished_at set), so
+    // resuming has to open the next attempt rather than revive a finished row.
+    if (run.currentStepRunId) {
+      const current = ctx.db
+        .prepare(
+          "SELECT step_template_id, ordinal, attempt, status FROM workflow_step_runs WHERE id = ?"
+        )
+        .get(run.currentStepRunId) as
+        | { step_template_id: string; ordinal: number; attempt: number; status: string }
+        | undefined;
+      if (current && current.status !== "active") {
+        insertStep(
+          ctx.db,
+          () => now,
+          run.goalId,
+          runId,
+          current.step_template_id,
+          current.ordinal,
+          current.attempt + 1,
+          { idFactory: ctx.idFactory, stagedEvents }
+        );
+      }
+    }
+    return stagedEvents;
   })();
 
   publishStagedWorkflowEvents(ctx.bus, staged);

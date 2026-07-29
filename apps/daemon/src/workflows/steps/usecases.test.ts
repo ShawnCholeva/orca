@@ -243,7 +243,7 @@ describe("workflow step usecases", () => {
     expect(eventTypes.at(-1)?.type).toBe("workflow.run.completed");
   });
 
-  it("blocked + resume reuses the current step without incrementing attempt", () => {
+  it("blocked + resume opens a fresh attempt of the same step (blocked rows are terminal)", () => {
     const { db, runCtx } = setup();
     seedGoal(db, "goal-1");
     seedEngineeringTemplate(db, () => NOW);
@@ -256,7 +256,14 @@ describe("workflow step usecases", () => {
     markWorkflowRunBlocked(runCtx, run.id, "waiting for operator");
     const resumed = resumeWorkflowRun(runCtx, run.id);
     expect(resumed.status).toBe("active");
-    expect(resumed.currentStepRunId).toBe(initialStepId);
+    // markStepBlocked sets finished_at, so the blocked row is TERMINAL; resume must
+    // not revive it — it opens a fresh attempt of the same step instead.
+    expect(resumed.currentStepRunId).not.toBe(initialStepId);
+
+    const freshStep = getStep(db, resumed.currentStepRunId!)!;
+    expect(freshStep.step_template_id).toBe(initialStep.step_template_id);
+    expect(freshStep.attempt).toBe(2);
+    expect(freshStep.status).toBe("active");
 
     const stepAfterResume = getStep(db, initialStepId)!;
     expect(stepAfterResume.attempt).toBe(1);
