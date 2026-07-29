@@ -48,7 +48,20 @@ export interface AgentHookRouteDeps {
     sessionId: string,
     payload: { toolName: string; toolInput: unknown; toolUseId: string; transcriptPath: string | undefined },
   ): Promise<void>;
+  /**
+   * Orca's policy gate. Returns a denial reason SHOWN TO THE AGENT, or null when the
+   * policy has no opinion (the call then falls through to the normal permission
+   * flow). Never returns "allow" — that would auto-approve past the approval gate.
+   */
+  onToolGate(
+    sessionId: string,
+    payload: { toolName: string; toolInput: unknown },
+  ): Promise<string | null>;
 }
+
+// Exit-0-with-no-decision equivalent: the tool call continues through the normal
+// permission flow. Staying silent must never read as approval.
+const NO_OPINION = { continue: true } as const;
 
 export function registerAgentHookRoutes(server: FastifyInstance, deps: AgentHookRouteDeps): void {
   server.post("/v1/agent-hooks/response-done", async (request, reply) => {
@@ -85,6 +98,24 @@ export function registerAgentHookRoutes(server: FastifyInstance, deps: AgentHook
       });
     }
     return { continue: true };
+  });
+
+  server.post("/v1/agent-hooks/tool-gate", async (request) => {
+    const { sessionId } = request.query as { sessionId?: string };
+    const body = (request.body ?? {}) as { tool_name?: string; tool_input?: unknown };
+    if (!sessionId || !body.tool_name) return NO_OPINION;
+    const reason = await deps.onToolGate(sessionId, {
+      toolName: body.tool_name,
+      toolInput: body.tool_input ?? {},
+    });
+    if (!reason) return NO_OPINION;
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: reason,
+      },
+    };
   });
 
   server.post("/v1/agent-hooks/elicit", async (request) => {

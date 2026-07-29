@@ -99,6 +99,7 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       { rule: "implies", when: { field: "recommended_tier", equals: "ground_and_design" }, then: { field: "codebase_state", excludes: ["existing_understood"] }, mode: "enforce" },
       { rule: "implies", when: { field: "recommended_tier", equals: "clarify_first" }, then: { field: "has_product_intent", equals: false }, mode: "enforce" },
     ],
+    workspaceWrites: "deny",
     agentPreference: LIGHT,
   },
   {
@@ -112,13 +113,14 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       { key: "constraints", type: "array", itemType: "string", required: true },
       { key: "open_questions", type: "array", itemType: "string", required: false },
     ],
+    workspaceWrites: "deny",
     agentPreference: LIGHT,
   },
   {
     id: "research", ordinal: 2, name: "Research",
     completionPolicy: "reasoning",
     instructions:
-      "Ground the confirmed frame in the current codebase before any solution is proposed. Explore the existing structure and follow established patterns; identify the smallest set of files, modules, and constraints the work would touch, the risks the framing missed, and any existing problems in this area that would affect the work. Do not propose approaches yet. When the codebase reveals a decision that genuinely diverges and is the user's to make, pause and ask with concrete options and a recommendation rather than resolving it silently. If you are the entry step and no Clarify step ran before you, treat the Triage readiness brief as the confirmed frame.",
+      "Ground the confirmed frame in the current codebase before any solution is proposed. Explore the existing structure and follow established patterns; identify the smallest set of files, modules, and constraints the work would touch, the risks the framing missed, and any existing problems in this area that would affect the work. Stay pre-implementation: make no code changes — you are reading the codebase, not altering it, even if asked to resolve something. Do not propose approaches yet. When the codebase reveals a decision that genuinely diverges and is the user's to make, pause and ask with concrete options and a recommendation rather than resolving it silently. If you are the entry step and no Clarify step ran before you, treat the Triage readiness brief as the confirmed frame.",
     outputSchema: [
       { key: "summary", type: "string", required: true },
       { key: "files_in_scope", type: "array", itemType: "string", required: true },
@@ -131,6 +133,7 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       skipWhen: { stepId: "triage", field: "codebase_state", equals: "greenfield" },
       skipDetail: "greenfield — files are planned, not yet created",
     }],
+    workspaceWrites: "deny",
     agentPreference: REASONING,
   },
   {
@@ -164,6 +167,7 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       // mode — a free-form coverage miss should inform the reviewer, not veto.
       { rule: "covers_prior", field: "task_plan[].files", prior: [{ stepId: "research", field: "files_in_scope" }], mode: "observe", label: "Plan covers researched files" },
     ],
+    workspaceWrites: "deny",
     agentPreference: REASONING,
   },
   {
@@ -804,7 +808,12 @@ export const BUILTIN_TEMPLATE_CATALOG: BuiltInTemplateDefinition[] = [
     // "Verify" and promoted to a worker gate (REASONING) that independently
     // verifies the built result — the sole post-build quality check now that
     // Validate Build is gone. Its `rejected` port still loops to Execution.
-    version: 13, category: CATEGORY, recommended: true,
+    // v14: the design phase is read-only by declaration — Triage, Clarify,
+    // Research and Proposal carry workspaceWrites:"deny" (enforced at the tool
+    // gate), and Research's instructions state the pre-implementation contract
+    // Proposal already stated. A live run showed a user revision reaching the
+    // Research worker, which then wrote and ran a file.
+    version: 14, category: CATEGORY, recommended: true,
     steps: ADAPTIVE_STEPS, guardrails: [APPROVAL_MARK_DONE, validationRule(["execution"]), CONTEXT_RULE], graph: ADAPTIVE_GRAPH,
   },
   {

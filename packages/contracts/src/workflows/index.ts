@@ -296,6 +296,12 @@ export const WorkflowStepTemplate = z
     agentPreference: z.array(StepAgentChoice).min(1).max(8),
     completionPolicy: StepCompletionPolicy.optional(),
     grounding: z.array(GroundingCheck).max(16).optional(),
+    // Opt-in read-only declaration for pre-implementation steps. Optional by
+    // necessity, not convenience: loadRunTemplate re-parses template_snapshot_json
+    // for every in-flight run and node-lineage parses stored snapshots, so a
+    // required field would throw on history that append-only rules forbid rewriting.
+    // Absent === writes permitted; the daemon enforces "deny" at the tool gate.
+    workspaceWrites: z.enum(["allow", "deny"]).optional(),
   })
   .strict();
 export type WorkflowStepTemplate = z.infer<typeof WorkflowStepTemplate>;
@@ -2122,6 +2128,11 @@ export const OrchestratorAction = z.discriminatedUnion("kind", [
   // The step agent needs a decision from the user: surface structured options as
   // an interactive choice, not prose. The answer flows back as user guidance.
   z.object({ kind: z.literal("ask_user"), body: z.string().min(1).max(8000), questions: z.array(AskUserQuestionItem).min(1).max(4), rationale: z.string().max(2000).optional() }),
+  // The user's free text answers the question already open on the chat surface.
+  // Only valid while one is open; consumes it and releases the parked worker.
+  // Free text that instead asks ABOUT the open question is answer_user_directly,
+  // which leaves the question open for the user to still decide.
+  z.object({ kind: z.literal("answer_open_question"), answerText: z.string().min(1).max(4000), rationale: z.string().max(2000).optional() }),
 ]);
 export type OrchestratorAction = z.infer<typeof OrchestratorAction>;
 

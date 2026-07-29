@@ -43,6 +43,27 @@ describe("classifyToolAction", () => {
     expect(c.riskClass).toBe("medium");
     expect(c.hardConstraintViolations).toEqual([]);
   });
+  it("does not flag a node one-liner reading process.env", () => {
+    const c = classifyToolAction({
+      toolName: "Bash",
+      toolInput: { command: `node -e "const db=new D(process.env.HOME+'/.orca/orca.db',{readonly:true})"` },
+    });
+    expect(c.riskClass).toBe("medium");
+    expect(c.hardConstraintViolations).toEqual([]);
+  });
+  it("does not flag other host-object env accessors", () => {
+    for (const command of ["node -e 'console.log(process.env)'", "deno run -A -e 'Deno.env.get(\"X\")'", "vite build --mode import.meta.env"]) {
+      const c = classifyToolAction({ toolName: "Bash", toolInput: { command } });
+      expect(c.hardConstraintViolations, command).toEqual([]);
+    }
+  });
+  it("still flags reading a .env dotfile as critical", () => {
+    for (const command of ["cat .env", "cat /srv/app/.env", "cat ~/.env.production", "grep KEY ../.env"]) {
+      const c = classifyToolAction({ toolName: "Bash", toolInput: { command } });
+      expect(c.riskClass, command).toBe("critical");
+      expect(c.hardConstraintViolations.length, command).toBeGreaterThan(0);
+    }
+  });
   it("treats an unknown tool conservatively as sandbox_edit/medium", () => {
     const c = classifyToolAction({ toolName: "SomeMcpTool", toolInput: {} });
     expect(c.permissionTier).toBe("sandbox_edit");

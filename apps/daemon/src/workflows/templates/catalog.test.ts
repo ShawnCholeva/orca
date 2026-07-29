@@ -199,8 +199,8 @@ describe("Adaptive Delivery v9 completion gates", () => {
   const grounding = (stepId: string) =>
     (def.steps.find((s) => s.id === stepId)!.grounding ?? []) as NonNullable<WorkflowStepTemplate["grounding"]>;
 
-  it("is version 13 and runs the sensor ladder for execution", () => {
-    expect(def.version).toBe(13);
+  it("is version 14 and runs the sensor ladder for execution", () => {
+    expect(def.version).toBe(14);
     const rule = def.guardrails.find((g) => g.kind === "validation_rule")!;
     expect((rule.configJson as { appliesToSteps: string[] }).appliesToSteps.sort())
       .toEqual(["execution"]);
@@ -212,6 +212,22 @@ describe("Adaptive Delivery v9 completion gates", () => {
     // completion twice. A deterministic contract must be stated to the model.
     const proposal = def.steps.find((s) => s.id === "proposal")!;
     expect(proposal.instructions).toMatch(/chosen_approach.*exact(ly)?.*name/i);
+  });
+
+  it("tells Research it is pre-implementation, as Proposal already is", () => {
+    // Live incident (2026-07-29): a user revision reached the Research worker and
+    // it began writing and running a file. Proposal carried "make no code changes";
+    // Research carried no read-only clause at all.
+    const research = def.steps.find((s) => s.id === "research")!;
+    expect(research.instructions).toMatch(/make no code changes/i);
+  });
+
+  it("forbids workspace writes on every pre-implementation step", () => {
+    for (const stepId of ["triage", "clarify", "research", "proposal"]) {
+      expect(def.steps.find((s) => s.id === stepId)!.workspaceWrites, stepId).toBe("deny");
+    }
+    // Execution must stay writable — the policy is opt-in, never a blanket default.
+    expect(def.steps.find((s) => s.id === "execution")!.workspaceWrites).toBeUndefined();
   });
 
   it("declares grounding checks on every step with a mechanical referent", () => {

@@ -34,6 +34,15 @@ export function buildAgentHookSettings(args: {
       StopFailure: [{ hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/stop?sessionId=${sid}&failure=1`, true) }] }],
       PreToolUse: [
         { matcher: "AskUserQuestion", hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/elicit?sessionId=${sid}`, false), timeout: 600 }] },
+        // Orca's policy gate. Must be PreToolUse, not PermissionRequest, for two
+        // reasons: PermissionRequest only fires when Claude Code would otherwise
+        // prompt (a workspace `Edit(<path>)` allow-rule bypasses it entirely), and its
+        // deny carries no reason field — an opaque refusal invites the agent to reach
+        // the same end another way. PreToolUse fires for every call and its
+        // permissionDecisionReason is shown to the model. Blocking (not spooled)
+        // because it has to be able to deny; scoped to bash + edit tools so reads
+        // never pay for the round-trip.
+        { matcher: "Bash|Edit|Write|MultiEdit|NotebookEdit", hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/tool-gate?sessionId=${sid}`, false), timeout: 10 }] },
         { matcher: "*", hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/tool-use?sessionId=${sid}`, true), timeout: 5 }] },
       ],
       PermissionRequest: [

@@ -15,7 +15,12 @@ const CRITICAL_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   { re: /\brm\s+-[a-z]*r[a-z]*f|\brm\s+-[a-z]*f[a-z]*r/, reason: "destructive recursive delete (rm -rf)" },
   { re: /\b(mkfs|dd\s+if=|:\(\)\s*\{)/, reason: "destructive disk/forkbomb operation" },
   { re: /(^|\s)(>|>>)\s*\/(etc|dev|sys|proc)\b/, reason: "write to a protected system path" },
-  { re: /(?:^|\s)~\/\.ssh\b|\/\.aws\/credentials\b|\.env\b|\bid_rsa\b/, reason: "access to a secret/credential file" },
+  // `.env` matches the DOTFILE form only — not preceded by a word char or dot, and
+  // not continuing into a longer member chain. A bare /\.env\b/ fired on every
+  // `process.env` / `Deno.env` / `import.meta.env` one-liner and denied readonly
+  // probes as credential access; because this list is a hard constraint the deny is
+  // unappealable, so the agent's only path forward was to route around it.
+  { re: /(?:^|\s)~\/\.ssh\b|\/\.aws\/credentials\b|(?<![\w.])\.env(?:\.[\w-]+)?(?![\w.])|\bid_rsa\b/, reason: "access to a secret/credential file" },
 ];
 const FULL_ACCESS_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   { re: /\b(curl|wget|nc|ncat|ssh|scp|rsync)\b/, reason: "network access" },

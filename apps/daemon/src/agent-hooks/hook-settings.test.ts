@@ -27,6 +27,15 @@ describe("buildAgentHookSettings", () => {
     expect(cmd).not.toContain("--spool");
   });
 
+  it("gates bash and edit tools with a blocking PreToolUse hook", () => {
+    // PermissionRequest alone cannot enforce a read-only step: it never fires for
+    // calls a workspace allow-rule already approved. PreToolUse fires for every one.
+    const entry = settings.hooks.PreToolUse!.find((h) => h.matcher.includes("Write"))!;
+    expect(entry.matcher).toBe("Bash|Edit|Write|MultiEdit|NotebookEdit");
+    expect(entry.hooks[0].command).toContain("/v1/agent-hooks/tool-gate?sessionId=s1");
+    expect(entry.hooks[0].command).not.toContain("--spool"); // must block to deny
+  });
+
   it("shell-quotes resolver args with spaces", () => {
     const s = buildAgentHookSettings({ sessionId: "s1", resolverCommand: ["/abs path/orca-daemon"] });
     expect(s.hooks.Stop[0].hooks[0].command).toContain("'/abs path/orca-daemon'");
