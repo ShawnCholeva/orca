@@ -11,6 +11,8 @@ import type { SessionOutputStore } from "../../sessions/output-store.js";
 import { OrchestratorService } from "./service.js";
 import { DispatchEngine } from "./dispatch-engine.js";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
+import { failSession } from "../../sessions/runtime.js";
+import { CRASH_RETRY_CAP } from "./crash-retry.js";
 import {
   buildLivenessWatchdogDeps,
   livenessWatchdogTick,
@@ -262,7 +264,7 @@ describe("livenessWatchdogTick", () => {
         "SELECT body FROM orchestrator_messages WHERE goal_id = ? AND role = 'orchestrator' LIMIT 1"
       )
       .get(goalId) as { body: string } | undefined;
-    expect(msg?.body).toMatch(/manual intervention/i);
+    expect(msg?.body).toMatch(/stopped the run here/i);
   });
 
   it("no-op when the worker is alive", async () => {
@@ -544,5 +546,64 @@ describe("livenessWatchdogTick — stall sensor", () => {
       db.prepare("SELECT failure_reason AS r FROM sessions WHERE id = ?").get(sessionId) as { r: string }
     ).r;
     expect(reason).toBe("worker_exited_no_signal");
+  });
+});
+
+function stallRescues(db: Database.Database, stepRunId: string): number {
+  return (
+    db.prepare("SELECT stall_rescues AS c FROM workflow_step_runs WHERE id = ?").get(stepRunId) as {
+      c: number;
+    }
+  ).c;
+}
+
+describe("stall recovery accounting", () => {
+  it("counts a stall rescue separately from a crash retry and says so in the chat", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { goalId, stepRunId } = seedRunningWorkerStep(db);
+    const { completions } = makeServiceWithSubscriber(
+      db, bus, idFactory, vi.fn(async () => ({ sessionId: "respawn-1" }))
+    );
+
+    const progress = new Map<string, ProgressMark>();
+    let clock = NOW;
+    const deps = buildLivenessWatchdogDeps(db, bus, {
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, progress,
+    });
+    await livenessWatchdogTick(deps);
+    clock = atOffset(STALL_MS + 1);
+    await livenessWatchdogTick(deps);
+    await Promise.all(completions);
+
+    expect(stallRescues(db, stepRunId)).toBe(1);
+    expect(crashRetries(db, stepRunId)).toBe(1);
+    const body = (
+      db.prepare(
+        "SELECT body AS b FROM orchestrator_messages WHERE goal_id = ? ORDER BY created_at DESC LIMIT 1"
+      ).get(goalId) as { b: string }
+    ).b;
+    expect(body).toContain("hasn't made progress");
+    expect(body).toContain("2 of 3");
+  });
+
+  it("at the cap, blocks the step run and the workflow run instead of leaving it active", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, runId, stepRunId } = seedRunningWorkerStep(db, {
+      crashRetries: CRASH_RETRY_CAP - 1,
+    });
+    const { completions } = makeServiceWithSubscriber(
+      db, bus, idFactory, vi.fn(async () => ({ sessionId: "respawn-1" }))
+    );
+
+    failSession(db, bus, sessionId, goalId, "worker_stalled", NOW);
+    await Promise.all(completions);
+
+    const stepRun = db
+      .prepare("SELECT status, finished_at, blocked_reason FROM workflow_step_runs WHERE id = ?")
+      .get(stepRunId) as { status: string; finished_at: string | null; blocked_reason: string | null };
+    expect(stepRun.status).toBe("blocked");
+    expect(stepRun.finished_at).not.toBeNull();
+    const run = db.prepare("SELECT status FROM workflow_runs WHERE id = ?").get(runId) as { status: string };
+    expect(run.status).toBe("blocked");
   });
 });

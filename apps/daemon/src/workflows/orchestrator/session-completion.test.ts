@@ -624,7 +624,7 @@ describe("OrchestratorService.onWorkflowSessionCompleted", () => {
       )
       .get(goalId) as { body: string } | undefined;
     expect(msg?.body).toMatch(/crashed 3 times/i);
-    expect(msg?.body).toMatch(/manual intervention/i);
+    expect(msg?.body).toMatch(/stopped the run here/i);
   });
 
   it("session.stopped: user-requested stop → run blocked, broker NOT called", async () => {

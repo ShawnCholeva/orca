@@ -189,6 +189,7 @@ describe("runMigrations", () => {
       "0061_step_run_pending_worker_hitl.sql",
       "0062_gate_recommended_outcome.sql",
       "0063_goal_success_criteria.sql",
+      "0064_step_run_stall_rescues.sql",
     ]);
   });
 
@@ -344,6 +345,7 @@ describe("runMigrations", () => {
       "0061_step_run_pending_worker_hitl.sql",
       "0062_gate_recommended_outcome.sql",
       "0063_goal_success_criteria.sql",
+      "0064_step_run_stall_rescues.sql",
     ]);
 
     const goalCount = (
@@ -652,6 +654,7 @@ describe("session tables migration", () => {
       "0061_step_run_pending_worker_hitl.sql",
       "0062_gate_recommended_outcome.sql",
       "0063_goal_success_criteria.sql",
+      "0064_step_run_stall_rescues.sql",
     ]);
 
     const tables = (
@@ -1193,6 +1196,7 @@ describe("migration 0010 workflows", () => {
       "0061_step_run_pending_worker_hitl.sql",
       "0062_gate_recommended_outcome.sql",
       "0063_goal_success_criteria.sql",
+      "0064_step_run_stall_rescues.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1811,6 +1815,7 @@ describe("migration 0012 orchestration transport", () => {
       "0061_step_run_pending_worker_hitl.sql",
       "0062_gate_recommended_outcome.sql",
       "0063_goal_success_criteria.sql",
+      "0064_step_run_stall_rescues.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

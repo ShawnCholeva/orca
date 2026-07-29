@@ -28,6 +28,8 @@ import type { OperatorRegistry } from "../operators/registry.js";
 import type { OrchestrationTransportBroker } from "../orchestration-transport/broker.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import { loadRunTemplate } from "../runs/run-template.js";
+import { markWorkflowRunBlocked } from "../runs/usecases.js";
+import { markStepBlocked } from "../steps/usecases.js";
 import { reconstructTranscript } from "./interview.js";
 import { buildStepExecutionInput } from "./step-input.js";
 import { decodeSessionTail, decodeSessionTailFromSeq } from "./session-tail.js";
@@ -47,7 +49,7 @@ import { judgeAgentResponse } from "./judgement.js";
 import { sanitizeNarration } from "./sanitize-narration.js";
 import { extractOrcaStepCompleteBlock } from "./orca-output.js";
 import { completeStepWithLedger } from "./ledger-commit.js";
-import { incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
+import { formatRevisionForWorker, incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
 import { incrementCrashRetry, CRASH_RETRY_CAP } from "./crash-retry.js";
 import {
   buildEvaluationFailedStepResult,
@@ -90,8 +92,9 @@ import {
 import { buildEvidenceFacet, evaluateGrounding, localWorkspaceProbe } from "../../harness-sensors/grounding.js";
 import { availableSensorKinds } from "../../harness-sensors/detect.js";
 import { postOrchestratorMessage } from "./orchestrator-message.js";
-import { isHumanPromptOpen } from "./human-prompt-gate.js";
-import { recordPromptSuppressed } from "../../orchestrator-chat/usecases.js";
+import { isHumanPromptOpen, readOpenWorkerQuestion } from "./human-prompt-gate.js";
+import { recordPromptSuppressed, recordWorkerQuestionAnswer } from "../../orchestrator-chat/usecases.js";
+import { assembleFreeTextReason } from "./worker-answer-format.js";
 
 import {
   type StepDispatchCapabilities,
@@ -340,20 +343,44 @@ export class OrchestratorService {
     }
     // Crash → consume a retry from the budget; respawn under cap, escalate at cap.
     if (sess.status === "failed") {
+      // A worker that stopped making progress (or that the user declared stuck) is a
+      // different fact from one that died: both consume the same rescue budget, but
+      // only this one is counted against the step's score.
+      const stalled =
+        sess.failure_reason === "worker_stalled" || sess.failure_reason === "user_declared_stuck";
       const counter = incrementCrashRetry(stepRun.crash_retries ?? 0);
       db.prepare("UPDATE workflow_step_runs SET crash_retries = ? WHERE id = ?").run(
         counter.nextAttempt,
         stepRun.id
       );
+      if (stalled) {
+        db.prepare(
+          "UPDATE workflow_step_runs SET stall_rescues = stall_rescues + 1 WHERE id = ?"
+        ).run(stepRun.id);
+      }
       if (counter.capReached) {
+        const reason = stalled
+          ? `no progress after ${CRASH_RETRY_CAP} restarts`
+          : `crashed ${CRASH_RETRY_CAP} times${sess.failure_reason ? ` (${sess.failure_reason})` : ""}`;
         postOrchestratorMessage(
           db,
           now,
           run.goalId,
-          `The agent for "${stepTpl.name}" crashed ${CRASH_RETRY_CAP} times${sess.failure_reason ? ` (${sess.failure_reason})` : ""}. Manual intervention needed.`,
+          `"${stepTpl.name}" ${stalled ? `hasn't made progress after ${CRASH_RETRY_CAP} restarts` : `crashed ${CRASH_RETRY_CAP} times`}. I've stopped the run here — pick it back up when you're ready.`,
           options
         );
+        markStepBlocked(db, now, stepRun.id, reason, options);
+        markWorkflowRunBlocked({ db, bus: options.bus ?? new EventBus(), idFactory: options.idFactory }, run.id, reason);
       } else {
+        if (stalled) {
+          postOrchestratorMessage(
+            db,
+            now,
+            run.goalId,
+            `"${stepTpl.name}" hasn't made progress in a while — restarting it (attempt ${counter.nextAttempt + 1} of ${CRASH_RETRY_CAP}).`,
+            options
+          );
+        }
         await this.engine.spawnStepAgent(
           db,
           now,
@@ -1059,6 +1086,27 @@ export class OrchestratorService {
       case "escalate_to_user": {
         postOrchestratorMessage(db, now, ctx.run.goalId, sanitizeNarration(action.body), options);
         return { postedChatReply: true };
+      }
+      case "answer_open_question": {
+        // The mediator read the user's free text as settling the question the step
+        // agent is parked on. If that question is no longer open (answered on the
+        // card, or withdrawn), there is nothing to consume — say so rather than
+        // silently dropping the text.
+        const open = readOpenWorkerQuestion(db, ctx.run.goalId, ctx.stepRun.id);
+        if (!open) {
+          postOrchestratorMessage(
+            db, now, ctx.run.goalId,
+            "That question is no longer open — nothing was changed.",
+            options
+          );
+          return { postedChatReply: true };
+        }
+        this.consumeOpenWorkerQuestion(
+          db, now,
+          { goalId: ctx.run.goalId, stepRunId: ctx.stepRun.id, question: open, answerText: action.answerText },
+          options
+        );
+        return { postedChatReply: false };
       }
       case "ask_user": {
         // Acquire the human-prompt gate: if any prompt is already open for this
@@ -1944,6 +1992,10 @@ export class OrchestratorService {
         return sessionId
           ? ""
           : "Couldn't relay your message — no live agent session for the current step. It may need to be respawned.";
+      case "answer_open_question":
+        // Silent, like answering on the card: the user's own message is already
+        // in chat and the question bubble flips to its answered state.
+        return "";
       case "approve_step_complete":
         return "Approved the current step from your message — advancing the workflow.";
       case "revise_step":
@@ -2044,6 +2096,11 @@ export class OrchestratorService {
 
     const invoke = this.orchestratorMediator.invokeWithBackoff?.bind(this.orchestratorMediator) ?? this.orchestratorMediator.invoke.bind(this.orchestratorMediator);
 
+    // A question already open on the chat surface makes this text ambiguous —
+    // the user's answer, or a question about the choices. Show it to the
+    // mediator so it can tell them apart instead of assuming either one.
+    const openWorkerQuestion = readOpenWorkerQuestion(db, args.goalId, stepRun.id);
+
     let action;
     try {
       action = await invoke({
@@ -2053,9 +2110,21 @@ export class OrchestratorService {
         stepRunId: stepRun.id,
         adapterId,
         modelId,
-        triggerPayload: { userMessage: args.body },
+        triggerPayload: {
+          userMessage: args.body,
+          ...(openWorkerQuestion ? { openWorkerQuestion } : {}),
+        },
       });
     } catch (err) {
+      // An LLM outage must not strand a user who is answering a question: fall
+      // back to taking the text at face value (the pre-mediator behavior) so the
+      // run keeps moving. Only the ambiguous-text path has something to degrade.
+      if (openWorkerQuestion) {
+        this.consumeOpenWorkerQuestion(
+          db, now, { goalId: args.goalId, stepRunId: stepRun.id, question: openWorkerQuestion, answerText: args.body }, options
+        );
+        return;
+      }
       postOrchestratorMessage(
         db, now, run.goalId,
         `Orchestrator-LLM unavailable after retries; pausing — last error: ${err instanceof Error ? err.message : "unknown"}`,
@@ -2074,19 +2143,61 @@ export class OrchestratorService {
           .get(stepRun.id) as { id: string } | undefined
       )?.id ?? null;
 
+    // Relaying text to the agent while it is parked on its own question would
+    // leave the card open and the park flag set — the step would never advance.
+    // Forwarding while a worker question is open IS answering it, so route it
+    // through the path that also releases the park.
+    const resolved: OrchestratorAction =
+      openWorkerQuestion && action.kind === "forward_to_agent"
+        ? { kind: "answer_open_question", answerText: action.translated }
+        : action;
+
     const ctx = { run, stepRun, stepTpl, template, goal };
     const { postedChatReply } = await this.applyOrchestratorAction(
-      db, now, ctx, sessionId, "", action, options
+      db, now, ctx, sessionId, "", resolved, options
     );
     // Some actions need a durable acknowledgment after applying their side effect.
     if (!postedChatReply) {
-      const acknowledgment = this.acknowledgeUserMessageAction(action, sessionId);
+      const acknowledgment = this.acknowledgeUserMessageAction(resolved, sessionId);
       if (acknowledgment) {
         postOrchestratorMessage(
           db, now, run.goalId, acknowledgment, options
         );
       }
     }
+  }
+
+  /**
+   * Takes the user's text as the answer to the question open on the chat surface:
+   * records it on the question bubble (so the card renders answered) and hands it
+   * to the parked worker so the step resumes. Mirrors the worker-question answer
+   * route, which does the same for an option selection.
+   */
+  private consumeOpenWorkerQuestion(
+    db: Database.Database,
+    now: () => string,
+    input: {
+      goalId: string;
+      stepRunId: string;
+      question: { questionId: string };
+      answerText: string;
+    },
+    options: RequestNextDecisionOptions
+  ): void {
+    recordWorkerQuestionAnswer(
+      {
+        db,
+        bus: options.bus ?? new EventBus(),
+        idFactory: options.idFactory ?? randomUUID,
+      },
+      { goalId: input.goalId, questionId: input.question.questionId, answer: { viaChat: true } }
+    );
+    this.deliverWorkerAnswer(
+      db,
+      now,
+      { goalId: input.goalId, stepRunId: input.stepRunId, reason: assembleFreeTextReason(input.answerText) },
+      options
+    );
   }
 
   /**
@@ -2265,7 +2376,19 @@ export class OrchestratorService {
     const sessionRow = db
       .prepare("SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('running','starting') ORDER BY started_at DESC LIMIT 1")
       .get(stepRun.id) as { id: string } | undefined;
-    await this.reviseStep(db, now, { run, stepRun }, sessionRow?.id ?? null, feedback, options);
+    // The chat bubble above shows the user's words; the worker gets them wrapped in
+    // the step contract. Engine-authored revisions (grounding, refute) already carry
+    // their own framing and are not re-wrapped.
+    const stepTemplate = loadRunTemplate(db, run)?.steps.find((s) => s.id === stepRun.step_template_id);
+    await this.reviseStep(
+      db, now, { run, stepRun }, sessionRow?.id ?? null,
+      formatRevisionForWorker({
+        stepName: stepTemplate?.name ?? "current",
+        feedback,
+        readOnly: stepTemplate?.workspaceWrites === "deny",
+      }),
+      options
+    );
   }
 
   /** Posts the Done step's closing summary and best-effort verifies the spec file(s). */
