@@ -23,6 +23,7 @@ import { seedRefinementMemory } from "./memory/refinement-seed.js";
 import { findWorkspaceByPath, insertWorkspaceEntity, linkGoalWorkspace, listWorkspaceIdentitiesByGoal } from "./workspaces/projection.js";
 import { insertGoalDocument } from "./goal-documents/projection.js";
 import { defaultDocumentName, takeSnapshot } from "./goal-documents/usecases.js";
+import { markStepBlocked } from "./workflows/steps/usecases.js";
 import type { ModelProviderRegistry } from "./llm/registry.js";
 
 export interface CreateGoalCtx {
@@ -455,6 +456,17 @@ export function archiveGoal(id: string): Goal {
 
     stmts.archiveGoal.run(now, now, id);
     deleteApprovalCountsForGoal(db, id);
+
+    const inFlight = db
+      .prepare(
+        `SELECT wsr.id AS id FROM workflow_step_runs wsr
+         WHERE wsr.goal_id = ? AND wsr.status = 'active'`
+      )
+      .all(id) as { id: string }[];
+    for (const s of inFlight) {
+      markStepBlocked(db, () => now, s.id, "goal_archived");
+    }
+
     updatedRow = stmts.selectGoalById.get(id) as GoalRow;
   })();
 

@@ -11,6 +11,7 @@ import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
 import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { resetPreparedStatements as resetRunProjectionPreparedStatements } from "./projection.js";
 import { markStepBlocked } from "../steps/usecases.js";
+import { archiveGoal } from "../../goals.js";
 import {
   ActiveWorkflowRunExistsError,
   cancelWorkflowRun,
@@ -69,6 +70,18 @@ function seedTemplate(db: Database.Database, id: string, version: number): void 
     NOW,
     NOW
   );
+}
+
+// Seed a goal + template + an active run parked on its first (active) step run.
+function seedActiveRunOnStep(
+  ctx: WorkflowRunUsecaseCtx,
+  goalId = "goal-1",
+  templateId = "orca/engineering"
+): { goalId: string; runId: string; stepRunId: string } {
+  seedGoal(ctx.db, goalId);
+  seedTemplate(ctx.db, templateId, 1);
+  const run = startWorkflowRun(ctx, { goalId, templateId });
+  return { goalId, runId: run.id, stepRunId: run.currentStepRunId! };
 }
 
 function setup(): {
@@ -274,5 +287,44 @@ describe("workflow run usecases", () => {
       "workflow.step.started",
       "workflow.run.cancelled",
     ]);
+  });
+
+  it("cancelling a run closes the step that was in flight", () => {
+    const { db, ctx } = setup();
+    const { runId, stepRunId } = seedActiveRunOnStep(ctx);
+
+    cancelWorkflowRun(ctx, runId);
+
+    const stepRun = db
+      .prepare("SELECT status, finished_at, blocked_reason FROM workflow_step_runs WHERE id = ?")
+      .get(stepRunId) as { status: string; finished_at: string | null; blocked_reason: string | null };
+    expect(stepRun.status).toBe("blocked");
+    expect(stepRun.finished_at).not.toBeNull();
+    expect(stepRun.blocked_reason).toBe("run_cancelled");
+  });
+
+  it("cancelling leaves already-finished step runs untouched", () => {
+    const { db, ctx } = setup();
+    const { runId, stepRunId } = seedActiveRunOnStep(ctx);
+    db.prepare("UPDATE workflow_step_runs SET status = 'passed', finished_at = ? WHERE id = ?")
+      .run(NOW, stepRunId);
+
+    cancelWorkflowRun(ctx, runId);
+
+    const stepRun = db.prepare("SELECT status FROM workflow_step_runs WHERE id = ?")
+      .get(stepRunId) as { status: string };
+    expect(stepRun.status).toBe("passed");
+  });
+
+  it("archiving a goal closes the step that was in flight", () => {
+    const { db, ctx } = setup();
+    const { goalId, stepRunId } = seedActiveRunOnStep(ctx);
+
+    archiveGoal(goalId);
+
+    const stepRun = db.prepare("SELECT status, blocked_reason FROM workflow_step_runs WHERE id = ?")
+      .get(stepRunId) as { status: string; blocked_reason: string | null };
+    expect(stepRun.status).toBe("blocked");
+    expect(stepRun.blocked_reason).toBe("goal_archived");
   });
 });

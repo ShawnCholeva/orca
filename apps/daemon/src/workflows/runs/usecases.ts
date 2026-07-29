@@ -8,7 +8,7 @@ import {
 import type { EventBus } from "../../events.js";
 import { redactSecrets } from "../../memory/normalize.js";
 import { appendWorkflowEvent, publishStagedWorkflowEvents } from "../events.js";
-import { createInitialStep, insertStep } from "../steps/usecases.js";
+import { createInitialStep, insertStep, markStepBlocked } from "../steps/usecases.js";
 import { getTemplateById } from "../templates/projection.js";
 import { getWorkflowRunById } from "./projection.js";
 import { descendantRunIds } from "../composition/store.js";
@@ -276,6 +276,19 @@ export function cancelWorkflowRun(
         `UPDATE goals SET active_workflow_run_id = NULL WHERE id = ? AND active_workflow_run_id IN (${goalPlaceholders})`
       )
       .run(run.goalId, ...cancelledSet);
+
+    // Abandoning a run must leave a terminal fact behind: an in-flight step run left
+    // `active` forever is invisible to scoring, so giving up on a stuck step would
+    // cost nothing.
+    const inFlight = ctx.db
+      .prepare(
+        `SELECT id FROM workflow_step_runs
+         WHERE workflow_run_id IN (${cancelledSet.map(() => "?").join(",")}) AND status = 'active'`
+      )
+      .all(...cancelledSet) as { id: string }[];
+    for (const s of inFlight) {
+      markStepBlocked(ctx.db, () => now, s.id, "run_cancelled");
+    }
 
     const event = appendWorkflowEvent(
       ctx.db,
