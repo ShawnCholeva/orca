@@ -309,6 +309,14 @@ function readPackageVersion(): string {
 }
 const pkg = { version: readPackageVersion() };
 
+/** Parses ORCA_STALL_MS, falling back to 600000 for anything non-finite (unset or a
+ *  typo). A NaN stallMs makes the watchdog's `now - mark.sinceMs < stallMs` guard
+ *  always false, reaping every live worker on its second tick. */
+export function parseStallMs(raw: string | undefined): number {
+  const parsed = Number(raw ?? 600000);
+  return Number.isFinite(parsed) ? parsed : 600000;
+}
+
 const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 function isShadowAdapterId(adapterId: string): adapterId is ShadowAdapterId {
@@ -1033,7 +1041,7 @@ export function createServer(
   if (deps?.resumeActiveRunsOnBoot) {
     const watchdogMs = Number(process.env["ORCA_LIVENESS_WATCHDOG_MS"] ?? 5000);
     const watchdogGraceMs = Number(process.env["ORCA_LIVENESS_GRACE_MS"] ?? 15000);
-    const stallMs = Number(process.env["ORCA_STALL_MS"] ?? 600000);
+    const stallMs = parseStallMs(process.env["ORCA_STALL_MS"]);
     const watchdogProgress = new Map<string, ProgressMark>();
     const watchdogDeps = buildLivenessWatchdogDeps(db, eventBus, {
       isTmuxAlive: (sessionId) => workerSessions.isTmuxAlive(sessionId),

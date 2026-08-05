@@ -32,7 +32,7 @@ import {
   UpdateGoalResponse
 } from '@orca/contracts';
 import type { Config } from './config.js';
-import { createServer } from './server.js';
+import { createServer, parseStallMs } from './server.js';
 import { closeDatabase, getDatabase, openDatabase } from './db.js';
 import { defaultMigrationsDir, runMigrations } from './migrations.js';
 import { bootstrapRegistries } from './registry/bootstrap.js';
@@ -2980,5 +2980,23 @@ describe('CORS', () => {
   it('rejects non-loopback origins', async () => {
     expect(await preflight('https://evil.example.com')).toBeUndefined();
     expect(await preflight('http://localhost.evil.com')).toBeUndefined();
+  });
+});
+
+describe('parseStallMs', () => {
+  it('falls back to 600000 when ORCA_STALL_MS is unset', () => {
+    expect(parseStallMs(undefined)).toBe(600000);
+  });
+
+  it('parses a valid override', () => {
+    expect(parseStallMs('120000')).toBe(120000);
+  });
+
+  it('falls back to 600000 for a malformed value instead of yielding NaN', () => {
+    // A NaN stallMs makes the watchdog's `now - mark.sinceMs < stallMs` guard always
+    // false (any comparison with NaN is false), which reaps every live worker on its
+    // second tick instead of never reaping — a typo must not turn into a footgun.
+    expect(parseStallMs('not-a-number')).toBe(600000);
+    expect(Number.isFinite(parseStallMs('not-a-number'))).toBe(true);
   });
 });
