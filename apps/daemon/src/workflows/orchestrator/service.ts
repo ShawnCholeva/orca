@@ -358,11 +358,6 @@ export class OrchestratorService {
         counter.nextAttempt,
         stepRun.id
       );
-      if (stalled) {
-        db.prepare(
-          "UPDATE workflow_step_runs SET stall_rescues = stall_rescues + 1 WHERE id = ?"
-        ).run(stepRun.id);
-      }
       if (counter.capReached) {
         const reason = stalled
           ? `no progress after ${CRASH_RETRY_CAP} restarts`
@@ -386,6 +381,9 @@ export class OrchestratorService {
         markWorkflowRunBlocked({ db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory }, run.id, reason);
       } else {
         if (stalled) {
+          db.prepare(
+            "UPDATE workflow_step_runs SET stall_rescues = stall_rescues + 1 WHERE id = ?"
+          ).run(stepRun.id);
           postOrchestratorMessage(
             db,
             now,

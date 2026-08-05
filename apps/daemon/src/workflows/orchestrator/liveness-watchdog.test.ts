@@ -619,6 +619,10 @@ describe("stall recovery accounting", () => {
       .get(stepRunId) as { status: string; finished_at: string | null; blocked_reason: string | null };
     expect(stepRun.status).toBe("blocked");
     expect(stepRun.finished_at).not.toBeNull();
+    // Nothing was rescued at the cap — the worker was never restarted — so this
+    // attempt must not add to stall_rescues; only the two actual restarts already
+    // reflected in the seeded crash_retries counted toward the rescue budget.
+    expect(stallRescues(db, stepRunId)).toBe(0);
     const run = db.prepare("SELECT status FROM workflow_runs WHERE id = ?").get(runId) as { status: string };
     expect(run.status).toBe("blocked");
 
