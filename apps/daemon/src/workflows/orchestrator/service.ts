@@ -374,7 +374,15 @@ export class OrchestratorService {
           `"${stepTpl.name}" ${stalled ? `hasn't made progress after ${CRASH_RETRY_CAP} restarts` : `crashed ${CRASH_RETRY_CAP} times`}. I've stopped the run here — pick it back up when you're ready.`,
           options
         );
-        markStepBlocked(db, now, stepRun.id, reason, options);
+        const stagedEvents: DomainEvent[] = [];
+        markStepBlocked(db, now, stepRun.id, reason, {
+          idFactory: options.idFactory,
+          stagedEvents,
+          ...(options.bus
+            ? { activityCtx: { db, bus: options.bus, now, idFactory: options.idFactory } }
+            : {}),
+        });
+        publishStaged(options.bus, stagedEvents);
         markWorkflowRunBlocked({ db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory }, run.id, reason);
       } else {
         if (stalled) {

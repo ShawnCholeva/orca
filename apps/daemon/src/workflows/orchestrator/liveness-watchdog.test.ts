@@ -603,9 +603,16 @@ describe("stall recovery accounting", () => {
     const { completions } = makeServiceWithSubscriber(
       db, bus, idFactory, vi.fn(async () => ({ sessionId: "respawn-1" }))
     );
+    // Observed on the BUS, not just persisted to the events table — a table-only
+    // check would pass even if the cap path never reaches publishStaged, leaving
+    // the WS stream (and the AgentActivity card) never told the step blocked.
+    const busEvents: string[] = [];
+    bus.subscribe((event) => busEvents.push(event.type));
 
     failSession(db, bus, sessionId, goalId, "worker_stalled", NOW);
     await Promise.all(completions);
+
+    expect(busEvents).toContain("workflow.step.blocked");
 
     const stepRun = db
       .prepare("SELECT status, finished_at, blocked_reason FROM workflow_step_runs WHERE id = ?")
