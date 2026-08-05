@@ -343,6 +343,11 @@ export class OrchestratorService {
     }
     // Crash → consume a retry from the budget; respawn under cap, escalate at cap.
     if (sess.status === "failed") {
+      // A stalled worker's tmux process is, by definition, still alive — unlike a
+      // genuine crash (already dead), it must be killed before we ever respawn or
+      // block, or a second worker ends up running on the same step/workspace.
+      // For a genuine crash this is a harmless no-op.
+      await this.workerTerminate?.(args.sessionId).catch(() => {});
       // A worker that stopped making progress (or that the user declared stuck) is a
       // different fact from one that died: both consume the same rescue budget, but
       // only this one is counted against the step's score.

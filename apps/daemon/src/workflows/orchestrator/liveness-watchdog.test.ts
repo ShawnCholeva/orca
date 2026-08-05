@@ -125,7 +125,8 @@ function makeServiceWithSubscriber(
   db: Database.Database,
   bus: EventBus,
   idFactory: () => string,
-  launch: WorkflowSessionLauncher["launch"]
+  launch: WorkflowSessionLauncher["launch"],
+  workerTerminate?: (sessionId: string) => Promise<void>
 ): { completions: Promise<void>[] } {
   const broker = { propose: vi.fn() };
   const launcher: WorkflowSessionLauncher = { launch };
@@ -143,7 +144,10 @@ function makeServiceWithSubscriber(
     broker as never,
     fakeRegistry(),
     fakeOutputStore(),
-    fakeStepDispatch()
+    fakeStepDispatch(),
+    undefined,
+    undefined,
+    workerTerminate
   );
   const completions: Promise<void>[] = [];
   bus.subscribe((event) => {
@@ -398,7 +402,8 @@ describe("livenessWatchdogTick — stall sensor", () => {
     const { db, bus, idFactory } = setupHarness();
     const { sessionId, stepRunId } = seedRunningWorkerStep(db);
     const launch: WorkflowSessionLauncher["launch"] = vi.fn(async () => ({ sessionId: "respawn-1" }));
-    const { completions } = makeServiceWithSubscriber(db, bus, idFactory, launch);
+    const workerTerminate = vi.fn(async () => {});
+    const { completions } = makeServiceWithSubscriber(db, bus, idFactory, launch, workerTerminate);
 
     const progress = new Map<string, ProgressMark>();
     let clock = NOW;
@@ -422,6 +427,10 @@ describe("livenessWatchdogTick — stall sensor", () => {
     expect(reason).toBe("worker_stalled");
     expect(crashRetries(db, stepRunId)).toBe(1);
     expect(launch).toHaveBeenCalledTimes(1);
+    // The stalled worker's tmux process must be killed before a second worker is
+    // spawned into the same workspace — otherwise both run concurrently on the
+    // same step (Finding 1: stall reap orphans a live worker).
+    expect(workerTerminate).toHaveBeenCalledWith(sessionId);
   });
 
   it("does not reap while output_seq keeps advancing", async () => {
