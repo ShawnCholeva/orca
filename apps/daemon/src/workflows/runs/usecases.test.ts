@@ -226,6 +226,27 @@ describe("workflow run usecases", () => {
     expect(old.status).toBe("blocked");
   });
 
+  it("resuming a blocked run on a graph-routed template keeps the run's graph cursor", () => {
+    const { db, ctx } = setup();
+    seedGoal(db, "goal-1");
+    seedTemplate(db, "orca/engineering", 1);
+
+    const run = startWorkflowRun(ctx, { goalId: "goal-1", templateId: "orca/engineering" });
+    const stepRunId = run.currentStepRunId!;
+
+    // Simulate a graph-routed template: the run's graph cursor (current_node_id)
+    // is a distinct graph node id, not the step template id ("intake").
+    db.prepare("UPDATE workflow_runs SET current_node_id = 'graph-node-7' WHERE id = ?").run(run.id);
+
+    markStepBlocked(db, () => NOW, stepRunId, "no progress after 3 restarts");
+    markWorkflowRunBlocked(ctx, run.id, "no progress after 3 restarts");
+
+    const resumed = resumeWorkflowRun(ctx, run.id);
+    expect(resumed.status).toBe("active");
+    // Resuming must not collapse the graph cursor down to the step template id.
+    expect(resumed.currentNodeId).toBe("graph-node-7");
+  });
+
   it("completing a run marks the goal completed", () => {
     const { db, ctx } = setup();
     seedGoal(db, "goal-1");

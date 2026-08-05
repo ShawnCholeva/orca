@@ -222,7 +222,8 @@ export function resumeWorkflowRun(
           current.step_template_id,
           current.ordinal,
           current.attempt + 1,
-          { idFactory: ctx.idFactory, stagedEvents }
+          { idFactory: ctx.idFactory, stagedEvents },
+          run.currentNodeId ?? undefined
         );
       }
     }
