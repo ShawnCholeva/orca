@@ -929,21 +929,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     const body = messageDraft.trim();
     if (!body) return;
 
-    if (pendingRevisionRunId) {
-      setSendingMessage(true);
-      setMessageError(null);
-      try {
-        await submitStepRevision(pendingRevisionRunId, body);
-        markAnswerPending();
-        setMessageDraft("");
-      } catch (err) {
-        setMessageError(toErrorMessage(err, "Failed to send your revision."));
-      } finally {
-        setSendingMessage(false);
-      }
-      return;
-    }
-
     const command = parseSlashCommand(body);
     if (command) {
       setSendingMessage(true);
@@ -953,6 +938,21 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
         setMessageDraft("");
       } catch {
         setMessageError("Failed to run that command.");
+      } finally {
+        setSendingMessage(false);
+      }
+      return;
+    }
+
+    if (pendingRevisionRunId) {
+      setSendingMessage(true);
+      setMessageError(null);
+      try {
+        await submitStepRevision(pendingRevisionRunId, body);
+        markAnswerPending();
+        setMessageDraft("");
+      } catch (err) {
+        setMessageError(toErrorMessage(err, "Failed to send your revision."));
       } finally {
         setSendingMessage(false);
       }

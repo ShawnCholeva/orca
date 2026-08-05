@@ -795,6 +795,33 @@ describe("OrcaChat", () => {
     expect(createOrchestratorMessageMock).not.toHaveBeenCalled();
   });
 
+  it("sends /stuck as a command even while a revision card is open, not as revision feedback", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-rev", goalId: "goal-1", role: "orchestrator", kind: "message",
+          body: "Here is the step result.", correlationId: "c1", createdAt: now,
+          pendingRevision: { workflowRunId: "r1" },
+        },
+      ],
+    });
+    runGoalCommandMock.mockResolvedValue({ ok: true, message: "Thanks — restarting the agent on this step." });
+    const { OrcaChat } = await import("./OrcaChat");
+
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const input = await screen.findByPlaceholderText("Message Orca…");
+    fireEvent.change(input, { target: { value: "/stuck going in circles" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => expect(runGoalCommandMock).toHaveBeenCalledWith("goal-1", {
+      command: "stuck",
+      args: "going in circles",
+    }));
+    expect(submitStepRevisionMock).not.toHaveBeenCalled();
+  });
+
   it("sends an unknown slash command as an ordinary message", async () => {
     getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
     createOrchestratorMessageMock.mockResolvedValue({
