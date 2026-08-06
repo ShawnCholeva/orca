@@ -1462,6 +1462,18 @@
 }
 .orca-chat-blocked-title { font-weight: 600; color: #92400e; font-size: 13px; }
 .orca-chat-blocked-reason { margin: 0; color: var(--text-2); font-size: 12px; }
+.orca-chat-blocked-resume-btn {
+  align-self: flex-start;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  background: var(--bg, #fff);
+  font-size: 13px;
+}
+.orca-chat-blocked-resume-btn:hover:not(:disabled) { background: var(--bg-3, rgba(0,0,0,0.06)); }
+.orca-chat-blocked-resume-btn:disabled { cursor: not-allowed; opacity: 0.6; }
+.orca-chat-blocked-resume-error { margin: 0; color: #92400e; font-size: 12px; }
 
 /* Human routing choice for an undecidable splitter: pick the next step. Neutral
    (not alarming) — it's an awaiting-input state, not an error. */

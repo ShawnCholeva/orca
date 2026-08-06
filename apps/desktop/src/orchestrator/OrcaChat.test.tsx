@@ -43,6 +43,7 @@ const listRecommendationsMock = vi.fn();
 const acceptRecommendationMock = vi.fn();
 const listWorkflowRunsMock = vi.fn();
 const listWorkflowStepRunsMock = vi.fn();
+const resumeWorkflowRunMock = vi.fn();
 
 vi.mock("../api", () => ({
   confirmSplit: (...args: unknown[]) => confirmSplitMock(...args),
@@ -76,6 +77,7 @@ vi.mock("../api", () => ({
   submitStepRevision: (...args: unknown[]) => submitStepRevisionMock(...args),
   listRecommendations: (...args: unknown[]) => listRecommendationsMock(...args),
   acceptRecommendation: (...args: unknown[]) => acceptRecommendationMock(...args),
+  resumeWorkflowRun: (...args: unknown[]) => resumeWorkflowRunMock(...args),
   toErrorMessage: (err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback,
 }));
@@ -264,6 +266,7 @@ describe("OrcaChat", () => {
     listWorkflowRunsMock.mockResolvedValue({ runs: [] });
     listWorkflowStepRunsMock.mockReset();
     listWorkflowStepRunsMock.mockResolvedValue({ stepRuns: [] });
+    resumeWorkflowRunMock.mockReset();
   });
 
   afterEach(() => {
@@ -587,6 +590,114 @@ describe("OrcaChat", () => {
     // Honest status: no "starting"/"awaiting" spinner over a halted run.
     expect(screen.queryByTestId("step-starting")).toBeNull();
     expect(screen.queryByTestId("awaiting-reply")).toBeNull();
+  });
+
+  function setupBlockedRun() {
+    setupRunLoad();
+    getWorkflowRunMock.mockResolvedValue({
+      run: {
+        id: "run-1",
+        goalId: "goal-1",
+        templateId: "orca/engineering",
+        templateVersion: 1,
+        status: "blocked",
+        currentStepRunId: "step-1",
+        startedAt: now,
+        finishedAt: null,
+        blockedReason: "hasn't made progress after 3 restarts. I've stopped the run here — pick it back up when you're ready.",
+      },
+    });
+  }
+
+  it("shows a Resume run control only when the run is blocked", async () => {
+    setupRunLoad();
+    const { OrcaChat } = await import("./OrcaChat");
+    const firstRender = render(
+      <OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />,
+    );
+    await screen.findByPlaceholderText("Message Orca…");
+    expect(screen.queryByRole("button", { name: /resume run/i })).toBeNull();
+    firstRender.unmount();
+
+    setupBlockedRun();
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByRole("button", { name: /resume run/i })).toBeTruthy();
+  });
+
+  it("resuming a blocked run calls the resume client with the goal and run ids", async () => {
+    setupBlockedRun();
+    resumeWorkflowRunMock.mockResolvedValue({
+      run: {
+        id: "run-1",
+        goalId: "goal-1",
+        templateId: "orca/engineering",
+        templateVersion: 1,
+        status: "active",
+        currentStepRunId: "step-2",
+        startedAt: now,
+        finishedAt: null,
+        blockedReason: null,
+      },
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const resumeButton = await screen.findByRole("button", { name: /resume run/i });
+    fireEvent.click(resumeButton);
+
+    await waitFor(() => {
+      expect(resumeWorkflowRunMock).toHaveBeenCalledWith("goal-1", "run-1");
+    });
+  });
+
+  it("disables the Resume run button while the request is in flight", async () => {
+    setupBlockedRun();
+    let releaseResume!: () => void;
+    resumeWorkflowRunMock.mockReturnValue(
+      new Promise((resolve) => {
+        releaseResume = () => resolve({
+          run: {
+            id: "run-1", goalId: "goal-1", templateId: "orca/engineering", templateVersion: 1,
+            status: "active", currentStepRunId: "step-2", startedAt: now, finishedAt: null, blockedReason: null,
+          },
+        });
+      }),
+    );
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const resumeButton = await screen.findByRole("button", { name: /resume run/i });
+    fireEvent.click(resumeButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /resume run/i })).toBeDisabled();
+    });
+
+    await act(async () => {
+      releaseResume();
+      await Promise.resolve();
+    });
+  });
+
+  it("shows plain-language copy (not the raw server error) when resume fails", async () => {
+    setupBlockedRun();
+    resumeWorkflowRunMock.mockRejectedValue(
+      new Error("SQLITE_CONSTRAINT: FOREIGN KEY constraint failed at workflow_runs.current_step_run_id"),
+    );
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const resumeButton = await screen.findByRole("button", { name: /resume run/i });
+    fireEvent.click(resumeButton);
+
+    await waitFor(() => {
+      expect(resumeWorkflowRunMock).toHaveBeenCalled();
+    });
+    const errorEl = await screen.findByTestId("resume-run-error");
+    expect(errorEl.textContent).not.toContain("SQLITE_CONSTRAINT");
+    expect(errorEl.textContent).not.toContain("FOREIGN KEY");
+    expect(errorEl.textContent?.length).toBeGreaterThan(0);
   });
 
   it("does not render the goal title/description header card", async () => {

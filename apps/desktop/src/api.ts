@@ -1099,6 +1099,22 @@ export async function getWorkflowRun(
   );
 }
 
+export async function resumeWorkflowRun(
+  goalId: string,
+  runId: string,
+): Promise<WorkflowRunResponse> {
+  const { baseUrl, token } = await loadConfig();
+  return requestJson(
+    `${baseUrl}/v1/goals/${encodeURIComponent(goalId)}/workflow-runs/${encodeURIComponent(runId)}/resume`,
+    {
+      method: "POST",
+      headers: authHeaders(token),
+    },
+    WorkflowRunResponse,
+    "Resume workflow run failed",
+  );
+}
+
 export async function listWorkflowRuns(
   goalId: string,
 ): Promise<ListWorkflowRunsResponse> {

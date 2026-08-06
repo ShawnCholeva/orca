@@ -34,6 +34,7 @@ import {
   openEventStream,
   requestNextOrchestratorDecision,
   requestStepRevision,
+  resumeWorkflowRun,
   runGoalCommand,
   submitStepRevision,
   submitWorkerAnswers,
@@ -130,6 +131,10 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const [approvingCompletion, setApprovingCompletion] = useState(false);
   // In-flight flag while submitting a human gate approve/reject decision.
   const [decidingGate, setDecidingGate] = useState(false);
+  // In-flight flag while resuming a blocked run, plus a plain-language error
+  // for a failed attempt (never the raw server string).
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Track which goal each data set has already loaded for, so SSE-driven
@@ -914,6 +919,22 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   }
 
 
+  // Resume a blocked run. Never surfaces the server's raw error text — the
+  // codebase deliberately keeps developer-facing strings out of the UI.
+  async function handleResume() {
+    if (!selectedGoalId || !runId) return;
+    setResuming(true);
+    setResumeError(null);
+    try {
+      await resumeWorkflowRun(selectedGoalId, runId);
+      setRefreshNonce((current) => current + 1);
+    } catch {
+      setResumeError("Couldn't resume the run. Try again.");
+    } finally {
+      setResuming(false);
+    }
+  }
+
   async function handleRevise(runId: string) {
     try {
       await requestStepRevision(runId);
@@ -1253,6 +1274,21 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                 <p className="orca-chat-blocked-reason">
                   {blockedReason ?? "The workflow stopped and could not continue automatically."}
                 </p>
+                <button
+                  type="button"
+                  className="orca-chat-blocked-resume-btn"
+                  aria-label="Resume run"
+                  data-testid="resume-run-btn"
+                  disabled={resuming}
+                  onClick={() => void handleResume()}
+                >
+                  {resuming ? "Resuming…" : "Resume run"}
+                </button>
+                {resumeError && (
+                  <p className="orca-chat-blocked-resume-error" data-testid="resume-run-error">
+                    {resumeError}
+                  </p>
+                )}
               </div>
             )}
 
