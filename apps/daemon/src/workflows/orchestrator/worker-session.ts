@@ -307,8 +307,12 @@ export class WorkerSessionManager {
    * liveness (the tmux session can die independently of the daemon).
    */
   async isTmuxAlive(sessionId: string): Promise<boolean> {
-    if (this.sessions.has(sessionId)) return true;
-    return hasSession(this.tmux, this.name(sessionId));
+    const alive = await hasSession(this.tmux, this.name(sessionId));
+    // Self-heal: a DB/map row can outlive the tmux session it names (external
+    // kill, crash, tmux server death). Evict the stale entry so the manager's
+    // own bookkeeping stops lying about it — respawn/reattach see it as gone.
+    if (!alive) this.sessions.delete(sessionId);
+    return alive;
   }
 
   async reattach(sessionId: string, _workspacePath: string): Promise<boolean> {

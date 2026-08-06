@@ -35,6 +35,51 @@ describe("WorkerSessionManager.isTmuxAlive", () => {
     expect(await new WorkerSessionManager({ ...deps, tmux: aliveTmux }).isTmuxAlive("s1")).toBe(true);
     expect(await new WorkerSessionManager({ ...deps, tmux: deadTmux }).isTmuxAlive("s1")).toBe(false);
   });
+
+  it("still reports alive when a session IN THE MAP has a live tmux session (spawn's own bookkeeping doesn't short-circuit the real check)", async () => {
+    const tmux = fakeTmux(["auto mode on"]);
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")), authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0, resolveProvider,
+    });
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    expect(await mgr.isTmuxAlive("sess-1")).toBe(true);
+  });
+
+  it("reports false — and evicts the stale map entry — when a session IN THE MAP has no live tmux session", async () => {
+    // A worker the daemon spawned (so it's in the in-memory map) whose tmux
+    // session died externally (crash / `tmux kill-session` / tmux server death)
+    // while the daemon kept running. Before the fix, isTmuxAlive short-circuited
+    // on `this.sessions.has()` and never asked tmux at all — this is the live
+    // defect: the dead-worker reap could only ever fire for workers inherited
+    // across a daemon restart (empty map).
+    const calls: string[][] = [];
+    const deadTmux: TmuxRunner & { calls: string[][] } = {
+      calls,
+      run: vi.fn(async (args: string[]) => {
+        calls.push(args);
+        return { stdout: args[0] === "capture-pane" ? "auto mode on" : "", stderr: "", code: args[0] === "has-session" ? 1 : 0 };
+      }),
+    };
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")), authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux: deadTmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0, resolveProvider,
+    });
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    expect(deadTmux.calls.filter((c) => c[0] === "new-session")).toHaveLength(1);
+
+    expect(await mgr.isTmuxAlive("sess-1")).toBe(false);
+
+    // Proof of eviction: spawn() short-circuits on `this.sessions.has(sessionId)`
+    // (unchanged). If the stale entry were NOT evicted, this second spawn would
+    // be a silent no-op (no second new-session call) — respawning a worker whose
+    // tmux session is dead would be impossible. It DOES respawn, so the entry
+    // was evicted.
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    expect(deadTmux.calls.filter((c) => c[0] === "new-session")).toHaveLength(2);
+  });
 });
 
 describe("WorkerSessionManager.spawn", () => {
@@ -590,6 +635,24 @@ describe("WorkerSessionManager.reattach", () => {
     const adopted = await mgr.reattach("sess-missing", "/repo");
     expect(adopted).toBe(false);
     expect(tmux.calls.some((c) => c[0] === "new-session")).toBe(false);
+  });
+
+  it("a second reattach on an already-attached session short-circuits without touching tmux (unchanged by isTmuxAlive)", async () => {
+    const tmux = fakeTmux(["auto mode on"]);
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")),
+      authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+      resolveProvider,
+    });
+    expect(await mgr.reattach("sess-1", "/repo")).toBe(true); // populates the map
+    const callsBefore = tmux.calls.length;
+    // reattach's `this.sessions.has(sessionId)` fast path means this second call
+    // never asks tmux anything — untouched by isTmuxAlive's fix.
+    expect(await mgr.reattach("sess-1", "/repo")).toBe(true);
+    expect(tmux.calls.length).toBe(callsBefore);
+    await mgr.terminate("sess-1");
   });
 
   it("spawn still works without markRunning (optional dep)", async () => {
