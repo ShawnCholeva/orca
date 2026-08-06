@@ -18,6 +18,7 @@ import {
   livenessWatchdogTick,
   type ProgressMark,
 } from "./liveness-watchdog.js";
+import { resolvePermissionPendingActivity } from "../../activities/store.js";
 import {
   cleanupHarness,
   NOW,
@@ -514,6 +515,43 @@ describe("livenessWatchdogTick — stall sensor", () => {
     await livenessWatchdogTick(deps);
 
     expect(sessionStatus(db, sessionId)).toBe("running");
+  });
+
+  it("re-arms the stall clock once a permission approval is resolved", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, runId, stepRunId } = seedRunningWorkerStep(db);
+    const launch: WorkflowSessionLauncher["launch"] = vi.fn(async () => ({ sessionId: "respawn-1" }));
+    const { completions } = makeServiceWithSubscriber(db, bus, idFactory, launch);
+    seedActivity(db, { goalId, runId, stepRunId, status: "active", sourceKind: "permission_pending", updatedAt: NOW });
+
+    const progress = new Map<string, ProgressMark>();
+    let clock = NOW;
+    const deps = buildLivenessWatchdogDeps(db, bus, {
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, progress,
+    });
+
+    await livenessWatchdogTick(deps);
+    clock = atOffset(STALL_MS + 1);
+    await livenessWatchdogTick(deps);
+    // Still pending approval: suppressed, no reap.
+    expect(sessionStatus(db, sessionId)).toBe("running");
+
+    // The approval resolves (mirrors both server.ts call sites — user answer and
+    // timeout — which both now call this on resolution).
+    resolvePermissionPendingActivity({ db, bus, now: () => clock }, { stepRunId });
+
+    clock = atOffset(STALL_MS + 2);
+    await livenessWatchdogTick(deps);              // system turn again: re-baseline, no reap yet
+    expect(sessionStatus(db, sessionId)).toBe("running");
+    clock = atOffset(STALL_MS + 2 + STALL_MS + 1);
+    await livenessWatchdogTick(deps);
+    await Promise.all(completions);
+
+    expect(sessionStatus(db, sessionId)).toBe("failed");
+    const reason = (
+      db.prepare("SELECT failure_reason AS r FROM sessions WHERE id = ?").get(sessionId) as { r: string }
+    ).r;
+    expect(reason).toBe("worker_stalled");
   });
 
   it("forgets accumulated idle time when the turn passes to the user", async () => {

@@ -231,6 +231,7 @@ import type { RunnerPort } from './workflows/orchestrator/runner-port.js';
 import {
   openOrUpdateLive as openOrUpdateLiveActivity,
   pauseForProviderRecovery as pauseForProviderRecoveryActivity,
+  resolvePermissionPendingActivity,
 } from './activities/store.js';
 import { resumeActiveRuns } from './workflows/orchestrator/resume.js';
 import {
@@ -1896,6 +1897,17 @@ export function createServer(
         } catch (err) {
           console.error("[permission] deletePendingApprovalMessage (timeout) failed", err);
         }
+        // A timeout is itself a resolution: the permission_pending activity must
+        // stop suppressing the stall clock here too, or a step whose approval
+        // timed out reads as "the user's turn" forever (live e2e: 17 minutes).
+        // Best-effort — the decision above already unblocked the worker.
+        if (stepContext) {
+          try {
+            resolvePermissionPendingActivity(activityCtx, { stepRunId: stepContext.stepRunId });
+          } catch (err) {
+            console.error("[permission] resolvePermissionPendingActivity (timeout) failed", err);
+          }
+        }
       }
       return result;
     },
@@ -2066,6 +2078,19 @@ export function createServer(
       );
     } catch (err) {
       console.error("[permission] deletePendingApprovalMessage failed", err);
+    }
+    // The permission_pending activity must stop suppressing the stall clock now
+    // that a human has actually answered — else the step reads as "the user's
+    // turn" forever (live e2e: an activity sat permission_pending 17 minutes
+    // after being answered). Best-effort — the decision above already unblocked
+    // the worker.
+    try {
+      const sessionRow = db.prepare("SELECT workflow_step_run_id AS step_run_id FROM sessions WHERE id = ?").get(pending.sessionId) as { step_run_id: string | null } | undefined;
+      if (sessionRow?.step_run_id) {
+        resolvePermissionPendingActivity(activityCtx, { stepRunId: sessionRow.step_run_id });
+      }
+    } catch (err) {
+      console.error("[permission] resolvePermissionPendingActivity failed", err);
     }
     const actionClass = actionClassOf(
       pending.toolName,

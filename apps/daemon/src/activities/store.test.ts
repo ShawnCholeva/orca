@@ -16,6 +16,7 @@ import {
   pauseForProviderRecovery,
   recordOrchestratorReasoning,
   resolveMarkDoneActivity,
+  resolvePermissionPendingActivity,
   resumeFromConfirmation,
   resumeFromProviderRecovery,
   type ActivityStoreCtx
@@ -397,6 +398,27 @@ describe("ActivityStore", () => {
     expect(resumed?.status).toBe("active");
     expect(resumed?.sourceKind).toBe("step_started");
     expect(resumed?.agentSessionId).toBe("sess2");
+  });
+
+  it("resolvePermissionPendingActivity clears a permission_pending activity back to active/step_started", () => {
+    const { ctx } = ctxFor(db);
+    openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "working", workCategory: null });
+    openOrUpdateLive(ctx, {
+      ...base,
+      sourceKind: "permission_pending",
+      currentText: "The agent wants to run Bash — awaiting your approval.",
+      workCategory: null
+    });
+    const resolved = resolvePermissionPendingActivity(ctx, { stepRunId: "s1" });
+    expect(resolved?.status).toBe("active");
+    expect(resolved?.sourceKind).toBe("step_started");
+  });
+
+  it("resolvePermissionPendingActivity is a no-op when the live activity isn't permission_pending", () => {
+    const { ctx } = ctxFor(db);
+    openOrUpdateLive(ctx, { ...base, sourceKind: "step_started", currentText: "working", workCategory: null });
+    const resolved = resolvePermissionPendingActivity(ctx, { stepRunId: "s1" });
+    expect(resolved).toBeUndefined();
   });
 
   it("completeLive does not close a confirmation checkpoint", () => {

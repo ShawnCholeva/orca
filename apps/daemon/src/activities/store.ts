@@ -576,6 +576,44 @@ export function resolveMarkDoneActivity(
   return activity;
 }
 
+// Resolve a live permission_pending activity back to the system's turn. Unlike
+// the gate/mark-done pauses, permission_pending never opens its own row or
+// flips status to paused_for_input — onPermissionRequest (server.ts) mutates
+// the ongoing turn's live row in place via openOrUpdateLive, so nothing ever
+// reverted it once the approval was decided (live e2e: an activity sat
+// permission_pending for 17 minutes after being answered, indefinitely
+// suppressing the stall clock — see liveness-watchdog.ts). Call this on BOTH
+// resolution paths (user answer and timeout) so the row reads as the system's
+// turn again the moment the approval is decided, not whenever the next tool
+// call happens to touch it.
+export function resolvePermissionPendingActivity(
+  ctx: ActivityStoreCtx,
+  input: { stepRunId: string }
+): ActivityT | undefined {
+  let event: DomainEvent | undefined;
+  const activity = ctx.db.transaction(() => {
+    const live = getLiveForStepRun(ctx.db, input.stepRunId);
+    if (live === undefined || live.sourceKind !== "permission_pending") return undefined;
+
+    const now = currentTime(ctx);
+    ctx.db
+      .prepare(
+        `UPDATE activities
+         SET status = 'active', source_kind = 'step_started', updated_at = ?
+         WHERE id = ?`
+      )
+      .run(now, live.id);
+
+    const resolved = getActivityById(ctx.db, live.id);
+    if (resolved === undefined) throw new Error(`Activity disappeared: ${live.id}`);
+    event = insertActivityChangedEvent(ctx.db, resolved, now);
+    return resolved;
+  })();
+
+  publishActivityChanged(ctx, event);
+  return activity;
+}
+
 export function resumeFromConfirmation(
   ctx: ActivityStoreCtx,
   input: { stepRunId: string }

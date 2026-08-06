@@ -87,6 +87,43 @@ function insertSession(db: ReturnType<typeof openDatabase>, sessionId: string, g
 }
 
 /**
+ * Seed a full workflow step-run context so resolveStepContext() returns a
+ * non-null result for the given session.
+ */
+function insertSessionWithWorkflowContext(
+  db: ReturnType<typeof openDatabase>,
+  sessionId: string,
+  goalId: string,
+): { stepRunId: string; workflowRunId: string } {
+  const now = new Date().toISOString();
+  const workspaceId = `ws-wf-${sessionId}`;
+  const templateId = `tmpl-wf-${sessionId}`;
+  const workflowRunId = `wr-wf-${sessionId}`;
+  const stepRunId = `sr-wf-${sessionId}`;
+
+  db.prepare(
+    `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(workspaceId, `/tmp/ws-wf-${sessionId}`, 'test', '', now, now);
+  db.prepare(
+    `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
+  ).run(goalId, workspaceId, now);
+  db.prepare(
+    `INSERT INTO workflow_templates (id, name, description, version, steps_json, created_at, updated_at) VALUES (?, ?, '', 1, '[]', ?, ?)`
+  ).run(templateId, 'test-template', now, now);
+  db.prepare(
+    `INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, started_at) VALUES (?, ?, ?, 1, 'active', ?, ?)`
+  ).run(workflowRunId, goalId, templateId, stepRunId, now);
+  db.prepare(
+    `INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, status, fingerprint, started_at) VALUES (?, ?, ?, 'step-1', 0, 'active', 'fp-test', ?)`
+  ).run(stepRunId, goalId, workflowRunId, now);
+  db.prepare(
+    `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, workflow_step_run_id, created_at) VALUES (?, ?, ?, 'claude-code', 'test session', 'running', ?, ?)`
+  ).run(sessionId, goalId, workspaceId, stepRunId, now);
+
+  return { stepRunId, workflowRunId };
+}
+
+/**
  * Insert a workspace row with a specific path (for always-allow write tests).
  */
 function insertWorkspace(db: ReturnType<typeof openDatabase>, workspaceId: string, goalId: string, wsPath: string): void {
@@ -742,6 +779,156 @@ describe('permission decision flow', () => {
 
     resetAccountabilityStatements();
   });
+
+  // ---- Defect B: resolving a permission approval must clear the
+  // permission_pending activity, or the stall clock stays suppressed forever
+  // (live e2e: an activity sat permission_pending 17 minutes after being
+  // answered). Both resolution paths — user answer and timeout — must do this.
+
+  it('ask-mode goal: resolving via the user answer clears the permission_pending activity (system turn again)', async () => {
+    const goalId = 'goal-resolve-answer';
+    const sessionId = 'session-resolve-answer';
+    insertGoal(db, goalId, 'ask');
+    const { stepRunId } = insertSessionWithWorkflowContext(db, sessionId, goalId);
+
+    const hookPromise = server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Bash', tool_input: { command: 'echo hi' }, tool_use_id: 'tu-resolve-answer' },
+    });
+
+    const approvalId = await vi.waitFor(
+      () => {
+        const row = db
+          .prepare("SELECT pending_approval FROM orchestrator_messages WHERE goal_id = ? AND pending_approval IS NOT NULL")
+          .get(goalId) as { pending_approval: string } | undefined;
+        if (!row) throw new Error('pending approval message not yet posted');
+        return (JSON.parse(row.pending_approval) as { approvalId: string }).approvalId;
+      },
+      { timeout: 2000, interval: 50 }
+    );
+
+    // Before resolving: the activity reads permission_pending (suppressing stall).
+    const before = db
+      .prepare("SELECT status, source_kind FROM activities WHERE step_run_id = ?")
+      .get(stepRunId) as { status: string; source_kind: string };
+    expect(before.source_kind).toBe('permission_pending');
+
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/permission-approvals/${approvalId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { decision: 'allow' },
+    });
+    await hookPromise;
+
+    // After resolving: the activity no longer reads permission_pending — the
+    // system's turn again, so the stall sensor is re-armed.
+    const after = db
+      .prepare("SELECT status, source_kind FROM activities WHERE step_run_id = ?")
+      .get(stepRunId) as { status: string; source_kind: string };
+    expect(after.source_kind).not.toBe('permission_pending');
+    expect(after.status).toBe('active');
+  });
+
+  it('ask-mode goal: resolving via timeout also clears the permission_pending activity (system turn again)', async () => {
+    const goalId = 'goal-resolve-timeout';
+    const sessionId = 'session-resolve-timeout';
+    insertGoal(db, goalId, 'ask');
+    const { stepRunId } = insertSessionWithWorkflowContext(db, sessionId, goalId);
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const hookPromise = server.inject({
+        method: 'POST',
+        url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+        headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+        payload: { tool_name: 'Bash', tool_input: { command: 'echo hi' }, tool_use_id: 'tu-resolve-timeout' },
+      });
+
+      // Let the synchronous portion of the handler (record + open the
+      // permission_pending activity) run before advancing the fake clock.
+      // setTimeout is faked (so vi.waitFor's real-timer polling would hang);
+      // yield to the real event loop via setImmediate instead, which stays real.
+      let before: { source_kind: string } | undefined;
+      for (let i = 0; i < 20 && !before; i++) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        before = db
+          .prepare("SELECT source_kind FROM activities WHERE step_run_id = ?")
+          .get(stepRunId) as { source_kind: string } | undefined;
+      }
+      expect(before?.source_kind).toBe('permission_pending');
+
+      // No human answer arrives — fire the ~1800s decision timeout.
+      await vi.advanceTimersByTimeAsync(1_790_000);
+
+      const res = await hookPromise;
+      const body = res.json() as { hookSpecificOutput: { decision: { behavior: string } } };
+      expect(body.hookSpecificOutput.decision.behavior).toBe('deny');
+
+      const after = db
+        .prepare("SELECT status, source_kind FROM activities WHERE step_run_id = ?")
+        .get(stepRunId) as { status: string; source_kind: string };
+      expect(after.source_kind).not.toBe('permission_pending');
+      expect(after.status).toBe('active');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Guard-preserving: a genuinely PENDING approval must keep suppressing the
+  // stall clock no matter how long the user takes. This asserts the activity
+  // stays permission_pending through a long wait — the liveness-watchdog test
+  // "re-arms the stall clock once a permission approval is resolved" is the
+  // sibling assertion proving reap only fires AFTER resolution, never before.
+  it('ask-mode goal: an approval left unresolved keeps the activity permission_pending (no reap-eligibility change)', async () => {
+    const goalId = 'goal-resolve-pending';
+    const sessionId = 'session-resolve-pending';
+    insertGoal(db, goalId, 'ask');
+    const { stepRunId } = insertSessionWithWorkflowContext(db, sessionId, goalId);
+
+    const hookPromise = server.inject({
+      method: 'POST',
+      url: `/v1/agent-hooks/permission?sessionId=${sessionId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { tool_name: 'Bash', tool_input: { command: 'echo hi' }, tool_use_id: 'tu-resolve-pending' },
+    });
+
+    await vi.waitFor(
+      () => {
+        const row = db
+          .prepare("SELECT pending_approval FROM orchestrator_messages WHERE goal_id = ? AND pending_approval IS NOT NULL")
+          .get(goalId) as { pending_approval: string } | undefined;
+        if (!row) throw new Error('pending approval message not yet posted');
+        return (JSON.parse(row.pending_approval) as { approvalId: string }).approvalId;
+      },
+      { timeout: 2000, interval: 50 }
+    );
+
+    const row = db
+      .prepare("SELECT source_kind FROM activities WHERE step_run_id = ?")
+      .get(stepRunId) as { source_kind: string };
+    expect(row.source_kind).toBe('permission_pending');
+
+    // Resolve so the held hook doesn't dangle past the test.
+    const approvalId = (
+      JSON.parse(
+        (
+          db
+            .prepare("SELECT pending_approval FROM orchestrator_messages WHERE goal_id = ? AND pending_approval IS NOT NULL")
+            .get(goalId) as { pending_approval: string }
+        ).pending_approval
+      ) as { approvalId: string }
+    ).approvalId;
+    await server.inject({
+      method: 'POST',
+      url: `/v1/goals/${goalId}/permission-approvals/${approvalId}`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { decision: 'deny' },
+    });
+    await hookPromise;
+  });
 });
 
 // ---- Worker question (elicit hook) flow ----
@@ -764,47 +951,11 @@ describe('worker question (elicit hook) flow', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  /**
-   * Seed a full workflow step-run context so resolveStepContext() returns a
-   * non-null result for the given session.
-   */
-  function insertSessionWithWorkflowContext(
-    sessionId: string,
-    goalId: string,
-  ): { stepRunId: string; workflowRunId: string } {
-    const now = new Date().toISOString();
-    const workspaceId = `ws-wf-${sessionId}`;
-    const templateId = `tmpl-wf-${sessionId}`;
-    const workflowRunId = `wr-wf-${sessionId}`;
-    const stepRunId = `sr-wf-${sessionId}`;
-
-    db.prepare(
-      `INSERT INTO workspaces (id, path, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(workspaceId, `/tmp/ws-wf-${sessionId}`, 'test', '', now, now);
-    db.prepare(
-      `INSERT INTO goal_workspaces (goal_id, workspace_id, attached_at) VALUES (?, ?, ?)`
-    ).run(goalId, workspaceId, now);
-    db.prepare(
-      `INSERT INTO workflow_templates (id, name, description, version, steps_json, created_at, updated_at) VALUES (?, ?, '', 1, '[]', ?, ?)`
-    ).run(templateId, 'test-template', now, now);
-    db.prepare(
-      `INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, started_at) VALUES (?, ?, ?, 1, 'active', ?, ?)`
-    ).run(workflowRunId, goalId, templateId, stepRunId, now);
-    db.prepare(
-      `INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, status, fingerprint, started_at) VALUES (?, ?, ?, 'step-1', 0, 'active', 'fp-test', ?)`
-    ).run(stepRunId, goalId, workflowRunId, now);
-    db.prepare(
-      `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, workflow_step_run_id, created_at) VALUES (?, ?, ?, 'claude-code', 'test session', 'running', ?, ?)`
-    ).run(sessionId, goalId, workspaceId, stepRunId, now);
-
-    return { stepRunId, workflowRunId };
-  }
-
   it('elicit hook stamps stepRunId on pending_question and supersedes open orchestrator question', async () => {
     const goalId = 'goal-elicit-wf';
     const sessionId = 'session-elicit-wf';
     insertGoal(db, goalId, 'ask');
-    const { stepRunId } = insertSessionWithWorkflowContext(sessionId, goalId);
+    const { stepRunId } = insertSessionWithWorkflowContext(db, sessionId, goalId);
 
     // Pre-seed an open orchestrator question for the same step run.
     const orchMsgId = 'orch-msg-wf';
