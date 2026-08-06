@@ -84,6 +84,7 @@ The daemon (`apps/daemon/src`) is organized by subsystem. Each typically has `us
 | Adapters | `adapters/` | `claude-code` and `codex` spawn factories; execution-mode config + dispatcher. |
 | Agent hooks | `agent-hooks/`, `shadow-hooks/` | HTTP endpoints agents' native hooks call back into (Stop/response-done, etc.). |
 | Orchestrator-LLM | `orchestrator-llm/`, `orchestrator-chat/` | The goal-scoped mediating LLM: session, mediator, prompts, shadow vs provider client routing. |
+| Chat commands | `commands/` | Deterministic slash commands from the chat input (`POST /v1/goals/:goalId/commands`). Never routed through the orchestrator LLM — a command that can be reinterpreted is not a command. Today: `/stuck`. |
 | Workflows | `workflows/` | The big one — see below. |
 | Memory | `memory/` | Typed Goal memory, promotion rules, refinement seeding. |
 | Context assembly | `context/` | Right-sized context package per session (deterministic assembler + renderer). |
@@ -102,7 +103,7 @@ Inside `workflows/`:
 - `templates/` — workflow definitions (built-ins registered in `catalog.ts`'s `BUILTIN_TEMPLATE_CATALOG`) and validation pipeline.
 - `runs/` — run lifecycle.
 - `steps/` — per-step run state.
-- `orchestrator/` — the mediation engine: step dispatch, agent interview, judgement, revise loop, crash retry, idle timeout, resume, worker sessions/questions, synthesis. The advance/route/gate/splitter/spawn core is its own deterministic **`DispatchEngine`** (the paper's "control unit"); **`OrchestratorService`** is the event-handler/reaction layer that calls it (the boundary is acyclic). Provider rate/quota recovery is a standalone **`ProviderRecoveryController`** over a **`RunnerPort`** — the in-process execution-plane seam that precedes FUTURE_ARCHITECTURE's Runner Protocol.
+- `orchestrator/` — the mediation engine: step dispatch, agent interview, judgement, revise loop, crash retry, idle timeout, resume, worker sessions/questions, synthesis. The **liveness watchdog** carries two sensors: a dead-tmux reap, and a **system-turn stall sensor** for a worker that is alive but not progressing (progress = `sessions.output_seq` or the step's `activities.updated_at` advancing; the clock accrues *only* while Orca owes the next move, so a worker parked on a user's question or tool approval is never restarted). Both reap through one `failSession` path into the shared rescue budget (`CRASH_RETRY_CAP`), which terminates the step run and the run as `blocked` at the cap rather than spinning forever — and `blocked` is recoverable: resume opens a fresh attempt *and* dispatches an agent for it. The advance/route/gate/splitter/spawn core is its own deterministic **`DispatchEngine`** (the paper's "control unit"); **`OrchestratorService`** is the event-handler/reaction layer that calls it (the boundary is acyclic). Provider rate/quota recovery is a standalone **`ProviderRecoveryController`** over a **`RunnerPort`** — the in-process execution-plane seam that precedes FUTURE_ARCHITECTURE's Runner Protocol.
 - `orchestration-transport/` — transport broker, fallback policy, human-review path, provider catalog.
 - `artifacts/`, `decisions/`, `guardrails/`, `operators/` — supporting concerns.
 
@@ -257,6 +258,8 @@ Prereqs: Node 20+, pnpm (via Corepack), Rust toolchain for Tauri, OS-specific Ta
 | `ORCA_SESSION_OUTPUT_TAIL_BYTES` | Per-session persisted output tail cap (default 1 MiB). |
 | `ORCA_SESSION_STOP_GRACE_MS` | SIGTERM→SIGKILL grace (default 5000). |
 | `ORCA_SESSION_WS_BUFFER_LIMIT_BYTES` | Slow-subscriber buffer limit before the daemon drops it. |
+| `ORCA_LIVENESS_WATCHDOG_MS` / `ORCA_LIVENESS_GRACE_MS` | Watchdog tick interval (default 5000) and the post-spawn grace before a worker may be reaped (default 15000). |
+| `ORCA_STALL_MS` | System-turn idle time tolerated before a live-but-idle worker is restarted (default 600000). A malformed value falls back to the default. |
 
 ### Debugging the daemon
 

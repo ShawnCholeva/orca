@@ -219,6 +219,31 @@ Integration:
 Live verification: reproduce against the `DSL` goal's Research step and confirm the step
 score moves.
 
+## Decisions made during implementation
+
+Recorded here so they are deliberate rather than accidental:
+
+- **In-flight rescues count toward the score.** A step that was rescued and is *still
+  running* discounts the template's score immediately, rather than waiting for the run
+  to finish. The rescue genuinely happened the moment the system had to restart the
+  worker; the cost is not deferred. (User decision, 2026-08-04.)
+- **A cap escalation is not a rescue.** `stall_rescues` increments only when a worker was
+  actually restarted, so the attempt that produced the block contributes the hard-fail
+  weight alone rather than compounding with a rescue weight.
+- **Unchecked work is never graded.** The `null`/needs-evidence sentinel and the
+  `VERSION_MIN` floor are both gated on the *unweighted* population count, so a rescue can
+  never manufacture a failing grade — or a version-comparison signal — out of a step that
+  produced no conclusive evidence.
+- **Unknown slash commands fall through to the orchestrator** as ordinary chat messages.
+  The design above says an unknown command returns a plain error; in practice the client
+  registry returns `null` for anything unrecognized, so `/usr/bin/x` reads as prose rather
+  than erroring. The daemon's `UnknownCommandError` path remains for other clients.
+- **Resume dispatches an agent** (added after the whole-branch review). The cap tells the
+  user to pick the run back up, so resuming had to do more than flip database state: it
+  opens the fresh attempt *and* respawns a worker for it, sharing one implementation with
+  the boot-recovery path. If that respawn fails, the run returns to `blocked` with a
+  plain-language explanation so the Resume control reappears.
+
 ## Out of scope
 
 - Actively unsticking a live session (sending `Esc`, re-prompting) before reaping it.
