@@ -2911,6 +2911,33 @@ export class DispatchEngine {
    * re-evaluated — the decision is already recorded and deduped by traversal_seq.
    */
   /**
+   * Client-facing follow-through for the /next-decision route: requestNextDecision
+   * only *selects* the run's current step's operator and returns — it deliberately
+   * does not launch (its internal advance recursion must stay select-without-launch,
+   * see requestNextDecision's doc comment) — so a route-driven client that never
+   * calls again would otherwise leave the step parked with an operator selected
+   * and no worker forever. Loads the run/template/goal fresh and delegates entirely
+   * to spawnRoutedStep, so it inherits the same no-op guards (non-active run, a
+   * parked gate/splitter destination with a null current step) and the same
+   * idempotent-on-selection, single-choke-point double-launch guard in
+   * spawnStepAgent. Errors are the caller's responsibility to catch — a launch
+   * failure here must not turn a successful decision response into a 500.
+   */
+  async launchCurrentStepIfIdle(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    options: RequestNextDecisionOptions = {}
+  ): Promise<void> {
+    const run = getWorkflowRunById(db, runId);
+    if (!run) return;
+    const template = loadRunTemplate(db, run);
+    if (!template) return;
+    const goal = readGoal(db, run.goalId);
+    await this.spawnRoutedStep(db, now, runId, template, goal, options);
+  }
+
+  /**
    * After a supervised Continue routes to a step destination, launch that step's
    * worker agent. The confirm paths reach a freshly-created attempt with no
    * operator selected, so they must call spawnStepAgent — requestNextDecision

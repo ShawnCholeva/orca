@@ -2432,6 +2432,8 @@ export function createServer(
     operatorRegistry: daemonContext.operatorRegistry,
     workflowSessionLauncher: daemonContext.workflowSessionLauncher,
     stepDispatch: daemonContext.stepDispatchCapabilities,
+    workerSpawn: workerSpawnFn,
+    workerDeliver: workerDeliverFn,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
   });

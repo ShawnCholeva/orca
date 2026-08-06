@@ -29,6 +29,11 @@ export interface OrchestratorRouteDeps {
   operatorRegistry: Pick<OperatorRegistry, "list">;
   workflowSessionLauncher?: WorkflowSessionLauncher;
   stepDispatch?: StepDispatchCapabilities;
+  /** Runs the launched step's session as a headless tmux worker. Without this,
+   *  next-decision's launch follow-through would only create a session row. */
+  workerSpawn?: (input: { sessionId: string; goalId: string; adapterId: string }) => Promise<void>;
+  /** Submits the composed initial objective to the freshly-spawned worker. */
+  workerDeliver?: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">;
   now?: () => string;
   idFactory?: () => string;
 }
@@ -46,8 +51,8 @@ export function registerOrchestratorRoutes(
     deps.operatorRegistry,
     deps.workflowSessionLauncher ?? { launch: async () => { throw new Error("direct_launch_unsupported"); } },
     deps.stepDispatch,
-    undefined,
-    undefined,
+    deps.workerSpawn,
+    deps.workerDeliver,
     undefined
   );
 
@@ -72,17 +77,31 @@ export function registerOrchestratorRoutes(
       );
     }
 
+    const now = deps.now ?? (() => new Date().toISOString());
     try {
-      const result = await dispatchEngine.requestNextDecision(
-        deps.db,
-        deps.now ?? (() => new Date().toISOString()),
-        id,
-        {
+      const result = await dispatchEngine.requestNextDecision(deps.db, now, id, {
+        bus: deps.bus,
+        idFactory: deps.idFactory,
+      });
+      const response = NextOrchestratorDecisionResponse.parse(result);
+
+      // Follow-through: requestNextDecision only *selects* the current step's
+      // operator (see DispatchEngine.requestNextDecision's doc comment) — this
+      // is the only client-facing route that drives dispatch for a run started
+      // through the HTTP API, so launch the worker here or it parks forever.
+      // Best-effort: a launch failure must not turn a successful decision into
+      // a 500 (spawnStepAgent already posts a chat message on its own launch
+      // failure; this just guards against the few paths it doesn't wrap).
+      try {
+        await dispatchEngine.launchCurrentStepIfIdle(deps.db, now, id, {
           bus: deps.bus,
           idFactory: deps.idFactory,
-        }
-      );
-      return NextOrchestratorDecisionResponse.parse(result);
+        });
+      } catch (launchError) {
+        console.error("[orchestrator] next-decision launch follow-through failed", id, launchError);
+      }
+
+      return response;
     } catch (error) {
       if (
         error instanceof OrchestratorRunNotFoundError ||
