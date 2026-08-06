@@ -214,12 +214,17 @@ import {
   shouldSuggestRemember,
 } from './harness-risk/accountability.js';
 import { registerGoalBootstrapRoute } from './goals/bootstrap-route.js';
-import { startWorkflowRun } from './workflows/runs/usecases.js';
+import {
+  markWorkflowRunBlocked,
+  startWorkflowRun,
+  WorkflowRunInvalidTransitionError,
+} from './workflows/runs/usecases.js';
 import {
   OrchestratorService,
   OrchestratorProviderRecoveryNotFoundError,
   OrchestratorProviderRecoveryInvalidTransitionError,
 } from './workflows/orchestrator/service.js';
+import { postOrchestratorMessage } from './workflows/orchestrator/orchestrator-message.js';
 import { DispatchEngine } from './workflows/orchestrator/dispatch-engine.js';
 import { ProviderRecoveryController } from './workflows/orchestrator/provider-recovery-controller.js';
 import type { RunnerPort } from './workflows/orchestrator/runner-port.js';
@@ -1692,12 +1697,51 @@ export function createServer(
 
   // ---- Workflow run lifecycle routes ----
 
+  // respawnStepRun can throw before any session row exists (e.g. no ready
+  // agent for the step's provider) — before the resume route's best-effort
+  // `.catch(() => {})` swallows it. Left alone, that strands the run `active`
+  // with no worker and no diagnostic: exactly the state this whole task
+  // exists to eliminate. Wrap the shared respawn here — resume path only,
+  // respawnStepRun itself (and the boot path that also uses it) is untouched
+  // — so a failure is logged, explained in the chat in plain language, and
+  // the run is put back to `blocked` so the Resume control reappears.
+  const onResumeRespawnFailed = async (args: {
+    goalId: string;
+    runId: string;
+    stepRunId: string;
+  }): Promise<void> => {
+    try {
+      await respawnStepRun(args);
+    } catch (err) {
+      console.error("[resume] respawn failed after user-triggered resume", args.runId, err);
+      const now = daemonContext.now ?? (() => new Date().toISOString());
+      postOrchestratorMessage(
+        db,
+        now,
+        args.goalId,
+        "I tried to restart this step but couldn't get an agent going. Check your provider setup (login, credentials, model access) and press Resume run again once that's fixed.",
+        { bus: eventBus, idFactory: daemonContext.idFactory }
+      );
+      try {
+        markWorkflowRunBlocked(
+          { db, bus: eventBus, now, idFactory: daemonContext.idFactory },
+          args.runId,
+          "restart failed: no agent could be started"
+        );
+      } catch (blockErr) {
+        // The run moved on before we could re-block it (e.g. it was
+        // cancelled in the meantime) — nothing more to do.
+        if (!(blockErr instanceof WorkflowRunInvalidTransitionError)) throw blockErr;
+      }
+    }
+  };
+
   registerWorkflowRunRoutes(server, {
     db,
     bus: eventBus,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
-    onResumed: respawnStepRun,
+    onResumed: onResumeRespawnFailed,
   });
 
   // ---- Workflow artifact routes ----
