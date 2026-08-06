@@ -878,7 +878,8 @@ export class DispatchEngine {
       const { sessionId } = await this.launcher.launch(launchCtx);
       this.recordStepLaunchTransition(db, now, goal, run, stepRun, sessionId, options);
       return this.commitNoopLatestDecision(db, run.id, stepRun.id);
-    } catch {
+    } catch (err) {
+      console.error("[orchestrator] direct launch failed; falling back to a launch recommendation", stepRun.id, err);
       return this.commitLaunchRecommendation(db, now, ctx, chosen, objective, options);
     }
   }
