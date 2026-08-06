@@ -845,6 +845,39 @@ export function createServer(
     stepDispatch: daemonContext.stepDispatchCapabilities,
   });
 
+  // Get an agent back onto a step run: prefer reattaching a surviving tmux
+  // worker over spawning a fresh one, otherwise dispatch via the orchestrator
+  // service. Shared by boot-time reconciliation (below) and a user-triggered
+  // resume (registerWorkflowRunRoutes' onResumed) — two callers of the same
+  // "make the run's current step run have a worker again" behavior.
+  const respawnStepRun = async ({
+    runId,
+    stepRunId,
+    goalId,
+  }: {
+    runId: string;
+    stepRunId: string;
+    goalId: string;
+  }): Promise<void> => {
+    // Prefer reattaching a surviving tmux worker over respawning a fresh one.
+    const sessionRow = db.prepare(
+      "SELECT id FROM sessions WHERE workflow_step_run_id = ? ORDER BY created_at DESC LIMIT 1"
+    ).get(stepRunId) as { id: string } | undefined;
+    if (sessionRow) {
+      const wsRow = db.prepare(
+        "SELECT w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC LIMIT 1"
+      ).get(goalId) as { path: string } | undefined;
+      if (wsRow && await workerSessions.reattach(sessionRow.id, wsRow.path)) return; // adopted; no respawn
+    }
+    await orchestratorService.respawnStepAgent(
+      db,
+      daemonContext.now ?? (() => new Date().toISOString()),
+      runId,
+      stepRunId,
+      { bus: eventBus, idFactory: daemonContext.idFactory }
+    );
+  };
+
   // Boot-time resume (production only — gated so createServer in tests is inert).
   // reconcileSessionsOnBoot skips workflow-step sessions (tmux workers may survive
   // the restart), so those sessions still have status 'running' in DB. Here we
@@ -886,25 +919,7 @@ export function createServer(
           await workerSessions.reattach(sessionId, wsRow.path);
         }
       },
-      respawn: async ({ runId, stepRunId, goalId }) => {
-        // Prefer reattaching a surviving tmux worker over respawning a fresh one.
-        const sessionRow = db.prepare(
-          "SELECT id FROM sessions WHERE workflow_step_run_id = ? ORDER BY created_at DESC LIMIT 1"
-        ).get(stepRunId) as { id: string } | undefined;
-        if (sessionRow) {
-          const wsRow = db.prepare(
-            "SELECT w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC LIMIT 1"
-          ).get(goalId) as { path: string } | undefined;
-          if (wsRow && await workerSessions.reattach(sessionRow.id, wsRow.path)) return; // adopted; no respawn
-        }
-        await orchestratorService.respawnStepAgent(
-          db,
-          daemonContext.now ?? (() => new Date().toISOString()),
-          runId,
-          stepRunId,
-          { bus: eventBus, idFactory: daemonContext.idFactory }
-        );
-      },
+      respawn: respawnStepRun,
       markRecoverySessionMissing: async ({ stepRunId, sessionId }) => {
         // A run paused for provider recovery lost its native worker across the
         // restart. Never respawn (that discards the checkpoint). Flip the
@@ -1682,6 +1697,7 @@ export function createServer(
     bus: eventBus,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
+    onResumed: respawnStepRun,
   });
 
   // ---- Workflow artifact routes ----

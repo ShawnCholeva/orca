@@ -32,6 +32,12 @@ export interface WorkflowRunRouteDeps {
   bus: EventBus;
   now?: () => string;
   idFactory?: () => string;
+  /**
+   * Fired after a successful resume so the freshly-opened step-run attempt
+   * actually gets a worker (reattach a surviving one, or dispatch a new one).
+   * Best-effort: never blocks the HTTP reply (see the resume route below).
+   */
+  onResumed?: (args: { goalId: string; runId: string; stepRunId: string }) => Promise<void>;
 }
 
 interface GoalRow {
@@ -176,6 +182,15 @@ export function registerWorkflowRunRoutes(
 
     try {
       const run = resumeWorkflowRun(createUsecaseCtx(deps), id);
+      if (deps.onResumed && run.currentStepRunId) {
+        // Best-effort dispatch; never block the resume reply on it (matches
+        // the onUserMessage convention in orchestrator-chat/routes.ts). A 200
+        // here means the run is unblocked and a respawn was kicked off in the
+        // background — not a confirmed-running agent.
+        void deps
+          .onResumed({ goalId, runId: id, stepRunId: run.currentStepRunId })
+          .catch(() => {});
+      }
       return WorkflowRunResponse.parse({ run });
     } catch (error) {
       if (error instanceof WorkflowRunNotFoundError) {
