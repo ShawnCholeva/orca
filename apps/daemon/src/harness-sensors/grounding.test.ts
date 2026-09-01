@@ -78,12 +78,37 @@ describe("evaluateGrounding — member_of", () => {
 });
 
 describe("evaluateGrounding — implies", () => {
-  it("vacuously passes when the antecedent does not hold", () => {
+  it("skips when the antecedent does not hold, and says why", () => {
     const g = run(
       [{ rule: "implies", when: { field: "verdict", equals: "needs_work" }, then: { field: "concerns", nonEmpty: true }, mode: "enforce" }],
       { verdict: "sound", concerns: [] },
     );
+    // A rule that never examined its consequent must not read as a passed check —
+    // the confirm card renders passes as green ticks and would overstate its evidence.
+    expect(g.checks[0]!.result).toBe("skipped");
+    expect(g.checks[0]!.detail).toBe("rule does not apply — verdict is not needs_work");
+    // Pre-existing verdict rule (checks.every(skipped) -> "skipped"), unchanged by this
+    // task: with only one check and it now skipped, the overall verdict is "skipped", not
+    // "passed" -- this is the same correction one layer up: a rule that examined nothing
+    // must not count as evidence that grounded the step.
+    expect(g.verdict).toBe("skipped");
+  });
+
+  it("skips when the antecedent field is missing from the output entirely", () => {
+    const g = run(
+      [{ rule: "implies", when: { field: "verdict", equals: "needs_work" }, then: { field: "concerns", nonEmpty: true }, mode: "enforce" }],
+      { concerns: [] },
+    );
+    expect(g.checks[0]!.result).toBe("skipped");
+  });
+
+  it("still evaluates normally when the antecedent holds", () => {
+    const g = run(
+      [{ rule: "implies", when: { field: "verdict", equals: "needs_work" }, then: { field: "concerns", nonEmpty: true }, mode: "enforce" }],
+      { verdict: "needs_work", concerns: ["missing error path"] },
+    );
     expect(g.checks[0]!.result).toBe("passed");
+    expect(g.verdict).toBe("passed");
   });
 
   it("fails when the antecedent holds and the consequent is empty", () => {

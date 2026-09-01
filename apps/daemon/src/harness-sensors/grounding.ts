@@ -154,7 +154,7 @@ function evaluateOne(
     case "implies": {
       const antecedent = resolveSelector(output, check.when.field);
       if (!antecedent.present || !antecedent.values.some((v) => v === check.when.equals)) {
-        return { result: "passed", detail: "" };
+        return { result: "skipped", detail: `rule does not apply — ${check.when.field} is not ${String(check.when.equals)}` };
       }
       const consequent = resolveSelector(output, check.then.field);
       const failures: string[] = [];
