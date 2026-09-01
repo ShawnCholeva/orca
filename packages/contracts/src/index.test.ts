@@ -1811,6 +1811,26 @@ describe("ConfirmationSummary", () => {
     expect(parsed.fields).toHaveLength(2);
   });
 
+  it("accepts an optional details array alongside fields", () => {
+    const parsed = ConfirmationSummary.parse({
+      lead: "Provisional brief.",
+      fields: [{ label: "Recommended step", value: "Clarify" }],
+      details: [
+        { label: "Known files", value: ["docs/cara.md", "apps/api/src/config.ts"] },
+        { label: "Codebase state", value: "existing_ungrounded" },
+      ],
+      scoring: null,
+    });
+    expect(parsed.details).toHaveLength(2);
+  });
+
+  it("parses a card persisted before details existed", () => {
+    const parsed = ConfirmationSummary.parse({
+      lead: "ok", fields: [{ label: "Problem", value: "x" }], scoring: null,
+    });
+    expect(parsed.details).toBeUndefined();
+  });
+
   it("rides on Activity as an optional field", () => {
     const base = {
       id: "a1", goalId: "g1", workflowRunId: "r1", stepRunId: "s1",

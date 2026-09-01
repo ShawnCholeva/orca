@@ -1388,17 +1388,21 @@ export const ConfirmationSummaryEvidence = z
   .strict();
 export type ConfirmationSummaryEvidence = z.infer<typeof ConfirmationSummaryEvidence>;
 
+const ConfirmationCardField = z
+  .object({
+    label: z.string().min(1).max(128),
+    value: z.union([z.string().max(4000), z.array(z.string().max(4000)).max(64)]),
+  })
+  .strict();
+
 export const ConfirmationSummary = z
   .object({
     lead: z.string().max(4000),
-    fields: z
-      .array(
-        z.object({
-          label: z.string().min(1).max(128),
-          value: z.union([z.string().max(4000), z.array(z.string().max(4000)).max(64)]),
-        }).strict()
-      )
-      .max(32),
+    fields: z.array(ConfirmationCardField).max(32),
+    // Fields whose schema marks them `display: "agent"` — folded behind the
+    // card's disclosure rather than dropped. Optional so cards persisted
+    // before this existed still parse.
+    details: z.array(ConfirmationCardField).max(32).optional(),
     // Built only from null (no scoring) or a re-parsed persisted stash
     // (pending_completion_json.scoring) — never fresh model output directly — so
     // this tolerates a pre-5.5 stash missing `reasoning`, like StoredStepResultScoring.
