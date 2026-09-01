@@ -1173,6 +1173,13 @@
 .step-confirm-field dt { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); margin-bottom: 6px; }
 .step-confirm-field dd { margin: 0; color: var(--text-2); }
 .step-confirm-field ul { margin: 2px 0 0; padding-left: 16px; }
+.step-confirm-brief { margin: 0 0 16px; }
+.step-confirm-brief-summary {
+  cursor: pointer; font-size: 11px; color: var(--text-3);
+  display: flex; align-items: baseline; gap: 8px;
+}
+.step-confirm-brief-summary::-webkit-details-marker { color: var(--text-4); }
+.step-confirm-brief .step-confirm-fields { margin: 12px 0 0; }
 .step-confirm-scores-toggle {
   display: inline-flex;
   align-items: center;

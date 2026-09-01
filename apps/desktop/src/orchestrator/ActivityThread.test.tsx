@@ -383,6 +383,47 @@ describe("refute advisory (5.4 L4)", () => {
   });
 });
 
+describe("agent-audience brief disclosure", () => {
+  it("folds details behind a disclosure that names the count", () => {
+    render(
+      <LiveActivity
+        activity={{
+          ...confirmActivity,
+          confirmationSummary: {
+            ...confirmActivity.confirmationSummary,
+            fields: [{ label: "Recommended step", value: "Clarify" }],
+            details: [
+              { label: "Known files", value: ["docs/cara.md"] },
+              { label: "Codebase state", value: "existing_ungrounded" },
+            ],
+          },
+        }}
+      />,
+    );
+    const brief = screen.getByTestId("step-confirm-brief");
+    expect(brief).toHaveTextContent("Brief for the next step (2)");
+    expect(brief).toHaveTextContent("Known files");
+    expect(brief).toHaveTextContent("Codebase state");
+    // The decision still reads on the card face.
+    expect(screen.getByText("Recommended step")).toBeInTheDocument();
+  });
+
+  it("renders no disclosure when there are no details", () => {
+    render(
+      <LiveActivity
+        activity={{
+          ...confirmActivity,
+          confirmationSummary: {
+            ...confirmActivity.confirmationSummary,
+            fields: [{ label: "Problem", value: "x" }],
+          },
+        }}
+      />,
+    );
+    expect(screen.queryByTestId("step-confirm-brief")).toBeNull();
+  });
+});
+
 describe("pickLiveActivity", () => {
   it("returns pause-interaction activities and null for active tool_use or plain paused", () => {
     // step_confirmation_pending → shown

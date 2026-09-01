@@ -71,6 +71,29 @@ const REFUTE_VERDICT_LABEL: Record<string, string> = {
   unavailable: "No independent review ran",
 };
 
+function ConfirmFieldList({
+  fields,
+}: {
+  fields: NonNullable<Activity["confirmationSummary"]>["fields"];
+}) {
+  return (
+    <dl className="step-confirm-fields">
+      {fields.map((f, i) => (
+        <div key={i} className="step-confirm-field">
+          <dt>{f.label}</dt>
+          <dd>
+            {Array.isArray(f.value) ? (
+              <ul>{f.value.map((v, j) => <li key={j}>{v}</li>)}</ul>
+            ) : (
+              f.value
+            )}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 // The synthesized frame body (lead + fields) shared by the live confirmation
 // card and the persisted step-result card.
 export function ConfirmationFrame({
@@ -102,21 +125,17 @@ export function ConfirmationFrame({
           ) : null}
         </div>
       ) : null}
-      {summary.fields.length > 0 ? (
-        <dl className="step-confirm-fields">
-          {summary.fields.map((f, i) => (
-            <div key={i} className="step-confirm-field">
-              <dt>{f.label}</dt>
-              <dd>
-                {Array.isArray(f.value) ? (
-                  <ul>{f.value.map((v, j) => <li key={j}>{v}</li>)}</ul>
-                ) : (
-                  f.value
-                )}
-              </dd>
-            </div>
-          ))}
-        </dl>
+      {summary.fields.length > 0 ? <ConfirmFieldList fields={summary.fields} /> : null}
+      {/* Fields the schema marks `display: "agent"` — handoff payload for the
+          next step, not review material for the human. Folded, never dropped;
+          the count makes it evident nothing was lost. */}
+      {summary.details && summary.details.length > 0 ? (
+        <details className="step-confirm-brief" data-testid="step-confirm-brief">
+          <summary className="step-confirm-brief-summary">
+            <span>Brief for the next step ({summary.details.length})</span>
+          </summary>
+          <ConfirmFieldList fields={summary.details} />
+        </details>
       ) : null}
     </>
   );
