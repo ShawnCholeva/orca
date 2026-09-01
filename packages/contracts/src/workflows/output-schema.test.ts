@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WorkflowStepOutputSchema, validateStepOutput } from "./output-schema.js";
+import { WorkflowStepOutputField, WorkflowStepOutputSchema, validateStepOutput } from "./output-schema.js";
 
 const schema = WorkflowStepOutputSchema.parse([
   { key: "problem", type: "string", required: true },
@@ -70,5 +70,30 @@ describe("validateStepOutput", () => {
     const r = validateStepOutput(schema, { problem: "x", constraints: ["a", 1] });
     expect(r.ok).toBe(false);
     expect(r.ok === false && r.errors.join()).toMatch(/constraints\[1\]/);
+  });
+});
+
+describe("display audience", () => {
+  it("accepts user and agent, and parses fields that omit it", () => {
+    const withUser = WorkflowStepOutputField.parse({
+      key: "rationale", type: "string", required: true, display: "user",
+    });
+    expect(withUser.display).toBe("user");
+
+    const withAgent = WorkflowStepOutputField.parse({
+      key: "known_files", type: "array", itemType: "string", required: false, display: "agent",
+    });
+    expect(withAgent.display).toBe("agent");
+
+    // Absent is legal and stays absent — the `agent` default is applied by the
+    // card builder, not by the parser, so a round-trip never invents a value.
+    const bare = WorkflowStepOutputField.parse({ key: "problem", type: "string", required: true });
+    expect(bare.display).toBeUndefined();
+  });
+
+  it("rejects an audience outside the enum", () => {
+    expect(() =>
+      WorkflowStepOutputField.parse({ key: "problem", type: "string", required: true, display: "both" })
+    ).toThrow();
   });
 });

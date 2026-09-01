@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const PrimitiveType = z.enum(["string", "number", "boolean", "array", "object"]);
 const ItemType = z.enum(["string", "number", "boolean", "object"]);
+const DisplayAudience = z.enum(["user", "agent"]);
 
 export type WorkflowStepOutputField = {
   key: string;
@@ -11,6 +12,14 @@ export type WorkflowStepOutputField = {
   enum?: string[];
   itemType?: z.infer<typeof ItemType>;
   fields?: WorkflowStepOutputField[];
+  /** Who this field is for on the step-completion confirm card.
+   *  `user` means user AND agent — it renders on the card face.
+   *  `agent` means agent only *on the card*: it folds behind the card's
+   *  disclosure. It does NOT filter the field out of `priorStepOutputs` —
+   *  downstream steps receive every field either way (step-input.ts).
+   *  Absent ⇒ `agent`, because agent visibility is the baseline; putting a
+   *  field in front of the human is the deliberate act. */
+  display?: z.infer<typeof DisplayAudience>;
 };
 
 export const WorkflowStepOutputField: z.ZodType<WorkflowStepOutputField> = z.lazy(() =>
@@ -22,6 +31,7 @@ export const WorkflowStepOutputField: z.ZodType<WorkflowStepOutputField> = z.laz
     enum: z.array(z.string().min(1).max(128)).min(1).max(32).optional(),
     itemType: ItemType.optional(),
     fields: z.array(WorkflowStepOutputField).max(32).optional(),
+    display: DisplayAudience.optional(),
   }).strict().superRefine((field, ctx) => {
     if (field.enum && field.type !== "string") {
       ctx.addIssue({
