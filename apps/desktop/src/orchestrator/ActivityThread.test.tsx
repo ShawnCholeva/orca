@@ -556,8 +556,8 @@ describe("ActivityCard", () => {
     const card = screen.getByTestId("step-result-card");
     expect(card).toHaveTextContent("Investigate");
     expect(card).not.toHaveTextContent("82%");
-    // The expander is now a bottom "Evidence" toggle (was a top "Details" button).
-    expect(screen.getByTestId("step-result-expand")).toHaveTextContent("Evidence");
+    // The expander is now a bottom "Scores" toggle (was a top "Details" button).
+    expect(screen.getByTestId("step-result-expand")).toHaveTextContent("Scores");
     fireEvent.click(screen.getByTestId("step-result-expand"));
     expect(card).toHaveTextContent("82%");
     expect(card).toHaveTextContent("Followed instructions");
@@ -782,5 +782,12 @@ describe("evidence bundle (paper p.62)", () => {
     const toggle = screen.getByTestId("confirm-scores-toggle");
     expect(toggle).toHaveTextContent("Evidence");
     expect(toggle).not.toHaveTextContent("Scores");
+  });
+
+  it("labels the toggle 'Scores' when the summary has no evidence bundle", () => {
+    render(<LiveActivity activity={confirmActivity} />);
+    const toggle = screen.getByTestId("confirm-scores-toggle");
+    expect(toggle).toHaveTextContent("Scores");
+    expect(toggle).not.toHaveTextContent("Evidence");
   });
 })

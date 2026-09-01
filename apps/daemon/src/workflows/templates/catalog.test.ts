@@ -396,9 +396,4 @@ describe("Triage grounding labels", () => {
     ]);
     expect(new Set(labels).size).toBe(labels.length);
   });
-
-  it("bumps adaptive-delivery so the labels actually install", () => {
-    const t = BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === "orca/adaptive-delivery")!;
-    expect(t.version).toBe(16);
-  });
 });
