@@ -10,6 +10,7 @@ import {
   upgradeInstalledBuiltInTemplates,
   UnknownBuiltInTemplateError,
 } from "./usecases.js";
+import { BUILTIN_TEMPLATE_CATALOG } from "./catalog.js";
 
 let db: Database.Database;
 function ctx() {
@@ -102,6 +103,8 @@ describe("category persistence", () => {
 });
 
 describe("upgradeInstalledBuiltInTemplates", () => {
+  const BUGFIX_VERSION = BUILTIN_TEMPLATE_CATALOG.find((t) => t.id === "orca/bug-triage-fix")!.version;
+
   function insertOldBuiltIn(id: string, version: number) {
     const steps = JSON.stringify([
       {
@@ -124,7 +127,7 @@ describe("upgradeInstalledBuiltInTemplates", () => {
     const row = db
       .prepare("SELECT version, steps_json, graph_json FROM workflow_templates WHERE id = ?")
       .get("orca/bug-triage-fix") as { version: number; steps_json: string; graph_json: string | null };
-    expect(row.version).toBe(4);
+    expect(row.version).toBe(BUGFIX_VERSION);
     expect(row.steps_json).toContain('"id":"done"');
     expect(row.graph_json).not.toBeNull();
   });
@@ -167,14 +170,14 @@ describe("upgradeInstalledBuiltInTemplates", () => {
     const row = db
       .prepare("SELECT version, catalog_version, steps_json FROM workflow_templates WHERE id = ?")
       .get("orca/bug-triage-fix") as { version: number; catalog_version: number; steps_json: string };
-    expect(row.catalog_version).toBe(4); // the catalog version that landed
-    expect(row.version).toBe(11); // append-only: forward of the learned 10, never backward to 4
+    expect(row.catalog_version).toBe(BUGFIX_VERSION); // the catalog version that landed
+    expect(row.version).toBe(11); // append-only: forward of the learned 10, never backward to the catalog version
     expect(row.steps_json).toContain('"id":"done"'); // catalog content applied
   });
 
   it("is a no-op when the installed catalog version is current, even under learned forward versions", () => {
     insertOldBuiltIn("orca/bug-triage-fix", 10); // learned content at version 10
-    db.prepare("UPDATE workflow_templates SET catalog_version = 4 WHERE id = 'orca/bug-triage-fix'").run();
+    db.prepare("UPDATE workflow_templates SET catalog_version = ? WHERE id = 'orca/bug-triage-fix'").run(BUGFIX_VERSION);
     upgradeInstalledBuiltInTemplates(ctx());
     const row = db
       .prepare("SELECT version, steps_json FROM workflow_templates WHERE id = ?")
