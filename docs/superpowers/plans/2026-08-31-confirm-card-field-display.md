@@ -4,7 +4,7 @@
 
 **Goal:** Add an optional `display: "user" | "agent"` audience to workflow step output fields so the step-completion confirm card shows the human only the fields they are deciding on, folding the rest behind a disclosure — while every field continues to reach downstream agents unchanged.
 
-**Architecture:** One optional key on `WorkflowStepOutputField` (absent ⇒ `agent`). `buildConfirmationSummary` splits schema fields into the card's existing `fields` array and a new optional `details` array; the desktop renders `details` inside a `<details>` disclosure. A legacy rule — a schema where no top-level field declares an audience is treated as all-`user` — keeps in-flight runs and completed history rendering exactly as they do today. All 98 top-level catalog fields are then annotated explicitly, so the `agent` default only ever governs fields added later.
+**Architecture:** One optional key on `WorkflowStepOutputField` (absent ⇒ `agent`). `buildConfirmationSummary` splits schema fields into the card's existing `fields` array and a new optional `details` array; the desktop renders `details` inside a `<details>` disclosure. A legacy rule — a schema where no top-level field declares an audience is treated as all-`user` — keeps unannotated templates (duplicated, custom, or not yet annotated) rendering full-face exactly as they do today. [Corrected 2026-08-31: this does not distinguish in-flight from historical runs — the schema is read from each template's live row, not a per-run snapshot; see Task 3's background note.] All 98 top-level catalog fields are then annotated explicitly, so the `agent` default only ever governs fields added later.
 
 **Tech Stack:** TypeScript, Zod (contracts), Vitest (daemon + contracts + desktop), React + Testing Library (desktop), plain CSS.
 
@@ -211,7 +211,7 @@ git commit -m "feat(contracts): add optional details array to ConfirmationSummar
 - Consumes: `WorkflowStepOutputField.display` (Task 1); `ConfirmationSummary.details` (Task 2).
 - Produces: `buildConfirmationSummary(...)` returns `details` only when at least one field routed there. Signature is otherwise unchanged — all six existing parameters and their order stay exactly as they are.
 
-**Background the implementer needs:** this function is called from two places, both in `apps/daemon/src/activities/projection.ts` (lines 149 and 238), and both rebuild the card from the run's **snapshotted** schema in `steps_json`. That snapshot predates `display` for every run that already exists, which is what the `legacy` rule below protects.
+**Background the implementer needs:** this function is called from two places, both in `apps/daemon/src/activities/projection.ts` (lines 149 and 238), and both read the step's `outputSchema` from a query that joins `workflow_step_runs` to `workflow_templates` **by `template_id` only** (`LEFT JOIN workflow_templates wt ON wt.id = wr.template_id`) — no `template_version` filter, so this is always the template's **current, live** schema, not a per-run snapshot. What the `legacy` rule below protects is a schema with **no** `display` field anywhere — i.e. an unannotated template (duplicated via `duplicateTemplate`, custom, or a built-in template not yet annotated) — so its card still renders full-face instead of emptying out. *(Corrected 2026-08-31: this paragraph originally claimed the schema is snapshotted into `steps_json` per run and that the rule protects run history. Verified false by reading `projection.ts:160-230`; confirmed live against a completed goal whose history rendered in the new split format after its template was annotated.)*
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -689,7 +689,7 @@ Restart the daemon first so the v15 catalog installs, then start an Adaptive Del
 1. The card face shows **Problem**, **Success outcome**, **Recommended step**, **Rationale** — and nothing else.
 2. A **"Brief for the next step (5)"** disclosure sits below it.
 3. Expanding it reveals Constraints, Known files, Risks, Has product intent, Codebase state.
-4. An older run's Triage card, opened from history, still shows all nine rows on its face — the `legacy` rule doing its job on a pre-`display` snapshot.
+4. ~~An older run's Triage card, opened from history, still shows all nine rows on its face — the `legacy` rule doing its job on a pre-`display` snapshot.~~ **Investigated and invalid (2026-08-31):** this check's premise is wrong. `buildConfirmationSummary`'s callers (`apps/daemon/src/activities/projection.ts:149,238`) join to `workflow_templates` by `template_id` only, not `template_version` — there is no per-run snapshot. Once Triage's live template row is upgraded to v15, an older Triage run opened from history renders in the **new split format** (four rows on the face, five behind the disclosure), the same as an in-flight run — it does not keep showing all nine rows. Confirmed live against a completed "Script Studio" goal.
 
 - [ ] **Step 4: Commit any fixes, then report**
 

@@ -53,7 +53,7 @@ Collapsing after N rows needs no backend change but is blind. Schema order is au
 - Demoted fields fold behind a disclosure on the confirm card — visible on demand, never dropped.
 - All 98 top-level catalog fields carry an explicit `display`, so the default only ever governs fields added later.
 - Triage's card face reduces to: lead → Problem → Success outcome → Recommended step → Rationale.
-- Cards for in-flight runs and completed history keep their current face.
+- Templates with no `display` annotation anywhere (duplicated, custom, or not yet annotated) keep their current full-face card via the `legacy` rule. *(See correction note in §4.2: this is a property of the template, not of a run's age — an annotated template's history renders in the new split format too, since the schema is read from the live template row.)*
 
 ### Non-goals
 - Filtering what any agent receives. Out of scope and explicitly undesirable.
@@ -98,7 +98,13 @@ const target = legacy || field.display === "user" ? fields : details;
 
 The `_completion` skip and the splitter relabel are unchanged; the relabel pushes to `target` rather than to `fields` directly, so a demoted branch field would fold correctly (none is demoted today). `details` is included in the returned object only when non-empty, so unannotated steps produce byte-identical cards.
 
-**The `legacy` rule is what protects history.** Output schemas are snapshotted into each run's `steps_json`, and cards are rebuilt from that snapshot on read (`apps/daemon/src/activities/projection.ts:149,238`). Without this rule, every in-flight and completed run — whose snapshot predates `display` — would default to `agent` and lose its card face on next render. The rule reads "a schema in which *no* field declares an audience is a pre-`display` schema; treat all of it as `user`." Within an annotated schema the `agent` default still applies, so a newly added field is agent-only until deliberately promoted.
+**The `legacy` rule protects unannotated templates, not history.** `buildConfirmationSummary`'s two call sites in `apps/daemon/src/activities/projection.ts` (lines ~149, ~238) join `workflow_step_runs` to `workflow_templates` **by `template_id` only** — there is no snapshot and no `template_version` filter. The schema used to build any card, for an in-flight run or a completed one, is always the template's *current, live* row. So a historical run of a template that later gets annotated renders in the new split format the moment the live template row is upgraded, exactly like a run still in progress — the `legacy` rule does nothing to keep it on its old face.
+
+What the rule actually protects: templates whose schema carries **no** `display` annotation anywhere — a duplicated template (`duplicateTemplate`), a custom template, or a built-in template not yet annotated. Without the rule, every field in such a schema would default to `agent`, folding the whole card behind the disclosure and leaving the face empty except for the lead. The rule reads "a schema in which *no* field declares an audience is unannotated; treat all of it as `user`." Within an annotated schema the `agent` default still applies, so a newly added field is agent-only until deliberately promoted.
+
+The requirement to bump template versions (§4.5) is still correct, but for the accurate reason: bumping is what gets an annotated schema onto the **live** template row that every reader queries — it has nothing to do with invalidating a per-run snapshot, because no such snapshot is read.
+
+> **Correction (2026-08-31):** This section originally claimed the `legacy` rule protects historical runs because output schemas are snapshotted into each run's `steps_json`. That was wrong. Verified by reading `apps/daemon/src/activities/projection.ts:160-230`: both call sites join `workflow_templates` by `id` only, never by `template_version`, so cards are always built from the live template row. Confirmed live against a completed "Script Studio" goal, which rendered in the new split format once Triage was annotated. The rule remains load-bearing for the corrected reason above — it protects templates with no `display` annotations at all, not history.
 
 ### 4.3 Desktop
 
@@ -122,7 +128,7 @@ Top-level counts per step definition (for review completeness): triage 9, clarif
 
 ### 4.5 Version bumps — required on all seven templates
 
-The boot upgrade installs a template only when the catalog version **exceeds** the installed one. A template whose schema gains annotations but whose version does not move keeps its un-annotated installed copy — whose fields then default to `agent`, folding that card. Skipping a bump therefore causes exactly the regression this design exists to avoid.
+The boot upgrade installs a template only when the catalog version **exceeds** the installed one. Every card — for an in-flight run or a historical one — is built from the template's live row (see the correction in §4.2), so annotations only take effect once that row is upgraded. A template whose schema gains annotations but whose version does not move keeps its un-annotated installed copy, and the `legacy` rule keeps every card built against it full-face, exactly as before. Skipping a bump therefore does not fold or empty any card; it simply means the reduced Triage face never ships.
 
 | template | version |
 |---|---|
@@ -151,7 +157,7 @@ Add a `v15:` comment to the adaptive-delivery block in the existing house style,
 
 ## 6. Risks & notes
 
-- **History and in-flight runs** are protected only by the legacy rule in §4.2. It is the single most important line to get right and is covered by a dedicated test.
+- **Unannotated templates** (duplicated, custom, or not yet annotated) are protected only by the `legacy` rule in §4.2 — without it, their cards would render empty except for the lead. It is the single most important line to get right and is covered by a dedicated test. *(Corrected 2026-08-31: this was originally stated as protecting "history and in-flight runs"; it does not — the schema is read from the live template row, not a per-run snapshot, so an annotated template's history is not specially protected. See the correction note in §4.2.)*
 - **Scope of the annotation sweep.** 93 of the 98 annotations are behavior-preserving `user` markers (89 outside Triage, plus Triage's own four). They are mechanical, but they touch six templates the user has not reviewed; the diff should be read as "no card changes except Triage."
 - **Shared worktree.** Parallel agents are working on `main` in this worktree, with uncommitted changes in `OrcaChat.tsx`, `projection.ts` (`workflows/steps/`), `contracts/workflows/index.ts` and others. Stage explicit paths; never `git add -A`. The files this change touches — `output-schema.ts`, `contracts/src/index.ts`, `confirmation-summary.ts`, `catalog.ts`, `ActivityThread.tsx`, `orchestrator.css` — were all clean at design time.
 - **Follow-up, not in scope.** Once Triage is validated in a live run, the same review applies one card at a time to Proposal (`approaches` + `task_plan` + `files` is the next-loudest), Research, and Execution.
