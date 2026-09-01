@@ -72,15 +72,15 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Assess the goal without interviewing the user and without changing any code. Read the goal and inspect the workspace only enough to judge three things: how large or vague the goal is, whether the product intent is already clear, and the state of the relevant codebase. Report the codebase state honestly: `greenfield` when the workspace is empty or has no relevant existing code (a from-scratch build); `existing_ungrounded` when relevant code exists but you have not yet grounded yourself in it; `existing_understood` only when the relevant code already exists AND is understood. Do NOT report an empty workspace as understood — a greenfield build has nothing to understand yet, it has design to do. Produce a provisional readiness brief that later steps can build on when earlier design steps are skipped: the problem, the success outcome, the hard constraints, the files likely in scope, and known risks — all best-effort and explicitly provisional, to be superseded by Clarify/Research when they run. Recommend exactly one entry tier: clarify_first when product intent is vague or the goal is large (including a greenfield build whose intent is not yet crisp); ground_and_design when intent is clear but the code is greenfield or not yet grounded — the approach still needs to be designed; approach_only ONLY when the code already exists and is understood and just the approach is open. A greenfield/from-scratch goal must never be approach_only — it always needs design (ground_and_design) or clarification (clarify_first) first. When uncertain, prefer the earlier (more thorough) tier — under-designing is more costly than over-designing.",
     outputSchema: [
-      { key: "problem", type: "string", required: true },
-      { key: "success_outcome", type: "string", required: true },
-      { key: "constraints", type: "array", itemType: "string", required: true },
-      { key: "known_files", type: "array", itemType: "string", required: false },
-      { key: "risks", type: "array", itemType: "string", required: false },
-      { key: "has_product_intent", type: "boolean", required: true },
-      { key: "codebase_state", type: "string", required: true, enum: ["greenfield", "existing_ungrounded", "existing_understood"] },
-      { key: "recommended_tier", type: "string", required: true, enum: ["clarify_first", "ground_and_design", "approach_only"] },
-      { key: "rationale", type: "string", required: true },
+      { key: "problem", type: "string", required: true, display: "user" },
+      { key: "success_outcome", type: "string", required: true, display: "user" },
+      { key: "constraints", type: "array", itemType: "string", required: true, display: "agent" },
+      { key: "known_files", type: "array", itemType: "string", required: false, display: "agent" },
+      { key: "risks", type: "array", itemType: "string", required: false, display: "agent" },
+      { key: "has_product_intent", type: "boolean", required: true, display: "agent" },
+      { key: "codebase_state", type: "string", required: true, enum: ["greenfield", "existing_ungrounded", "existing_understood"], display: "agent" },
+      { key: "recommended_tier", type: "string", required: true, enum: ["clarify_first", "ground_and_design", "approach_only"], display: "user" },
+      { key: "rationale", type: "string", required: true, display: "user" },
     ],
     // The recommended tier must be consistent with the step's OWN readiness
     // signals (product intent + codebase_state, the mapping its instructions
@@ -108,10 +108,10 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Interview the user relentlessly, from a product perspective, until you reach a shared, unambiguous understanding of what they want to build and why. You may inspect the workspace to orient yourself on what the product is and what the user is working with, but stay in a product frame — do not analyze the code technically or begin designing how to solve the goal; the next step handles technical grounding and approaches. Walk down each branch of the design tree, resolving dependencies between decisions one at a time, and pursue every aspect that materially shapes the intent, hard constraints, and what success looks like. Ask exactly one question at a time and always offer your recommended answer. Treat open questions as a working queue you must drain, not an output field. When no questions remain, synthesize the frame (problem, success outcome, constraints) into the step output with an empty open_questions list and complete; the user confirms or revises it on the completion card.",
     outputSchema: [
-      { key: "problem", type: "string", required: true },
-      { key: "success_outcome", type: "string", required: true },
-      { key: "constraints", type: "array", itemType: "string", required: true },
-      { key: "open_questions", type: "array", itemType: "string", required: false },
+      { key: "problem", type: "string", required: true, display: "user" },
+      { key: "success_outcome", type: "string", required: true, display: "user" },
+      { key: "constraints", type: "array", itemType: "string", required: true, display: "user" },
+      { key: "open_questions", type: "array", itemType: "string", required: false, display: "user" },
     ],
     workspaceWrites: "deny",
     agentPreference: LIGHT,
@@ -122,9 +122,9 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Ground the confirmed frame in the current codebase before any solution is proposed. Explore the existing structure and follow established patterns; identify the smallest set of files, modules, and constraints the work would touch, the risks the framing missed, and any existing problems in this area that would affect the work. Stay pre-implementation: make no code changes — you are reading the codebase, not altering it, even if asked to resolve something. Do not propose approaches yet. When the codebase reveals a decision that genuinely diverges and is the user's to make, pause and ask with concrete options and a recommendation rather than resolving it silently. If you are the entry step and no Clarify step ran before you, treat the Triage readiness brief as the confirmed frame.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "files_in_scope", type: "array", itemType: "string", required: true },
-      { key: "risks", type: "array", itemType: "string", required: false },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "files_in_scope", type: "array", itemType: "string", required: true, display: "user" },
+      { key: "risks", type: "array", itemType: "string", required: false, display: "user" },
     ],
     grounding: [{
       rule: "paths_exist", field: "files_in_scope", mode: "enforce", label: "Referenced files exist",
@@ -142,18 +142,18 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Propose two or three genuinely different approaches grounded in the research, each with explicit tradeoffs, then lead with your recommended one and the reasoning behind it. Apply YAGNI ruthlessly — cut any scope, abstraction, or flexibility the goal does not require. Stay pre-implementation: make no code changes. When the choice between approaches is the user's to make (a product, scope, or UX fork), pause and ask with the options and your recommendation rather than selecting silently. Set chosen_approach to the exact name of the approach you chose — it must match one of your approaches' name values verbatim, not a description of it. Also produce an ordered task_plan that breaks the chosen approach into the steps needed to realize it — a single item for a small feature, several for a large initiative; the executing agent will work through it. For each task_plan item, list in `files` the files it will create or touch, so the plan collectively covers the files Research put in scope. If you are the entry step and no Research ran before you, do a quick targeted look at the files in the Triage brief to ground yourself before proposing.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
       {
-        key: "approaches", type: "array", itemType: "object", required: true,
+        key: "approaches", type: "array", itemType: "object", required: true, display: "user",
         fields: [
           { key: "name", type: "string", required: true },
           { key: "tradeoffs", type: "string", required: true },
         ],
       },
-      { key: "recommendation", type: "string", required: true },
-      { key: "chosen_approach", type: "string", required: true },
+      { key: "recommendation", type: "string", required: true, display: "user" },
+      { key: "chosen_approach", type: "string", required: true, display: "user" },
       {
-        key: "task_plan", type: "array", itemType: "object", required: true,
+        key: "task_plan", type: "array", itemType: "object", required: true, display: "user",
         fields: [
           { key: "title", type: "string", required: true },
           { key: "detail", type: "string", required: true },
@@ -183,10 +183,10 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       "the sequencing and breakdown. If the work is large, complete what you can and report the " +
       "remaining items as follow-up.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "completed_requirements", type: "array", itemType: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "completed_requirements", type: "array", itemType: "string", required: true, display: "user" },
       {
-        key: "changes", type: "array", itemType: "object", required: true,
+        key: "changes", type: "array", itemType: "object", required: true, display: "user",
         fields: [
           { key: "file", type: "string", required: true },
           { key: "description", type: "string", required: true },
@@ -194,7 +194,7 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
         ],
       },
       {
-        key: "validation", type: "array", itemType: "object", required: true,
+        key: "validation", type: "array", itemType: "object", required: true, display: "user",
         fields: [
           { key: "command", type: "string", required: true },
           { key: "result", type: "string", required: true, enum: ["passed", "failed", "skipped"] },
@@ -202,17 +202,17 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
         ],
       },
       {
-        key: "artifacts", type: "array", itemType: "object", required: false,
+        key: "artifacts", type: "array", itemType: "object", required: false, display: "user",
         fields: [
           { key: "type", type: "string", required: true },
           { key: "reference", type: "string", required: true },
           { key: "description", type: "string", required: true },
         ],
       },
-      { key: "risks", type: "array", itemType: "string", required: false },
-      { key: "blockers", type: "array", itemType: "string", required: false },
-      { key: "assumptions", type: "array", itemType: "string", required: false },
-      { key: "handoff", type: "string", required: true },
+      { key: "risks", type: "array", itemType: "string", required: false, display: "user" },
+      { key: "blockers", type: "array", itemType: "string", required: false, display: "user" },
+      { key: "assumptions", type: "array", itemType: "string", required: false, display: "user" },
+      { key: "handoff", type: "string", required: true, display: "user" },
     ],
     // Claimed change list must reconcile against actual workspace git state.
     grounding: [{ rule: "paths_changed", field: "changes[].file", mode: "enforce" }],
@@ -229,21 +229,21 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
       "concealing it. Ask the user only when a required finalization decision cannot be inferred safely. " +
       "Complete only when the durable outcome and artifacts are accurately recorded.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "delivered_requirements", type: "array", itemType: "string", required: true },
-      { key: "validation_evidence", type: "array", itemType: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "delivered_requirements", type: "array", itemType: "string", required: true, display: "user" },
+      { key: "validation_evidence", type: "array", itemType: "string", required: true, display: "user" },
       {
-        key: "operational_artifacts", type: "array", itemType: "object", required: false,
+        key: "operational_artifacts", type: "array", itemType: "object", required: false, display: "user",
         fields: [
           { key: "type", type: "string", required: true },
           { key: "reference", type: "string", required: true },
           { key: "description", type: "string", required: true },
         ],
       },
-      { key: "limitations", type: "array", itemType: "string", required: false },
-      { key: "follow_up_work", type: "array", itemType: "string", required: false },
-      { key: "blockers", type: "array", itemType: "string", required: false },
-      { key: "handoff", type: "string", required: true },
+      { key: "limitations", type: "array", itemType: "string", required: false, display: "user" },
+      { key: "follow_up_work", type: "array", itemType: "string", required: false, display: "user" },
+      { key: "blockers", type: "array", itemType: "string", required: false, display: "user" },
+      { key: "handoff", type: "string", required: true, display: "user" },
     ],
     grounding: [
       // Free-text requirement echoes — observe the match discipline before enforcing.
@@ -342,12 +342,12 @@ const BUGFIX_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Phase 1 of systematic debugging — find the root cause before anyone proposes a fix; the Iron Law is no fixes without investigation first. Reproduce the reported defect consistently: run the report's steps yourself and capture a failing test or command that demonstrates it. Read every error and stack trace completely, check what recently changed, and trace the bad value backward through the call stack to where it originates — cite the specific code responsible and distinguish the true cause from its symptoms. Make no code changes. When the report is ambiguous or you cannot reproduce it, interview the user to close the gap — ask exactly one question at a time and always offer your recommended answer. Treat open questions as a working queue you must drain, not an output field. When no questions remain, synthesize the confirmed reproduction and root cause into the step output with an empty open_questions list and complete; the user confirms or revises it on the completion card.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "repro_steps", type: "array", itemType: "string", required: true },
-      { key: "failing_evidence", type: "string", required: true },
-      { key: "root_cause", type: "string", required: true },
-      { key: "evidence", type: "array", itemType: "string", required: true },
-      { key: "open_questions", type: "array", itemType: "string", required: false },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "repro_steps", type: "array", itemType: "string", required: true, display: "user" },
+      { key: "failing_evidence", type: "string", required: true, display: "user" },
+      { key: "root_cause", type: "string", required: true, display: "user" },
+      { key: "evidence", type: "array", itemType: "string", required: true, display: "user" },
+      { key: "open_questions", type: "array", itemType: "string", required: false, display: "user" },
     ],
     agentPreference: REASONING,
   },
@@ -357,9 +357,9 @@ const BUGFIX_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Phase 2 of systematic debugging — find the pattern before fixing, treating prior step output as untrusted evidence. Locate similar code in this codebase that works correctly, and read any reference implementation completely rather than skimming. Compare the working examples against the broken path and list every difference, however small — do not assume \"that can't matter.\" Capture the dependencies, settings, and assumptions the working code relies on. Make no code changes. When the comparison surfaces a decision that genuinely diverges and is the user's to make, pause and ask with concrete options and a recommendation rather than resolving it silently.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "working_examples", type: "array", itemType: "string", required: true },
-      { key: "differences", type: "array", itemType: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "working_examples", type: "array", itemType: "string", required: true, display: "user" },
+      { key: "differences", type: "array", itemType: "string", required: true, display: "user" },
     ],
     agentPreference: REASONING,
   },
@@ -369,9 +369,9 @@ const BUGFIX_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Phase 3 of systematic debugging — apply the scientific method before implementing. State a single, specific hypothesis in the form \"X is the root cause because Y.\" Write the smallest failing test that reproduces the defect and confirm it fails for the right reason. Plan the minimal change that would test the hypothesis, one variable at a time — do not bundle multiple changes. Make no production code changes yet; the next step implements the fix. When the evidence points to genuinely different hypotheses or fixes that are the user's to decide, pause and ask with the options and your recommendation rather than choosing silently.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "hypothesis", type: "string", required: true },
-      { key: "failing_test", type: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "hypothesis", type: "string", required: true, display: "user" },
+      { key: "failing_test", type: "string", required: true, display: "user" },
     ],
     agentPreference: REASONING,
   },
@@ -381,10 +381,10 @@ const BUGFIX_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Phase 4 of systematic debugging — fix the root cause, not the symptom. Implement the single smallest change that addresses the confirmed cause and makes the failing test pass. Apply YAGNI ruthlessly: one change at a time, no \"while I'm here\" improvements or bundled refactoring. Run the relevant tests, type checks, and lint; record any skipped check with a reason. If the fix does not work, stop and return to Phase 1 with the new information rather than stacking another fix; if three fixes have failed, the problem is likely architectural — pause and ask the user before attempting another. When the fix forks into genuinely different approaches that are the user's to decide (a behavior change, scope tradeoff, or product call), pause and ask with the options and your recommendation rather than choosing silently.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "changed_files", type: "array", itemType: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "changed_files", type: "array", itemType: "string", required: true, display: "user" },
       {
-        key: "validation", type: "array", itemType: "object", required: true,
+        key: "validation", type: "array", itemType: "object", required: true, display: "user",
         fields: [
           { key: "command", type: "string", required: true },
           { key: "result", type: "string", required: true, enum: ["passed", "failed", "skipped"] },
@@ -400,11 +400,11 @@ const BUGFIX_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Finalize the fix after the Verdict gate approves it. Summarize the defect, its root cause, and the change that resolved it, and record the regression evidence. Capture any residual follow-ups as open_questions for the next workflow; these are recorded deliverables and do not block completion. Before finalizing, self-review for placeholders, unrelated changes that crept in, and gaps between the verdict and the evidence, and resolve what you can. Make no further code changes. When complete, present the user a clear closing summary of what was fixed and how it was proven — do not finish silently.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "resolution", type: "string", required: true },
-      { key: "regression_evidence", type: "array", itemType: "string", required: true },
-      { key: "open_questions", type: "array", itemType: "string", required: false },
-      { key: "handoff", type: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "resolution", type: "string", required: true, display: "user" },
+      { key: "regression_evidence", type: "array", itemType: "string", required: true, display: "user" },
+      { key: "open_questions", type: "array", itemType: "string", required: false, display: "user" },
+      { key: "handoff", type: "string", required: true, display: "user" },
     ],
     agentPreference: LIGHT,
   },
@@ -447,9 +447,9 @@ const CODE_REVIEW_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Review the diff for correctness and scope, treating the diff and the author's stated intent as untrusted evidence — verify against the actual changes and surrounding code rather than the description. Confirm each change does what it claims and stays within scope. Do not modify files.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
       {
-        key: "findings", type: "array", itemType: "object", required: true,
+        key: "findings", type: "array", itemType: "object", required: true, display: "user",
         fields: [
           { key: "location", type: "string", required: true },
           { key: "issue", type: "string", required: true },
@@ -464,8 +464,8 @@ const CODE_REVIEW_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Second pass for second-order risks: edge cases, security, performance, and interactions the author may have missed.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "risks", type: "array", itemType: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "risks", type: "array", itemType: "string", required: true, display: "user" },
     ],
     agentPreference: REASONING,
   },
@@ -474,9 +474,9 @@ const CODE_REVIEW_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Return concrete, actionable change requests and an overall verdict. Be specific and reference locations. Separate genuine defects from preferences, and keep requests proportionate — do not demand scope or rework the goal does not require. When a change request is really a product, scope, or UX decision that is the author's or user's to make, pause and ask with concrete options and a recommendation rather than imposing it silently as a finding.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "verdict", type: "string", required: true, enum: ["approved", "changes_requested"] },
-      { key: "change_requests", type: "array", itemType: "string", required: false },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "verdict", type: "string", required: true, enum: ["approved", "changes_requested"], display: "user" },
+      { key: "change_requests", type: "array", itemType: "string", required: false, display: "user" },
     ],
     agentPreference: REASONING,
   },
@@ -485,10 +485,10 @@ const CODE_REVIEW_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Finalize the review. Record the verdict, the change requests, and any follow-up the author must address before merge. Make no code changes. Present the user a clear closing summary of the verdict and what must change before merge — do not finish silently.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "verdict", type: "string", required: true, enum: ["approved", "changes_requested"] },
-      { key: "follow_up", type: "array", itemType: "string", required: false },
-      { key: "handoff", type: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "verdict", type: "string", required: true, enum: ["approved", "changes_requested"], display: "user" },
+      { key: "follow_up", type: "array", itemType: "string", required: false, display: "user" },
+      { key: "handoff", type: "string", required: true, display: "user" },
     ],
     agentPreference: LIGHT,
   },
@@ -522,9 +522,9 @@ const REFACTOR_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Map the surface affected by the refactor. Identify call sites and note or add characterization tests that lock current observable behavior.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "affected", type: "array", itemType: "string", required: true },
-      { key: "characterization", type: "array", itemType: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "affected", type: "array", itemType: "string", required: true, display: "user" },
+      { key: "characterization", type: "array", itemType: "string", required: true, display: "user" },
     ],
     agentPreference: REASONING,
   },
@@ -533,9 +533,9 @@ const REFACTOR_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Restructure in the smallest safe increments within the mapped scope only. Apply YAGNI ruthlessly: no \"while I'm here\" improvements, no bundled feature work, no scope the refactor does not require. Do not change observable behavior. Run the available checks after each increment. When the work forks into a genuine behavior change or scope decision that is the user's to make, pause and ask with concrete options and a recommendation rather than changing it silently.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "changed_files", type: "array", itemType: "string", required: true },
-      { key: "increments", type: "array", itemType: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "changed_files", type: "array", itemType: "string", required: true, display: "user" },
+      { key: "increments", type: "array", itemType: "string", required: true, display: "user" },
     ],
     agentPreference: EXECUTION,
   },
@@ -544,16 +544,16 @@ const REFACTOR_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Prove observable behavior is unchanged, treating the prior step output as untrusted evidence — re-run the characterization tests and relevant checks yourself rather than trusting the Restructure step's report. Record each command and its real result, and give a verdict. If parity cannot be shown, say so plainly rather than asserting success.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
       {
-        key: "checks", type: "array", itemType: "object", required: true,
+        key: "checks", type: "array", itemType: "object", required: true, display: "user",
         fields: [
           { key: "command", type: "string", required: true },
           { key: "result", type: "string", required: true, enum: ["passed", "failed", "skipped"] },
           { key: "evidence", type: "string", required: true },
         ],
       },
-      { key: "verdict", type: "string", required: true, enum: ["passed", "failed"] },
+      { key: "verdict", type: "string", required: true, enum: ["passed", "failed"], display: "user" },
     ],
     agentPreference: EXECUTION,
   },
@@ -562,9 +562,9 @@ const REFACTOR_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Summarize the refactor and any residual risks. Make no further changes. Present the user a clear closing summary of what was restructured and how parity was proven — do not finish silently.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "residual_risks", type: "array", itemType: "string", required: false },
-      { key: "handoff", type: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "residual_risks", type: "array", itemType: "string", required: false, display: "user" },
+      { key: "handoff", type: "string", required: true, display: "user" },
     ],
     agentPreference: LIGHT,
   },
@@ -598,9 +598,9 @@ const QUALITY_COVERAGE_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Identify under-checked paths across tests, types, lint, and edge cases for the target code. Prioritize the highest-risk gaps, and do not pad with low-value checks the code does not need. When prioritizing surfaces a decision the user should own — which surfaces matter most, or what coverage bar is good enough — pause and ask with concrete options and a recommendation rather than choosing the scope silently.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
       {
-        key: "gaps", type: "array", itemType: "object", required: true,
+        key: "gaps", type: "array", itemType: "object", required: true, display: "user",
         fields: [
           { key: "kind", type: "string", required: true },
           { key: "location", type: "string", required: true },
@@ -614,9 +614,9 @@ const QUALITY_COVERAGE_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Add the missing tests and checks. Confirm each new test fails for the right reason before making it pass.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "added", type: "array", itemType: "string", required: true },
-      { key: "negative_evidence", type: "array", itemType: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "added", type: "array", itemType: "string", required: true, display: "user" },
+      { key: "negative_evidence", type: "array", itemType: "string", required: true, display: "user" },
     ],
     agentPreference: EXECUTION,
   },
@@ -625,16 +625,16 @@ const QUALITY_COVERAGE_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Make the new checks pass and run the full relevant suite. Report the coverage and quality delta.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
       {
-        key: "results", type: "array", itemType: "object", required: true,
+        key: "results", type: "array", itemType: "object", required: true, display: "user",
         fields: [
           { key: "command", type: "string", required: true },
           { key: "result", type: "string", required: true, enum: ["passed", "failed", "skipped"] },
           { key: "evidence", type: "string", required: true },
         ],
       },
-      { key: "delta", type: "string", required: true },
+      { key: "delta", type: "string", required: true, display: "user" },
     ],
     agentPreference: EXECUTION,
   },
@@ -643,9 +643,9 @@ const QUALITY_COVERAGE_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Finalize the coverage work. Summarize the gaps closed, the checks added, and the resulting quality delta. Make no further changes. Present the user a clear closing summary of what was covered and the quality delta — do not finish silently.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "gaps_closed", type: "array", itemType: "string", required: true },
-      { key: "handoff", type: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "gaps_closed", type: "array", itemType: "string", required: true, display: "user" },
+      { key: "handoff", type: "string", required: true, display: "user" },
     ],
     agentPreference: LIGHT,
   },
@@ -687,8 +687,8 @@ const SCOPE_BRIEF_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Turn the delegated goal area into a concise scope brief: the problem in one line, the smallest set of files or modules likely in scope, and the known risks. Explore only enough to ground the brief. Make no code changes.",
     outputSchema: [
-      { key: "notes", type: "string", required: true },
-      { key: "risks", type: "array", itemType: "string", required: false },
+      { key: "notes", type: "string", required: true, display: "user" },
+      { key: "risks", type: "array", itemType: "string", required: false, display: "user" },
     ],
     agentPreference: LIGHT,
   },
@@ -698,7 +698,7 @@ const SCOPE_BRIEF_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Finalize the scope brief for the calling workflow: a single paragraph the parent can act on directly. Make no code changes. Present the brief plainly to close out — do not finish silently.",
     outputSchema: [
-      { key: "brief", type: "string", required: true },
+      { key: "brief", type: "string", required: true, display: "user" },
     ],
     agentPreference: LIGHT,
   },
@@ -729,7 +729,7 @@ const SCOPED_DELIVERY_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Read the goal and name the single area the delegated scope brief should cover. Do not design the solution or change any code; the child produces the brief and the Deliver step does the work.",
     outputSchema: [
-      { key: "goal_area", type: "string", required: true },
+      { key: "goal_area", type: "string", required: true, display: "user" },
     ],
     agentPreference: LIGHT,
   },
@@ -744,8 +744,8 @@ const SCOPED_DELIVERY_STEPS: WorkflowStepTemplate[] = [
     instructions:
       "Carry out the goal within the scope brief returned by the delegated child, following existing codebase patterns and staying inside that scope. Add or update tests and run the relevant checks. Do not expand scope beyond the brief; record what was delivered.",
     outputSchema: [
-      { key: "summary", type: "string", required: true },
-      { key: "outcome", type: "string", required: true },
+      { key: "summary", type: "string", required: true, display: "user" },
+      { key: "outcome", type: "string", required: true, display: "user" },
     ],
     agentPreference: EXECUTION,
   },
@@ -813,49 +813,54 @@ export const BUILTIN_TEMPLATE_CATALOG: BuiltInTemplateDefinition[] = [
     // gate), and Research's instructions state the pre-implementation contract
     // Proposal already stated. A live run showed a user revision reaching the
     // Research worker, which then wrote and ran a file.
-    version: 14, category: CATEGORY, recommended: true,
+    // v15: every top-level output field declares a `display` audience. Triage's
+    // provisional brief (constraints, known_files, risks, has_product_intent,
+    // codebase_state) is `agent` — it folds behind the confirm card's disclosure
+    // because it is handoff fuel for the next step, not the routing decision the
+    // human is confirming. Every other field is `user`, preserving today's cards.
+    version: 15, category: CATEGORY, recommended: true,
     steps: ADAPTIVE_STEPS, guardrails: [APPROVAL_MARK_DONE, validationRule(["execution"]), CONTEXT_RULE], graph: ADAPTIVE_GRAPH,
   },
   {
     id: "orca/bug-triage-fix", name: "Bug Triage & Fix",
     description: "Reproduce the report, isolate the root cause, patch it, and prove the regression is gone.",
     bestFor: "A reported defect you can reproduce and need fixed without regressions.",
-    version: 4, category: CATEGORY, recommended: true,
+    version: 5, category: CATEGORY, recommended: true,
     steps: BUGFIX_STEPS, guardrails: [validationRule(["implementation"]), APPROVAL_MARK_DONE], graph: BUGFIX_GRAPH,
   },
   {
     id: "orca/code-review", name: "Code Review",
     description: "Static-analyze a diff, surface second-order risks, and return concrete, actionable suggestions.",
     bestFor: "A thorough second-pass review of an existing diff or change.",
-    version: 3, category: CATEGORY, recommended: false,
+    version: 4, category: CATEGORY, recommended: false,
     steps: CODE_REVIEW_STEPS, guardrails: [CONTEXT_RULE], graph: CODE_REVIEW_GRAPH,
   },
   {
     id: "orca/refactor", name: "Refactor",
     description: "Map the blast radius, restructure in safe increments, and prove observable behavior is unchanged.",
     bestFor: "Restructuring code while proving observable behavior stays unchanged.",
-    version: 3, category: CATEGORY, recommended: false,
+    version: 4, category: CATEGORY, recommended: false,
     steps: REFACTOR_STEPS, guardrails: [validationRule(["restructure"]), APPROVAL_MARK_DONE], graph: REFACTOR_GRAPH,
   },
   {
     id: "orca/quality-coverage", name: "Quality Coverage",
     description: "Find untested or under-checked paths, generate cases, and confirm they fail for the right reasons before they pass.",
     bestFor: "Closing gaps in tests, types, and checks on existing code.",
-    version: 3, category: CATEGORY, recommended: false,
+    version: 4, category: CATEGORY, recommended: false,
     steps: QUALITY_COVERAGE_STEPS, guardrails: [validationRule(["generate_checks", "confirm_green"])], graph: QUALITY_COVERAGE_GRAPH,
   },
   {
     id: "orca/scope-brief", name: "Scope Brief",
     description: "A minimal reusable sub-workflow: turn a delegated goal area into a concise scope brief the calling workflow can act on. Declares a typed input (goal_area) and returns one output (brief).",
     bestFor: "A reusable child sub-workflow other templates delegate to for a scoped brief.",
-    version: 1, category: CATEGORY, recommended: false,
+    version: 2, category: CATEGORY, recommended: false,
     steps: SCOPE_BRIEF_STEPS, guardrails: [CONTEXT_RULE], graph: SCOPE_BRIEF_GRAPH, inputs: SCOPE_BRIEF_INPUTS,
   },
   {
     id: "orca/scoped-delivery", name: "Scoped Delivery",
     description: "Demonstrates workflow composition end-to-end: an Intake step feeds a delegated Scope Brief child (isolated state, mapped reads/writes), whose result flows back into a Deliver step.",
     bestFor: "Seeing sub-workflow composition end-to-end — a parent that delegates a scoped brief to a child template.",
-    version: 1, category: CATEGORY, recommended: false,
+    version: 2, category: CATEGORY, recommended: false,
     steps: SCOPED_DELIVERY_STEPS, guardrails: [APPROVAL_MARK_DONE, CONTEXT_RULE], graph: SCOPED_DELIVERY_GRAPH,
   },
 ];

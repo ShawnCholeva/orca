@@ -80,8 +80,8 @@ describe("Bug Triage & Fix systematic debugging (Four Phases)", () => {
   const bugfix = BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === "orca/bug-triage-fix")!;
   const step = (id: string) => bugfix.steps.find((s) => s.id === id)!;
 
-  it("bumps the template version to 4", () => {
-    expect(bugfix.version).toBe(4);
+  it("bumps the template version to 5", () => {
+    expect(bugfix.version).toBe(5);
   });
 
   it("names its steps after the four phases plus Done", () => {
@@ -165,10 +165,10 @@ describe("honest/participatory rewrite of the secondary templates", () => {
   const def = (id: string) => BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === id)!;
   const step = (id: string, sid: string) => def(id).steps.find((s) => s.id === sid)!;
 
-  it("bumps code-review, refactor, and quality-coverage to version 3", () => {
-    expect(def("orca/code-review").version).toBe(3);
-    expect(def("orca/refactor").version).toBe(3);
-    expect(def("orca/quality-coverage").version).toBe(3);
+  it("bumps code-review, refactor, and quality-coverage to version 4", () => {
+    expect(def("orca/code-review").version).toBe(4);
+    expect(def("orca/refactor").version).toBe(4);
+    expect(def("orca/quality-coverage").version).toBe(4);
   });
 
   it("tells the analytical/change steps to pause and ask at a user-owned fork", () => {
@@ -199,8 +199,8 @@ describe("Adaptive Delivery v9 completion gates", () => {
   const grounding = (stepId: string) =>
     (def.steps.find((s) => s.id === stepId)!.grounding ?? []) as NonNullable<WorkflowStepTemplate["grounding"]>;
 
-  it("is version 14 and runs the sensor ladder for execution", () => {
-    expect(def.version).toBe(14);
+  it("is version 15 and runs the sensor ladder for execution", () => {
+    expect(def.version).toBe(15);
     const rule = def.guardrails.find((g) => g.kind === "validation_rule")!;
     expect((rule.configJson as { appliesToSteps: string[] }).appliesToSteps.sort())
       .toEqual(["execution"]);
@@ -307,5 +307,60 @@ describe("Adaptive Delivery v12 Critique worker gate", () => {
 
   it("has no `critique` step template (the step became a gate)", () => {
     expect(def.steps.some((s) => s.id === "critique")).toBe(false);
+  });
+});
+
+describe("output field display audience", () => {
+  const allSteps = BUILTIN_TEMPLATE_CATALOG.flatMap((t) => t.steps);
+
+  it("annotates every top-level output field in every template", () => {
+    const unannotated: string[] = [];
+    for (const step of allSteps) {
+      for (const f of step.outputSchema) {
+        if (f.display === undefined) unannotated.push(`${step.id}.${f.key}`);
+      }
+    }
+    expect(unannotated).toEqual([]);
+  });
+
+  it("leaves nested subfields unannotated — they inherit their parent's target", () => {
+    const annotatedNested: string[] = [];
+    for (const step of allSteps) {
+      for (const f of step.outputSchema) {
+        for (const child of f.fields ?? []) {
+          if (child.display !== undefined) annotatedNested.push(`${step.id}.${f.key}.${child.key}`);
+        }
+      }
+    }
+    expect(annotatedNested).toEqual([]);
+  });
+
+  it("shows Triage's decision and folds its provisional brief", () => {
+    const triage = allSteps.find((s) => s.id === "triage")!;
+    const audience = Object.fromEntries(triage.outputSchema.map((f) => [f.key, f.display]));
+    expect(audience).toEqual({
+      problem: "user",
+      success_outcome: "user",
+      recommended_tier: "user",
+      rationale: "user",
+      constraints: "agent",
+      known_files: "agent",
+      risks: "agent",
+      has_product_intent: "agent",
+      codebase_state: "agent",
+    });
+  });
+
+  it("bumps every template version so the annotated schemas actually install", () => {
+    const versions = Object.fromEntries(BUILTIN_TEMPLATE_CATALOG.map((t) => [t.id, t.version]));
+    expect(versions).toEqual({
+      "orca/adaptive-delivery": 15,
+      "orca/bug-triage-fix": 5,
+      "orca/code-review": 4,
+      "orca/refactor": 4,
+      "orca/quality-coverage": 4,
+      "orca/scope-brief": 2,
+      "orca/scoped-delivery": 2,
+    });
   });
 });
