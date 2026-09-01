@@ -250,3 +250,87 @@ describe("buildConfirmationSummary evidence bundle", () => {
     expect(out.evidence?.checks[0]!.kind).toBe("grounding");
   });
 });
+
+describe("display audience routing", () => {
+  const annotated: WorkflowStepOutputSchema = [
+    { key: "problem", type: "string", required: true, display: "user" },
+    { key: "rationale", type: "string", required: true, display: "user" },
+    { key: "known_files", type: "array", itemType: "string", required: false, display: "agent" },
+    { key: "codebase_state", type: "string", required: true, display: "agent" },
+    // No `display` — inside an annotated schema the `agent` default applies.
+    { key: "risks", type: "array", itemType: "string", required: false },
+  ];
+
+  const block = {
+    problem: "Card is too loud",
+    rationale: "Intent is undefined",
+    known_files: ["a.ts", "b.ts"],
+    codebase_state: "existing_ungrounded",
+    risks: ["scope is unbounded"],
+  };
+
+  it("puts user fields on the face and agent fields (incl. unannotated) in details", () => {
+    const out = buildConfirmationSummary(annotated, block, null, null);
+    expect(out.fields).toEqual([
+      { label: "Problem", value: "Card is too loud" },
+      { label: "Rationale", value: "Intent is undefined" },
+    ]);
+    expect(out.details).toEqual([
+      { label: "Known files", value: ["a.ts", "b.ts"] },
+      { label: "Codebase state", value: "existing_ungrounded" },
+      { label: "Risks", value: ["scope is unbounded"] },
+    ]);
+  });
+
+  it("treats a schema with no audience anywhere as all-user and omits details", () => {
+    const legacy: WorkflowStepOutputSchema = [
+      { key: "problem", type: "string", required: true },
+      { key: "known_files", type: "array", itemType: "string", required: false },
+    ];
+    const out = buildConfirmationSummary(legacy, block, null, null);
+    expect(out.fields).toEqual([
+      { label: "Problem", value: "Card is too loud" },
+      { label: "Known files", value: ["a.ts", "b.ts"] },
+    ]);
+    expect(out.details).toBeUndefined();
+  });
+
+  it("keeps the splitter relabel on the face when the branch field is user", () => {
+    const schema: WorkflowStepOutputSchema = [
+      { key: "recommended_tier", type: "string", required: true, display: "user" },
+      { key: "known_files", type: "array", itemType: "string", required: false, display: "agent" },
+    ];
+    const out = buildConfirmationSummary(
+      schema,
+      { recommended_tier: "clarify_first", known_files: ["a.ts"] },
+      null,
+      null,
+      { branchKey: "recommended_tier", branchToName: { clarify_first: "Clarify" } }
+    );
+    expect(out.fields).toEqual([{ label: "Recommended step", value: "Clarify" }]);
+    expect(out.details).toEqual([{ label: "Known files", value: ["a.ts"] }]);
+  });
+
+  it("routes a nested object's rows to its parent's target", () => {
+    const schema: WorkflowStepOutputSchema = [
+      {
+        key: "decision", type: "object", required: true, display: "agent",
+        fields: [
+          { key: "tier", type: "string", required: true },
+          { key: "reason", type: "string", required: true },
+        ],
+      },
+    ];
+    const out = buildConfirmationSummary(
+      schema,
+      { decision: { tier: "clarify_first", reason: "vague" } },
+      null,
+      null
+    );
+    expect(out.fields).toEqual([]);
+    expect(out.details).toEqual([
+      { label: "Decision · Tier", value: "clarify_first" },
+      { label: "Decision · Reason", value: "vague" },
+    ]);
+  });
+});

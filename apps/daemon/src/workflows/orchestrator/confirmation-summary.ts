@@ -185,8 +185,15 @@ export function buildConfirmationSummary(
 ): ConfirmationSummaryT {
   const obj = (block ?? {}) as Record<string, unknown>;
   const fields: CardField[] = [];
+  const details: CardField[] = [];
+  // A schema in which NO top-level field declares an audience predates `display`
+  // — it was snapshotted into the run's steps_json before this feature existed.
+  // Treat all of it as `user` so in-flight runs and completed history keep their
+  // card face instead of silently folding into the disclosure.
+  const legacy = !outputSchema.some((f) => f.display !== undefined);
   for (const field of outputSchema) {
     if (field.key === "_completion") continue;
+    const target = legacy || field.display === "user" ? fields : details;
     // A field that feeds a downstream splitter (e.g. Triage's `recommended_tier`)
     // is a routing decision; show the destination step's name instead of the raw
     // branch token so the user reads "Recommended step: Proposal", not the tier.
@@ -194,16 +201,17 @@ export function buildConfirmationSummary(
       const raw = obj[field.key];
       const name = typeof raw === "string" ? routing.branchToName[raw.trim()] : undefined;
       if (name) {
-        fields.push({ label: "Recommended step", value: name });
+        target.push({ label: "Recommended step", value: name });
         continue;
       }
     }
-    flattenField(field, obj[field.key], "", 1, fields);
+    flattenField(field, obj[field.key], "", 1, target);
   }
   const lead = confirmationLead(scoring?.reason, proposal, refute ?? null);
   return {
     lead,
     fields: fields.slice(0, 32),
+    ...(details.length > 0 ? { details: details.slice(0, 32) } : {}),
     scoring,
     refute: refute ?? null,
     ...(evidence !== undefined ? { evidence: buildEvidenceBundle(evidence) } : {}),
