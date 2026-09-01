@@ -220,7 +220,7 @@ export function ConfirmationCard({
               aria-expanded={scoresOpen}
               onClick={() => setScoresOpen((o) => !o)}
             >
-              <span>Scores</span>
+              <span>Evidence</span>
               <ScoresCaret />
             </button>
           ) : null}
@@ -358,7 +358,7 @@ export function StepResultCard({ activity }: { activity: Activity }) {
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
         >
-          <span>Scores</span>
+          <span>Evidence</span>
           <svg
             className="step-confirm-scores-caret"
             width="11"

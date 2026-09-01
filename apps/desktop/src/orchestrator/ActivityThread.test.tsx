@@ -556,8 +556,8 @@ describe("ActivityCard", () => {
     const card = screen.getByTestId("step-result-card");
     expect(card).toHaveTextContent("Investigate");
     expect(card).not.toHaveTextContent("82%");
-    // The expander is now a bottom "Scores" toggle (was a top "Details" button).
-    expect(screen.getByTestId("step-result-expand")).toHaveTextContent("Scores");
+    // The expander is now a bottom "Evidence" toggle (was a top "Details" button).
+    expect(screen.getByTestId("step-result-expand")).toHaveTextContent("Evidence");
     fireEvent.click(screen.getByTestId("step-result-expand"));
     expect(card).toHaveTextContent("82%");
     expect(card).toHaveTextContent("Followed instructions");
@@ -761,5 +761,26 @@ describe("evidence bundle (paper p.62)", () => {
     // the raw self-scores are demoted behind a "Model self-assessment" disclosure
     expect(screen.getByText(/Model self-assessment/i)).toBeInTheDocument();
     expect(screen.getByText(/its own claim/i)).toBeInTheDocument();
+  });
+
+  it("labels the evidence toggle 'Evidence', not 'Scores'", () => {
+    render(
+      <LiveActivity
+        activity={{
+          ...confirmActivity,
+          confirmationSummary: {
+            ...confirmActivity.confirmationSummary,
+            evidence: {
+              executed: false,
+              checks: [{ name: "Referenced files exist", status: "passed", kind: "grounding", detail: null }],
+              cantVerify: [],
+            },
+          },
+        }}
+      />,
+    );
+    const toggle = screen.getByTestId("confirm-scores-toggle");
+    expect(toggle).toHaveTextContent("Evidence");
+    expect(toggle).not.toHaveTextContent("Scores");
   });
 })
