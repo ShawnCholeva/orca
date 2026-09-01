@@ -55,6 +55,21 @@ describe("composeAgentInitialPrompt", () => {
     expect(prompt).toMatch(/\/repos\/web/);
   });
 
+  it("never leaks the display audience flag into the output schema block", () => {
+    const prompt = composeAgentInitialPrompt({
+      goalTitle: "G",
+      goalIntent: "",
+      stepInstructions: "do it",
+      outputSchema: [
+        { key: "problem", type: "string", required: true, display: "user" },
+        { key: "risks", type: "array", itemType: "string", required: false, display: "agent" },
+      ],
+      priorStepArtifacts: [],
+    });
+    expect(prompt).toMatch(/"problem"/);
+    expect(prompt).not.toMatch(/display/);
+  });
+
   it("omits the Workspaces section when none are provided", () => {
     const prompt = composeAgentInitialPrompt({
       goalTitle: "G",
@@ -257,6 +272,31 @@ describe("composeOrchestratorPrompt", () => {
     // Reasoning material the model still needs is retained.
     expect(ctx.currentStep.instructions).toBe("do the thing");
     expect(ctx.goal.title).toBe("T");
+  });
+
+  it("never leaks the display audience flag from currentStep.outputSchema into the user prompt", () => {
+    const { userPrompt } = composeOrchestratorPrompt({
+      triggerKind: "agent_response",
+      context: {
+        goal: { id: "G1", title: "T", intent: "D", attachedWorkspaces: [], attachedDocuments: [] },
+        workflowRun: { templateId: "tmpl", templateVersion: 1, ordinal: 7, status: "active" },
+        currentStep: {
+          id: "triage",
+          instructions: "do the thing",
+          outputSchema: [
+            { key: "problem", type: "string", required: true, display: "user" },
+            { key: "risks", type: "array", itemType: "string", required: false, display: "agent" },
+          ],
+          agentAdapterId: "codex",
+          executionMode: "shadow_session",
+        },
+        conversation: { chatMessages: [], currentStepAgentTurns: [] },
+        priorStepArtifacts: [],
+      } as never,
+      triggerPayload: {},
+    });
+    expect(userPrompt).toMatch(/"problem"/);
+    expect(userPrompt).not.toMatch(/display/);
   });
 
   it("voice rule forbids internal identifiers and no longer mandates 'Step N agent'", () => {

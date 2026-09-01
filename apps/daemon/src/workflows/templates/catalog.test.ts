@@ -351,6 +351,16 @@ describe("output field display audience", () => {
     });
   });
 
+  it("demotes only Triage's provisional brief", () => {
+    const demoted = allSteps
+      .flatMap((s) => s.outputSchema.filter((f) => f.display === "agent").map((f) => `${s.id}.${f.key}`))
+      .sort();
+    expect(demoted).toEqual([
+      "triage.codebase_state", "triage.constraints", "triage.has_product_intent",
+      "triage.known_files", "triage.risks",
+    ]);
+  });
+
   it("bumps every template version so the annotated schemas actually install", () => {
     const versions = Object.fromEntries(BUILTIN_TEMPLATE_CATALOG.map((t) => [t.id, t.version]));
     expect(versions).toEqual({

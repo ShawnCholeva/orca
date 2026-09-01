@@ -1,5 +1,6 @@
 import type { OrchestratorInvocationContext } from "./context.js";
 import type { PendingQuestionItem as AskUserQuestionItemT, WorkflowStepOutputSchema } from "@orca/contracts";
+import { stripFieldDisplay } from "@orca/contracts";
 import { SENTINEL_INSTRUCTION } from "./sentinel.js";
 
 export interface AgentInitialPromptInput {
@@ -78,7 +79,7 @@ export function composeAgentInitialPrompt(input: AgentInitialPromptInput): strin
     input.stepInstructions,
     "",
     "# Output schema",
-    input.outputSchema.map((f) => JSON.stringify(f)).join("\n"),
+    input.outputSchema.map((f) => JSON.stringify(stripFieldDisplay(f))).join("\n"),
     "",
     "# Prior step outputs",
     artifactBlock,
@@ -181,7 +182,7 @@ export function composeOrchestratorPrompt(input: OrchestratorPromptInput): Orche
       ? {
           currentStep: {
             instructions: currentStep.instructions,
-            outputSchema: currentStep.outputSchema,
+            outputSchema: currentStep.outputSchema.map(stripFieldDisplay),
             executionMode: currentStep.executionMode,
             ...(currentStep.completionPolicy !== undefined
               ? { completionPolicy: currentStep.completionPolicy }

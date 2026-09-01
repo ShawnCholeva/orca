@@ -100,6 +100,20 @@ describe("synthesizeStepOutput", () => {
     expect(r.ok === false && r.reason).toMatch(/schema/i);
   });
 
+  it("strips the display audience flag from the outputSchema sent to the broker", async () => {
+    const d = deps();
+    const annotatedSchema = [
+      { key: "summary", type: "string", required: true, display: "user" },
+    ];
+    await synthesizeStepOutput(d, {
+      ...input,
+      outputSchema: annotatedSchema as unknown as SynthesisInput["outputSchema"],
+      sessionResult: "no block",
+    });
+    const sentRequest = (d.broker.propose as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(JSON.stringify(sentRequest.payload.outputSchema)).not.toMatch(/display/);
+  });
+
   it("transport failure surfaces as error", async () => {
     const propose = vi.fn().mockResolvedValue({ status: "needs_human_review", attemptId: "a", reviewPayloadId: "h" });
     const r = await synthesizeStepOutput({ broker: { propose } }, { ...input, sessionResult: "" });

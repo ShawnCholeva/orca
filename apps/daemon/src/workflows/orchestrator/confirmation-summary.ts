@@ -187,12 +187,14 @@ export function buildConfirmationSummary(
   const fields: CardField[] = [];
   const details: CardField[] = [];
   // A schema in which NO top-level field declares an audience is an unannotated
-  // template — duplicated (`duplicateTemplate`), custom, or a built-in template
-  // not yet annotated. (The schema here is always read from the template's live
-  // row, not a per-run snapshot, so this is about the template, not the run's
-  // age.) Treat all of it as `user` so its card renders full-face instead of
-  // silently emptying — every field would otherwise default to `agent` and fold
-  // behind the disclosure, leaving nothing but the lead.
+  // template — custom, not yet annotated, or a duplicate whose schema was later
+  // edited in the desktop UI (which doesn't round-trip `display`; a fresh
+  // duplicate keeps its annotations verbatim). (The schema here is always read
+  // from the template's live row, not a per-run snapshot, so this is about the
+  // template, not the run's age.) Treat all of it as `user` so its card renders
+  // full-face instead of silently emptying — every field would otherwise
+  // default to `agent` and fold behind the disclosure, leaving nothing but the
+  // lead.
   const legacy = !outputSchema.some((f) => f.display !== undefined);
   for (const field of outputSchema) {
     if (field.key === "_completion") continue;

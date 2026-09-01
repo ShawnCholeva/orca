@@ -7,6 +7,7 @@ export {
   WorkflowStepOutputSchema,
   WorkflowStepOutputField,
   validateStepOutput,
+  stripFieldDisplay,
   type ValidateResult,
 } from "./output-schema.js";
 
@@ -575,6 +576,11 @@ export const WorkflowStepRun = z
     // (e.g. shadow timeout) and its output is stashed awaiting a retry. The step
     // is still `active` but NOT progressing — the UI must not claim it is working.
     judgePending: z.boolean().optional(),
+    // True when the last orchestrator action replied in chat rather than driving
+    // the agent: the step is still `active` but parked on the HUMAN, not
+    // progressing. Same rule as judgePending — the UI must not claim it is
+    // working. Cleared as soon as an action drives the agent again.
+    awaitingUser: z.boolean().optional(),
     stepResult: WorkflowStepResult.nullable(),
   })
   .strict();

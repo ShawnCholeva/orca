@@ -44,6 +44,32 @@ describe("validateSchemaTightening", () => {
   });
   it("bans required→optional (weakening)", () =>
     bad(base.map((f) => f.key === "summary" ? { ...f, required: false } : f), "optional"));
+  it("allows a preserved display audience on a pre-existing field", () => {
+    const withDisplay: WorkflowStepOutputSchema = base.map((f) =>
+      f.key === "summary" ? { ...f, display: "user" as const } : f
+    );
+    ok(withDisplay.map((f) => f.key === "summary" ? { ...f, display: "user" as const } : f));
+  });
+  it("bans changing or dropping a pre-existing field's display audience", () => {
+    const withDisplay: WorkflowStepOutputSchema = base.map((f) =>
+      f.key === "summary" ? { ...f, display: "user" as const } : f
+    );
+    const changed = validateSchemaTightening(
+      withDisplay,
+      withDisplay.map((f) => f.key === "summary" ? { ...f, display: "agent" as const } : f)
+    );
+    expect(changed.ok).toBe(false);
+    if (!changed.ok) expect(changed.errors.join(" ")).toContain("display");
+    const dropped = validateSchemaTightening(
+      withDisplay,
+      withDisplay.map((f) => { if (f.key !== "summary") return f; const { display: _d, ...rest } = f; return rest; })
+    );
+    expect(dropped.ok).toBe(false);
+    if (!dropped.ok) expect(dropped.errors.join(" ")).toContain("display");
+  });
+  it("does not require a newly added field to carry a display audience", () => {
+    ok([...base, { key: "evidence_refs", type: "array", itemType: "string", required: true }]);
+  });
   it("recurses into nested object fields with the same rules", () => {
     const nestedBase: WorkflowStepOutputSchema = [
       { key: "plan", type: "object", required: true, fields: [{ key: "goal", type: "string", required: true }] },

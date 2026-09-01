@@ -46,6 +46,15 @@ export const WorkflowStepOutputField: z.ZodType<WorkflowStepOutputField> = z.laz
 export const WorkflowStepOutputSchema = z.array(WorkflowStepOutputField).min(1).max(32);
 export type WorkflowStepOutputSchema = z.infer<typeof WorkflowStepOutputSchema>;
 
+// `display` is confirm-card routing metadata, not an output requirement — strip
+// it (recursively, though the catalog never annotates nested fields) before an
+// output schema reaches an LLM prompt, so it can't be mistaken for something to
+// satisfy or de-prioritize.
+export function stripFieldDisplay(field: WorkflowStepOutputField): WorkflowStepOutputField {
+  const { display: _display, ...rest } = field;
+  return rest.fields ? { ...rest, fields: rest.fields.map(stripFieldDisplay) } : rest;
+}
+
 export type ValidateResult = { ok: true } | { ok: false; errors: string[] };
 
 function typeOf(value: unknown): "string" | "number" | "boolean" | "array" | "object" | "other" {

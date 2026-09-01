@@ -2,6 +2,7 @@ import {
   OrchestrationRequest,
   SynthesisProposal,
   SynthesisRequest,
+  stripFieldDisplay,
   validateStepOutput,
   type ModelProviderId,
   type WorkflowStepOutputSchema,
@@ -51,7 +52,7 @@ export async function synthesizeStepOutput(
   for (let attempt = 0; attempt < 2; attempt++) {
     const requestPayload = SynthesisRequest.parse({
       sessionResult: input.sessionResult,
-      outputSchema: input.outputSchema,
+      outputSchema: input.outputSchema.map(stripFieldDisplay),
       stepInput: input.stepInput,
     });
     const validateProposal = (raw: unknown) => {
