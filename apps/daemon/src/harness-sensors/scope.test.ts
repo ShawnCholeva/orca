@@ -16,11 +16,15 @@ describe("deriveEvidenceScope", () => {
     expect(r.residualRisk.length).toBeGreaterThan(0);
   });
 
-  it("non-code output, no execution → 'nothing was executed to check this', NOT dinged for unrun sensors", () => {
+  it("non-code output, no execution → distinct, non-duplicating lines; NOT dinged for unrun sensors", () => {
     const r = deriveEvidenceScope({ writeSet: ["docs/plan.md"], availableSensors: ["unit", "typecheck"], ranSensors: [] });
-    expect(r.gaps).toContain("nothing was executed to check this — semantic correctness is unverified");
+    expect(r.gaps).toEqual(["nothing was executed to check this"]);
     expect(r.gaps.some((g) => g.includes("available here but none ran"))).toBe(false); // gated on code write-set
-    expect(r.untestedRegions).toContain("semantic correctness — nothing was executed");
+    expect(r.untestedRegions).toEqual(["semantic correctness", "runtime behavior"]);
+    // These three render as one list on the confirm card; no entry may restate another.
+    const rendered = [...r.gaps, ...r.untestedRegions];
+    expect(new Set(rendered).size).toBe(rendered.length);
+    expect(rendered.filter((s) => s.includes("nothing was executed"))).toHaveLength(1);
   });
 
   it("code changed, some sensors ran → no per-file untested; unran available sensor still a gap", () => {

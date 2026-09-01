@@ -271,7 +271,7 @@ describe("buildEvidenceFacet", () => {
     expect(f.verdict).toBe("passed");
     expect(f.oracleAdequacy.sufficient).toBe(false);
     // Non-code, no-execution scope: derived gap for "nothing was executed".
-    expect(f.oracleAdequacy.gaps).toEqual(["nothing was executed to check this — semantic correctness is unverified"]);
+    expect(f.oracleAdequacy.gaps).toEqual(["nothing was executed to check this"]);
     expect(f.grounding?.verdict).toBe("passed");
   });
 
@@ -298,8 +298,8 @@ describe("buildEvidenceFacet — scope population", () => {
       scope: { writeSet: ["docs/x.md"], availableSensors: ["unit"] },
     })!;
     expect(f.oracleAdequacy.sufficient).toBe(false); // UNCHANGED
-    expect(f.oracleAdequacy.gaps).toContain("nothing was executed to check this — semantic correctness is unverified");
-    expect(f.untestedRegions).toContain("semantic correctness — nothing was executed");
+    expect(f.oracleAdequacy.gaps).toContain("nothing was executed to check this");
+    expect(f.untestedRegions).toContain("semantic correctness");
   });
 
   it("sensors branch merges derived gaps with existing missing-required gaps; verdict/sufficient unchanged", () => {

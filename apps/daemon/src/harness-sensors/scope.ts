@@ -43,8 +43,8 @@ export function deriveEvidenceScope(input: {
   } else if (!hasExecutionOracle) {
     // Non-code output with no execution: the whole semantic surface is unverified.
     // (No "oracle"/"sensor"/etc. — these strings render in the UI and must pass no-jargon.)
-    gaps.push("nothing was executed to check this — semantic correctness is unverified");
-    untestedRegions.push("semantic correctness — nothing was executed");
+    gaps.push("nothing was executed to check this");
+    untestedRegions.push("semantic correctness");
     untestedRegions.push("runtime behavior");
   }
 
