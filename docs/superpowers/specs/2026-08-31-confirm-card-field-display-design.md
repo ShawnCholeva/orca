@@ -53,7 +53,7 @@ Collapsing after N rows needs no backend change but is blind. Schema order is au
 - Demoted fields fold behind a disclosure on the confirm card — visible on demand, never dropped.
 - All 98 top-level catalog fields carry an explicit `display`, so the default only ever governs fields added later.
 - Triage's card face reduces to: lead → Problem → Success outcome → Recommended step → Rationale.
-- Templates with no `display` annotation anywhere (duplicated, custom, or not yet annotated) keep their current full-face card via the `legacy` rule. *(See correction note in §4.2: this is a property of the template, not of a run's age — an annotated template's history renders in the new split format too, since the schema is read from the live template row.)*
+- Templates with no `display` annotation anywhere (custom, not yet annotated, or a duplicate whose schema was later edited in the desktop UI) keep their current full-face card via the `legacy` rule. *(See correction note in §4.2: this is a property of the template, not of a run's age — an annotated template's history renders in the new split format too, since the schema is read from the live template row.)*
 
 ### Non-goals
 - Filtering what any agent receives. Out of scope and explicitly undesirable.
@@ -157,7 +157,7 @@ Add a `v15:` comment to the adaptive-delivery block in the existing house style,
 
 ## 6. Risks & notes
 
-- **Unannotated templates** (duplicated, custom, or not yet annotated) are protected only by the `legacy` rule in §4.2 — without it, their cards would render empty except for the lead. It is the single most important line to get right and is covered by a dedicated test. *(Corrected 2026-08-31: this was originally stated as protecting "history and in-flight runs"; it does not — the schema is read from the live template row, not a per-run snapshot, so an annotated template's history is not specially protected. See the correction note in §4.2.)*
+- **Unannotated templates** (custom, not yet annotated, or a duplicate whose schema was later edited in the desktop UI) are protected only by the `legacy` rule in §4.2 — without it, their cards would render empty except for the lead. It is the single most important line to get right and is covered by a dedicated test. *(Corrected 2026-08-31: this was originally stated as protecting "history and in-flight runs"; it does not — the schema is read from the live template row, not a per-run snapshot, so an annotated template's history is not specially protected. See the correction note in §4.2.)*
 - **Scope of the annotation sweep.** 93 of the 98 annotations are behavior-preserving `user` markers (89 outside Triage, plus Triage's own four). They are mechanical, but they touch six templates the user has not reviewed; the diff should be read as "no card changes except Triage."
 - **Shared worktree.** Parallel agents are working on `main` in this worktree, with uncommitted changes in `OrcaChat.tsx`, `projection.ts` (`workflows/steps/`), `contracts/workflows/index.ts` and others. Stage explicit paths; never `git add -A`. The files this change touches — `output-schema.ts`, `contracts/src/index.ts`, `confirmation-summary.ts`, `catalog.ts`, `ActivityThread.tsx`, `orchestrator.css` — were all clean at design time.
 - **Follow-up, not in scope.** Once Triage is validated in a live run, the same review applies one card at a time to Proposal (`approaches` + `task_plan` + `files` is the next-loudest), Research, and Execution.
