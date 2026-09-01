@@ -199,8 +199,8 @@ describe("Adaptive Delivery v9 completion gates", () => {
   const grounding = (stepId: string) =>
     (def.steps.find((s) => s.id === stepId)!.grounding ?? []) as NonNullable<WorkflowStepTemplate["grounding"]>;
 
-  it("is version 15 and runs the sensor ladder for execution", () => {
-    expect(def.version).toBe(15);
+  it("is version 16 and runs the sensor ladder for execution", () => {
+    expect(def.version).toBe(16);
     const rule = def.guardrails.find((g) => g.kind === "validation_rule")!;
     expect((rule.configJson as { appliesToSteps: string[] }).appliesToSteps.sort())
       .toEqual(["execution"]);
@@ -364,7 +364,7 @@ describe("output field display audience", () => {
   it("bumps every template version so the annotated schemas actually install", () => {
     const versions = Object.fromEntries(BUILTIN_TEMPLATE_CATALOG.map((t) => [t.id, t.version]));
     expect(versions).toEqual({
-      "orca/adaptive-delivery": 15,
+      "orca/adaptive-delivery": 16,
       "orca/bug-triage-fix": 5,
       "orca/code-review": 4,
       "orca/refactor": 4,
@@ -372,5 +372,33 @@ describe("output field display audience", () => {
       "orca/scope-brief": 2,
       "orca/scoped-delivery": 2,
     });
+  });
+});
+
+describe("Triage grounding labels", () => {
+  const triage = BUILTIN_TEMPLATE_CATALOG
+    .flatMap((t) => t.steps)
+    .find((s) => s.id === "triage")!;
+
+  it("gives every implies rule a distinct label", () => {
+    const implies = (triage.grounding ?? []).filter((g) => g.rule === "implies");
+    expect(implies).toHaveLength(5);
+    const labels = implies.map((g) => g.label);
+    // Without labels these all render as "Recommended tier consistency", because
+    // evaluateGrounding records the `when` field and every rule is gated on
+    // recommended_tier.
+    expect(labels).toEqual([
+      "Approach-only requires clear intent",
+      "Approach-only requires understood code",
+      "Ground-and-design requires clear intent",
+      "Ground-and-design requires ungrounded code",
+      "Clarify-first requires unclear intent",
+    ]);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it("bumps adaptive-delivery so the labels actually install", () => {
+    const t = BUILTIN_TEMPLATE_CATALOG.find((d) => d.id === "orca/adaptive-delivery")!;
+    expect(t.version).toBe(16);
   });
 });

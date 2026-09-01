@@ -87,17 +87,17 @@ const ADAPTIVE_STEPS: WorkflowStepTemplate[] = [
     // define), and named files must exist.
     grounding: [
       { rule: "paths_exist", field: "known_files", mode: "enforce" },
-      { rule: "implies", when: { field: "recommended_tier", equals: "approach_only" }, then: { field: "has_product_intent", equals: true }, mode: "enforce" },
+      { rule: "implies", when: { field: "recommended_tier", equals: "approach_only" }, then: { field: "has_product_intent", equals: true }, mode: "enforce", label: "Approach-only requires clear intent" },
       // approach_only skips Clarify AND Research, so it is only sound when the code
       // already exists and is understood. This deterministically forbids a
       // greenfield/from-scratch goal (or one with ungrounded code) from skipping
       // straight to Proposal (OBS-6).
-      { rule: "implies", when: { field: "recommended_tier", equals: "approach_only" }, then: { field: "codebase_state", equals: "existing_understood" }, mode: "enforce" },
-      { rule: "implies", when: { field: "recommended_tier", equals: "ground_and_design" }, then: { field: "has_product_intent", equals: true }, mode: "enforce" },
+      { rule: "implies", when: { field: "recommended_tier", equals: "approach_only" }, then: { field: "codebase_state", equals: "existing_understood" }, mode: "enforce", label: "Approach-only requires understood code" },
+      { rule: "implies", when: { field: "recommended_tier", equals: "ground_and_design" }, then: { field: "has_product_intent", equals: true }, mode: "enforce", label: "Ground-and-design requires clear intent" },
       // ground_and_design designs the approach, which is only warranted when the
       // code is not already understood (greenfield or existing-but-ungrounded).
-      { rule: "implies", when: { field: "recommended_tier", equals: "ground_and_design" }, then: { field: "codebase_state", excludes: ["existing_understood"] }, mode: "enforce" },
-      { rule: "implies", when: { field: "recommended_tier", equals: "clarify_first" }, then: { field: "has_product_intent", equals: false }, mode: "enforce" },
+      { rule: "implies", when: { field: "recommended_tier", equals: "ground_and_design" }, then: { field: "codebase_state", excludes: ["existing_understood"] }, mode: "enforce", label: "Ground-and-design requires ungrounded code" },
+      { rule: "implies", when: { field: "recommended_tier", equals: "clarify_first" }, then: { field: "has_product_intent", equals: false }, mode: "enforce", label: "Clarify-first requires unclear intent" },
     ],
     workspaceWrites: "deny",
     agentPreference: LIGHT,
@@ -818,7 +818,11 @@ export const BUILTIN_TEMPLATE_CATALOG: BuiltInTemplateDefinition[] = [
     // codebase_state) is `agent` — it folds behind the confirm card's disclosure
     // because it is handoff fuel for the next step, not the routing decision the
     // human is confirming. Every other field is `user`, preserving today's cards.
-    version: 15, category: CATEGORY, recommended: true,
+    // v16: Triage's five `implies` grounding rules carry explicit labels. They are
+    // all gated on `recommended_tier`, and the evaluator records the `when` field,
+    // so without labels every one of them rendered on the confirm card as the same
+    // "Recommended tier consistency" row.
+    version: 16, category: CATEGORY, recommended: true,
     steps: ADAPTIVE_STEPS, guardrails: [APPROVAL_MARK_DONE, validationRule(["execution"]), CONTEXT_RULE], graph: ADAPTIVE_GRAPH,
   },
   {
