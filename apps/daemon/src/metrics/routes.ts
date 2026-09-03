@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { MetricPeriod, MetricScope } from "@orca/contracts";
 import { getTemplateMetricsDetail, getTemplateMetricsSummaries } from "./usecases.js";
 import { getSampleDetail } from "./sample-detail.js";
+import { getRunDetail, getRunSummaries } from "./runs-usecases.js";
 
 export interface MetricsRouteDeps { db: Database.Database }
 
@@ -31,6 +32,26 @@ export function registerMetricsRoutes(server: FastifyInstance, deps: MetricsRout
     if (!detail) {
       reply.status(404);
       return { error: { code: "template_not_found", message: `Template not found or has no runs: ${templateId}` } };
+    }
+    return { detail };
+  });
+
+  // The run-shaped read model: a run is a trace, a step run is a span. Distinct
+  // from the per-template aggregate above, which cannot answer "how did THIS run
+  // behave" — see docs/superpowers/specs/2026-09-02-run-trace-contract.md.
+  server.get("/v1/metrics/runs", async (request) => {
+    const raw = (request.query as { limit?: string }).limit;
+    const parsed = raw === undefined ? 50 : Number(raw);
+    const limit = Number.isFinite(parsed) ? Math.min(Math.max(Math.trunc(parsed), 1), 200) : 50;
+    return { runs: getRunSummaries(db, { limit }) };
+  });
+
+  server.get("/v1/metrics/runs/:runId", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    const detail = getRunDetail(db, runId);
+    if (!detail) {
+      reply.status(404);
+      return { error: { code: "run_not_found", message: `Run not found: ${runId}` } };
     }
     return { detail };
   });
