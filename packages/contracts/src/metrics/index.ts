@@ -5,6 +5,21 @@ export { labelForGateFailure, GATE_FAILURE_CODES } from "./gate-failure-labels.j
 import { CONFIDENCE_REASON_CODES } from "./confidence-reasons.js";
 export { labelForConfidenceReason, CONFIDENCE_REASON_CODES } from "./confidence-reasons.js";
 export type { ConfidenceReasonCode } from "./confidence-reasons.js";
+export {
+  GATED_PATTERNS,
+  GATES,
+  MEASUREMENT_STATES,
+  PROPORTION_RATE_MIN,
+  VERSION_DELTA_MIN_PER_SIDE,
+  collapsesToNumber,
+  deltaAllowed,
+  gateFor,
+  labelForMeasurementState,
+  proportionInterval,
+  rangesOverlap,
+  zeroEventUpperBound,
+} from "./n-gate.js";
+export type { GateVerdict, GatedPattern, MeasurementState, ProportionInterval, Range, RenderForm } from "./n-gate.js";
 
 export const MetricPeriod = z.enum(["24h", "7d", "30d"]);
 export type MetricPeriod = z.infer<typeof MetricPeriod>;
