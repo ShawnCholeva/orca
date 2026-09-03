@@ -18,6 +18,9 @@ holds it. **Status: `open` unless stated.**
 | A6 | **924s watchdog lag.** `sessions.exited_at` is the watchdog's stamp, not the death; one row lagged 15.4 min. | OPEN | Consequence: any duration derived from `exited_at` measures *detection*, not death. |
 | A7 | **5 remaining `IN ('running','starting')` read sites** blind to a session in its spawn window. | **FIXED** `ca56037`, `4de1bc3`, `f15f47b` | 7 of 9 swept; 2 excluded deliberately with reasons. |
 
+| A8 | **Orchestrator stuck in `orchestrator_phase='independent_check'`.** Refute completed (valid JSON verdict, pane idle, `Cooked for 30s · done`), `finished_at` written, but status stayed `active` and the phase never advanced. `pending_completion_json` NULL. Preceded by a daemon restart mid-flight (`crash_retries=2`). Suspected restart-durability gap in the completion path — the worker survives now, the orchestrator's memory of what it was doing does not. | **OPEN — live reproduction** | Run `01a06587`. `finished_at` set while `status='active'` should not coexist. |
+| A9 | **500 on `POST /decide-gate` when the daemon restarts mid-request.** The write commits; only the response is lost. User sees an error for an action that succeeded, inviting a double-submit. | OPEN | Same root condition as A8. |
+
 ## B. Metrics screen — data and doctrine
 
 | # | Issue | Status |
@@ -62,6 +65,11 @@ holds it. **Status: `open` unless stated.**
 
 | # | Issue | Status |
 |---|---|---|
+| D5 | Stepper shows `running` while the DB has `awaiting_user=1` — the stepper isn't consuming the flag. | OPEN |
+| D6 | `tsx watch` daemon restarts (triggered by any agent editing a file) kill in-flight workers and burn crash-retry budget even with the reaper fixed. | OPEN — environmental |
+
+| # | Issue | Status |
+|---|---|---|
 | D1 | **`Browse…` is dead in browser mode.** Calls the Tauri dialog unconditionally — `TypeError: Cannot read properties of undefined (reading 'invoke')` at `CoordinateStep.tsx:673`. No `isTauri()` guard, no user-facing error. **`WorkspacesPage.tsx` already does this correctly.** | OPEN |
 | D2 | **"Step 4 of 6" vs stepper numbering 1,2,3,4,[gate],6,[gate],8** — numbering counts gates, total doesn't. | OPEN |
 | D3 | **Confirm-card toggle named two things**: live card says "Evidence", resolved card says "Scores". `4c0f85e` missed the confirmed-card path. | OPEN |
@@ -79,3 +87,12 @@ holds it. **Status: `open` unless stated.**
   → **Guard: `git add <paths> && git commit --only <paths>`. "no changes added to commit" is an alarm, not a no-op.**
 - **An assertion that fires on healthy data is worse than none** — it burns the reader's belief that it means something.
 - **Non-random termination contaminates a population** exactly as non-random missingness invalidates a bound. 4 of 5 runs died from infrastructure ⇒ effective n for workflow quality is **1, not 5**.
+
+## F. Executable axis (found on a live run)
+
+| # | Issue | Status |
+|---|---|---|
+| F1 | **Sensor ladder credited a stub script as a passing check.** `echo no types` exiting 0 recorded as `✓ typecheck`, while the agent honestly reported it `skipped` ("exercises no type checker, provides no signal"). Inverts the axis — the deterministic oracle was softer than the model's self-report. Also inflated `oracleAdequacy` and the tier, since `classifyTier`/`sourcesPassed`/`executed` all tested `sensorsRun.length > 0`, which a *skipped* sensor satisfies. | **FIXED** `d0ff433` |
+| F2 | **"but nothing was run or tested" hardcoded into the `upheld` refute label**, firing on steps where sensors demonstrably ran and passed. Mirror image of F1 — undersells real execution evidence. | **FIXED** `d0ff433` |
+
+Shared root cause, and it is E's hazard again: **a label that outlived the evidence it was written for.**
