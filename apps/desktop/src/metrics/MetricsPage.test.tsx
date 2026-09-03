@@ -60,13 +60,32 @@ const proposal = (over: Partial<TemplateInstructionProposal> = {}): TemplateInst
   ...over,
 });
 
+// The Runs ledger is now what the tab opens on. These tests assert what the
+// AGGREGATE view contains, and reached it incidentally when it was the default —
+// so they navigate to it the way a reader now does. The assertions themselves are
+// unchanged: they describe a view that still exists, one toggle away.
+function renderWorkflowView() {
+  const result = render(<MetricsPage />);
+  fireEvent.click(screen.getByRole("button", { name: "Workflow averages" }));
+  return result;
+}
+
 describe("MetricsPage", () => {
+  it("opens on the run ledger, not the aggregate view", async () => {
+    // The aggregate view still opens on a grade computed over runs the daemon
+    // killed; the ledger answers "how did THIS run behave", which is the question
+    // the tab is actually asked.
+    render(<MetricsPage />);
+    expect(screen.getByRole("button", { name: "Runs" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Workflow averages" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("renders a pending proposal in the rail and opens the review modal on 'Review change'", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
     vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [step()], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
     vi.spyOn(api, "listProposals").mockResolvedValue([proposal()]);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
-    render(<MetricsPage />);
+    renderWorkflowView();
 
     expect(await screen.findByText("Cuts vague-output failures")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Review change"));
@@ -79,7 +98,7 @@ describe("MetricsPage", () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([proposal()]);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
     const applySpy = vi.spyOn(api, "applyProposal").mockRejectedValue(new api.ApiError("Stale proposal — template was modified."));
-    render(<MetricsPage />);
+    renderWorkflowView();
 
     expect(await screen.findByText("Cuts vague-output failures")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Review change"));
@@ -99,7 +118,7 @@ describe("MetricsPage", () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([prop]);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
     const applySpy = vi.spyOn(api, "applyProposal").mockResolvedValue({ ...prop, status: "applied", appliedAsVersion: 2 });
-    render(<MetricsPage />);
+    renderWorkflowView();
 
     expect(await screen.findByText("Cuts vague-output failures")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Review change"));
@@ -118,7 +137,7 @@ describe("MetricsPage", () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([prop]);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([]);
     const applySpy = vi.spyOn(api, "applyProposal").mockResolvedValue({ ...prop, status: "applied", appliedAsVersion: 2 });
-    render(<MetricsPage />);
+    renderWorkflowView();
 
     expect(await screen.findByText("Cuts vague-output failures")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Review change"));
@@ -131,7 +150,7 @@ describe("MetricsPage", () => {
   it("shows a loading state then renders the health tile", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
     vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
-    render(<MetricsPage />);
+    renderWorkflowView();
     expect(screen.getByText(/Loading/i)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Step health")).toBeInTheDocument());
     expect(screen.getByText("Brainstorm")).toBeInTheDocument();
@@ -140,7 +159,7 @@ describe("MetricsPage", () => {
   it("shows Step health and Gate health as two distinct readouts", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
     vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
-    render(<MetricsPage />);
+    renderWorkflowView();
     expect(await screen.findByText("Step health")).toBeInTheDocument();
     expect(screen.getByText("Gate health")).toBeInTheDocument();
     expect(screen.queryByText("Workflow health")).toBeNull();
@@ -148,13 +167,13 @@ describe("MetricsPage", () => {
 
   it("shows the empty state when no templates have runs", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([]);
-    render(<MetricsPage />);
+    renderWorkflowView();
     await waitFor(() => expect(screen.getByText(/Run a workflow to see metrics/i)).toBeInTheDocument());
   });
 
   it("shows an error state on fetch failure", async () => {
     vi.spyOn(api, "getTemplateMetricsSummaries").mockRejectedValue(new Error("boom"));
-    render(<MetricsPage />);
+    renderWorkflowView();
     await waitFor(() => expect(screen.getByText(/Couldn't load metrics/i)).toBeInTheDocument());
   });
 
@@ -166,7 +185,7 @@ describe("MetricsPage", () => {
     };
     vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([nullSummary]);
     vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary: nullSummary, steps: [], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
-    render(<MetricsPage />);
+    renderWorkflowView();
     await waitFor(() => expect(screen.getByText("Step health")).toBeInTheDocument());
     const dashes = screen.getAllByText("—");
     expect(dashes.length).toBeGreaterThanOrEqual(1);
@@ -182,7 +201,7 @@ describe("MetricsPage", () => {
       policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] },
       completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } },
     });
-    render(<MetricsPage />);
+    renderWorkflowView();
     expect(await screen.findByText(/was a step/i)).toBeInTheDocument();
     expect(screen.getByText(/renamed from 'Release Readiness'/i)).toBeInTheDocument();
 
@@ -210,7 +229,7 @@ describe("MetricsPage", () => {
       policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] },
       completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } },
     });
-    render(<MetricsPage />);
+    renderWorkflowView();
     expect(await screen.findByText("Pipeline")).toBeInTheDocument();
 
     const html = document.body.innerHTML;
@@ -239,7 +258,7 @@ describe("MetricsPage", () => {
       policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] },
       completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } },
     });
-    render(<MetricsPage />);
+    renderWorkflowView();
     expect(await screen.findByText("Gates")).toBeInTheDocument();
     expect(screen.getByText("Step performance")).toBeInTheDocument();
     expect(screen.queryByText("Pipeline")).toBeNull();
@@ -265,7 +284,7 @@ describe("MetricsPage", () => {
       return Promise.resolve([proposal({ id: "tpl2", stepTemplateId: "proposal", predictedImprovement: "tpl2 proposal" })]);
     });
 
-    render(<MetricsPage />);
+    renderWorkflowView();
     expect(await screen.findByText("OLD tpl proposal")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /analyze this template/i }));

@@ -104,7 +104,7 @@ export function WorkflowDropdown({ summaries, value, onChange }: { summaries: Te
       <button type="button" onClick={() => setOpen((o) => !o)}
         style={{ display: "inline-flex", alignItems: "center", gap: 8, background: open ? "var(--accent-soft)" : "rgba(255,255,255,0.03)", border: `1px solid ${open ? "var(--accent-line)" : "var(--hairline)"}`, color: "var(--text)", borderRadius: 8, padding: "5px 9px 5px 11px", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 500, minWidth: 200 }}>
         <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cur.name}</span>
-        <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }}>{cur.runs} runs</span>
+        <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }}>{cur.runs} {cur.runs === 1 ? "run" : "runs"}</span>
         <ChevronDown size={13} color="var(--text-3)" style={{ transform: open ? "rotate(180deg)" : "none" }} />
       </button>
       {open && (

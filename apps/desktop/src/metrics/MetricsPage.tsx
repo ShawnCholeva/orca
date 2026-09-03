@@ -28,10 +28,10 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
   const [detail, setDetail] = useState<TemplateMetricsDetail | null>(null);
   const [openStep, setOpenStep] = useState<string | null>(null);
   const [openGate, setOpenGate] = useState<string | null>(null);
-  // The run ledger answers "how did THIS run behave", which the aggregate view
-  // below structurally cannot. Which one LEADS is a product decision, so the
-  // default stays on the existing view until that call is made deliberately.
-  const [view, setView] = useState<"runs" | "workflow">("workflow");
+  // The run ledger leads. The aggregate view below cannot answer "how did THIS run
+  // behave", and it still opens on a grade computed over runs the daemon killed —
+  // so it is reachable behind the toggle rather than being what the tab shows first.
+  const [view, setView] = useState<"runs" | "workflow">("runs");
   const [reloadKey, setReloadKey] = useState(0);
   const [proposals, setProposals] = useState<TemplateInstructionProposal[]>([]);
   const [reviewingProposalId, setReviewingProposalId] = useState<string | null>(null);

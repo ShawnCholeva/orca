@@ -44,6 +44,20 @@ const TERMINATION_TONE: Record<RunSummary["terminationCause"], string> = {
 };
 
 /**
+ * The runs that can say anything about the WORKFLOW: ones that actually finished.
+ * A run the substrate killed measured the daemon, and a run still in flight has not
+ * reported yet — neither is evidence about the workflow.
+ *
+ * Exported and shared because the headline and the sample-floor line must be the
+ * SAME quantity, not two predicates that agree today. The n handed to a gate has to
+ * be the n of a single population; two counts that happen to match are that rule
+ * already broken, waiting for one of them to be edited.
+ */
+export function workflowEvidenceRuns(runs: RunSummary[]): RunSummary[] {
+  return runs.filter((r) => r.terminationCause === "completed");
+}
+
+/**
  * One sentence, the most important true fact, computed rather than authored so it
  * stays true as the data changes. The contamination case leads: a run killed by the
  * substrate says nothing about the workflow, and reporting those five together
@@ -52,14 +66,14 @@ const TERMINATION_TONE: Record<RunSummary["terminationCause"], string> = {
 export function headline(runs: RunSummary[]): string {
   if (runs.length === 0) return "No runs yet.";
   const infra = runs.filter((r) => r.terminationCause === "infrastructure_killed");
-  const finished = runs.filter((r) => r.terminationCause === "completed");
+  const finished = workflowEvidenceRuns(runs);
   if (infra.length > 0) {
     const reasons = new Set(infra.map((r) => r.terminationEvidence).filter((e): e is string => e != null));
     const observed =
       reasons.size === 1
         ? `${infra.length} of your ${runs.length} runs ended the same way — ${[...reasons][0]}.`
         : `${infra.length} of your ${runs.length} runs stopped without finishing, for reasons in the substrate rather than the workflow.`;
-    const left = `That leaves ${finished.length} run${finished.length === 1 ? "" : "s"} that can tell you anything about the workflow itself.`;
+    const left = `That leaves ${finished.length} finished run${finished.length === 1 ? "" : "s"} that can tell you anything about the workflow itself.`;
     // The mechanism is a diagnosis, not an observation — say which it is. Runs that
     // share an outcome need not share a cause, and attributing all of them to one
     // bug claims more than the session history supports.
@@ -371,7 +385,7 @@ export function RunDetailPanel({ detail, onBack }: { detail: RunDetail; onBack: 
  */
 function CantTellYou({ runs }: { runs: RunSummary[] }) {
   const gateless = runs.length > 0;
-  const workflowN = runs.filter((r) => r.terminationCause === "completed").length;
+  const workflowN = workflowEvidenceRuns(runs).length;
   return (
     <section style={{ display: "grid", gap: 8 }}>
       <h3 style={{ fontSize: 13, margin: 0 }}>What this screen can&apos;t tell you yet</h3>

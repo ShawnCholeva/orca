@@ -183,7 +183,9 @@ describe("App tab visibility with zero goals", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: /Metrics/ }));
 
-    expect(await screen.findByText("Step health")).toBeInTheDocument();
+    // The tab opens on the run ledger; it used to be identified here by a string
+    // from the aggregate view, which is now one toggle away.
+    expect(await screen.findByRole("button", { name: "Runs" })).toHaveAttribute("aria-pressed", "true");
   });
 });
 

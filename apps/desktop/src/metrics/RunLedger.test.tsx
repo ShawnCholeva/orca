@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
-import { RunDetailPanel, RunRow, headline } from "./RunLedger";
+import { RunDetailPanel, RunRow, headline, workflowEvidenceRuns } from "./RunLedger";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -78,6 +78,23 @@ describe("cost", () => {
   });
 });
 
+describe("workflowEvidenceRuns", () => {
+  it("is the single source for both the headline and the sample floor", () => {
+    // These two lines must be the SAME quantity, not two predicates that agree
+    // today. An n handed to a gate has to be the n of one population; two counts
+    // that happen to match are that rule already broken, waiting for an edit.
+    const runs = [
+      summary({ runId: "a", terminationCause: "completed" }),
+      summary({ runId: "b", terminationCause: "infrastructure_killed" }),
+      summary({ runId: "c", terminationCause: "running" }),
+      summary({ runId: "d", terminationCause: "workflow_failed" }),
+    ];
+    expect(workflowEvidenceRuns(runs).map((r) => r.runId)).toEqual(["a"]);
+    // A run still in flight has reported nothing yet, so it is not yet evidence.
+    expect(headline(runs)).toContain("1 finished run");
+  });
+});
+
 describe("headline", () => {
   it("leads with contamination when runs were killed by the substrate", () => {
     const runs = [
@@ -92,8 +109,10 @@ describe("headline", () => {
     expect(h).toContain("crashed 3 times (worker_exited_no_signal)");
     expect(h).toContain("root-caused");
     expect(h).not.toContain("were killed by the daemon");
-    // The whole point: it says how much workflow evidence is actually left.
-    expect(h).toContain("1 run");
+    // The whole point: it says how much workflow evidence is actually left — and
+    // names the quantity, so "6 runs minus 4 killed" doesn't invite the reader to
+    // expect 2 when a still-running run has reported nothing yet.
+    expect(h).toContain("1 finished run");
   });
 
   it("does not claim a shared cause when the evidence differs", () => {
