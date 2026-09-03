@@ -155,7 +155,7 @@ export function RateInterval({
   );
 }
 
-// Form per state — solid / dashed / dotted and a distinct hue, so the five states
+// Form per state — solid / dashed / dotted and a distinct hue, so the six states
 // are told apart without reaching for opacity. `lossy` is the urgent uninstrumented
 // case: the value is measured and then discarded, so data is being destroyed on
 // every run until it is fixed.
@@ -171,6 +171,12 @@ function formFor(state: MeasurementState, lossy: boolean): { borderLeftStyle: st
       return lossy
         ? { borderLeftStyle: "solid", borderLeftColor: "var(--err)" }
         : { borderLeftStyle: "solid", borderLeftColor: "var(--hairline-strong)" };
+    case "unknown":
+      // Absent with no established cause. Deliberately not borrowed from any of the
+      // states above: each of those names a reason, and this one is the admission
+      // that we don't have one yet. Provisional treatment — the visual language here
+      // is the frontend owner's call, not this function's.
+      return { borderLeftStyle: "dashed", borderLeftColor: "var(--text-4)" };
     case "measured":
       return { borderLeftStyle: "none", borderLeftColor: "transparent" };
   }
