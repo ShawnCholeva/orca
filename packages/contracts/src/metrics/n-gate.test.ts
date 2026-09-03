@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   GATED_PATTERNS,
+  shortLabelForMeasurementState,
   MEASUREMENT_STATES,
   collapsesToNumber,
   deltaAllowed,
@@ -285,6 +286,14 @@ describe("labelForMeasurementState", () => {
     expect(unknown).not.toBe(uninstrumented);
     // Must not assert the stronger claim.
     expect(unknown).toMatch(/haven't established/i);
+  });
+
+  it("keeps every state distinct at tag length — compaction must not collapse the vocabulary", () => {
+    const tags = MEASUREMENT_STATES.filter((s) => s !== "measured").map((s) => shortLabelForMeasurementState(s));
+    tags.push(shortLabelForMeasurementState("uninstrumented", { lossy: true }));
+    expect(tags.every((t) => t && t.length > 0)).toBe(true);
+    expect(new Set(tags).size).toBe(tags.length);
+    expect(shortLabelForMeasurementState("measured")).toBeNull();
   });
 
   it("frames a per-side shortfall against its own threshold and unit", () => {

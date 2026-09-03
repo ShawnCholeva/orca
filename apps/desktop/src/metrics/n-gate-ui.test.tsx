@@ -6,9 +6,22 @@ import { MeasurementLabel, RateInterval } from "./n-gate-ui";
 const BANDS = [0.5, 0.8];
 
 describe("RateInterval", () => {
-  it("renders nothing with no observations — that is the label's job, never 0%", () => {
+  it("never renders silently empty with no observations", () => {
+    // A silent empty render is the untyped absence with no dash to notice it by —
+    // the one failure mode that does not show up in a screenshot.
     const { container } = render(<RateInterval pos={0} neg={0} />);
-    expect(container).toBeEmptyDOMElement();
+    expect(container).not.toBeEmptyDOMElement();
+    expect(container.textContent).not.toMatch(/0%/);
+  });
+
+  it("defaults an unexplained absence to the weakest true claim", () => {
+    render(<RateInterval pos={0} neg={0} />);
+    expect(screen.getByText(/haven't established/i)).toBeInTheDocument();
+  });
+
+  it("lets a caller that knows the reason state it", () => {
+    render(<RateInterval pos={0} neg={0} emptyState="insufficient" />);
+    expect(screen.getByText(/Not enough runs yet/i)).toBeInTheDocument();
   });
 
   it("renders a word and no percentage at n=1", () => {
@@ -126,6 +139,30 @@ describe("MeasurementLabel", () => {
       />
     );
     expect(screen.getByText("Stamp the pause reason into the event.")).toBeInTheDocument();
+  });
+
+  it("compacts to a tag that still resolves to the full sentence for a screen reader", () => {
+    render(<MeasurementLabel state="unmeasurable_structural" compact
+      reason="Nothing to check this total against — this run never finished." />);
+    const tag = screen.getByRole("note");
+    expect(tag.textContent).toBe("unchecked");
+    expect(tag.getAttribute("aria-label")).toMatch(/this run never finished/);
+  });
+
+  it("keeps compact tags distinct per state — compaction must not collapse the vocabulary", () => {
+    const tags = (["insufficient", "unmeasurable_coverage", "unmeasurable_structural", "uninstrumented", "unknown"] as const)
+      .map((state) => {
+        const { container } = render(<MeasurementLabel state={state} compact />);
+        return container.textContent;
+      });
+    const { container: lossyEl } = render(<MeasurementLabel state="uninstrumented" compact lossy />);
+    tags.push(lossyEl.textContent);
+    expect(new Set(tags).size).toBe(tags.length);
+  });
+
+  it("carries the fix into the compact tag's accessible text rather than dropping it", () => {
+    render(<MeasurementLabel state="uninstrumented" compact lossy fix="Stamp the pause reason into the event." />);
+    expect(screen.getByRole("note").getAttribute("aria-label")).toMatch(/Stamp the pause reason/);
   });
 
   it("never signals absence with opacity — form carries the state", () => {

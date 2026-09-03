@@ -84,6 +84,31 @@ export function labelForMeasurementState(
   }
 }
 
+// The same vocabulary at tag length, for a state that repeats down a column where
+// the full sentence would cost more comprehension than it buys. Compaction must
+// never collapse the states into one marker — a generic "something's off" chip is
+// the em-dash returning in a nicer font — so every state keeps a distinct word,
+// and the caller is expected to state the full sentence once per screen.
+export function shortLabelForMeasurementState(
+  state: MeasurementState,
+  opts?: { lossy?: boolean }
+): string | null {
+  switch (state) {
+    case "measured":
+      return null;
+    case "insufficient":
+      return "too few runs";
+    case "unmeasurable_coverage":
+      return "part-checked";
+    case "unmeasurable_structural":
+      return "unchecked";
+    case "unknown":
+      return "unestablished";
+    case "uninstrumented":
+      return opts?.lossy ? "discarded" : "not recorded";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The gate table
 // ---------------------------------------------------------------------------

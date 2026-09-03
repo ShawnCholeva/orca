@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import {
   collapsesToNumber,
   labelForMeasurementState,
+  shortLabelForMeasurementState,
   proportionInterval,
   type MeasurementState,
 } from "@orca/contracts";
@@ -39,6 +40,8 @@ export function RateInterval({
   bandEdges = [],
   label,
   outcomeWords = { pass: "passed", fail: "failed" },
+  emptyState = "unknown",
+  emptyReason,
   style,
 }: {
   pos: number;
@@ -49,11 +52,21 @@ export function RateInterval({
   /** What the count is a count OF, e.g. "passed". Used in the accessible text. */
   label?: string;
   outcomeWords?: { pass: string; fail: string };
+  /** Why there are no observations. Defaults to the weakest claim available. */
+  emptyState?: MeasurementState;
+  emptyReason?: string;
   style?: CSSProperties;
 }) {
   const interval = proportionInterval(pos, neg);
-  // No observations is not zero percent. The caller renders a MeasurementLabel.
-  if (interval === null) return null;
+  // No observations is not zero percent — and it is not nothing, either. Returning
+  // null here made the convention "the caller renders a MeasurementLabel" something
+  // the type system never enforced, so a caller that forgot rendered an untyped
+  // absence with no dash to notice it by: the one failure that never shows up in a
+  // screenshot. The default states the weakest true thing (we have not established
+  // why this is absent); a caller that knows better passes the state it knows.
+  if (interval === null) {
+    return <MeasurementLabel state={emptyState} reason={emptyReason} style={style} />;
+  }
 
   const n = interval.n;
   const { point, lower, upper } = interval;
@@ -193,6 +206,7 @@ export function MeasurementLabel({
   reason,
   lossy = false,
   fix,
+  compact = false,
   style,
 }: {
   state: MeasurementState;
@@ -209,12 +223,43 @@ export function MeasurementLabel({
   /** The one change that would make this answerable. An absence the reader can act
    *  on beats an absence they can only notice. */
   fix?: string;
+  /** Tag-length rendering for a state that repeats down a column. The full sentence
+   *  still reaches a screen reader, and the caller is expected to state it once per
+   *  screen — a tag alone is a caveat nobody can resolve. */
+  compact?: boolean;
   style?: CSSProperties;
 }) {
   const text = labelForMeasurementState(state, { needed, have, need, unit, checked, of, reason, lossy });
   if (text === null) return null;
 
   const form = formFor(state, lossy);
+
+  if (compact) {
+    return (
+      <span
+        role="note"
+        aria-label={fix ? `${text} ${fix}` : text}
+        data-compact="true"
+        className="mono"
+        style={{
+          display: "inline-block",
+          fontSize: 10,
+          lineHeight: 1.5,
+          padding: "0 4px",
+          borderRadius: 2,
+          borderWidth: 1,
+          borderStyle: form.borderLeftStyle as CSSProperties["borderStyle"],
+          borderColor: form.borderLeftColor,
+          color: "var(--text-3)",
+          whiteSpace: "nowrap",
+          ...style,
+        }}
+      >
+        {shortLabelForMeasurementState(state, { lossy })}
+      </span>
+    );
+  }
+
   return (
     <div
       style={{

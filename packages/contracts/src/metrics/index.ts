@@ -15,6 +15,7 @@ export {
   deltaAllowed,
   gateFor,
   labelForMeasurementState,
+  shortLabelForMeasurementState,
   proportionInterval,
   rangesOverlap,
   zeroEventUpperBound,
