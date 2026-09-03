@@ -23,6 +23,7 @@ export const MEASUREMENT_STATES = [
   "unmeasurable_coverage",    // the check ran on too few completions  -> run more checks
   "unmeasurable_structural",  // no independent check exists, ever     -> none; say so
   "uninstrumented",           // the value isn't recorded at all       -> engineering work
+  "unknown",                  // absent, and we haven't established why -> find out
 ] as const;
 
 export type MeasurementState = (typeof MEASUREMENT_STATES)[number];
@@ -68,6 +69,14 @@ export function labelForMeasurementState(
         : "Too few of these runs were actually checked to measure this.";
     case "unmeasurable_structural":
       return opts?.reason ?? "This can't be measured, and more runs won't change that.";
+    // "We haven't established whether this is recorded" is a different claim from
+    // "this isn't recorded". Rendering the second when we mean the first asserts a
+    // fact we do not have — the same defect as a status read everywhere and written
+    // nowhere: it looks like a settled answer and isn't. It gets its own state
+    // rather than a reason string because its remedy differs from every other
+    // member's: find out, rather than wait, check more, build, or accept.
+    case "unknown":
+      return "We haven't established whether this is recorded anywhere.";
     case "uninstrumented":
       return opts?.lossy
         ? "This is being measured and then thrown away. It needs a fix before it can show up here."

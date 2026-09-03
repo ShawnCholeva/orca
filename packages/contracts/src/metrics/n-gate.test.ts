@@ -279,6 +279,14 @@ describe("labelForMeasurementState", () => {
     expect(fallback).not.toMatch(/self|report|execut/i);
   });
 
+  it("refuses to claim a value is unrecorded when we only know it is absent", () => {
+    const unknown = labelForMeasurementState("unknown")!;
+    const uninstrumented = labelForMeasurementState("uninstrumented")!;
+    expect(unknown).not.toBe(uninstrumented);
+    // Must not assert the stronger claim.
+    expect(unknown).toMatch(/haven't established/i);
+  });
+
   it("frames a per-side shortfall against its own threshold and unit", () => {
     expect(labelForMeasurementState("insufficient", { have: 3, need: 5, unit: "runs per version" }))
       .toBe("Needs 5 runs per version; this has 3.");
