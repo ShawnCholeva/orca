@@ -232,6 +232,19 @@ export const CompletionGateMetrics = z.object({
 }).strict();
 export type CompletionGateMetrics = z.infer<typeof CompletionGateMetrics>;
 
+/**
+ * A step blocked by the SUBSTRATE, not by the workflow. Kept in its own array
+ * rather than folded into FailureMode: a step that crashed out is not a
+ * low-quality step, it is one that never got to be judged, and merging the two
+ * would report the daemon while naming the workflow. No pct — the denominator
+ * that makes sense for quality failures does not apply here.
+ */
+export const InfrastructureFailure = z.object({
+  label: z.string(),
+  count: z.number().int().nonnegative(),
+}).strict();
+export type InfrastructureFailure = z.infer<typeof InfrastructureFailure>;
+
 export const FailureMode = z.object({
   label: z.string(), count: z.number().int().nonnegative(), pct: z.number(),
 }).strict();
@@ -324,6 +337,10 @@ export const StepMetrics = z.object({
   versionInvalidOutputRateDelta: z.number().nullable(),
   insights: z.array(z.string()),
   recentReasons: z.array(z.object({ at: z.string(), reason: z.string() }).strict()),
+  // Aggregated substrate failures for this step, from step-run blocked_reason.
+  // Optional purely so in-flight fixtures stay valid (same additive pattern as
+  // `vindication`); aggregate.ts always emits it, empty when nothing crashed.
+  infrastructureFailures: z.array(InfrastructureFailure).optional(),
   versionHistory: NodeVersionHistory.optional(),
   // Observational (Phase 2a): downstream-vindication tally over the step's final
   // completions — does not feed score/band/calibration. Optional so existing

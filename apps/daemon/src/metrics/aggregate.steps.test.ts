@@ -1122,3 +1122,50 @@ describe("rescued steps cost the score", () => {
     expect(step.versionScoreDeltaVersions).toBeNull();
   });
 });
+
+describe("computeStepMetrics — substrate failures", () => {
+  const R = (attempt: number, status: string, blockedReason: string | null): TemplateStepRun => ({
+    workflowRunId: `r${attempt}`, stepTemplateId: "s", attempt: 1, status,
+    startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:05:00.000Z",
+    blockedReason, templateVersion: 1, stallRescues: 0,
+  });
+
+  it("aggregates blocked_reason so a crashing step does not report an empty failure list", () => {
+    // The founder's Triage tile scored 16/100 with failureModes: []. The score
+    // counts blocked finals; failureModes is built from evidence/refute facets,
+    // which on a crashed-then-retried step all read "passed". Nothing carried the
+    // crash to the surface, so the screen showed a bad number and no reason.
+    const ts = [sc("p1", "r1", "s", "passed", true, "2026-05-01T00:10:00.000Z")];
+    const runs = [
+      R(1, "blocked", "crashed 3 times (worker_exited_no_signal)"),
+      R(2, "blocked", "crashed 3 times (worker_exited_no_signal)"),
+      R(3, "blocked", "no progress after 3 restarts"),
+    ];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+
+    expect(step.infrastructureFailures).toEqual([
+      { label: "Worker died without reporting why", count: 2 },
+      { label: "Worker stopped making progress", count: 1 },
+    ]);
+  });
+
+  it("keeps substrate failures OUT of failureModes — a crashed step is not a low-quality step", () => {
+    const ts = [sc("p1", "r1", "s", "passed", true, "2026-05-01T00:10:00.000Z")];
+    const runs = [R(1, "blocked", "crashed 3 times (worker_exited_no_signal)")];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+
+    expect(step.infrastructureFailures).toHaveLength(1);
+    for (const m of step.failureModes) {
+      expect(m.label).not.toMatch(/worker|crash|progress/i);
+    }
+  });
+
+  it("leaves a workflow-authored blocked_reason alone", () => {
+    // "vetoed" is the engine rejecting the work, not the substrate dropping it.
+    const ts = [sc("p1", "r1", "s", "passed", true, "2026-05-01T00:10:00.000Z")];
+    const runs = [R(1, "failed", "vetoed")];
+    const [step] = computeStepMetrics({ transitions: ts, stepRuns: runs, stepNames: names, nowIso: "2026-05-08T00:00:00.000Z", period: "7d" });
+
+    expect(step.infrastructureFailures).toEqual([]);
+  });
+});

@@ -8,6 +8,7 @@ import type { CalibrationEntry } from "./verification.js";
 import { labelForFailure } from "./failure-labels.js";
 import { composedScore } from "./composed-score.js";
 import { deriveConfidenceReason } from "./confidence-reason.js";
+import { classifyInfraReason } from "./infra-failure.js";
 
 export const SAMPLE_MIN = 5;
 // Per-side minimum of SCORED samples before a per-step version delta is emitted.
@@ -527,6 +528,21 @@ export function computeStepMetrics(input: {
       .slice(0, 5)
       .map((r) => ({ at: r.finishedAt ?? r.startedAt ?? "", reason: r.blockedReason! }));
 
+    // Substrate failures, aggregated. Deliberately NOT merged into failureModes:
+    // a step that crashed out never got to be judged, so counting it as a quality
+    // failure reports the daemon while naming the workflow. Without this a step
+    // could score in the teens off blocked finals while its failure list sat empty,
+    // because that list is built only from evidence/refute facets — which, on a
+    // crashed-then-retried step, all say "passed".
+    const infraCounts = new Map<string, number>();
+    for (const r of stepRuns) {
+      const label = classifyInfraReason(r.blockedReason);
+      if (label !== null) infraCounts.set(label, (infraCounts.get(label) ?? 0) + 1);
+    }
+    const infrastructureFailures = [...infraCounts.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count);
+
     // Inspectable breakdown of the composed score over the conclusive completions
     // (same population scoreOver/scoredSampleSize weight by) — lets the UI/falsifier
     // see WHICH verifiers drove the score, not just the final number. Fail-edge
@@ -623,7 +639,7 @@ export function computeStepMetrics(input: {
       failureModes,
       reconciliation,
       trend, versionBoundaries, versionScoreDelta, versionScoreDeltaVersions,
-      versionInvalidOutputRateDelta, insights: [], recentReasons,
+      versionInvalidOutputRateDelta, insights: [], recentReasons, infrastructureFailures,
       versionHistory: input.lineage?.get(stepTemplateId),
       vindication: input.vindicationByCompletion ? vindTally : undefined,
       confidenceReason: confidenceReason ?? undefined,
