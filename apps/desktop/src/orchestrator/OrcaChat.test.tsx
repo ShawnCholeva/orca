@@ -407,6 +407,42 @@ describe("OrcaChat", () => {
     expect(screen.queryByTestId("step-working")).toBeNull();
   });
 
+  it("does not show 'Working on {step}' when the agent answered and is waiting on the user", async () => {
+    setupRunLoad();
+    // The agent finished its turn, the orchestrator relayed the answer to chat,
+    // and the next move is the user's. The step is still `active` with no live
+    // activity — the exact shape that used to render a false "Working on …".
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+        ordinal: 4, attempt: 1, status: "active", startedAt: now, finishedAt: null,
+        blockedReason: null, awaitingUser: true,
+      },
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByPlaceholderText("Message Orca…")).toBeInTheDocument();
+    expect(screen.queryByTestId("step-working")).toBeNull();
+  });
+
+  it("still shows 'Working on {step}' in the opening gap when the agent has the next move", async () => {
+    setupRunLoad();
+    // Same shape, but the orchestrator drove the agent rather than replying: the
+    // filler row must survive, or the chat looks frozen while the step spins up.
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+        ordinal: 4, attempt: 1, status: "active", startedAt: now, finishedAt: null,
+        blockedReason: null, awaitingUser: false,
+      },
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByTestId("step-working")).toBeInTheDocument();
+  });
+
   it("does not also pulse a worker activity while the orchestrator review runs (one live indicator)", async () => {
     setupRunLoad();
     getWorkflowStepRunMock.mockResolvedValue({
@@ -1580,6 +1616,27 @@ describe("OrcaChat", () => {
       expect(screen.queryByTestId("awaiting-reply")).toBeNull();
     });
     expect(screen.getByText("Here is the bounded plan.")).toBeInTheDocument();
+  });
+
+  it("shows a plain Thinking… bubble while a send is in flight, not a step-by-step routing checklist", async () => {
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+    createOrchestratorMessageMock.mockImplementation(() => new Promise(() => {}));
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+    await screen.findByPlaceholderText("Message Orca…");
+    fireEvent.change(screen.getByPlaceholderText("Message Orca…"), {
+      target: { value: "Plan the rollout." },
+    });
+    fireEvent.click(screen.getByText("Send"));
+
+    const indicator = await screen.findByTestId("awaiting-reply");
+    expect(indicator).toHaveTextContent("Thinking…");
+    // The two-beat "Reading your message → Working out a response" choreography
+    // narrated Orca's own plumbing on every single send. One honest bubble.
+    expect(screen.queryByText("Reading your message")).toBeNull();
+    expect(screen.queryByText("Working out a response")).toBeNull();
   });
 
   it("shows thinking indicator after async reply (reply:null) and clears it when orchestrator reply lands", async () => {

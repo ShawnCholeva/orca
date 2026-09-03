@@ -4525,3 +4525,60 @@ describe("OrchestratorService step_complete state-conflict detection", () => {
     expect(decideConflictResponse("auto", 0)).toEqual({ pause: false });
   });
 });
+
+describe("OrchestratorService awaiting_user (is the step parked on the human?)", () => {
+  function awaitingUser(db: Database.Database): number {
+    return (
+      db.prepare("SELECT awaiting_user FROM workflow_step_runs WHERE id = 'step-1'").get() as {
+        awaiting_user: number;
+      }
+    ).awaiting_user;
+  }
+
+  it("sets awaiting_user when the orchestrator answers the user and stops (paraphrase)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    const service = makeJudgeService(
+      recordingMediator({ kind: "paraphrase_agent_message", body: "Fixed the overlay. Ready for the next one." }),
+      vi.fn(async () => "delivered" as const)
+    );
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText: "Fixed it." },
+      { bus, idFactory }
+    );
+
+    // The step is still active, but nobody is working on it — the agent
+    // answered and is waiting for the user's next message.
+    const row = db.prepare("SELECT status FROM workflow_step_runs WHERE id = 'step-1'").get() as {
+      status: string;
+    };
+    expect(row.status).toBe("active");
+    expect(awaitingUser(db)).toBe(1);
+  });
+
+  it("clears awaiting_user when the orchestrator drives the agent instead of replying (revise)", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    db.prepare("UPDATE workflow_step_runs SET awaiting_user = 1 WHERE id = 'step-1'").run();
+    const service = makeJudgeService(
+      recordingMediator({ kind: "revise_step", feedback: "Cover the error path too." }),
+      vi.fn(async () => "delivered" as const)
+    );
+
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText: "Done." },
+      { bus, idFactory }
+    );
+
+    expect(awaitingUser(db)).toBe(0);
+  });
+});

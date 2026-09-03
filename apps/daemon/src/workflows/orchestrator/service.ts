@@ -118,6 +118,7 @@ export {
   buildTelemetry,
   nowWithFirstTimestamp,
 } from "./dispatch-engine.js";
+import { LIVE_SESSION } from "../../sessions/live-session.js";
 
 interface RecoveryScoringPromptInput {
   stepTpl: WorkflowStepTemplate;
@@ -931,7 +932,7 @@ export class OrchestratorService {
       }
 
       const ctx = { run, stepRun, stepTpl, template, goal };
-      await this.applyOrchestratorAction(
+      const { postedChatReply } = await this.applyOrchestratorAction(
         db,
         now,
         ctx,
@@ -940,6 +941,7 @@ export class OrchestratorService {
         action,
         options
       );
+      this.setAwaitingUser(db, stepRun.id, postedChatReply);
     } finally {
       this.clearStepPhase(db, now, phaseScope, options);
     }
@@ -1062,7 +1064,25 @@ export class OrchestratorService {
       return;
     }
     db.prepare("UPDATE workflow_step_runs SET pending_judge_json = NULL WHERE id = ?").run(ctx.stepRun.id);
-    await this.applyOrchestratorAction(db, now, ctx, sessionId, stash.responseText, action, options);
+    const { postedChatReply } = await this.applyOrchestratorAction(
+      db, now, ctx, sessionId, stash.responseText, action, options
+    );
+    this.setAwaitingUser(db, ctx.stepRun.id, postedChatReply);
+  }
+
+  /**
+   * Record whether the step run is now parked on the HUMAN. `postedChatReply` is
+   * the one honest discriminator every orchestrator action produces: it either
+   * replied in chat (the next move is the user's) or drove the agent (the next
+   * move is the agent's). Without it an `active` step with no live activity is
+   * ambiguous, and the chat claims "Working on <step>…" over an idle agent that
+   * is really waiting on the user.
+   */
+  private setAwaitingUser(db: Database.Database, stepRunId: string, awaiting: boolean): void {
+    db.prepare("UPDATE workflow_step_runs SET awaiting_user = ? WHERE id = ?").run(
+      awaiting ? 1 : 0,
+      stepRunId
+    );
   }
 
   /**
@@ -1880,7 +1900,7 @@ export class OrchestratorService {
     if (!stepRunId) return; // question wasn't tied to a step; nothing to resume
     const sess = db
       .prepare(
-        "SELECT id FROM sessions WHERE workflow_step_run_id = ? AND goal_id = ? AND status IN ('starting','running') ORDER BY rowid DESC LIMIT 1"
+        `SELECT id FROM sessions WHERE workflow_step_run_id = ? AND goal_id = ? AND ${LIVE_SESSION} ORDER BY rowid DESC LIMIT 1`
       )
       .get(stepRunId, goalId) as { id: string } | undefined;
     if (!sess || !this.workerDeliver) {
@@ -2167,6 +2187,7 @@ export class OrchestratorService {
     const { postedChatReply } = await this.applyOrchestratorAction(
       db, now, ctx, sessionId, "", resolved, options
     );
+    this.setAwaitingUser(db, stepRun.id, postedChatReply);
     // Some actions need a durable acknowledgment after applying their side effect.
     if (!postedChatReply) {
       const acknowledgment = this.acknowledgeUserMessageAction(resolved, sessionId);
@@ -2319,7 +2340,7 @@ export class OrchestratorService {
     publishStaged(options.bus, stagedEvents);
 
     const sessionRow = db
-      .prepare("SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('running','starting') ORDER BY started_at DESC LIMIT 1")
+      .prepare(`SELECT id FROM sessions WHERE workflow_step_run_id = ? AND ${LIVE_SESSION} ORDER BY created_at DESC LIMIT 1`)
       .get(stepRun.id) as { id: string } | undefined;
     if (sessionRow?.id) void this.workerTerminate?.(sessionRow.id);
 
@@ -2385,7 +2406,7 @@ export class OrchestratorService {
     resumeFromConfirmation(activityCtx, { stepRunId: stepRun.id });
 
     const sessionRow = db
-      .prepare("SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('running','starting') ORDER BY started_at DESC LIMIT 1")
+      .prepare(`SELECT id FROM sessions WHERE workflow_step_run_id = ? AND ${LIVE_SESSION} ORDER BY created_at DESC LIMIT 1`)
       .get(stepRun.id) as { id: string } | undefined;
     // The chat bubble above shows the user's words; the worker gets them wrapped in
     // the step contract. Engine-authored revisions (grounding, refute) already carry
@@ -2502,7 +2523,7 @@ export class OrchestratorService {
     if (!run || !run.currentStepRunId) return false;
     const sessionRow = db
       .prepare(
-        "SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('running','starting') ORDER BY started_at DESC LIMIT 1"
+        `SELECT id FROM sessions WHERE workflow_step_run_id = ? AND ${LIVE_SESSION} ORDER BY created_at DESC LIMIT 1`
       )
       .get(run.currentStepRunId) as { id: string } | undefined;
     if (!sessionRow?.id) return false;

@@ -1,24 +1,36 @@
 import type { Activity, ActivityDiff, ActivityStep } from "@orca/contracts";
 
+// How the tail of the thread renders once the worker is no longer streaming
+// into it. Two very different things used to share one "interrupted" flag:
+//   live    — the worker is mid-turn; the last step pulses.
+//   settled — the turn ENDED normally and something else now holds the floor
+//             (the orchestrator reviewing its output). The work finished, so
+//             the last step earns a check. It must NOT show a pause: nothing
+//             was halted, and the daemon marks that same step done moments
+//             later, so a pause is a lie that visibly flips to a check.
+//   halted  — the run actually stopped mid-flight (blocked, or a user
+//             interrupt). Only this earns the pause glyph.
+type ActivityTail = "live" | "settled" | "halted";
+
 export function AgentActivity({
   activity,
-  interrupted = false,
+  tail = "live",
 }: {
   activity: Activity;
-  // Forces the active line to render paused instead of pulsing. Set when the run
-  // is no longer making progress (e.g. blocked) so the UI never shows a live
-  // spinner over work that has actually stopped (honest, inspectable status).
-  interrupted?: boolean;
+  tail?: ActivityTail;
 }) {
   const completed = activity.status === "completed";
-  // A finished activity (completed/expired/interrupted) that still carries an
-  // active step was cut short — render that step as paused, not running.
-  const finished = interrupted || activity.status === "completed" || activity.status === "expired";
+  // An activity that reached a terminal status while still carrying an active
+  // step was cut short (e.g. the user pressed Escape) — that is a halt.
+  const cutShort =
+    tail === "halted" || activity.status === "completed" || activity.status === "expired";
+  // Anything but a live tail means nothing is streaming here any more.
+  const stopped = cutShort || tail === "settled";
   // The active line is the last step still marked active; if there is none yet
   // (step opened, no tool call run), fall back to a single pulse.
   const activeStep = [...activity.steps].reverse().find((s) => s.status === "active") ?? null;
   const doneSteps = activity.steps.filter((s) => s.status === "done");
-  const showInitialPulse = !finished && activeStep === null && activity.steps.length === 0;
+  const showInitialPulse = !stopped && activeStep === null && activity.steps.length === 0;
   // The summary's top border is a divider from the steps thread above it. With
   // no steps rendered (a tool-less turn), that divider would float with nothing
   // above it — so drop it and sit the summary flush.
@@ -32,7 +44,11 @@ export function AgentActivity({
           <StepRow key={step.id} step={step} state="done" />
         ))}
         {activeStep ? (
-          <StepRow key={activeStep.id} step={activeStep} state={finished ? "interrupted" : "running"} />
+          <StepRow
+            key={activeStep.id}
+            step={activeStep}
+            state={cutShort ? "interrupted" : tail === "settled" ? "done" : "running"}
+          />
         ) : null}
         {showInitialPulse ? (
           <div className="agent-activity-step" data-testid="agent-activity-active">

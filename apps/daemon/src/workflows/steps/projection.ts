@@ -22,11 +22,12 @@ interface WorkflowStepRunRow {
   operator_selected_at: string | null;
   orchestrator_phase: string | null;
   pending_judge_json: string | null;
+  awaiting_user: number;
   step_result_json: string | null;
 }
 
 const STEP_RUN_COLUMNS =
-  "id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, started_at, finished_at, blocked_reason, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at, orchestrator_phase, pending_judge_json, step_result_json";
+  "id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, started_at, finished_at, blocked_reason, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at, orchestrator_phase, pending_judge_json, awaiting_user, step_result_json";
 
 let _db: Database.Database | null = null;
 let _stmt: Database.Statement | null = null;
@@ -68,6 +69,7 @@ function rowToStepRun(row: WorkflowStepRunRow): WorkflowStepRunT {
     operatorSelectedAt: row.operator_selected_at,
     orchestratorPhase: row.orchestrator_phase as never,
     judgePending: row.pending_judge_json != null,
+    awaitingUser: row.awaiting_user === 1,
     stepResult,
   });
 }

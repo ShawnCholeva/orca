@@ -77,6 +77,7 @@ export const migrationFiles = [
   "0062_gate_recommended_outcome.sql",
   "0063_goal_success_criteria.sql",
   "0064_step_run_stall_rescues.sql",
+  "0065_step_run_awaiting_user.sql",
 ] as const;
 
 export function runMigrations(

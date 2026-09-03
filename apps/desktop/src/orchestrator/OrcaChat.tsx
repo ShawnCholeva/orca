@@ -524,6 +524,11 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   // timeout) and stashed the output awaiting a retry. The step is still `active`
   // but stalled on the human — never claim it is "working".
   const judgePending = workflowState.stepRun?.judgePending === true;
+  // The agent finished its turn and the orchestrator answered in chat rather than
+  // driving it onward: the step is `active` but the next move is the USER's. An
+  // idle agent is not a working one — this is the difference between "no activity
+  // yet" (worth a filler row) and "waiting on you" (never claim work).
+  const awaitingUser = workflowState.stepRun?.awaitingUser === true;
   // "Starting workflow" is a first-moment-of-the-run affordance, so gate it on the
   // run's FIRST step (ordinal 0). Every later step's start-latency uses the generic
   // "Working on {step}…" row instead — otherwise "Starting workflow" wrongly
@@ -747,6 +752,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     // claim otherwise.
     pendingAnyQuestionId == null &&
     !judgePending &&
+    !awaitingUser &&
     !sendingMessage &&
     !awaitingReply &&
     !runBlocked &&
@@ -1158,8 +1164,12 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                     <div className="mono msg-meta">orca</div>
                     {/* During the orchestrator's post-worker review the worker's
                         turn is over, so its activity must stop pulsing — otherwise
-                        two live indicators show at once. */}
-                    <AgentActivity activity={entry.activity} interrupted={runBlocked || showOrchestratorReview} />
+                        two live indicators show at once. That turn ENDED though,
+                        so it settles to a check; only a blocked run is halted. */}
+                    <AgentActivity
+                      activity={entry.activity}
+                      tail={runBlocked ? "halted" : showOrchestratorReview ? "settled" : "live"}
+                    />
                   </div>
                 </div>
               )
@@ -1240,7 +1250,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                 run is waiting on a human, not the agent, so never spin then. */}
             {(sendingMessage || awaitingReply) && !runBlocked && (
               <div data-testid="awaiting-reply">
-                <RoutingCard />
+                <ThinkingRow label="Thinking…" />
               </div>
             )}
 
@@ -1711,33 +1721,6 @@ function SystemCard(props: {
           <p className="msg-text">{props.body}</p>
           {props.meta && <p className="orca-chat-system-meta mono">{props.meta}</p>}
           {props.children}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RoutingCard() {
-  return (
-    <div className="msg msg--orca">
-      <OrcaMark />
-      <div className="agent-activity" data-testid="routing-card">
-        <div className="agent-activity-steps">
-          <div className="agent-activity-step">
-            <svg className="agent-activity-check" width="13" height="13" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M20 6L9 17l-5-5" />
-            </svg>
-            <span className="agent-activity-step-text is-done">Reading your message</span>
-          </div>
-          <div className="agent-activity-step">
-            <span className="thinking-dots agent-activity-pulse" aria-hidden>
-              <span style={{ animationDelay: "0s" }} />
-              <span style={{ animationDelay: "0.18s" }} />
-              <span style={{ animationDelay: "0.36s" }} />
-            </span>
-            <span className="agent-activity-step-text">Working out a response</span>
-          </div>
         </div>
       </div>
     </div>

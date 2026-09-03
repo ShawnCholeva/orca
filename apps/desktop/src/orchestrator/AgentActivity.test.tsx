@@ -63,8 +63,8 @@ describe("AgentActivity", () => {
     expect(screen.queryByTestId("agent-activity-active")).toBeNull();
   });
 
-  it("renders the active step as interrupted (no pulse) when interrupted is set, even on an active activity", () => {
-    render(<AgentActivity interrupted activity={baseActivity({
+  it("renders the active step as interrupted (no pulse) when the run halted, even on an active activity", () => {
+    render(<AgentActivity tail="halted" activity={baseActivity({
       status: "active",
       steps: [
         { id: "1", text: "Read App.tsx", category: "reading", status: "done", createdAt: "t" },
@@ -72,6 +72,29 @@ describe("AgentActivity", () => {
       ],
     })} />);
     expect(screen.getByTestId("agent-activity-interrupted").textContent).toContain("Working on the step...");
+    expect(screen.queryByTestId("agent-activity-active")).toBeNull();
+  });
+
+  // A settled tail is the orchestrator-review window: the worker's turn ENDED
+  // (that is what triggered the review), so its last tool call is finished. It
+  // must read as done, never as a pause — a pause claims the work was halted,
+  // and the daemon flips the very same step to a check moments later.
+  it("renders the active step as done (check), not paused, when the turn settled for review", () => {
+    render(<AgentActivity tail="settled" activity={baseActivity({
+      status: "active",
+      steps: [
+        { id: "1", text: "Read App.tsx", category: "reading", status: "done", createdAt: "t" },
+        { id: "2", text: "Ran the migration", category: "other", status: "active", createdAt: "t" },
+      ],
+    })} />);
+    const done = screen.getAllByTestId("agent-activity-done");
+    expect(done.map((row) => row.textContent)).toContain("Ran the migration");
+    expect(screen.queryByTestId("agent-activity-interrupted")).toBeNull();
+    expect(screen.queryByTestId("agent-activity-active")).toBeNull();
+  });
+
+  it("shows no live pulse on a settled step-less activity (review is not the worker working)", () => {
+    render(<AgentActivity tail="settled" activity={baseActivity({ status: "active", steps: [] })} />);
     expect(screen.queryByTestId("agent-activity-active")).toBeNull();
   });
 
