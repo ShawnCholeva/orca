@@ -96,17 +96,87 @@ describe("ShadowSessionManager spawn integration", () => {
     expect(newSession!.args.join(" ")).toContain(goalDir);
   });
 
-  it("startup answers the trust prompt with Enter", async () => {
+  // Verbatim pane from `claude` in a fresh shadow dir. The highlight (❯) sits on
+  // "No, exit" — a bare Enter here QUITS the agent.
+  const TRUST_PANE = [
+    " Quick safety check: Is this a project you created or one you trust? (Like your",
+    " own code, a well-known open source project, or work from your team).",
+    "",
+    " ❯ No, exit",
+    "   Yes, I trust this folder",
+    "",
+    " Enter to confirm · Esc to cancel",
+  ].join("\n");
+
+  // Same menu after the highlight has moved onto the affirmative row.
+  const TRUST_PANE_ON_YES = TRUST_PANE.replace(" ❯ No, exit", "   No, exit").replace(
+    "   Yes, I trust this folder",
+    " ❯ Yes, I trust this folder",
+  );
+
+  it("startup moves the highlight onto 'Yes, I trust' before pressing Enter", async () => {
     const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
-    // First capture-pane returns trust prompt; subsequent ones return ready state
-    const tmux = fakeTmux(["trust this folder", "❯ \n auto mode on"]);
+    const tmux = fakeTmux([TRUST_PANE, TRUST_PANE_ON_YES, "❯ \n auto mode on"]);
     const m = new ShadowSessionManager(deps(root, tmux));
     await m.spawn("G4");
-    // Wait for startup to complete (readyQuietMs=1)
-    await new Promise((r) => setTimeout(r, 20));
-    const sendKeys = tmux.calls.filter((c) => c.args[0] === "send-keys" && c.args.includes("Enter"));
-    // Should have sent Enter to answer the trust prompt
-    expect(sendKeys.length).toBeGreaterThanOrEqual(1);
+    await new Promise((r) => setTimeout(r, 40));
+
+    const keys = tmux.calls.filter((c) => c.args[0] === "send-keys");
+    const down = keys.findIndex((c) => c.args.includes("Down"));
+    const enter = keys.findIndex((c) => c.args.includes("Enter"));
+    // It must step onto the affirmative row FIRST — confirming the default
+    // selects "No, exit" and kills the shadow orchestrator.
+    expect(down).toBeGreaterThanOrEqual(0);
+    expect(enter).toBeGreaterThan(down);
+  });
+
+  it("never presses Enter while the highlight is still on the exit option", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    // The TUI has not attached its input handler yet, so the first Down presses
+    // are swallowed and the highlight stays put. This is the real failure mode:
+    // an Enter here quits the agent.
+    const tmux = fakeTmux([TRUST_PANE]);
+    const m = new ShadowSessionManager({ ...deps(root, tmux), startupTimeoutMs: 60 });
+    await m.spawn("G4d");
+    await new Promise((r) => setTimeout(r, 120));
+
+    const keys = tmux.calls.filter((c) => c.args[0] === "send-keys");
+    // It keeps retrying the move (self-correcting for the dropped keys)…
+    expect(keys.filter((c) => c.args.includes("Down")).length).toBeGreaterThan(1);
+    // …and never confirms, because the highlight never landed on "Yes".
+    expect(keys.filter((c) => c.args.includes("Enter"))).toHaveLength(0);
+  });
+
+  it("does not confirm the trust prompt before its options have painted", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    // The question text is on screen but the menu rows are not rendered yet.
+    // Guessing here is what kills the session, so it must keep polling instead.
+    const tmux = fakeTmux(["Is this a project you created or one you trust?"]);
+    const m = new ShadowSessionManager({ ...deps(root, tmux), startupTimeoutMs: 40 });
+    await m.spawn("G4b");
+    await new Promise((r) => setTimeout(r, 80));
+    expect(tmux.calls.filter((c) => c.args[0] === "send-keys")).toHaveLength(0);
+  });
+
+  it("fails fast with an accurate reason when the agent exits during startup", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    // A dead tmux session: capture-pane yields nothing and has-session is nonzero.
+    const tmux = {
+      calls: [] as Array<{ args: string[]; input?: string }>,
+      run: async (args: string[]) => {
+        if (args[0] === "capture-pane") return { stdout: "", stderr: "", code: 1 };
+        if (args[0] === "has-session") return { stdout: "", stderr: "", code: 1 };
+        return { stdout: "", stderr: "", code: 0 };
+      },
+    };
+    const m = new ShadowSessionManager({ ...deps(root, tmux), startupTimeoutMs: 5000 });
+    await m.spawn("G4c");
+    const started = Date.now();
+    await expect(
+      m.ask("G4c", { systemPrompt: "S", userPrompt: "q", timeoutMs: 1000 }),
+    ).rejects.toThrow(/exited during startup/i);
+    // Diagnosis must not cost the full startup budget.
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 
   it("startup trusts Codex project hooks with t before reporting ready", async () => {

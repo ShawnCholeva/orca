@@ -233,6 +233,37 @@ describe("ShadowSessionManager.ask (hook-resolved)", () => {
     ).rejects.toThrow(/startup timed out.*never reached a ready input prompt/i);
   });
 
+  it("evicts the session after a startup timeout so a retry respawns instead of failing forever", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    // The provider is slow to come up: the pane is not ready for the first
+    // attempt, then becomes ready before the retry.
+    let pane = "loading...\nplease wait";
+    const calls: Array<{ args: string[]; input?: string }> = [];
+    const tmux = {
+      calls,
+      run: async (args: string[], input?: string) => {
+        calls.push({ args, input });
+        if (args[0] === "capture-pane") return { stdout: pane, stderr: "", code: 0 };
+        return { stdout: "", stderr: "", code: 0 };
+      },
+    };
+    const m = new ShadowSessionManager({ ...deps(root, tmux), startupTimeoutMs: 20 });
+    await m.spawn("G1");
+    await expect(
+      m.ask("G1", { systemPrompt: "S", userPrompt: "q", timeoutMs: 1000 }),
+    ).rejects.toThrow(/startup timed out/i);
+    // A session whose `ready` rejected is poisoned: every later ask awaits the
+    // same rejection. It must not be left in the map.
+    expect(m.has("G1")).toBe(false);
+
+    pane = "❯ \n auto mode on";
+    const retry = m.ask("G1", { systemPrompt: "S", userPrompt: "q", timeoutMs: 1000 });
+    while (!m.has("G1")) await Promise.resolve();
+    await waitReady();
+    m.resolvePending("G1", { text: '```orca:action\n{"kind":"answer_user_directly","body":"hi"}\n```' });
+    expect((await retry).text).toBe('{"kind":"answer_user_directly","body":"hi"}');
+  });
+
   it("ask auto-spawns when no session exists yet", async () => {
     const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
     const tmux = fakeTmux();

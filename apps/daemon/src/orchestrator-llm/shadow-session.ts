@@ -11,6 +11,8 @@ import {
   capturePane,
   paste,
   sendEnter,
+  sendKey,
+  hasSession,
   killSession,
 } from "../tmux/runner.js";
 
@@ -71,6 +73,33 @@ const HOOK_TRUST_PROMPT = /hook needs review|hooks need review|press t to trust|
 const BLOCKING_INTERSTITIAL = /update available|press enter to continue|\b\d+\.\s*(update now|skip)\b/i;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * How far to move the trust prompt's highlight (`❯`) to land on the affirmative
+ * row, or null when the menu has not painted yet.
+ *
+ * The affirmative row is NOT reliably first. Current Claude Code renders
+ *
+ *     ❯ No, exit
+ *       Yes, I trust this folder
+ *
+ * defaulting the highlight to the safe choice for a human — so confirming the
+ * default QUITS the agent. The session then dies and startup polls a dead pane
+ * for the whole timeout, reporting "never reached a ready input prompt" when the
+ * truth is "we told it to exit". Never guess the row: returning null keeps the
+ * caller polling, because a wrong guess kills the session.
+ */
+export function trustPromptMoves(pane: string): number | null {
+  const options = pane
+    .split("\n")
+    .filter((line) => /^\s*(❯\s*)?(\d+[.)]\s*)?(yes|no)\b/i.test(line));
+  const selected = options.findIndex((line) => /^\s*❯/.test(line));
+  const affirmative = options.findIndex(
+    (line) => /\byes\b/i.test(line) && /\btrust\b/i.test(line)
+  );
+  if (selected < 0 || affirmative < 0) return null;
+  return affirmative - selected;
+}
+
 // Cold-starting an interactive Claude Code session (trust prompt -> hook trust ->
 // ready input box) routinely needs well over 20s, especially a SECOND concurrent
 // session (e.g. the refute's `${goalId}::refute`) on a busy machine. A too-tight
@@ -120,11 +149,18 @@ export class ShadowSessionManager {
     const started = await newSession(this.tmux, name, dir, command);
     dbg(goalId, `tmux new-session code=${started.code} adapter=${adapterId} name=${name} command=${command} dir=${dir}`);
     const ready = this.startup(goalId, name, provider);
-    // Prevent an unhandled-rejection warning when nobody is awaiting `ready` yet
-    // (askOnce still observes the rejection via `await pre.ready`).
-    ready.catch(() => undefined);
     const session: Session = { adapterId, provider, name, ready, queue: Promise.resolve(), pending: null, systemSent: false };
     this.sessions.set(goalId, session);
+    // A session whose startup rejected is poisoned: `askOnce` awaits the same
+    // settled `ready` every time, so the goal would fail with the identical
+    // error forever and the "send any message to retry" advice would be a lie.
+    // Evict it (and its pane) so the next ask respawns. Doubles as the
+    // unhandled-rejection guard for when nobody is awaiting `ready` yet.
+    ready.catch(() => {
+      if (this.sessions.get(goalId) !== session) return;
+      this.sessions.delete(goalId);
+      void killSession(this.tmux, name).catch(() => undefined);
+    });
     return shadowSessionId(goalId);
   }
 
@@ -134,13 +170,40 @@ export class ShadowSessionManager {
     const poll = this.deps.pollMs ?? 300;
     const timeoutMs = resolveStartupTimeoutMs(this.deps.startupTimeoutMs);
     const deadline = Date.now() + timeoutMs;
-    let trustAnswered = false;
     let hookTrustAnswered = false;
     while (Date.now() < deadline) {
       const pane = await capturePane(this.tmux, name);
-      if (!trustAnswered && pattern.test(pane)) {
-        await sendEnter(this.tmux, name); // default highlight = "1. Yes, I trust"
-        trustAnswered = true;
+      // An empty pane is either a TUI that has not painted yet or a session that
+      // has already exited. Only the second is fatal, so confirm before failing —
+      // but fail immediately when it is, instead of polling a dead pane for the
+      // whole budget and then blaming a "ready prompt" that was never coming.
+      if (pane.trim() === "" && !(await hasSession(this.tmux, name))) {
+        dbg(goalId, "session exited during startup");
+        throw new Error(
+          `shadow orchestrator for goal ${goalId} exited during startup: ${provider.displayName} quit before reaching a ready input prompt`,
+        );
+      }
+      if (pattern.test(pane)) {
+        const moves = trustPromptMoves(pane);
+        // Options not painted yet — keep polling rather than confirming blind.
+        if (moves === null) {
+          await sleep(poll);
+          continue;
+        }
+        // Move ONE row per poll and re-read, instead of firing the whole
+        // sequence at once. Keys sent before the TUI attaches its input handler
+        // are silently swallowed, and an open-loop burst then leaves the
+        // highlight parked on "No, exit" while we press Enter on it — which
+        // quits the agent. Re-reading makes a dropped key self-correct: the
+        // highlight simply hasn't moved, so the next poll sends it again.
+        if (moves !== 0) {
+          await sendKey(this.tmux, name, moves > 0 ? "Down" : "Up");
+          await sleep(poll);
+          continue;
+        }
+        // Confirm only once the pane shows the highlight ON the affirmative row.
+        await sendEnter(this.tmux, name);
+        dbg(goalId, "trust confirmed on the affirmative row");
         await sleep(this.deps.readyQuietMs ?? 1500);
         continue;
       }
