@@ -5,16 +5,23 @@ import { tmuxSessionName } from "../orchestrator-llm/shadow-session.js";
 const WORKER_PREFIX = "orca-worker-";
 const SHADOW_PREFIX = "orca-shadow-";
 
-// The still-running worker sessions of a run. Used to tear down leaked workers
+// The still-live worker sessions of a run. Used to tear down leaked workers
 // when a run reaches a terminal state WITHOUT completing (cancel/fail/block
 // mid-step): the run-terminal cleanup otherwise only kills the shadow.
+//
+// Same terminal-denylist as the keep-set below, and for the same reason — the
+// old `IN ('running','starting')` could not see a worker still at `created`.
+// One dead status value produced both halves of the defect: the boot sweep
+// killed live workers it should have kept, and this teardown missed leaked
+// workers it should have killed.
 export function workerSessionIdsForRun(db: Database.Database, runId: string): string[] {
   return (
     db
       .prepare(
         `SELECT s.id AS id FROM sessions s
          JOIN workflow_step_runs wsr ON wsr.id = s.workflow_step_run_id
-         WHERE wsr.workflow_run_id = ? AND s.status IN ('running', 'starting')`
+         WHERE wsr.workflow_run_id = ?
+           AND s.status NOT IN ('exited', 'failed', 'stopped', 'archived')`
       )
       .all(runId) as Array<{ id: string }>
   ).map((r) => r.id);
@@ -29,6 +36,21 @@ export function workerSessionIdsForRun(db: Database.Database, runId: string): st
 // is terminal, and orphaned shadows self-heal on the next spawn (same-named
 // kill-and-recreate) — so it only leaks. MUST run AFTER resumeActiveRuns has
 // reattached, so a wanted worker is never killed out from under a reattach.
+//
+// The worker keep-set excludes TERMINAL statuses rather than listing live ones.
+// It used to allow-list `('running','starting')`, which silently omitted
+// `created` — the status every session is INSERTed with (sessions/usecases.ts)
+// and holds for the whole of spawn(), since markRunning fires only after the
+// config-dir writes, newSession, pipePaneToFile and startTail. A boot reap
+// landing in that window killed a live, just-spawned worker mid-turn, leaving
+// no exit code or signal; the liveness watchdog then reported it as
+// `worker_exited_no_signal` and three of those blocked the run.
+// `starting` compounded it by reading like a deliberate guard for exactly that
+// window while never being written by any code path. A denylist is correct by
+// construction: a new pre-running status can leak a pane, but can never again
+// get a live agent killed — the asymmetry this sweep should have had from the
+// start, given that being wrong in one direction only wastes a tmux session and
+// being wrong in the other destroys work.
 export async function reapOrphanTmuxSessions(r: TmuxRunner, db: Database.Database): Promise<string[]> {
   const ours = (await listSessions(r)).filter(
     (n) => n.startsWith(WORKER_PREFIX) || n.startsWith(SHADOW_PREFIX)
@@ -42,7 +64,8 @@ export async function reapOrphanTmuxSessions(r: TmuxRunner, db: Database.Databas
           `SELECT s.id AS id FROM sessions s
            JOIN workflow_step_runs wsr ON wsr.id = s.workflow_step_run_id
            JOIN workflow_runs wr ON wr.id = wsr.workflow_run_id
-           WHERE wr.status = 'active' AND s.status IN ('running', 'starting')`
+           WHERE wr.status = 'active'
+             AND s.status NOT IN ('exited', 'failed', 'stopped', 'archived')`
         )
         .all() as Array<{ id: string }>
     ).map((row) => `${WORKER_PREFIX}${row.id}`)

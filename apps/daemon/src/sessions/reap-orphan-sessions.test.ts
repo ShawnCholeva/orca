@@ -140,6 +140,55 @@ describe("reapOrphanTmuxSessions", () => {
   });
 });
 
+describe("reapOrphanTmuxSessions — freshly-spawned workers", () => {
+  it("keeps a worker still at 'created', the status it holds for the whole of spawn()", async () => {
+    // The live defect: sessions INSERT as 'created' and only reach 'running'
+    // after markRunning, which spawn() calls AFTER newSession/pipePane/startTail.
+    // The old allow-list ('running','starting') therefore reaped a healthy
+    // worker mid-turn if a boot reap landed inside that window — the worker died
+    // with no exit code or signal and the run blocked as worker_exited_no_signal.
+    const db = freshDb();
+    seedTemplate(db, "tpl");
+    seedGoal(db, "g1");
+    seedRun(db, "run1", "g1", "active");
+    seedStepRun(db, "sr1", "run1", "g1");
+    seedSession(db, "sess-created", "g1", "created", "sr1");
+
+    const killed: string[] = [];
+    const tmux: TmuxRunner = {
+      run: async (args) => {
+        if (args[0] === "list-sessions") return { stdout: "orca-worker-sess-created\n", stderr: "", code: 0 };
+        if (args[0] === "kill-session") killed.push(args[2]);
+        return { stdout: "", stderr: "", code: 0 };
+      },
+    };
+
+    expect(await reapOrphanTmuxSessions(tmux, db)).toEqual([]);
+    expect(killed).toEqual([]);
+  });
+
+  it("still reaps a worker whose session reached a terminal status", async () => {
+    const db = freshDb();
+    seedTemplate(db, "tpl");
+    seedGoal(db, "g1");
+    seedRun(db, "run1", "g1", "active");
+    seedStepRun(db, "sr1", "run1", "g1");
+    seedSession(db, "sess-failed", "g1", "failed", "sr1");
+
+    const killed: string[] = [];
+    const tmux: TmuxRunner = {
+      run: async (args) => {
+        if (args[0] === "list-sessions") return { stdout: "orca-worker-sess-failed\n", stderr: "", code: 0 };
+        if (args[0] === "kill-session") killed.push(args[2]);
+        return { stdout: "", stderr: "", code: 0 };
+      },
+    };
+
+    expect(await reapOrphanTmuxSessions(tmux, db)).toEqual(["orca-worker-sess-failed"]);
+    expect(killed).toEqual(["orca-worker-sess-failed"]);
+  });
+});
+
 describe("workerSessionIdsForRun", () => {
   it("returns only the run's still-running worker sessions", async () => {
     const db = freshDb();
@@ -153,5 +202,20 @@ describe("workerSessionIdsForRun", () => {
     seedSession(db, "sess-nostep", "g1", "running", null); // not a step session → excluded
 
     expect(workerSessionIdsForRun(db, "run1").sort()).toEqual(["sess-running", "sess-starting"]);
+  });
+
+  it("includes a worker still at 'created' so a blocked run's leaked pane is torn down", async () => {
+    // Twin of the keep-set defect, opposite direction: this teardown could not
+    // see a worker mid-spawn, so a run that blocked while one was starting left
+    // its tmux pane running forever.
+    const db = freshDb();
+    seedTemplate(db, "tpl");
+    seedGoal(db, "g1");
+    seedRun(db, "run1", "g1", "blocked");
+    seedStepRun(db, "sr1", "run1", "g1");
+    seedSession(db, "sess-created", "g1", "created", "sr1");
+    seedSession(db, "sess-exited", "g1", "exited", "sr1");
+
+    expect(workerSessionIdsForRun(db, "run1")).toEqual(["sess-created"]);
   });
 });
