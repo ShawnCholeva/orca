@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
-import { RunDetailPanel, headline } from "./RunLedger";
+import { RunDetailPanel, RunRow, headline } from "./RunLedger";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -51,6 +51,33 @@ function detail(over: Partial<RunDetail> = {}): RunDetail {
   return { run: summary(), spans: [span()], interventions: [park()], ...over };
 }
 
+describe("cost", () => {
+  it("renders the typed absence INSTEAD of a figure when nothing reported a cost", () => {
+    // "Unmetered reads as free" is the bug the whole cost vocabulary exists to
+    // prevent. A typed label beneath a confident $0.00 does not prevent it — the
+    // reader takes the number and skips the caption.
+    render(<RunRow onOpen={() => {}} run={summary({
+      cost: { usd: 0, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
+              coverage: { reported: 0, total: 0 }, rollupCheck: "not_applicable" },
+    })} />);
+    expect(document.body.textContent).not.toContain("$0.00");
+    expect(document.body.textContent).toContain("isn't being recorded yet");
+  });
+
+  it("states coverage as a count, never as an interval over a census", () => {
+    // Coverage enumerates THIS run's own nodes. There is no larger population it
+    // samples, so "3 of 3" is a fact, exact at n=1 — hedging it with a confidence
+    // interval is the facts-vs-estimates inversion in the other direction.
+    render(<RunRow onOpen={() => {}} run={summary({
+      cost: { usd: 5, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
+              coverage: { reported: 3, total: 3 }, rollupCheck: "matches" },
+    })} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("3 of 3 nodes reported a cost");
+    expect(text).not.toMatch(/between \d+% and \d+%/);
+  });
+});
+
 describe("headline", () => {
   it("leads with contamination when runs were killed by the substrate", () => {
     const runs = [
@@ -59,8 +86,12 @@ describe("headline", () => {
       summary({ runId: "c", terminationCause: "completed" }),
     ];
     const h = headline(runs);
-    expect(h).toContain("2 of your 3 runs were killed by the daemon");
+    // States the OBSERVED outcome; the mechanism is marked as a diagnosis rather
+    // than asserted for runs nobody attributed individually.
+    expect(h).toContain("2 of your 3 runs ended the same way");
     expect(h).toContain("crashed 3 times (worker_exited_no_signal)");
+    expect(h).toContain("root-caused");
+    expect(h).not.toContain("were killed by the daemon");
     // The whole point: it says how much workflow evidence is actually left.
     expect(h).toContain("1 run");
   });
@@ -70,7 +101,9 @@ describe("headline", () => {
       summary({ runId: "a", terminationCause: "infrastructure_killed", terminationEvidence: "crashed 3 times" }),
       summary({ runId: "b", terminationCause: "infrastructure_killed", terminationEvidence: "no progress after 3 restarts" }),
     ];
-    expect(headline(runs)).not.toContain("the same way");
+    const h = headline(runs);
+    expect(h).not.toContain("the same way");
+    expect(h).toContain("stopped without finishing");
   });
 
   it("reports the waiting share when nothing was killed", () => {
@@ -102,19 +135,27 @@ describe("RunDetailPanel", () => {
     expect(screen.getAllByText("waiting on you").length).toBeGreaterThan(0);
   });
 
-  it("renders a gate with no interior as an absence, not a zero-width bar", () => {
-    // A worker gate spawns a real agent and emits no transitions at all. A
-    // zero-width bar would read as "instant" — an assertion about a duration
-    // that was never measured.
+  it("renders a gate's known duration as entirely unaccounted, not as an unsummable split", () => {
+    // A gate has a step_run bracket (so elapsed is known) but emits no
+    // step_complete (so nothing was observed). That is 100% unaccounted — we know
+    // it took 100s and watched none of it — not three nulls that fail to sum.
     render(<RunDetailPanel detail={detail({
-      spans: [span({ kind: "gate", name: "Critique", elapsedMs: null, workingMs: null, cost: null, tier: null, verifiers: null })],
+      spans: [span({ kind: "gate", name: "Critique", elapsedMs: 100_000, workingMs: null, cost: null, tier: null, verifiers: null })],
     })} onBack={() => {}} />);
-    expect(document.body.textContent).toContain("measured and then thrown away");
-    expect(document.body.textContent).toContain("emit step_launch/step_complete on its surrogate");
-    // The shared bar renders an explicit absent material rather than a zero-width
-    // segment, which would read as "instant" — a duration nobody took.
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("none of it observed");
+    expect(text).toContain("emit step_launch/step_complete on its surrogate");
+    // The guard that catches an unsummable split must NOT fire here.
+    expect(document.querySelectorAll('[data-seg="mismatch"]')).toHaveLength(0);
+  });
+
+  it("renders a span with no recorded bracket as an absence, not a zero-width bar", () => {
+    render(<RunDetailPanel detail={detail({
+      spans: [span({ elapsedMs: null, workingMs: null, cost: null, tier: null, verifiers: null })],
+    })} onBack={() => {}} />);
+    // An explicit absent material: a zero-width segment would read as "instant",
+    // a duration nobody took.
     expect(document.querySelectorAll('[data-seg="absent"]').length).toBeGreaterThan(0);
-    // Exactly one working segment: the run header's. The gate span contributes none.
     expect(document.querySelectorAll('[data-seg="working"]')).toHaveLength(1);
   });
 
@@ -141,7 +182,7 @@ describe("RunDetailPanel", () => {
   it("never dims anything", () => {
     // Binding rule: an unmeasured value is a different object, not a faint one.
     const { container } = render(<RunDetailPanel detail={detail({
-      spans: [span(), span({ kind: "gate", elapsedMs: null, workingMs: null, cost: null, tier: null, verifiers: null })],
+      spans: [span(), span({ workflowStepRunId: "sr2", kind: "gate", elapsedMs: null, workingMs: null, cost: null, tier: null, verifiers: null })],
     })} onBack={() => {}} />);
     expect(container.innerHTML).not.toMatch(/opacity/i);
   });

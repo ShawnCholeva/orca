@@ -18,20 +18,33 @@ function stepNamesForRun(db: Database.Database, runId: string, templateId: strin
     .prepare("SELECT template_snapshot_json FROM workflow_runs WHERE id = ?")
     .get(runId) as { template_snapshot_json: string | null } | undefined;
   const live = db
-    .prepare("SELECT steps_json FROM workflow_templates WHERE id = ?")
-    .get(templateId) as { steps_json: string } | undefined;
+    .prepare("SELECT steps_json, graph_json FROM workflow_templates WHERE id = ?")
+    .get(templateId) as { steps_json: string; graph_json: string | null } | undefined;
 
-  for (const raw of [row?.template_snapshot_json, live?.steps_json]) {
+  for (const raw of [row?.template_snapshot_json, live?.steps_json, live?.graph_json]) {
     if (!raw) continue;
     try {
       const parsed = JSON.parse(raw) as unknown;
       const steps = Array.isArray(parsed)
         ? parsed
         : (parsed as { steps?: unknown }).steps;
-      if (!Array.isArray(steps)) continue;
-      for (const s of steps as Array<{ id?: unknown; name?: unknown }>) {
-        if (typeof s.id === "string" && typeof s.name === "string" && !out.has(s.id)) {
-          out.set(s.id, s.name);
+      if (Array.isArray(steps)) {
+        for (const s of steps as Array<{ id?: unknown; name?: unknown }>) {
+          if (typeof s.id === "string" && typeof s.name === "string" && !out.has(s.id)) {
+            out.set(s.id, s.name);
+          }
+        }
+      }
+      // Gate spans are keyed by the surrogate id `__gate__:<nodeId>`, so their
+      // display name lives on the graph node rather than in `steps`. Without this a
+      // gate renders as its raw surrogate id.
+      const nodes = (parsed as { nodes?: unknown; graph?: { nodes?: unknown } }).nodes
+        ?? (parsed as { graph?: { nodes?: unknown } }).graph?.nodes;
+      if (Array.isArray(nodes)) {
+        for (const n of nodes as Array<{ id?: unknown; name?: unknown; type?: unknown }>) {
+          if (n.type !== "gate" || typeof n.id !== "string") continue;
+          const key = `__gate__:${n.id}`;
+          if (!out.has(key)) out.set(key, typeof n.name === "string" ? n.name : n.id);
         }
       }
     } catch {

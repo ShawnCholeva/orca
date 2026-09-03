@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
 import { getRunDetail, getRunSummaries } from "../api";
-import { MeasurementLabel, RateInterval } from "./n-gate-ui";
+import { MeasurementLabel } from "./n-gate-ui";
 import { IntervalBar, formatDuration } from "./interval-bar";
 
 // A LEDGER, not a dashboard. Every run shown in full, newest first — no averages,
@@ -31,7 +31,7 @@ const TERMINATION_SENTENCE: Record<RunSummary["terminationCause"], string> = {
   running: "still running",
   completed: "finished",
   workflow_failed: "the workflow stopped it",
-  infrastructure_killed: "the daemon killed the worker — not a workflow failure",
+  infrastructure_killed: "stopped by the substrate, not the workflow",
   unknown: "stopped, with nothing recorded about why",
 };
 
@@ -55,11 +55,15 @@ export function headline(runs: RunSummary[]): string {
   const finished = runs.filter((r) => r.terminationCause === "completed");
   if (infra.length > 0) {
     const reasons = new Set(infra.map((r) => r.terminationEvidence).filter((e): e is string => e != null));
-    const same = reasons.size === 1 ? ` All ${infra.length} stopped the same way — ${[...reasons][0]}.` : "";
-    return (
-      `${infra.length} of your ${runs.length} runs were killed by the daemon, not by the workflow.${same}` +
-      ` That leaves ${finished.length} run${finished.length === 1 ? "" : "s"} that can tell you anything about the workflow itself.`
-    );
+    const observed =
+      reasons.size === 1
+        ? `${infra.length} of your ${runs.length} runs ended the same way — ${[...reasons][0]}.`
+        : `${infra.length} of your ${runs.length} runs stopped without finishing, for reasons in the substrate rather than the workflow.`;
+    const left = `That leaves ${finished.length} run${finished.length === 1 ? "" : "s"} that can tell you anything about the workflow itself.`;
+    // The mechanism is a diagnosis, not an observation — say which it is. Runs that
+    // share an outcome need not share a cause, and attributing all of them to one
+    // bug claims more than the session history supports.
+    return `${observed} We've root-caused that to a daemon bug; it isn't your workflow failing. ${left}`;
   }
   const parked = runs.reduce((a, r) => a + r.durations.parkedMs, 0);
   const elapsed = runs.reduce((a, r) => a + r.durations.elapsedMs, 0);
@@ -90,6 +94,18 @@ function DurationTerms({ d }: { d: RunSummary["durations"] }) {
 
 function CostCell({ cost }: { cost: RunSummary["cost"] }) {
   const { reported, total } = cost.coverage;
+  // Absence is never zero. With nothing reported there is no total to render —
+  // showing $0.00 with an explanation beneath it is still showing $0.00.
+  if (reported === 0) {
+    return (
+      <div style={{ display: "grid", gap: 4 }}>
+        <MeasurementLabel
+          state="uninstrumented"
+          fix={total === 0 ? "Wire cost capture for this provider." : "No node on this run reported a cost."}
+        />
+      </div>
+    );
+  }
   return (
     <div style={{ display: "grid", gap: 4 }}>
       <span className="mono" style={{ fontSize: 13, fontWeight: 600 }}>{usd(cost.usd)}</span>
@@ -103,11 +119,9 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
           {usd(cost.supersededUsd)} on work that was replaced
         </span>
       )}
-      {total === 0 ? (
-        <MeasurementLabel state="uninstrumented" fix="Wire cost capture for this provider." />
-      ) : (
-        <RateInterval pos={reported} neg={total - reported} label="nodes reported a cost" />
-      )}
+      <span style={{ fontSize: 12, color: reported === total ? "var(--text-2)" : "var(--warn)" }} className="mono">
+        {reported} of {total} nodes reported a cost
+      </span>
       {cost.rollupCheck === "not_applicable" && (
         <MeasurementLabel
           state="unmeasurable_structural"
@@ -125,7 +139,7 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
 
 // ── the launcher ─────────────────────────────────────────────────────────────
 
-function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) => void }) {
+export function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) => void }) {
   return (
     <button
       type="button"
@@ -191,7 +205,6 @@ const PARK_SENTENCE: Record<Intervention["parkState"], string> = {
 };
 
 function SpanRow({ span }: { span: RunTraceSpan }) {
-  const noInterior = span.elapsedMs === null || span.elapsedMs === 0;
   return (
     <div
       style={{
@@ -211,19 +224,15 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
       </div>
 
       <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
-        {/* The bar renders its own absent material when the interior was never
-            measured; the label beside it names the one change that would fix it. */}
+        {/* Parked is deliberately absent here: a park between two spans belongs
+            to neither, so the parks section below owns them. */}
         <IntervalBar
           elapsedMs={span.elapsedMs}
-          workingMs={span.workingMs}
-          parkedMs={noInterior ? null : 0}
-          unaccountedMs={
-            span.elapsedMs == null || span.workingMs == null
-              ? null
-              : Math.max(0, span.elapsedMs - span.workingMs)
-          }
+          workingMs={span.elapsedMs == null ? null : span.workingMs ?? 0}
+          parkedMs={span.elapsedMs == null ? null : 0}
+          unaccountedMs={span.elapsedMs == null ? null : Math.max(0, span.elapsedMs - (span.workingMs ?? 0))}
         />
-        {noInterior ? (
+        {span.elapsedMs == null ? (
           <MeasurementLabel
             state="uninstrumented"
             lossy={span.kind === "gate"}
@@ -235,11 +244,18 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
           />
         ) : (
           <span className="mono" style={{ fontSize: 11.5, color: "var(--text-2)" }}>
-            {dur(span.elapsedMs!)}
-            {span.workingMs === null
-              ? " · nothing reported how much of this was model time"
-              : ` · ${dur(span.workingMs)} observed, ${dur(Math.max(0, span.elapsedMs! - span.workingMs))} unaccounted`}
+            {dur(span.elapsedMs)}
+            {span.workingMs == null
+              ? " · none of it observed"
+              : ` · ${dur(span.workingMs)} observed, ${dur(Math.max(0, span.elapsedMs - span.workingMs))} unaccounted`}
           </span>
+        )}
+        {span.kind === "gate" && span.workingMs == null && (
+          <MeasurementLabel
+            state="uninstrumented"
+            lossy
+            fix="This gate spawned a real agent; emit step_launch/step_complete on its surrogate."
+          />
         )}
         {span.blockedReason && (
           <span style={{ fontSize: 11.5, color: "var(--err)" }}>{span.blockedReason}</span>
