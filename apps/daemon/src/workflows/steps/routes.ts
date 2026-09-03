@@ -20,6 +20,7 @@ import { listArtifactsForRun } from "../artifacts/projection.js";
 import { getDecisionById } from "../decisions/usecases.js";
 import { getWorkflowStepRunById, listStepRunsForRun } from "./projection.js";
 import { injectAnswerToSession } from "../orchestrator/agent-interview.js";
+import { LIVE_SESSION } from "../../sessions/live-session.js";
 
 export interface WorkflowStepRouteDeps {
   db: Database.Database;
@@ -232,7 +233,7 @@ export function registerWorkflowStepRoutes(
     if (answerText !== undefined && deps.sessionRuntime) {
       const linked = deps.db
         .prepare(
-          "SELECT id FROM sessions WHERE workflow_step_run_id = ? AND status IN ('running','starting') ORDER BY started_at DESC LIMIT 1"
+          "SELECT id FROM sessions WHERE workflow_step_run_id = ? AND " + LIVE_SESSION + " ORDER BY created_at DESC LIMIT 1"
         )
         .get(stepRun.id) as { id: string } | undefined;
       if (linked) {

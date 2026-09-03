@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { killSession, listSessions, type TmuxRunner } from "../tmux/runner.js";
+import { liveSessionSql } from "./live-session.js";
 import { tmuxSessionName } from "../orchestrator-llm/shadow-session.js";
 
 const WORKER_PREFIX = "orca-worker-";
@@ -21,7 +22,7 @@ export function workerSessionIdsForRun(db: Database.Database, runId: string): st
         `SELECT s.id AS id FROM sessions s
          JOIN workflow_step_runs wsr ON wsr.id = s.workflow_step_run_id
          WHERE wsr.workflow_run_id = ?
-           AND s.status NOT IN ('exited', 'failed', 'stopped', 'archived')`
+           AND ${liveSessionSql("s.status")}`
       )
       .all(runId) as Array<{ id: string }>
   ).map((r) => r.id);
@@ -65,7 +66,7 @@ export async function reapOrphanTmuxSessions(r: TmuxRunner, db: Database.Databas
            JOIN workflow_step_runs wsr ON wsr.id = s.workflow_step_run_id
            JOIN workflow_runs wr ON wr.id = wsr.workflow_run_id
            WHERE wr.status = 'active'
-             AND s.status NOT IN ('exited', 'failed', 'stopped', 'archived')`
+             AND ${liveSessionSql("s.status")}`
         )
         .all() as Array<{ id: string }>
     ).map((row) => `${WORKER_PREFIX}${row.id}`)
