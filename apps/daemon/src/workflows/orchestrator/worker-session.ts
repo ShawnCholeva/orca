@@ -4,6 +4,7 @@ import {
   defaultTmuxRunner, newSession, capturePane, sendEnter, sendKey, paste, pipePaneToFile, killSession, hasSession,
   type TmuxRunner,
 } from "../../tmux/runner.js";
+import { trustPromptMoves } from "../../tmux/trust-prompt.js";
 
 const TRUST_DEFAULT = /trust this folder|Is this a project you created or one you trust|do you trust/i;
 const READY_DEFAULT = /(auto mode on|\? for shortcuts|\n\s*❯)/i;
@@ -177,16 +178,37 @@ export class WorkerSessionManager {
     const readyRe = this.deps.readyPattern ?? READY_DEFAULT;
     const poll = this.deps.pollMs ?? 300;
     const deadline = Date.now() + (this.deps.startupTimeoutMs ?? 20_000);
-    let trustAnswered = false;
     while (Date.now() < deadline) {
       const pane = await capturePane(this.tmux, name);
-      if (!trustAnswered && trustRe.test(pane)) {
+      if (trustRe.test(pane)) {
+        const moves = trustPromptMoves(pane);
+        // Options not painted yet — keep polling rather than confirming blind.
+        // A blind Enter lands on whatever row is highlighted, and Claude Code
+        // defaults that to "No, exit", which QUITS the worker ~2s into its life.
+        if (moves === null) {
+          await sleep(poll);
+          continue;
+        }
+        // Move ONE row per poll and re-read. Keys sent before the TUI attaches
+        // its input handler are silently swallowed, so an open-loop burst can
+        // leave the highlight parked on "No, exit" while we press Enter on it.
+        // Re-reading self-corrects: an unmoved highlight just gets sent again.
+        if (moves !== 0) {
+          await sendKey(this.tmux, name, moves > 0 ? "Down" : "Up");
+          await sleep(poll);
+          continue;
+        }
+        // Confirm only once the pane shows the highlight ON the affirmative row,
+        // then keep polling for the ready prompt rather than assuming it arrived.
         await sendEnter(this.tmux, name);
-        trustAnswered = true;
         await sleep(this.deps.readyQuietMs ?? 1500);
-        return;
+        continue;
       }
-      if (!trustRe.test(pane) && (readyRe.test(pane) || CODEX_PROMPT_IDLE.test(pane))) { await sleep(this.deps.readyQuietMs ?? 1500); return; }
+      // Reached only when the trust prompt is absent, which matters: READY_DEFAULT's
+      // `\n\s*❯` branch also matches the trust menu's own highlighted row, so ready
+      // and trust are indistinguishable to that pattern alone. The trust branch
+      // above `continue`s, so this check never sees a pane bearing the menu.
+      if (readyRe.test(pane) || CODEX_PROMPT_IDLE.test(pane)) { await sleep(this.deps.readyQuietMs ?? 1500); return; }
       await sleep(poll);
     }
   }

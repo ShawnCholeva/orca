@@ -768,3 +768,61 @@ describe("WorkerSessionManager.terminate", () => {
     ]);
   });
 });
+
+describe("WorkerSessionManager startup — trust prompt", () => {
+  // Claude Code renders the affirmative row SECOND and highlights "No, exit".
+  // A blind Enter therefore selects exit and quits the worker ~2s in; the run
+  // then blocks as `worker_exited_no_signal` after three identical retries.
+  const TRUST_NO_SELECTED = ["Do you trust the files in this folder?", "❯ No, exit", "  Yes, I trust this folder"].join("\n");
+  const TRUST_YES_SELECTED = ["Do you trust the files in this folder?", "  No, exit", "❯ Yes, I trust this folder"].join("\n");
+  const READY = "auto mode on";
+
+  function mgrWith(panes: string[]) {
+    const tmux = fakeTmux(panes);
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")), authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 200, pollMs: 1, readyQuietMs: 0, resolveProvider,
+    });
+    return { tmux, mgr };
+  }
+  const keys = (tmux: { calls: string[][] }) =>
+    tmux.calls.filter((c) => c[0] === "send-keys").map((c) => c[c.length - 1]);
+  async function waitFor(fn: () => boolean, ms = 1000) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      if (fn()) return;
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    throw new Error("condition never met");
+  }
+
+  it("moves the highlight onto the affirmative row and never confirms on 'No, exit'", async () => {
+    const { tmux, mgr } = mgrWith([TRUST_NO_SELECTED, TRUST_YES_SELECTED, READY]);
+    await mgr.spawn({ sessionId: "s1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await waitFor(() => keys(tmux).includes("Enter"));
+    const sent = keys(tmux);
+    // The FIRST key must be the move, not the confirm — confirming first is the bug.
+    expect(sent[0]).toBe("Down");
+    expect(sent.indexOf("Down")).toBeLessThan(sent.indexOf("Enter"));
+  });
+
+  it("keeps polling instead of confirming blind while the menu has not painted its options", async () => {
+    // Trust TEXT is on screen but no yes/no rows yet: the highlight position is
+    // unknowable, and a guess costs the session.
+    const { tmux, mgr } = mgrWith(["Do you trust the files in this folder?"]);
+    await mgr.spawn({ sessionId: "s2", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await waitFor(() => tmux.calls.filter((c) => c[0] === "capture-pane").length >= 3);
+    expect(keys(tmux)).toHaveLength(0);
+  });
+
+  it("does not mistake the trust menu's own '❯' row for the ready prompt", async () => {
+    // READY_DEFAULT's `\n\s*❯` branch matches "❯ No, exit". If ready were checked
+    // first, startup would return with the menu still open and deliver() would
+    // paste the step prompt into a modal dialog.
+    const { tmux, mgr } = mgrWith([TRUST_NO_SELECTED, TRUST_YES_SELECTED, READY]);
+    await mgr.spawn({ sessionId: "s3", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await waitFor(() => keys(tmux).includes("Enter"));
+    expect(keys(tmux).filter((k) => k === "Enter")).toHaveLength(1);
+  });
+});

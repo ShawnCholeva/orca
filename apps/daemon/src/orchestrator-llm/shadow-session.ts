@@ -15,6 +15,7 @@ import {
   hasSession,
   killSession,
 } from "../tmux/runner.js";
+import { trustPromptMoves } from "../tmux/trust-prompt.js";
 
 export type { ShadowAdapterId } from "./providers/types.js";
 import type { ShadowAdapterId } from "./providers/types.js";
@@ -73,32 +74,6 @@ const HOOK_TRUST_PROMPT = /hook needs review|hooks need review|press t to trust|
 const BLOCKING_INTERSTITIAL = /update available|press enter to continue|\b\d+\.\s*(update now|skip)\b/i;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * How far to move the trust prompt's highlight (`❯`) to land on the affirmative
- * row, or null when the menu has not painted yet.
- *
- * The affirmative row is NOT reliably first. Current Claude Code renders
- *
- *     ❯ No, exit
- *       Yes, I trust this folder
- *
- * defaulting the highlight to the safe choice for a human — so confirming the
- * default QUITS the agent. The session then dies and startup polls a dead pane
- * for the whole timeout, reporting "never reached a ready input prompt" when the
- * truth is "we told it to exit". Never guess the row: returning null keeps the
- * caller polling, because a wrong guess kills the session.
- */
-export function trustPromptMoves(pane: string): number | null {
-  const options = pane
-    .split("\n")
-    .filter((line) => /^\s*(❯\s*)?(\d+[.)]\s*)?(yes|no)\b/i.test(line));
-  const selected = options.findIndex((line) => /^\s*❯/.test(line));
-  const affirmative = options.findIndex(
-    (line) => /\byes\b/i.test(line) && /\btrust\b/i.test(line)
-  );
-  if (selected < 0 || affirmative < 0) return null;
-  return affirmative - selected;
-}
 
 // Cold-starting an interactive Claude Code session (trust prompt -> hook trust ->
 // ready input box) routinely needs well over 20s, especially a SECOND concurrent
