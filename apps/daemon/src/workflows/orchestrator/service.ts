@@ -979,6 +979,15 @@ export class OrchestratorService {
     phase: OrchestratorStepPhase | null,
     options: RequestNextDecisionOptions
   ): void {
+    // maybeRefute now clears the phase it set, and onAgentResponseDone's finally
+    // clears again on the way out. Both are correct; without this the second one
+    // would append a phase_changed(null) event for a transition that already
+    // happened, and the event stream is how we tell a missing clear from a late
+    // one. Only emit when the value actually changes.
+    const current = db
+      .prepare("SELECT orchestrator_phase AS phase FROM workflow_step_runs WHERE id = ?")
+      .get(scope.stepRunId) as { phase: string | null } | undefined;
+    if (current !== undefined && (current.phase ?? null) === phase) return;
     db.prepare("UPDATE workflow_step_runs SET orchestrator_phase = ? WHERE id = ?").run(
       phase,
       scope.stepRunId
@@ -1733,29 +1742,37 @@ export class OrchestratorService {
     // Only now — past every skip guard — is the refute actually about to run, so
     // this is where the honest "independent_check" status belongs. Setting it at
     // the call site would flash the status on steps the gate skips.
-    this.setStepPhase(
-      db,
-      now,
-      { goalId: ctx.run.goalId, workflowRunId: ctx.run.id, stepRunId: ctx.stepRun.id },
-      "independent_check",
-      options
-    );
-    const proposal = await refuteStepCompletion(this.shadowAsk, {
-      refuteSessionKey: `${goal.id}::refute`,
-      adapterId,
-      request,
-      timeoutMs: SHADOW_LLM_TIMEOUT_MS,
-    });
-    const outcome: RefuteOutcome = proposal ? proposal.verdict : "unavailable";
-    const facet: RefuteFacet = {
-      verdict: outcome,
-      triggered_by: gate.triggers,
-      risk_class: riskClass,
-      reason: proposal?.reason ?? null,
-      issue_refs: proposal?.issueRefs ?? [],
-      reasoning: proposal?.reasoning ?? null,
-    };
-    return { ran: true, outcome, facet, proposal };
+    //
+    // Whoever SETS the phase clears it. Three call sites reach this function
+    // (onAgentResponseDone, runStashedJudgeRetry, onUserMessage) and only the
+    // first wraps applyOrchestratorAction in a phase-clearing finally, so a
+    // refute entered through either of the other two used to leave the step
+    // advertising "Running an independent check…" forever — the check having
+    // finished seconds earlier. Clearing it here instead of at the call sites
+    // makes that leak impossible for any future caller too, rather than relying
+    // on each one remembering.
+    const phaseScope = { goalId: ctx.run.goalId, workflowRunId: ctx.run.id, stepRunId: ctx.stepRun.id };
+    this.setStepPhase(db, now, phaseScope, "independent_check", options);
+    try {
+      const proposal = await refuteStepCompletion(this.shadowAsk, {
+        refuteSessionKey: `${goal.id}::refute`,
+        adapterId,
+        request,
+        timeoutMs: SHADOW_LLM_TIMEOUT_MS,
+      });
+      const outcome: RefuteOutcome = proposal ? proposal.verdict : "unavailable";
+      const facet: RefuteFacet = {
+        verdict: outcome,
+        triggered_by: gate.triggers,
+        risk_class: riskClass,
+        reason: proposal?.reason ?? null,
+        issue_refs: proposal?.issueRefs ?? [],
+        reasoning: proposal?.reasoning ?? null,
+      };
+      return { ran: true, outcome, facet, proposal };
+    } finally {
+      this.clearStepPhase(db, now, phaseScope, options);
+    }
   }
 
   /** Bounded revise feedback for a refuted completion — mirrors 5.3's gate

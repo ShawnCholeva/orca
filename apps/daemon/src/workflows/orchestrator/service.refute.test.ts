@@ -328,6 +328,52 @@ describe("OrchestratorService L5 refute gate", () => {
     expect(row.orchestrator_phase).toBeNull();
   });
 
+  it("clears 'independent_check' as soon as the check ends, not when the caller unwinds", async () => {
+    // The phase is set inside maybeRefute but was cleared only by
+    // onAgentResponseDone's finally. Two other call sites reach maybeRefute
+    // (runStashedJudgeRetry, onUserMessage) and neither clears, so a refute
+    // entered through them left the step advertising "Running an independent
+    // check…" permanently. Driving onAgentResponseDone cannot show that
+    // directly — its finally hides it — but WHEN the clear lands does: if
+    // maybeRefute owns the clear it fires the moment the verdict returns,
+    // before the completion is committed. If ownership sits in the caller it
+    // fires last, after everything. Ordering is the observable difference.
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    seedToolGate(db, "step-1", "high");
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+
+    const order: string[] = [];
+    bus.subscribe((e) => {
+      if (e.type === "workflow.step.phase_changed") {
+        order.push(`phase:${(e.payload as { phase: string | null }).phase ?? "null"}`);
+      } else if (e.type === "harness.transition.recorded") {
+        order.push("transition");
+      }
+    });
+
+    const service = makeRefuteService(fakeRefuteAsk("upheld"));
+    await service.onAgentResponseDone(
+      db,
+      () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText },
+      { bus, idFactory }
+    );
+    await flushDeferred();
+
+    const clearedAt = order.indexOf("phase:null");
+    const committedAt = order.indexOf("transition");
+    expect(clearedAt).toBeGreaterThanOrEqual(0);
+    expect(committedAt).toBeGreaterThanOrEqual(0);
+    expect(clearedAt).toBeLessThan(committedAt);
+    // And exactly one clear: onAgentResponseDone's finally still runs, but a
+    // second phase_changed(null) for a transition that already happened would
+    // corrupt the one signal that distinguishes a MISSING clear from a late one.
+    expect(order.filter((e) => e === "phase:null")).toHaveLength(1);
+  });
+
   it("high-risk upheld -> commits; RefuteFacet verdict upheld, no veto", async () => {
     const { db, bus, idFactory } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" });
