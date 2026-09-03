@@ -212,16 +212,20 @@ export function computeCost(transitions: RunTransition[]): RunCost {
     const prev = lastByStep.get(key);
     if (prev === undefined || t.transition.createdAt > prev) lastByStep.set(key, t.transition.createdAt);
   }
-  const wasted = new Set<string>();
+  // Split rather than blended. A completion that FAILED and was also superseded is
+  // counted once, as failed — failure is the stronger claim. The two buckets answer
+  // different questions ("what did I spend on attempts that failed" vs "what did I
+  // spend that produced nothing the run kept"), reasonable readers pick different
+  // ones, and blending them into a single "waste" figure repeats the disease this
+  // projection exists to fix.
+  let failedUsd = 0;
+  let supersededUsd = 0;
   for (const t of completes) {
     const key = t.stepTemplateId ?? t.transition.workflowStepRunId ?? t.transition.id;
-    const failed = t.transition.telemetry?.outcome.status === "failed";
-    const superseded = lastByStep.get(key) !== t.transition.createdAt;
-    if (failed || superseded) wasted.add(t.transition.id);
+    const cost = t.transition.telemetry?.cost?.usd ?? 0;
+    if (t.transition.telemetry?.outcome.status === "failed") failedUsd += cost;
+    else if (lastByStep.get(key) !== t.transition.createdAt) supersededUsd += cost;
   }
-  const wastedUsd = completes
-    .filter((t) => wasted.has(t.transition.id))
-    .reduce((acc, t) => acc + (t.transition.telemetry?.cost?.usd ?? 0), 0);
 
   // `mark_done` carries a cumulative roll-up equal to the sum of every
   // step_complete. It is a CHECKSUM, never an addend — summing all boundaries
@@ -229,13 +233,16 @@ export function computeCost(transitions: RunTransition[]): RunCost {
   const rollup = transitions.find(
     (t) => t.transition.boundary === "mark_done" && t.transition.telemetry?.cost != null
   )?.transition.telemetry?.cost?.usd;
-  const rollupMatchesSum = rollup === undefined ? null : Math.abs(rollup - usd) < CENT;
+  const rollupCheck: RunCost["rollupCheck"] =
+    rollup === undefined ? "not_applicable" : Math.abs(rollup - usd) < CENT ? "matches" : "diverged";
 
   return {
     usd,
-    wastedUsd,
+    wastedUsd: failedUsd + supersededUsd,
+    failedUsd,
+    supersededUsd,
     coverage: { reported, total: completes.length },
-    rollupMatchesSum,
+    rollupCheck,
   };
 }
 
@@ -310,6 +317,7 @@ export function buildSpans(input: {
       // A span launched more than once was restarted; the launch/complete pairing is
       // NOT 1:1, so this counts launches rather than pairing them.
       restarts: Math.max(0, launches - 1),
+      completions: completes.length,
       stallRescues: s.stallRescues,
       cost: spanCost(completes),
       tier,
@@ -402,7 +410,8 @@ export function buildRunSummary(input: {
     cost: computeCost(transitions),
     stepsDelivered: stepRuns.filter((s) => DELIVERED.has(s.status)).length,
     stepsBlocked: stepRuns.filter((s) => BLOCKED.has(s.status)).length,
-    restarts: spans.reduce((acc, s) => acc + s.restarts, 0),
+    spanRelaunches: spans.reduce((acc, s) => acc + s.restarts, 0),
+    retriedCompletions: spans.reduce((acc, s) => acc + Math.max(0, s.completions - 1), 0),
     openInterventions: interventions.filter((iv) => iv.open).length,
   };
 }

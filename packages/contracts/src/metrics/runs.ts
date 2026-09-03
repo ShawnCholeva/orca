@@ -96,17 +96,38 @@ export const RunDurations = z.object({
 }).strict();
 export type RunDurations = z.infer<typeof RunDurations>;
 
+/**
+ * The roll-up checksum's own state. Deliberately NOT a nullable boolean: `null`
+ * would read identically to "checked and inconclusive", and this is the one field
+ * whose entire purpose is honesty about absence.
+ */
+export const RollupCheck = z.enum([
+  "matches",         // Σ step_complete == mark_done's cumulative roll-up
+  "diverged",        // they disagree — a completion escaped the roll-up; a real defect
+  "not_applicable",  // the run has no mark_done, so there is nothing to check against
+]);
+export type RollupCheck = z.infer<typeof RollupCheck>;
+
 export const RunCost = z.object({
   /** Σ over `step_complete` ONLY, all attempts. `mark_done` is a checksum, never an addend. */
   usd: z.number().nonnegative(),
-  /** Union of completions that failed or were superseded — the price of the retry loop. */
+  /**
+   * Spend that produced nothing the run delivered, split rather than blended —
+   * `failedUsd + supersededUsd == wastedUsd`, and a completion lands in exactly one
+   * bucket (failure is the stronger claim, so a failed-and-superseded completion
+   * counts as failed). They answer different questions and reasonable readers pick
+   * different ones, so the contract names both instead of choosing.
+   */
   wastedUsd: z.number().nonnegative(),
+  /** Completions whose own `outcome.status` is `failed`. The unambiguous half. */
+  failedUsd: z.number().nonnegative(),
+  /** Completions that SUCCEEDED but were replaced by a later attempt of the same step. */
+  supersededUsd: z.number().nonnegative(),
   coverage: z.object({
     reported: z.number().int().nonnegative(),
     total: z.number().int().nonnegative(),
   }).strict(),
-  /** null when no mark_done roll-up exists to check against; false is a real defect. */
-  rollupMatchesSum: z.boolean().nullable(),
+  rollupCheck: RollupCheck,
 }).strict();
 export type RunCost = z.infer<typeof RunCost>;
 
@@ -127,8 +148,10 @@ export const RunTraceSpan = z.object({
 
   status: z.string(),
   blockedReason: z.string().nullable(),
-  /** step_launch count − 1: a span launched more than once was restarted. */
+  /** step_launch count − 1: a span RE-LAUNCHED. The crash/reap signal. */
   restarts: z.number().int().nonnegative(),
+  /** step_complete count. >1 means the revise loop ran — distinct from `restarts`. */
+  completions: z.number().int().nonnegative(),
   stallRescues: z.number().int().nonnegative(),
 
   cost: SpanCost.nullable(),
@@ -183,7 +206,15 @@ export const RunSummary = z.object({
   cost: RunCost,
   stepsDelivered: z.number().int().nonnegative(),
   stepsBlocked: z.number().int().nonnegative(),
-  restarts: z.number().int().nonnegative(),
+  /**
+   * Σ of span `restarts` — a step run RE-LAUNCHED, which is the crash/reap signal.
+   * NOT "how many times did this run retry"; that is `retriedCompletions`. The two
+   * differ: a step can produce three completions from one launch (the revise loop)
+   * or three launches for one completion (crash-retry).
+   */
+  spanRelaunches: z.number().int().nonnegative(),
+  /** Σ of completions beyond the first per span — the revise/re-judge loop's volume. */
+  retriedCompletions: z.number().int().nonnegative(),
   openInterventions: z.number().int().nonnegative(),
 }).strict();
 export type RunSummary = z.infer<typeof RunSummary>;

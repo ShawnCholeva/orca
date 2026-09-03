@@ -261,7 +261,7 @@ describe("computeCost", () => {
       markDone(61.52),
     ]);
     expect(c.usd).toBeCloseTo(61.52, 5);
-    expect(c.rollupMatchesSum).toBe(true);
+    expect(c.rollupCheck).toBe("matches");
   });
 
   it("flags a roll-up that disagrees with the sum", () => {
@@ -269,12 +269,14 @@ describe("computeCost", () => {
       complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 10 }),
       markDone(25),
     ]);
-    expect(c.rollupMatchesSum).toBe(false);
+    expect(c.rollupCheck).toBe("diverged");
   });
 
-  it("reports null rather than false when there is no roll-up to check", () => {
-    expect(computeCost([complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 10 })]).rollupMatchesSum)
-      .toBeNull();
+  it("types the absence of a roll-up rather than reporting a bare null", () => {
+    // `null` would read identically to "checked and inconclusive" in the one field
+    // whose entire purpose is honesty about absence.
+    expect(computeCost([complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 10 })]).rollupCheck)
+      .toBe("not_applicable");
   });
 
   it("counts failed and superseded completions once, not twice", () => {
@@ -284,7 +286,27 @@ describe("computeCost", () => {
       complete({ id: "c2", at: "2026-09-01T00:20:00.000Z", stepTemplateId: "execution", usd: 3.23 }),
     ]);
     expect(c.usd).toBeCloseTo(45.71, 5);
+    expect(c.failedUsd).toBeCloseTo(42.48, 5);
+    // The delivered attempt is not superseded, so nothing lands in that bucket.
+    expect(c.supersededUsd).toBe(0);
     expect(c.wastedUsd).toBeCloseTo(42.48, 5);
+  });
+
+  it("splits a succeeded-but-superseded attempt out of failed spend", () => {
+    // The live disagreement: execution ran 3x — $42.48 failed, $2.64 succeeded then
+    // was replaced, $3.23 delivered. "$48.02 failed" and "$50.66 produced nothing
+    // the run kept" are both true and answer different questions, so both are named
+    // rather than blended into one figure.
+    const c = computeCost([
+      complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", stepTemplateId: "execution", usd: 42.48, status: "failed" }),
+      complete({ id: "c2", at: "2026-09-01T00:20:00.000Z", stepTemplateId: "execution", usd: 2.64 }),
+      complete({ id: "c3", at: "2026-09-01T00:30:00.000Z", stepTemplateId: "execution", usd: 3.23 }),
+    ]);
+    expect(c.failedUsd).toBeCloseTo(42.48, 5);
+    expect(c.supersededUsd).toBeCloseTo(2.64, 5);
+    expect(c.wastedUsd).toBeCloseTo(45.12, 5);
+    // A completion is counted once: failed-and-superseded is failed, never both.
+    expect(c.failedUsd + c.supersededUsd).toBeCloseTo(c.wastedUsd, 5);
   });
 
   it("counts a completion with no cost in the coverage denominator, never as zero", () => {
@@ -316,7 +338,10 @@ describe("buildRunDetail", () => {
     });
     expect(detail.spans).toHaveLength(1);
     expect(detail.spans[0].name).toBe("Triage");
-    expect(detail.spans[0].restarts).toBe(1); // two launches, one span
+    expect(detail.spans[0].restarts).toBe(1);   // two launches of one span: a relaunch
+    expect(detail.spans[0].completions).toBe(1); // one completion: no revise loop
+    expect(detail.run.spanRelaunches).toBe(1);
+    expect(detail.run.retriedCompletions).toBe(0);
     expect(detail.spans[0].cost?.state).toBe("unknown");
     expect(detail.run.openInterventions).toBe(0);
   });

@@ -115,12 +115,25 @@ The 17.95-hour hole between `execution` finishing (05:37:16) and `__gate__:revie
 | Field | Definition | Mark |
 |---|---|---|
 | `costUsd` | Σ `telemetry.cost.usd` over **`step_complete` only**, **all attempts including superseded/retried** | D |
-| `costWastedUsd` | Σ over the **set union** of: completions whose own `telemetry.outcome.status == 'failed'`, plus completions superseded by a later attempt of the same (run, step). Union, not a sum of two filters — a completion can be both. | D |
+| `failedUsd` | Σ over completions whose own `telemetry.outcome.status == 'failed'`. The unambiguous half. | D |
+| `supersededUsd` | Σ over completions that **succeeded** but were replaced by a later attempt of the same (run, step). | D |
+| `wastedUsd` | `failedUsd + supersededUsd`. A completion lands in exactly ONE bucket — failure is the stronger claim, so failed-and-superseded counts as failed. | D |
 | `costCoverage` | `{reported, total}` counts of completions carrying non-null cost | D |
+| `rollupCheck` | `matches` \| `diverged` \| `not_applicable` — never a nullable boolean (§3.2) | D |
+
+> **Why the split rather than a ruling.** Two independent derivations disagreed by exactly $2.64 on the live run: one counted only self-declared failures ($48.02), the other also counted a succeeded-but-superseded attempt ($50.66). Both are defensible and they answer different questions — *"what did I spend on attempts that failed"* versus *"what did I spend that produced nothing the run kept."* Blending them into one "waste" figure and picking a side would repeat the exact disease this projection exists to fix: a number whose definition is unstated. **Name both.** The copy chooses which to lead with; `failedUsd` is the safer headline because it makes no judgement about whether a replaced-but-successful artifact had value.
 
 **`mark_done` is a checksum, never an addend.** It carries a cumulative roll-up that sums every `step_complete` on the run (per ORCA.md, Stateful axis). Summing all boundaries adds the total to itself — the source of the $61.52 / $123.04 discrepancy. Exactly 2× is the signature.
 
 **Assert it:** `Σ(step_complete cost) == mark_done.telemetry.cost.usd`. On the live run this holds to the cent. Divergence means a completion escaped the roll-up's view — a cheap, deterministic integrity sensor the spine should have.
+
+### 3.2 The checksum's own absence must be typed
+
+`rollupCheck` is an enum — `matches` | `diverged` | `not_applicable` — **not a nullable boolean.** A bare `null` reads identically to "checked and inconclusive," and this is the one field whose entire purpose is honesty about absence. Four of the five live runs have no `mark_done` at all; `not_applicable` says that, `null` does not.
+
+### 3.3 The park clip rule, stated
+
+An open park is clipped to **exactly the same terminal moment `elapsedMs` uses** — `run.finishedAt ?? MAX(step_run.finished_at)`, or `now` for a live run (§2.1). This is not a preference: `parkedMs` and `elapsedMs` must be bounded by the same instant or the sum invariant cannot hold. Clipping parked to any other bound (the last transition, say) silently breaks `elapsed = working + parked + unaccounted`. Two derivations that disagree on parked time almost always disagree on this bound rather than on the parks themselves.
 
 **Total includes superseded attempts.** That is what the subscription bill reflects; a delivered-work-only figure is a number no invoice will agree with.
 
