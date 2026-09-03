@@ -131,8 +131,22 @@ export function computeTemplateSummary(input: {
 
   const cur = dimsFromTransitions(currentNonGate);
   const prev = dimsFromTransitions(priorNonGate);
-  const curLatency = medianLatencyMs(input.current.transitions);
-  const priorLatency = medianLatencyMs(input.prior.transitions);
+  // Gates are excluded from the duration median too, and the split from the
+  // comment above is deliberate rather than an oversight. RATES legitimately
+  // count gate surrogates — a gate that escalated is a real escalation and
+  // belongs in that denominator. A duration MEDIAN is a different aggregation
+  // with a different appropriate population: a step's latency answers "how long
+  // did the agent take to do the work", a gate's answers "how long did the check
+  // take", and pooling them yields the median of neither. Gate durations are not
+  // lost — GateMetrics reports its own p50 over exactly these transitions.
+  //
+  // This mattered the moment gate surrogates began emitting transitions at all
+  // (be490cb): before that the two arguments were the same array, so passing the
+  // unfiltered one was harmless. It would otherwise have moved a shipped number
+  // with nobody touching it — the Triage 16/100 failure, where adjacent figures
+  // were each computed over a different population with nothing saying so.
+  const curLatency = medianLatencyMs(currentNonGate);
+  const priorLatency = medianLatencyMs(priorNonGate);
 
   // Version comparison: latest vs immediately-prior version present in the window.
   const presentVersions = [...new Set(input.current.transitions.map((t) => t.templateVersion))].sort((a, b) => b - a);

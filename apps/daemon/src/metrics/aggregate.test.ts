@@ -203,6 +203,35 @@ describe("computeTemplateSummary", () => {
     expect(summary.versionComparison?.byDimension).toBeDefined();
   });
 
+  it("excludes gate surrogates from the latency median", () => {
+    // Gates emitted no transitions until be490cb, so passing the unfiltered list
+    // was harmless. Now they carry latency_ms, and a gate's duration answers a
+    // different question than a step's — pooling them is the median of neither.
+    // GateMetrics reports its own p50 over exactly these, so nothing is lost.
+    const summary = computeTemplateSummary({
+      templateId: "t1", name: "T", latestVersion: 1, runCount: 3,
+      versions: [{ version: 1, runs: 3, firstSeenAt: "2026-05-01T00:00:00.000Z" }],
+      current: {
+        transitions: [
+          stepComplete("a", "r1", "s1", 1, 100, "passed", "2026-05-02T00:00:00.000Z"),
+          stepComplete("b", "r2", "s1", 1, 200, "passed", "2026-05-02T00:00:00.000Z"),
+          stepComplete("c", "r3", "s1", 1, 300, "passed", "2026-05-02T00:00:00.000Z"),
+          // A fast gate check would drag the median down toward itself.
+          stepComplete("g", "r1", "__gate__:verify", 1, 5, "passed", "2026-05-02T00:00:00.000Z"),
+          stepComplete("h", "r2", "__gate__:critique", 1, 5, "passed", "2026-05-02T00:00:00.000Z"),
+        ],
+        stepRuns: [
+          stepRun("r1", "s1", 1, "passed", 1),
+          stepRun("r2", "s1", 1, "passed", 1),
+          stepRun("r3", "s1", 1, "passed", 1),
+        ],
+      },
+      prior: { transitions: [], stepRuns: [] },
+    });
+    // Median of the three real steps (100/200/300), not of all five.
+    expect(summary.latencyP50Ms).toBe(200);
+  });
+
   it("single template version → versionComparison is null", () => {
     const summary = computeTemplateSummary({
       templateId: "t1", name: "Test Template", latestVersion: 1, runCount: 10,
