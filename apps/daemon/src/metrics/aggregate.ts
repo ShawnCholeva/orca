@@ -42,6 +42,17 @@ export function medianLatencyMs(ts: TemplateTransition[]): number | null {
   return xs.length % 2 === 0 ? (xs[mid - 1] + xs[mid]) / 2 : xs[mid];
 }
 
+/**
+ * A worker gate creates a real `workflow_step_runs` row (`__gate__:<nodeId>`) so
+ * the engine can hang a session off it. It is not a step of the workflow, and
+ * four separate places in this file had their own copy of this prefix check —
+ * one of which was missed, which is how gate surrogates got into the summary's
+ * first-pass and recovery rates.
+ */
+export function isGateSurrogate(stepTemplateId: string | null | undefined): boolean {
+  return stepTemplateId?.startsWith("__gate__:") === true;
+}
+
 const PASSED = new Set(["passed"]);
 const FAILED_STATUSES = new Set(["failed", "blocked"]);
 
@@ -125,7 +136,7 @@ export function computeTemplateSummary(input: {
   // purposes (computeStepMetrics already excludes them there); they must not feed the
   // six-dimension harness metrics, or gate approvals/denials contaminate verificationStrength
   // etc. — same predicate computeStepMetrics uses.
-  const isGateTransition = (t: TemplateTransition) => t.stepTemplateId?.startsWith("__gate__:");
+  const isGateTransition = (t: TemplateTransition) => isGateSurrogate(t.stepTemplateId);
   const currentNonGate = input.current.transitions.filter((t) => !isGateTransition(t));
   const priorNonGate = input.prior.transitions.filter((t) => !isGateTransition(t));
 
@@ -172,8 +183,17 @@ export function computeTemplateSummary(input: {
     templateId: input.templateId, name: input.name, latestVersion: input.latestVersion,
     runs: input.runCount,
     dimensions: toSummaryDimensions(cur),
-    firstPass: firstPassRate(input.current.stepRuns),
-    recovered: recoveredRate(input.current.stepRuns),
+    // Gate surrogates are excluded here for a reason distinct from the latency
+    // median above: they cannot answer the question these rates ask. closeSurrogate
+    // sets status='passed' unconditionally — on every path, including the aborts
+    // that discard the gate's output — so each surrogate is a guaranteed first-pass
+    // in both numerator and denominator. On the founder's data that is 4 of 22 rows
+    // that could not have been anything else. Worse for recovery: a gate loop-back
+    // bumps the surrogate's attempt, producing attempt>1 with status passed, which
+    // recoveredRate reads as a step that failed and then recovered — so re-entering
+    // a gate looked like the workflow healing itself.
+    firstPass: firstPassRate(input.current.stepRuns.filter((r) => !isGateSurrogate(r.stepTemplateId))),
+    recovered: recoveredRate(input.current.stepRuns.filter((r) => !isGateSurrogate(r.stepTemplateId))),
     escalated: escalatedRate(input.current.transitions),
     latencyP50Ms: curLatency,
     deltas: {
@@ -267,13 +287,13 @@ export function computeStepMetrics(input: {
   const byStep = new Map<string, TemplateTransition[]>();
   for (const t of input.transitions) {
     if (!t.stepTemplateId) continue;
-    if (t.stepTemplateId.startsWith("__gate__:")) continue;
+    if (isGateSurrogate(t.stepTemplateId)) continue;
     if (!inCurrentShape(t.stepTemplateId)) continue;
     (byStep.get(t.stepTemplateId) ?? byStep.set(t.stepTemplateId, []).get(t.stepTemplateId)!).push(t);
   }
   const runsByStep = new Map<string, TemplateStepRun[]>();
   for (const r of input.stepRuns) {
-    if (r.stepTemplateId.startsWith("__gate__:")) continue;
+    if (isGateSurrogate(r.stepTemplateId)) continue;
     if (!inCurrentShape(r.stepTemplateId)) continue;
     (runsByStep.get(r.stepTemplateId) ?? runsByStep.set(r.stepTemplateId, []).get(r.stepTemplateId)!).push(r);
   }

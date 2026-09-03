@@ -232,6 +232,33 @@ describe("computeTemplateSummary", () => {
     expect(summary.latencyP50Ms).toBe(200);
   });
 
+  it("excludes gate surrogates from firstPass and recovered", () => {
+    // closeSurrogate sets status='passed' unconditionally, so every surrogate is
+    // a guaranteed first-pass in both numerator and denominator. And a gate
+    // loop-back bumps the surrogate's attempt, producing attempt>1 + passed --
+    // which recoveredRate reads as a step that failed and then recovered, so
+    // re-entering a gate used to IMPROVE the recovery tile.
+    const summary = computeTemplateSummary({
+      templateId: "t1", name: "T", latestVersion: 1, runCount: 2,
+      versions: [{ version: 1, runs: 2, firstSeenAt: "2026-05-01T00:00:00.000Z" }],
+      current: {
+        transitions: [stepComplete("a", "r1", "s1", 1, 100, "passed", "2026-05-02T00:00:00.000Z")],
+        stepRuns: [
+          stepRun("r1", "s1", 1, "failed", 1),
+          stepRun("r2", "s1", 1, "failed", 1),
+          // Surrogates: one plain close, one from a gate loop-back.
+          stepRun("r1", "__gate__:verify", 1, "passed", 1),
+          stepRun("r2", "__gate__:verify", 2, "passed", 1),
+        ],
+      },
+      prior: { transitions: [], stepRuns: [] },
+    });
+    // Both real steps failed on their only attempt: nothing passed first time and
+    // nothing recovered. The surrogates must not manufacture either.
+    expect(summary.firstPass).toBe(0);
+    expect(summary.recovered).toBe(0);
+  });
+
   it("single template version → versionComparison is null", () => {
     const summary = computeTemplateSummary({
       templateId: "t1", name: "Test Template", latestVersion: 1, runCount: 10,

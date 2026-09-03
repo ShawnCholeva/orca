@@ -2542,6 +2542,20 @@ export class DispatchEngine {
     // called from five sites, four of which are early returns, and gate cost would
     // leak on every abort otherwise.
     const closeSurrogate = (failureCode: FailureCode | null = null) => {
+      // `passed` here is a LIFECYCLE marker meaning "this surrogate row is closed",
+      // not a verdict — it is set on all five paths including the four aborts that
+      // discard the gate's output, and the status CHECK offers no honest word for
+      // "closed". The gate's actual verdict lives in workflow_gate_decisions, and
+      // the emitted transition below carries `output_unavailable` on the aborts, so
+      // the transition and this row deliberately disagree.
+      //
+      // That divergence is safe only because nothing reads a surrogate's status as
+      // a verdict: metrics/aggregate.ts filters these rows out of every rate and
+      // score via isGateSurrogate(). It was NOT safe before 4637d68 — the summary's
+      // firstPass and recovered rates read them, so an aborted gate counted as a
+      // clean first-time pass and a re-entered gate counted as a recovery. If a new
+      // consumer of workflow_step_runs.status appears, it must exclude these rows
+      // or this comment becomes a bug report.
       db.prepare("UPDATE workflow_step_runs SET status = 'passed', finished_at = ? WHERE id = ?").run(now(), surrogateStepRun.id);
       try {
         const sessionRow = db
