@@ -52,7 +52,10 @@ export function classifyTier(t: TemplateTransition): VerificationTier {
   if (tr.telemetry?.outcome.failure_code === "evaluation_failed") return "unverified";
   const ev = tr.evidence;
   if (ev) {
-    const anySensors = ev.sensorsRun.length > 0;
+    // "A sensor ran" means one actually executed. A no-op stub is recorded as
+    // `skipped`, so a workspace full of placeholder scripts cannot reach the
+    // execution tiers on exit codes alone.
+    const anySensors = ev.sensorsRun.some((s) => s.result !== "skipped");
     if (anySensors && ev.oracleAdequacy.sufficient) return "verified_executed";
     if (anySensors) return "partially_verified";
     // No execution — but a passed enforce-mode grounding check means part of

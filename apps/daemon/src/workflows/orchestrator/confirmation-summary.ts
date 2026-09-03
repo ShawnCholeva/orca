@@ -66,7 +66,13 @@ function buildEvidenceBundle(facet: EvidenceFacet | null): ConfirmationSummaryEv
   }
   if (checks.length === 0) checks.push(STRUCTURE_CHECK);
   const cantVerify = [...facet.oracleAdequacy.gaps, ...facet.untestedRegions].slice(0, 32);
-  return { executed: facet.sensorsRun.length > 0, checks: checks.slice(0, 32), cantVerify };
+  // `executed` gates the card's "nothing was run" copy, so a skipped stub must not
+  // set it — otherwise the card claims execution evidence it does not have.
+  return {
+    executed: facet.sensorsRun.some((s) => s.result !== "skipped"),
+    checks: checks.slice(0, 32),
+    cantVerify,
+  };
 }
 
 type CardField = ConfirmationSummaryT["fields"][number];

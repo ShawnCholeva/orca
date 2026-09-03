@@ -14,7 +14,11 @@ export function sourcesPassed(
   ev: EvidenceFacet | null | undefined,
   rf: RefuteFacet | null | undefined,
 ): { executable: boolean; grounding: boolean; independentReview: boolean } {
-  const executable = !!ev && ev.sensorsRun.length > 0 && ev.oracleAdequacy.sufficient === true;
+  // A skipped sensor did not run — a no-op stub script is recorded as `skipped`
+  // precisely so it cannot credit the strongest tier in the ladder on the strength
+  // of `echo` exiting 0.
+  const executable =
+    !!ev && ev.sensorsRun.some((s) => s.result !== "skipped") && ev.oracleAdequacy.sufficient === true;
   const grounding =
     ev?.grounding?.verdict === "passed" &&
     (ev.grounding.checks ?? []).some((c) => c.mode === "enforce" && c.result !== "skipped");

@@ -65,11 +65,21 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 // (the refute call itself failed) is a defensive case — the engine still
 // escalates to a human pause for it, so the card should not stay silent.
 const REFUTE_VERDICT_LABEL: Record<string, string> = {
-  upheld: "A second AI reviewed it and agreed — but nothing was run or tested",
+  upheld: "A second AI reviewed it and agreed",
   refuted: "Independent review disputes this",
   uncertain: "Independent review was inconclusive",
   unavailable: "No independent review ran",
 };
+
+// The "nothing was run" clause used to be baked into the `upheld` label, so a step
+// whose tests actually ran and passed was told that nothing had been — undercutting
+// real execution evidence with the runner's own output printed two rows above.
+// `evidence.executed` is the daemon's answer to exactly this question; use it.
+function upheldReviewLine(executed: boolean): string {
+  return executed
+    ? `${REFUTE_VERDICT_LABEL.upheld}; the checks also ran and passed`
+    : `${REFUTE_VERDICT_LABEL.upheld} — but nothing was run or tested`;
+}
 
 function ConfirmFieldList({
   fields,
@@ -268,7 +278,7 @@ export function ConfirmationCard({
               <div className="step-confirm-ev-group" data-testid="step-confirm-independent">
                 <div className="step-confirm-ev-label">Independent check</div>
                 <div className="step-confirm-ev-review">
-                  {REFUTE_VERDICT_LABEL[summary.refute.verdict] ?? "No independent review ran"}
+                  {upheldReviewLine(summary.evidence?.executed ?? false)}
                 </div>
               </div>
             ) : null}

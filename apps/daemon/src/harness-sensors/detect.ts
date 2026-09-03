@@ -7,6 +7,8 @@ export type DetectedSensor = {
   kind: WorkflowSensorKind;
   command: string;
   args: string[];
+  /** The raw package.json script body, so the runner can tell a real check from a stub. */
+  scriptBody: string;
 };
 
 // Maps a guardrail `required` label to (sensor kind, package.json script name).
@@ -53,7 +55,10 @@ export function detectSensors(workspacePath: string, required: string[]): Detect
   for (const entry of HARNESS_SENSORS) {
     if (!required.includes(entry.label)) continue;
     if (typeof scripts[entry.script] !== "string") continue;
-    out.push({ kind: entry.kind, command: "npm", args: ["run", entry.script] });
+    out.push({
+      kind: entry.kind, command: "npm", args: ["run", entry.script],
+      scriptBody: scripts[entry.script]!,
+    });
   }
   return out;
 }
@@ -64,3 +69,37 @@ export function availableSensorKinds(workspacePath: string): WorkflowSensorKind[
   const scripts = readScripts(workspacePath);
   return HARNESS_SENSORS.filter((entry) => typeof scripts[entry.script] === "string").map((e) => e.kind);
 }
+
+/**
+ * True when a package.json script provably cannot exercise anything — its whole
+ * body is shell no-ops (`echo`, `printf`, `true`, `:`, `exit 0`, comments).
+ *
+ * WHY THIS EXISTS. A sensor's exit code is evidence about the COMMAND that ran; it
+ * is evidence about the artifact only if the command actually exercises the
+ * artifact. `"typecheck": "echo no types"` exits 0 and cannot do otherwise, so
+ * crediting it as a passing deterministic sensor inverts the Executable axis: the
+ * oracle the model's self-report is supposed to be checked against becomes the
+ * softer of the two. Observed live — the agent classified the stub as `skipped`
+ * with "it exercises no type checker, so it provides no signal", while the runner
+ * recorded a pass.
+ *
+ * Deliberately narrow and provable rather than heuristic. It reads the script BODY,
+ * which the detector already has, and asks a question with a definite answer: can
+ * any segment of this fail? `echo x && node --test` contains a real command and is
+ * NOT a no-op. Perfect detection is impossible (`tsc --version` exercises nothing
+ * either) — this catches the provable case and claims nothing about the rest.
+ *
+ * The asymmetry decides the bias: wrongly crediting a stub over-claims verification
+ * at `executable` weight 1.0, the strongest tier in the ladder. Wrongly skipping a
+ * real check only under-claims, and is recoverable. So detect narrowly, and when
+ * unsure, run it.
+ */
+export function isNoOpScript(body: string): boolean {
+  const segments = body
+    .split(/&&|\|\||;|\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !s.startsWith("#"));
+  if (segments.length === 0) return true;
+  return segments.every((s) => /^(echo\b.*|printf\b.*|true|:|exit\s+0)$/.test(s));
+}
+

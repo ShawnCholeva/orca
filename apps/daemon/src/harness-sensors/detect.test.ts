@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { availableSensorKinds, detectSensors } from "./detect.js";
+import { availableSensorKinds, detectSensors, isNoOpScript } from "./detect.js";
 
 const dirs: string[] = [];
 function workspaceWith(scripts: Record<string, string>): string {
@@ -62,5 +62,25 @@ describe("availableSensorKinds", () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), "orca-detect-empty-"));
     dirs.push(dir);
     expect(availableSensorKinds(dir)).toEqual([]);
+  });
+});
+
+describe("isNoOpScript", () => {
+  it("recognises scripts that provably cannot fail", () => {
+    for (const body of ["echo no types", "true", ":", "exit 0", "echo a && echo b", "printf 'x'", "# nothing"]) {
+      expect(isNoOpScript(body)).toBe(true);
+    }
+  });
+
+  it("leaves anything that can fail alone", () => {
+    for (const body of [
+      "tsc --noEmit",
+      "node --test src/*.test.js",
+      "echo starting && tsc --noEmit",
+      "eslint .",
+      "exit 1",
+    ]) {
+      expect(isNoOpScript(body)).toBe(false);
+    }
   });
 });

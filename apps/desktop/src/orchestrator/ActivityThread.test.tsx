@@ -289,6 +289,34 @@ it("renders lead, fields, a collapsed scores dropdown, and Continue + Revise", (
   expect(onContinue).toHaveBeenCalledWith("r1");
 });
 
+describe("independent check line", () => {
+  const withRefute = (evidence: unknown) => ({
+    ...confirmActivity,
+    confirmationSummary: {
+      ...confirmActivity.confirmationSummary,
+      refute: { verdict: "upheld", reason: null, issueRefs: [] },
+      evidence,
+    },
+  }) as any;
+
+  it("does not claim nothing was run when the sensors actually ran", () => {
+    // Observed live: this line said "but nothing was run or tested" on a step
+    // where `npm test` ran and 5 tests passed, with the runner's own output
+    // printed two rows above it. The clause was baked into the verdict label.
+    render(<LiveActivity activity={withRefute({ executed: true, checks: [], cantVerify: [] })} />);
+    fireEvent.click(screen.getByTestId("confirm-scores-toggle"));
+    const line = screen.getByTestId("step-confirm-independent").textContent ?? "";
+    expect(line).toContain("the checks also ran and passed");
+    expect(line).not.toContain("nothing was run");
+  });
+
+  it("still says nothing was run when no sensor executed", () => {
+    render(<LiveActivity activity={withRefute({ executed: false, checks: [], cantVerify: [] })} />);
+    fireEvent.click(screen.getByTestId("confirm-scores-toggle"));
+    expect(screen.getByTestId("step-confirm-independent").textContent).toContain("nothing was run or tested");
+  });
+});
+
 describe("refute advisory (5.4 L4)", () => {
   it("renders the disputed chip, reason, and issue list when the verdict is refuted", () => {
     render(

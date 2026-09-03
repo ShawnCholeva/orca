@@ -2,7 +2,7 @@
 import type { EvidenceFacet, SensorResult } from "@orca/contracts";
 import { runCheckCommand } from "../readiness/exec.js";
 import { inheritCredEnv } from "../readiness/exec.js";
-import { detectSensors, HARNESS_SENSORS } from "./detect.js";
+import { detectSensors, HARNESS_SENSORS, isNoOpScript } from "./detect.js";
 
 const SENSOR_TIMEOUT_MS = 180_000; // tests/typecheck need far longer than the 5s readiness default
 const SUMMARY_MAX = 4000;
@@ -22,7 +22,24 @@ export async function runSensors(opts: {
   const sensorsRun: SensorResult[] = [];
 
   let failed = false;
+  const stubbed: string[] = [];
   for (const sensor of sensors) {
+    // A script that provably cannot fail is not a passing check — it is the
+    // absence of one. Record it as `skipped` (never `passed`) and let it raise an
+    // oracle gap, so it can neither credit `executable` nor lift the tier.
+    if (isNoOpScript(sensor.scriptBody)) {
+      sensorsRun.push({
+        kind: sensor.kind,
+        command: `${sensor.command} ${sensor.args.join(" ")}`,
+        exitCode: null,
+        durationMs: 0,
+        result: "skipped",
+        summary: `Not run: the script is a no-op stub (\`${sensor.scriptBody}\`), so it exercises nothing and can only exit 0.`,
+        artifactRef: null,
+      });
+      stubbed.push(sensor.kind);
+      continue;
+    }
     const res = await runCheckCommand(sensor.command, sensor.args, {
       cwd: opts.workspacePath,
       timeoutMs: opts.timeoutMs ?? SENSOR_TIMEOUT_MS,
@@ -52,6 +69,7 @@ export async function runSensors(opts: {
   for (const entry of HARNESS_SENSORS) {
     if (!opts.required.includes(entry.label)) continue;
     if (!detectedLabels.has(entry.kind)) gaps.push(`${entry.label}: no matching script`);
+    else if (stubbed.includes(entry.kind)) gaps.push(`${entry.label}: the script is a no-op stub, so nothing was checked`);
   }
 
   const missingRequired = gaps.length > 0;
@@ -61,9 +79,12 @@ export async function runSensors(opts: {
       ? "partial"
       : "passed";
 
+  // A skipped stub is not a pass. Requiring every sensor to have actually passed
+  // keeps `sufficient` false whenever any required check was a no-op.
   const passedAllRequired =
     !failed &&
     !missingRequired &&
+    sensorsRun.length > 0 &&
     sensorsRun.every((s) => s.result === "passed");
 
   return {

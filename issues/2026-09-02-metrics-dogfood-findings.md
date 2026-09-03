@@ -49,6 +49,15 @@ holds it. **Status: `open` unless stated.**
 | C9 | `"1 runs"` pluralization in the aggregate view. | OPEN |
 | C10 | Copy dates were UTC; screen renders local. Screen is right — copy needs updating. | OPEN (copy) |
 
+## C+. Executable axis — the harness over-crediting itself
+
+| # | Issue | Status |
+|---|---|---|
+| E1 | **The sensor ladder counted a no-op stub script as a passing deterministic sensor.** `"typecheck": "echo no types"` exits 0, so the runner recorded `passed` — while the *agent* correctly classified it `skipped` ("it exercises no type checker, so it provides no signal"). This inverts the Executable axis: the deterministic oracle the self-report is meant to be checked against became the softer of the two. It fed `oracleAdequacy.sufficient`, the verification tier, and `composedScore` at `executable` weight **1.0** — the strongest tier in the ladder — for a command that did nothing. Widespread rather than exotic, since the catalog encourages declaring these scripts. | **FIXED** `d5e1f5c` |
+| E2 | **The independent-check line contradicted the sensor list directly above it** — "a second AI reviewed it and agreed *but nothing was run or tested*" on a step where `npm test` ran and 5 tests passed. The clause was baked into the verdict label instead of reading `evidence.executed`. Mirror image of E1: E1 oversells a stub, E2 undersells real execution. | **FIXED** `d5e1f5c` |
+
+**The invariant E1 establishes:** *a sensor's exit code is evidence about the command that ran; it is evidence about the artifact only if the command actually exercises the artifact.* Detection is deliberately narrow and provable — it reads the script **body** (which the detector already had and discarded) and asks whether any segment can fail. `echo x && node --test` is not a stub. Perfect detection is impossible (`tsc --version` exercises nothing either), so it catches the provable case and claims nothing about the rest. The asymmetry sets the bias: wrongly crediting a stub over-claims at the highest confidence in the ladder; wrongly skipping a real check only under-claims and is recoverable.
+
 ## D. App-wide UX found by driving it
 
 | # | Issue | Status |
