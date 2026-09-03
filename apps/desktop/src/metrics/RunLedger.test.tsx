@@ -1,0 +1,148 @@
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
+import { RunDetailPanel, headline } from "./RunLedger";
+
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+function summary(over: Partial<RunSummary> = {}): RunSummary {
+  return {
+    runId: "r1", goalId: "g1", templateId: "t", templateName: "Adaptive Delivery",
+    templateVersion: 16, status: "completed",
+    startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T21:00:00.000Z",
+    blockedReason: null, terminationCause: "completed", terminationEvidence: null,
+    durations: {
+      elapsedMs: 3_600_000, workingMs: 600_000, parkedMs: 2_400_000,
+      unaccountedMs: 600_000, spanActiveMs: 1_200_000, accruing: false, integrityFlag: null,
+    },
+    cost: {
+      usd: 61.52, wastedUsd: 50.66, failedUsd: 48.02, supersededUsd: 2.64,
+      coverage: { reported: 10, total: 11 }, rollupCheck: "matches",
+    },
+    stepsDelivered: 8, stepsBlocked: 0, spanRelaunches: 1, retriedCompletions: 5,
+    openInterventions: 0, ...over,
+  };
+}
+
+function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
+  return {
+    workflowRunId: "r1", workflowStepRunId: "sr1", goalId: "g1",
+    stepTemplateId: "triage", name: "Triage", ordinal: 0, attempt: 1, kind: "step",
+    startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T00:30:00.000Z",
+    elapsedMs: 1_800_000, workingMs: 600_000,
+    status: "passed", blockedReason: null, restarts: 0, completions: 1, stallRescues: 0,
+    cost: { usd: 1.52, tokensIn: 10, tokensOut: 20, state: "reported" },
+    tier: "partially_verified",
+    verifiers: { executable: false, grounding: true, independentReview: false },
+    refuteVerdict: null, conflicts: [], outcomeStatus: "succeeded", failureCode: null, ...over,
+  };
+}
+
+function park(over: Partial<Intervention> = {}): Intervention {
+  return {
+    activityId: "a1", goalId: "g1", workflowRunId: "r1", workflowStepRunId: "sr1",
+    sourceKind: "step_confirmation_pending",
+    enteredAt: "2026-09-01T00:30:00.000Z", exitedAt: null,
+    durationMs: 3_000_000, open: true, parkState: "abandoned", ...over,
+  };
+}
+
+function detail(over: Partial<RunDetail> = {}): RunDetail {
+  return { run: summary(), spans: [span()], interventions: [park()], ...over };
+}
+
+describe("headline", () => {
+  it("leads with contamination when runs were killed by the substrate", () => {
+    const runs = [
+      summary({ runId: "a", terminationCause: "infrastructure_killed", terminationEvidence: "crashed 3 times (worker_exited_no_signal)" }),
+      summary({ runId: "b", terminationCause: "infrastructure_killed", terminationEvidence: "crashed 3 times (worker_exited_no_signal)" }),
+      summary({ runId: "c", terminationCause: "completed" }),
+    ];
+    const h = headline(runs);
+    expect(h).toContain("2 of your 3 runs were killed by the daemon");
+    expect(h).toContain("crashed 3 times (worker_exited_no_signal)");
+    // The whole point: it says how much workflow evidence is actually left.
+    expect(h).toContain("1 run");
+  });
+
+  it("does not claim a shared cause when the evidence differs", () => {
+    const runs = [
+      summary({ runId: "a", terminationCause: "infrastructure_killed", terminationEvidence: "crashed 3 times" }),
+      summary({ runId: "b", terminationCause: "infrastructure_killed", terminationEvidence: "no progress after 3 restarts" }),
+    ];
+    expect(headline(runs)).not.toContain("the same way");
+  });
+
+  it("reports the waiting share when nothing was killed", () => {
+    expect(headline([summary()])).toContain("waiting on you");
+  });
+
+  it("says nothing rather than zero for no runs", () => {
+    expect(headline([])).toBe("No runs yet.");
+  });
+});
+
+describe("RunDetailPanel", () => {
+  it("renders all four duration terms, never the residual alone", () => {
+    render(<RunDetailPanel detail={detail()} onBack={() => {}} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("1h 0m = 10m working + 40m waiting on you + 10m unaccounted");
+  });
+
+  it("names an abandoned card as debris, never as waiting on you", () => {
+    // All three of the founder's open cards are abandoned. Telling him they are
+    // "waiting on you" would send him to answer cards that accomplish nothing.
+    render(<RunDetailPanel detail={detail()} onBack={() => {}} />);
+    expect(screen.getAllByText("left open when the run stopped").length).toBeGreaterThan(0);
+    expect(screen.queryByText("waiting on you")).toBeNull();
+  });
+
+  it("says waiting on you when the run is genuinely still live", () => {
+    render(<RunDetailPanel detail={detail({ interventions: [park({ parkState: "awaiting_you" })] })} onBack={() => {}} />);
+    expect(screen.getAllByText("waiting on you").length).toBeGreaterThan(0);
+  });
+
+  it("renders a gate with no interior as an absence, not a zero-width bar", () => {
+    // A worker gate spawns a real agent and emits no transitions at all. A
+    // zero-width bar would read as "instant" — an assertion about a duration
+    // that was never measured.
+    render(<RunDetailPanel detail={detail({
+      spans: [span({ kind: "gate", name: "Critique", elapsedMs: null, workingMs: null, cost: null, tier: null, verifiers: null })],
+    })} onBack={() => {}} />);
+    expect(document.body.textContent).toContain("measured and then thrown away");
+    expect(document.body.textContent).toContain("emit step_launch/step_complete on its surrogate");
+    // The shared bar renders an explicit absent material rather than a zero-width
+    // segment, which would read as "instant" — a duration nobody took.
+    expect(document.querySelectorAll('[data-seg="absent"]').length).toBeGreaterThan(0);
+    // Exactly one working segment: the run header's. The gate span contributes none.
+    expect(document.querySelectorAll('[data-seg="working"]')).toHaveLength(1);
+  });
+
+  it("marks an LLM review distinctly from an executed check", () => {
+    render(<RunDetailPanel detail={detail({
+      spans: [span({ verifiers: { executable: true, grounding: false, independentReview: true } })],
+    })} onBack={() => {}} />);
+    expect(screen.getByText("tests ran")).toBeTruthy();
+    expect(screen.getByText("a model reviewed it")).toBeTruthy();
+  });
+
+  it("says nothing checked it rather than leaving the verifier row blank", () => {
+    render(<RunDetailPanel detail={detail({
+      spans: [span({ verifiers: { executable: false, grounding: false, independentReview: false } })],
+    })} onBack={() => {}} />);
+    expect(screen.getByText("nothing checked this")).toBeTruthy();
+  });
+
+  it("flags a pause whose reason was destroyed as lossy rather than guessing", () => {
+    render(<RunDetailPanel detail={detail({ interventions: [park({ sourceKind: "unknown" })] })} onBack={() => {}} />);
+    expect(document.body.textContent).toContain("Stamp the pause reason into the event.");
+  });
+
+  it("never dims anything", () => {
+    // Binding rule: an unmeasured value is a different object, not a faint one.
+    const { container } = render(<RunDetailPanel detail={detail({
+      spans: [span(), span({ kind: "gate", elapsedMs: null, workingMs: null, cost: null, tier: null, verifiers: null })],
+    })} onBack={() => {}} />);
+    expect(container.innerHTML).not.toMatch(/opacity/i);
+  });
+});

@@ -2,6 +2,8 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { z } from "zod";
 import {
+  RunSummary,
+  RunDetail,
   AppSettings,
   type PutSettingsRequest,
   AcceptRecommendationResponse,
@@ -2252,4 +2254,22 @@ export function openSessionStream(handlers: SessionStreamHandlers): {
 
 export function openArtifact(reference: string): Promise<void> {
   return openPath(reference);
+}
+
+// ── Run ledger ───────────────────────────────────────────────────────────────
+// The run-shaped read model. Distinct from the per-template aggregate above,
+// which cannot answer "how did THIS run behave".
+
+export async function getRunSummaries(limit = 50): Promise<RunSummary[]> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/metrics/runs?limit=${limit}`, { headers: authHeaders(token) });
+  const body = await parseResponse(res, z.object({ runs: z.array(RunSummary) }));
+  return body.runs;
+}
+
+export async function getRunDetail(runId: string): Promise<RunDetail> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/metrics/runs/${encodeURIComponent(runId)}`, { headers: authHeaders(token) });
+  const body = await parseResponse(res, z.object({ detail: RunDetail }));
+  return body.detail;
 }

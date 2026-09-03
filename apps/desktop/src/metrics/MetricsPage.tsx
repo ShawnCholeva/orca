@@ -8,6 +8,7 @@ import { GatePerformancePanel, FusedPipelinePanel } from "./GatePerformance";
 import { SelfImprovementRail } from "./SelfImprovement";
 import { ProposalReviewModal } from "./ProposalReviewModal";
 import { Workflow, Refresh } from "./metrics-icons";
+import { RunLedger } from "./RunLedger";
 
 const PERIODS = ["24h", "7d", "30d"] as const;
 type Period = (typeof PERIODS)[number];
@@ -27,6 +28,10 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
   const [detail, setDetail] = useState<TemplateMetricsDetail | null>(null);
   const [openStep, setOpenStep] = useState<string | null>(null);
   const [openGate, setOpenGate] = useState<string | null>(null);
+  // The run ledger answers "how did THIS run behave", which the aggregate view
+  // below structurally cannot. Which one LEADS is a product decision, so the
+  // default stays on the existing view until that call is made deliberately.
+  const [view, setView] = useState<"runs" | "workflow">("workflow");
   const [reloadKey, setReloadKey] = useState(0);
   const [proposals, setProposals] = useState<TemplateInstructionProposal[]>([]);
   const [reviewingProposalId, setReviewingProposalId] = useState<string | null>(null);
@@ -73,6 +78,15 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
   for (const p of proposals) if (p.status === "pending" && !proposalsByStep.has(p.stepTemplateId)) proposalsByStep.set(p.stepTemplateId, p);
   const reviewingProposal = proposals.find((p) => p.id === reviewingProposalId) ?? null;
 
+  if (view === "runs") {
+    return (
+      <div style={{ display: "grid", gap: 14, padding: 12, height: "100%", minHeight: 0, overflowY: "auto" }}>
+        <ViewToggle view={view} onChange={setView} />
+        <RunLedger />
+      </div>
+    );
+  }
+
   if (error) {
     return <CenterNote>Couldn't load metrics. <button type="button" onClick={() => setReloadKey((k) => k + 1)} style={linkBtn}>Retry</button></CenterNote>;
   }
@@ -87,6 +101,7 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
     <>
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 340px", gap: 12, padding: 12, height: "100%", minHeight: 0, overflow: "hidden" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
+        <ViewToggle view={view} onChange={setView} />
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           <Workflow size={14} color="var(--text-3)" />
           <span className="mono" style={{ fontSize: 10.5, letterSpacing: 1.1, textTransform: "uppercase", color: "var(--text-3)", marginRight: 2 }}>Workflow</span>
@@ -173,6 +188,22 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
 
 const linkBtn: React.CSSProperties = { background: "transparent", color: "var(--accent)", border: "none", cursor: "pointer", fontSize: 11, padding: "4px 6px" };
 const iconBtn: React.CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", background: "transparent", border: "1px solid var(--hairline)", borderRadius: 8, cursor: "pointer", padding: 5, color: "var(--text-3)" };
+function ViewToggle({ view, onChange }: { view: "runs" | "workflow"; onChange: (v: "runs" | "workflow") => void }) {
+  const tab = (id: "runs" | "workflow", label: string) => (
+    <button key={id} type="button" onClick={() => onChange(id)} aria-pressed={view === id}
+      style={{ background: view === id ? "var(--accent-soft)" : "transparent", color: view === id ? "var(--accent)" : "var(--text-3)",
+               border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 11.5 }}>
+      {label}
+    </button>
+  );
+  return (
+    <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.03)", border: "1px solid var(--hairline)", borderRadius: 8, padding: 2, width: "fit-content", flexShrink: 0 }}>
+      {tab("runs", "Runs")}
+      {tab("workflow", "Workflow averages")}
+    </div>
+  );
+}
+
 function rate(r: number | null): number | null { return r == null ? null : Math.round(r * 100); }
 function pctDelta(d: number | null): number { return d == null ? 0 : Math.round(d * 100); }
 function CenterNote({ children }: { children: React.ReactNode }) {
