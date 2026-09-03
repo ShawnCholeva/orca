@@ -33,12 +33,32 @@ export type MeasurementState = (typeof MEASUREMENT_STATES)[number];
 // completes right now — so it gets its own sentence.
 export function labelForMeasurementState(
   state: MeasurementState,
-  opts?: { needed?: number; checked?: number; of?: number; lossy?: boolean }
+  opts?: {
+    needed?: number;
+    // Per-side shortfall, for a threshold expressed against a unit other than
+    // "runs so far" — e.g. a version comparison needing 5 runs per version.
+    have?: number;
+    need?: number;
+    unit?: string;
+    checked?: number;
+    of?: number;
+    // What specifically cannot be formed or checked. `unmeasurable_structural`
+    // covers several situations that share a remedy (none) but not a sentence:
+    // a self-report nothing can verify, a reasoning step with nothing to execute,
+    // a total whose intervals overlap. The caller names its own; the fallback
+    // below asserts no particular cause, because a wrong default here would
+    // state something untrue about the reader's data.
+    reason?: string;
+    lossy?: boolean;
+  }
 ): string | null {
   switch (state) {
     case "measured":
       return null;
     case "insufficient":
+      if (opts?.have != null && opts?.need != null) {
+        return `Needs ${opts.need} ${opts.unit ?? "runs"}; this has ${opts.have}.`;
+      }
       return opts?.needed != null
         ? `Not enough runs yet — ${opts.needed} more and this becomes a number.`
         : "Not enough runs yet for this to mean anything.";
@@ -47,7 +67,7 @@ export function labelForMeasurementState(
         ? `Only ${opts.checked} of ${opts.of} runs were actually checked — too few to measure.`
         : "Too few of these runs were actually checked to measure this.";
     case "unmeasurable_structural":
-      return "Nothing independent can check this — the step is only reporting on itself.";
+      return opts?.reason ?? "This can't be measured, and more runs won't change that.";
     case "uninstrumented":
       return opts?.lossy
         ? "This is being measured and then thrown away. It needs a fix before it can show up here."

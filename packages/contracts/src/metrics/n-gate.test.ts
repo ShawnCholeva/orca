@@ -261,4 +261,28 @@ describe("labelForMeasurementState", () => {
     expect(labelForMeasurementState("insufficient")).toBeTruthy();
     expect(labelForMeasurementState("unmeasurable_coverage")).toBeTruthy();
   });
+
+  // unmeasurable_structural covers several situations that share a remedy but not
+  // a sentence: a self-report nothing can verify, a reasoning step with nothing to
+  // execute, a total whose intervals overlap. One hardcoded sentence would state
+  // something untrue about two of the three.
+  it("lets the caller name what specifically cannot be formed or checked", () => {
+    expect(labelForMeasurementState("unmeasurable_structural", {
+      reason: "no waiting total — two of these prompts overlap",
+    })).toBe("no waiting total — two of these prompts overlap");
+  });
+
+  it("asserts no particular cause when the caller names none", () => {
+    const fallback = labelForMeasurementState("unmeasurable_structural")!;
+    expect(fallback).toBeTruthy();
+    // Must not claim self-reporting, which is only one of the situations.
+    expect(fallback).not.toMatch(/self|report|execut/i);
+  });
+
+  it("frames a per-side shortfall against its own threshold and unit", () => {
+    expect(labelForMeasurementState("insufficient", { have: 3, need: 5, unit: "runs per version" }))
+      .toBe("Needs 5 runs per version; this has 3.");
+    expect(labelForMeasurementState("insufficient", { have: 2, need: 5 }))
+      .toBe("Needs 5 runs; this has 2.");
+  });
 });
