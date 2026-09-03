@@ -2,6 +2,23 @@ import { z } from "zod";
 import { ORCHESTRATION_REQUEST_MAX_PAYLOAD_BYTES, hasMaxSerializedBytes, REASONING_MAX } from "../workflows/index.js";
 import { WorkflowStepOutputSchema } from "../workflows/output-schema.js";
 
+/**
+ * The FROZEN proposal vocabulary: what an LLM may name in `invariantsPreserved`.
+ *
+ * These strings are named after the six metrics dimensions but are NOT coupled to
+ * them — `TemplateMetricsSummary.versionComparison.byDimension` is a loose
+ * `z.record(z.string(), …)`, and `enrichWithRegression` reads it as
+ * `byDimension[dim] ?? null`, so a dimension that no longer exists degrades to "no
+ * signal" rather than breaking. Metrics dimensions may therefore be retired or
+ * redefined; these strings must not follow them.
+ *
+ * The reason to freeze rather than track: a persisted proposal's
+ * `invariants_preserved_json` is re-validated against this enum every time it is
+ * read (`learning/store.ts`). Removing a member makes any stored proposal naming it
+ * fail to parse, breaking the learning rail for that template — a data-loss class of
+ * bug for a forward-only, append-only ledger. Adding a member is safe; removing or
+ * renaming one is not. Guarded by a test in `index.test.ts`.
+ */
 export const DimensionKey = z.enum([
   "trajectoryEfficiency", "verificationStrength", "recovery",
   "stateConsistency", "safetyCompliance", "replayability",

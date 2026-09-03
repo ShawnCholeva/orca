@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DimensionKey,
   ProposeInstructionRevisionProposal,
   TemplateInstructionProposal, ProposeSchemaRevisionProposal,
   JudgeInstructionEditProposal, JudgeInstructionEditRequest, CounterfactualJudgment,
@@ -8,6 +9,22 @@ import {
 import { OrchestrationDecisionKind } from "../workflows/index.js";
 
 describe("learning contracts", () => {
+  // The proposal vocabulary is FROZEN — see the comment on DimensionKey. A stored
+  // proposal's `invariants_preserved_json` re-validates against this enum on read,
+  // so removing or renaming a member makes every proposal naming it unparseable and
+  // breaks the learning rail for that template. The metrics dimensions this enum was
+  // named after may be retired or redefined; these strings may not follow them.
+  it("freezes the DimensionKey proposal vocabulary", () => {
+    expect(DimensionKey.options).toEqual([
+      "trajectoryEfficiency",
+      "verificationStrength",
+      "recovery",
+      "stateConsistency",
+      "safetyCompliance",
+      "replayability",
+    ]);
+  });
+
   it("accepts a valid proposal fill and rejects a non-dimension invariant", () => {
     const ok = ProposeInstructionRevisionProposal.safeParse({
       proposedInstructions: "Do X, then verify Y.",
