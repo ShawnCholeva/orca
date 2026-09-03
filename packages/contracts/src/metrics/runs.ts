@@ -126,6 +126,14 @@ export const RunCost = z.object({
   coverage: z.object({
     reported: z.number().int().nonnegative(),
     total: z.number().int().nonnegative(),
+    /**
+     * Spans that emitted NO completion at all, so they are absent from
+     * `reported`/`total` entirely rather than counted as unreported. A worker gate
+     * is exactly this today — it spawns a real agent and reports nothing — which
+     * means `usd` is understated by an amount the run cannot state. Falls to 0 on
+     * its own once those spans emit, so it needs no regime marker.
+     */
+    silent: z.number().int().nonnegative(),
   }).strict(),
   rollupCheck: RollupCheck,
 }).strict();

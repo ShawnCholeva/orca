@@ -17,7 +17,7 @@ function summary(over: Partial<RunSummary> = {}): RunSummary {
     },
     cost: {
       usd: 61.52, wastedUsd: 50.66, failedUsd: 48.02, supersededUsd: 2.64,
-      coverage: { reported: 10, total: 11 }, rollupCheck: "matches",
+      coverage: { reported: 10, total: 11, silent: 0 }, rollupCheck: "matches",
     },
     stepsDelivered: 8, stepsBlocked: 0, spanRelaunches: 1, retriedCompletions: 5,
     openInterventions: 0, ...over,
@@ -58,10 +58,18 @@ describe("cost", () => {
     // reader takes the number and skips the caption.
     render(<RunRow onOpen={() => {}} run={summary({
       cost: { usd: 0, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
-              coverage: { reported: 0, total: 0 }, rollupCheck: "not_applicable" },
+              coverage: { reported: 0, total: 0, silent: 0 }, rollupCheck: "not_applicable" },
     })} />);
     expect(document.body.textContent).not.toContain("$0.00");
     expect(document.body.textContent).toContain("isn't being recorded yet");
+  });
+
+  it("says the total is understated when a node spent money and reported nothing", () => {
+    render(<RunRow onOpen={() => {}} run={summary({
+      cost: { usd: 5, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
+              coverage: { reported: 3, total: 3, silent: 2 }, rollupCheck: "matches" },
+    })} />);
+    expect(document.body.textContent).toContain("2 more nodes spent money and reported nothing");
   });
 
   it("states coverage as a count, never as an interval over a census", () => {
@@ -70,7 +78,7 @@ describe("cost", () => {
     // interval is the facts-vs-estimates inversion in the other direction.
     render(<RunRow onOpen={() => {}} run={summary({
       cost: { usd: 5, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
-              coverage: { reported: 3, total: 3 }, rollupCheck: "matches" },
+              coverage: { reported: 3, total: 3, silent: 0 }, rollupCheck: "matches" },
     })} />);
     const text = document.body.textContent ?? "";
     expect(text).toContain("3 of 3 nodes reported a cost");

@@ -309,12 +309,24 @@ describe("computeCost", () => {
     expect(c.failedUsd + c.supersededUsd).toBeCloseTo(c.wastedUsd, 5);
   });
 
+  it("counts a span that emitted nothing at all as silent, not as unreported", () => {
+    // A worker gate spawns a real agent, spends real money and emits no
+    // step_complete, so it is absent from reported/total entirely — the run total
+    // is understated by an amount the run itself cannot state. Falls to 0 on its
+    // own once gates emit, so it needs no regime marker to maintain.
+    const c = computeCost(
+      [complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", stepRunId: "sr-1", usd: 5 })],
+      [stepRun({ stepRunId: "sr-1" }), stepRun({ stepRunId: "sr-gate", stepTemplateId: "__gate__:critique" })],
+    );
+    expect(c.coverage).toEqual({ reported: 1, total: 1, silent: 1 });
+  });
+
   it("counts a completion with no cost in the coverage denominator, never as zero", () => {
     const c = computeCost([
       complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", stepTemplateId: "a", usd: 5 }),
       complete({ id: "c2", at: "2026-09-01T00:20:00.000Z", stepTemplateId: "b", usd: null }),
     ]);
-    expect(c.coverage).toEqual({ reported: 1, total: 2 });
+    expect(c.coverage).toEqual({ reported: 1, total: 2, silent: 0 });
     expect(c.usd).toBe(5);
   });
 });

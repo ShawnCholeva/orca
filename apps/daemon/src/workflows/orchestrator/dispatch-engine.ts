@@ -2445,6 +2445,30 @@ export class DispatchEngine {
     })();
     publishStaged(options.bus, stagedEvents);
 
+    // The surrogate is a real span: it has a step_run row, an attempt, a
+    // fingerprint, an operator selection and a start/finish. Bracket it like any
+    // other step so the ledger can show what a gate cost and how long it took.
+    try {
+      emitStepLaunch(
+        { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
+        {
+          goalId: goal.id,
+          workflowRunId: run.id,
+          workflowStepRunId: surrogateId,
+          stateDeps: {
+            read_set: [],
+            write_set: [],
+            assumptions: [],
+            version_deps: [],
+            conflict_policy: conflictPolicyForGoal(db, goal.id),
+            conflicts: [],
+          },
+        }
+      );
+    } catch (err) {
+      console.error("emitStepLaunch (gate surrogate) failed", err);
+    }
+
     const objective = composeGateWorkerPrompt(gateRequest);
     // A launch throw or a failed delivery means the worker will never receive its
     // objective and can never emit a verdict — the awaitingWorker park would hang
@@ -2509,28 +2533,63 @@ export class DispatchEngine {
     const stashRow = run
       ? (db.prepare("SELECT pending_gate_route_json FROM workflow_runs WHERE id = ?").get(run.id) as { pending_gate_route_json: string | null } | undefined)
       : undefined;
-    const closeSurrogate = () =>
+    // A worker gate spawns a real agent on the user's subscription, so its spend is
+    // ingested into SessionCostAccumulator like any worker's — but nothing drained
+    // it, because gates emitted no step_complete. It accrued in RAM and died with
+    // the process: `captured-but-discarded`. Emitting here is the drain.
+    //
+    // Deliberately inside closeSurrogate rather than on the happy path: this is
+    // called from five sites, four of which are early returns, and gate cost would
+    // leak on every abort otherwise.
+    const closeSurrogate = (failureCode: FailureCode | null = null) => {
       db.prepare("UPDATE workflow_step_runs SET status = 'passed', finished_at = ? WHERE id = ?").run(now(), surrogateStepRun.id);
+      try {
+        const sessionRow = db
+          .prepare("SELECT id FROM sessions WHERE workflow_step_run_id = ? ORDER BY created_at DESC LIMIT 1")
+          .get(surrogateStepRun.id) as { id: string } | undefined;
+        emitStepComplete(
+          { db, bus: options.bus ?? new EventBus(), now, idFactory: options.idFactory },
+          {
+            goalId: surrogateStepRun.goal_id,
+            workflowRunId: surrogateStepRun.workflow_run_id,
+            workflowStepRunId: surrogateStepRun.id,
+            // A gate runs no sensors. `evidence: null` is a true statement about
+            // what happened, not a gap — the gate's verdict lives in
+            // workflow_gate_decisions and is an LLM judgement, not an oracle.
+            evidence: null,
+            telemetry: buildTelemetry(
+              this.otlpAccumulator,
+              sessionRow?.id,
+              failureCode === null ? "succeeded" : "failed",
+              failureCode,
+              null
+            ),
+          }
+        );
+      } catch (err) {
+        console.error("emitStepComplete (gate surrogate) failed", err);
+      }
+    };
     if (!run || run.status !== "active" || !stashRow?.pending_gate_route_json) {
-      closeSurrogate();
+      closeSurrogate("output_unavailable");
       return;
     }
     let stash: { awaitingWorker?: boolean; gateNodeId: string; sourceStepRunId: string };
     try {
       stash = JSON.parse(stashRow.pending_gate_route_json);
     } catch {
-      closeSurrogate();
+      closeSurrogate("output_unavailable");
       return;
     }
     if (!stash.awaitingWorker) {
       // Not an in-flight worker gate (already a human park, or something else).
-      closeSurrogate();
+      closeSurrogate("output_unavailable");
       return;
     }
 
     const template = loadRunTemplate(db, run);
     if (!template) {
-      closeSurrogate();
+      closeSurrogate("output_unavailable");
       return;
     }
     const goal = readGoal(db, run.goalId);

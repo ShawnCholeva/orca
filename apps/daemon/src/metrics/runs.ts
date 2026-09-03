@@ -4,6 +4,7 @@ import type {
 } from "@orca/contracts";
 import { classifyTier } from "./verification.js";
 import { sourcesPassed } from "./source-signals.js";
+import { INFRA_REASON_MARKERS } from "./infra-failure.js";
 import type { ActivityEvent, RunRow, RunStepRunRow, RunTransition } from "./runs-fetch.js";
 
 // The run-trace projection. Pure functions over already-fetched rows; see
@@ -198,7 +199,7 @@ export function computeDurations(input: {
 
 const CENT = 0.005;
 
-export function computeCost(transitions: RunTransition[]): RunCost {
+export function computeCost(transitions: RunTransition[], stepRuns: RunStepRunRow[] = []): RunCost {
   const completes = transitions.filter((t) => t.transition.boundary === "step_complete");
   const usd = completes.reduce((acc, t) => acc + (t.transition.telemetry?.cost?.usd ?? 0), 0);
   const reported = completes.filter((t) => t.transition.telemetry?.cost != null).length;
@@ -236,12 +237,23 @@ export function computeCost(transitions: RunTransition[]): RunCost {
   const rollupCheck: RunCost["rollupCheck"] =
     rollup === undefined ? "not_applicable" : Math.abs(rollup - usd) < CENT ? "matches" : "diverged";
 
+  // Spans that emitted no completion at all are invisible to `reported/total`,
+  // whose denominator is completions. A worker gate is exactly that today: it
+  // spawns a real agent, spends real money, and reports nothing — so the run total
+  // is understated by an amount the run itself cannot state. Counting them keeps
+  // the gap visible per run, and the number falls to 0 on its own once gates emit,
+  // rather than needing a regime marker that would then have to be maintained.
+  const completedSpanIds = new Set(
+    completes.map((t) => t.transition.workflowStepRunId).filter((id): id is string => id != null)
+  );
+  const silent = stepRuns.filter((s) => !completedSpanIds.has(s.stepRunId)).length;
+
   return {
     usd,
     wastedUsd: failedUsd + supersededUsd,
     failedUsd,
     supersededUsd,
-    coverage: { reported, total: completes.length },
+    coverage: { reported, total: completes.length, silent },
     rollupCheck,
   };
 }
@@ -342,8 +354,6 @@ const INFRA_FAILURE_CODES = new Set([
   "provider_error", "daemon_restart", "session_not_terminal", "timeout",
   "internal_error", "output_unavailable", "source_truncated",
 ]);
-/** Free-text blocked_reason markers the daemon writes for substrate failures. */
-const INFRA_REASON_MARKERS = ["worker_exited_no_signal", "worker_stalled", "crashed", "no progress after"];
 
 /**
  * Why the run stopped — and specifically whether the WORKFLOW stopped it or the
@@ -367,8 +377,11 @@ export function deriveTermination(
   const reasons = [run.blockedReason, ...stepRuns.map((s) => s.blockedReason)].filter(
     (r): r is string => r != null && r.length > 0
   );
+  // Shares infra-failure.ts's marker list rather than keeping a second copy: a
+  // marker added to one and not the other would silently split the taxonomy at
+  // run level versus step level.
   const infraReason = reasons.find((r) =>
-    INFRA_REASON_MARKERS.some((m) => r.toLowerCase().includes(m))
+    INFRA_REASON_MARKERS.some(({ marker }) => r.toLowerCase().includes(marker))
   );
   if (infraReason !== undefined) return { cause: "infrastructure_killed", evidence: infraReason };
 
@@ -407,7 +420,7 @@ export function buildRunSummary(input: {
     terminationCause: termination.cause,
     terminationEvidence: termination.evidence,
     durations: computeDurations({ run, stepRuns, transitions, interventions, nowMs }),
-    cost: computeCost(transitions),
+    cost: computeCost(transitions, stepRuns),
     stepsDelivered: stepRuns.filter((s) => DELIVERED.has(s.status)).length,
     stepsBlocked: stepRuns.filter((s) => BLOCKED.has(s.status)).length,
     spanRelaunches: spans.reduce((acc, s) => acc + s.restarts, 0),

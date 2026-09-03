@@ -107,7 +107,7 @@ function DurationTerms({ d }: { d: RunSummary["durations"] }) {
 // ── cost ─────────────────────────────────────────────────────────────────────
 
 function CostCell({ cost }: { cost: RunSummary["cost"] }) {
-  const { reported, total } = cost.coverage;
+  const { reported, total, silent } = cost.coverage;
   // Absence is never zero. With nothing reported there is no total to render —
   // showing $0.00 with an explanation beneath it is still showing $0.00.
   if (reported === 0) {
@@ -136,6 +136,16 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
       <span style={{ fontSize: 12, color: reported === total ? "var(--text-2)" : "var(--warn)" }} className="mono">
         {reported} of {total} nodes reported a cost
       </span>
+      {silent > 0 && (
+        // These nodes are absent from the ratio above, not counted as unreported —
+        // so this total is understated by an amount the run cannot state. Says so
+        // rather than letting the figure read as complete.
+        <MeasurementLabel
+          state="uninstrumented"
+          lossy
+          fix={`${silent} more node${silent === 1 ? "" : "s"} spent money and reported nothing, so this total is low. Emit step_launch/step_complete on the gate surrogate.`}
+        />
+      )}
       {cost.rollupCheck === "not_applicable" && (
         <MeasurementLabel
           state="unmeasurable_structural"
