@@ -50,7 +50,9 @@ holds it. **Status: `open` unless stated.**
 | C6 | Ledger headline over-claimed ("killed by the daemon") past what session history supports. | **FIXED** `1ea4900` |
 | C7 | Gate spans: `unaccountedMs` not computed, so four terms summed to 0 against nonzero elapsed. Caught by the `IntervalBar` mismatch guard on live data. | **FIXED** `1ea4900` |
 | C8 | Gate spans rendered as raw `__gate__:critique`. | **FIXED** `1ea4900` |
-| C9 | `"1 runs"` pluralization in the aggregate view. | OPEN |
+| C9 | `"1 runs"` pluralization in the aggregate view. | **FIXED** `88fce5e` |
+| C11 | **The aggregate view still renders a bare em dash for null metrics.** Its own test — `"renders em dash for null metrics (not 0 / F)"` — passes and honestly describes today's screen, but an em dash is exactly the untyped absence this project exists to remove. Flagged rather than silently ported during the default flip; converting the aggregate view to typed nulls is its own piece of work. | OPEN |
+| C12 | **Metrics tab now defaults to the ledger.** Both the headline and the "can't tell you" block derive from one exported `workflowEvidenceRuns()` rather than two duplicate predicates that happened to agree. | **DONE** `88fce5e` |
 | C10 | Copy dates were UTC; screen renders local. Screen is right — copy needs updating. | OPEN (copy) |
 
 ## C+. Executable axis — the harness over-crediting itself
