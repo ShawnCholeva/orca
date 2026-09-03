@@ -585,8 +585,11 @@ export function listGoals(): GoalListItem[] {
 export function getGoalById(db: Database.Database, id: string): Goal | null {
   const stmts = ensureStmts(db);
   const row = stmts.selectGoalById.get(id) as GoalRow | undefined;
-  if (!row || row.archived_at !== null) {
+  if (!row) {
     return null;
   }
+  // Archived goals stay readable: the workspaces view links to them, and every
+  // sub-resource route already serves them. Mutations guard on archived_at
+  // themselves and reject with their own error.
   return rowToGoal(row);
 }

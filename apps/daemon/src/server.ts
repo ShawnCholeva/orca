@@ -277,6 +277,7 @@ import { registerAgentHookRoutes } from './agent-hooks/routes.js';
 import { WorkerSessionManager } from './workflows/orchestrator/worker-session.js';
 import { defaultTmuxRunner } from './tmux/runner.js';
 import { reapOrphanTmuxSessions, workerSessionIdsForRun } from './sessions/reap-orphan-sessions.js';
+import { liveSessionSql } from './sessions/live-session.js';
 import { resolveAgentProvider } from './orchestrator-llm/providers/registry.js';
 import { WorkerQuestionStore } from './workflows/orchestrator/worker-questions.js';
 import { PermissionApprovalStore } from './workflows/orchestrator/permission-approvals.js';
@@ -893,7 +894,7 @@ export function createServer(
       listActiveRuns: async () => {
         const rows = db.prepare(`
           SELECT wr.id AS run_id, wr.goal_id, wr.current_step_run_id,
-                 (SELECT s.id FROM sessions s WHERE s.workflow_step_run_id = wr.current_step_run_id AND s.status IN ('running','starting') ORDER BY s.created_at DESC LIMIT 1) AS session_id,
+                 (SELECT s.id FROM sessions s WHERE s.workflow_step_run_id = wr.current_step_run_id AND ${liveSessionSql('s.status')} ORDER BY s.created_at DESC LIMIT 1) AS session_id,
                  (SELECT ws.pending_provider_recovery_json IS NOT NULL FROM workflow_step_runs ws WHERE ws.id = wr.current_step_run_id) AS provider_recovery_pending
           FROM workflow_runs wr
           WHERE wr.status = 'active'
@@ -1223,7 +1224,9 @@ export function createServer(
       return apiError('not_found', `Goal not found: ${id}`);
     }
 
-    if (extractionRunner) {
+    // Archived goals are readable but inert: opening one must not kick off
+    // extraction work for a goal the user has put away.
+    if (extractionRunner && goal.archivedAt === null) {
       try {
         enqueueEligibleForGoal(
           { db, bus: eventBus, outputStore: sessionOutputStore, runner: extractionRunner },

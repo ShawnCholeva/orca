@@ -1054,6 +1054,17 @@ describe("archiveGoal", () => {
     expect(JSON.parse(eventRow!.payload)).toEqual({});
   });
 
+  it("keeps an archived goal readable via getGoalById", async () => {
+    const { db, ctx } = setup();
+    const created = await createGoal({ title: "ToArchive", intent: "test intent" }, ctx);
+    archiveGoal(created.id);
+
+    const fetched = getGoalById(db, created.id);
+    expect(fetched?.id).toBe(created.id);
+    expect(fetched?.status).toBe("archived");
+    expect(fetched?.archivedAt).not.toBeNull();
+  });
+
   it("reaps the goal's gate_approval_counts rows on archive", async () => {
     const { db, ctx } = setup();
     const created = await createGoal({ title: "X", intent: "test intent" }, ctx);

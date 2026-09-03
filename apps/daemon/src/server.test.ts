@@ -1292,7 +1292,7 @@ describe('goal refinement and workspace routes', () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it('GET /v1/goals/:id returns 404 for archived goal', async () => {
+  it('GET /v1/goals/:id still returns an archived goal', async () => {
     const created = CreateGoalResponse.parse(JSON.parse(
       (await server.inject({
         method: 'POST', url: '/v1/goals',
@@ -1303,7 +1303,11 @@ describe('goal refinement and workspace routes', () => {
     await server.inject({ method: 'POST', url: `/v1/goals/${created.goal.id}/archive`, headers: AUTH_HEADERS });
 
     const res = await server.inject({ method: 'GET', url: `/v1/goals/${created.goal.id}`, headers: AUTH_HEADERS });
-    expect(res.statusCode).toBe(404);
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as { goal: { id: string; status: string; archivedAt: string | null } };
+    expect(body.goal.id).toBe(created.goal.id);
+    expect(body.goal.status).toBe('archived');
+    expect(body.goal.archivedAt).not.toBeNull();
   });
 
   it('GET /v1/goals/:id returns bundle for refined goal with 2 workspaces', async () => {
