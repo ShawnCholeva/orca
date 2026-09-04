@@ -37,6 +37,25 @@
   --sp-6: 32px;
 }
 
+/* Form controls do not inherit type. A <button> takes the UA stylesheet's font
+ * unless something tells it otherwise, so a bare button inside a themed container
+ * renders Arial at 13.3333px no matter what its parent says — and 13.3333px is not
+ * a value anyone chose, it is what you get when nothing sets one.
+ *
+ * This was 103 of 163 elements on the Metrics tab, against 18 in Inter: the run
+ * rows are buttons, so the whole run list rendered in the wrong typeface at a
+ * browser-default size beside correctly-styled chrome. It also produced most of the
+ * off-scale sizes, since the children of those buttons inherited the default too.
+ *
+ * Note what this means for the type-scale test: it asserts over source literals,
+ * and nothing in the source was wrong. A default that arrives from the UA
+ * stylesheet is invisible to any check that reads the code rather than the
+ * rendered result. */
+button, input, select, textarea, optgroup {
+  font-family: inherit;
+  font-size: inherit;
+}
+
 html, body, #root {
   height: 100%;
 }
