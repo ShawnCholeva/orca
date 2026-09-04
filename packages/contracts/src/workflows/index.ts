@@ -2163,3 +2163,80 @@ export const ListWorkflowRunCompositionsResponse = z.object({
   compositions: z.array(WorkflowRunComposition),
 }).strict();
 export type ListWorkflowRunCompositionsResponse = z.infer<typeof ListWorkflowRunCompositionsResponse>;
+
+/**
+ * Why a step run stopped, as a STRUCTURED value rather than a sentence.
+ *
+ * `blocked_reason` is free text with a count interpolated into it — "crashed 3
+ * times (worker_exited_no_signal)". Classifying it downstream means matching
+ * English, which is fine as an observational signal and not fine as the basis
+ * for a headline claim about whose fault a stop was.
+ *
+ * The value was never missing: `service.ts` composes that sentence FROM
+ * `sess.failure_reason`, which is already one of these. The classifier was
+ * re-deriving, from English, a fact the writer held in a variable and discarded.
+ * This carries it instead.
+ *
+ * `substrate` vs `workflow` is the load-bearing split: a run the daemon killed
+ * says nothing about the workflow, and pooling the two reports the daemon while
+ * naming the workflow.
+ */
+export const StepBlockedCode = z.enum([
+  // substrate — the daemon or the provider failed
+  "worker_exited_no_signal",
+  "worker_stalled",
+  "crash_cap",
+  "provider_error",
+  // human or operator
+  "user_declared_stuck",
+  "goal_archived",
+  "run_cancelled",
+  // workflow — the workflow's own logic stopped it
+  "revise_cap",
+  "guardrail_denied",
+  "evidence_veto",
+  "refute_veto",
+  "unknown",
+]);
+export type StepBlockedCode = z.infer<typeof StepBlockedCode>;
+
+const SUBSTRATE_BLOCKED_CODES = new Set<StepBlockedCode>([
+  "worker_exited_no_signal", "worker_stalled", "crash_cap", "provider_error",
+]);
+
+/** True when the substrate stopped the step rather than the workflow deciding to. */
+export function isSubstrateBlockedCode(code: StepBlockedCode): boolean {
+  return SUBSTRATE_BLOCKED_CODES.has(code);
+}
+
+/**
+ * A step's stop cause AND how we know it. `inferred` means the row predates
+ * `blocked_code` and the cause was matched out of the free-text reason — an
+ * observational signal, never a basis for a headline claim. It goes false on its
+ * own as new rows accumulate; nothing needs to clear it.
+ */
+export const StepBlockedCause = z.object({
+  code: StepBlockedCode,
+  inferred: z.boolean(),
+}).strict();
+export type StepBlockedCause = z.infer<typeof StepBlockedCause>;
+
+/**
+ * The scope a claim covers, travelling as data so a copy layer cannot render the
+ * claim without its terms — the prose form of "ship the terms, not just the
+ * result". `inferred` here is true when ANY row in scope was inferred: a claim is
+ * only as verified as its weakest row.
+ *
+ * It exists because provenance and coverage are different axes. "Every step
+ * passed first try" can be perfectly verified and still overstated: it is a
+ * census over n steps of one template for one user, not a property of the
+ * workflow. A flattering claim on an inferred basis is the worst pairing
+ * available, because neither half prompts anyone to check it.
+ */
+export const ClaimScope = z.object({
+  steps: z.number().int().nonnegative(),
+  runs: z.number().int().nonnegative(),
+  templates: z.number().int().nonnegative(),
+  inferred: z.boolean(),
+}).strict();
+export type ClaimScope = z.infer<typeof ClaimScope>;

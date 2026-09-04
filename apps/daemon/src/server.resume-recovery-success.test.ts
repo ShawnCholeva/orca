@@ -131,7 +131,7 @@ describe("resume respawn success (server.ts wiring)", () => {
     const ctx: WorkflowRunUsecaseCtx = { db, bus: eventBus, now: () => NOW, idFactory: () => `ctx-fixed-id-${++ctxNextId}` };
     const run = startWorkflowRun(ctx, { goalId: "goal-1", templateId: "orca/engineering" });
     const terminalStepRunId = run.currentStepRunId!;
-    markStepBlocked(db, () => NOW, terminalStepRunId, "no progress after 3 restarts");
+    markStepBlocked(db, () => NOW, terminalStepRunId, "no progress after 3 restarts", "unknown");
     markWorkflowRunBlocked(ctx, run.id, "no progress after 3 restarts");
 
     const response = await server.inject({

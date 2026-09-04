@@ -206,7 +206,7 @@ describe("workflow run usecases", () => {
     const run = startWorkflowRun(ctx, { goalId: "goal-1", templateId: "orca/engineering" });
     const stepRunId = run.currentStepRunId!;
 
-    markStepBlocked(db, () => NOW, stepRunId, "no progress after 3 restarts");
+    markStepBlocked(db, () => NOW, stepRunId, "no progress after 3 restarts", "unknown");
     markWorkflowRunBlocked(ctx, run.id, "no progress after 3 restarts");
 
     const resumed = resumeWorkflowRun(ctx, run.id);
@@ -238,7 +238,7 @@ describe("workflow run usecases", () => {
     // is a distinct graph node id, not the step template id ("intake").
     db.prepare("UPDATE workflow_runs SET current_node_id = 'graph-node-7' WHERE id = ?").run(run.id);
 
-    markStepBlocked(db, () => NOW, stepRunId, "no progress after 3 restarts");
+    markStepBlocked(db, () => NOW, stepRunId, "no progress after 3 restarts", "unknown");
     markWorkflowRunBlocked(ctx, run.id, "no progress after 3 restarts");
 
     const resumed = resumeWorkflowRun(ctx, run.id);

@@ -9,7 +9,7 @@ import type {
 import {
   WORKFLOW_FAILURE_MAX_MESSAGE_CHARS,
   WorkflowStepResult as WorkflowStepResultSchema,
-} from "@orca/contracts";
+  StepBlockedCode,} from "@orca/contracts";
 import { redactSecrets } from "../../memory/normalize.js";
 import { appendWorkflowEvent } from "../events.js";
 import { getWorkflowRunById } from "../runs/projection.js";
@@ -430,6 +430,11 @@ export function markStepBlocked(
   now: () => string,
   stepRunId: string,
   reason: string,
+  // The structured twin of `reason`. Every caller already knows it — the one that
+  // composes English builds that sentence from this very value — so it is
+  // required rather than optional: an optional code would drift back to null at
+  // the next call site somebody adds.
+  code: StepBlockedCode,
   eventOptions?: StepEventOptions
 ): WorkflowStepRunT {
   return db.transaction(() => {
@@ -441,8 +446,8 @@ export function markStepBlocked(
     const raw = readStepRow(db, stepRunId);
     const result = terminalStepResult(db, raw, "blocked", timestamp);
     db.prepare(
-      "UPDATE workflow_step_runs SET status = 'blocked', blocked_reason = ?, finished_at = ?, step_result_json = ? WHERE id = ?"
-    ).run(sanitizeReason(reason), timestamp, serializeStepResult(result), stepRunId);
+      "UPDATE workflow_step_runs SET status = 'blocked', blocked_reason = ?, blocked_code = ?, finished_at = ?, step_result_json = ? WHERE id = ?"
+    ).run(sanitizeReason(reason), code, timestamp, serializeStepResult(result), stepRunId);
     emitEvent(
       db,
       "workflow.step.blocked",

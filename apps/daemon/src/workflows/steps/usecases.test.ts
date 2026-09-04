@@ -252,7 +252,7 @@ describe("workflow step usecases", () => {
     const initialStep = getStep(db, initialStepId)!;
     expect(initialStep.attempt).toBe(1);
 
-    markStepBlocked(db, () => NOW, initialStepId, "Need <secret> detail");
+    markStepBlocked(db, () => NOW, initialStepId, "Need <secret> detail", "unknown");
     markWorkflowRunBlocked(runCtx, run.id, "waiting for operator");
     const resumed = resumeWorkflowRun(runCtx, run.id);
     expect(resumed.status).toBe("active");
@@ -382,7 +382,7 @@ describe("workflow step usecases", () => {
     const run = startWorkflowRun(runCtx, { goalId: "goal-1", templateId: ENGINEERING_ID });
     const first = getStep(db, run.currentStepRunId!)!;
 
-    markStepBlocked(db, () => NOW, first.id, "Need input", {
+    markStepBlocked(db, () => NOW, first.id, "Need input", "unknown", {
       activityCtx: runCtx,
     });
 

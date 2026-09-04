@@ -289,7 +289,7 @@ export function cancelWorkflowRun(
       )
       .all(...cancelledSet) as { id: string }[];
     for (const s of inFlight) {
-      markStepBlocked(ctx.db, () => now, s.id, "run_cancelled", {
+      markStepBlocked(ctx.db, () => now, s.id, "run_cancelled", "run_cancelled", {
         idFactory: ctx.idFactory,
         stagedEvents,
       });

@@ -1,0 +1,21 @@
+-- 0066_step_run_blocked_code.sql
+-- The structured reason a step run stopped, alongside the human sentence.
+--
+-- `blocked_reason` is free text with a count interpolated into it — "crashed 3
+-- times (worker_exited_no_signal)" — so the only way to ask "was this the
+-- workflow or the daemon?" was to match English. That is acceptable as an
+-- observational signal and not as the basis for a headline claim about whose
+-- fault a stop was, which is what it was about to become.
+--
+-- The value was never missing. `service.ts` composes that sentence FROM
+-- `sess.failure_reason`, which is already structured; the classifier downstream
+-- was re-deriving, from English, a fact the writer held in a variable and threw
+-- away. This column carries it instead.
+--
+-- Additive and nullable ON PURPOSE. Rows written before this land keep
+-- `blocked_code IS NULL`, and a reader must treat those as INFERRED — classified
+-- by matching the sentence — rather than backfilling them. Backfilling would mix
+-- a verified signal with a guessed one under one name, which is the exact defect
+-- the column exists to remove. The null count falls on its own as new rows
+-- accumulate.
+ALTER TABLE workflow_step_runs ADD COLUMN blocked_code TEXT;

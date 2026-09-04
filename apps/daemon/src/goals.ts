@@ -465,7 +465,7 @@ export function archiveGoal(id: string): Goal {
       )
       .all(id) as { id: string }[];
     for (const s of inFlight) {
-      markStepBlocked(db, () => now, s.id, "goal_archived", { stagedEvents: stepBlockedEvents });
+      markStepBlocked(db, () => now, s.id, "goal_archived", "goal_archived", { stagedEvents: stepBlockedEvents });
     }
 
     updatedRow = stmts.selectGoalById.get(id) as GoalRow;

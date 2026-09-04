@@ -203,6 +203,7 @@ describe('context migration 0006_context.sql', () => {
       '0063_goal_success_criteria.sql',
       '0064_step_run_stall_rescues.sql',
       '0065_step_run_awaiting_user.sql',
+      '0066_step_run_blocked_code.sql',
     ]);
 
     const tables = (
@@ -335,6 +336,7 @@ describe('context migration 0006_context.sql', () => {
       '0063_goal_success_criteria.sql',
       '0064_step_run_stall_rescues.sql',
       '0065_step_run_awaiting_user.sql',
+      '0066_step_run_blocked_code.sql',
     ]);
 
     const counts = {

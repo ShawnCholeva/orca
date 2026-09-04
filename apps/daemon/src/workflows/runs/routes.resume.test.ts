@@ -104,7 +104,7 @@ describe("POST /v1/goals/:goalId/workflow-runs/:id/resume", () => {
 
     // A run blocked at the rescue cap: its current step run is terminal (blocked),
     // and the run itself is blocked — the exact scenario the cap path leaves behind.
-    markStepBlocked(db, () => NOW, terminalStepRunId, "no progress after 3 restarts");
+    markStepBlocked(db, () => NOW, terminalStepRunId, "no progress after 3 restarts", "unknown");
     markWorkflowRunBlocked(ctx, run.id, "no progress after 3 restarts");
 
     const calls: Array<{ goalId: string; runId: string; stepRunId: string }> = [];
@@ -186,7 +186,7 @@ describe("POST /v1/goals/:goalId/workflow-runs/:id/resume", () => {
 
     const run = startWorkflowRun(ctx, { goalId: "goal-1", templateId: "orca/engineering" });
     const terminalStepRunId = run.currentStepRunId!;
-    markStepBlocked(db, () => NOW, terminalStepRunId, "no progress after 3 restarts");
+    markStepBlocked(db, () => NOW, terminalStepRunId, "no progress after 3 restarts", "unknown");
     markWorkflowRunBlocked(ctx, run.id, "no progress after 3 restarts");
 
     const app: FastifyInstance = Fastify();

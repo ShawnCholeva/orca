@@ -17,6 +17,7 @@ import {
   type WorkflowTemplate as WorkflowTemplateT,
   type TransitionStatus,
   type StateDepsFacet,
+  type StepBlockedCode,
 } from "@orca/contracts";
 
 import { EventBus } from "../../events.js";
@@ -382,7 +383,12 @@ export class OrchestratorService {
           options
         );
         const stagedEvents: DomainEvent[] = [];
-        markStepBlocked(db, now, stepRun.id, reason, {
+        // The sentence above is composed FROM this value; pass it structured
+        // rather than making a reader match the sentence back out of English.
+        const blockedCode: StepBlockedCode = stalled
+          ? "worker_stalled"
+          : ((sess.failure_reason as StepBlockedCode | null) ?? "crash_cap");
+        markStepBlocked(db, now, stepRun.id, reason, blockedCode, {
           idFactory: options.idFactory,
           stagedEvents,
           ...(options.bus
