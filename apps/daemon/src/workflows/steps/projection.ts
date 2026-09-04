@@ -27,16 +27,17 @@ interface WorkflowStepRunRow {
   operator_selected_at: string | null;
   orchestrator_phase: string | null;
   pending_judge_json: string | null;
+  awaiting_user: number;
   activity_status: string | null;
   activity_source_kind: string | null;
   step_result_json: string | null;
 }
 
-// Aliased because the live-activity join needs one. `awaiting_user` is gone from
-// the list: the column has a single writer and four park paths that never reach
-// it, so the fact is read from the activity that already holds it.
+// Aliased because the live-activity join needs one. Both `awaiting_user` and the
+// live activity are selected: they cover different halves of "parked on the
+// human" (chat replies vs parks) and neither is complete alone.
 const STEP_RUN_COLUMNS =
-  "wsr.id, wsr.goal_id, wsr.workflow_run_id, wsr.step_template_id, wsr.ordinal, wsr.attempt, wsr.status, wsr.started_at, wsr.finished_at, wsr.blocked_reason, wsr.selected_operator_id, wsr.selected_provider_id, wsr.selected_model_id, wsr.operator_selected_at, wsr.orchestrator_phase, wsr.pending_judge_json, wsr.step_result_json, " +
+  "wsr.id, wsr.goal_id, wsr.workflow_run_id, wsr.step_template_id, wsr.ordinal, wsr.attempt, wsr.status, wsr.started_at, wsr.finished_at, wsr.blocked_reason, wsr.selected_operator_id, wsr.selected_provider_id, wsr.selected_model_id, wsr.operator_selected_at, wsr.orchestrator_phase, wsr.pending_judge_json, wsr.awaiting_user, wsr.step_result_json, " +
   LIVE_ACTIVITY_COLUMNS;
 
 const STEP_RUN_FROM = `FROM workflow_step_runs wsr ${liveActivityJoin("wsr")}`;
@@ -81,7 +82,11 @@ function rowToStepRun(row: WorkflowStepRunRow): WorkflowStepRunT {
     operatorSelectedAt: row.operator_selected_at,
     orchestratorPhase: row.orchestrator_phase as never,
     judgePending: row.pending_judge_json != null,
-    awaitingUser: isAwaitingUser(row.activity_status, row.activity_source_kind),
+    awaitingUser: isAwaitingUser(
+      row.activity_status,
+      row.activity_source_kind,
+      row.awaiting_user === 1
+    ),
     stepResult,
   });
 }

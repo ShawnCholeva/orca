@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { isAwaitingUser } from "../../activities/awaiting-user.js";
+import { isParkedOnActivity } from "../../activities/awaiting-user.js";
 
 import type { EventBus } from "../../events.js";
 import { failSession } from "../../sessions/runtime.js";
@@ -182,10 +182,12 @@ export function buildLivenessWatchdogDeps(
         startedAtMs: r.started_at ? Date.parse(r.started_at) : null,
         outputSeq: r.output_seq,
         activityAtMs: r.activity_updated_at ? Date.parse(r.activity_updated_at) : null,
-        // Shares the ONE definition of "parked on the human" with the step-run
-        // projection. A second copy is how the cached column and this predicate
-        // drifted apart in the first place.
-        systemTurn: !isAwaitingUser(r.activity_status, r.activity_source_kind),
+        // Shares the PARK half of "parked on the human" with the step-run
+        // projection, rather than keeping a second copy of the predicate. It is
+        // deliberately the park half only: the stall clock asks whether the agent
+        // is stuck, and a chat reply awaiting the user is a different question
+        // this sensor has never claimed to answer.
+        systemTurn: !isParkedOnActivity(r.activity_status, r.activity_source_kind),
       }));
     },
     hasStepOutput: (stepRunId) =>

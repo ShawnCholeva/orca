@@ -1,39 +1,59 @@
 /**
- * Is a step run parked on the HUMAN? One definition, for every reader.
+ * Is a step run parked on the HUMAN?
  *
- * It used to be two, and they disagreed. `workflow_step_runs.awaiting_user` is a
- * cached column with a SINGLE writer — `setAwaitingUser`, called after an
- * orchestrator action and discriminating on whether that action posted a chat
- * reply. But at least four paths park a step without an orchestrator action:
- * `pauseForStepConfirmation`, `pauseForGateDecision`, `pauseForMarkDone`, and
- * `permission_pending`. A park created by any of them leaves the column at
- * whatever the last orchestrator action set.
+ * TWO SOURCES, EACH HOLDING HALF THE FACT. This was originally read as "the
+ * column is a stale cache of what `activities` already knows", and that is wrong
+ * in a way worth recording, because the wrong reading produces a plausible fix
+ * that trades one false answer for another.
  *
- * Live consequence: a run sat with `awaiting_user = 0` while its activity had
- * been `paused_for_input` for 39 hours — so the ledger would say "parked 39h"
- * while the chat said "working", and whichever the reader saw second, they would
- * stop trusting both. Two surfaces contradicting each other about one fact is a
- * defect regardless of which is right.
+ *   `activities`                     covers PARKS — a confirmation card, a gate
+ *                                    decision, a worker question, mark-done, a
+ *                                    pending tool permission.
+ *   `workflow_step_runs.awaiting_user` covers CHAT REPLIES — the orchestrator
+ *                                    answered, paraphrased or escalated to the
+ *                                    user and stopped. `paraphrase_agent_message`,
+ *                                    `answer_user_directly` and `escalate_to_user`
+ *                                    only `postOrchestratorMessage`; they raise no
+ *                                    activity at all, so nothing in `activities`
+ *                                    represents this state.
  *
- * A test asserting the two agree could only cover paths someone enumerated, and
- * the bug is a missing write on a path nobody enumerated. So this derives the
- * fact from the `activities` row, where it already lives, and the column becomes
- * removable. Deriving does not add coupling — the two were already coupled by an
- * invariant maintained by hand across five paths; this replaces that with one
- * enforced by construction.
+ * Neither is a cache of the other and neither is complete. Reading only the
+ * column missed a park and reported "working" on a run that had been waiting on
+ * its user for 39 hours. Reading only the activity — the fix that looked obvious
+ * — would have missed a chat reply and reported "working" on a run whose next
+ * move is the user's. Both are false negatives; only the union is correct.
+ *
+ * The real single-source fix is to give the chat-reply case an activity too, so
+ * `activities` becomes complete and the column can be dropped. That is a change
+ * to the activity model rather than to its readers, and it belongs to whoever
+ * owns that model. Until then, read both.
  */
 
 /**
+ * The PARK half, from the live activity row.
+ *
  * `permission_pending` is the exception that makes this two conditions rather
  * than one: `openActivity` inserts EVERY activity as `active` and only the park
  * paths flip the status, so a worker waiting on tool approval reads as active
  * while genuinely being parked on the user.
  */
-export function isAwaitingUser(
+export function isParkedOnActivity(
   activityStatus: string | null | undefined,
   activitySourceKind: string | null | undefined
 ): boolean {
   return activityStatus === "paused_for_input" || activitySourceKind === "permission_pending";
+}
+
+/**
+ * The union. `chatReplyPending` is `workflow_step_runs.awaiting_user` — set when
+ * the last orchestrator action posted a chat reply rather than driving the agent.
+ */
+export function isAwaitingUser(
+  activityStatus: string | null | undefined,
+  activitySourceKind: string | null | undefined,
+  chatReplyPending: boolean
+): boolean {
+  return isParkedOnActivity(activityStatus, activitySourceKind) || chatReplyPending;
 }
 
 /**
@@ -47,6 +67,6 @@ export function liveActivityJoin(alias: string): string {
            AND a.status IN ('active', 'paused_for_input')`;
 }
 
-/** The columns `isAwaitingUser` consumes, for the SELECT list. */
+/** The columns `isParkedOnActivity` consumes, for the SELECT list. */
 export const LIVE_ACTIVITY_COLUMNS =
   "a.status AS activity_status, a.source_kind AS activity_source_kind";

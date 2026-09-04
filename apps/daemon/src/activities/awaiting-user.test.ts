@@ -1,28 +1,58 @@
 import { describe, expect, it } from "vitest";
-import { isAwaitingUser, liveActivityJoin, LIVE_ACTIVITY_COLUMNS } from "./awaiting-user.js";
+import {
+  isAwaitingUser,
+  isParkedOnActivity,
+  liveActivityJoin,
+  LIVE_ACTIVITY_COLUMNS,
+} from "./awaiting-user.js";
 
-describe("isAwaitingUser", () => {
+describe("isParkedOnActivity", () => {
   it("is true for a parked activity", () => {
-    expect(isAwaitingUser("paused_for_input", "step_confirmation_pending")).toBe(true);
+    expect(isParkedOnActivity("paused_for_input", "step_confirmation_pending")).toBe(true);
   });
 
   it("is true for permission_pending even though its status stays active", () => {
     // openActivity inserts EVERY activity as `active` and only the park paths flip
     // the status, so a worker waiting on tool approval reads as active while
     // genuinely being parked. This is the exception that makes it two conditions.
-    expect(isAwaitingUser("active", "permission_pending")).toBe(true);
+    expect(isParkedOnActivity("active", "permission_pending")).toBe(true);
   });
 
   it("is false while the agent has the turn", () => {
-    expect(isAwaitingUser("active", "tool_use")).toBe(false);
-    expect(isAwaitingUser("active", "turn_completed")).toBe(false);
+    expect(isParkedOnActivity("active", "tool_use")).toBe(false);
+    expect(isParkedOnActivity("active", "turn_completed")).toBe(false);
   });
 
   it("is false when there is no live activity at all", () => {
     // A step run with no activity row: the LEFT JOIN yields nulls, and "nobody is
     // parked" is the right reading — never a crash and never a default of true.
-    expect(isAwaitingUser(null, null)).toBe(false);
-    expect(isAwaitingUser(undefined, undefined)).toBe(false);
+    expect(isParkedOnActivity(null, null)).toBe(false);
+    expect(isParkedOnActivity(undefined, undefined)).toBe(false);
+  });
+});
+
+describe("isAwaitingUser", () => {
+  // The two sources cover different halves and NEITHER is complete alone. Each
+  // case below is a false negative for one of them, which is why the union is the
+  // only correct reading.
+
+  it("catches a park the chat-reply flag misses", () => {
+    // The live 39-hour run: awaiting_user was 0 because no orchestrator action had
+    // posted a chat reply, while the activity had been parked since the day before.
+    expect(isAwaitingUser("paused_for_input", "step_confirmation_pending", false)).toBe(true);
+  });
+
+  it("catches a chat reply the activity misses", () => {
+    // paraphrase_agent_message / answer_user_directly / escalate_to_user only
+    // postOrchestratorMessage — they raise no activity, so nothing in `activities`
+    // represents "the orchestrator answered and stopped".
+    expect(isAwaitingUser(null, null, true)).toBe(true);
+    expect(isAwaitingUser("active", "turn_completed", true)).toBe(true);
+  });
+
+  it("is false only when neither source says the human owes the next move", () => {
+    expect(isAwaitingUser("active", "tool_use", false)).toBe(false);
+    expect(isAwaitingUser(null, null, false)).toBe(false);
   });
 });
 
@@ -35,7 +65,7 @@ describe("liveActivityJoin", () => {
     expect(sql).not.toContain("expired");
   });
 
-  it("selects the two columns the predicate consumes", () => {
+  it("selects the two columns the park predicate consumes", () => {
     expect(LIVE_ACTIVITY_COLUMNS).toContain("activity_status");
     expect(LIVE_ACTIVITY_COLUMNS).toContain("activity_source_kind");
   });
