@@ -462,6 +462,29 @@ Three calls:
 
 An existing test caught the second half, and it was one edit from being rewritten as a stale assertion about a cache. **When two stores disagree, check whether they are answering the same question before deciding which is stale.**
 
+### 13.8 Prefer a shape in which the bug cannot be expressed
+
+The strongest form of every guard in this document is the one that isn't a guard.
+
+- **`awaitingYou` needs no run-terminal clip.** A park on a dead run is `abandoned` by construction, so it can never enter that set — a banner reading "waiting 300h" on a run that died in seventeen minutes is *unreachable* rather than *prevented*.
+- **`lastSignalAt` is defined to include `lastProgressAt`**, so the pair cannot invert. Not checked for inversion — incapable of it.
+- **`unaccountedMs` is a named term rather than a hoped-for property**, so a residual can never quietly absorb an error.
+- **A terminated-only population** means a forgotten run cannot swamp a statistic because it was never eligible, not because it was capped.
+
+A check catches a bug after someone writes it and only where someone remembered to check. A shape prevents the bug from being written, and every future author inherits that without knowing this conversation happened. **When both are available, take the shape.**
+
+### 13.9 When you establish how to read a stream, check every reader of that stream
+
+`buildInterventions` and `computeProgress` read the same `activity.changed` stream. The progress clock counts only status **changes** — a repeated status is one state continuing. `buildInterventions` counted raw **events**, so a park re-raised every few seconds for 41 hours became **57 open cards against a database holding one**.
+
+Same stream, same file, opposite treatment, written hours apart by the same author who had just reasoned the rule out correctly for the other reader.
+
+This is **not** the duplicate-taxonomy family (`'starting'`, two marker lists, five `startsWith("__gate__:")`), and "make it one thing" does not apply — the two genuinely compute different quantities and should stay separate functions. The guard is different:
+
+> **When you establish how a stream must be read, audit every reader of it before you move on.**
+
+And note why it survived review: **a healthy run hides it completely.** A run that parks once and resolves has events and parks in one-to-one correspondence, so the two readings agree on every well-behaved case. It took a pathological run — one the two clocks had just made visible — to separate them.
+
 ---
 
 ## 14. Not built — do not read this document as describing the system
