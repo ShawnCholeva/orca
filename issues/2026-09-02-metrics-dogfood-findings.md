@@ -132,6 +132,8 @@ holds it. **Status: `open` unless stated.**
   This is NOT the duplicate-taxonomy family: the two genuinely compute different quantities, so "make it one thing" does not apply.
   → **Guard: when you establish how to read a stream, check every reader of that stream.**
 - **The strongest form of a guarantee is a shape in which the bug cannot be expressed.** Three instances: `lastSignalAt` defined to include `lastProgressAt` so the pair cannot invert; `awaitingYou` needing no run-terminal clip because a park on a dead run is `abandoned` by construction and can never enter the set; `coverage.silent` falling to zero as a consequence of gates emitting. In each case the alternative was a check that catches the bug — which is strictly weaker, because a check can be removed and a shape cannot.
+- **A green signal that isn't evidence — now four members, all the same shape: the check does not run where the property lives.** vitest does not typecheck (contract changes went green on tests, red on `tsc`, three times). happy-dom never loads the stylesheet (an invisible title passed 864 tests). A hand-written mock is an unverified claim about a contract (`{workspaces: []}` mocked against a function returning a bare array — the suite cannot check a mock against the thing it stands in for). A source-literal conformance test cannot see a UA default (47 elements at the browser's button size, with nothing wrong in the source).
+  → **Guard: ask where the property actually resolves, and put the check there.** The lead's own instance: verifying this screen for hours via the accessibility tree, which carries text and structure and says nothing about appearance — every "verified" meant *the numbers are right*, never *it looks right*.
 - **An assertion that fires on healthy data is worse than none** — it burns the reader's belief that it means something.
 - **Non-random termination contaminates a population** exactly as non-random missingness invalidates a bound. 4 of 5 runs died from infrastructure ⇒ effective n for workflow quality is **1, not 5**.
 
@@ -152,6 +154,12 @@ Shared root cause, and it is E's hazard again: **a label that outlived the evide
 | H2 | **`silent` is unmeasurable mid-step and must say so.** A run classifier reading "no transitions for 47 minutes" as *idle* would have reported the instrument, not the run — on a step that produced working code and passing tests. Three blocking requirements before that row ships: name the channel (*"no step boundary in 47 minutes"*, not *"idle"*); treat silence the channel cannot distinguish from unrecorded activity as `unknown`, not a verdict; clip both clocks to the run's terminal so terminated runs don't drift toward looking maximally silent. | OPEN — blocking the idle-run row |
 
 ## G. Design system (found while grounding the UI work)
+
+| # | Issue | Status |
+|---|---|---|
+| G3 | **103 of 163 elements on the Metrics tab render in Arial; only 18 in Inter.** The run rows are `<button>` elements, and a button inherits neither `font-family` nor `font-size` — it takes the UA stylesheet unless told otherwise. Proved: a bare `<button>` inside a div set to `Inter / 12px` computes to **Arial / 13.3333px**, and **zero of the 9 buttons** on the panel resolve to Inter. Downstream: 8 distinct font sizes against a 6-step scale (47 elements at the UA default `13.3333px`, 2 at `11.5px`), and padding at 2/9/10/14px against a 4/8/12/16/24/32 scale. **This is the founder's "a lot of incorrectly styled places" and it is one rule.** | OPEN — one rule |
+| G4 | **The type/space scale is enforced only over SOURCE literals, so it cannot see a UA default.** Nothing in the source is wrong — the size is never written down — which is why a passing conformance test coexisted with 47 off-scale elements. **The check has to run where the property resolves**, i.e. against computed styles, not source text. | OPEN |
+
 
 | # | Issue | Status |
 |---|---|---|
