@@ -126,7 +126,7 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
           <div style={{ display: "flex", background: "rgba(255,255,255,0.03)", border: "1px solid var(--hairline)", borderRadius: 8, padding: 2 }}>
             {SCOPES.map((s) => (
               <button key={s.id} type="button" onClick={() => setScope(s.id)} aria-pressed={scope === s.id}
-                style={{ background: scope === s.id ? "var(--accent-2-soft)" : "transparent", color: scope === s.id ? "var(--accent-2)" : "var(--text-3)", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 11.5 }}>
+                style={{ background: scope === s.id ? "var(--accent-2-soft)" : "transparent", color: scope === s.id ? "var(--accent-2)" : "var(--text-3)", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: "var(--fs-2)" }}>
                 {s.label}
               </button>
             ))}
@@ -202,7 +202,7 @@ function ViewToggle({ view, onChange }: { view: "runs" | "workflow"; onChange: (
   const tab = (id: "runs" | "workflow", label: string) => (
     <button key={id} type="button" onClick={() => onChange(id)} aria-pressed={view === id}
       style={{ background: view === id ? "var(--accent-soft)" : "transparent", color: view === id ? "var(--accent)" : "var(--text-3)",
-               border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 11.5 }}>
+               border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: "var(--fs-2)" }}>
       {label}
     </button>
   );
