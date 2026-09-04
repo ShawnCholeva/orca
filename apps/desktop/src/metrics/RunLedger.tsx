@@ -263,7 +263,7 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
     >
       <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
         <span style={{ fontSize: "var(--fs-3)", fontWeight: 600 }}>{span.name}</span>
-        <span style={{ fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+        <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>
           {span.kind === "gate" ? "gate" : "step"} · attempt {span.attempt} · {span.status}
         </span>
       </div>
@@ -288,7 +288,7 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
             }
           />
         ) : (
-          <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-2)" }}>
+          <span className="mono" style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>
             {dur(span.elapsedMs)}
             {span.workingMs == null
               ? " · none of it observed"
@@ -303,10 +303,10 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
           />
         )}
         {span.blockedReason && (
-          <span style={{ fontSize: "var(--fs-1)", color: "var(--err)" }}>{span.blockedReason}</span>
+          <span style={{ fontSize: "var(--fs-2)", color: "var(--err)" }}>{span.blockedReason}</span>
         )}
         {span.verifiers && (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: "var(--fs-1)" }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: "var(--fs-2)" }}>
             {span.verifiers.executable && <Chip tone="var(--run)">tests ran</Chip>}
             {span.verifiers.grounding && <Chip tone="var(--run)">claims checked</Chip>}
             {/* An LLM's opinion, carrying real weight into a graded number. Marked
@@ -318,7 +318,7 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
           </div>
         )}
         {(span.restarts > 0 || span.completions > 1) && (
-          <span style={{ fontSize: "var(--fs-1)", color: "var(--text-2)" }}>
+          <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>
             {span.restarts > 0 && `relaunched ${span.restarts}x after a crash`}
             {span.restarts > 0 && span.completions > 1 && " · "}
             {span.completions > 1 && `redone ${span.completions - 1}x`}
