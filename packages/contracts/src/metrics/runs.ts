@@ -249,6 +249,35 @@ export const TerminationCause = z.enum([
 ]);
 export type TerminationCause = z.infer<typeof TerminationCause>;
 
+/**
+ * What is waiting on the reader RIGHT NOW, derived server-side.
+ *
+ * Exists because the obvious client derivation — `terminationCause === "running"
+ * && openInterventions > 0` — reconstructs `parkState` from a status and an
+ * untyped count, and cannot tell `awaiting_you` from `abandoned`. Every one of the
+ * founder's currently-open cards on a DEAD run is `abandoned`; rendering those as
+ * actionable sends him to answer cards that accomplish nothing.
+ *
+ * `count: 0` is an observation ("we checked; nothing is waiting"), not an absence,
+ * so this is never null. `sinceMs` needs no run-terminal clip: a park on a dead run
+ * is `abandoned` by construction and can never appear here, so the unclipped-clock
+ * bug is unreachable rather than guarded against.
+ */
+export const AwaitingYou = z.object({
+  count: z.number().int().nonnegative(),
+  /** Age of the longest currently-open one. Null when count is 0. */
+  sinceMs: z.number().int().nonnegative().nullable(),
+  /**
+   * Of that longest one, and read from the EVENT rather than the activities row —
+   * the row is mutable and holds the LATEST value, so a reused activity would
+   * confidently report a later pause's reason. It is the difference between
+   * "Orca is waiting on you", which a reader learns to ignore, and "Orca needs
+   * your OK on a step", which they act on.
+   */
+  sourceKind: InterventionSourceKind.nullable(),
+}).strict();
+export type AwaitingYou = z.infer<typeof AwaitingYou>;
+
 export const RunSummary = z.object({
   runId: z.string(),
   goalId: z.string(),
@@ -277,6 +306,7 @@ export const RunSummary = z.object({
   /** Σ of completions beyond the first per span — the revise/re-judge loop's volume. */
   retriedCompletions: z.number().int().nonnegative(),
   openInterventions: z.number().int().nonnegative(),
+  awaitingYou: AwaitingYou,
 }).strict();
 export type RunSummary = z.infer<typeof RunSummary>;
 

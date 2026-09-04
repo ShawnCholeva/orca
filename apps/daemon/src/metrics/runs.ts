@@ -94,26 +94,36 @@ export function buildInterventions(input: {
   const runLive = LIVE_RUN_STATUSES.has(run.status);
   const forRun = events.filter((e) => e.workflowRunId === run.runId);
 
+  // ONE intervention per park EPISODE, not per park event.
+  //
+  // A re-raised `paused_for_input` on the same activity is the same park
+  // continuing, not a new one. The stuck run re-raises `provider_recovery_pending`
+  // every few seconds; over 41 hours that produced 63 park events across 7
+  // activities — one activity alone fired 57 — and the screen said "57 cards still
+  // open" against a database holding exactly one. An episode opens on the
+  // TRANSITION into `paused_for_input` and closes on the transition out.
+  //
+  // This is the same rule the progress clock already uses on the same stream: a
+  // repeated status is one state continuing, and only a CHANGE is an event. It was
+  // applied there and not here, and a healthy run hides the difference — it parks
+  // once and resolves, so events and parks coincide.
   const out: Intervention[] = [];
-  for (let i = 0; i < forRun.length; i++) {
-    const e = forRun[i];
-    if (e.status !== PARK_STATUS) continue;
-    // Close on the next event for THIS activity with a different status.
-    let exitedAt: string | null = null;
-    for (let j = i + 1; j < forRun.length; j++) {
-      const n = forRun[j];
-      if (n.activityId !== e.activityId) continue;
-      if (n.status === PARK_STATUS) continue;
-      exitedAt = n.createdAt;
-      break;
-    }
-    const enteredMs = ms(e.createdAt);
-    if (enteredMs === null) continue;
+  const openEpisode = new Map<string, { enteredAt: string; stepRunId: string | null; sourceKind: string | null }>();
+
+  const close = (activityId: string, exitedAt: string | null) => {
+    const ep = openEpisode.get(activityId);
+    if (ep === undefined) return;
+    openEpisode.delete(activityId);
+    const enteredMs = ms(ep.enteredAt);
+    if (enteredMs === null) return;
     const open = exitedAt === null;
     const endMs = open ? nowMs : ms(exitedAt) ?? nowMs;
-    const raw = sourceKinds.get(e.activityId);
+    // Prefer the EVENT's own sourceKind: the activities row is mutable and holds
+    // the LATEST value, so a reused activity confidently reports a later pause's
+    // reason. The row is the fallback only for events emitted before `18ea6ef`.
+    const raw = ep.sourceKind ?? sourceKinds.get(activityId);
     const sourceKind: InterventionSourceKind =
-      raw !== undefined && KNOWN_SOURCE_KINDS.has(raw)
+      raw !== undefined && raw !== null && KNOWN_SOURCE_KINDS.has(raw)
         ? (raw as InterventionSourceKind)
         : "unknown";
     // A park's meaning inverts with its run's liveness: on a live run the reader is
@@ -121,12 +131,12 @@ export function buildInterventions(input: {
     // nothing. Decided here so the UI cannot render the wrong one.
     const parkState: ParkState = !open ? "resolved" : runLive ? "awaiting_you" : "abandoned";
     out.push({
-      activityId: e.activityId,
+      activityId,
       goalId: run.goalId,
       workflowRunId: run.runId,
-      workflowStepRunId: e.stepRunId,
+      workflowStepRunId: ep.stepRunId,
       sourceKind,
-      enteredAt: e.createdAt,
+      enteredAt: ep.enteredAt,
       exitedAt,
       // ACTUAL age — unclamped, live while open. Distinct from the clamped
       // contribution this park makes to `parkedMs`.
@@ -134,7 +144,24 @@ export function buildInterventions(input: {
       open,
       parkState,
     });
+  };
+
+  for (const e of forRun) {
+    if (e.status === PARK_STATUS) {
+      // Only the transition INTO the park opens an episode; a repeat extends it.
+      if (!openEpisode.has(e.activityId)) {
+        openEpisode.set(e.activityId, {
+          enteredAt: e.createdAt, stepRunId: e.stepRunId, sourceKind: e.sourceKind,
+        });
+      }
+      continue;
+    }
+    close(e.activityId, e.createdAt);
   }
+  // Whatever is still parked at the end of the stream is genuinely still open.
+  for (const activityId of [...openEpisode.keys()]) close(activityId, null);
+  out.sort((a, b) => a.enteredAt.localeCompare(b.enteredAt));
+
   return out;
 }
 
@@ -505,7 +532,21 @@ export function buildRunSummary(input: {
     spanRelaunches: spans.reduce((acc, s) => acc + s.restarts, 0),
     retriedCompletions: spans.reduce((acc, s) => acc + Math.max(0, s.completions - 1), 0),
     openInterventions: interventions.filter((iv) => iv.open).length,
+    awaitingYou: computeAwaitingYou(interventions),
   };
+}
+
+/**
+ * What is waiting on the reader right now. `awaiting_you` already encodes the
+ * live-run condition (a park on a dead run is `abandoned`), so this needs no
+ * status check and no clipping — the longest-open-park age cannot run past a
+ * terminated run because such a park is never in this set.
+ */
+export function computeAwaitingYou(interventions: Intervention[]): RunSummary["awaitingYou"] {
+  const waiting = interventions.filter((iv) => iv.open && iv.parkState === "awaiting_you");
+  if (waiting.length === 0) return { count: 0, sinceMs: null, sourceKind: null };
+  const longest = waiting.reduce((a, b) => (b.durationMs > a.durationMs ? b : a));
+  return { count: waiting.length, sinceMs: longest.durationMs, sourceKind: longest.sourceKind };
 }
 
 export function buildRunDetail(input: {

@@ -46,6 +46,9 @@ export type ActivityEvent = {
   workflowRunId: string | null;
   stepRunId: string | null;
   status: string;
+  /** From the EVENT payload (`18ea6ef`). Null on events emitted before that,
+   *  which is the only case the mutable-row fallback is for. */
+  sourceKind: string | null;
 };
 
 const FACET_COLS = HARNESS_FACETS.map((f) => `ht.${f.column}`).join(", ");
@@ -146,7 +149,10 @@ export function listActivityEventsByGoal(db: Database.Database, goalId: string):
   ).all(goalId) as Array<{ payload: string; created_at: string }>;
   const out: ActivityEvent[] = [];
   for (const r of rows) {
-    let p: { activityId?: unknown; workflowRunId?: unknown; stepRunId?: unknown; status?: unknown };
+    let p: {
+      activityId?: unknown; workflowRunId?: unknown; stepRunId?: unknown;
+      status?: unknown; sourceKind?: unknown;
+    };
     try { p = JSON.parse(r.payload); } catch { continue; }
     if (typeof p.activityId !== "string" || typeof p.status !== "string") continue;
     out.push({
@@ -155,6 +161,7 @@ export function listActivityEventsByGoal(db: Database.Database, goalId: string):
       workflowRunId: typeof p.workflowRunId === "string" ? p.workflowRunId : null,
       stepRunId: typeof p.stepRunId === "string" ? p.stepRunId : null,
       status: p.status,
+      sourceKind: typeof p.sourceKind === "string" ? p.sourceKind : null,
     });
   }
   return out;

@@ -22,6 +22,10 @@ function summary(over: Partial<RunSummary> = {}): RunSummary {
     },
     stepsDelivered: 8, stepsBlocked: 0, spanRelaunches: 1, retriedCompletions: 5,
     openInterventions: 0,
+    // The completed-run case: nothing waits because the run is over. The
+    // INTERESTING case is the opposite — a live run holding an open card — so this
+    // fixture should not be read as covering it.
+    awaitingYou: { count: 0, sinceMs: null, sourceKind: null },
     // A completed run: progress and signal agree, and nothing was mid-flight, so
     // silence is conclusive. A run whose signal outran its progress is the
     // "moving but not advancing" case and is asserted separately.

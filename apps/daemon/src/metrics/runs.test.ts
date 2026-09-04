@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { HarnessTransition } from "@orca/contracts";
+import type { HarnessTransition, Intervention } from "@orca/contracts";
 import {
-  buildInterventions, buildRunDetail, clampIntervals, computeCost, computeDurations,
-  computeProgress, mergeIntervals, runTerminalMs, totalMs,
+  buildInterventions, buildRunDetail, clampIntervals, computeAwaitingYou, computeCost,
+  computeDurations, computeProgress, mergeIntervals, runTerminalMs, totalMs,
 } from "./runs.js";
 import type { ActivityEvent, RunRow, RunStepRunRow, RunTransition } from "./runs-fetch.js";
 
@@ -67,8 +67,8 @@ function markDone(usd: number): RunTransition {
   return { transition: t, stepTemplateId: null };
 }
 
-function ev(activityId: string, status: string, at: string, stepRunId = "sr-1"): ActivityEvent {
-  return { createdAt: at, activityId, workflowRunId: RUN_ID, stepRunId, status };
+function ev(activityId: string, status: string, at: string, stepRunId = "sr-1", sourceKind: string | null = null): ActivityEvent {
+  return { createdAt: at, activityId, workflowRunId: RUN_ID, stepRunId, status, sourceKind };
 }
 
 describe("mergeIntervals", () => {
@@ -444,5 +444,70 @@ describe("computeProgress", () => {
     expect(computeProgress({ ...base, stepRuns: [stepRun({ status: "active" })] }).silenceConclusive)
       .toBe(false);
     expect(computeProgress(base).silenceConclusive).toBe(true);
+  });
+});
+
+describe("park episodes", () => {
+  it("treats a re-raised park on one activity as ONE park, not one per event", () => {
+    // The stuck run re-raised `provider_recovery_pending` every few seconds for 41
+    // hours: 57 park events for one activity, and the screen said "57 cards still
+    // open" against a database holding exactly one. A repeated status is one state
+    // continuing — the same rule the progress clock already applies to this stream.
+    const events = Array.from({ length: 57 }, (_, i) =>
+      ev("a1", "paused_for_input", `2026-09-01T00:${String(i % 60).padStart(2, "0")}:00.000Z`, "sr-1", "provider_recovery_pending"));
+    const out = buildInterventions({ events, sourceKinds: new Map(), run: run({ status: "active" }), nowMs: NOW });
+    expect(out).toHaveLength(1);
+    expect(out[0].open).toBe(true);
+    expect(out[0].enteredAt).toBe("2026-09-01T00:00:00.000Z"); // the FIRST, not the last
+    expect(out[0].sourceKind).toBe("provider_recovery_pending");
+  });
+
+  it("still counts a genuine re-park after a resolution as a second park", () => {
+    const out = buildInterventions({
+      events: [
+        ev("a1", "paused_for_input", "2026-09-01T00:10:00.000Z"),
+        ev("a1", "active", "2026-09-01T00:20:00.000Z"),
+        ev("a1", "paused_for_input", "2026-09-01T00:30:00.000Z"),
+      ],
+      sourceKinds: new Map(), run: run(), nowMs: NOW,
+    });
+    expect(out).toHaveLength(2);
+    expect(out[0].exitedAt).toBe("2026-09-01T00:20:00.000Z");
+    expect(out[1].open).toBe(true);
+  });
+
+  it("prefers the event's sourceKind over the mutable activities row", () => {
+    // The row holds the LATEST value, so a reused activity reports a later pause's
+    // reason with full confidence.
+    const out = buildInterventions({
+      events: [ev("a1", "paused_for_input", "2026-09-01T00:10:00.000Z", "sr-1", "gate_decision_pending")],
+      sourceKinds: new Map([["a1", "mark_done_pending"]]),
+      run: run(), nowMs: NOW,
+    });
+    expect(out[0].sourceKind).toBe("gate_decision_pending");
+  });
+});
+
+describe("computeAwaitingYou", () => {
+  const park = (over: Partial<Intervention>): Intervention => ({
+    activityId: "a1", goalId: GOAL_ID, workflowRunId: RUN_ID, workflowStepRunId: "sr-1",
+    sourceKind: "step_confirmation_pending", enteredAt: "2026-09-01T00:00:00.000Z",
+    exitedAt: null, durationMs: 1000, open: true, parkState: "awaiting_you", ...over,
+  });
+
+  it("reports zero as an observation rather than an absence", () => {
+    expect(computeAwaitingYou([])).toEqual({ count: 0, sinceMs: null, sourceKind: null });
+  });
+
+  it("excludes an abandoned card — its run is dead and answering it achieves nothing", () => {
+    expect(computeAwaitingYou([park({ parkState: "abandoned" })]).count).toBe(0);
+  });
+
+  it("reports the longest open park and its kind", () => {
+    const out = computeAwaitingYou([
+      park({ activityId: "a1", durationMs: 1000 }),
+      park({ activityId: "a2", durationMs: 90_000, sourceKind: "permission_pending" }),
+    ]);
+    expect(out).toEqual({ count: 2, sinceMs: 90_000, sourceKind: "permission_pending" });
   });
 });
