@@ -68,18 +68,48 @@ function finalAttempts(runs: TemplateStepRun[]): TemplateStepRun[] {
   return [...byKey.values()];
 }
 
+/** Step statuses that represent a reached outcome. `pending`/`active` have not. */
+const TERMINAL_STEP_STATUSES = new Set(["passed", "failed", "blocked", "skipped"]);
+
+/**
+ * Final attempts that actually reached an outcome.
+ *
+ * `firstPass`/`recovered` divided by every final attempt, which on the founder's
+ * data included a step that was still running. A thing in progress is not an
+ * observation of that thing, so it cannot appear in a rate about outcomes — the
+ * same rule the run ledger applies when it aggregates over terminated runs only.
+ *
+ * This exclusion is DEFINITIONAL and deliberately the only one here. Infra-killed
+ * steps stay in the population: removing them would answer "when the substrate
+ * let it finish, how often did it pass first time", which is a different question
+ * than the label asks, and it would rest on classifyInfraReason matching free
+ * text with a count interpolated into it. Separating workflow failures from
+ * substrate kills is worth doing and is coming, on a recorded step-level cause
+ * rather than parsed English — at which point this becomes a four-way split
+ * (passed-first-time / failed-on-merit / infra-killed / still-running) whose
+ * parts sum to the total, so the reader sees the cut instead of inheriting it.
+ *
+ * Note a step whose latest attempt is non-terminal drops out even if an earlier
+ * attempt passed. That is reachable and normal: a gate rejection routes backward
+ * and nextAttemptForStep opens a new attempt. The earlier pass was superseded by
+ * that rejection, so the step genuinely has no settled outcome yet.
+ */
+export function settledFinalAttempts(runs: TemplateStepRun[]): TemplateStepRun[] {
+  return finalAttempts(runs).filter((r) => TERMINAL_STEP_STATUSES.has(r.status));
+}
+
 export function firstPassRate(runs: TemplateStepRun[]): CountedRate | null {
-  const finals = finalAttempts(runs);
-  if (finals.length === 0) return null;
-  const firstPass = finals.filter((r) => r.attempt === 1 && PASSED.has(r.status)).length;
-  return { pos: firstPass, n: finals.length };
+  const settled = settledFinalAttempts(runs);
+  if (settled.length === 0) return null;
+  const firstPass = settled.filter((r) => r.attempt === 1 && PASSED.has(r.status)).length;
+  return { pos: firstPass, n: settled.length };
 }
 
 export function recoveredRate(runs: TemplateStepRun[]): CountedRate | null {
-  const finals = finalAttempts(runs);
-  if (finals.length === 0) return null;
-  const recovered = finals.filter((r) => r.attempt > 1 && PASSED.has(r.status)).length;
-  return { pos: recovered, n: finals.length };
+  const settled = settledFinalAttempts(runs);
+  if (settled.length === 0) return null;
+  const recovered = settled.filter((r) => r.attempt > 1 && PASSED.has(r.status)).length;
+  return { pos: recovered, n: settled.length };
 }
 
 // Escalated: distinct (run, step) that had a require_approval/deny gate or a human

@@ -263,6 +263,47 @@ describe("computeTemplateSummary", () => {
     expect(summary.recovered).toEqual({ pos: 0, n: 2 });
   });
 
+  it("excludes a step still running from the outcome rates", () => {
+    // The founder's 30d population was 9 passed + 4 daemon-killed + 1 ACTIVE.
+    // Dividing by 14 asserted a terminal outcome about a step still in flight;
+    // the residual read as "5 never passed". A thing in progress is not an
+    // observation of that thing.
+    const summary = computeTemplateSummary({
+      templateId: "t1", name: "T", latestVersion: 1, runCount: 3,
+      versions: [{ version: 1, runs: 3, firstSeenAt: "2026-05-01T00:00:00.000Z" }],
+      current: {
+        transitions: [stepComplete("a", "r1", "s1", 1, 100, "passed", "2026-05-02T00:00:00.000Z")],
+        stepRuns: [
+          stepRun("r1", "s1", 1, "passed", 1),
+          stepRun("r2", "s1", 1, "passed", 1),
+          stepRun("r3", "s1", 1, "active", 1),
+        ],
+      },
+      prior: { transitions: [], stepRuns: [] },
+    });
+    // Two settled steps, both first-time passes — not 2 of 3.
+    expect(summary.firstPass).toEqual({ pos: 2, n: 2 });
+  });
+
+  it("keeps infrastructure-killed steps in the population", () => {
+    // Deliberately NOT excluded here: that would answer a different question than
+    // the label asks, and it would rest on matching free text. The split lands
+    // with a recorded step-level cause instead.
+    const summary = computeTemplateSummary({
+      templateId: "t1", name: "T", latestVersion: 1, runCount: 2,
+      versions: [{ version: 1, runs: 2, firstSeenAt: "2026-05-01T00:00:00.000Z" }],
+      current: {
+        transitions: [stepComplete("a", "r1", "s1", 1, 100, "passed", "2026-05-02T00:00:00.000Z")],
+        stepRuns: [
+          stepRun("r1", "s1", 1, "passed", 1),
+          { ...stepRun("r2", "s1", 1, "blocked", 1), blockedReason: "crashed 3 times (worker_exited_no_signal)" },
+        ],
+      },
+      prior: { transitions: [], stepRuns: [] },
+    });
+    expect(summary.firstPass).toEqual({ pos: 1, n: 2 });
+  });
+
   it("single template version → versionComparison is null", () => {
     const summary = computeTemplateSummary({
       templateId: "t1", name: "Test Template", latestVersion: 1, runCount: 10,
