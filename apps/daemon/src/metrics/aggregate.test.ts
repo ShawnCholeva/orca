@@ -307,6 +307,61 @@ describe("computeTemplateSummary", () => {
     expect(summary.firstPass).toEqual({ pos: 1, n: 2 });
   });
 
+  it("partitions every final attempt into exactly one bucket, and the parts sum", () => {
+    // The sum is the property that matters: a reader sees the cut instead of
+    // inheriting it, and a miscategorised step lands visibly in the wrong bucket
+    // rather than vanishing from a denominator.
+    const summary = computeTemplateSummary({
+      templateId: "t1", name: "T", latestVersion: 1, runCount: 5,
+      versions: [{ version: 1, runs: 5, firstSeenAt: "2026-05-01T00:00:00.000Z" }],
+      current: {
+        transitions: [stepComplete("a", "r1", "s1", 1, 100, "passed", "2026-05-02T00:00:00.000Z")],
+        stepRuns: [
+          stepRun("r1", "s1", 1, "passed", 1),
+          { ...stepRun("r2", "s1", 2, "passed", 1) },
+          { ...stepRun("r3", "s1", 1, "blocked", 1), blockedReason: "crashed", blockedCode: "worker_exited_no_signal" },
+          { ...stepRun("r4", "s1", 1, "blocked", 1), blockedReason: "gave up", blockedCode: "revise_cap" },
+          stepRun("r5", "s1", 1, "active", 1),
+        ],
+      },
+      prior: { transitions: [], stepRuns: [] },
+    });
+
+    const o = summary.stepOutcomes!;
+    expect(o).toMatchObject({
+      passedFirstTime: 1, passedAfterRetry: 1,
+      infraKilled: 1, failedOnMerit: 1, unattributed: 0, stillRunning: 1,
+    });
+    const sum = o.passedFirstTime + o.passedAfterRetry + o.failedOnMerit +
+      o.infraKilled + o.unattributed + o.skipped + o.stillRunning;
+    expect(sum).toBe(o.scope.steps);
+    expect(o.scope).toMatchObject({ steps: 5, runs: 5, templates: 1, inferred: false });
+  });
+
+  it("counts a step that predates blocked_code as unattributed, never guessed", () => {
+    // All five of the founder's runs derive to inferred. Matching the free text
+    // tells you the FAMILY, not the member — guessing a specific code here would
+    // put an advisory signal under a load-bearing name.
+    const summary = computeTemplateSummary({
+      templateId: "t1", name: "T", latestVersion: 1, runCount: 2,
+      versions: [{ version: 1, runs: 2, firstSeenAt: "2026-05-01T00:00:00.000Z" }],
+      current: {
+        transitions: [stepComplete("a", "r1", "s1", 1, 100, "passed", "2026-05-02T00:00:00.000Z")],
+        stepRuns: [
+          stepRun("r1", "s1", 1, "passed", 1),
+          // Historical row: a reason, no code.
+          { ...stepRun("r2", "s1", 1, "blocked", 1), blockedReason: "crashed 3 times (worker_exited_no_signal)" },
+        ],
+      },
+      prior: { transitions: [], stepRuns: [] },
+    });
+
+    const o = summary.stepOutcomes!;
+    expect(o.unattributed).toBe(1);
+    expect(o.infraKilled).toBe(0); // NOT guessed, even though the sentence names it
+    expect(o.scope.inferred).toBe(true); // and the claim carries that it is weak
+  });
+
   it("single template version → versionComparison is null", () => {
     const summary = computeTemplateSummary({
       templateId: "t1", name: "Test Template", latestVersion: 1, runCount: 10,

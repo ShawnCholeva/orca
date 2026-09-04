@@ -10,6 +10,8 @@ import { composedScore } from "./composed-score.js";
 import { deriveConfidenceReason } from "./confidence-reason.js";
 import { classifyInfraReason } from "./infra-failure.js";
 import { FAILED_TRANSITION_STATUSES } from "@orca/contracts";
+import { isSubstrateBlockedCode, type StepOutcomeBreakdown } from "@orca/contracts";
+import { deriveStepBlockedCause } from "../workflows/steps/blocked-cause.js";
 
 export const SAMPLE_MIN = 5;
 // Per-side minimum of SCORED samples before a per-step version delta is emitted.
@@ -94,6 +96,61 @@ const TERMINAL_STEP_STATUSES = new Set(["passed", "failed", "blocked", "skipped"
  * and nextAttemptForStep opens a new attempt. The earlier pass was superseded by
  * that rejection, so the step genuinely has no settled outcome yet.
  */
+/**
+ * The full partition of final attempts: every step lands in exactly one bucket
+ * and the parts sum to the total.
+ *
+ * Cause comes from `deriveStepBlockedCause`, never from the raw `blocked_code`
+ * column and never from `classifyInfraReason`. The column alone cannot tell a
+ * verified cause from a historical absence, and the classifier answers the FAMILY
+ * question ("something in the substrate failed") which is not specific enough to
+ * carry a claim — it stays advisory, feeding `infrastructureFailures`.
+ *
+ * So a step that stopped before the column existed counts as `unattributed`
+ * rather than being guessed into `failedOnMerit` or `infraKilled`. That bucket is
+ * expected to dominate at first and empties on its own; nothing backfills it,
+ * because storing a guess beside a verified value under one name is the defect
+ * the column was added to remove.
+ */
+export function stepOutcomeBreakdown(runs: TemplateStepRun[]): StepOutcomeBreakdown {
+  const finals = finalAttempts(runs);
+  const b = {
+    passedFirstTime: 0, passedAfterRetry: 0, failedOnMerit: 0,
+    infraKilled: 0, unattributed: 0, skipped: 0, stillRunning: 0,
+  };
+  let anyInferred = false;
+  const runIds = new Set<string>();
+  for (const r of finals) {
+    runIds.add(r.workflowRunId);
+    if (!TERMINAL_STEP_STATUSES.has(r.status)) { b.stillRunning += 1; continue; }
+    if (r.status === "skipped") { b.skipped += 1; continue; }
+    if (PASSED.has(r.status)) {
+      if (r.attempt === 1) b.passedFirstTime += 1;
+      else b.passedAfterRetry += 1;
+      continue;
+    }
+    const cause = deriveStepBlockedCause({ blockedCode: r.blockedCode, blockedReason: r.blockedReason });
+    if (cause === null || cause.inferred) {
+      if (cause?.inferred) anyInferred = true;
+      b.unattributed += 1;
+      continue;
+    }
+    if (isSubstrateBlockedCode(cause.code)) b.infraKilled += 1;
+    else b.failedOnMerit += 1;
+  }
+  return {
+    ...b,
+    scope: {
+      steps: finals.length,
+      runs: runIds.size,
+      // Scope is a property of the aggregation, so this claim is built here rather
+      // than inherited: one template per summary, by construction.
+      templates: finals.length > 0 ? 1 : 0,
+      inferred: anyInferred,
+    },
+  };
+}
+
 export function settledFinalAttempts(runs: TemplateStepRun[]): TemplateStepRun[] {
   return finalAttempts(runs).filter((r) => TERMINAL_STEP_STATUSES.has(r.status));
 }
@@ -226,6 +283,7 @@ export function computeTemplateSummary(input: {
     firstPass: firstPassRate(input.current.stepRuns.filter((r) => !isGateSurrogate(r.stepTemplateId))),
     recovered: recoveredRate(input.current.stepRuns.filter((r) => !isGateSurrogate(r.stepTemplateId))),
     escalated: escalatedRate(input.current.transitions),
+    stepOutcomes: stepOutcomeBreakdown(input.current.stepRuns.filter((r) => !isGateSurrogate(r.stepTemplateId))),
     latencyP50Ms: curLatency,
     deltas: {
       trajectoryEfficiency: delta(cur.trajectory_efficiency.value, prev.trajectory_efficiency.value),

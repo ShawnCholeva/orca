@@ -3,6 +3,7 @@ import { z } from "zod";
 export { labelForFailure } from "./failure-labels.js";
 export { labelForGateFailure, GATE_FAILURE_CODES } from "./gate-failure-labels.js";
 import { CONFIDENCE_REASON_CODES } from "./confidence-reasons.js";
+import { ClaimScope } from "../workflows/index.js";
 export { labelForConfidenceReason, CONFIDENCE_REASON_CODES } from "./confidence-reasons.js";
 export type { ConfidenceReasonCode } from "./confidence-reasons.js";
 export {
@@ -51,6 +52,33 @@ const SixDeltas = z.object({
   latencyP50Ms: z.number().nullable(),
 }).strict();
 
+/**
+ * Every final step attempt in the window, split by what actually became of it.
+ *
+ * The parts sum to the total, and that property is the point: a reader can see
+ * the cut instead of inheriting it, and a miscategorised step lands visibly in
+ * the wrong bucket rather than vanishing from a denominator. Shrinking the
+ * denominator quietly is how "first-pass rate" comes to answer a question its
+ * label does not ask.
+ *
+ * `unattributed` is the honest bucket and is expected to dominate at first: a
+ * step that stopped before `blocked_code` existed derives to unknown/inferred,
+ * and is NOT guessed into failedOnMerit or infraKilled. It empties on its own as
+ * new rows accumulate. `scope.inferred` is true when any step in the window was
+ * inferred, so a claim built on this can never be rendered without its terms.
+ */
+export const StepOutcomeBreakdown = z.object({
+  passedFirstTime: z.number().int().nonnegative(),
+  passedAfterRetry: z.number().int().nonnegative(),
+  failedOnMerit: z.number().int().nonnegative(),
+  infraKilled: z.number().int().nonnegative(),
+  unattributed: z.number().int().nonnegative(),
+  skipped: z.number().int().nonnegative(),
+  stillRunning: z.number().int().nonnegative(),
+  scope: ClaimScope,
+}).strict();
+export type StepOutcomeBreakdown = z.infer<typeof StepOutcomeBreakdown>;
+
 export const VerificationTier = z.enum([
   "verified_executed", "partially_verified", "ai_reviewed", "self_reported", "unverified",
 ]);
@@ -85,6 +113,8 @@ export const TemplateMetricsSummary = z.object({
   firstPass: CountedRate.nullable(),
   recovered: CountedRate.nullable(),
   escalated: CountedRate.nullable(),
+  // Optional so in-flight fixtures stay valid; computeTemplateSummary always emits it.
+  stepOutcomes: StepOutcomeBreakdown.optional(),
   latencyP50Ms: z.number().nullable(),
   deltas: SixDeltas,
   versionComparison: z.object({
