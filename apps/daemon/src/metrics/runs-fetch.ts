@@ -36,6 +36,9 @@ export type RunTransition = {
   stepTemplateId: string | null;
 };
 
+/** Any run-attributable event: its payload names a workflowRunId. */
+export type RunEvent = { createdAt: string; type: string; workflowRunId: string };
+
 /** One `activity.changed` row, payload parsed in TS. */
 export type ActivityEvent = {
   createdAt: string;
@@ -153,6 +156,27 @@ export function listActivityEventsByGoal(db: Database.Database, goalId: string):
       stepRunId: typeof p.stepRunId === "string" ? p.stepRunId : null,
       status: p.status,
     });
+  }
+  return out;
+}
+
+/**
+ * Run-attributable events for a goal, oldest first. `events` is GOAL-scoped and
+ * only some payloads carry a run id — `harness.transition.recorded` notably does
+ * not — so "any event" would silently mean "any event of the goal", and a sibling
+ * run's event would register as this run's signal. Filtered to payloads that name
+ * the run, and the id is parsed in TS rather than matched in SQL.
+ */
+export function listRunEventsByGoal(db: Database.Database, goalId: string): RunEvent[] {
+  const rows = db.prepare(
+    "SELECT type, payload, created_at FROM events WHERE goal_id = ? ORDER BY seq ASC"
+  ).all(goalId) as Array<{ type: string; payload: string; created_at: string }>;
+  const out: RunEvent[] = [];
+  for (const r of rows) {
+    let p: { workflowRunId?: unknown };
+    try { p = JSON.parse(r.payload); } catch { continue; }
+    if (typeof p.workflowRunId !== "string") continue;
+    out.push({ createdAt: r.created_at, type: r.type, workflowRunId: p.workflowRunId });
   }
   return out;
 }

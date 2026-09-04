@@ -1,11 +1,11 @@
 import type {
-  Intervention, InterventionSourceKind, ParkState, RunCost, RunDetail,
-  RunDurations, RunSummary, RunTraceSpan, SpanCost, VerificationTier,
+  Intervention, InterventionSourceKind, ParkState, ProgressChannel as RunProgressChannel,
+  RunCost, RunDetail, RunDurations, RunSummary, RunTraceSpan, SpanCost, VerificationTier,
 } from "@orca/contracts";
 import { classifyTier } from "./verification.js";
 import { sourcesPassed } from "./source-signals.js";
 import { INFRA_REASON_MARKERS } from "./infra-failure.js";
-import type { ActivityEvent, RunRow, RunStepRunRow, RunTransition } from "./runs-fetch.js";
+import type { ActivityEvent, RunEvent, RunRow, RunStepRunRow, RunTransition } from "./runs-fetch.js";
 
 // The run-trace projection. Pure functions over already-fetched rows; see
 // docs/superpowers/specs/2026-09-02-run-trace-contract.md for the evidence contract.
@@ -147,6 +147,82 @@ function parkIntervals(interventions: Intervention[], nowMs: number): Interval[]
       return { start, end };
     })
     .filter((i): i is Interval => i !== null);
+}
+
+/**
+ * The two clocks. See `RunProgress` in contracts for why there are two and why
+ * neither reads `activities.updated_at`.
+ *
+ * `lastProgressAt` counts only records of the state ACTUALLY ADVANCING: engine
+ * boundaries, step-run brackets, and activity events whose STATUS CHANGED. That
+ * last filter is the load-bearing one — a park being resolved is progress, a park
+ * being re-touched is not, and only the append-only stream can tell them apart.
+ * On the live stuck run all eight recent activity events carry the same
+ * `paused_for_input` for the same activity, so every one is correctly excluded
+ * with no threshold and no allowlist.
+ */
+export function computeProgress(input: {
+  run: RunRow;
+  stepRuns: RunStepRunRow[];
+  transitions: RunTransition[];
+  activityEvents: ActivityEvent[];
+  runEvents: RunEvent[];
+  nowMs: number;
+}): RunSummary["progress"] {
+  const { run, stepRuns, transitions, activityEvents, runEvents, nowMs } = input;
+  const startMs = ms(run.startedAt) ?? nowMs;
+  const endMs = Math.max(startMs, runTerminalMs(run, stepRuns, nowMs));
+  // Both clocks are clipped to the run's own window, for the same reason parkedMs
+  // is: a record written after the run ended is not the run still moving.
+  const within = (iso: string | null): number | null => {
+    const t = ms(iso);
+    return t === null || t < startMs || t > endMs ? null : t;
+  };
+
+  let progressAt: number | null = null;
+  let progressChannel: RunProgressChannel | null = null;
+  const bid = (at: number | null, channel: RunProgressChannel) => {
+    if (at === null) return;
+    if (progressAt === null || at > progressAt) { progressAt = at; progressChannel = channel; }
+  };
+
+  for (const t of transitions) bid(within(t.transition.createdAt), "harness_transition");
+  for (const sr of stepRuns) {
+    bid(within(sr.startedAt), "step_boundary");
+    bid(within(sr.finishedAt), "step_boundary");
+  }
+  // An activity event counts only where the status CHANGED for that activity.
+  const lastStatus = new Map<string, string>();
+  for (const e of activityEvents) {
+    if (e.workflowRunId !== run.runId) continue;
+    const prev = lastStatus.get(e.activityId);
+    if (prev !== undefined && prev !== e.status) bid(within(e.createdAt), "activity_transition");
+    lastStatus.set(e.activityId, e.status);
+  }
+
+  // `lastSignalAt` INCLUDES lastProgressAt by definition, so signal >= progress
+  // holds by construction and the pair can never invert.
+  let signalAt: number | null = progressAt;
+  let signalChannel: RunProgressChannel | null = progressChannel;
+  for (const e of runEvents) {
+    if (e.workflowRunId !== run.runId) continue;
+    const at = within(e.createdAt);
+    if (at !== null && (signalAt === null || at > signalAt)) { signalAt = at; signalChannel = "run_event"; }
+  }
+
+  // Silence is only conclusive when no step is mid-flight. With just the Stop and
+  // PermissionRequest hooks wired, an agent working inside a step emits nothing —
+  // so an old signal there cannot tell "idle" from "working, unobserved", and
+  // calling it silent would assert idleness the record cannot support.
+  const stepInFlight = stepRuns.some((sr) => sr.status === "active");
+
+  return {
+    lastProgressAt: progressAt === null ? null : new Date(progressAt).toISOString(),
+    lastProgressChannel: progressChannel,
+    lastSignalAt: signalAt === null ? null : new Date(signalAt).toISOString(),
+    lastSignalChannel: signalChannel,
+    silenceConclusive: !stepInFlight,
+  };
 }
 
 export function computeDurations(input: {
@@ -403,9 +479,11 @@ export function buildRunSummary(input: {
   transitions: RunTransition[];
   interventions: Intervention[];
   spans: RunTraceSpan[];
+  activityEvents: ActivityEvent[];
+  runEvents: RunEvent[];
   nowMs: number;
 }): RunSummary {
-  const { run, stepRuns, transitions, interventions, spans, nowMs } = input;
+  const { run, stepRuns, transitions, interventions, spans, activityEvents, runEvents, nowMs } = input;
   const termination = deriveTermination(run, stepRuns, transitions);
   return {
     runId: run.runId,
@@ -420,6 +498,7 @@ export function buildRunSummary(input: {
     terminationCause: termination.cause,
     terminationEvidence: termination.evidence,
     durations: computeDurations({ run, stepRuns, transitions, interventions, nowMs }),
+    progress: computeProgress({ run, stepRuns, transitions, activityEvents, runEvents, nowMs }),
     cost: computeCost(transitions, stepRuns),
     stepsDelivered: stepRuns.filter((s) => DELIVERED.has(s.status)).length,
     stepsBlocked: stepRuns.filter((s) => BLOCKED.has(s.status)).length,
@@ -434,15 +513,19 @@ export function buildRunDetail(input: {
   stepRuns: RunStepRunRow[];
   transitions: RunTransition[];
   events: ActivityEvent[];
+  runEvents: RunEvent[];
   sourceKinds: Map<string, string>;
   stepNames: Map<string, string>;
   nowMs: number;
 }): RunDetail {
-  const { run, stepRuns, transitions, events, sourceKinds, stepNames, nowMs } = input;
+  const { run, stepRuns, transitions, events, runEvents, sourceKinds, stepNames, nowMs } = input;
   const interventions = buildInterventions({ events, sourceKinds, run, nowMs });
   const spans = buildSpans({ run, stepRuns, transitions, stepNames });
   return {
-    run: buildRunSummary({ run, stepRuns, transitions, interventions, spans, nowMs }),
+    run: buildRunSummary({
+      run, stepRuns, transitions, interventions, spans,
+      activityEvents: events, runEvents, nowMs,
+    }),
     spans,
     interventions,
   };

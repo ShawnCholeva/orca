@@ -139,6 +139,58 @@ export const RunCost = z.object({
 }).strict();
 export type RunCost = z.infer<typeof RunCost>;
 
+/**
+ * Which record a timestamp rests on. Named rather than inferred, so a reader is
+ * told what kind of evidence they have instead of being handed a bare instant.
+ */
+export const ProgressChannel = z.enum([
+  "harness_transition",  // an engine-owned boundary — the strongest signal
+  "step_boundary",       // a step run started or finished
+  "activity_transition", // an activity CHANGED status — a park opening or closing
+  "run_event",           // any other run-attributable event (signal only, not progress)
+]);
+export type ProgressChannel = z.infer<typeof ProgressChannel>;
+
+/**
+ * Two clocks, because a run with no open park has two possible realities and one
+ * timestamp cannot serve both: nothing is happening (a dead worker), or things
+ * are happening and nothing is advancing (a loop).
+ *
+ * Deliberately no "state" and no staleness threshold. The magnitude does the
+ * judging — "last progress 39h ago" needs no constant to be alarming, and a
+ * threshold would be a number nobody could defend.
+ *
+ * NOT derived from `activities.updated_at`, which is the obvious source and the
+ * wrong one: a row touched by a retry loop is indistinguishable from a row doing
+ * work. On the live stuck run that column moved twice within seconds after 38.6
+ * hours of no progress, in an identical state. Progress is defined by append-only
+ * state transitions, never by mutation timestamps.
+ */
+export const RunProgress = z.object({
+  /** Last time the run's state actually ADVANCED. Clipped to the run's terminal. */
+  lastProgressAt: z.string().nullable(),
+  lastProgressChannel: ProgressChannel.nullable(),
+  /**
+   * Last time ANYTHING run-attributable happened. Defined to include
+   * `lastProgressAt`, so `lastSignalAt >= lastProgressAt` holds by construction
+   * rather than by coincidence and the pair can never invert.
+   */
+  lastSignalAt: z.string().nullable(),
+  lastSignalChannel: ProgressChannel.nullable(),
+  /**
+   * False while a step is mid-flight. Only the Stop and PermissionRequest hooks
+   * are wired, so an agent working inside a step emits nothing at all — and an old
+   * `lastSignalAt` then cannot distinguish "idle" from "working, unobserved".
+   * Concluding silence there would assert idleness the record cannot support.
+   *
+   * A 36-minute gap with no step boundary on a COMPLETED run is the case: the
+   * honest reading is "we can't tell from the record what happened in it", not
+   * "nothing did".
+   */
+  silenceConclusive: z.boolean(),
+}).strict();
+export type RunProgress = z.infer<typeof RunProgress>;
+
 export const RunTraceSpan = z.object({
   workflowRunId: z.string(),
   workflowStepRunId: z.string(),
@@ -211,6 +263,7 @@ export const RunSummary = z.object({
   /** The literal signal the cause was read from — so the classification is auditable. */
   terminationEvidence: z.string().nullable(),
   durations: RunDurations,
+  progress: RunProgress,
   cost: RunCost,
   stepsDelivered: z.number().int().nonnegative(),
   stepsBlocked: z.number().int().nonnegative(),

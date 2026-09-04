@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { RunDetail, RunSummary } from "@orca/contracts";
 import {
-  activitySourceKinds, getRun, listActivityEventsByGoal, listRuns,
+  activitySourceKinds, getRun, listActivityEventsByGoal, listRunEventsByGoal, listRuns,
   listStepRunsByRun, listTransitionsByRun,
 } from "./runs-fetch.js";
 import { buildInterventions, buildRunDetail, buildRunSummary, buildSpans } from "./runs.js";
@@ -62,8 +62,10 @@ export function getRunSummaries(
   return listRuns(db, opts.limit ?? 50).map((run) => {
     const stepRuns = listStepRunsByRun(db, run.runId);
     const transitions = listTransitionsByRun(db, run.runId);
+    const activityEvents = listActivityEventsByGoal(db, run.goalId);
+    const runEvents = listRunEventsByGoal(db, run.goalId);
     const interventions = buildInterventions({
-      events: listActivityEventsByGoal(db, run.goalId),
+      events: activityEvents,
       sourceKinds: activitySourceKinds(db, run.goalId),
       run,
       nowMs,
@@ -72,7 +74,9 @@ export function getRunSummaries(
       run, stepRuns, transitions,
       stepNames: stepNamesForRun(db, run.runId, run.templateId),
     });
-    return buildRunSummary({ run, stepRuns, transitions, interventions, spans, nowMs });
+    return buildRunSummary({
+      run, stepRuns, transitions, interventions, spans, activityEvents, runEvents, nowMs,
+    });
   });
 }
 
@@ -88,6 +92,7 @@ export function getRunDetail(
     stepRuns: listStepRunsByRun(db, runId),
     transitions: listTransitionsByRun(db, runId),
     events: listActivityEventsByGoal(db, run.goalId),
+    runEvents: listRunEventsByGoal(db, run.goalId),
     sourceKinds: activitySourceKinds(db, run.goalId),
     stepNames: stepNamesForRun(db, runId, run.templateId),
     nowMs: Date.parse(opts.nowIso ?? new Date().toISOString()),

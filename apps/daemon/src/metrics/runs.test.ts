@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { HarnessTransition } from "@orca/contracts";
 import {
   buildInterventions, buildRunDetail, clampIntervals, computeCost, computeDurations,
-  mergeIntervals, runTerminalMs, totalMs,
+  computeProgress, mergeIntervals, runTerminalMs, totalMs,
 } from "./runs.js";
 import type { ActivityEvent, RunRow, RunStepRunRow, RunTransition } from "./runs-fetch.js";
 
@@ -344,6 +344,7 @@ describe("buildRunDetail", () => {
         complete({ id: "c1", at: "2026-09-01T00:20:00.000Z", usd: null }),
       ],
       events: [],
+      runEvents: [],
       sourceKinds: new Map(),
       stepNames: new Map([["triage", "Triage"]]),
       nowMs: NOW,
@@ -356,5 +357,92 @@ describe("buildRunDetail", () => {
     expect(detail.run.retriedCompletions).toBe(0);
     expect(detail.spans[0].cost?.state).toBe("unknown");
     expect(detail.run.openInterventions).toBe(0);
+  });
+});
+
+describe("computeProgress", () => {
+  const base = {
+    run: run({ startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T01:00:00.000Z" }),
+    stepRuns: [stepRun({ status: "passed" })],
+    transitions: [],
+    activityEvents: [],
+    runEvents: [],
+    nowMs: NOW,
+  };
+
+  it("ignores an activity event that repeats the same status", () => {
+    // The live stuck run: eight `activity.changed` events for one activity, all
+    // carrying `paused_for_input`, two of them 38.6 hours after the last real
+    // progress. `activities.updated_at` — the obvious source, and the one whose
+    // name promises exactly this — would report "last activity 5 minutes ago" on
+    // a run that had not advanced in a day and a half.
+    const p = computeProgress({
+      ...base,
+      activityEvents: [
+        ev("a1", "paused_for_input", "2026-09-01T00:10:00.000Z"),
+        ev("a1", "paused_for_input", "2026-09-01T00:50:00.000Z"),
+      ],
+    });
+    expect(p.lastProgressAt).toBe("2026-09-01T00:30:00.000Z"); // the span's finish
+    expect(p.lastProgressChannel).toBe("step_boundary");
+  });
+
+  it("counts an activity event that CHANGED status — a park resolving is progress", () => {
+    const p = computeProgress({
+      ...base,
+      activityEvents: [
+        ev("a1", "paused_for_input", "2026-09-01T00:10:00.000Z"),
+        ev("a1", "active", "2026-09-01T00:45:00.000Z"),
+      ],
+    });
+    expect(p.lastProgressAt).toBe("2026-09-01T00:45:00.000Z");
+    expect(p.lastProgressChannel).toBe("activity_transition");
+  });
+
+  it("keeps signal >= progress by construction, so the pair cannot invert", () => {
+    const p = computeProgress({
+      ...base,
+      transitions: [complete({ id: "c1", at: "2026-09-01T00:20:00.000Z" })],
+      runEvents: [],
+    });
+    expect(p.lastSignalAt).toBe(p.lastProgressAt);
+  });
+
+  it("moves signal ahead of progress when only a run event fired — the spinning case", () => {
+    const p = computeProgress({
+      ...base,
+      runEvents: [{ createdAt: "2026-09-01T00:55:00.000Z", type: "workflow.step.phase_changed", workflowRunId: RUN_ID }],
+    });
+    expect(p.lastSignalAt).toBe("2026-09-01T00:55:00.000Z");
+    expect(p.lastSignalChannel).toBe("run_event");
+    expect(p.lastProgressAt).toBe("2026-09-01T00:30:00.000Z");
+  });
+
+  it("ignores an event belonging to a sibling run of the same goal", () => {
+    // `events` is goal-scoped; "any event" would let a sibling run's activity
+    // register as this run's signal.
+    const p = computeProgress({
+      ...base,
+      runEvents: [{ createdAt: "2026-09-01T00:55:00.000Z", type: "workflow.step.started", workflowRunId: "other-run" }],
+    });
+    expect(p.lastSignalAt).toBe("2026-09-01T00:30:00.000Z");
+  });
+
+  it("clips both clocks to the run's own window", () => {
+    const p = computeProgress({
+      ...base,
+      runEvents: [{ createdAt: "2026-09-02T00:00:00.000Z", type: "activity.changed", workflowRunId: RUN_ID }],
+    });
+    // The event is a day after the run ended; the run was not still moving.
+    expect(p.lastSignalAt).toBe("2026-09-01T00:30:00.000Z");
+  });
+
+  it("refuses to call silence conclusive while a step is mid-flight", () => {
+    // Only Stop and PermissionRequest are wired, so an agent working inside a step
+    // emits nothing. An old signal there cannot tell "idle" from "working,
+    // unobserved", and calling it silent asserts idleness the record cannot support.
+    expect(computeProgress({ ...base, stepRuns: [stepRun({ status: "active" })] }).silenceConclusive)
+      .toBe(false);
+    expect(computeProgress(base).silenceConclusive).toBe(true);
   });
 });
