@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { isAwaitingUser } from "../../activities/awaiting-user.js";
 
 import type { EventBus } from "../../events.js";
 import { failSession } from "../../sessions/runtime.js";
@@ -181,11 +182,10 @@ export function buildLivenessWatchdogDeps(
         startedAtMs: r.started_at ? Date.parse(r.started_at) : null,
         outputSeq: r.output_seq,
         activityAtMs: r.activity_updated_at ? Date.parse(r.activity_updated_at) : null,
-        // `permission_pending` is the exception that makes this two conditions rather
-        // than one: openActivity inserts EVERY activity as 'active', and only the park
-        // paths flip the status, so a worker awaiting tool approval reads as active.
-        systemTurn:
-          r.activity_status !== "paused_for_input" && r.activity_source_kind !== "permission_pending",
+        // Shares the ONE definition of "parked on the human" with the step-run
+        // projection. A second copy is how the cached column and this predicate
+        // drifted apart in the first place.
+        systemTurn: !isAwaitingUser(r.activity_status, r.activity_source_kind),
       }));
     },
     hasStepOutput: (stepRunId) =>

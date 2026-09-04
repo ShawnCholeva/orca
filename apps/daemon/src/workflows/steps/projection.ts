@@ -1,5 +1,10 @@
 import type Database from "better-sqlite3";
 import {
+  LIVE_ACTIVITY_COLUMNS,
+  isAwaitingUser,
+  liveActivityJoin,
+} from "../../activities/awaiting-user.js";
+import {
   WorkflowStepResult,
   WorkflowStepRun,
   type WorkflowStepRun as WorkflowStepRunT,
@@ -22,12 +27,19 @@ interface WorkflowStepRunRow {
   operator_selected_at: string | null;
   orchestrator_phase: string | null;
   pending_judge_json: string | null;
-  awaiting_user: number;
+  activity_status: string | null;
+  activity_source_kind: string | null;
   step_result_json: string | null;
 }
 
+// Aliased because the live-activity join needs one. `awaiting_user` is gone from
+// the list: the column has a single writer and four park paths that never reach
+// it, so the fact is read from the activity that already holds it.
 const STEP_RUN_COLUMNS =
-  "id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, started_at, finished_at, blocked_reason, selected_operator_id, selected_provider_id, selected_model_id, operator_selected_at, orchestrator_phase, pending_judge_json, awaiting_user, step_result_json";
+  "wsr.id, wsr.goal_id, wsr.workflow_run_id, wsr.step_template_id, wsr.ordinal, wsr.attempt, wsr.status, wsr.started_at, wsr.finished_at, wsr.blocked_reason, wsr.selected_operator_id, wsr.selected_provider_id, wsr.selected_model_id, wsr.operator_selected_at, wsr.orchestrator_phase, wsr.pending_judge_json, wsr.step_result_json, " +
+  LIVE_ACTIVITY_COLUMNS;
+
+const STEP_RUN_FROM = `FROM workflow_step_runs wsr ${liveActivityJoin("wsr")}`;
 
 let _db: Database.Database | null = null;
 let _stmt: Database.Statement | null = null;
@@ -36,7 +48,7 @@ function ensureStmt(db: Database.Database): Database.Statement {
   if (_db !== db || !_stmt) {
     _db = db;
     _stmt = db.prepare(
-      `SELECT ${STEP_RUN_COLUMNS} FROM workflow_step_runs WHERE id = ?`
+      `SELECT ${STEP_RUN_COLUMNS} ${STEP_RUN_FROM} WHERE wsr.id = ?`
     );
   }
   return _stmt;
@@ -69,7 +81,7 @@ function rowToStepRun(row: WorkflowStepRunRow): WorkflowStepRunT {
     operatorSelectedAt: row.operator_selected_at,
     orchestratorPhase: row.orchestrator_phase as never,
     judgePending: row.pending_judge_json != null,
-    awaitingUser: row.awaiting_user === 1,
+    awaitingUser: isAwaitingUser(row.activity_status, row.activity_source_kind),
     stepResult,
   });
 }
@@ -96,7 +108,7 @@ export function listStepRunsForRun(
       // its surrogate `active` for the whole eval). They are not real steps —
       // and their negative ordinal violates WorkflowStepRun's nonnegative-ordinal
       // contract, so serving them would 500 this projection.
-      `SELECT ${STEP_RUN_COLUMNS} FROM workflow_step_runs WHERE workflow_run_id = ? AND ordinal >= 0 ORDER BY ordinal ASC, attempt ASC`
+      `SELECT ${STEP_RUN_COLUMNS} ${STEP_RUN_FROM} WHERE wsr.workflow_run_id = ? AND wsr.ordinal >= 0 ORDER BY wsr.ordinal ASC, wsr.attempt ASC`
     )
     .all(workflowRunId) as WorkflowStepRunRow[];
   return rows.map(rowToStepRun);
