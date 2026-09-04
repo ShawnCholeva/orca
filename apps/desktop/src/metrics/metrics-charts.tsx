@@ -1,5 +1,6 @@
 import { useId, type CSSProperties, type ReactElement, type ReactNode } from "react";
-import type { NodeVersionHistory } from "@orca/contracts";
+import type { MeasurementState, NodeVersionHistory } from "@orca/contracts";
+import { MeasurementLabel } from "./n-gate-ui";
 
 export function Panel({
   title,
@@ -154,6 +155,7 @@ export function StatTile({
   spark,
   sparkColor,
   grade,
+  absence,
 }: {
   label: string;
   value: number | string | null;
@@ -165,6 +167,10 @@ export function StatTile({
   spark?: number[];
   sparkColor?: string;
   grade?: string | null;
+  /** Why `value` is null, when the caller knows. Omitted means we have not
+   *  established why — which is a different claim from "not enough runs yet", and
+   *  the two have opposite remedies. */
+  absence?: { state: MeasurementState; reason?: string; fix?: string; lossy?: boolean };
 }) {
   return (
     <div style={{ flex: 1, minWidth: 0, background: "var(--panel)", border: "1px solid var(--hairline)", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
@@ -174,7 +180,18 @@ export function StatTile({
       </div>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-          <span style={{ fontSize: 26, fontWeight: 600, letterSpacing: -0.5, color: accent || "var(--text)", lineHeight: 1 }}>{value == null ? "—" : value}</span>
+          {/* The typed absence REPLACES the figure. A dash said a value was missing
+              and nothing about which of five situations produced it — and those have
+              opposite remedies: wait for runs, run more checks, or build the
+              instrumentation. `unknown` is the default rather than a guess at one of
+              them, because a tile whose null the contract does not explain has
+              genuinely not established why, and asserting a reason we don't have is
+              the same defect one level down. */}
+          {value == null ? (
+            <MeasurementLabel compact state={absence?.state ?? "unknown"} {...absence} />
+          ) : (
+            <span style={{ fontSize: 26, fontWeight: 600, letterSpacing: -0.5, color: accent || "var(--text)", lineHeight: 1 }}>{value}</span>
+          )}
           {value != null && unit && <span className="mono" style={{ fontSize: 12, color: "var(--text-3)" }}>{unit}</span>}
           {value != null && grade && (
             <span style={{ marginLeft: 4, fontSize: 12, fontWeight: 700, color: accent, border: `1px solid ${accent}`, borderRadius: 5, padding: "1px 6px", lineHeight: 1.3 }}>{grade}</span>

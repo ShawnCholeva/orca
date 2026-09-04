@@ -177,7 +177,16 @@ describe("MetricsPage", () => {
     await waitFor(() => expect(screen.getByText(/Couldn't load metrics/i)).toBeInTheDocument());
   });
 
-  it("renders em dash for null metrics (not 0 / F)", async () => {
+  // Replaces "renders em dash for null metrics (not 0 / F)". That test passed and
+  // honestly described the screen — the tile really did render an em dash — but a
+  // bare dash is the untyped absence this whole redesign exists to remove. It says
+  // a value is missing and nothing about which of five different situations
+  // produced it, so the reader cannot tell "wait for runs" from "this is never
+  // recorded" from "nobody has established why", which have opposite remedies.
+  //
+  // What it kept and this keeps: an unmeasured metric must never render as 0 or F.
+  // That was the original defect and it is still the load-bearing assertion.
+  it("renders a typed absence for a null metric, never a bare dash and never 0 / F", async () => {
     const nullSummary = {
       ...summary,
       dimensions: { ...summary.dimensions, verificationStrength: { value: null } },
@@ -187,9 +196,16 @@ describe("MetricsPage", () => {
     vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary: nullSummary, steps: [], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
     renderWorkflowView();
     await waitFor(() => expect(screen.getByText("Step health")).toBeInTheDocument());
-    const dashes = screen.getAllByText("—");
-    expect(dashes.length).toBeGreaterThanOrEqual(1);
+
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
     expect(screen.queryByText("F")).not.toBeInTheDocument();
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
+
+    // The absence carries a type the reader can act on, and the full sentence
+    // reaches a screen reader even though the tile only has room for the tag.
+    const tag = document.querySelector('[data-compact="true"]');
+    expect(tag).toBeTruthy();
+    expect(tag!.getAttribute("aria-label")).toMatch(/haven't established|isn't being recorded|Not enough runs/);
   });
 
   it("renders version change-marker chips on gates and the scope toggle with Current shape active", async () => {

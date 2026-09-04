@@ -7,7 +7,16 @@ import { StepRow } from "./StepPerformance";
 
 const GATE_GRID = "34px minmax(0,1fr) 96px 64px 22px";
 
-function pct(x: number | null): string { return x == null ? "—" : `${Math.round(x * 100)}%`; }
+// Returns null rather than a dash. A caller that has nothing to show must decide
+// what to do about it — drop the clause, drop the row, or type the absence — and a
+// dash let every caller skip that decision while looking like it had made one.
+function pct(x: number | null): string | null { return x == null ? null : `${Math.round(x * 100)}%`; }
+
+/** Joins the clauses that exist. Renders nothing at all when none do. */
+function clauses(parts: (string | null)[]): string | null {
+  const present = parts.filter((p): p is string => p != null);
+  return present.length > 0 ? present.join(" · ") : null;
+}
 
 export function GateRow({ gate, index, isLast, open, onToggle, guards }: { gate: GateMetrics; index: number; isLast: boolean; open: boolean; onToggle: () => void; guards?: { from: string; to: string } }) {
   const color = gate.health == null ? "var(--accent)" : gate.health >= 80 ? "var(--run)" : gate.health >= 60 ? "var(--warn)" : "var(--err)";
@@ -25,13 +34,25 @@ export function GateRow({ gate, index, isLast, open, onToggle, guards }: { gate:
             <VersionMarkerChips history={gate.versionHistory} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 7 }}>
-            <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>
-              {pct(gate.context.approvalRate)} approved · {gate.context.meanLoops == null ? "—" : `${gate.context.meanLoops.toFixed(1)} loops`}
-              {gate.scored.overturnRate != null ? ` · ${pct(gate.scored.overturnRate)} sent back` : ""}
-            </span>
+            {/* Only the clauses that exist. Previously read "— approved · — loops",
+                which states two absences in the grammar of two measurements. When
+                nothing is measured the line is absent and the health column's
+                "unproven" carries the fact. */}
+            {(() => {
+              const line = clauses([
+                pct(gate.context.approvalRate) && `${pct(gate.context.approvalRate)} approved`,
+                gate.context.meanLoops == null ? null : `${gate.context.meanLoops.toFixed(1)} loops`,
+                pct(gate.scored.overturnRate) && `${pct(gate.scored.overturnRate)} sent back`,
+              ]);
+              return line == null ? null : (
+                <span className="mono" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{line}</span>
+              );
+            })()}
           </div>
         </div>
-        {gate.trend.length > 0 ? <Sparkline data={gate.trend} color={color} w={84} h={26} /> : <span className="mono" style={{ fontSize: 10, color: "var(--text-4)", textAlign: "center" }}>—</span>}
+        {/* No trend, no chart. An empty cell claims nothing; a dash reads as a
+            plotted value of nothing. The typed fact lives in the health column. */}
+        {gate.trend.length > 0 ? <Sparkline data={gate.trend} color={color} w={84} h={26} /> : <span />}
         <div style={{ textAlign: "right" }}>
           {gate.health == null ? (
             <span className="mono" style={{ fontSize: 12, fontWeight: 600, color }} title="No independent check has confirmed this gate's calls yet — not a failing grade.">unproven</span>
@@ -56,18 +77,39 @@ export function GateRow({ gate, index, isLast, open, onToggle, guards }: { gate:
               </div>
             ))}
             <SectionLabel>Grounded in checks</SectionLabel>
-            <div style={{ fontSize: 12, color: "var(--text-2)" }}>{pct(gate.scored.groundedness)} average strength of the evidence behind gate calls.</div>
+            <div style={{ fontSize: 12, color: "var(--text-2)" }}>
+              {pct(gate.scored.groundedness) == null
+                ? "No evidence strength has been scored for this gate's calls yet."
+                : `${pct(gate.scored.groundedness)} average strength of the evidence behind gate calls.`}
+            </div>
             <SectionLabel>Do its approvals hold up?</SectionLabel>
             <div style={{ fontSize: 12, color: "var(--text-2)" }}>
               {gate.decisionConfidence.state === "measured" && gate.decisionConfidence.value != null
                 ? `${Math.round(gate.decisionConfidence.value * 100)}% of its approvals held up downstream (${gate.decisionConfidence.sampleSize} checked).`
                 : "Not enough decisions yet to tell whether its approvals hold up."}
             </div>
-            <SectionLabel>Cost</SectionLabel>
-            <div className="mono" style={{ fontSize: 11.5, color: "var(--text-3)" }}>
-              {gate.cost.p50LatencyMs == null ? "—" : `${Math.round(gate.cost.p50LatencyMs)}ms`} · {gate.cost.meanTokens == null ? "—" : `${Math.round(gate.cost.meanTokens)} tok`} · {gate.cost.meanUsd == null ? "—" : `$${gate.cost.meanUsd.toFixed(3)}`}
-              {gate.cost.tokensSpentOnOverturned ? ` · ${gate.cost.tokensSpentOnOverturned} tok spent on calls later sent back` : ""}
-            </div>
+            {/* Never render a container whose content cannot be computed. Three
+                dashes under a "Cost" heading is a row that will sit there forever
+                looking like a measurement that happens to be empty. Gates emit
+                step_launch/step_complete since be490cb, so when this is absent it is
+                a gate that genuinely reported nothing, not a permanent hole. */}
+            {(() => {
+              const line = clauses([
+                gate.cost.p50LatencyMs == null ? null : `${Math.round(gate.cost.p50LatencyMs)}ms`,
+                gate.cost.meanTokens == null ? null : `${Math.round(gate.cost.meanTokens)} tok`,
+                gate.cost.meanUsd == null ? null : `$${gate.cost.meanUsd.toFixed(3)}`,
+                gate.cost.tokensSpentOnOverturned
+                  ? `${gate.cost.tokensSpentOnOverturned} tok spent on calls later sent back`
+                  : null,
+              ]);
+              if (line == null) return null;
+              return (
+                <>
+                  <SectionLabel>Cost</SectionLabel>
+                  <div className="mono" style={{ fontSize: 11.5, color: "var(--text-3)" }}>{line}</div>
+                </>
+              );
+            })()}
             <VersionHistoryStrip history={gate.versionHistory} />
           </div>
         </div>

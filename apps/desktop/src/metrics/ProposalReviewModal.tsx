@@ -97,7 +97,7 @@ export function ProposalReviewModal({ proposal, stepName, onApply, onDismiss, on
               style={{ width: "100%", background: "var(--bg)", color: "var(--text)", border: "1px solid var(--hairline)", borderRadius: 6, fontFamily: "inherit", fontSize: 11.5, padding: "7px 10px", boxSizing: "border-box" }} />
           </div>
           <div style={{ color: "var(--text-2)" }}>Predicts: {proposal.predictedImprovement}</div>
-          <div style={{ color: "var(--text-3)" }}>Preserves: {proposal.invariantsPreserved.join(", ") || "—"}</div>
+          <div style={{ color: "var(--text-3)" }}>Preserves: {proposal.invariantsPreserved.join(", ") || "nothing stated"}</div>
         </div>
 
         <footer style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderTop: "1px solid var(--hairline)" }}>

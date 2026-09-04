@@ -175,7 +175,7 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
                 : <div style={{ color: "var(--text-2)" }}>Adds required structure — open Review change.</div>)
               : <div style={{ color: "var(--text-2)" }}>{changedCount} line{changedCount === 1 ? "" : "s"} changed</div>}
 
-            <div style={{ color: "var(--text-3)", fontSize: 11.5 }}>Preserves: {p.invariantsPreserved.join(", ") || "—"}</div>
+            <div style={{ color: "var(--text-3)", fontSize: 11.5 }}>Preserves: {p.invariantsPreserved.join(", ") || "nothing stated"}</div>
 
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <Btn kind="quiet" size="xs" onClick={() => onReview(p.id)}>Review change</Btn>
@@ -232,7 +232,10 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
           <div style={{ color: "var(--text-3)" }}>
             {p.regressionDetected ? "Regression detected" : "Watching"}
             {p.watchedDeltas && Object.keys(p.watchedDeltas).length > 0
-              ? " · " + Object.entries(p.watchedDeltas).map(([k, v]) => `${k} ${v == null ? "—" : v.toFixed(2)}`).join(", ")
+              // A watched dimension with no delta yet is a metric awaiting runs, not a
+              // metric whose value is a dash. Naming it and saying so beats printing a
+              // mark that reads as a number nobody bothered to fill in.
+              ? " · " + Object.entries(p.watchedDeltas).map(([k, v]) => (v == null ? `${k} awaiting runs` : `${k} ${v.toFixed(2)}`)).join(", ")
               : " · awaiting runs"}
           </div>
           {(() => {

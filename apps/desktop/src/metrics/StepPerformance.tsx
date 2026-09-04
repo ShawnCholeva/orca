@@ -180,7 +180,9 @@ export function StepRow({ step, index, isLast, open, onToggle, onOpenGoal, propo
             ))}
           </div>
         </div>
-        {step.trend.length > 0 ? <Sparkline data={step.trend} color={m.color} w={84} h={26} /> : <span className="mono" style={{ fontSize: 10, color: "var(--text-4)", textAlign: "center" }}>—</span>}
+        {/* No trend, no chart — same as the gate rows. An empty cell claims nothing;
+            a dash reads as a plotted value of nothing. */}
+        {step.trend.length > 0 ? <Sparkline data={step.trend} color={m.color} w={84} h={26} /> : <span />}
         <div style={{ textAlign: "right" }}>
           {step.score == null ? (
             // No conclusive verdict — show the coverage gap, not a failing grade it didn't earn.
