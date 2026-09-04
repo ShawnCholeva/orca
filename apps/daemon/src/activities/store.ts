@@ -169,7 +169,17 @@ function insertActivityChangedEvent(
     workflowRunId: activity.workflowRunId,
     stepRunId: activity.stepRunId,
     turnOrdinal: activity.turnOrdinal,
-    status: activity.status
+    status: activity.status,
+    // WHY the activity changed, not just that it did. A subscriber can tell a
+    // step-confirmation park from a permission request from a provider limit —
+    // the difference between "Orca is waiting on you", which a user learns to
+    // ignore, and "Orca needs your OK on a step", which they act on.
+    //
+    // It has to ride the append-only payload: `source_kind` is overwritten on the
+    // mutable row by later appends (see appendActivityStep), so a subscriber that
+    // joined back to `activities` would read whatever the row says now rather than
+    // what it said at the pause. Deriving this at read time is already lossy.
+    sourceKind: activity.sourceKind
   };
   const eventId = randomUUID();
   const result = db

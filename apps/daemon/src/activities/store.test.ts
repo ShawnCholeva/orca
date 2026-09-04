@@ -23,7 +23,7 @@ import {
 } from "./store.js";
 
 function ctxFor(db: Database.Database) {
-  const events: Array<{ type: string }> = [];
+  const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
   const bus = new EventBus();
   bus.subscribe((event) => events.push(event));
   let n = 0;
@@ -82,6 +82,46 @@ describe("ActivityStore", () => {
     expect(b.currentText).toBe("Reading...");
     expect(b.turnOrdinal).toBe(0);
     expect(events.filter((event) => event.type === "activity.changed").length).toBe(2);
+  });
+
+  it("carries sourceKind on the activity.changed payload", () => {
+    // Subscribers need WHY the activity changed, not just that it did — the
+    // difference between "Orca is waiting on you", which a user learns to ignore,
+    // and "Orca needs your OK on a step", which they act on.
+    const { ctx, events } = ctxFor(db);
+    openOrUpdateLive(ctx, {
+      ...base,
+      sourceKind: "step_confirmation_pending",
+      currentText: "Waiting on you",
+      workCategory: null
+    });
+
+    const changed = events.filter((e) => e.type === "activity.changed");
+    expect(changed).toHaveLength(1);
+    expect(changed[0].payload).toMatchObject({ sourceKind: "step_confirmation_pending" });
+  });
+
+  it("reports the sourceKind the activity had AT the event, not whatever the row says later", () => {
+    // appendActivityStep overwrites source_kind to 'tool_use' on the mutable row,
+    // so a subscriber that joined back to `activities` would read the wrong cause
+    // for an earlier event. This is why it has to ride the append-only payload:
+    // deriving it at read time is already lossy, not theoretically lossy.
+    const { ctx, events } = ctxFor(db);
+    openOrUpdateLive(ctx, {
+      ...base,
+      sourceKind: "step_confirmation_pending",
+      currentText: "Waiting on you",
+      workCategory: null
+    });
+    const parkEvent = events.filter((e) => e.type === "activity.changed").at(-1)!;
+
+    appendActivityStep(ctx, { ...base, text: "Reading a file", category: "reading", diff: null });
+
+    const rowNow = db
+      .prepare("SELECT source_kind AS k FROM activities WHERE step_run_id = ?")
+      .get(base.stepRunId) as { k: string };
+    expect(rowNow.k).toBe("tool_use"); // the row moved on
+    expect(parkEvent.payload).toMatchObject({ sourceKind: "step_confirmation_pending" }); // the event did not
   });
 
   it("opens a new turn after the prior one completes", () => {
