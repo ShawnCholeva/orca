@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { FAILED_TRANSITION_STATUSES } from "@orca/contracts";
 
 export interface FailureCluster {
   failure_code: string | null;
@@ -17,8 +18,11 @@ interface SampleRow {
   id: string;
 }
 
-// Statuses that represent a non-successful outcome worth attributing.
-const FAILED_STATUSES = "('failed','escalated','denied')";
+// Statuses that represent a non-successful outcome worth attributing. Built from
+// the enum rather than hand-listed, so a status added to TransitionStatus is
+// attributed by default instead of silently dropping out of the clusters.
+// Values come from a frozen zod enum, never from user input.
+const FAILED_STATUSES = `(${FAILED_TRANSITION_STATUSES.map((s) => `'${s}'`).join(",")})`;
 
 let _db: Database.Database | null = null;
 let _stmts: {

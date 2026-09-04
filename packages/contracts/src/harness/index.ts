@@ -117,6 +117,24 @@ export type RiskFacet = z.infer<typeof RiskFacet>;
 export const TransitionStatus = z.enum(["succeeded", "failed", "escalated", "denied"]);
 export type TransitionStatus = z.infer<typeof TransitionStatus>;
 
+/**
+ * Every status that is NOT a success — derived, never hand-listed.
+ *
+ * Two consumers used to enumerate the complement of `succeeded` longhand in
+ * their own files (a JS Set in metrics/aggregate.ts, a SQL literal in
+ * harness-metrics/attribution.ts), which meant a fifth status would be silently
+ * non-failed in one and non-attributed in the other: a real failure going
+ * uncounted, with nothing to notice it.
+ *
+ * The asymmetry decides the default. A new status wrongly treated as a failure
+ * inflates a tile and someone asks why; wrongly treated as a success hides a
+ * defect and nobody asks anything. So the safe direction is to derive the
+ * complement, and a status added to the enum lands on the failed side until
+ * someone deliberately moves it.
+ */
+export const FAILED_TRANSITION_STATUSES: readonly TransitionStatus[] =
+  TransitionStatus.options.filter((s) => s !== "succeeded");
+
 // Categorical, clusterable failure codes (mirrors the extraction enum, migrations/0005).
 export const FailureCode = z.enum([
   "invalid_output", "timeout", "session_not_terminal", "output_unavailable",

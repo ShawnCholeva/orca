@@ -9,6 +9,7 @@ import { labelForFailure } from "./failure-labels.js";
 import { composedScore } from "./composed-score.js";
 import { deriveConfidenceReason } from "./confidence-reason.js";
 import { classifyInfraReason } from "./infra-failure.js";
+import { FAILED_TRANSITION_STATUSES } from "@orca/contracts";
 
 export const SAMPLE_MIN = 5;
 // Per-side minimum of SCORED samples before a per-step version delta is emitted.
@@ -214,7 +215,9 @@ export function computeTemplateSummary(input: {
   };
 }
 
-const FAILED_OUTCOME = new Set(["failed", "escalated", "denied"]);
+// Derived from the enum, not hand-listed: a status added to TransitionStatus
+// lands on the failed side by default. See FAILED_TRANSITION_STATUSES.
+const FAILED_OUTCOME: ReadonlySet<string> = new Set(FAILED_TRANSITION_STATUSES);
 const TREND_BUCKETS = 12;
 
 function mean(xs: number[]): number | null {

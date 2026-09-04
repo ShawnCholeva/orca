@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HarnessTransition, HarnessTransitionBoundary, HARNESS_FACETS } from "./index.js";
+import { HarnessTransition, HarnessTransitionBoundary, HARNESS_FACETS, FAILED_TRANSITION_STATUSES, TransitionStatus } from "./index.js";
 
 describe("HARNESS_FACETS registry", () => {
   const ENVELOPE_KEYS = ["boundary", "createdAt", "goalId", "id", "workflowRunId", "workflowStepRunId"];
@@ -235,5 +235,26 @@ describe("RefuteFacet", () => {
     const f = { verdict: "refuted", triggered_by: ["no_oracle"], risk_class: "high", reason: "bad", issue_refs: ["x"] };
     expect(RefuteFacet.parse(f).reasoning ?? null).toBeNull();
     expect(RefuteFacet.parse({ ...f, reasoning: "why" }).reasoning).toBe("why");
+  });
+});
+
+describe("FAILED_TRANSITION_STATUSES", () => {
+  it("is exactly the complement of succeeded, derived rather than listed", () => {
+    // Two consumers used to hand-enumerate this in their own files — a JS Set in
+    // metrics/aggregate.ts and a SQL literal in harness-metrics/attribution.ts.
+    // Identical, with no shared source: a fifth status would have been silently
+    // non-failed in one and non-attributed in the other.
+    expect([...FAILED_TRANSITION_STATUSES].sort()).toEqual(
+      TransitionStatus.options.filter((s) => s !== "succeeded").sort()
+    );
+    expect(FAILED_TRANSITION_STATUSES).not.toContain("succeeded");
+  });
+
+  it("covers every status the enum knows about, once succeeded is added back", () => {
+    // The property that matters: a status added to TransitionStatus cannot fall
+    // through both sides. It is failed by default until someone moves it.
+    expect([...FAILED_TRANSITION_STATUSES, "succeeded"].sort()).toEqual(
+      [...TransitionStatus.options].sort()
+    );
   });
 });
