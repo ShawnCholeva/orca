@@ -58,6 +58,25 @@ export function workflowEvidenceRuns(runs: RunSummary[]): RunSummary[] {
 }
 
 /**
+ * Runs that have ENDED. Every aggregate on this screen is computed over these and
+ * only these — a live run appears as a row and never inside a statistic.
+ *
+ * A run in progress is not an observation of a run; it is a partial observation
+ * whose value changes every second. Pooling it makes a statistic that moves when
+ * nothing happened, which is the same lie as a number computed over a population
+ * its label doesn't name. The live case is not hypothetical: a run currently sits
+ * at 39.4h elapsed / 39.2h parked and still accruing, and under any pooled figure
+ * it would dominate forever and grow.
+ *
+ * The protection is structural rather than a bound: a forgotten run can never
+ * swamp a statistic, not because it was capped but because it was never eligible.
+ * Any statistic added later inherits that without its author needing to know.
+ */
+export function terminatedRuns(runs: RunSummary[]): RunSummary[] {
+  return runs.filter((r) => r.terminationCause !== "running");
+}
+
+/**
  * One sentence, the most important true fact, computed rather than authored so it
  * stays true as the data changes. The contamination case leads: a run killed by the
  * substrate says nothing about the workflow, and reporting those five together
@@ -65,24 +84,26 @@ export function workflowEvidenceRuns(runs: RunSummary[]): RunSummary[] {
  */
 export function headline(runs: RunSummary[]): string {
   if (runs.length === 0) return "No runs yet.";
-  const infra = runs.filter((r) => r.terminationCause === "infrastructure_killed");
-  const finished = workflowEvidenceRuns(runs);
+  // Every count and ratio below is over ENDED runs; live ones are rows, not data.
+  const ended = terminatedRuns(runs);
+  const infra = ended.filter((r) => r.terminationCause === "infrastructure_killed");
+  const finished = workflowEvidenceRuns(ended);
   if (infra.length > 0) {
     const reasons = new Set(infra.map((r) => r.terminationEvidence).filter((e): e is string => e != null));
     const observed =
       reasons.size === 1
-        ? `${infra.length} of your ${runs.length} runs ended the same way — ${[...reasons][0]}.`
-        : `${infra.length} of your ${runs.length} runs stopped without finishing, for reasons in the substrate rather than the workflow.`;
+        ? `${infra.length} of your ${ended.length} finished runs ended the same way — ${[...reasons][0]}.`
+        : `${infra.length} of your ${ended.length} finished runs stopped without completing, for reasons in the substrate rather than the workflow.`;
     const left = `That leaves ${finished.length} finished run${finished.length === 1 ? "" : "s"} that can tell you anything about the workflow itself.`;
     // The mechanism is a diagnosis, not an observation — say which it is. Runs that
     // share an outcome need not share a cause, and attributing all of them to one
     // bug claims more than the session history supports.
     return `${observed} We've root-caused that to a daemon bug; it isn't your workflow failing. ${left}`;
   }
-  const parked = runs.reduce((a, r) => a + r.durations.parkedMs, 0);
-  const elapsed = runs.reduce((a, r) => a + r.durations.elapsedMs, 0);
+  const parked = ended.reduce((a, r) => a + r.durations.parkedMs, 0);
+  const elapsed = ended.reduce((a, r) => a + r.durations.elapsedMs, 0);
   if (elapsed > 0 && parked / elapsed > 0.5) {
-    return `${Math.round((parked / elapsed) * 100)}% of the time across your ${runs.length} runs was Orca waiting on you.`;
+    return `${Math.round((parked / elapsed) * 100)}% of the time across your ${ended.length} finished runs was Orca waiting on you.`;
   }
   return `${runs.length} run${runs.length === 1 ? "" : "s"}, all shown below.`;
 }
@@ -395,7 +416,7 @@ export function RunDetailPanel({ detail, onBack }: { detail: RunDetail; onBack: 
  */
 function CantTellYou({ runs }: { runs: RunSummary[] }) {
   const gateless = runs.length > 0;
-  const workflowN = workflowEvidenceRuns(runs).length;
+  const workflowN = workflowEvidenceRuns(terminatedRuns(runs)).length;
   return (
     <section style={{ display: "grid", gap: 8 }}>
       <h3 style={{ fontSize: 13, margin: 0 }}>What this screen can&apos;t tell you yet</h3>

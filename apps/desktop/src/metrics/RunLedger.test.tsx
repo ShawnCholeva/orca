@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
-import { RunDetailPanel, RunRow, headline, workflowEvidenceRuns } from "./RunLedger";
+import { RunDetailPanel, RunRow, headline, terminatedRuns, workflowEvidenceRuns } from "./RunLedger";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -86,6 +86,25 @@ describe("cost", () => {
   });
 });
 
+describe("terminatedRuns", () => {
+  it("keeps a live run out of every aggregate while it still renders as a row", () => {
+    // A run in progress is a partial observation whose value changes every second.
+    // The live case: one run sits at 39.4h elapsed / 39.2h parked and still
+    // accruing — pooled, it would dominate any ratio forever and keep growing.
+    const runs = [
+      summary({ runId: "done", terminationCause: "completed", durations: {
+        elapsedMs: 60_000, workingMs: 60_000, parkedMs: 0, unaccountedMs: 0,
+        spanActiveMs: 0, accruing: false, integrityFlag: null } }),
+      summary({ runId: "live", terminationCause: "running", durations: {
+        elapsedMs: 141_840_000, workingMs: 0, parkedMs: 141_120_000, unaccountedMs: 720_000,
+        spanActiveMs: 0, accruing: true, integrityFlag: null } }),
+    ];
+    expect(terminatedRuns(runs).map((r) => r.runId)).toEqual(["done"]);
+    // Pooled, the parked share would be ~99% and rising. Over ended runs it is 0.
+    expect(headline(runs)).not.toContain("waiting on you");
+  });
+});
+
 describe("workflowEvidenceRuns", () => {
   it("is the single source for both the headline and the sample floor", () => {
     // These two lines must be the SAME quantity, not two predicates that agree
@@ -113,7 +132,7 @@ describe("headline", () => {
     const h = headline(runs);
     // States the OBSERVED outcome; the mechanism is marked as a diagnosis rather
     // than asserted for runs nobody attributed individually.
-    expect(h).toContain("2 of your 3 runs ended the same way");
+    expect(h).toContain("2 of your 3 finished runs ended the same way");
     expect(h).toContain("crashed 3 times (worker_exited_no_signal)");
     expect(h).toContain("root-caused");
     expect(h).not.toContain("were killed by the daemon");
@@ -130,7 +149,7 @@ describe("headline", () => {
     ];
     const h = headline(runs);
     expect(h).not.toContain("the same way");
-    expect(h).toContain("stopped without finishing");
+    expect(h).toContain("stopped without completing");
   });
 
   it("reports the waiting share when nothing was killed", () => {
