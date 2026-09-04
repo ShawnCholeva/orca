@@ -21,7 +21,16 @@ function summary(over: Partial<RunSummary> = {}): RunSummary {
       coverage: { reported: 10, total: 11, silent: 0 }, rollupCheck: "matches",
     },
     stepsDelivered: 8, stepsBlocked: 0, spanRelaunches: 1, retriedCompletions: 5,
-    openInterventions: 0, ...over,
+    openInterventions: 0,
+    // A completed run: progress and signal agree, and nothing was mid-flight, so
+    // silence is conclusive. A run whose signal outran its progress is the
+    // "moving but not advancing" case and is asserted separately.
+    progress: {
+      lastProgressAt: "2026-09-01T21:00:00.000Z", lastProgressChannel: "step_boundary",
+      lastSignalAt: "2026-09-01T21:00:00.000Z", lastSignalChannel: "step_boundary",
+      silenceConclusive: true,
+    },
+    ...over,
   };
 }
 
@@ -262,7 +271,29 @@ describe("RunDetailPanel", () => {
 
   it("flags a pause whose reason was destroyed as lossy rather than guessing", () => {
     render(<RunDetailPanel detail={detail({ interventions: [park({ sourceKind: "unknown" })] })} onBack={() => {}} />);
-    expect(document.body.textContent).toContain("Stamp the pause reason into the event.");
+    const tag = document.querySelector('[data-compact="true"]');
+    expect(tag!.textContent).toBe("discarded");
+    // The tag occupies the reason cell rather than sitting beside a placeholder —
+    // the absent thing is the reason, so the reason slot carries its type.
+    expect(document.body.textContent).not.toContain("a pause");
+  });
+
+  it("states the overwrite finding once, including that the UNTAGGED rows may be wrong", () => {
+    // `source_kind` is NOT NULL and is overwritten as the activity advances, so
+    // `unknown` fires only when the overwrite lands outside the pause vocabulary.
+    // When it lands on another pause kind the row shows a confident, specific,
+    // plausible — and wrong — reason, with no tag at all. So the tagged rows are the
+    // honest ones and a fallback marks where the system noticed, not where it failed.
+    // No per-row treatment can say that; only this statement can, which is why the
+    // row tags are quiet and the alarm lives here.
+    render(<RunDetailPanel detail={detail({ interventions: [
+      park({ activityId: "a1", sourceKind: "unknown" }),
+      park({ activityId: "a2", sourceKind: "permission_pending" }),
+      park({ activityId: "a3", sourceKind: "question_pending" }),
+    ] })} onBack={() => {}} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("1 is missing outright");
+    expect(text).toContain("the 2 that show a reason may be showing a later pause's reason instead");
   });
 
   it("never dims anything", () => {
