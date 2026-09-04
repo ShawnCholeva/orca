@@ -1,6 +1,7 @@
 # Run Trace Contract — evidence spec for the run-shaped read model
 
-**Status:** proposed · **Author:** harness expert (orca-36) · **Date:** 2026-09-02
+**Status:** built · **Author:** harness expert (orca-36) · **Date:** 2026-09-02, revised 2026-09-04
+**Read §12 first if you are implementing against this.** §1–§11 are the original contract and remain accurate; §12 covers the fields added since, §13 records *why* the non-obvious calls were made, and §14 states what is still unbuilt. The shapes in §1–§11 are recoverable from the code — the reasoning in §13 is not, and it is the part a future reader will otherwise undo.
 **Companion:** [`2026-09-02-metrics-run-ledger-design.md`](./2026-09-02-metrics-run-ledger-design.md) (product/IA — the *screen*). This document is the *evidence contract* only: what is persisted, what is derivable, and what each field is allowed to claim. It does not specify layout.
 **Implements from:** `apps/daemon/src/metrics/`, `apps/daemon/src/harness-metrics/`, `packages/contracts/src/harness/index.ts`, `apps/daemon/src/activities/store.ts`.
 
@@ -290,7 +291,9 @@ Stall rescues and crash retries are **agent-lost time, not human-parked time.** 
 
 ---
 
-## 6. Gate emission — the one boundary gap
+## 6. Gate emission — LANDED (`be490cb`)
+
+> **Status: done.** Worker gates now emit `step_launch`/`step_complete` on the surrogate. What follows is the reasoning, kept because it is the argument for *why no new boundary*, which a future reader will otherwise re-litigate.
 
 Gate step runs exist (`__gate__:critique`, `__gate__:review`, with `started_at`/`finished_at`) and emit **zero harness transitions**. A worker gate spawns a real agent on the user's subscription and leaves no telemetry record; the screen renders that as `null`, which reads as *free*.
 
@@ -332,13 +335,13 @@ Add a `runId` filter. Transitions already carry `workflowRunId`; this is a where
 
 ## 8. Zero-emission confirmation
 
-Everything above derives from persisted rows today, with **exactly three exceptions**, all additive:
+The projection was built with **exactly three** emission changes. Two have landed:
 
-| # | Change | Size | Unlocks |
-|---|---|---|---|
-| 1 | `sourceKind` in the `activity.changed` payload | one line | why-attributed intervention tax, incl. permission prompts (§5.1) |
-| 2 | `cost.source` on `CostEntry` | one nullable field | `measured` vs `estimated` (§3.1) |
-| 3 | `step_launch`/`step_complete` on gate surrogates | §6 | gate cost, latency, restarts |
+| # | Change | Status |
+|---|---|---|
+| 1 | `sourceKind` in the `activity.changed` payload | **landed** `18ea6ef` — why-attributed intervention tax, incl. permission prompts (§5.1) |
+| 2 | `step_launch`/`step_complete` on gate surrogates | **landed** `be490cb` — gate cost, latency, restarts (§6) |
+| 3 | `cost.source` on `CostEntry` | **NOT BUILT** — until it lands, `measured` and `estimated` are indistinguishable and the projection emits `reported` (§3.1) |
 
 Two corrections to earlier assumptions, recorded so they are not re-derived:
 
@@ -371,3 +374,103 @@ Not metrics gaps — the screen's job is to make them undeniable, not to fix the
 1. **`worker_exited_no_signal` crash loop** — blocked 4 of 5 runs. Note the code is the *liveness watchdog's own label* for `isTmuxAlive() === false`, not an observed process exit, so it names a symptom rather than a cause.
 2. **No notification on a pending confirmation** — a card sat 17.95 hours because Orca never told anyone it was waiting.
 3. **Runs terminate without resolving or expiring their pending activities.** All three currently-open parks sit on runs that had already blocked, on step runs that had also blocked. An expiry path exists (an older run's activities did reach `expired`) — it did not fire for these. This is what makes `parkState: "abandoned"` (§2.2) necessary rather than cosmetic.
+
+
+---
+
+## 12. Added after the original contract
+
+| Field | On | What it is |
+|---|---|---|
+| `terminationCause` + `terminationEvidence` | `RunSummary` | Five values (`running` / `completed` / `workflow_failed` / `infrastructure_killed` / `unknown`) plus the literal signal it was read from, so the classification is auditable rather than asserted. |
+| `coverage.silent` | `RunCost` | Spans that emitted **no completion at all**, so they are absent from `reported`/`total` rather than counted as unreported. |
+| `failedUsd` / `supersededUsd` | `RunCost` | `wastedUsd` split. A completion lands in exactly one bucket; failure is the stronger claim. |
+| `rollupCheck` | `RunCost` | `matches` / `diverged` / `not_applicable` — a typed absence, never a nullable boolean. |
+| `spanRelaunches` / `retriedCompletions` | `RunSummary` | Re-launches (the crash signal) vs completions beyond the first (the revise loop). Different numbers; on the live completed run, 1 and 5. |
+| `progress` (`RunProgress`) | `RunSummary` | Two clocks — §13.4. |
+| `blocked_code` + `StepBlockedCause` | step runs | Why a step stopped, as a code rather than a sentence — §13.5. |
+| `ClaimScope` | aggregations | The scope a prose claim covers, travelling as data — §13.6. |
+
+---
+
+## 13. Decisions, and why — the part not recoverable from the code
+
+### 13.1 `silent` is a lifecycle, not a marker
+
+Gate emission created a discontinuity: runs from before it stay understated forever. The obvious fixes are a migration date or a stored regime flag. Both need maintaining and both eventually lie.
+
+`coverage.silent` counts spans that emitted no completion at all. It is not a typed absence — it is an **observed count**, rendered at full weight — and it **falls to zero on its own** as those spans start emitting. Historical runs keeping `silent: 2` forever is correct, because their totals really are understated forever.
+
+> **The general rule: a state that names a defect should expire when the defect does — and the expiry must be a consequence of the fix, not a separate step.** A flag someone has to clear by hand is a marker with extra steps.
+
+### 13.2 Aggregates are computed over terminated runs only
+
+A run in progress is not an observation of a run; it is a partial observation whose value changes every second. Pooling it produces a statistic that moves when nothing happened.
+
+Live: one run sat at 39.4h elapsed / 39.2h parked and still accruing, against 21.5h of parked time across every *terminated* run combined. Pooled, it would have dominated forever and grown.
+
+The protection is structural rather than a bound: **a forgotten run can never swamp a statistic, not because it was capped but because it was never eligible** — and any statistic added later inherits that without its author knowing why.
+
+### 13.3 Rates and durations take different populations
+
+A gate that escalated *is* a real escalation, so gate spans belong in `escalatedRate`'s numerator and denominator. A gate's duration answers a different question from a step's, so gate spans belong in **neither** side of a duration median.
+
+Same `isGateSurrogate` predicate, correct in one place and wrong in the other. **"Filter gates" as a blanket rule would have broken `escalated`.**
+
+Corollary, found the same way: `recoveredRate`'s denominator is eligible finals with `attempt > 1`, **not** all finals. A step that passed first try never had an opportunity to recover — it is not a trial that scored zero, it is not a trial. `{pos: 0, n: 14}` asserts recovery was tested fourteen times and never worked, which is false and stays false however it is rendered. `n = 0` asserts nothing, which is true. **Fix the number; do not annotate it in the renderer.**
+
+### 13.4 Two clocks, and why `lastSignalAt` includes `lastProgressAt`
+
+A run with no open park has two possible realities that are identical from any single timestamp: nothing is happening (a dead worker), or things are happening and nothing is advancing (a loop). The stall sensor sees neither — it only runs while Orca owes the next move.
+
+- `lastProgressAt` — the state actually **advanced**: engine boundaries, step-run brackets, and activity events whose **status changed**.
+- `lastSignalAt` — anything run-attributable happened.
+
+Three calls worth keeping:
+
+**Not `activities.updated_at`.** It is the obvious source, it is literally named for the last update, and it is a *touch* rather than *work*. On the live stuck run it moved twice within seconds after 38.6 hours of no progress, in an identical state. **Progress is defined by append-only state transitions, never by mutation timestamps** — and name the field after the definition, or the next implementer re-enters through the name.
+
+**The change-filter, not an exclusion list.** A park *resolving* is progress; a park being re-touched is not. The discriminator is the status change, which the append-only stream gives us and the mutable row cannot. On the stuck run all eight recent activity events repeat one status, so every one is excluded — no threshold, no allowlist, no tuning.
+
+**`lastSignalAt` is defined to include `lastProgressAt`**, so `signal >= progress` holds by construction. They read different stores and could otherwise invert, and **a pair that can invert is a discriminator that can lie.** "Any event" was the obvious definition and is not derivable: `events` is goal-scoped and only some payloads carry a run id — `harness.transition.recorded` notably does not — so it would silently mean "any event of the goal" and a sibling run's event would register as this run's signal.
+
+**No state enum and no staleness threshold.** "advancing / spinning / silent" needs a constant for "recent" that nobody could defend. The magnitude does the judging: *40.9h ago* is alarming without help. The one derived flag, `silenceConclusive`, is derived from a **fact** (is a step mid-flight) rather than a threshold.
+
+### 13.5 The stop cause does not guess
+
+`blocked_reason` is free text with a count interpolated into it — `"crashed 3 times (worker_exited_no_signal)"`. Classifying it downstream means matching English: fine as an observational signal, not fine as the basis for a claim about whose fault a stop was.
+
+The value was never missing. `service.ts` composes that sentence **from** `sess.failure_reason`, which is already structured — **the classifier was re-deriving, from English, a fact the writer held in a variable and threw away.**
+
+Three calls:
+
+- **The code is required, not optional.** An optional one drifts back to null at the next call site somebody adds, which is how the taxonomy split originally.
+- **A pre-column row yields `unknown` / `inferred: true`, never a guessed code.** Matching the sentence identifies the **family** (something in the substrate failed) but not **which member**; returning `worker_exited_no_signal` for that string asserts more than it supports. `classifyInfraReason` stays advisory, keeps doing the family question for the observational list, and is deliberately **not** imported into the load-bearing path.
+- **Historical rows are not backfilled.** Running a classifier over them and storing the result mixes a verified signal with a guessed one under one name — the exact defect the column removes.
+
+### 13.6 `ClaimScope` — provenance and coverage are different axes
+
+`inferred` answers *how do we know*. It cannot answer *how much does this cover*.
+
+"Every step passed on its first attempt" can be perfectly verified and still overstated: it is a **census over n steps of one template for one user**, not a property of the workflow. Shipping `{steps, runs, templates, inferred}` as data means the copy layer **cannot render the claim without its terms** — the prose form of "ship the terms, not just the result".
+
+> **A flattering claim on an inferred basis is the worst pairing available, because neither half prompts anyone to check it.** Every overstatement caught on this project was pessimistic, and each was caught because it was insulting.
+
+### 13.7 Two stores disagreeing may be two partial answers
+
+`awaiting_user` and `activities` were read as a contradiction — one stale, one correct. They are not. `activities` covers **parks**; the column covers **chat replies**, which raise no activity at all. Reading only the column missed a park for 39 hours; reading only the activity misses a chat reply. Both are false negatives; **only the union is correct.**
+
+An existing test caught the second half, and it was one edit from being rewritten as a stale assertion about a cache. **When two stores disagree, check whether they are answering the same question before deciding which is stale.**
+
+---
+
+## 14. Not built — do not read this document as describing the system
+
+| Gap | Consequence |
+|---|---|
+| **`PostToolUse` is unwired.** Only `Stop` and `PermissionRequest` hooks exist. | An agent working inside a step emits nothing, so a span's interior is unobservable. **This is why `silenceConclusive` exists at all**, and why `unaccountedMs` is large on healthy runs. `tool_gate` coverage is also sampled by permission policy rather than complete — a pre-allowed tool leaves no trace, so tool-gate counts are a lower bound. |
+| **`cost.source` is unbuilt.** | `measured` and `estimated` are indistinguishable, so the projection emits `reported`. `unreported` vs `unmetered` needs the adapter's declared `hookContract()` and is emitted as `unknown` until then. **`unmetered` must never be inferred from a missing row** — that reclassifies a defect as a limit, the most damaging direction an absence can be wrong in. |
+| **`prompt_ref` / `raw_output_ref` are hardcoded null.** `SensorResult.artifactRef` has no store behind it. | Compaction without offload: every "why did this go wrong" dead-ends at a summary with nothing to drill into, and replay can never be re-executed. |
+| **Revision edges are not emitted.** | `REVISE_CAP` loops leave only an incremented `attempt`. Which issue triggered a bounce, and whether the same issue recurred, is unrecorded. |
+| **Approval latency is not recorded.** `RiskFacet.approval` has `decided_at`, no `requested_at`. | The human-cost curve — the metric the autonomy thesis rests on — is unmeasured. |
+| **The single-source fix for §13.7 is not built.** | Giving the chat-reply case an activity would let the column go. Deliberately deferred: the union is correct and guarded, and the trigger is a *third* reader of "is this parked" appearing, not tidiness. |
