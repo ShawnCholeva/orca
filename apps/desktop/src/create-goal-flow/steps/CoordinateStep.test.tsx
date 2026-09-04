@@ -7,6 +7,12 @@ const listModelProvidersMock = vi.fn();
 const listWorkflowTemplatesMock = vi.fn();
 const listWorkspacesMock = vi.fn();
 const inspectWorkspaceMock = vi.fn();
+const isTauriMock = vi.fn(() => true);
+
+vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: () => isTauriMock(),
+  invoke: vi.fn(),
+}));
 
 vi.mock("../../api", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../api")>();
@@ -91,5 +97,40 @@ describe("CoordinateStep — registry picker", () => {
     // and must not surface the stale entry.
     await screen.findByText("All registered added");
     expect(screen.queryByText("deleted-repo")).toBeNull();
+  });
+});
+
+// D1: `Browse…` called the Tauri dialog unconditionally. Under `dev:browser` the
+// IPC bridge is absent, so it threw `Cannot read properties of undefined (reading
+// 'invoke')` into the console and the button silently did nothing — the worst
+// failure shape, because the control looks available and reports nothing when it
+// isn't. `WorkspacesPage.tsx` already had the right pattern: gate on isTauri() and
+// offer a typed path instead.
+describe("CoordinateStep — browser mode has no Tauri dialog", () => {
+  beforeEach(() => {
+    listModelProvidersMock.mockResolvedValue([]);
+    listWorkflowTemplatesMock.mockResolvedValue({ templates: [] });
+    listWorkspacesMock.mockResolvedValue([]);
+    inspectWorkspaceMock.mockReset();
+  });
+
+  it("offers a typed path instead of a dead Browse button when Tauri is absent", async () => {
+    isTauriMock.mockReturnValue(false);
+    inspectWorkspaceMock.mockResolvedValue({ preview: { name: "repo", path: "/tmp/repo" } });
+    const dispatch = vi.fn();
+    render(<CoordinateStep state={coordinateState()} dispatch={dispatch} onNavigateToWorkspaces={() => {}} />);
+
+    expect(screen.queryByRole("button", { name: /Browse/ })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/Workspace folder path/i), { target: { value: "/tmp/repo" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Add folder$/ }));
+    await waitFor(() => expect(inspectWorkspaceMock).toHaveBeenCalledWith({ inputPath: "/tmp/repo" }));
+  });
+
+  it("keeps the native picker when Tauri is present", async () => {
+    isTauriMock.mockReturnValue(true);
+    render(<CoordinateStep state={coordinateState()} dispatch={vi.fn()} onNavigateToWorkspaces={() => {}} />);
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /Browse/ }).length).toBeGreaterThan(0));
+    expect(screen.queryByLabelText(/Workspace folder path/i)).toBeNull();
   });
 });

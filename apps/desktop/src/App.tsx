@@ -1,5 +1,5 @@
-import { useState, useEffect, FormEvent } from "react";
-import { Goal, DomainEventType, type Agent, type GoalListItem } from "@orca/contracts";
+import { useState, useEffect, useCallback, FormEvent } from "react";
+import { Goal, DomainEventType, type Agent, type GoalListItem, type RunSummary } from "@orca/contracts";
 import {
   fetchHealth,
   listAgents,
@@ -8,6 +8,7 @@ import {
   updateAgentConnection,
   archiveGoal,
   openEventStream,
+  getRunSummaries,
   ApiError,
   type ConnectionStatus,
 } from "./api";
@@ -17,6 +18,7 @@ import { OnboardingView } from "./onboarding/OnboardingView";
 import { Titlebar } from "./chrome/Titlebar";
 import { BootstrapErrorScreen } from "./chrome/BootstrapErrorScreen";
 import { NoReadyAgentsBanner } from "./chrome/NoReadyAgentsBanner";
+import { WaitingOnYouBanner } from "./chrome/WaitingOnYouBanner";
 import { OrcaChat } from "./orchestrator/OrcaChat";
 import { WorkflowsPage } from "./workflows/WorkflowsPage";
 import { inputStyle } from "./workflows/ScopeControls";
@@ -56,6 +58,17 @@ export default function App() {
   const [selectedOrchestratorGoalId, setSelectedOrchestratorGoalId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("workspaces");
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [runs, setRuns] = useState<RunSummary[]>([]);
+
+  const refreshRuns = useCallback(async () => {
+    try {
+      setRuns(await getRunSummaries());
+    } catch {
+      // A failed poll leaves the previous answer standing. Blanking the banner on a
+      // transient 500 would say "nothing is waiting" when we simply don't know, and
+      // a daemon restart happens here whenever anyone saves a file.
+    }
+  }, []);
 
   async function loadGoals() {
     try {
@@ -180,11 +193,41 @@ export default function App() {
         ) {
           setDetailRefreshKey((k) => k + 1);
         }
+        // Piggybacks the existing subscription deliberately. A second
+        // openEventStream() here opened a second websocket AND shadowed this one for
+        // any consumer that assumed a single stream — which is exactly what it did
+        // to App's own tests.
+        if (event.type === "activity.changed" || event.type.startsWith("workflow.")) {
+          void refreshRuns();
+        }
       },
       onStatus: setConnectionStatus,
     });
     return () => stream.close();
-  }, [currentGoalId]);
+  }, [currentGoalId, refreshRuns]);
+
+  // "Is anything waiting on me" is app-level state, so it is fetched here rather
+  // than inside a screen — the whole failure was that the answer existed somewhere
+  // the reader had to navigate to.
+  //
+  // The wake listeners are the point of the feature, not a nicety. The founder's two
+  // long parks both happened with the laptop closed and sleeping, which suspends the
+  // daemon too: no local channel can fire during that window, so the earliest
+  // anything on this machine can tell him is the moment the lid opens. That moment
+  // is this listener.
+
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === "visible") void refreshRuns();
+    }
+    void refreshRuns();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [refreshRuns]);
 
   function handleCreateFlowDone(goalId: string) {
     setShowCreateFlow(false);
@@ -255,6 +298,9 @@ export default function App() {
     <div className="app-shell">
       <Titlebar />
       {onboardingState === "complete" && <NoReadyAgentsBanner agents={agents} />}
+      {onboardingState === "complete" && (
+        <WaitingOnYouBanner runs={runs} onOpenGoal={(goalId) => { setSelectedOrchestratorGoalId(goalId); setActiveTab("orchestrator"); setMode("list"); }} />
+      )}
 
       {mode === "detail" && currentGoalId ? (
         <div className="main-content main-content--full">

@@ -255,14 +255,14 @@ export function MeasurementLabel({
           borderWidth: 1,
           borderStyle: form.borderLeftStyle as CSSProperties["borderStyle"],
           borderColor: form.borderLeftColor,
-          // Compaction must not flatten urgency along with length. `lossy` is the
-          // one state where data is being destroyed on every run that completes,
-          // so it keeps the tone and weight the others give up; the rest recede to
-          // secondary text because they are caveats, not alarms. Without this every
-          // tag arrives at the same volume and the loudest state is the one that
-          // most needed to stay loud.
-          color: lossy ? "var(--err)" : "var(--text-3)",
-          fontWeight: lossy ? 600 : 400,
+          // `lossy` stays distinguishable from every other tag — its border keeps the
+          // error tone — but it is no longer loud in itself. A per-row fact does not
+          // get to be alarming eight times: a tag repeated down a column is the
+          // wallpaper failure returning one size down, which is what compaction was
+          // for. The alarm belongs to the once-per-section statement, which can say
+          // the thing no row tag can — that the UNTAGGED rows may be wrong too,
+          // because a fallback marks where the system noticed, not where it failed.
+          color: lossy ? "var(--text-2)" : "var(--text-3)",
           whiteSpace: "nowrap",
           ...style,
         }}

@@ -453,15 +453,36 @@ function InterventionRow({ iv }: { iv: Intervention }) {
   );
 }
 
-/** The sentence the `discarded` pause tags stand for, once, above the rows it marks. */
+/**
+ * The finding the per-row tags cannot state, once, above the rows.
+ *
+ * `source_kind` is NOT NULL and is overwritten as the activity moves on, so a park's
+ * reason is captured and then destroyed. `unknown` fires only when the overwrite
+ * happens to land outside the pause vocabulary — `tool_use`, `step_started`. When it
+ * lands on ANOTHER pause kind, the row shows a confident, specific, plausible reason
+ * that belongs to a later park, and carries no tag at all.
+ *
+ * So the tagged rows are the honest ones and the untagged rows are the hazard: a
+ * fallback marks where the system noticed, not where it failed. No per-row treatment
+ * can express "the rows without a tag may also be wrong", which is why the alarm
+ * lives here and the tags are quiet.
+ */
 function ParkCaveat({ interventions }: { interventions: Intervention[] }) {
   const unlabelled = interventions.filter((i) => i.sourceKind === "unknown").length;
   if (unlabelled === 0) return null;
+  const named = interventions.length - unlabelled;
   return (
     <MeasurementLabel
       state="uninstrumented"
       lossy
-      fix={`${unlabelled} of these pauses lost the record of why they stopped. Stamp the pause reason into the event.`}
+      fix={
+        `These reasons are read from a record that gets overwritten as the run continues. ` +
+        `${unlabelled} ${unlabelled === 1 ? "is" : "are"} missing outright` +
+        (named > 0
+          ? `, and the ${named} that show a reason may be showing a later pause's reason instead — we can't tell which.`
+          : ".") +
+        ` Read sourceKind from the event, which is immutable, not from the activity row.`
+      }
     />
   );
 }

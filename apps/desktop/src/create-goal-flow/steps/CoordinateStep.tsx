@@ -1,5 +1,6 @@
 import { useState, useEffect, type CSSProperties, type Dispatch } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { isTauri } from "@tauri-apps/api/core";
 import type { FlowAction, FlowState, PendingWorkspace, PendingDocument } from "../state";
 import type { ModelProviderInfo, WorkflowTemplate, WorkspaceSummary } from "@orca/contracts";
 import {
@@ -211,9 +212,14 @@ function DocumentsBlock({
               <Btn kind="primary" onClick={() => void handleAdd()} disabled={!ref.trim()}>
                 Add
               </Btn>
-              <Btn kind="quiet" onClick={() => void handleBrowse()}>
-                Browse…
-              </Btn>
+              {/* Tauri-only, same reason as the workspace picker. No fallback is
+                  needed here: the text input beside it already accepts a path or a
+                  URL, so browser mode loses the convenience and keeps the capability. */}
+              {isTauri() && (
+                <Btn kind="quiet" onClick={() => void handleBrowse()}>
+                  Browse…
+                </Btn>
+              )}
             </div>
             {error && <p style={errorStyle}>{error}</p>}
           </>
@@ -490,6 +496,12 @@ function RegisteredWorkspaceSelect({
 // ── Main CoordinateStep ────────────────────────────────────────
 export function CoordinateStep({ state, dispatch, onNavigateToWorkspaces }: Props) {
   const [inspectError, setInspectError] = useState<string | null>(null);
+  const [typedPath, setTypedPath] = useState("");
+
+  // The native picker is Tauri-only. Under `dev:browser` the IPC bridge is absent,
+  // so calling it threw into the console and the button did nothing visible — a
+  // control that looks available and silently fails. Same gate WorkspacesPage uses.
+  const tauri = isTauri();
 
   const atCap = state.pendingWorkspaces.length >= SOFT_CAP;
 
@@ -520,6 +532,16 @@ export function CoordinateStep({ state, dispatch, onNavigateToWorkspaces }: Prop
     void addWorkspaceByPath(ws.path);
   }
 
+  // The browser-mode equivalent of the picker. Routes through the same
+  // addWorkspaceByPath as Browse and the registry, so the rest of the flow stays
+  // source-agnostic and there is no second definition of "add a workspace".
+  async function handleAddTypedPath() {
+    const path = typedPath.trim();
+    if (!path || state.inspecting || atCap) return;
+    await addWorkspaceByPath(await expandTilde(path));
+    setTypedPath("");
+  }
+
   const noWorkspace = state.pendingWorkspaces.length === 0;
   const noWorkflow = state.workflowTemplateId === null;
   const createDisabled = state.inspecting || noWorkspace || noWorkflow;
@@ -545,16 +567,42 @@ export function CoordinateStep({ state, dispatch, onNavigateToWorkspaces }: Prop
             <p style={mutedStyle}>Maximum {SOFT_CAP} workspaces reached.</p>
           ) : (
             <>
-              <div>
-                <Btn
-                  kind="quiet"
-                  onClick={() => void handlePickFolder()}
-                  disabled={state.inspecting}
-                  icon={<Icon.folder size={14} />}
-                >
-                  {state.inspecting ? "Inspecting…" : "Browse…"}
-                </Btn>
-              </div>
+              {tauri ? (
+                <div>
+                  <Btn
+                    kind="quiet"
+                    onClick={() => void handlePickFolder()}
+                    disabled={state.inspecting}
+                    icon={<Icon.folder size={14} />}
+                  >
+                    {state.inspecting ? "Inspecting…" : "Browse…"}
+                  </Btn>
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input
+                    type="text"
+                    value={typedPath}
+                    onChange={(e) => setTypedPath(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void handleAddTypedPath();
+                      }
+                    }}
+                    placeholder="/absolute/path/to/folder"
+                    aria-label="Workspace folder path"
+                    style={{ ...inputStyle, flex: 1, minWidth: 0 }}
+                  />
+                  <Btn
+                    kind="primary"
+                    onClick={() => void handleAddTypedPath()}
+                    disabled={!typedPath.trim() || state.inspecting}
+                  >
+                    {state.inspecting ? "Inspecting…" : "Add folder"}
+                  </Btn>
+                </div>
+              )}
               <RegisteredWorkspaceSelect
                 existingPaths={state.pendingWorkspaces.map((ws) => ws.path)}
                 disabled={!!state.inspecting}
