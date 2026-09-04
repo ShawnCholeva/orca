@@ -147,7 +147,15 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
           <StatTile label="Gate health" value={wf.gateHealth.value} accent={wf.gateHealth.value == null ? "var(--text-3)" : wf.gateHealth.value >= 80 ? "var(--run)" : wf.gateHealth.value >= 60 ? "var(--warn)" : "var(--err)"} grade={wf.gateHealth.grade} delta={pctDelta(wf.gateHealth.delta)} deltaGood="up" />
           <StatTile label="First-pass" value={rate(wf.firstPass)} unit={denom(wf.firstPass)} />
           <StatTile label="Self-recovered" value={rate(wf.recovered)} unit={denom(wf.recovered)} accent="var(--warn)" />
-          <StatTile label="Escalated" value={rate(wf.escalated)} unit={denom(wf.escalated)} accent="var(--err)" />
+          {/* Escalated is cut from the display, not from the contract — `wf.escalated`
+              stays and nothing upstream changes.
+              It is computed over a different population from the two tiles beside it,
+              so the row rendered "3 of 7" next to "5 of 11": two denominators, adjacent
+              and unexplained, which reads as a broken screen rather than as two honest
+              measurements. The difference cannot be compressed into a suffix without
+              claiming the populations are comparable, and the question it was there to
+              answer — how often does a run need a human — is now answered properly by
+              the run ledger, with real durations instead of a rate. */}
         </div>
 
         {detail?.pipeline ? (

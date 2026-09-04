@@ -346,3 +346,22 @@ describe("MetricsPage", () => {
     expect(container.innerHTML).not.toMatch(/opacity:\s*0?\.\d/i);
   });
 });
+
+describe("MetricsPage — tiles that cannot share a denominator", () => {
+  it("does not render an Escalated tile beside tiles computed over a different population", async () => {
+    // On live data this row read "First-pass 3 of 7" next to "Escalated 5 of 11".
+    // Both correct, computed over different populations, and adjacent with nothing
+    // saying so — which reads as a broken screen rather than two honest numbers.
+    // The gap can't be compressed into a suffix without implying the two are
+    // comparable, and the question the tile answered is now answered by the run
+    // ledger in durations rather than a rate. Display-only: `escalated` stays in the
+    // contract and nothing upstream changed.
+    vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([summary]);
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary, steps: [], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
+    renderWorkflowView();
+
+    expect(await screen.findByText("First-pass")).toBeInTheDocument();
+    expect(screen.getByText("Self-recovered")).toBeInTheDocument();
+    expect(screen.queryByText("Escalated")).toBeNull();
+  });
+});
