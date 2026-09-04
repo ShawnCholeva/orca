@@ -171,7 +171,7 @@ describe("workflowEvidenceRuns", () => {
     ];
     expect(workflowEvidenceRuns(runs).map((r) => r.runId)).toEqual(["a"]);
     // A run still in flight has reported nothing yet, so it is not yet evidence.
-    expect(headline(runs)).toContain("1 finished run");
+    expect(headline(runs)).toContain("1 completed run");
   });
 });
 
@@ -185,14 +185,14 @@ describe("headline", () => {
     const h = headline(runs);
     // States the OBSERVED outcome; the mechanism is marked as a diagnosis rather
     // than asserted for runs nobody attributed individually.
-    expect(h).toContain("2 of your 3 finished runs ended the same way");
+    expect(h).toContain("2 of your 3 runs that ended stopped the same way");
     expect(h).toContain("crashed 3 times (worker_exited_no_signal)");
     expect(h).toContain("root-caused");
     expect(h).not.toContain("were killed by the daemon");
     // The whole point: it says how much workflow evidence is actually left — and
     // names the quantity, so "6 runs minus 4 killed" doesn't invite the reader to
     // expect 2 when a still-running run has reported nothing yet.
-    expect(h).toContain("1 finished run");
+    expect(h).toContain("1 completed run");
   });
 
   it("does not claim a shared cause when the evidence differs", () => {
@@ -202,7 +202,7 @@ describe("headline", () => {
     ];
     const h = headline(runs);
     expect(h).not.toContain("the same way");
-    expect(h).toContain("stopped without completing");
+    expect(h).toContain("reasons in the substrate");
   });
 
   it("reports the waiting share when nothing was killed", () => {

@@ -15,6 +15,9 @@ const LIVE_RUN_STATUSES = new Set(["active", "paused", "delegating"]);
 
 const PARK_STATUS = "paused_for_input";
 
+const isKnownParkKind = (k: string | null | undefined): k is string =>
+  k != null && KNOWN_SOURCE_KINDS.has(k);
+
 const KNOWN_SOURCE_KINDS = new Set<string>([
   "question_pending", "step_confirmation_pending", "gate_decision_pending",
   "mark_done_pending", "permission_pending", "provider_recovery_pending",
@@ -118,9 +121,19 @@ export function buildInterventions(input: {
     if (enteredMs === null) return;
     const open = exitedAt === null;
     const endMs = open ? nowMs : ms(exitedAt) ?? nowMs;
-    // Prefer the EVENT's own sourceKind: the activities row is mutable and holds
-    // the LATEST value, so a reused activity confidently reports a later pause's
-    // reason. The row is the fallback only for events emitted before `18ea6ef`.
+    // The episode's own events first, the mutable row only if it saw none.
+    //
+    // Both alternatives were tried and both lose the reason on the live park. The
+    // FIRST event of an episode predates `18ea6ef` and carries no sourceKind at
+    // all; the activities ROW has since been overwritten to `tool_use`, which is
+    // not a park kind — so reading either yields `unknown` while 21 of that
+    // episode's own events say `provider_recovery_pending`.
+    //
+    // Taking the most recent KNOWN PARK kind the episode itself reported is not a
+    // guess: it is the last time the system said, on the append-only record, why
+    // THIS park exists. The known-kind filter is what makes it safe — a row value
+    // leaking through the emitter (`tool_use` on a `paused_for_input` event) is not
+    // a park reason and is excluded rather than quoted.
     const raw = ep.sourceKind ?? sourceKinds.get(activityId);
     const sourceKind: InterventionSourceKind =
       raw !== undefined && raw !== null && KNOWN_SOURCE_KINDS.has(raw)
@@ -148,11 +161,16 @@ export function buildInterventions(input: {
 
   for (const e of forRun) {
     if (e.status === PARK_STATUS) {
-      // Only the transition INTO the park opens an episode; a repeat extends it.
-      if (!openEpisode.has(e.activityId)) {
+      // Only the transition INTO the park opens an episode; a repeat EXTENDS it,
+      // and a repeat carrying a known park kind sharpens its reason.
+      const existing = openEpisode.get(e.activityId);
+      if (existing === undefined) {
         openEpisode.set(e.activityId, {
-          enteredAt: e.createdAt, stepRunId: e.stepRunId, sourceKind: e.sourceKind,
+          enteredAt: e.createdAt, stepRunId: e.stepRunId,
+          sourceKind: isKnownParkKind(e.sourceKind) ? e.sourceKind : null,
         });
+      } else if (isKnownParkKind(e.sourceKind)) {
+        existing.sourceKind = e.sourceKind;
       }
       continue;
     }

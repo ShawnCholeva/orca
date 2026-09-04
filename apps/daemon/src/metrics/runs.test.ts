@@ -476,6 +476,27 @@ describe("park episodes", () => {
     expect(out[1].open).toBe(true);
   });
 
+  it("takes the episode's own strongest park reason over a stale row", () => {
+    // The live park: its FIRST event predates the sourceKind payload, and the
+    // activities row has since been overwritten to `tool_use` — not a park kind at
+    // all. Both obvious readings yield `unknown` while 21 of that episode's own
+    // events say `provider_recovery_pending`. The known-kind filter is what makes
+    // using them safe: a row value leaking through the emitter is excluded rather
+    // than quoted.
+    const out = buildInterventions({
+      events: [
+        ev("a1", "paused_for_input", "2026-09-01T00:00:00.000Z", "sr-1", null),
+        ev("a1", "paused_for_input", "2026-09-01T00:05:00.000Z", "sr-1", "provider_recovery_pending"),
+        ev("a1", "paused_for_input", "2026-09-01T00:10:00.000Z", "sr-1", "tool_use"),
+      ],
+      sourceKinds: new Map([["a1", "tool_use"]]),
+      run: run({ status: "active" }), nowMs: NOW,
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].sourceKind).toBe("provider_recovery_pending");
+    expect(out[0].enteredAt).toBe("2026-09-01T00:00:00.000Z"); // still the FIRST
+  });
+
   it("prefers the event's sourceKind over the mutable activities row", () => {
     // The row holds the LATEST value, so a reused activity reports a later pause's
     // reason with full confidence.

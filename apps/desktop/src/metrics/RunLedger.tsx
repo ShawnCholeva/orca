@@ -92,9 +92,9 @@ export function headline(runs: RunSummary[]): string {
     const reasons = new Set(infra.map((r) => r.terminationEvidence).filter((e): e is string => e != null));
     const observed =
       reasons.size === 1
-        ? `${infra.length} of your ${ended.length} finished runs ended the same way — ${[...reasons][0]}.`
-        : `${infra.length} of your ${ended.length} finished runs stopped without completing, for reasons in the substrate rather than the workflow.`;
-    const left = `That leaves ${finished.length} finished run${finished.length === 1 ? "" : "s"} that can tell you anything about the workflow itself.`;
+        ? `${infra.length} of your ${ended.length} runs that ended stopped the same way — ${[...reasons][0]}.`
+        : `${infra.length} of your ${ended.length} runs that ended stopped for reasons in the substrate rather than the workflow.`;
+    const left = `That leaves ${finished.length} completed run${finished.length === 1 ? "" : "s"} that can tell you anything about the workflow itself.`;
     // The mechanism is a diagnosis, not an observation — say which it is. Runs that
     // share an outcome need not share a cause, and attributing all of them to one
     // bug claims more than the session history supports.
@@ -103,7 +103,7 @@ export function headline(runs: RunSummary[]): string {
   const parked = ended.reduce((a, r) => a + r.durations.parkedMs, 0);
   const elapsed = ended.reduce((a, r) => a + r.durations.elapsedMs, 0);
   if (elapsed > 0 && parked / elapsed > 0.5) {
-    return `${Math.round((parked / elapsed) * 100)}% of the time across your ${ended.length} finished runs was Orca waiting on you.`;
+    return `${Math.round((parked / elapsed) * 100)}% of the time across your ${ended.length} runs that ended was Orca waiting on you.`;
   }
   return `${runs.length} run${runs.length === 1 ? "" : "s"}, all shown below.`;
 }
