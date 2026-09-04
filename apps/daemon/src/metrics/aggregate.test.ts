@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
+import type { CountedRate } from "@orca/contracts";
+const ratio = (r: CountedRate | null) => (r == null ? null : r.pos / r.n);
 import { windowStart, SAMPLE_MIN, medianLatencyMs, firstPassRate, recoveredRate, escalatedRate, computeTemplateSummary } from "./aggregate.js";
 
 function stepComplete(id: string, runId: string, step: string, version: number, latency: number, verdict: "passed" | "failed", at: string): TemplateTransition {
@@ -81,7 +83,7 @@ describe("firstPassRate", () => {
       { workflowRunId: "r2", stepTemplateId: "s", attempt: 1, status: "failed", startedAt: "2026-05-01T00:00:00.000Z", finishedAt: "2026-05-01T00:01:00.000Z", blockedReason: "boom", templateVersion: 1, stallRescues: 0 },
       { workflowRunId: "r2", stepTemplateId: "s", attempt: 2, status: "passed", startedAt: "2026-05-01T00:02:00.000Z", finishedAt: "2026-05-01T00:03:00.000Z", blockedReason: null, templateVersion: 1, stallRescues: 0 },
     ];
-    expect(firstPassRate(runs)).toBeCloseTo(0.5); // r1 first-pass; r2 recovered (not first-pass)
+    expect(ratio(firstPassRate(runs))).toBeCloseTo(0.5); // r1 first-pass; r2 recovered (not first-pass)
   });
 
   it("SAMPLE_MIN is 5", () => { expect(SAMPLE_MIN).toBe(5); });
@@ -100,7 +102,7 @@ describe("recoveredRate", () => {
     // r2: attempt 2 passed → recovered
     // r3: attempt 2 failed → not recovered
     // 1 recovered / 3 distinct = 0.333...
-    expect(recoveredRate(runs)).toBeCloseTo(1 / 3);
+    expect(ratio(recoveredRate(runs))).toBeCloseTo(1 / 3);
   });
 
   it("returns null with no runs", () => {
@@ -120,7 +122,7 @@ describe("escalatedRate", () => {
     // r2: deny → escalated
     // r3, r4: no gate decision → not escalated
     // 2 escalated / 4 distinct = 0.5
-    expect(escalatedRate(ts)).toBeCloseTo(0.5);
+    expect(ratio(escalatedRate(ts))).toBeCloseTo(0.5);
   });
 
   it("counts transitions with human interventions as escalated", () => {
@@ -132,7 +134,7 @@ describe("escalatedRate", () => {
     // r1: human intervention → escalated
     // r2, r3: no escalation
     // 1 escalated / 3 distinct = 0.333...
-    expect(escalatedRate(ts)).toBeCloseTo(1 / 3);
+    expect(ratio(escalatedRate(ts))).toBeCloseTo(1 / 3);
   });
 
   it("returns null with no transitions", () => {
@@ -155,7 +157,7 @@ describe("escalatedRate", () => {
     ];
     // The first transition is skipped because it has no workflowRunId/workflowStepRunId
     // Only r2 is counted: 0 escalated / 1 distinct = 0
-    expect(escalatedRate(ts)).toBeCloseTo(0);
+    expect(ratio(escalatedRate(ts))).toBeCloseTo(0);
   });
 
   it("returns null when all transitions lack workflowRunId or workflowStepRunId", () => {
@@ -255,8 +257,10 @@ describe("computeTemplateSummary", () => {
     });
     // Both real steps failed on their only attempt: nothing passed first time and
     // nothing recovered. The surrogates must not manufacture either.
-    expect(summary.firstPass).toBe(0);
-    expect(summary.recovered).toBe(0);
+    // The gate surrogate must not swell the denominator either — that is the whole
+    // point of carrying n rather than a bare ratio.
+    expect(summary.firstPass).toEqual({ pos: 0, n: 2 });
+    expect(summary.recovered).toEqual({ pos: 0, n: 2 });
   });
 
   it("single template version → versionComparison is null", () => {
@@ -336,7 +340,7 @@ describe("computeTemplateSummary", () => {
       },
       prior: { transitions: [], stepRuns: [] },
     });
-    expect(summary.recovered).toBeCloseTo(0.5); // r2 is the recovered one
-    expect(summary.escalated).toBeCloseTo(0.5); // r2 has gate_decision require_approval
+    expect(ratio(summary.recovered)).toBeCloseTo(0.5); // r2 is the recovered one
+    expect(ratio(summary.escalated)).toBeCloseTo(0.5); // r2 has gate_decision require_approval
   });
 });

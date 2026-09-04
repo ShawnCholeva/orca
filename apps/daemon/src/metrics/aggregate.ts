@@ -1,6 +1,6 @@
 import type { HarnessMetrics } from "../harness-metrics/usecases.js";
 import { computeHarnessMetricsFromTransitions } from "../harness-metrics/usecases.js";
-import type { MetricPeriod, MetricScope, TemplateMetricsSummary, StepMetrics, NodeVersionHistory } from "@orca/contracts";
+import type { MetricPeriod, MetricScope, TemplateMetricsSummary, StepMetrics, NodeVersionHistory, CountedRate } from "@orca/contracts";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
 import type { VindicationOutcome } from "./vindication.js";
 import { classifyTier, strongestTier, TIER_LABEL, buildArtifacts, computeCalibration, CALIBRATION_DIVERGENCE, CALIBRATION_SCORE_MIN } from "./verification.js";
@@ -67,23 +67,23 @@ function finalAttempts(runs: TemplateStepRun[]): TemplateStepRun[] {
   return [...byKey.values()];
 }
 
-export function firstPassRate(runs: TemplateStepRun[]): number | null {
+export function firstPassRate(runs: TemplateStepRun[]): CountedRate | null {
   const finals = finalAttempts(runs);
   if (finals.length === 0) return null;
   const firstPass = finals.filter((r) => r.attempt === 1 && PASSED.has(r.status)).length;
-  return firstPass / finals.length;
+  return { pos: firstPass, n: finals.length };
 }
 
-export function recoveredRate(runs: TemplateStepRun[]): number | null {
+export function recoveredRate(runs: TemplateStepRun[]): CountedRate | null {
   const finals = finalAttempts(runs);
   if (finals.length === 0) return null;
   const recovered = finals.filter((r) => r.attempt > 1 && PASSED.has(r.status)).length;
-  return recovered / finals.length;
+  return { pos: recovered, n: finals.length };
 }
 
 // Escalated: distinct (run, step) that had a require_approval/deny gate or a human
 // intervention, over distinct (run, step) total.
-export function escalatedRate(ts: TemplateTransition[]): number | null {
+export function escalatedRate(ts: TemplateTransition[]): CountedRate | null {
   const keys = new Set<string>();
   const escalated = new Set<string>();
   for (const { transition: t } of ts) {
@@ -95,7 +95,7 @@ export function escalatedRate(ts: TemplateTransition[]): number | null {
     if (gate === "require_approval" || gate === "deny" || humans > 0) escalated.add(key);
   }
   if (keys.size === 0) return null;
-  return escalated.size / keys.size;
+  return { pos: escalated.size, n: keys.size };
 }
 
 function toSummaryDimensions(m: HarnessMetrics): TemplateMetricsSummary["dimensions"] {

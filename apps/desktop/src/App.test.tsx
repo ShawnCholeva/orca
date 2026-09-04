@@ -59,7 +59,7 @@ const metricsSummary = {
     safetyCompliance: { value: 0.92 },
     replayability: { value: 1 },
   },
-  firstPass: 0.64,
+  firstPass: { pos: 16, n: 25 },
   recovered: 0.28,
   escalated: 0.08,
   latencyP50Ms: 2400,

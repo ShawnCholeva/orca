@@ -62,6 +62,13 @@ export const ConfidenceReason = z.object({
 }).strict();
 export type ConfidenceReason = z.infer<typeof ConfidenceReason>;
 
+// A rate as the two counts it was computed from: `pos` of `n`.
+export const CountedRate = z.object({
+  pos: z.number().nonnegative(),
+  n: z.number().positive(),
+}).strict();
+export type CountedRate = z.infer<typeof CountedRate>;
+
 export const TemplateMetricsSummary = z.object({
   templateId: z.string(),
   name: z.string(),
@@ -71,9 +78,13 @@ export const TemplateMetricsSummary = z.object({
   runs: z.number().int().nonnegative(),
   dimensions: SixDimensions,
   // Tile rates (0..1 or null) — the four legacy tiles, computed server-side.
-  firstPass: z.number().nullable(),
-  recovered: z.number().nullable(),
-  escalated: z.number().nullable(),
+  // A rate travels with its denominator. Shipping the bare ratio discards the one
+  // thing that makes it auditable and the one thing an interval is built from —
+  // and it is how gate surrogates sat in these denominators unnoticed, since a
+  // ratio looks identical whichever population produced it.
+  firstPass: CountedRate.nullable(),
+  recovered: CountedRate.nullable(),
+  escalated: CountedRate.nullable(),
   latencyP50Ms: z.number().nullable(),
   deltas: SixDeltas,
   versionComparison: z.object({

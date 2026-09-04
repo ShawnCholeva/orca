@@ -129,9 +129,9 @@ describe("getTemplateMetricsDetail — scope (current/latest/all)", () => {
     expect(latestDetail).not.toBeNull();
 
     // current: 4 total finals across all steps/versions (a-v1 pass, z-v1 pass, a-v2 pass, a-v1b fail) -> 3/4 first-pass.
-    expect(currentDetail!.summary.firstPass).toBeCloseTo(0.75, 5);
+    expect(currentDetail!.summary.firstPass).toEqual({ pos: 3, n: 4 });
     // latest: only v2 runs contribute (a-v2 pass) -> 1/1 first-pass.
-    expect(latestDetail!.summary.firstPass).toBeCloseTo(1, 5);
-    expect(currentDetail!.summary.firstPass).not.toBe(latestDetail!.summary.firstPass);
+    expect(latestDetail!.summary.firstPass).toEqual({ pos: 1, n: 1 });
+    expect(currentDetail!.summary.firstPass).not.toEqual(latestDetail!.summary.firstPass);
   });
 });

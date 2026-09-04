@@ -22,7 +22,7 @@ function detail(steps: StepMetrics[]): TemplateMetricsDetail {
     summary: {
       templateId: "tpl", name: "Brainstorm", latestVersion: 2, scope: "current", runs: 12,
       dimensions: { trajectoryEfficiency: { value: 0.8 }, verificationStrength: { value: 0.6 }, recovery: { value: 0.5 }, stateConsistency: { value: 1 }, safetyCompliance: { value: 1 }, replayability: { value: 1 } },
-      firstPass: 0.5, recovered: 0.2, escalated: 0.05, latencyP50Ms: 100,
+      firstPass: { pos: 10, n: 20 }, recovered: { pos: 4, n: 20 }, escalated: { pos: 1, n: 20 }, latencyP50Ms: 100,
       deltas: { trajectoryEfficiency: null, verificationStrength: null, recovery: null, stateConsistency: null, safetyCompliance: null, replayability: null, latencyP50Ms: null },
       versionComparison: { latest: 2, prior: 1, byDimension: { verificationStrength: -0.05 } },
       versions: [], confidence: "ok", calibration: [],

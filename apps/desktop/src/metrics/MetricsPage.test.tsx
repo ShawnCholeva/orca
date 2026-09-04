@@ -10,7 +10,7 @@ const summary = {
   templateId: "tpl", name: "Brainstorm", latestVersion: 1, scope: "current" as const, runs: 12,
   dimensions: { trajectoryEfficiency: { value: null }, verificationStrength: { value: 0.82 },
     recovery: { value: 0.28 }, stateConsistency: { value: 1 }, safetyCompliance: { value: 0.92 }, replayability: { value: 1 } },
-  firstPass: 0.64, recovered: 0.28, escalated: 0.08,
+  firstPass: { pos: 16, n: 25 }, recovered: { pos: 7, n: 25 }, escalated: { pos: 2, n: 25 },
   latencyP50Ms: 2400,
   deltas: { trajectoryEfficiency: null, verificationStrength: 0.04, recovery: 0.05,
     stateConsistency: 0, safetyCompliance: -0.03, replayability: 0, latencyP50Ms: -300 },
@@ -302,5 +302,29 @@ describe("MetricsPage", () => {
     });
     expect(screen.queryByText("STALE tpl refetch")).toBeNull();
     expect(screen.getByText("tpl2 proposal")).toBeInTheDocument();
+  });
+
+  // The tile row is where the founder's original complaint lives: five estimates
+  // rendered at `opacity: 0.55` when the sample couldn't support them. The fade was
+  // never a second claim — the numbers were asserted at any alpha — so it cost
+  // legibility and bought nothing. It is replaced by the sample stating itself once.
+  //
+  // Worth noting why this needs its own fixture: the default summary has 12 runs and
+  // `confidence: "ok"`, so on the live data and on every other test here the branch
+  // never renders. Verifying the removal in the browser proved only that the fade was
+  // absent where it had never appeared.
+  it("states the sample in words instead of fading the tiles when confidence is low", async () => {
+    const thin = { ...summary, runs: 3, confidence: "low" as const };
+    vi.spyOn(api, "getTemplateMetricsSummaries").mockResolvedValue([thin]);
+    vi.spyOn(api, "getTemplateMetricsDetail").mockResolvedValue({ summary: thin, steps: [], gates: [], splitters: [], policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 }, overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] }, completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 }, vetoed: { count: 0, sampleTransitionIds: [] } } });
+    const { container } = renderWorkflowView();
+
+    expect(await screen.findByText("Step health")).toBeInTheDocument();
+    expect(screen.getByText(/Needs 5 runs; this has 3\./)).toBeInTheDocument();
+    // Inline styles only. A bare /opacity/i also catches `stopOpacity` on the
+    // sparkline's gradient, which fades a chart fill rather than a claim — banning
+    // it would be the assertion firing on healthy data, which costs more belief
+    // than it protects.
+    expect(container.innerHTML).not.toMatch(/style="[^"]*opacity/i);
   });
 });

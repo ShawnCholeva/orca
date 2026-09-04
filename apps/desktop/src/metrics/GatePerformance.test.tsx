@@ -60,7 +60,7 @@ const summaryForPipeline = {
   templateId: "tpl", name: "Brainstorm", latestVersion: 1, scope: "current" as const, runs: 12,
   dimensions: { trajectoryEfficiency: { value: null }, verificationStrength: { value: 0.82 },
     recovery: { value: 0.28 }, stateConsistency: { value: 1 }, safetyCompliance: { value: 0.92 }, replayability: { value: 1 } },
-  firstPass: 0.64, recovered: 0.28, escalated: 0.08, latencyP50Ms: 2400,
+  firstPass: { pos: 16, n: 25 }, recovered: { pos: 7, n: 25 }, escalated: { pos: 2, n: 25 }, latencyP50Ms: 2400,
   deltas: { trajectoryEfficiency: null, verificationStrength: 0.04, recovery: 0.05,
     stateConsistency: 0, safetyCompliance: -0.03, replayability: 0, latencyP50Ms: -300 },
   versionComparison: null, versions: [{ version: 1, runs: 12, firstSeenAt: "2026-05-01T00:00:00.000Z" }], confidence: "ok" as const,

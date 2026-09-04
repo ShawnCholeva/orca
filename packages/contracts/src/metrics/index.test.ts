@@ -25,7 +25,7 @@ describe("metrics contracts", () => {
         safetyCompliance: { value: 1 },
         replayability: { value: 1 },
       },
-      firstPass: 0.6, recovered: 0.28, escalated: 0.08,
+      firstPass: { pos: 15, n: 25 }, recovered: { pos: 7, n: 25 }, escalated: { pos: 2, n: 25 },
       latencyP50Ms: 1200,
       deltas: { verificationStrength: 0.05, recovery: null, trajectoryEfficiency: null,
                 stateConsistency: 0, safetyCompliance: 0, replayability: 0, latencyP50Ms: -100 },
