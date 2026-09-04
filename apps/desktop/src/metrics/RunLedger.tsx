@@ -117,7 +117,7 @@ function intervalParts(d: RunSummary["durations"]) {
 
 function DurationTerms({ d }: { d: RunSummary["durations"] }) {
   return (
-    <span style={{ fontSize: 12, color: "var(--text-2)" }} className="mono">
+    <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }} className="mono">
       {dur(d.elapsedMs)} = {dur(d.workingMs)} working + {dur(d.parkedMs)} waiting on you
       {" + "}{dur(d.unaccountedMs)} unaccounted
       {d.accruing ? " · still running" : ""}
@@ -143,18 +143,18 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
   }
   return (
     <div style={{ display: "grid", gap: 4 }}>
-      <span className="mono" style={{ fontSize: 13, fontWeight: 600 }}>{usd(cost.usd)}</span>
+      <span className="mono" style={{ fontSize: "var(--fs-3)", fontWeight: 600 }}>{usd(cost.usd)}</span>
       {cost.failedUsd > 0 && (
-        <span style={{ fontSize: 12, color: "var(--err)" }} className="mono">
+        <span style={{ fontSize: "var(--fs-2)", color: "var(--err)" }} className="mono">
           {usd(cost.failedUsd)} on attempts that failed
         </span>
       )}
       {cost.supersededUsd > 0 && (
-        <span style={{ fontSize: 12, color: "var(--warn)" }} className="mono">
+        <span style={{ fontSize: "var(--fs-2)", color: "var(--warn)" }} className="mono">
           {usd(cost.supersededUsd)} on work that was replaced
         </span>
       )}
-      <span style={{ fontSize: 12, color: reported === total ? "var(--text-2)" : "var(--warn)" }} className="mono">
+      <span style={{ fontSize: "var(--fs-2)", color: reported === total ? "var(--text-2)" : "var(--warn)" }} className="mono">
         {reported} of {total} nodes reported a cost
       </span>
       {silent > 0 && (
@@ -174,7 +174,7 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
         />
       )}
       {cost.rollupCheck === "diverged" && (
-        <span style={{ fontSize: 12, color: "var(--err)", fontWeight: 600 }}>
+        <span style={{ fontSize: "var(--fs-2)", color: "var(--err)", fontWeight: 600 }}>
           This total disagrees with the run&apos;s own roll-up — a step&apos;s cost is missing from one of them.
         </span>
       )}
@@ -206,19 +206,19 @@ export function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) 
     >
       <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, color: "var(--text-3)" }}>{day(run.startedAt)}</span>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>{run.templateName}</span>
-          <span style={{ fontSize: 12, color: "var(--text-3)" }}>v{run.templateVersion}</span>
-          <span style={{ fontSize: 12, color: TERMINATION_TONE[run.terminationCause], fontWeight: 600 }}>
+          <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>{day(run.startedAt)}</span>
+          <span style={{ fontSize: "var(--fs-4)", fontWeight: 600 }}>{run.templateName}</span>
+          <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>v{run.templateVersion}</span>
+          <span style={{ fontSize: "var(--fs-2)", color: TERMINATION_TONE[run.terminationCause], fontWeight: 600 }}>
             {TERMINATION_SENTENCE[run.terminationCause]}
           </span>
         </div>
         {run.terminationEvidence && run.terminationCause !== "completed" && (
-          <span style={{ fontSize: 12, color: "var(--text-2)" }}>{run.terminationEvidence}</span>
+          <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>{run.terminationEvidence}</span>
         )}
         <IntervalBar {...intervalParts(run.durations)} />
         <DurationTerms d={run.durations} />
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12, color: "var(--text-2)" }}>
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: "var(--fs-2)", color: "var(--text-2)" }}>
           <span>{run.stepsDelivered} delivered</span>
           {run.stepsBlocked > 0 && <span>{run.stepsBlocked} blocked</span>}
           {run.retriedCompletions > 0 && <span>{run.retriedCompletions} redone</span>}
@@ -262,8 +262,8 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
       }}
     >
       <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>{span.name}</span>
-        <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>
+        <span style={{ fontSize: "var(--fs-3)", fontWeight: 600 }}>{span.name}</span>
+        <span style={{ fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
           {span.kind === "gate" ? "gate" : "step"} · attempt {span.attempt} · {span.status}
         </span>
       </div>
@@ -288,7 +288,7 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
             }
           />
         ) : (
-          <span className="mono" style={{ fontSize: 11.5, color: "var(--text-2)" }}>
+          <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-2)" }}>
             {dur(span.elapsedMs)}
             {span.workingMs == null
               ? " · none of it observed"
@@ -303,10 +303,10 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
           />
         )}
         {span.blockedReason && (
-          <span style={{ fontSize: 11.5, color: "var(--err)" }}>{span.blockedReason}</span>
+          <span style={{ fontSize: "var(--fs-1)", color: "var(--err)" }}>{span.blockedReason}</span>
         )}
         {span.verifiers && (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 11.5 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: "var(--fs-1)" }}>
             {span.verifiers.executable && <Chip tone="var(--run)">tests ran</Chip>}
             {span.verifiers.grounding && <Chip tone="var(--run)">claims checked</Chip>}
             {/* An LLM's opinion, carrying real weight into a graded number. Marked
@@ -318,7 +318,7 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
           </div>
         )}
         {(span.restarts > 0 || span.completions > 1) && (
-          <span style={{ fontSize: 11.5, color: "var(--text-2)" }}>
+          <span style={{ fontSize: "var(--fs-1)", color: "var(--text-2)" }}>
             {span.restarts > 0 && `relaunched ${span.restarts}x after a crash`}
             {span.restarts > 0 && span.completions > 1 && " · "}
             {span.completions > 1 && `redone ${span.completions - 1}x`}
@@ -330,7 +330,7 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
         {span.cost === null || span.cost.usd === null ? (
           <MeasurementLabel state="uninstrumented" lossy={span.kind === "gate"} />
         ) : (
-          <span className="mono" style={{ fontSize: 13 }}>{usd(span.cost.usd)}</span>
+          <span className="mono" style={{ fontSize: "var(--fs-3)" }}>{usd(span.cost.usd)}</span>
         )}
       </div>
     </div>
@@ -339,7 +339,7 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
 
 function Chip({ children, tone }: { children: React.ReactNode; tone: string }) {
   return (
-    <span style={{ border: `1px solid ${tone}`, color: tone, borderRadius: 4, padding: "1px 6px", fontSize: 11 }}>
+    <span style={{ border: `1px solid ${tone}`, color: tone, borderRadius: 4, padding: "1px 6px", fontSize: "var(--fs-1)" }}>
       {children}
     </span>
   );
@@ -348,7 +348,7 @@ function Chip({ children, tone }: { children: React.ReactNode; tone: string }) {
 function InterventionRow({ iv }: { iv: Intervention }) {
   const urgent = iv.parkState === "awaiting_you";
   return (
-    <div style={{ display: "flex", gap: 12, alignItems: "baseline", padding: "6px 0", fontSize: 12 }}>
+    <div style={{ display: "flex", gap: 12, alignItems: "baseline", padding: "6px 0", fontSize: "var(--fs-2)" }}>
       <span className="mono" style={{ minWidth: 64, color: urgent ? "var(--err)" : "var(--text-2)", fontWeight: urgent ? 600 : 400 }}>
         {dur(iv.durationMs)}
       </span>
@@ -369,15 +369,15 @@ export function RunDetailPanel({ detail, onBack }: { detail: RunDetail; onBack: 
   return (
     <div style={{ display: "grid", gap: 18 }}>
       <div>
-        <button type="button" onClick={onBack} style={{ fontSize: 12, background: "none", border: "none", color: "var(--accent)", cursor: "pointer", padding: 0 }}>
+        <button type="button" onClick={onBack} style={{ fontSize: "var(--fs-2)", background: "none", border: "none", color: "var(--accent)", cursor: "pointer", padding: 0 }}>
           ← All runs
         </button>
       </div>
       <div style={{ display: "grid", gap: 8 }}>
-        <h2 style={{ fontSize: 16, margin: 0 }}>
+        <h2 style={{ fontSize: "var(--fs-5)", margin: 0 }}>
           {run.templateName} <span style={{ color: "var(--text-3)", fontWeight: 400 }}>v{run.templateVersion} · {day(run.startedAt)}</span>
         </h2>
-        <span style={{ fontSize: 13, color: TERMINATION_TONE[run.terminationCause], fontWeight: 600 }}>
+        <span style={{ fontSize: "var(--fs-3)", color: TERMINATION_TONE[run.terminationCause], fontWeight: 600 }}>
           {TERMINATION_SENTENCE[run.terminationCause]}
           {run.terminationEvidence ? ` — ${run.terminationEvidence}` : ""}
         </span>
@@ -387,19 +387,19 @@ export function RunDetailPanel({ detail, onBack }: { detail: RunDetail; onBack: 
 
       {open.length > 0 && (
         <section style={{ display: "grid", gap: 4 }}>
-          <h3 style={{ fontSize: 13, margin: 0 }}>Still open</h3>
+          <h3 style={{ fontSize: "var(--fs-3)", margin: 0 }}>Still open</h3>
           {open.map((iv) => <InterventionRow key={iv.activityId} iv={iv} />)}
         </section>
       )}
 
       <section>
-        <h3 style={{ fontSize: 13, margin: "0 0 4px" }}>What ran</h3>
+        <h3 style={{ fontSize: "var(--fs-3)", margin: "0 0 4px" }}>What ran</h3>
         {spans.map((s) => <SpanRow key={s.workflowStepRunId} span={s} />)}
       </section>
 
       {interventions.length > 0 && (
         <section>
-          <h3 style={{ fontSize: 13, margin: "0 0 4px" }}>Every time it stopped for you</h3>
+          <h3 style={{ fontSize: "var(--fs-3)", margin: "0 0 4px" }}>Every time it stopped for you</h3>
           {interventions.map((iv) => <InterventionRow key={iv.activityId} iv={iv} />)}
         </section>
       )}
@@ -419,7 +419,7 @@ function CantTellYou({ runs }: { runs: RunSummary[] }) {
   const workflowN = workflowEvidenceRuns(terminatedRuns(runs)).length;
   return (
     <section style={{ display: "grid", gap: 8 }}>
-      <h3 style={{ fontSize: 13, margin: 0 }}>What this screen can&apos;t tell you yet</h3>
+      <h3 style={{ fontSize: "var(--fs-3)", margin: 0 }}>What this screen can&apos;t tell you yet</h3>
       {workflowN < 5 && (
         <MeasurementLabel
           state="insufficient"
@@ -461,18 +461,18 @@ export function RunLedger() {
     return () => { live = false; };
   }, [openRunId]);
 
-  if (error) return <p style={{ fontSize: 13, color: "var(--err)" }}>Couldn&apos;t load runs.</p>;
-  if (runs === null) return <p style={{ fontSize: 13, color: "var(--text-3)" }}>Loading…</p>;
-  if (runs.length === 0) return <p style={{ fontSize: 13, color: "var(--text-3)" }}>No runs yet.</p>;
+  if (error) return <p style={{ fontSize: "var(--fs-3)", color: "var(--err)" }}>Couldn&apos;t load runs.</p>;
+  if (runs === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>Loading…</p>;
+  if (runs.length === 0) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>No runs yet.</p>;
 
   if (openRunId) {
-    if (detail === null) return <p style={{ fontSize: 13, color: "var(--text-3)" }}>Loading…</p>;
+    if (detail === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>Loading…</p>;
     return <RunDetailPanel detail={detail} onBack={() => setOpenRunId(null)} />;
   }
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
-      <p style={{ fontSize: 14, margin: 0, lineHeight: 1.5 }}>{headline(runs)}</p>
+      <p style={{ fontSize: "var(--fs-4)", margin: 0, lineHeight: 1.5 }}>{headline(runs)}</p>
       <div style={{ display: "grid", gap: 10 }}>
         {runs.map((r) => <RunRow key={r.runId} run={r} onOpen={setOpenRunId} />)}
       </div>
