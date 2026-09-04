@@ -74,7 +74,7 @@ export function RateInterval({
   // A rate over one observation is the observation wearing a percent sign.
   if (n === 1) {
     return (
-      <span style={{ fontSize: 12.5, color: toneFor(point, bandEdges), ...style }}>
+      <span style={{ fontSize: "var(--fs-2)", color: toneFor(point, bandEdges), ...style }}>
         {pos === 1 ? outcomeWords.pass : outcomeWords.fail}
       </span>
     );
@@ -93,7 +93,7 @@ export function RateInterval({
       <span
         role="img"
         aria-label={readout}
-        style={{ fontSize: 12.5, fontWeight: 600, color: toneFor(point, bandEdges), ...style }}
+        style={{ fontSize: "var(--fs-2)", fontWeight: 600, color: toneFor(point, bandEdges), ...style }}
       >
         {primary}
       </span>
@@ -108,7 +108,7 @@ export function RateInterval({
     >
       <span
         className="mono"
-        style={{ fontSize: 12, fontWeight: 600, color: toneFor(point, bandEdges), whiteSpace: "nowrap" }}
+        style={{ fontSize: "var(--fs-2)", fontWeight: 600, color: toneFor(point, bandEdges), whiteSpace: "nowrap" }}
       >
         {primary}
       </span>
@@ -185,11 +185,16 @@ function formFor(state: MeasurementState, lossy: boolean): { borderLeftStyle: st
         ? { borderLeftStyle: "solid", borderLeftColor: "var(--err)" }
         : { borderLeftStyle: "solid", borderLeftColor: "var(--hairline-strong)" };
     case "unknown":
-      // Absent with no established cause. Deliberately not borrowed from any of the
-      // states above: each of those names a reason, and this one is the admission
-      // that we don't have one yet. Provisional treatment — the visual language here
-      // is the frontend owner's call, not this function's.
-      return { borderLeftStyle: "dashed", borderLeftColor: "var(--text-4)" };
+      // Absent with no established cause. The failure to design against is this
+      // reading as a fainter `insufficient`: they sit adjacent, and their remedies
+      // are opposites — one says wait, the other says go find out. A reader who
+      // takes "we haven't looked" for "not enough runs yet" waits for something
+      // that will never arrive on its own. So it differs on BOTH channels rather
+      // than one: `double` is the only border style no other state uses, and
+      // `--info` is a hue this vocabulary hasn't spent. Dashed-and-dimmer, the
+      // provisional treatment, differed only in weight — which is the difference
+      // this whole module refuses to encode meaning in.
+      return { borderLeftStyle: "double", borderLeftColor: "var(--info)" };
     case "measured":
       return { borderLeftStyle: "none", borderLeftColor: "transparent" };
   }
@@ -243,14 +248,21 @@ export function MeasurementLabel({
         className="mono"
         style={{
           display: "inline-block",
-          fontSize: 10,
+          fontSize: "var(--fs-1)",
           lineHeight: 1.5,
           padding: "0 4px",
           borderRadius: 2,
           borderWidth: 1,
           borderStyle: form.borderLeftStyle as CSSProperties["borderStyle"],
           borderColor: form.borderLeftColor,
-          color: "var(--text-3)",
+          // Compaction must not flatten urgency along with length. `lossy` is the
+          // one state where data is being destroyed on every run that completes,
+          // so it keeps the tone and weight the others give up; the rest recede to
+          // secondary text because they are caveats, not alarms. Without this every
+          // tag arrives at the same volume and the loudest state is the one that
+          // most needed to stay loud.
+          color: lossy ? "var(--err)" : "var(--text-3)",
+          fontWeight: lossy ? 600 : 400,
           whiteSpace: "nowrap",
           ...style,
         }}
@@ -267,7 +279,7 @@ export function MeasurementLabel({
         borderLeftStyle: form.borderLeftStyle as CSSProperties["borderLeftStyle"],
         borderLeftColor: form.borderLeftColor,
         paddingLeft: 9,
-        fontSize: 12,
+        fontSize: "var(--fs-2)",
         lineHeight: 1.45,
         color: "var(--text-2)",
         ...style,
@@ -275,7 +287,7 @@ export function MeasurementLabel({
     >
       <div>{text}</div>
       {fix && (
-        <div className="mono" style={{ fontSize: 10.5, color: "var(--text-3)", marginTop: 2 }}>{fix}</div>
+        <div className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", marginTop: 2 }}>{fix}</div>
       )}
     </div>
   );

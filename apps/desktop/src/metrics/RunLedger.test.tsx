@@ -1,7 +1,8 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
-import { RunDetailPanel, RunRow, headline, terminatedRuns, workflowEvidenceRuns } from "./RunLedger";
+import { CostCaveats, RunDetailPanel, RunLedger, RunRow, headline, terminatedRuns, workflowEvidenceRuns } from "./RunLedger";
+import * as api from "../api";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -64,12 +65,51 @@ describe("cost", () => {
     expect(document.body.textContent).toContain("isn't being recorded yet");
   });
 
-  it("says the total is understated when a node spent money and reported nothing", () => {
+  it("marks the total as understated, attached to the figure, when a node spent money and reported nothing", () => {
+    // The row carries a typed marker rather than the full sentence: at one paragraph
+    // per row this repeated verbatim six times on one screen, and repetition is not
+    // salience — by the third row it is wallpaper. The sentence itself, with its
+    // count, is stated once above the rows by CostCaveats and asserted below.
+    //
+    // What must NOT weaken: the marker is typed and adjacent to the figure, so the
+    // total cannot be read as complete. A bare dash here would be the untyped
+    // absence this screen exists to remove.
     render(<RunRow onOpen={() => {}} run={summary({
       cost: { usd: 5, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
               coverage: { reported: 3, total: 3, silent: 2 }, rollupCheck: "matches" },
     })} />);
-    expect(document.body.textContent).toContain("2 more nodes spent money and reported nothing");
+    const tag = document.querySelector('[data-compact="true"]');
+    expect(tag).toBeTruthy();
+    expect(tag!.textContent).toBe("discarded");
+    expect(tag!.getAttribute("aria-label")).toContain("2 more nodes spent money and reported nothing");
+    expect(document.body.textContent).not.toContain("—");
+  });
+
+  it("states the compacted caveats once, with their counts, above the rows", () => {
+    // The other half of the row-tag contract. A tag alone is a caveat the reader
+    // cannot resolve, so the sentence has to be somewhere — and it has to name the
+    // scale, because a tag repeated six times conveys scale only to someone who
+    // counts tags. The `fix` stays at full size: it is the entire actionable content.
+    render(<CostCaveats runs={[
+      summary({ runId: "a", cost: { usd: 5, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
+        coverage: { reported: 3, total: 3, silent: 2 }, rollupCheck: "not_applicable" } }),
+      summary({ runId: "b", cost: { usd: 2, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
+        coverage: { reported: 1, total: 1, silent: 1 }, rollupCheck: "not_applicable" } }),
+    ]} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("3 nodes across these runs spent money and reported nothing");
+    expect(text).toContain("2 of these runs never finished");
+    expect(text).toContain("Emit step_launch/step_complete on the gate surrogate.");
+  });
+
+  it("says nothing when there is no caveat to state", () => {
+    // Never render a container whose content cannot be computed — an empty honesty
+    // block is a heading that teaches the reader to skip the honesty blocks.
+    const { container } = render(<CostCaveats runs={[summary({
+      cost: { usd: 5, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
+              coverage: { reported: 3, total: 3, silent: 0 }, rollupCheck: "matches" },
+    })]} />);
+    expect(container.firstChild).toBeNull();
   });
 
   it("states coverage as a count, never as an interval over a census", () => {
@@ -231,5 +271,35 @@ describe("RunDetailPanel", () => {
       spans: [span(), span({ workflowStepRunId: "sr2", kind: "gate", elapsedMs: null, workingMs: null, cost: null, tier: null, verifiers: null })],
     })} onBack={() => {}} />);
     expect(container.innerHTML).not.toMatch(/opacity/i);
+  });
+});
+
+describe("loading failures", () => {
+  it("keeps the loaded list on screen when a run's detail fetch fails", async () => {
+    // One `error` flag across both fetches meant a failed DETAIL request replaced
+    // every already-loaded row with a dead-end sentence. In this environment any
+    // agent saving a file restarts the daemon, so a transient 500 is routine rather
+    // than exceptional — and losing six rows the reader was mid-way through reading
+    // is a worse failure than the fetch itself.
+    vi.spyOn(api, "getRunSummaries").mockResolvedValue([summary()]);
+    vi.spyOn(api, "getRunDetail").mockRejectedValue(new Error("500"));
+    render(<RunLedger />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Adaptive Delivery/ }));
+    expect(await screen.findByText(/Couldn't load this run/)).toBeInTheDocument();
+
+    // The way back is present, and it lands on a list that never went away.
+    fireEvent.click(screen.getByRole("button", { name: /All runs/ }));
+    expect(await screen.findByRole("button", { name: /Adaptive Delivery/ })).toBeInTheDocument();
+  });
+
+  it("offers a retry that actually refetches, rather than a dead end", async () => {
+    const runs = vi.spyOn(api, "getRunSummaries").mockRejectedValueOnce(new Error("500"));
+    render(<RunLedger />);
+    expect(await screen.findByText(/Couldn't load runs/)).toBeInTheDocument();
+
+    runs.mockResolvedValue([summary()]);
+    fireEvent.click(screen.getByRole("button", { name: /Try again/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Adaptive Delivery/ })).toBeInTheDocument());
   });
 });

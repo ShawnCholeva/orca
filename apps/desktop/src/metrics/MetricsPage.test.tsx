@@ -321,10 +321,12 @@ describe("MetricsPage", () => {
 
     expect(await screen.findByText("Step health")).toBeInTheDocument();
     expect(screen.getByText(/Needs 5 runs; this has 3\./)).toBeInTheDocument();
-    // Inline styles only. A bare /opacity/i also catches `stopOpacity` on the
-    // sparkline's gradient, which fades a chart fill rather than a claim — banning
-    // it would be the assertion firing on healthy data, which costs more belief
-    // than it protects.
-    expect(container.innerHTML).not.toMatch(/style="[^"]*opacity/i);
+    // Fractional opacity only, which is the actual ban: nothing on this screen is
+    // faded. The two broader spellings both fire on healthy markup — a bare
+    // /opacity/i catches `stopOpacity` on the sparkline's gradient (a chart fill,
+    // not a claim), and matching any inline `opacity` catches the shared button's
+    // `opacity: 1`, which fades nothing. An assertion that fires on healthy data
+    // costs more belief than it protects.
+    expect(container.innerHTML).not.toMatch(/opacity:\s*0?\.\d/i);
   });
 });

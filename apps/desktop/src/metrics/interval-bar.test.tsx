@@ -90,6 +90,44 @@ describe("IntervalBar", () => {
     expect(container.querySelector('[data-seg="mismatch"]')).toBeNull();
   });
 
+  it("paints only the measured parts, leaving unaccounted as the ground they sit on", () => {
+    // Unaccounted is the TRACK, not a third block at the right end. As a trailing
+    // segment it sat exactly where a progress bar's "remaining" lives, so the whole
+    // control read as a fill — on a mixed row, literally a green bar at 26%. As the
+    // ground, the reader never has to learn it as a category: everything we know is
+    // painted onto everything we don't.
+    const { container } = render(<IntervalBar {...run} />);
+    const widths = ["working", "parked"].map((seg) =>
+      parseFloat((container.querySelector(`[data-seg="${seg}"]`) as HTMLElement).style.width)
+    );
+    // 21h elapsed, 1h2m unaccounted -> the painted share stops ~4.92% short.
+    expect(widths[0]! + widths[1]!).toBeCloseTo(95.08, 1);
+    expect(container.querySelector('[data-seg="unaccounted-segment"]')).toBeNull();
+  });
+
+  it("keeps unaccounted an input it can disagree with, never a leftover it derives", () => {
+    // The track's width no longer needs unaccountedMs, so it would be natural to
+    // stop taking it and infer it from what isn't painted. That would make a
+    // mismatch unrepresentable — which sounds like a strength and is the opposite:
+    // a wrong-but-positive unaccounted becomes undetectable, and the gate-span bug
+    // this guard caught on live data would have drawn a plausible bar instead.
+    const { container } = render(
+      <IntervalBar elapsedMs={10 * M} workingMs={2 * M} parkedMs={2 * M} unaccountedMs={2 * M} />
+    );
+    expect(container.querySelector('[data-seg="mismatch"]')).toBeTruthy();
+    expect(container.querySelector('[data-seg="working"]')).toBeNull();
+  });
+
+  it("does not paint parked in the colour the app uses for interaction", () => {
+    // --accent is the link, the selected tab and the `running` tone. Parked time
+    // wearing it made the widest band on most rows read as "click me", and it is
+    // the one band the reader must not mistake for a control.
+    const { container } = render(<IntervalBar {...run} />);
+    const parked = container.querySelector('[data-seg="parked"]') as HTMLElement;
+    expect(parked.style.background).toContain("--accent-2");
+    expect(parked.style.background).not.toContain("var(--accent)");
+  });
+
   it("renders nothing measurable when elapsed itself is absent", () => {
     const { container } = render(
       <IntervalBar elapsedMs={null} workingMs={null} parkedMs={null} unaccountedMs={null} />

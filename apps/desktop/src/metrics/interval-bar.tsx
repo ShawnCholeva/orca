@@ -117,10 +117,32 @@ export function IntervalBar({
 
   const pctOf = (v: number) => `${(v / elapsedMs) * 100}%`;
 
+  // Two channels, each answering one question, because one channel answering three
+  // was unreadable without a legend:
+  //
+  //   HUE      whose time was this   — green Orca, violet the reader
+  //   MATERIAL did we measure it     — solid painted, hatched ground
+  //
+  // Unaccounted is the GROUND rather than a third segment. As a trailing block it
+  // sat exactly where a progress bar's "remaining" lives, and a left-anchored green
+  // fill growing rightward is over-determined before any of our semantics land — on
+  // a mixed row it was literally a green bar at 26%. Painting the known parts onto
+  // unknown ground removes the fill reading and removes a category the reader had to
+  // learn: a run with nothing observed is now visibly all-ground rather than looking
+  // like a broken row.
+  //
+  // Parked deliberately does NOT use --accent. That token is the link, the selected
+  // tab and the `running` tone, so the widest band on most rows was reading as a
+  // control. Violet is unspent here and carries no verdict — which is the point:
+  // the park is Orca going quiet, not the reader being slow, and hue cannot hold a
+  // caveat. Amber is reserved for a park the reader can act on right now, which is
+  // a per-intervention state this bar cannot see and must not guess at.
   return (
     <span
       role="img"
       aria-label={readout}
+      data-seg="unaccounted"
+      data-material="hatched"
       style={{
         display: "flex",
         height: 10,
@@ -128,25 +150,21 @@ export function IntervalBar({
         minWidth: 48,
         borderRadius: 2,
         overflow: "hidden",
-        background: "var(--hairline)",
+        backgroundImage:
+          "repeating-linear-gradient(45deg, var(--hairline-strong) 0 2px, transparent 2px 5px)",
         ...style,
       }}
     >
       {/* Watched. */}
       <span data-seg="working" style={{ width: pctOf(working), background: "var(--run)" }} />
       {/* Waiting on a person — a different kind of time, not a lesser one. */}
-      <span data-seg="parked" style={{ width: pctOf(parked), background: "var(--accent)" }} />
-      {/* Unobserved. Hatched rather than merely tinted, so it survives being read
-          without colour and cannot be mistaken for a measured category. */}
-      <span
-        data-seg="unaccounted"
-        data-material="hatched"
-        style={{
-          width: pctOf(unaccounted),
-          backgroundImage:
-            "repeating-linear-gradient(45deg, var(--hairline-strong) 0 2px, transparent 2px 5px)",
-        }}
-      />
+      <span data-seg="parked" style={{ width: pctOf(parked), background: "var(--accent-2)" }} />
+      {/* No third child: the width unaccounted would have occupied is the ground
+          showing through. `unaccountedMs` is still taken as an INPUT and still
+          checked against the sum above — deriving it as track-minus-painted would
+          make a mismatch unrepresentable, and an undetectable discrepancy is worse
+          than a visible one. A value you receive can disagree with you; one you
+          compute cannot. */}
     </span>
   );
 }

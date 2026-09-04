@@ -139,7 +139,10 @@ export function StepRow({ step, index, isLast, open, onToggle, onOpenGoal, propo
     ["Anything wrong", channels.wrong],
   ];
   return (
-    <div style={{ borderBottom: isLast ? "none" : "1px solid var(--hairline)", opacity: low ? 0.6 : 1 }}>
+    // No dimming. The row already states its own sample beside the step name, and
+    // that marker is the honest signal — a faint row is still an asserted row, and
+    // the reader loses legibility without losing a single claim.
+    <div style={{ borderBottom: isLast ? "none" : "1px solid var(--hairline)" }}>
       <div onClick={onToggle} style={{ display: "grid", gridTemplateColumns: GRID, alignItems: "center", gap: 12, padding: "12px 14px", cursor: "pointer" }}>
         <div style={{ display: "flex", justifyContent: "center" }}>
           <div style={{ width: 26, height: 26, borderRadius: 7, border: `1px solid ${m.color}`, background: `color-mix(in srgb, ${m.color} 12%, transparent)`, color: m.color, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "JetBrains Mono, monospace", fontSize: 11, fontWeight: 600 }}>
@@ -150,7 +153,10 @@ export function StepRow({ step, index, isLast, open, onToggle, onOpenGoal, propo
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{step.name}</span>
             <Pill tone={bandMeta[step.verification.band.level].tone} size="xs">{step.verification.band.label}</Pill>
-            {low && <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }} title={`Based on only ${step.sampleSize} run${step.sampleSize === 1 ? "" : "s"} — low confidence (fewer than 5). Scores here can swing as more runs accrue.`}>n={step.sampleSize}</span>}
+            {/* This marker is now the whole low-confidence signal, so it has to be
+                readable: at --text-4 it measured under 2:1 and was carrying meaning
+                nobody could see. n rides at the value's weight, never in a tooltip. */}
+            {low && <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-2)" }} title={`Based on only ${step.sampleSize} run${step.sampleSize === 1 ? "" : "s"} — low confidence (fewer than 5). Scores here can swing as more runs accrue.`}>n={step.sampleSize}</span>}
             <VersionMarkerChips history={step.versionHistory} />
           </div>
           {step.description && (

@@ -117,7 +117,13 @@ function intervalParts(d: RunSummary["durations"]) {
 
 function DurationTerms({ d }: { d: RunSummary["durations"] }) {
   return (
-    <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }} className="mono">
+    // Sits directly under the bar and reads as its caption: the bar carries the
+    // shape, this carries the arithmetic. They were competing at equal weight, and
+    // the sentence won because it was legible while the bar was ambiguous — which
+    // meant the bar cost a line and paid nothing. The terms stay visibly addable;
+    // that property is what makes the intervention tax falsifiable in front of the
+    // reader, and it is load-bearing rather than decorative.
+    <span style={{ fontSize: "var(--fs-1)", color: "var(--text-2)", lineHeight: 1.5 }} className="mono">
       {dur(d.elapsedMs)} = {dur(d.workingMs)} working + {dur(d.parkedMs)} waiting on you
       {" + "}{dur(d.unaccountedMs)} unaccounted
       {d.accruing ? " · still running" : ""}
@@ -141,42 +147,100 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
       </div>
     );
   }
+  // The caveats below ride as tags beside the figure rather than as paragraphs
+  // beneath it. They are attached, not footnoted — the number cannot be read
+  // without them — but each said the same three wrapped lines on every unfinished
+  // run, roughly eighteen lines of screen for a sentence that never varied. The
+  // sentence each tag stands for is stated once, above the rows, by CostCaveats.
+  //
+  // This is NOT the $0.00 defect returning. There the figure was unmeasured and the
+  // absence was demoted to a caption; here the figure IS measured and the tag
+  // qualifies the cross-check. The test that separates them: which object is the
+  // absence attached to? An unreported total still replaces the figure entirely,
+  // in the branch above.
   return (
-    <div style={{ display: "grid", gap: 4 }}>
-      <span className="mono" style={{ fontSize: "var(--fs-3)", fontWeight: 600 }}>{usd(cost.usd)}</span>
+    <div style={{ display: "grid", gap: "var(--sp-1)", justifyItems: "end", textAlign: "right" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: "var(--sp-2)" }}>
+        <span className="mono" style={{ fontSize: "var(--fs-5)", fontWeight: 600, letterSpacing: -0.4 }}>{usd(cost.usd)}</span>
+        {cost.rollupCheck === "not_applicable" && (
+          <MeasurementLabel
+            compact
+            state="unmeasurable_structural"
+            reason="Nothing to check this total against — this run never finished."
+          />
+        )}
+      </div>
       {cost.failedUsd > 0 && (
-        <span style={{ fontSize: "var(--fs-2)", color: "var(--err)" }} className="mono">
-          {usd(cost.failedUsd)} on attempts that failed
+        <span style={{ fontSize: "var(--fs-1)", color: "var(--err)" }} className="mono">
+          {usd(cost.failedUsd)} failed
         </span>
       )}
       {cost.supersededUsd > 0 && (
-        <span style={{ fontSize: "var(--fs-2)", color: "var(--warn)" }} className="mono">
-          {usd(cost.supersededUsd)} on work that was replaced
+        <span style={{ fontSize: "var(--fs-1)", color: "var(--warn)" }} className="mono">
+          {usd(cost.supersededUsd)} replaced
         </span>
       )}
-      <span style={{ fontSize: "var(--fs-2)", color: reported === total ? "var(--text-2)" : "var(--warn)" }} className="mono">
-        {reported} of {total} nodes reported a cost
-      </span>
-      {silent > 0 && (
-        // These nodes are absent from the ratio above, not counted as unreported —
-        // so this total is understated by an amount the run cannot state. Says so
-        // rather than letting the figure read as complete.
-        <MeasurementLabel
-          state="uninstrumented"
-          lossy
-          fix={`${silent} more node${silent === 1 ? "" : "s"} spent money and reported nothing, so this total is low. Emit step_launch/step_complete on the gate surrogate.`}
-        />
-      )}
-      {cost.rollupCheck === "not_applicable" && (
-        <MeasurementLabel
-          state="unmeasurable_structural"
-          reason="Nothing to check this total against — this run never finished."
-        />
-      )}
+      {/* Wraps rather than compressing: with the tag pinned beside it the sentence
+          broke as "reported a / cost", which reads as two facts. Given the choice
+          between a wrapped tag and a wrapped phrase, break the tag. */}
+      <div style={{ display: "flex", alignItems: "baseline", gap: "var(--sp-1)", flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <span style={{ fontSize: "var(--fs-1)", color: reported === total ? "var(--text-3)" : "var(--warn)", whiteSpace: "nowrap" }} className="mono">
+          {reported} of {total} nodes reported a cost
+        </span>
+        {silent > 0 && (
+          // Absent from the ratio beside it, not counted as unreported — so this
+          // total is understated by an amount the run itself cannot state.
+          <MeasurementLabel
+            compact
+            state="uninstrumented"
+            lossy
+            fix={`${silent} more node${silent === 1 ? "" : "s"} spent money and reported nothing, so this total is low. Emit step_launch/step_complete on the gate surrogate.`}
+          />
+        )}
+      </div>
       {cost.rollupCheck === "diverged" && (
+        // Never compacted: this one differs per run and is a defect rather than a
+        // standing limit. A tag would hide the only cost caveat worth reading.
         <span style={{ fontSize: "var(--fs-2)", color: "var(--err)", fontWeight: 600 }}>
           This total disagrees with the run&apos;s own roll-up — a step&apos;s cost is missing from one of them.
         </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The sentences the cost tags stand for, stated once, ABOVE the rows.
+ *
+ * Above rather than below because a caveat read after the data is a footnote, and
+ * footnotes are where urgency goes to die. Each names its own count, since scale is
+ * the urgency and a tag repeated six times conveys scale only to a reader who counts
+ * tags. The `fix` stays at full size here — it is the entire actionable content, and
+ * compacting it into six tooltips would leave the reader with an absence they can
+ * notice and not resolve.
+ */
+export function CostCaveats({ runs }: { runs: RunSummary[] }) {
+  const silentNodes = runs.reduce((a, r) => a + r.cost.coverage.silent, 0);
+  const unchecked = runs.filter((r) => r.cost.rollupCheck === "not_applicable").length;
+  if (silentNodes === 0 && unchecked === 0) return null;
+  return (
+    <div style={{ display: "grid", gap: "var(--sp-2)" }}>
+      {silentNodes > 0 && (
+        <MeasurementLabel
+          state="uninstrumented"
+          lossy
+          // The count rides in `fix`, not `reason`: labelForMeasurementState honours
+          // `reason` only for unmeasurable_structural, so a count passed there would
+          // have rendered nothing at all. It belongs beside the action regardless —
+          // scale is what makes the fix worth doing.
+          fix={`${silentNodes} node${silentNodes === 1 ? "" : "s"} across these runs spent money and reported nothing, so those totals are low. Emit step_launch/step_complete on the gate surrogate.`}
+        />
+      )}
+      {unchecked > 0 && (
+        <MeasurementLabel
+          state="unmeasurable_structural"
+          reason={`${unchecked} of these runs never finished, so their cost totals have nothing to check against.`}
+        />
       )}
     </div>
   );
@@ -191,8 +255,11 @@ export function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) 
       onClick={() => onOpen(run.runId)}
       style={{
         display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 190px",
-        gap: 20,
+        // Widened from 190px so product's wording fits on its own line rather than
+        // being shortened to fit the column. The space came from compacting the
+        // repeating caveats, which is what it was for.
+        gridTemplateColumns: "minmax(0, 1fr) 232px",
+        gap: "var(--sp-5)",
         alignItems: "start",
         width: "100%",
         textAlign: "left",
@@ -204,21 +271,32 @@ export function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) 
         color: "inherit",
       }}
     >
-      <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
-        <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-          <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>{day(run.startedAt)}</span>
+      <div style={{ display: "grid", gap: "var(--sp-2)", minWidth: 0 }}>
+        {/* Identity first and alone. Previously the name shared a baseline with the
+            date, the version and the outcome sentence at near-equal weight, so the
+            row opened with four competing entry points and the reader had none. */}
+        <div style={{ display: "flex", gap: "var(--sp-2)", alignItems: "baseline", flexWrap: "wrap" }}>
           <span style={{ fontSize: "var(--fs-4)", fontWeight: 600 }}>{run.templateName}</span>
-          <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>v{run.templateVersion}</span>
-          <span style={{ fontSize: "var(--fs-2)", color: TERMINATION_TONE[run.terminationCause], fontWeight: 600 }}>
-            {TERMINATION_SENTENCE[run.terminationCause]}
+          <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+            v{run.templateVersion} · {day(run.startedAt)}
           </span>
         </div>
-        {run.terminationEvidence && run.terminationCause !== "completed" && (
-          <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>{run.terminationEvidence}</span>
-        )}
+        {/* The outcome, with its evidence on the same line rather than orphaned on
+            the next one — the classification and the signal it was drawn from are one
+            statement, and splitting them let the label travel without its evidence.
+            The rule carries the tone so the sentence itself doesn't have to shout. */}
+        <div style={{ display: "flex", gap: "var(--sp-2)", alignItems: "stretch" }}>
+          <span style={{ width: 3, borderRadius: 2, background: TERMINATION_TONE[run.terminationCause], flexShrink: 0 }} />
+          <span style={{ fontSize: "var(--fs-3)", color: "var(--text)" }}>
+            {TERMINATION_SENTENCE[run.terminationCause]}
+            {run.terminationEvidence && run.terminationCause !== "completed" && (
+              <span style={{ color: "var(--text-3)" }}> — {run.terminationEvidence}</span>
+            )}
+          </span>
+        </div>
         <IntervalBar {...intervalParts(run.durations)} />
         <DurationTerms d={run.durations} />
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: "var(--fs-2)", color: "var(--text-2)" }}>
+        <div style={{ display: "flex", gap: "var(--sp-3)", flexWrap: "wrap", fontSize: "var(--fs-2)", color: "var(--text-3)" }}>
           <span>{run.stepsDelivered} delivered</span>
           {run.stepsBlocked > 0 && <span>{run.stepsBlocked} blocked</span>}
           {run.retriedCompletions > 0 && <span>{run.retriedCompletions} redone</span>}
@@ -346,28 +424,53 @@ function Chip({ children, tone }: { children: React.ReactNode; tone: string }) {
 }
 
 function InterventionRow({ iv }: { iv: Intervention }) {
-  const urgent = iv.parkState === "awaiting_you";
+  // Amber marks only what the reader can act on RIGHT NOW: an open park on a live
+  // run. `abandoned` is open on a dead run — nothing they do helps — so styling it
+  // as actionable would send them to answer cards that accomplish nothing. The
+  // distinction is decided server-side and must never be re-derived here from run
+  // status plus an open flag.
+  const actionable = iv.parkState === "awaiting_you";
   return (
-    <div style={{ display: "flex", gap: 12, alignItems: "baseline", padding: "6px 0", fontSize: "var(--fs-2)" }}>
-      <span className="mono" style={{ minWidth: 64, color: urgent ? "var(--err)" : "var(--text-2)", fontWeight: urgent ? 600 : 400 }}>
+    <div style={{ display: "flex", gap: "var(--sp-3)", alignItems: "baseline", padding: "var(--sp-1) 0", fontSize: "var(--fs-2)" }}>
+      <span className="mono" style={{ minWidth: 64, color: actionable ? "var(--warn)" : "var(--text-2)", fontWeight: actionable ? 600 : 400 }}>
         {dur(iv.durationMs)}
       </span>
-      <span style={{ color: "var(--text-2)" }}>
-        {iv.sourceKind === "unknown" ? "a pause" : iv.sourceKind.replace(/_/g, " ").replace(" pending", "")}
-      </span>
-      <span style={{ color: urgent ? "var(--err)" : "var(--text-3)" }}>{PARK_SENTENCE[iv.parkState]}</span>
-      {iv.sourceKind === "unknown" && (
-        <MeasurementLabel state="uninstrumented" lossy fix="Stamp the pause reason into the event." />
+      {/* The tag REPLACES the reason rather than sitting beside it. "a pause" was a
+          placeholder standing in for the missing reason, so rendering it next to a
+          marker of that same absence stated the gap twice and left a red box on every
+          row — the compaction turning back into wallpaper, one size down. The absent
+          thing here is the reason, so the reason slot is where its type belongs.
+          Duration and park state are measured and keep their own cells. */}
+      {iv.sourceKind === "unknown" ? (
+        <MeasurementLabel compact state="uninstrumented" lossy fix="Stamp the pause reason into the event." />
+      ) : (
+        <span style={{ color: "var(--text-2)" }}>
+          {iv.sourceKind.replace(/_/g, " ").replace(" pending", "")}
+        </span>
       )}
+      <span style={{ color: actionable ? "var(--warn)" : "var(--text-3)" }}>{PARK_SENTENCE[iv.parkState]}</span>
     </div>
+  );
+}
+
+/** The sentence the `discarded` pause tags stand for, once, above the rows it marks. */
+function ParkCaveat({ interventions }: { interventions: Intervention[] }) {
+  const unlabelled = interventions.filter((i) => i.sourceKind === "unknown").length;
+  if (unlabelled === 0) return null;
+  return (
+    <MeasurementLabel
+      state="uninstrumented"
+      lossy
+      fix={`${unlabelled} of these pauses lost the record of why they stopped. Stamp the pause reason into the event.`}
+    />
   );
 }
 
 export function RunDetailPanel({ detail, onBack }: { detail: RunDetail; onBack: () => void }) {
   const { run, spans, interventions } = detail;
-  const open = interventions.filter((i) => i.open);
+  const actionable = interventions.filter((i) => i.parkState === "awaiting_you");
   return (
-    <div style={{ display: "grid", gap: 18 }}>
+    <div style={{ display: "grid", gap: "var(--sp-5)" }}>
       <div>
         <button type="button" onClick={onBack} style={{ fontSize: "var(--fs-2)", background: "none", border: "none", color: "var(--accent)", cursor: "pointer", padding: 0 }}>
           ← All runs
@@ -385,21 +488,30 @@ export function RunDetailPanel({ detail, onBack }: { detail: RunDetail; onBack: 
         <DurationTerms d={run.durations} />
       </div>
 
-      {open.length > 0 && (
-        <section style={{ display: "grid", gap: 4 }}>
-          <h3 style={{ fontSize: "var(--fs-3)", margin: 0 }}>Still open</h3>
-          {open.map((iv) => <InterventionRow key={iv.activityId} iv={iv} />)}
+      {/* Sectioned by ACTIONABILITY, not by an `open` flag. The previous heading
+          said "Still open" over three rows each reading "left open when the run
+          stopped" — a contradiction in one glance — and those same rows appeared
+          again below, so the screen both misdescribed them and counted them twice.
+          Nothing here is `awaiting_you` on the founder's data today, so this section
+          is absent rather than empty: a heading over no rows teaches the reader that
+          headings mean nothing. */}
+      {actionable.length > 0 && (
+        <section style={{ display: "grid", gap: "var(--sp-1)" }}>
+          <h3 style={{ fontSize: "var(--fs-4)", margin: 0 }}>Waiting on you now</h3>
+          <ParkCaveat interventions={actionable} />
+          {actionable.map((iv) => <InterventionRow key={iv.activityId} iv={iv} />)}
         </section>
       )}
 
-      <section>
-        <h3 style={{ fontSize: "var(--fs-3)", margin: "0 0 4px" }}>What ran</h3>
+      <section style={{ display: "grid", gap: "var(--sp-1)" }}>
+        <h3 style={{ fontSize: "var(--fs-4)", margin: 0 }}>What ran</h3>
         {spans.map((s) => <SpanRow key={s.workflowStepRunId} span={s} />)}
       </section>
 
       {interventions.length > 0 && (
-        <section>
-          <h3 style={{ fontSize: "var(--fs-3)", margin: "0 0 4px" }}>Every time it stopped for you</h3>
+        <section style={{ display: "grid", gap: "var(--sp-1)" }}>
+          <h3 style={{ fontSize: "var(--fs-4)", margin: 0 }}>Every time it stopped for you</h3>
+          <ParkCaveat interventions={interventions} />
           {interventions.map((iv) => <InterventionRow key={iv.activityId} iv={iv} />)}
         </section>
       )}
@@ -441,39 +553,76 @@ function CantTellYou({ runs }: { runs: RunSummary[] }) {
 
 // ── page ─────────────────────────────────────────────────────────────────────
 
+/** A failed fetch, said in place, with the one control that can undo it. */
+function LoadError({ what, onRetry }: { what: string; onRetry: () => void }) {
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: "var(--sp-2)" }}>
+      <span style={{ fontSize: "var(--fs-3)", color: "var(--err)" }}>Couldn&apos;t load {what}.</span>
+      <button
+        type="button"
+        onClick={onRetry}
+        style={{ fontSize: "var(--fs-2)", background: "none", border: "none", color: "var(--accent)", cursor: "pointer", padding: 0 }}
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+
 export function RunLedger() {
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [openRunId, setOpenRunId] = useState<string | null>(null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
-  const [error, setError] = useState(false);
+  // Two fetches, two failure states. One shared flag meant a failed DETAIL fetch
+  // destroyed the LIST the reader was already looking at, replacing every loaded
+  // row with a dead-end sentence. Not an edge case here: any agent saving a file
+  // restarts the daemon, so a transient 500 mid-session is routine.
+  const [listError, setListError] = useState(false);
+  const [detailError, setDetailError] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     let live = true;
-    getRunSummaries().then((r) => { if (live) setRuns(r); }).catch(() => { if (live) setError(true); });
+    setListError(false);
+    getRunSummaries().then((r) => { if (live) setRuns(r); }).catch(() => { if (live) setListError(true); });
     return () => { live = false; };
-  }, []);
+  }, [reload]);
 
   useEffect(() => {
     setDetail(null);
+    setDetailError(false);
     if (!openRunId) return;
     let live = true;
-    getRunDetail(openRunId).then((d) => { if (live) setDetail(d); }).catch(() => { if (live) setError(true); });
+    getRunDetail(openRunId).then((d) => { if (live) setDetail(d); }).catch(() => { if (live) setDetailError(true); });
     return () => { live = false; };
-  }, [openRunId]);
+  }, [openRunId, reload]);
 
-  if (error) return <p style={{ fontSize: "var(--fs-3)", color: "var(--err)" }}>Couldn&apos;t load runs.</p>;
+  if (listError && runs === null) return <LoadError what="runs" onRetry={() => setReload((n) => n + 1)} />;
   if (runs === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>Loading…</p>;
   if (runs.length === 0) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>No runs yet.</p>;
 
   if (openRunId) {
+    if (detailError) {
+      return (
+        <div style={{ display: "grid", gap: "var(--sp-3)" }}>
+          <button type="button" onClick={() => setOpenRunId(null)} style={{ fontSize: "var(--fs-2)", background: "none", border: "none", color: "var(--accent)", cursor: "pointer", padding: 0, justifySelf: "start" }}>
+            ← All runs
+          </button>
+          <LoadError what="this run" onRetry={() => setReload((n) => n + 1)} />
+        </div>
+      );
+    }
     if (detail === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>Loading…</p>;
     return <RunDetailPanel detail={detail} onBack={() => setOpenRunId(null)} />;
   }
 
   return (
-    <div style={{ display: "grid", gap: 18 }}>
-      <p style={{ fontSize: "var(--fs-4)", margin: 0, lineHeight: 1.5 }}>{headline(runs)}</p>
-      <div style={{ display: "grid", gap: 10 }}>
+    <div style={{ display: "grid", gap: "var(--sp-5)" }}>
+      {/* The headline is the one sentence that leads the screen, so it takes the
+          display step rather than sitting one notch above body text. */}
+      <p style={{ fontSize: "var(--fs-4)", margin: 0, lineHeight: 1.5, maxWidth: "78ch" }}>{headline(runs)}</p>
+      <CostCaveats runs={runs} />
+      <div style={{ display: "grid", gap: "var(--sp-2)" }}>
         {runs.map((r) => <RunRow key={r.runId} run={r} onOpen={setOpenRunId} />)}
       </div>
       <CantTellYou runs={runs} />
