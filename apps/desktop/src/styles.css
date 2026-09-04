@@ -4,10 +4,12 @@
   padding: 0;
 }
 
+/* Colour is deliberately absent here and below: an unscoped rule reaches themed
+   surfaces too, where a hardcoded light-palette value is wrong. theme.css owns
+   body's colour (and this file loads first, so it already did). */
 body {
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 14px;
-  color: #1a1a1a;
   background: #f5f5f5;
 }
 
@@ -124,7 +126,6 @@ h2 {
   font-size: 15px;
   font-weight: 600;
   margin-bottom: 16px;
-  color: #1a1a1a;
 }
 
 /* ── Create Form ────────────────────────────────────────────── */
