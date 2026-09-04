@@ -17,7 +17,10 @@ function stepComplete(id: string, runId: string, step: string, version: number, 
   };
 }
 
-function stepRun(runId: string, step: string, attempt: number, status: "passed" | "failed" | "blocked", version: number): TemplateStepRun {
+// `status` mirrors TemplateStepRun.status (a bare string) rather than a hand-listed
+// subset: a narrower literal union here silently excludes real statuses — `active`
+// and `pending` are exactly the ones the settled-finals rule needs to construct.
+function stepRun(runId: string, step: string, attempt: number, status: string, version: number): TemplateStepRun {
   return {
     workflowRunId: runId,
     stepTemplateId: step,
