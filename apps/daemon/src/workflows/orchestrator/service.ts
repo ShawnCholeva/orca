@@ -50,7 +50,7 @@ import { sanitizeNarration } from "./sanitize-narration.js";
 import { extractOrcaStepCompleteBlock } from "./orca-output.js";
 import { completeStepWithLedger } from "./ledger-commit.js";
 import { formatRevisionForWorker, incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
-import { incrementCrashRetry, CRASH_RETRY_CAP } from "./crash-retry.js";
+import { incrementCrashRetry, isSubstrateRelaunch, CRASH_RETRY_CAP } from "./crash-retry.js";
 import {
   buildEvaluationFailedStepResult,
 } from "../steps/step-result.js";
@@ -264,10 +264,10 @@ export class OrchestratorService {
     // (1) Load session; skip if not linked to a workflow step run.
     const sess = db
       .prepare(
-        "SELECT id, workflow_step_run_id, status, failure_reason FROM sessions WHERE id = ?"
+        "SELECT id, workflow_step_run_id, status, failure_reason, started_at FROM sessions WHERE id = ?"
       )
       .get(args.sessionId) as
-      | { id: string; workflow_step_run_id: string | null; status: string; failure_reason: string | null }
+      | { id: string; workflow_step_run_id: string | null; status: string; failure_reason: string | null; started_at: string | null }
       | undefined;
     if (!sess || !sess.workflow_step_run_id) return;
 
@@ -354,11 +354,22 @@ export class OrchestratorService {
       // only this one is counted against the step's score.
       const stalled =
         sess.failure_reason === "worker_stalled" || sess.failure_reason === "user_declared_stuck";
-      const counter = incrementCrashRetry(stepRun.crash_retries ?? 0);
-      db.prepare("UPDATE workflow_step_runs SET crash_retries = ? WHERE id = ?").run(
-        counter.nextAttempt,
-        stepRun.id
-      );
+      // A worker that started under a previous daemon process did not fail because
+      // the agent could not do the work — the substrate went away underneath it.
+      // Relaunch it without spending from the budget; the budget is there to stop
+      // an agent that cannot do the work, and a daemon restart is not evidence
+      // about the agent. A session that both started and died under this process
+      // is a real crash and still pays.
+      const substrateRelaunch = isSubstrateRelaunch(sess.started_at, options.daemonStartedAt);
+      const counter = substrateRelaunch
+        ? { nextAttempt: stepRun.crash_retries ?? 0, capReached: false }
+        : incrementCrashRetry(stepRun.crash_retries ?? 0);
+      if (!substrateRelaunch) {
+        db.prepare("UPDATE workflow_step_runs SET crash_retries = ? WHERE id = ?").run(
+          counter.nextAttempt,
+          stepRun.id
+        );
+      }
       if (counter.capReached) {
         const reason = stalled
           ? `no progress after ${CRASH_RETRY_CAP} restarts`

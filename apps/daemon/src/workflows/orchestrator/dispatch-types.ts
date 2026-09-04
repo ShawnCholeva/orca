@@ -15,6 +15,10 @@ export interface StepDispatchCapabilities {
 export interface RequestNextDecisionOptions {
   bus?: EventBus;
   idFactory?: () => string;
+  /** This daemon process's start time, for deciding whether a failed worker
+   *  predates it (see isSubstrateRelaunch). Defaults to DAEMON_STARTED_AT;
+   *  tests set it so fixtures with fixed past timestamps stay meaningful. */
+  daemonStartedAt?: string;
   stepResultByStepRunId?: Record<string, WorkflowStepResult>;
   terminalFinishedAtByStepRunId?: Record<string, string>;
   /** StateDepsFacet to attach to the step's eventual step_complete transition. */

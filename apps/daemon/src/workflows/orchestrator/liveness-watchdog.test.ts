@@ -157,7 +157,13 @@ function makeServiceWithSubscriber(
     const goalId = typeof event.payload.goalId === "string" ? event.payload.goalId : null;
     if (!sessionId || !goalId) return;
     completions.push(
-      service.onWorkflowSessionCompleted(db, () => NOW, { sessionId, goalId }, { bus, idFactory })
+      // These fixtures date every session before the real process start, so pin the
+      // daemon generation explicitly: they mean "this worker started under THIS
+      // daemon and genuinely crashed", which is what should spend the budget.
+      // Without the pin they read as workers lost to a restart, which is exempt.
+      service.onWorkflowSessionCompleted(db, () => NOW, { sessionId, goalId }, {
+        bus, idFactory, daemonStartedAt: "2000-01-01T00:00:00.000Z",
+      })
     );
   });
   return { completions };

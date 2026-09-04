@@ -579,6 +579,37 @@ describe("OrchestratorService.onWorkflowSessionCompleted", () => {
     expect(retries).toBe(1);
   });
 
+  it("a worker lost to a daemon restart respawns WITHOUT spending from the crash budget", async () => {
+    // The founder's run 7 burned all three retries on eight daemon reloads in
+    // eight minutes, never on an agent failure. The budget exists to stop an
+    // agent that cannot do the work; a restart is not evidence about the agent.
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, runId, stepRunId } = seedWorkflowWithSession(db, {
+      sessionStatus: "failed",
+      failureReason: "worker_exited_no_signal",
+      selectedOperatorId: "agent:claude-code",
+      selectedModelId: "claude-haiku-4-5",
+      crashRetries: 2, // one away from the cap: a wrong answer here blocks the run
+    });
+    // Started under a previous daemon process (DAEMON_STARTED_AT is this process's
+    // module-load time, so any past instant predates it).
+    db.prepare("UPDATE sessions SET started_at = ? WHERE id = ?").run("2020-01-01T00:00:00.000Z", sessionId);
+
+    const launch: WorkflowSessionLauncher["launch"] = vi.fn(async () => ({ sessionId: "respawn-1" }));
+    const service = makeService({ propose: vi.fn() }, fakeOutputStore(), { launcher: { launch } });
+
+    await service.onWorkflowSessionCompleted(db, () => NOW, { sessionId, goalId }, { bus, idFactory });
+
+    // Respawned, run still alive, and the budget untouched at 2 rather than
+    // reaching the cap and blocking a run whose work is intact.
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(isRunBlocked(db, runId)).toBe(false);
+    const retries = (
+      db.prepare("SELECT crash_retries AS c FROM workflow_step_runs WHERE id = ?").get(stepRunId) as { c: number }
+    ).c;
+    expect(retries).toBe(2);
+  });
+
   it("session.failed at crash cap → posts escalation message, no respawn", async () => {
     const { db, bus, idFactory } = setupHarness();
     const { sessionId, goalId, stepRunId } = seedWorkflowWithSession(db, {
