@@ -13,11 +13,11 @@
  * that crashed out is not a low-quality run — it is a run that never got to be
  * judged, and the two must never share a tile.
  *
- * NOTE: `deriveTermination` in ./runs.ts classifies the same signals at RUN level
- * with its own copy of these markers. This module is the intended single home;
- * runs.ts should import from here rather than keep a second list, since a marker
- * added to one and not the other silently splits the taxonomy. Left to that
- * file's owner to switch over.
+ * `deriveTermination` in ./runs.ts classifies the same signals at RUN level and
+ * imports INFRA_REASON_MARKERS from here rather than keeping a second list — a
+ * marker added to one and not the other would silently split the taxonomy, and
+ * that split now sits under terminationCause, which the terminated-only
+ * denominators depend on. This module is the single home; keep it that way.
  */
 
 /** Free-text blocked_reason markers the daemon writes for substrate failures. */
