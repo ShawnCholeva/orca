@@ -5,7 +5,7 @@ import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/co
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CantTellYou, CostCaveats, RunDetailPanel, RunRow } from "./RunLedger";
-import { PipelineHealth } from "./PipelineHealth";
+import { WorkflowCard, rollupByWorkflow } from "./WorkflowRollup";
 import { IntervalBar } from "./interval-bar";
 
 afterEach(cleanup);
@@ -122,7 +122,7 @@ function readerFacingText(root: HTMLElement): { where: string; text: string }[] 
 }
 
 /** The surfaces asserted below. Shared with the coverage check so there is one list. */
-const SURFACE_NAMES = ["RunRow", "RunDetailPanel", "CostCaveats", "CantTellYou", "PipelineHealth", "IntervalBar"] as const;
+const SURFACE_NAMES = ["RunRow", "RunDetailPanel", "CostCaveats", "CantTellYou", "WorkflowCard", "IntervalBar"] as const;
 
 /**
  * Components that render no reader-facing prose of their own, with the reason.
@@ -136,7 +136,10 @@ const SURFACE_NAMES = ["RunRow", "RunDetailPanel", "CostCaveats", "CantTellYou",
 const NOT_A_PROSE_SURFACE: Record<string, string> = {
   // Primitives: a number, a shape, a count. Their absence cases route through
   // MeasurementLabel, which the surfaces above exercise.
-  CoverageReadout: "a count, rendered through RateInterval; exercised via PipelineHealth",
+  rollupByWorkflow: "a grouping function, no output of its own",
+  WorkflowRollup: "fetches and delegates to WorkflowCard, which is asserted directly",
+  TypicalRun: "durations and a median, no prose",
+  Figure: "a number and a label",
   Sample: "a count and its noun",
   StatTile: "a label and a figure; its absence renders via MeasurementLabel",
   Panel: "chrome — a border and a title supplied by the caller",
@@ -204,7 +207,12 @@ describe("no surface speaks to the reader about our backlog", () => {
     ["RunDetailPanel", () => render(<RunDetailPanel detail={detail()} onBack={() => {}} />).container],
     ["CostCaveats", () => render(<CostCaveats runs={[summary(), summary({ runId: "b" })]} />).container],
     ["CantTellYou", () => render(<CantTellYou runs={[summary(), summary({ runId: "b" })]} />).container],
-    ["PipelineHealth", () => render(<PipelineHealth detail={pipelineDetail()} />).container],
+    // The card, not the wrapper: WorkflowRollup only fetches and delegates, so
+    // mounting it synchronously would assert over a loading state. Same split as
+    // RunDetailPanel vs RunLedger.
+    ["WorkflowCard", () => render(
+      <WorkflowCard rollup={rollupByWorkflow([summary(), summary({ runId: "b", terminationCause: "completed" })])[0]!} />
+    ).container],
     // Found by the coverage check above: IntervalBar builds a full sentence into its
     // accessible name and nothing was asserting it.
     ["IntervalBar", () => render(

@@ -9,7 +9,7 @@ import { SelfImprovementRail } from "./SelfImprovement";
 import { ProposalReviewModal } from "./ProposalReviewModal";
 import { Workflow, Refresh } from "./metrics-icons";
 import { RunLedger } from "./RunLedger";
-import { PipelineHealth } from "./PipelineHealth";
+import { WorkflowRollup } from "./WorkflowRollup";
 import { MeasurementLabel } from "./n-gate-ui";
 
 // Three views. `workflow` is the original tab and is deliberately unchanged: a
@@ -105,7 +105,7 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
     return (
       <div style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", gap: 14, padding: 12, height: "100%", minHeight: 0, overflowY: "auto" }}>
         <ViewToggle view={view} onChange={setView} />
-        <PipelineHealth detail={detail} />
+        <WorkflowRollup />
       </div>
     );
   }
@@ -239,7 +239,7 @@ function ViewToggle({ view, onChange }: { view: MetricsView; onChange: (v: Metri
   return (
     <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.03)", border: "1px solid var(--hairline)", borderRadius: 8, padding: 2, width: "fit-content", flexShrink: 0 }}>
       {tab("runs", "Runs")}
-      {tab("pipeline", "Steps")}
+      {tab("pipeline", "Workflows")}
       {tab("workflow", "Workflow averages")}
     </div>
   );
