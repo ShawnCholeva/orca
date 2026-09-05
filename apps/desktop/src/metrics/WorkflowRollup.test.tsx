@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
-import { Dashboard, WorkflowRollup, aggregate, workflowsOf } from "./WorkflowRollup";
+import type { Intervention, RunDetail, RunSummary, RunTraceSpan, TemplateMetricsDetail } from "@orca/contracts";
+import { Dashboard, WorkflowRollup, aggregate, versionsOf, workflowsOf } from "./WorkflowRollup";
 import * as api from "../api";
 import { Donut } from "./dashboard-panels";
 
@@ -505,13 +505,71 @@ describe("choosing the workflow to inspect", () => {
     render(<WorkflowRollup />);
     await waitFor(() => expect(document.body.textContent).toContain("spent across 1 run"));
     // The gate fetch is keyed to the CHOSEN template, never to the first of several.
-    expect(gates).toHaveBeenCalledWith("t-b", "30d", "all");
+    // Its only version is the latest, so the scope is exact.
+    expect(gates).toHaveBeenCalledWith("t-b", "30d", "latest");
 
     fireEvent.click(screen.getByText("Bug Triage"));
     fireEvent.click(screen.getByText("Adaptive Delivery"));
     await waitFor(() => expect(document.body.textContent).toContain("spent across 2 runs"));
-    expect(gates).toHaveBeenCalledWith("t-a", "30d", "all");
+    expect(gates).toHaveBeenCalledWith("t-a", "30d", "latest");
     // The other workflow's run is not in any figure once it is deselected.
     expect(document.body.textContent).not.toContain("spent across 3 runs");
+  });
+});
+
+describe("choosing the version to inspect", () => {
+  const runs = () => [
+    run({ runId: "v14-a", templateVersion: 14, startedAt: "2026-08-01T00:00:00.000Z" }),
+    run({ runId: "v16-a", templateVersion: 16, startedAt: "2026-09-01T00:00:00.000Z" }),
+    run({ runId: "v14-b", templateVersion: 14, startedAt: "2026-08-15T00:00:00.000Z" }),
+    run({ runId: "v13-a", templateVersion: 13, startedAt: "2026-07-28T00:00:00.000Z" }),
+  ];
+
+  it("lists the versions with runs, newest version first, with run counts", () => {
+    expect(versionsOf(runs())).toEqual([
+      { version: 16, runs: 1 },
+      { version: 14, runs: 2 },
+      { version: 13, runs: 1 },
+    ]);
+  });
+
+  it("opens on the version of the most recent run, and switches when another is chosen", async () => {
+    vi.spyOn(api, "getRunSummaries").mockResolvedValue(runs());
+    vi.spyOn(api, "getRunDetail").mockImplementation(async (id) => ({
+      run: runs().find((r) => r.runId === id)!, spans: [], interventions: [], toolDecisions: [],
+    }));
+    const gates = vi.spyOn(api, "getTemplateMetricsDetail").mockRejectedValue(new Error("none"));
+    render(<WorkflowRollup />);
+    await waitFor(() => expect(document.body.textContent).toContain("spent across 1 run"));
+    // The newest version IS the latest, so the gate figures can be scoped to it.
+    expect(gates).toHaveBeenCalledWith("t", "30d", "latest");
+
+    fireEvent.click(screen.getByText("v16"));
+    fireEvent.click(screen.getByText("v14"));
+    await waitFor(() => expect(document.body.textContent).toContain("spent across 2 runs"));
+    // An older version has no gate scope of its own; the fetch widens to every
+    // version and the panel must say so.
+    expect(gates).toHaveBeenCalledWith("t", "30d", "all");
+
+    fireEvent.click(screen.getByText("v14"));
+    fireEvent.click(screen.getByText("All versions"));
+    await waitFor(() => expect(document.body.textContent).toContain("spent across 4 runs"));
+    expect(document.body.textContent).toContain("By template version");
+  });
+
+  it("says when the gate figures cover every version while one version is chosen", () => {
+    // Only the fields the panel reads; the rest of the template detail is irrelevant here.
+    const gates = {
+      completionGate: { verdictDist: { upheld: 1, evidence_veto: 0, refute_veto: 0, escalated: 0 } },
+      gates: [], splitters: [],
+    } as unknown as TemplateMetricsDetail;
+    const t = render(<Dashboard agg={aggregate({
+      runs: [run({ terminationCause: "completed" })], details: [], gates, gatesCoverEveryVersion: true,
+    })} />).container.textContent ?? "";
+    expect(t).toContain("across every version");
+    const without = render(<Dashboard agg={aggregate({
+      runs: [run({ terminationCause: "completed" })], details: [], gates,
+    })} />).container.textContent ?? "";
+    expect(without).not.toContain("across every version");
   });
 });

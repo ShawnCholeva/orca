@@ -182,6 +182,7 @@ const NOT_A_PROSE_SURFACE: Record<string, string> = {
   tokens: "formats a token count",
   PROMPT_KIND: "a lookup table of pause kinds",
   workflowsOf: "groups runs by template",
+  versionsOf: "groups a workflow's runs by version",
   modelName: "strips a release date from a model id",
 
   // Composers: they mount the surfaces above, each of which is asserted directly.

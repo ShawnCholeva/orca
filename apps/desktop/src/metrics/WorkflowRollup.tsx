@@ -75,6 +75,13 @@ export interface Loaded {
   // template-keyed panel sitting on a cross-run page is answering a different question
   // from everything around it, and nothing here will say so.
   gates?: TemplateMetricsDetail | null;
+  /**
+   * The template endpoint scopes gate verdicts to "latest" or "all" versions and
+   * nothing in between. When an older version is chosen the fetch widens to every
+   * version, and the panel has to say so — a per-version page captioned with
+   * all-version gate figures is the two-populations defect in a new place.
+   */
+  gatesCoverEveryVersion?: boolean;
 }
 interface StepAgg {
   usd: number; elapsedMs: number; restarts: number; spans: number; runIds: Set<string>;
@@ -105,7 +112,7 @@ interface StepAgg {
   gateSpans: number; gatesUnrecorded: number; lastGateAt: string | null;
 }
 
-export function aggregate({ runs, details, gates = null }: Loaded) {
+export function aggregate({ runs, details, gates = null, gatesCoverEveryVersion = false }: Loaded) {
   // Sums are computed over runs that ENDED. A live run's elapsed and parked clocks are
   // still accruing, so including it makes a total that changes on reload with no work
   // having happened — and one open run currently carries 62 of the window's 113 hours,
@@ -263,7 +270,7 @@ export function aggregate({ runs, details, gates = null }: Loaded) {
   }
 
   return {
-    runs, ended, details, byStep, byModel, parksByKind, tokens: tokenSums, byVersion, stops, stopsByReason, gates,
+    runs, ended, details, byStep, byModel, parksByKind, tokens: tokenSums, byVersion, stops, stopsByReason, gates, gatesCoverEveryVersion,
     usd: sum((r) => r.cost.usd),
     failedUsd: sum((r) => r.cost.failedUsd),
     supersededUsd: sum((r) => r.cost.supersededUsd),
@@ -555,7 +562,8 @@ export function Dashboard({ agg }: { agg: Agg }) {
                           to prevent a false inference, which was itself the false one,
                           and undetectable precisely because the numbers matched. */}
                       <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
-                        Every step completion is judged here. Counted over the last 30 days, so this is a
+                        Every step completion is judged here. Counted over the last 30 days
+                        {agg.gatesCoverEveryVersion ? " and across every version of this workflow" : ""}, so this is a
                         different window from the matrix beside it — the two totals are not the same set.
                       </p>
                       <div style={{ paddingTop: "var(--sp-2)", borderTop: "1px solid var(--hairline)", display: "grid", gap: "var(--sp-1)" }}>
@@ -850,10 +858,27 @@ export function workflowsOf(runs: RunSummary[]): WorkflowChoice[] {
     .map(([templateId, e]) => ({ templateId, name: e.name, runs: e.runs }));
 }
 
+/** The versions of one workflow that have runs, newest version first, with run counts. */
+export function versionsOf(runs: RunSummary[]): { version: number; runs: number }[] {
+  const counts = new Map<number, number>();
+  for (const r of runs) counts.set(r.templateVersion, (counts.get(r.templateVersion) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[0] - a[0]).map(([version, n]) => ({ version, runs: n }));
+}
+
+/** The version of the most recent run — what the version chooser opens on. */
+function latestRunVersion(runs: RunSummary[]): number | null {
+  return runs.reduce<RunSummary | null>((best, r) => (best === null || r.startedAt > best.startedAt ? r : best), null)?.templateVersion ?? null;
+}
+
+const ALL_VERSIONS = "all";
+
 export function WorkflowRollup() {
   const [loaded, setLoaded] = useState<{ runs: RunSummary[]; details: RunDetail[] } | null>(null);
   const [failed, setFailed] = useState(false);
   const [templateId, setTemplateId] = useState<string | null>(null);
+  // A version number as a string, or "all". Null until the runs arrive, and reset
+  // to the chosen workflow's most recent run whenever the workflow changes.
+  const [version, setVersion] = useState<string | null>(null);
   const [gates, setGates] = useState<TemplateMetricsDetail | null>(null);
 
   useEffect(() => {
@@ -869,31 +894,53 @@ export function WorkflowRollup() {
     return () => { live = false; };
   }, []);
 
+  const choices = loaded === null ? [] : workflowsOf(loaded.runs);
+  const chosen = choices.find((c) => c.templateId === templateId) ?? choices[0] ?? null;
+  const workflowRuns = loaded === null || chosen === null ? [] : loaded.runs.filter((r) => r.templateId === chosen.templateId);
+  const versions = versionsOf(workflowRuns);
+  const newest = versions[0]?.version ?? null;
+  const defaultVersion = latestRunVersion(workflowRuns);
+  const chosenVersion = version !== null && (version === ALL_VERSIONS || versions.some((v) => String(v.version) === version))
+    ? version
+    : defaultVersion === null ? ALL_VERSIONS : String(defaultVersion);
+  // The endpoint knows "latest" and "all". A chosen version that IS the latest gets
+  // the exact scope; anything else widens to every version and is captioned so.
+  const gateScope = chosenVersion !== ALL_VERSIONS && Number(chosenVersion) === newest ? "latest" : "all";
+  const gatesCoverEveryVersion = chosenVersion !== ALL_VERSIONS && gateScope === "all";
+
   // Gate figures are fetched for the CHOSEN template — never the first of several,
   // which would caption one workflow's page with another's gate verdicts.
+  const gateTemplate = chosen?.templateId ?? null;
   useEffect(() => {
     setGates(null);
-    if (templateId === null) return;
+    if (gateTemplate === null) return;
     let live = true;
-    getTemplateMetricsDetail(templateId, "30d", "all")
+    getTemplateMetricsDetail(gateTemplate, "30d", gateScope)
       .then((g) => { if (live) setGates(g); })
       .catch(() => { if (live) setGates(null); });
     return () => { live = false; };
-  }, [templateId]);
+  }, [gateTemplate, gateScope]);
 
   if (failed) return <p style={{ fontSize: "var(--fs-3)", color: "var(--err)" }}>Couldn&apos;t load runs.</p>;
   if (loaded === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>Loading…</p>;
-  if (loaded.runs.length === 0) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>No workflow has run yet.</p>;
+  if (loaded.runs.length === 0 || chosen === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>No workflow has run yet.</p>;
 
-  const choices = workflowsOf(loaded.runs);
-  const chosen = choices.find((c) => c.templateId === templateId) ?? choices[0]!;
-  const runs = loaded.runs.filter((r) => r.templateId === chosen.templateId);
-  const details = loaded.details.filter((d) => d.run.templateId === chosen.templateId);
+  const runs = chosenVersion === ALL_VERSIONS ? workflowRuns : workflowRuns.filter((r) => String(r.templateVersion) === chosenVersion);
+  const runIds = new Set(runs.map((r) => r.runId));
+  const details = loaded.details.filter((d) => runIds.has(d.run.runId));
+  const versionChoices: WorkflowChoice[] = [
+    ...versions.map((v) => ({ templateId: String(v.version), name: `v${v.version}`, runs: v.runs })),
+    { templateId: ALL_VERSIONS, name: "All versions", runs: workflowRuns.length },
+  ];
 
   return (
     <div style={{ display: "grid", gap: "var(--sp-4)", alignContent: "start" }}>
-      <WorkflowDropdown summaries={choices} value={chosen.templateId} onChange={setTemplateId} />
-      <Dashboard agg={aggregate({ runs, details, gates })} />
+      <div style={{ display: "flex", gap: "var(--sp-3)", alignItems: "center", flexWrap: "wrap" }}>
+        <WorkflowDropdown summaries={choices} value={chosen.templateId}
+          onChange={(id) => { setTemplateId(id); setVersion(null); }} />
+        <WorkflowDropdown summaries={versionChoices} value={chosenVersion} onChange={setVersion} />
+      </div>
+      <Dashboard agg={aggregate({ runs, details, gates, gatesCoverEveryVersion })} />
     </div>
   );
 }
