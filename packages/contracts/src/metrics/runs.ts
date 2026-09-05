@@ -421,11 +421,31 @@ export const ToolDecision = z.object({
 }).strict();
 export type ToolDecision = z.infer<typeof ToolDecision>;
 
+/**
+ * One moment the harness failed on this run, dated. The summary counts these
+ * (`spanRelaunches`, `terminationCause`) and the counts carry no time; a view of
+ * WHEN the harness fails needs the moments themselves.
+ *
+ * `crash_relaunch` is dated by the relaunch — the first launch that is not the
+ * span's first. `infra_failure` is a completion whose failure code names the
+ * substrate rather than the workflow. `run_killed` is the run's terminal moment
+ * when the substrate ended it. A workflow veto is not a harness error.
+ */
+export const HarnessError = z.object({
+  at: z.string(),
+  kind: z.enum(["crash_relaunch", "infra_failure", "run_killed"]),
+  stepName: z.string().nullable(),
+  detail: z.string().nullable(),
+}).strict();
+export type HarnessError = z.infer<typeof HarnessError>;
+
 export const RunDetail = z.object({
   run: RunSummary,
   spans: z.array(RunTraceSpan),
   interventions: z.array(Intervention),
   /** Every tool-gate decision on the run, in time order. */
   toolDecisions: z.array(ToolDecision),
+  /** Every moment the harness failed on the run, in time order. */
+  harnessErrors: z.array(HarnessError),
 }).strict();
 export type RunDetail = z.infer<typeof RunDetail>;

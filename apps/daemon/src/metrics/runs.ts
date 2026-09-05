@@ -1,6 +1,6 @@
 import type {
   Intervention, InterventionSourceKind, ParkState, ProgressChannel as RunProgressChannel,
-  RunCost, RunDetail, RunDurations, RunSummary, RunTraceSpan, SpanCost, ToolDecision, VerificationTier,
+  HarnessError, RunCost, RunDetail, RunDurations, RunSummary, RunTraceSpan, SpanCost, ToolDecision, VerificationTier,
 } from "@orca/contracts";
 import { classifyTier } from "./verification.js";
 import { sourcesPassed } from "./source-signals.js";
@@ -637,15 +637,61 @@ export function buildRunDetail(input: {
   const { run, stepRuns, transitions, events, runEvents, sourceKinds, stepNames, nowMs } = input;
   const interventions = buildInterventions({ events, sourceKinds, run, nowMs });
   const spans = buildSpans({ run, stepRuns, transitions, stepNames, interventions, nowMs });
+  const summary = buildRunSummary({
+    run, stepRuns, transitions, interventions, spans,
+    activityEvents: events, runEvents, nowMs,
+  });
   return {
-    run: buildRunSummary({
-      run, stepRuns, transitions, interventions, spans,
-      activityEvents: events, runEvents, nowMs,
-    }),
+    run: summary,
     spans,
     interventions,
     toolDecisions: buildToolDecisions(transitions, stepNames),
+    harnessErrors: buildHarnessErrors({ run, stepRuns, transitions, stepNames, summary, nowMs }),
   };
+}
+
+/**
+ * The moments the harness failed, in time order. Relaunches are every launch of a
+ * span after its first; infrastructure failures are completions whose failure
+ * code names the substrate; the kill is the run's terminal moment when the
+ * termination was classified as infrastructure. A workflow veto is the workflow
+ * deciding, not the harness failing, and is not here.
+ */
+export function buildHarnessErrors(input: {
+  run: RunRow;
+  stepRuns: RunStepRunRow[];
+  transitions: RunTransition[];
+  stepNames: Map<string, string>;
+  summary: RunSummary;
+  nowMs: number;
+}): HarnessError[] {
+  const { run, stepRuns, transitions, stepNames, summary, nowMs } = input;
+  const out: HarnessError[] = [];
+  const nameOf = (stepTemplateId: string | null) =>
+    stepTemplateId === null ? null : (stepNames.get(stepTemplateId) ?? stepTemplateId);
+  const launchesSeen = new Set<string>();
+  for (const t of transitions) {
+    const tr = t.transition;
+    if (tr.boundary === "step_launch" && tr.workflowStepRunId !== null) {
+      if (launchesSeen.has(tr.workflowStepRunId)) {
+        out.push({ at: tr.createdAt, kind: "crash_relaunch", stepName: nameOf(t.stepTemplateId), detail: null });
+      }
+      launchesSeen.add(tr.workflowStepRunId);
+    }
+    if (tr.boundary === "step_complete") {
+      const code = tr.telemetry?.outcome.failure_code ?? null;
+      if (code !== null && INFRA_FAILURE_CODES.has(code)) {
+        out.push({ at: tr.createdAt, kind: "infra_failure", stepName: nameOf(t.stepTemplateId), detail: code });
+      }
+    }
+  }
+  if (summary.terminationCause === "infrastructure_killed") {
+    out.push({
+      at: new Date(runTerminalMs(run, stepRuns, nowMs)).toISOString(),
+      kind: "run_killed", stepName: null, detail: summary.terminationEvidence,
+    });
+  }
+  return out.sort((a, b) => a.at.localeCompare(b.at));
 }
 
 /**

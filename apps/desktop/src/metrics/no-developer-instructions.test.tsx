@@ -106,7 +106,7 @@ const detail = (): RunDetail => ({
   run: summary(),
   spans: [span(), span({ workflowStepRunId: "sr2", name: "Verify" })],
   interventions: [park(), park({ activityId: "a2", sourceKind: "step_confirmation_pending" })],
-  toolDecisions: [],
+  harnessErrors: [], toolDecisions: [],
 });
 
 /** Every string this surface puts in front of a reader, spoken or seen. */
@@ -158,6 +158,7 @@ const NOT_A_PROSE_SURFACE: Record<string, string> = {
   Big: "a figure and a label supplied by the caller",
   BarList: "labels and bars supplied by the caller",
   Donut: "slices, a centre total and a legend, all supplied by the caller",
+  Scatter: "dots on a time axis; the row labels and hover text are the caller's",
   CountRow: "counts and labels supplied by the caller",
   Figure: "a number and a label",
   Sample: "a count and its noun",
@@ -242,7 +243,7 @@ describe("no surface speaks to the reader about our backlog", () => {
     ["Dashboard", () => render(
       <Dashboard agg={aggregate({
         runs: [summary(), summary({ runId: "b" })],
-        details: [{ run: summary(), spans: [span()], interventions: [park()], toolDecisions: [] }],
+        details: [{ run: summary(), spans: [span()], interventions: [park()], harnessErrors: [], toolDecisions: [] }],
       })} />
     ).container],
   ];

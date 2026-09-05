@@ -64,7 +64,7 @@ function park(over: Partial<Intervention> = {}): Intervention {
 }
 
 function detail(over: Partial<RunDetail> = {}): RunDetail {
-  return { run: summary(), spans: [span()], interventions: [park()], toolDecisions: [], ...over };
+  return { run: summary(), spans: [span()], interventions: [park()], harnessErrors: [], toolDecisions: [], ...over };
 }
 
 describe("cost", () => {
@@ -261,7 +261,7 @@ describe("RunDetailPanel", () => {
   });
 
   it("says waiting on you when the run is genuinely still live", () => {
-    render(<RunDetailPanel detail={detail({ interventions: [park({ parkState: "awaiting_you" })], toolDecisions: [] })} onBack={() => {}} />);
+    render(<RunDetailPanel detail={detail({ interventions: [park({ parkState: "awaiting_you" })], harnessErrors: [], toolDecisions: [] })} onBack={() => {}} />);
     expect(screen.getAllByText("waiting on you").length).toBeGreaterThan(0);
   });
 
@@ -312,7 +312,7 @@ describe("RunDetailPanel", () => {
   });
 
   it("flags a pause whose reason was destroyed as lossy rather than guessing", () => {
-    render(<RunDetailPanel detail={detail({ interventions: [park({ sourceKind: "unknown" })], toolDecisions: [] })} onBack={() => {}} />);
+    render(<RunDetailPanel detail={detail({ interventions: [park({ sourceKind: "unknown" })], harnessErrors: [], toolDecisions: [] })} onBack={() => {}} />);
     const tag = document.querySelector('[data-compact="true"]');
     expect(tag!.textContent).toBe("discarded");
     // The tag occupies the reason cell rather than sitting beside a placeholder —
@@ -659,7 +659,7 @@ describe("a step redone under a second model", () => {
 describe("what the safety floor stopped", () => {
   it("lists each denial with the reason the policy gave, and the step it happened in", () => {
     render(<RunDetailPanel detail={detail({
-      toolDecisions: [
+      harnessErrors: [], toolDecisions: [
         { workflowStepRunId: "sr1", stepName: "Execution", at: "2026-09-01T00:05:00.000Z", decision: "deny", riskClass: "critical", reasons: ["bash: destructive recursive delete (rm -rf)"] },
         { workflowStepRunId: "sr1", stepName: "Execution", at: "2026-09-01T00:06:00.000Z", decision: "require_approval", riskClass: "medium", reasons: ["bash: writes outside the workspace"] },
         { workflowStepRunId: "sr1", stepName: "Execution", at: "2026-09-01T00:07:00.000Z", decision: "allow", riskClass: "low", reasons: [] },
@@ -676,7 +676,7 @@ describe("what the safety floor stopped", () => {
   });
 
   it("omits the section when nothing needed a decision", () => {
-    render(<RunDetailPanel detail={detail({ toolDecisions: [] })} onBack={() => {}} />);
+    render(<RunDetailPanel detail={detail({ harnessErrors: [], toolDecisions: [] })} onBack={() => {}} />);
     expect(document.body.textContent).not.toContain("safety floor");
   });
 });

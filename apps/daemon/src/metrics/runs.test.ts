@@ -497,6 +497,49 @@ describe("buildRunDetail", () => {
     expect(detail.spans[0].refuteReason).toBe("Codebase is genuinely pre-existing and the constant is correct.");
   });
 
+  it("lists when the harness failed on the run: relaunches, infrastructure failure codes, and the kill", () => {
+    // A scatter of "when did the harness fail" needs timestamps, and the counts
+    // the summary carries (spanRelaunches, terminationCause) have none. Each
+    // relaunch is dated by its launch, each infra failure by its completion, and
+    // the kill by the run's terminal moment.
+    const launch = (id: string, at: string, stepRunId = "sr-1"): RunTransition => ({
+      ...complete({ id, at, stepRunId }), transition: { ...complete({ id, at, stepRunId }).transition, boundary: "step_launch" },
+    });
+    const detail = buildRunDetail({
+      run: run({ status: "blocked", blockedReason: "crashed 3 times (worker_exited_no_signal)", finishedAt: null }),
+      stepRuns: [stepRun({ stepRunId: "sr-1", stepTemplateId: "triage", status: "blocked", finishedAt: "2026-09-01T00:30:00.000Z" })],
+      transitions: [
+        launch("l1", "2026-09-01T00:00:00.000Z"),
+        launch("l2", "2026-09-01T00:05:00.000Z"),
+        launch("l3", "2026-09-01T00:10:00.000Z"),
+        { ...complete({ id: "c1", at: "2026-09-01T00:20:00.000Z", usd: 1, status: "failed" }),
+          transition: { ...complete({ id: "c1", at: "2026-09-01T00:20:00.000Z", usd: 1, status: "failed" }).transition,
+            telemetry: { ...complete({ id: "c1", at: "2026-09-01T00:20:00.000Z", usd: 1, status: "failed" }).transition.telemetry!,
+              outcome: { status: "failed", failure_code: "provider_error" } } } },
+      ],
+      events: [], runEvents: [], sourceKinds: new Map(), stepNames: new Map([["triage", "Triage"]]), nowMs: NOW,
+    });
+    expect(detail.harnessErrors).toEqual([
+      { at: "2026-09-01T00:05:00.000Z", kind: "crash_relaunch", stepName: "Triage", detail: null },
+      { at: "2026-09-01T00:10:00.000Z", kind: "crash_relaunch", stepName: "Triage", detail: null },
+      { at: "2026-09-01T00:20:00.000Z", kind: "infra_failure", stepName: "Triage", detail: "provider_error" },
+      { at: "2026-09-01T00:30:00.000Z", kind: "run_killed", stepName: null, detail: "crashed 3 times (worker_exited_no_signal)" },
+    ]);
+  });
+
+  it("records no harness error for a workflow veto or a completed run", () => {
+    const detail = buildRunDetail({
+      run: run(),
+      stepRuns: [stepRun({ stepRunId: "sr-1" })],
+      transitions: [{ ...complete({ id: "c1", at: "2026-09-01T00:20:00.000Z", usd: 1, status: "failed" }),
+        transition: { ...complete({ id: "c1", at: "2026-09-01T00:20:00.000Z", usd: 1, status: "failed" }).transition,
+          telemetry: { ...complete({ id: "c1", at: "2026-09-01T00:20:00.000Z", usd: 1, status: "failed" }).transition.telemetry!,
+            outcome: { status: "failed", failure_code: "evidence_veto" } } } }],
+      events: [], runEvents: [], sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
+    });
+    expect(detail.harnessErrors).toEqual([]);
+  });
+
   it("lists every tool-gate decision on the run, with the reasons the policy gave", () => {
     // The Workflows panel counts denials; the reasons — "rm -rf", "a credential
     // file" — are on the risk facet of the tool_gate transition and never left the

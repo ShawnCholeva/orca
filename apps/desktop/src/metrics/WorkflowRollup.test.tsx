@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Intervention, RunDetail, RunSummary, RunTraceSpan, TemplateMetricsDetail } from "@orca/contracts";
 import { Dashboard, RANGES, WorkflowRollup, aggregate, defaultIntervalFor, gatePeriodFor, intervalsFor, versionsOf, withinWindow, workflowsOf } from "./WorkflowRollup";
 import * as api from "../api";
-import { Donut } from "./dashboard-panels";
+import { Donut, Scatter } from "./dashboard-panels";
 
 // Real timers restored here as well as in the tests: a failing assertion would
 // otherwise leave the next test on a faked clock, and useFakeTimers does not move
@@ -54,8 +54,8 @@ function park(over: Partial<Intervention> = {}): Intervention {
 const loaded = (over: Partial<RunDetail> = {}) => ({
   runs: [run(), run({ runId: "b", terminationCause: "completed" })],
   details: [
-    { run: run(), spans: [span()], interventions: [park()], toolDecisions: [], ...over },
-    { run: run({ runId: "b" }), spans: [span({ workflowStepRunId: "s2", name: "Execution", cost: { usd: 40, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" } })], interventions: [park({ activityId: "a2", sourceKind: "question_pending" })], toolDecisions: [] },
+    { run: run(), spans: [span()], interventions: [park()], harnessErrors: [], toolDecisions: [], ...over },
+    { run: run({ runId: "b" }), spans: [span({ workflowStepRunId: "s2", name: "Execution", cost: { usd: 40, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" } })], interventions: [park({ activityId: "a2", sourceKind: "question_pending" })], harnessErrors: [], toolDecisions: [] },
   ],
 });
 
@@ -133,8 +133,8 @@ describe("a denominator says what it counts", () => {
     const a = aggregate({
       runs: [run(), run({ runId: "b" })],
       details: [
-        { run: run(), spans: [span({ workflowStepRunId: "s1" }), span({ workflowStepRunId: "s2", attempt: 2 })], interventions: [], toolDecisions: [] },
-        { run: run({ runId: "b" }), spans: [span({ workflowRunId: "b", workflowStepRunId: "s3" })], interventions: [], toolDecisions: [] },
+        { run: run(), spans: [span({ workflowStepRunId: "s1" }), span({ workflowStepRunId: "s2", attempt: 2 })], interventions: [], harnessErrors: [], toolDecisions: [] },
+        { run: run({ runId: "b" }), spans: [span({ workflowRunId: "b", workflowStepRunId: "s3" })], interventions: [], harnessErrors: [], toolDecisions: [] },
       ],
     });
     const { container } = render(<Dashboard agg={a} />);
@@ -148,7 +148,7 @@ describe("a denominator says what it counts", () => {
     // "2 attempts across 2 runs" everywhere would be noise that stops being read.
     const a = aggregate({
       runs: [run()],
-      details: [{ run: run(), spans: [span()], interventions: [], toolDecisions: [] }],
+      details: [{ run: run(), spans: [span()], interventions: [], harnessErrors: [], toolDecisions: [] }],
     });
     const { container } = render(<Dashboard agg={a} />);
     expect(container.textContent).toContain("1 run");
@@ -204,7 +204,7 @@ describe("unmeasured time is not idle time", () => {
         run: run(),
         spans: [span({ workflowStepRunId: "s1", name: "Verify", workingMs: null,
                        elapsedMs: 100_000, parkedMs: 30_000 })],
-        interventions: [], toolDecisions: [],
+        interventions: [], harnessErrors: [], toolDecisions: [],
       }],
     });
     const v = a.byStep.get("Verify")!;
@@ -227,7 +227,7 @@ describe("unmeasured time is not idle time", () => {
     // pass this while proving nothing.
     const over = span({ elapsedMs: 100_000, workingMs: 90_000, parkedMs: 50_000 });
     expect((over.workingMs ?? 0) + (over.parkedMs ?? 0)).toBeGreaterThan(over.elapsedMs!);
-    const a = aggregate({ runs: [run()], details: [{ run: run(), spans: [over], interventions: [], toolDecisions: [] }] });
+    const a = aggregate({ runs: [run()], details: [{ run: run(), spans: [over], interventions: [], harnessErrors: [], toolDecisions: [] }] });
     const t = a.byStep.get("Triage")!;
     expect(t.unaccountedMs).toBeGreaterThanOrEqual(0);
     expect(t.workingMs + t.parkedMs + t.unaccountedMs + t.unmeasuredMs).toBe(t.elapsedMs);
@@ -285,7 +285,7 @@ describe("the coverage matrix separates a missing sensor from a missing recordin
           span({ workflowStepRunId: "s2", name: "Verify", stepTemplateId: "__gate__:verify", kind: "gate",
                  status: "passed", completions: 0, workingMs: null, verifiers: null }),
         ],
-        interventions: [], toolDecisions: [],
+        interventions: [], harnessErrors: [], toolDecisions: [],
       }],
     });
     expect(a.byStep.get("Clarify")!.completed).toBe(1);
@@ -359,7 +359,7 @@ describe("the harness's own choices reach the surface", () => {
         span({ workflowStepRunId: "s2", name: "Proposal", completionLog: [c("claude-haiku-4-5-20251001", 2, "succeeded", true)] }),
         span({ workflowStepRunId: "s3", name: "Execution", completionLog: [c("claude-haiku-4-5-20251001", 42, "failed", true), c("claude-opus-5", 3)] }),
         span({ workflowStepRunId: "s4", name: "Verify", kind: "gate", completionLog: [], cost: null }),
-      ], interventions: [], toolDecisions: [] }],
+      ], interventions: [], harnessErrors: [], toolDecisions: [] }],
     });
     expect([...a.byModel.entries()]).toEqual([
       ["claude-haiku-4-5-20251001", { usd: 47, attempts: 3, failed: 2, replaced: 1 }],
@@ -375,7 +375,7 @@ describe("the harness's own choices reach the surface", () => {
   it("names a completion with no recorded model as such, never as free", () => {
     const a = aggregate({
       runs: [run({ terminationCause: "completed" })],
-      details: [{ run: run(), spans: [span({ completionLog: [{ at: "2026-09-01T00:10:00.000Z", model: null, usd: 7, outcome: "succeeded", failureCode: null, superseded: false, gated: true }] })], interventions: [], toolDecisions: [] }],
+      details: [{ run: run(), spans: [span({ completionLog: [{ at: "2026-09-01T00:10:00.000Z", model: null, usd: 7, outcome: "succeeded", failureCode: null, superseded: false, gated: true }] })], interventions: [], harnessErrors: [], toolDecisions: [] }],
     });
     expect(a.byModel.get("model not recorded")).toEqual({ usd: 7, attempts: 1, failed: 0, replaced: 0 });
   });
@@ -386,7 +386,7 @@ describe("the harness's own choices reach the surface", () => {
     const a = aggregate({
       runs: [run({ runId: "a", terminationCause: "completed" }), run({ runId: "live", terminationCause: "running" })],
       details: [
-        { run: run({ runId: "a" }), spans: [], toolDecisions: [], interventions: [
+        { run: run({ runId: "a" }), spans: [], harnessErrors: [], toolDecisions: [], interventions: [
           park({ activityId: "p1", sourceKind: "step_confirmation_pending", durationMs: 60_000, exitedAt: "x", open: false, parkState: "resolved" }),
           park({ activityId: "p2", sourceKind: "step_confirmation_pending", durationMs: 30_000, exitedAt: "x", open: false, parkState: "resolved" }),
           park({ activityId: "p3", sourceKind: "unknown", durationMs: 5_000, exitedAt: "x", open: false, parkState: "resolved" }),
@@ -394,7 +394,7 @@ describe("the harness's own choices reach the surface", () => {
           // and must be counted but never summed.
           park({ activityId: "p4", sourceKind: "step_confirmation_pending", durationMs: 400 * H, exitedAt: null, open: true, parkState: "abandoned" }),
         ] },
-        { run: run({ runId: "live" }), spans: [], toolDecisions: [], interventions: [
+        { run: run({ runId: "live" }), spans: [], harnessErrors: [], toolDecisions: [], interventions: [
           park({ activityId: "p9", sourceKind: "provider_recovery_pending", durationMs: 999 * H }),
         ] },
       ],
@@ -417,7 +417,7 @@ describe("the harness's own choices reach the surface", () => {
       details: [{ run: run(), spans: [
         span({ workflowStepRunId: "s1", cost: { usd: 1, tokensIn: 100, tokensOut: 200, cacheReadTokens: 5000, cacheCreationTokens: 300, state: "reported" } }),
         span({ workflowStepRunId: "s2", cost: { usd: 1, tokensIn: 50, tokensOut: 50, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" } }),
-      ], interventions: [], toolDecisions: [] }],
+      ], interventions: [], harnessErrors: [], toolDecisions: [] }],
     });
     expect(a.tokens).toEqual({ fresh: 150, output: 250, cacheRead: 5000, cacheWrite: 300, attempts: 2, spansWithoutCache: 1 });
     const t = render(<Dashboard agg={a} />).container.textContent ?? "";
@@ -428,7 +428,7 @@ describe("the harness's own choices reach the surface", () => {
   it("prints millions of tokens as millions", () => {
     const a = aggregate({
       runs: [run({ terminationCause: "completed" })],
-      details: [{ run: run(), spans: [span({ cost: { usd: 1, tokensIn: 100, tokensOut: 200, cacheReadTokens: 88_590_700, cacheCreationTokens: 300, state: "reported" } })], interventions: [], toolDecisions: [] }],
+      details: [{ run: run(), spans: [span({ cost: { usd: 1, tokensIn: 100, tokensOut: 200, cacheReadTokens: 88_590_700, cacheCreationTokens: 300, state: "reported" } })], interventions: [], harnessErrors: [], toolDecisions: [] }],
     });
     const t = render(<Dashboard agg={a} />).container.textContent ?? "";
     expect(t).toContain("88.6M");
@@ -460,12 +460,12 @@ describe("the harness's own choices reach the surface", () => {
     const a = aggregate({
       runs: [run({ runId: "a", terminationCause: "completed" }), run({ runId: "live", terminationCause: "running" })],
       details: [
-        { run: run({ runId: "a" }), spans: [], interventions: [], toolDecisions: [
+        { run: run({ runId: "a" }), spans: [], interventions: [], harnessErrors: [], toolDecisions: [
           { workflowStepRunId: "s1", stepName: "Execution", at: "2026-09-01T00:05:00.000Z", decision: "deny", riskClass: "critical", reasons: ["bash: destructive recursive delete (rm -rf)"] },
           { workflowStepRunId: "s1", stepName: "Execution", at: "2026-09-01T00:06:00.000Z", decision: "deny", riskClass: "critical", reasons: ["bash: destructive recursive delete (rm -rf)"] },
           { workflowStepRunId: "s1", stepName: "Execution", at: "2026-09-01T00:07:00.000Z", decision: "require_approval", riskClass: "medium", reasons: ["bash: writes outside the workspace"] },
         ] },
-        { run: run({ runId: "live" }), spans: [], interventions: [], toolDecisions: [
+        { run: run({ runId: "live" }), spans: [], interventions: [], harnessErrors: [], toolDecisions: [
           { workflowStepRunId: "s9", stepName: "Execution", at: "2026-09-02T00:05:00.000Z", decision: "deny", riskClass: "critical", reasons: ["bash: access to a secret/credential file"] },
         ] },
       ],
@@ -504,7 +504,7 @@ describe("choosing the workflow to inspect", () => {
     vi.useFakeTimers({ toFake: ["Date"], now: Date.parse("2026-09-01T12:00:00.000Z") });
     vi.spyOn(api, "getRunSummaries").mockResolvedValue(two());
     vi.spyOn(api, "getRunDetail").mockImplementation(async (id) => ({
-      run: two().find((r) => r.runId === id)!, spans: [], interventions: [], toolDecisions: [],
+      run: two().find((r) => r.runId === id)!, spans: [], interventions: [], harnessErrors: [], toolDecisions: [],
     }));
     const gates = vi.spyOn(api, "getTemplateMetricsDetail").mockRejectedValue(new Error("no template metrics"));
     render(<WorkflowRollup />);
@@ -545,7 +545,7 @@ describe("choosing the version to inspect", () => {
     vi.useFakeTimers({ toFake: ["Date"], now: Date.parse("2026-09-01T12:00:00.000Z") });
     vi.spyOn(api, "getRunSummaries").mockResolvedValue(runs());
     vi.spyOn(api, "getRunDetail").mockImplementation(async (id) => ({
-      run: runs().find((r) => r.runId === id)!, spans: [], interventions: [], toolDecisions: [],
+      run: runs().find((r) => r.runId === id)!, spans: [], interventions: [], harnessErrors: [], toolDecisions: [],
     }));
     const gates = vi.spyOn(api, "getTemplateMetricsDetail").mockRejectedValue(new Error("none"));
     render(<WorkflowRollup />);
@@ -595,13 +595,13 @@ describe("what the gates decided, from the same rows as everything else", () => 
     const a = aggregate({
       runs: [run({ terminationCause: "completed" }), run({ runId: "live", terminationCause: "running" })],
       details: [
-        { run: run(), interventions: [], toolDecisions: [], spans: [
+        { run: run(), interventions: [], harnessErrors: [], toolDecisions: [], spans: [
           span({ workflowStepRunId: "s1", completionLog: [c("succeeded", null), c("failed", "refute_veto")] }),
           span({ workflowStepRunId: "s2", completionLog: [c("failed", "evidence_veto"), c("escalated", "evidence_veto")] }),
           span({ workflowStepRunId: "s3", completionLog: [c("succeeded", null, false)] }),
           span({ workflowStepRunId: "s4", kind: "gate", completionLog: [c("succeeded", null)] }),
         ] },
-        { run: run({ runId: "live" }), interventions: [], toolDecisions: [], spans: [
+        { run: run({ runId: "live" }), interventions: [], harnessErrors: [], toolDecisions: [], spans: [
           span({ workflowStepRunId: "s9", completionLog: [c("succeeded", null)] }),
         ] },
       ],
@@ -675,7 +675,7 @@ describe("choosing the window to inspect", () => {
     vi.useFakeTimers({ toFake: ["Date"], now: NOW });
     vi.spyOn(api, "getRunSummaries").mockResolvedValue(runs());
     vi.spyOn(api, "getRunDetail").mockImplementation(async (id) => ({
-      run: runs().find((r) => r.runId === id)!, spans: [], interventions: [], toolDecisions: [],
+      run: runs().find((r) => r.runId === id)!, spans: [], interventions: [], harnessErrors: [], toolDecisions: [],
     }));
     const gates = vi.spyOn(api, "getTemplateMetricsDetail").mockRejectedValue(new Error("none"));
     try {
@@ -737,7 +737,7 @@ describe("choosing the step the window is divided into", () => {
   it("keeps the chosen step across a range change when it still fits, else falls back", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: Date.parse("2026-09-05T12:00:00.000Z") });
     vi.spyOn(api, "getRunSummaries").mockResolvedValue([run({ startedAt: "2026-09-05T11:00:00.000Z" })]);
-    vi.spyOn(api, "getRunDetail").mockResolvedValue({ run: run(), spans: [], interventions: [], toolDecisions: [] });
+    vi.spyOn(api, "getRunDetail").mockResolvedValue({ run: run(), spans: [], interventions: [], harnessErrors: [], toolDecisions: [] });
     vi.spyOn(api, "getTemplateMetricsDetail").mockRejectedValue(new Error("none"));
     render(<WorkflowRollup />);
     await waitFor(() => expect(document.body.textContent).toContain("spent across"));
@@ -757,5 +757,94 @@ describe("choosing the step the window is divided into", () => {
     fireEvent.click(screen.getByText("Last 7 days"));
     fireEvent.click(screen.getByText("Last 1 hour"));
     expect(screen.getByText("5 minutes").parentElement?.textContent).toContain("12 points");
+  });
+});
+
+describe("when the harness failed", () => {
+  const err = (at: string, kind: "crash_relaunch" | "infra_failure" | "run_killed", detail: string | null = null) =>
+    ({ at, kind, stepName: "Triage", detail });
+
+  it("keeps the events inside the window, from live runs too, in time order", () => {
+    const from = Date.parse("2026-09-01T00:00:00.000Z"), to = Date.parse("2026-09-02T00:00:00.000Z");
+    const a = aggregate({
+      runs: [run({ runId: "a", terminationCause: "completed" }), run({ runId: "live", terminationCause: "running" })],
+      details: [
+        { run: run({ runId: "a" }), spans: [], interventions: [], toolDecisions: [], harnessErrors: [
+          err("2026-09-01T12:00:00.000Z", "run_killed", "crashed 3 times"),
+          err("2026-08-31T23:59:00.000Z", "crash_relaunch"),   // before the window
+        ] },
+        { run: run({ runId: "live", terminationCause: "running" }), spans: [], interventions: [], toolDecisions: [], harnessErrors: [
+          err("2026-09-01T04:10:00.000Z", "crash_relaunch"),
+        ] },
+      ],
+      window: { fromMs: from, toMs: to }, intervalMs: 3_600_000,
+    });
+    expect(a.harnessErrors.map((e) => [e.at, e.kind])).toEqual([
+      ["2026-09-01T04:10:00.000Z", "crash_relaunch"],
+      ["2026-09-01T12:00:00.000Z", "run_killed"],
+    ]);
+    const { container } = render(<Dashboard agg={a} />);
+    expect(container.textContent).toContain("Harness errors");
+    expect(container.querySelectorAll("[data-dot]")).toHaveLength(2);
+  });
+
+  it("says the window is empty rather than drawing an empty axis", () => {
+    const a = aggregate({ runs: [run({ terminationCause: "completed" })], details: [] });
+    const { container } = render(<Dashboard agg={a} />);
+    expect(container.textContent).toContain("Nothing recorded in this window");
+    expect(container.querySelectorAll("[data-dot]")).toHaveLength(0);
+  });
+});
+
+describe("the scatter is drawn with the window and the step", () => {
+  const rows = [{ key: "k", label: "a kind" }];
+  // Local midnight: tick labels are in the reader's own time, like every date on
+  // the ledger, so the fixture is built in local time too.
+  const from = new Date(2026, 8, 1, 0, 0, 0).getTime();
+
+  it("puts a labelled tick on the interval and thins labels to at most eight", () => {
+    const { container } = render(
+      <Scatter rows={rows} fromMs={from} toMs={from + 24 * 3_600_000} intervalMs={3_600_000}
+               points={[{ rowKey: "k", atMs: from + 3_600_000, title: "t" }]} />);
+    const labels = [...container.querySelectorAll("text.mono")].map((t) => t.textContent);
+    expect(labels.length).toBeLessThanOrEqual(9);
+    // 25 ticks thinned to one in four: seven labels, four hours apart.
+    expect(labels[0]).toBe("00:00");
+    expect(labels[1]).toBe("04:00");
+  });
+
+  it("uses dates for day-sized steps", () => {
+    const { container } = render(
+      <Scatter rows={rows} fromMs={from} toMs={from + 7 * 24 * 3_600_000} intervalMs={24 * 3_600_000}
+               points={[{ rowKey: "k", atMs: from, title: "t" }]} />);
+    const labels = [...container.querySelectorAll("text.mono")].map((t) => t.textContent);
+    expect(labels[0]).toBe("Sep 01");
+    expect(labels).toHaveLength(8);
+  });
+
+  it("snaps ticks to the clock, so a window opened mid-afternoon still labels whole days", () => {
+    // Seven days at an 8-hour step from 17:22: thinned to one label a day, every
+    // label read "17:22". Snapped to midnight, the labels name days and hours.
+    const start = new Date(2026, 7, 29, 17, 22).getTime();
+    const { container } = render(
+      <Scatter rows={rows} fromMs={start} toMs={start + 7 * 24 * 3_600_000} intervalMs={8 * 3_600_000}
+               points={[{ rowKey: "k", atMs: start + 3_600_000, title: "t" }]} />);
+    const labels = [...container.querySelectorAll("text.mono")].map((t) => t.textContent);
+    expect(labels.length).toBeLessThanOrEqual(8);
+    expect(labels[0]).toBe("Aug 30 00:00");
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it("fans out dots that land on the same pixel instead of hiding one behind another", () => {
+    const { container } = render(
+      <Scatter rows={rows} fromMs={from} toMs={from + 3_600_000} intervalMs={300_000}
+               points={[
+                 { rowKey: "k", atMs: from + 1000, title: "one" },
+                 { rowKey: "k", atMs: from + 1000, title: "two" },
+               ]} />);
+    const dots = [...container.querySelectorAll("[data-dot]")];
+    expect(dots).toHaveLength(2);
+    expect(dots[0]!.getAttribute("cy")).not.toBe(dots[1]!.getAttribute("cy"));
+    expect(dots.map((d) => d.querySelector("title")?.textContent)).toEqual(["one", "two"]);
   });
 });

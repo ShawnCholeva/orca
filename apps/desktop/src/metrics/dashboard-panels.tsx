@@ -1,4 +1,6 @@
+import { scaleTime } from "d3-scale";
 import { arc, pie } from "d3-shape";
+import { timeFormat } from "d3-time-format";
 import { Fragment } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
@@ -367,3 +369,111 @@ export const gridStyle: CSSProperties = {
   gap: "var(--sp-3)",
   alignContent: "start",
 };
+
+export interface ScatterRow { key: string; label: string }
+export interface ScatterPoint { rowKey: string; atMs: number; title: string }
+
+const HOUR_MS = 3_600_000;
+const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * Dots on a time axis, one row per kind. The question is WHEN, so time is the
+ * only continuous axis and the row carries identity — a single hue, no legend,
+ * because position already says which kind a dot is.
+ *
+ * The axis is the chosen window exactly, and the ticks fall on the chosen
+ * interval: the two choosers above the dashboard are what this chart is drawn
+ * with, not a decoration beside it. Labels are thinned so no more than eight
+ * print, but every interval boundary keeps a minor tick — the reader can count.
+ *
+ * Coincident dots (same row, same pixel) fan out vertically instead of hiding
+ * one another; every dot keeps a 2px ring in the panel colour so a stack reads
+ * as a stack. Each dot carries its own hover text.
+ */
+export function Scatter({
+  rows, points, fromMs, toMs, intervalMs, tone = "var(--err)", height,
+}: { rows: ScatterRow[]; points: ScatterPoint[]; fromMs: number; toMs: number; intervalMs: number; tone?: string; height?: number }) {
+  if (points.length === 0) {
+    return <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>Nothing recorded in this window.</span>;
+  }
+  const width = 960;
+  const left = 168, right = 16, top = 12, bottom = 28;
+  const rowH = 34;
+  const h = height ?? top + rows.length * rowH + bottom;
+  const x = scaleTime().domain([new Date(fromMs), new Date(toMs)]).range([left, width - right]);
+  const rowY = new Map(rows.map((r, i) => [r.key, top + rowH * i + rowH / 2]));
+
+  // Ticks on the interval, snapped to the reader's clock rather than to the
+  // window's start: a window opened at 17:22 seven days ago put every daily label
+  // at "17:22", which named a time of day and said nothing about the day. Ticks
+  // run from the local midnight on or before the window opens, at the interval,
+  // and only those inside the window are drawn. Labels are thinned to at most
+  // eight; minor ticks stay so the reader can count intervals.
+  const origin = new Date(fromMs);
+  origin.setHours(0, 0, 0, 0);
+  const ticks: number[] = [];
+  for (let t = origin.getTime(); t <= toMs + 1; t += intervalMs) if (t >= fromMs) ticks.push(t);
+  const every = Math.max(1, Math.ceil(ticks.length / 8));
+  // A label names the day when labelled ticks are a day or more apart; the clock
+  // time joins it unless the step itself is a whole day, where every tick is midnight.
+  const labelledStep = every * intervalMs;
+  const fmt = labelledStep >= DAY_MS
+    ? (intervalMs >= DAY_MS ? timeFormat("%b %d") : timeFormat("%b %d %H:%M"))
+    : timeFormat("%H:%M");
+  const dayFmt = timeFormat("%b %d");
+
+  // Fan out dots that share a row and a pixel column.
+  const byCell = new Map<string, number[]>();
+  const placed = points.map((p, i) => {
+    const px = Math.round(x(new Date(p.atMs)));
+    const key = `${p.rowKey}@${px}`;
+    const cell = byCell.get(key) ?? [];
+    cell.push(i);
+    byCell.set(key, cell);
+    return { ...p, px, cell: key, slot: cell.length - 1 };
+  });
+  const dot = 4;
+
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <svg width="100%" viewBox={`0 0 ${width} ${h}`} role="img"
+           aria-label={`${points.length} ${points.length === 1 ? "event" : "events"} across ${rows.length} kinds`}
+           style={{ display: "block", minWidth: 640 }}>
+        {rows.map((r) => (
+          <g key={r.key}>
+            <line x1={left} x2={width - right} y1={rowY.get(r.key)} y2={rowY.get(r.key)} stroke="var(--hairline)" />
+            <text x={left - 10} y={rowY.get(r.key)} dy="0.35em" textAnchor="end"
+                  style={{ fontSize: 11, fill: "var(--text-2)" }}>{r.label}</text>
+          </g>
+        ))}
+        {ticks.map((t, i) => {
+          const tx = x(new Date(t));
+          const labelled = i % every === 0;
+          return (
+            <g key={t}>
+              <line x1={tx} x2={tx} y1={labelled ? top - 4 : h - bottom} y2={h - bottom + (labelled ? 6 : 3)}
+                    stroke={labelled ? "var(--hairline-strong)" : "var(--hairline)"} />
+              {labelled && (
+                <text x={tx} y={h - bottom + 18} textAnchor="middle" className="mono"
+                      style={{ fontSize: 10, fill: "var(--text-3)" }}>{fmt(new Date(t))}</text>
+              )}
+            </g>
+          );
+        })}
+        {placed.map((p) => {
+          const n = byCell.get(p.cell)!.length;
+          const cy = (rowY.get(p.rowKey) ?? 0) + (p.slot - (n - 1) / 2) * (dot * 2 + 2);
+          return (
+            <circle key={`${p.rowKey}-${p.atMs}-${p.slot}`} cx={p.px} cy={cy} r={dot}
+                    fill={tone} stroke="var(--panel)" strokeWidth={2} data-dot="true">
+              <title>{p.title}</title>
+            </circle>
+          );
+        })}
+      </svg>
+      <span style={{ fontSize: "var(--fs-1)", color: "var(--text-3)" }} className="mono">
+        {dayFmt(new Date(fromMs))} {timeFormat("%H:%M")(new Date(fromMs))} → {dayFmt(new Date(toMs))} {timeFormat("%H:%M")(new Date(toMs))}
+      </span>
+    </div>
+  );
+}

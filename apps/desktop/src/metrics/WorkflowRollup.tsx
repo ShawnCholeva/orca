@@ -5,7 +5,7 @@ import { formatDuration } from "./interval-bar";
 import { PROMPT_KIND, modelName, terminatedRuns, tokens } from "./RunLedger";
 import { WorkflowDropdown, type WorkflowChoice } from "./StepPerformance";
 import {
-  BarList, Big, CountRow, CoverageMatrix, Donut, Panel, SectionHeading, StackedRows, gridStyle,
+  BarList, Big, CountRow, CoverageMatrix, Donut, Panel, Scatter, SectionHeading, StackedRows, gridStyle,
   type BarItem, type CoverageRow, type StackedRow,
 } from "./dashboard-panels";
 
@@ -84,6 +84,9 @@ export interface Loaded {
   gatesCoverEveryVersion?: boolean;
   /** The period the gate-node lines were fetched for, so the caption can name it. */
   gatesPeriod?: MetricPeriod;
+  /** The chosen window and step — what the time panels are drawn with. */
+  window?: { fromMs: number; toMs: number };
+  intervalMs?: number;
 }
 interface StepAgg {
   usd: number; elapsedMs: number; restarts: number; spans: number; runIds: Set<string>;
@@ -114,7 +117,10 @@ interface StepAgg {
   gateSpans: number; gatesUnrecorded: number; lastGateAt: string | null;
 }
 
-export function aggregate({ runs, details, gates = null, gatesCoverEveryVersion = false, gatesPeriod = "30d" }: Loaded) {
+export function aggregate({
+  runs, details, gates = null, gatesCoverEveryVersion = false, gatesPeriod = "30d",
+  window = { fromMs: 0, toMs: Number.MAX_SAFE_INTEGER }, intervalMs = HOUR,
+}: Loaded) {
   // Sums are computed over runs that ENDED. A live run's elapsed and parked clocks are
   // still accruing, so including it makes a total that changes on reload with no work
   // having happened — and one open run currently carries 62 of the window's 113 hours,
@@ -231,6 +237,14 @@ export function aggregate({ runs, details, gates = null, gatesCoverEveryVersion 
     }
   }
 
+  // When the harness failed, inside the window. Events are ROWS, not sums, so a
+  // live run's events count — a relaunch at 04:10 is a fact whether or not the run
+  // has ended — and only the window decides what is drawn.
+  const harnessErrors = details
+    .flatMap((d) => d.harnessErrors.map((e) => ({ ...e, goalTitle: d.run.goalTitle })))
+    .filter((e) => { const t = Date.parse(e.at); return t >= window.fromMs && t <= window.toMs; })
+    .sort((a, b) => a.at.localeCompare(b.at));
+
   // What the policy stopped, by the reason it gave. A decision can carry several
   // reasons and each is counted; allows are not stops and are not here.
   const stopsByReason = new Map<string, { denied: number; approvals: number }>();
@@ -297,6 +311,7 @@ export function aggregate({ runs, details, gates = null, gatesCoverEveryVersion 
 
   return {
     runs, ended, details, byStep, byModel, parksByKind, tokens: tokenSums, byVersion, verdicts, stops, stopsByReason, gates, gatesCoverEveryVersion, gatesPeriod,
+    harnessErrors, window, intervalMs,
     usd: sum((r) => r.cost.usd),
     failedUsd: sum((r) => r.cost.failedUsd),
     supersededUsd: sum((r) => r.cost.supersededUsd),
@@ -544,6 +559,35 @@ export function Dashboard({ agg }: { agg: Agg }) {
           <div style={{ marginTop: "var(--sp-3)", paddingTop: "var(--sp-2)", borderTop: "1px solid var(--hairline)" }}>
             <CountRow items={[{ label: "relaunches after a crash — events, not steps", value: String(agg.relaunches) }]} />
           </div>
+        </Panel>
+
+        <Panel title="Harness errors" span={12}>
+          {/* WHEN the harness failed, on the chosen window at the chosen step. Three
+              kinds, one row each: a worker crashing and being relaunched, a completion
+              failing with a code that names the substrate, and the run being killed.
+              A workflow veto is not here — that is the workflow deciding. */}
+          <Scatter
+            fromMs={agg.window.fromMs}
+            toMs={agg.window.toMs}
+            intervalMs={agg.intervalMs}
+            rows={[
+              { key: "crash_relaunch", label: "worker crashed, relaunched" },
+              { key: "infra_failure", label: "failed inside the harness" },
+              { key: "run_killed", label: "run stopped by the harness" },
+            ]}
+            points={agg.harnessErrors.map((e) => ({
+              rowKey: e.kind,
+              atMs: Date.parse(e.at),
+              title: `${new Date(e.at).toLocaleString()} · ${e.goalTitle}${e.stepName ? ` · ${e.stepName}` : ""}${e.detail ? ` · ${e.detail}` : ""}`,
+            }))}
+          />
+          {agg.harnessErrors.length > 0 && (
+            <CountRow items={[
+              { label: "relaunches after a crash", value: String(agg.harnessErrors.filter((e) => e.kind === "crash_relaunch").length) },
+              { label: "failures inside the harness", value: String(agg.harnessErrors.filter((e) => e.kind === "infra_failure").length) },
+              { label: "runs stopped by the harness", value: String(agg.harnessErrors.filter((e) => e.kind === "run_killed").length) },
+            ]} />
+          )}
         </Panel>
 
         {/* One row per harness revision. Pooling v13 with v16 hides the one
@@ -1088,7 +1132,11 @@ export function WorkflowRollup() {
           No {chosen.name}{chosenVersion === ALL_VERSIONS ? "" : ` v${chosenVersion}`} runs were active in the {windowWords}.
         </p>
       ) : (
-        <Dashboard agg={aggregate({ runs, details, gates, gatesCoverEveryVersion, gatesPeriod })} />
+        <Dashboard agg={aggregate({
+          runs, details, gates, gatesCoverEveryVersion, gatesPeriod,
+          window: { fromMs: Date.now() - RANGES.find((r) => r.key === range)!.ms, toMs: Date.now() },
+          intervalMs: intervals.find((i) => i.key === chosenInterval)!.ms,
+        })} />
       )}
     </div>
   );
