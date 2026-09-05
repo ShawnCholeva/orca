@@ -429,12 +429,17 @@ function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker:
 
       <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
         {/* Parked is deliberately absent here: a park between two spans belongs
-            to neither, so the parks section below owns them. */}
+            to neither and lands in neither — the overlap gets both cases with no special
+            case for either, and the parks section still owns the between-span ones. */}
         <IntervalBar
           elapsedMs={span.elapsedMs}
           workingMs={span.elapsedMs == null ? null : span.workingMs ?? 0}
           parkedMs={span.parkedMs}
-          unaccountedMs={span.elapsedMs == null ? null : Math.max(0, span.elapsedMs - (span.workingMs ?? 0))}
+          unaccountedMs={
+            span.elapsedMs == null
+              ? null
+              : Math.max(0, span.elapsedMs - (span.workingMs ?? 0) - (span.parkedMs ?? 0))
+          }
         />
         {span.elapsedMs == null ? (
           <MeasurementLabel
@@ -451,7 +456,9 @@ function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker:
             {dur(span.elapsedMs)}
             {span.workingMs == null
               ? " · no interior detail recorded"
-              : ` · ${dur(span.workingMs)} observed, ${dur(Math.max(0, span.elapsedMs - span.workingMs))} unaccounted`}
+              : ` · ${dur(span.workingMs)} observed` +
+                (span.parkedMs ? `, ${dur(span.parkedMs)} waiting on you` : "") +
+                `, ${dur(Math.max(0, span.elapsedMs - span.workingMs - (span.parkedMs ?? 0)))} unaccounted`}
           </span>
         )}
         {/* No tag here. The duration line beside it already reads "no interior detail

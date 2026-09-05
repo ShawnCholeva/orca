@@ -44,7 +44,7 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     workflowRunId: "r1", workflowStepRunId: "sr1", goalId: "g1",
     stepTemplateId: "triage", name: "Triage", ordinal: 0, attempt: 1, kind: "step",
     startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T00:30:00.000Z",
-    elapsedMs: 1_800_000, workingMs: 600_000,
+    elapsedMs: 1_800_000, workingMs: 600_000, parkedMs: 0,
     status: "passed", blockedReason: null, restarts: 0, completions: 1, stallRescues: 0,
     cost: { usd: 1.52, tokensIn: 10, tokensOut: 20, state: "reported" },
     tier: "partially_verified",
@@ -269,7 +269,7 @@ describe("RunDetailPanel", () => {
     // step_complete (so nothing was observed). That is 100% unaccounted — we know
     // it took 100s and watched none of it — not three nulls that fail to sum.
     render(<RunDetailPanel detail={detail({
-      spans: [span({ kind: "gate", name: "Critique", elapsedMs: 100_000, workingMs: null, cost: null, tier: null, verifiers: null })],
+      spans: [span({ kind: "gate", name: "Critique", elapsedMs: 100_000, workingMs: null, parkedMs: 0, cost: null, tier: null, verifiers: null })],
     })} onBack={() => {}} />);
     const text = document.body.textContent ?? "";
     // Not "none of it observed": this gate reports 1m 40s and `passed`, so the
@@ -287,7 +287,7 @@ describe("RunDetailPanel", () => {
 
   it("renders a span with no recorded bracket as an absence, not a zero-width bar", () => {
     render(<RunDetailPanel detail={detail({
-      spans: [span({ elapsedMs: null, workingMs: null, cost: null, tier: null, verifiers: null })],
+      spans: [span({ elapsedMs: null, workingMs: null, parkedMs: 0, cost: null, tier: null, verifiers: null })],
     })} onBack={() => {}} />);
     // An explicit absent material: a zero-width segment would read as "instant",
     // a duration nobody took.
@@ -343,7 +343,7 @@ describe("RunDetailPanel", () => {
   it("never dims anything", () => {
     // Binding rule: an unmeasured value is a different object, not a faint one.
     const { container } = render(<RunDetailPanel detail={detail({
-      spans: [span(), span({ workflowStepRunId: "sr2", kind: "gate", elapsedMs: null, workingMs: null, cost: null, tier: null, verifiers: null })],
+      spans: [span(), span({ workflowStepRunId: "sr2", kind: "gate", elapsedMs: null, workingMs: null, parkedMs: 0, cost: null, tier: null, verifiers: null })],
     })} onBack={() => {}} />);
     expect(container.innerHTML).not.toMatch(/opacity/i);
   });

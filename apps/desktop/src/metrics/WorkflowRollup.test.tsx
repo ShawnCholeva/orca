@@ -29,7 +29,7 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     workflowRunId: "r1", workflowStepRunId: "sr1", goalId: "g1", stepTemplateId: "triage",
     name: "Triage", ordinal: 0, attempt: 1, kind: "step",
     startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T00:30:00.000Z",
-    elapsedMs: 30 * 60_000, workingMs: 60_000, status: "passed", blockedReason: null,
+    elapsedMs: 30 * 60_000, workingMs: 60_000, parkedMs: 0, status: "passed", blockedReason: null,
     restarts: 2, completions: 1, stallRescues: 0,
     cost: { usd: 5, tokensIn: 1, tokensOut: 1, state: "reported" },
     tier: null, verifiers: null, refuteVerdict: null, conflicts: [],

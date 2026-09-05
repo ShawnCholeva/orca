@@ -564,3 +564,56 @@ describe("cost provenance", () => {
     expect(span([null])).toBe("reported");
   });
 });
+
+describe("span parked time", () => {
+  it("attributes a park that falls INSIDE a span to that span", () => {
+    // Live: one Triage span is 78 minutes elapsed with 74.6 of them a
+    // confirmation card. Forcing span parked to 0 pushed all of it into
+    // `unaccounted`, so the step row said "unaccounted" about the same minutes
+    // the run header called "waiting on you".
+    const detail = buildRunDetail({
+      run: run({ status: "active" }),
+      stepRuns: [stepRun({ stepRunId: "sr-1", startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T01:00:00.000Z" })],
+      transitions: [],
+      events: [
+        ev("a1", "paused_for_input", "2026-09-01T00:10:00.000Z", "sr-1"),
+        ev("a1", "active", "2026-09-01T00:50:00.000Z", "sr-1"),
+      ],
+      runEvents: [], sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
+    });
+    expect(detail.spans[0].parkedMs).toBe(40 * 60_000);
+  });
+
+  it("attributes a park BETWEEN two spans to neither", () => {
+    // The original rule, which stays true and now needs no special case: a park
+    // that overlaps no span lands in no span.
+    const detail = buildRunDetail({
+      run: run({ status: "active" }),
+      stepRuns: [
+        stepRun({ stepRunId: "sr-1", startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T00:10:00.000Z" }),
+        stepRun({ stepRunId: "sr-2", startedAt: "2026-09-01T00:50:00.000Z", finishedAt: "2026-09-01T01:00:00.000Z" }),
+      ],
+      transitions: [],
+      events: [
+        ev("a1", "paused_for_input", "2026-09-01T00:20:00.000Z", "sr-1"),
+        ev("a1", "active", "2026-09-01T00:40:00.000Z", "sr-1"),
+      ],
+      runEvents: [], sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
+    });
+    expect(detail.spans.map((s) => s.parkedMs)).toEqual([0, 0]);
+  });
+
+  it("clips a park that straddles the span boundary", () => {
+    const detail = buildRunDetail({
+      run: run({ status: "active" }),
+      stepRuns: [stepRun({ stepRunId: "sr-1", startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T00:30:00.000Z" })],
+      transitions: [],
+      events: [
+        ev("a1", "paused_for_input", "2026-09-01T00:20:00.000Z", "sr-1"),
+        ev("a1", "active", "2026-09-01T00:50:00.000Z", "sr-1"),
+      ],
+      runEvents: [], sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
+    });
+    expect(detail.spans[0].parkedMs).toBe(10 * 60_000);
+  });
+});

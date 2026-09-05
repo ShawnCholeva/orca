@@ -205,6 +205,21 @@ export const RunTraceSpan = z.object({
   finishedAt: z.string().nullable(),
   elapsedMs: z.number().int().nonnegative().nullable(),
   workingMs: z.number().int().nonnegative().nullable(),
+  /**
+   * Park time that fell INSIDE this span's own window — the overlap of the run's
+   * merged park intervals with `[startedAt, finishedAt]`.
+   *
+   * It was previously forced to 0 on the reasoning that "a park between two spans
+   * belongs to neither". That is true and it is not the whole rule: a park can
+   * also open and close *within* a span. Live, one Triage span is 78 minutes
+   * elapsed with 74.6 of them a confirmation card — forcing 0 pushed all of it
+   * into `unaccounted`, so the step row said "unaccounted" about the same minutes
+   * the run header called "waiting on you".
+   *
+   * The overlap computation handles both cases without a special case: a park
+   * between spans overlaps none, so it lands in neither, exactly as intended.
+   */
+  parkedMs: z.number().int().nonnegative().nullable(),
 
   status: z.string(),
   blockedReason: z.string().nullable(),

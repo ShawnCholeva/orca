@@ -416,8 +416,14 @@ export function buildSpans(input: {
   stepRuns: RunStepRunRow[];
   transitions: RunTransition[];
   stepNames: Map<string, string>;
+  interventions: Intervention[];
+  nowMs: number;
 }): RunTraceSpan[] {
-  const { run, stepRuns, transitions, stepNames } = input;
+  const { run, stepRuns, transitions, stepNames, interventions, nowMs } = input;
+  // Merged ONCE for the whole run, then clipped per span. Merging is what keeps
+  // two simultaneously-parked step runs from double-counting into one span, and
+  // doing it once means every span clips the same interval set.
+  const parks = mergeIntervals(parkIntervals(interventions, nowMs));
   const byStepRun = new Map<string, RunTransition[]>();
   for (const t of transitions) {
     const id = t.transition.workflowStepRunId;
@@ -435,6 +441,10 @@ export function buildSpans(input: {
     const sp = final ? sourcesPassed(ev, rf) : null;
 
     const startedMs = ms(s.startedAt), finishedMs = ms(s.finishedAt);
+    const parkedMs =
+      startedMs === null || finishedMs === null || finishedMs <= startedMs
+        ? null
+        : totalMs(clampIntervals(parks, startedMs, finishedMs));
     const tier: VerificationTier | null = final
       ? classifyTier({ transition: final.transition, templateVersion: run.templateVersion, stepTemplateId: s.stepTemplateId })
       : null;
@@ -454,6 +464,7 @@ export function buildSpans(input: {
       workingMs: completes.length === 0
         ? null
         : completes.reduce((acc, t) => acc + (t.transition.telemetry?.latency_ms ?? 0), 0),
+      parkedMs,
       status: s.status,
       blockedReason: s.blockedReason,
       // A span launched more than once was restarted; the launch/complete pairing is
@@ -589,7 +600,7 @@ export function buildRunDetail(input: {
 }): RunDetail {
   const { run, stepRuns, transitions, events, runEvents, sourceKinds, stepNames, nowMs } = input;
   const interventions = buildInterventions({ events, sourceKinds, run, nowMs });
-  const spans = buildSpans({ run, stepRuns, transitions, stepNames });
+  const spans = buildSpans({ run, stepRuns, transitions, stepNames, interventions, nowMs });
   return {
     run: buildRunSummary({
       run, stepRuns, transitions, interventions, spans,

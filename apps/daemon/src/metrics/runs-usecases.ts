@@ -71,7 +71,7 @@ export function getRunSummaries(
       nowMs,
     });
     const spans = buildSpans({
-      run, stepRuns, transitions,
+      run, stepRuns, transitions, interventions, nowMs,
       stepNames: stepNamesForRun(db, run.runId, run.templateId),
     });
     return buildRunSummary({
