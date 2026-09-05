@@ -34,7 +34,7 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     restarts: 2, completions: 1, stallRescues: 0,
     cost: { usd: 5, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" },
     tier: null, verifiers: null, refuteVerdict: null, refuteTriggeredBy: [], refuteReason: null, evidenceGaps: null, conflicts: [],
-    outcomeStatus: "succeeded", failureCode: null, models: [], ...over,
+    outcomeStatus: "succeeded", failureCode: null, models: [], completionLog: [], ...over,
   };
 }
 
@@ -342,36 +342,65 @@ describe("a still-running run cannot move a total", () => {
 
 
 describe("the harness's own choices reach the surface", () => {
-  it("sums spend by model, and refuses to split a step that ran under two", () => {
-    // Span cost is one figure across every attempt of a step. When a step ran haiku
-    // and then opus in the revise loop, the figure belongs to both and can be
-    // attributed to neither — so it is named as mixed rather than assigned.
+  it("attributes spend to the model that produced each completion, not to the span", () => {
+    // A step that ran haiku ($42, failed) and then opus ($3, passed) is one span
+    // with one cost. Summed by span the $45 would have to go to one model or be
+    // named as mixed; summed by completion each dollar goes where it was spent.
+    const c = (model: string | null, usd: number, outcome = "succeeded", superseded = false) =>
+      ({ at: "2026-09-01T00:10:00.000Z", model, usd, outcome, failureCode: null, superseded });
     const a = aggregate({
       runs: [run({ terminationCause: "completed" })],
       details: [{ run: run(), spans: [
-        span({ workflowStepRunId: "s1", name: "Triage", models: ["claude-haiku-4-5-20251001"], cost: { usd: 3, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" }, outcomeStatus: "failed" }),
-        span({ workflowStepRunId: "s2", name: "Proposal", models: ["claude-haiku-4-5-20251001"], cost: { usd: 2, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" } }),
-        span({ workflowStepRunId: "s3", name: "Execution", models: ["claude-haiku-4-5-20251001", "claude-opus-5"], cost: { usd: 40, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" } }),
-        span({ workflowStepRunId: "s4", name: "Verify", kind: "gate", models: [], cost: null }),
+        span({ workflowStepRunId: "s1", name: "Triage", completionLog: [c("claude-haiku-4-5-20251001", 3, "failed")] }),
+        span({ workflowStepRunId: "s2", name: "Proposal", completionLog: [c("claude-haiku-4-5-20251001", 2, "succeeded", true)] }),
+        span({ workflowStepRunId: "s3", name: "Execution", completionLog: [c("claude-haiku-4-5-20251001", 42, "failed", true), c("claude-opus-5", 3)] }),
+        span({ workflowStepRunId: "s4", name: "Verify", kind: "gate", completionLog: [], cost: null }),
       ], interventions: [], toolDecisions: [] }],
     });
     expect([...a.byModel.entries()]).toEqual([
-      ["claude-haiku-4-5-20251001", { usd: 5, attempts: 2, failed: 1 }],
-      ["claude-haiku-4-5-20251001 → claude-opus-5", { usd: 40, attempts: 1, failed: 0 }],
+      ["claude-haiku-4-5-20251001", { usd: 47, attempts: 3, failed: 2, replaced: 1 }],
+      ["claude-opus-5", { usd: 3, attempts: 1, failed: 0, replaced: 0 }],
     ]);
     const t = render(<Dashboard agg={a} />).container.textContent ?? "";
-    expect(t).toContain("claude-haiku-4-5 → claude-opus-5");
-    expect(t).toContain("redone under a second model");
-    // opus appears only in the sequence, never as a bar of its own with $40 on it.
-    expect(t).not.toMatch(/^claude-opus-5|[^→] claude-opus-5/);
+    expect(t).toContain("claude-haiku-4-5");
+    expect(t).toContain("$47.00 · 3 attempts · 2 failed · 1 replaced");
+    expect(t).toContain("claude-opus-5");
+    expect(t).not.toContain("mixed");
   });
 
-  it("names a model that was never recorded as such, never as free", () => {
+  it("names a completion with no recorded model as such, never as free", () => {
     const a = aggregate({
       runs: [run({ terminationCause: "completed" })],
-      details: [{ run: run(), spans: [span({ models: [], cost: { usd: 7, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" } })], interventions: [], toolDecisions: [] }],
+      details: [{ run: run(), spans: [span({ completionLog: [{ at: "2026-09-01T00:10:00.000Z", model: null, usd: 7, outcome: "succeeded", failureCode: null, superseded: false }] })], interventions: [], toolDecisions: [] }],
     });
-    expect(a.byModel.get("model not recorded")).toEqual({ usd: 7, attempts: 1, failed: 0 });
+    expect(a.byModel.get("model not recorded")).toEqual({ usd: 7, attempts: 1, failed: 0, replaced: 0 });
+  });
+
+  it("totals the pauses by kind over ended runs, with the ones whose reason was lost named as such", () => {
+    // Every figure is a count or a sum of park LENGTHS — not a share of wall
+    // clock, because parks overlap and the run's own split already owns that.
+    const a = aggregate({
+      runs: [run({ runId: "a", terminationCause: "completed" }), run({ runId: "live", terminationCause: "running" })],
+      details: [
+        { run: run({ runId: "a" }), spans: [], toolDecisions: [], interventions: [
+          park({ activityId: "p1", sourceKind: "step_confirmation_pending", durationMs: 60_000, exitedAt: "x", open: false, parkState: "resolved" }),
+          park({ activityId: "p2", sourceKind: "step_confirmation_pending", durationMs: 30_000, exitedAt: "x", open: false, parkState: "resolved" }),
+          park({ activityId: "p3", sourceKind: "unknown", durationMs: 5_000, exitedAt: "x", open: false, parkState: "resolved" }),
+        ] },
+        { run: run({ runId: "live" }), spans: [], toolDecisions: [], interventions: [
+          park({ activityId: "p9", sourceKind: "provider_recovery_pending", durationMs: 999 * H }),
+        ] },
+      ],
+    });
+    expect([...a.parksByKind.entries()]).toEqual([
+      ["step_confirmation_pending", { count: 2, totalMs: 90_000, longestMs: 60_000 }],
+      ["unknown", { count: 1, totalMs: 5_000, longestMs: 5_000 }],
+    ]);
+    const t = render(<Dashboard agg={a} />).container.textContent ?? "";
+    expect(t).toContain("a step to confirm");
+    expect(t).toContain("2 pauses · 1m 30s in all · longest 1m 0s");
+    expect(t).toContain("reason not kept");
+    expect(t).not.toContain("provider recovery");
   });
 
   it("sums the four token kinds across ended runs, with cache as its own term", () => {
@@ -382,7 +411,7 @@ describe("the harness's own choices reach the surface", () => {
         span({ workflowStepRunId: "s2", cost: { usd: 1, tokensIn: 50, tokensOut: 50, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" } }),
       ], interventions: [], toolDecisions: [] }],
     });
-    expect(a.tokens).toEqual({ fresh: 150, output: 250, cacheRead: 5000, cacheWrite: 300, spansWithoutCache: 1 });
+    expect(a.tokens).toEqual({ fresh: 150, output: 250, cacheRead: 5000, cacheWrite: 300, attempts: 2, spansWithoutCache: 1 });
     const t = render(<Dashboard agg={a} />).container.textContent ?? "";
     expect(t).toContain("5.0k");
     expect(t).toContain("1 of 2 attempts recorded no cache figure");

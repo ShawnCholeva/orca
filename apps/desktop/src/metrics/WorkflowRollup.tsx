@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { RunDetail, RunSummary, TemplateMetricsDetail } from "@orca/contracts";
 import { getRunDetail, getRunSummaries, getTemplateMetricsDetail } from "../api";
 import { formatDuration } from "./interval-bar";
-import { modelName, terminatedRuns, tokens } from "./RunLedger";
+import { PROMPT_KIND, modelName, terminatedRuns, tokens } from "./RunLedger";
 import {
   BarList, Big, CountRow, CoverageMatrix, Donut, Panel, SectionHeading, StackedRows, gridStyle,
   type BarItem, type CoverageRow, type StackedRow,
@@ -22,9 +22,11 @@ import {
 //                                     Not permanent: the day a budget or a tolerable
 //                                     wait is chosen, the arc encodes THAT number and
 //                                     becomes legitimate.
-//   · no breakdown of pauses by kind — `source_kind` is read from a row overwritten as
-//                                     the activity advances, so a categorical split is
-//                                     confident about a field we know is corrupted
+//
+// Pauses ARE split by kind, with a caveat that was once a prohibition: the kind is
+// read from the append-only event payload since 18ea6ef, and parks recorded before
+// that carry a mutable row's value or none. Those land in a named "reason not kept"
+// bucket rather than being guessed, so the split is honest about its own gaps.
 
 const dur = (ms: number) => formatDuration(ms) ?? "not recorded";
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -116,28 +118,40 @@ export function aggregate({ runs, details, gates = null }: Loaded) {
   const sum = (f: (r: RunSummary) => number) => ended.reduce((a, r) => a + f(r), 0);
   const spans = details.filter((d) => endedIds.has(d.run.runId)).flatMap((d) => d.spans);
 
-  // Spend by the model that produced it. Span cost is ONE figure across every
-  // attempt of the step, so a step that ran under two models — Triage, Research and
+  // Spend by the model that produced it, summed over COMPLETIONS rather than spans.
+  // A span's cost is one figure across every attempt, and Triage, Research and
   // Execution each ran haiku and then opus in the revise loop on the live data —
-  // cannot have its figure assigned to either. It is named as mixed rather than
-  // split by a guess, and a span with a cost and no recorded model is named as
-  // that, never folded into a model or dropped as if free.
-  const byModel = new Map<string, { usd: number; attempts: number; failed: number }>();
+  // by span that figure could only be named as mixed; by completion each dollar
+  // goes to the model that spent it. A completion with no recorded model is named
+  // as that, never folded into a model or dropped as if free.
+  const byModel = new Map<string, { usd: number; attempts: number; failed: number; replaced: number }>();
+  for (const c of spans.flatMap((s) => s.completionLog)) {
+    if (c.usd === null) continue;
+    const key = c.model ?? "model not recorded";
+    const m = byModel.get(key) ?? { usd: 0, attempts: 0, failed: 0, replaced: 0 };
+    m.usd += c.usd;
+    m.attempts += 1;
+    if (c.outcome === "failed") m.failed += 1;
+    else if (c.superseded) m.replaced += 1;
+    byModel.set(key, m);
+  }
+  // The pauses by kind, over ended runs. Counts and sums of park LENGTHS — never a
+  // share of wall clock, because parks overlap and the run's own split owns that.
+  const parksByKind = new Map<string, { count: number; totalMs: number; longestMs: number }>();
+  for (const iv of details.filter((x) => endedIds.has(x.run.runId)).flatMap((x) => x.interventions)) {
+    const e = parksByKind.get(iv.sourceKind) ?? { count: 0, totalMs: 0, longestMs: 0 };
+    e.count += 1;
+    e.totalMs += iv.durationMs;
+    e.longestMs = Math.max(e.longestMs, iv.durationMs);
+    parksByKind.set(iv.sourceKind, e);
+  }
   // Token traffic, with cache as its own term. The price map does not price cache,
   // so cache reads — the largest term by two orders of magnitude on a cache-heavy
   // run — are the part of the cost story a dollar figure cannot carry.
-  const tokenSums = { fresh: 0, output: 0, cacheRead: 0, cacheWrite: 0, spansWithoutCache: 0 };
+  const tokenSums = { fresh: 0, output: 0, cacheRead: 0, cacheWrite: 0, attempts: 0, spansWithoutCache: 0 };
   for (const s of spans) {
     if (s.cost === null || s.cost.usd === null) continue;
-    // A step that ran under several models is keyed by the SEQUENCE, so the bar
-    // names both models in the order they were used. What it never does is split
-    // the figure between them.
-    const key = s.models.length === 0 ? "model not recorded" : s.models.join(" → ");
-    const m = byModel.get(key) ?? { usd: 0, attempts: 0, failed: 0 };
-    m.usd += s.cost.usd;
-    m.attempts += 1;
-    if (s.outcomeStatus === "failed") m.failed += 1;
-    byModel.set(key, m);
+    tokenSums.attempts += 1;
     tokenSums.fresh += s.cost.tokensIn ?? 0;
     tokenSums.output += s.cost.tokensOut ?? 0;
     if (s.cost.cacheReadTokens === null) tokenSums.spansWithoutCache += 1;
@@ -238,7 +252,7 @@ export function aggregate({ runs, details, gates = null }: Loaded) {
   }
 
   return {
-    runs, ended, details, byStep, byModel, tokens: tokenSums, byVersion, stops, stopsByReason, gates,
+    runs, ended, details, byStep, byModel, parksByKind, tokens: tokenSums, byVersion, stops, stopsByReason, gates,
     usd: sum((r) => r.cost.usd),
     failedUsd: sum((r) => r.cost.failedUsd),
     supersededUsd: sum((r) => r.cost.supersededUsd),
@@ -692,6 +706,31 @@ export function Dashboard({ agg }: { agg: Agg }) {
           <BarList items={stepBars(agg, (v) => v.elapsedMs, dur, TONE.waiting)} />
         </Panel>
 
+        <Panel title="Where you were needed" span={12}>
+          {/* Counts and sums of park lengths, by what the pause was for. Scaled to
+              the largest total rather than to wall clock: parks overlap, so their
+              lengths do not partition anything and must not be drawn as if they did.
+              The "reason not kept" row is the honest remainder — parks recorded
+              before the kind rode the event carry nothing recoverable. */}
+          <BarList
+            tone={TONE.waiting}
+            items={[...agg.parksByKind.entries()]
+              .sort((a, b) => b[1].totalMs - a[1].totalMs)
+              .map(([kind, p]) => ({
+                key: kind,
+                label: kind === "unknown" ? "reason not kept" : PROMPT_KIND[kind as keyof typeof PROMPT_KIND] ?? kind,
+                value: p.totalMs,
+                display: `${p.count} ${p.count === 1 ? "pause" : "pauses"} · ${dur(p.totalMs)} in all · longest ${dur(p.longestMs)}`,
+              }))}
+          />
+          {agg.parksByKind.has("unknown") && (
+            <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+              Pauses recorded before the reason was kept on the event have no recoverable kind and are
+              counted on their own row rather than guessed.
+            </p>
+          )}
+        </Panel>
+
         <SectionHeading>Where the money went</SectionHeading>
 
         <Panel title="Spend by outcome" span={5}>
@@ -740,17 +779,18 @@ export function Dashboard({ agg }: { agg: Agg }) {
               .sort((a, b) => b[1].usd - a[1].usd)
               .map(([key, m]) => ({
                 key,
-                label: key === "model not recorded" ? key : key.split(" → ").map(modelName).join(" → "),
+                label: key === "model not recorded" ? key : modelName(key),
                 value: m.usd,
-                display: `${usd(m.usd)} · ${m.attempts} ${m.attempts === 1 ? "attempt" : "attempts"}${m.failed > 0 ? ` · ${m.failed} failed` : ""}`,
+                display: `${usd(m.usd)} · ${m.attempts} ${m.attempts === 1 ? "attempt" : "attempts"}`
+                  + (m.failed > 0 ? ` · ${m.failed} failed` : "")
+                  + (m.replaced > 0 ? ` · ${m.replaced} replaced` : ""),
               }))}
           />
-          {[...agg.byModel.keys()].some((k) => k.includes(" → ")) && (
-            <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
-              An arrow means the step was redone under a second model. Its cost is one figure across
-              those attempts, so the bar names both models rather than splitting a guess between them.
-            </p>
-          )}
+          <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+            Each completion is counted under the model that produced it, so a step that ran again
+            under a second model splits exactly. <em>Replaced</em> is a completion that passed and was
+            later superseded by another attempt.
+          </p>
         </Panel>
 
         <Panel title="Tokens, this window" span={6}>
@@ -768,7 +808,7 @@ export function Dashboard({ agg }: { agg: Agg }) {
           />
           {agg.tokens.spansWithoutCache > 0 && (
             <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
-              {agg.tokens.spansWithoutCache} of {[...agg.byModel.values()].reduce((a, m) => a + m.attempts, 0)} attempts
+              {agg.tokens.spansWithoutCache} of {agg.tokens.attempts} attempts
               recorded no cache figure, so the two cache terms are lower than the truth.
             </p>
           )}

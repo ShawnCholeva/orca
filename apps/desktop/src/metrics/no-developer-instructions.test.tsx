@@ -61,7 +61,7 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     elapsedMs: 120_000, workingMs: null, parkedMs: 0, status: "passed", blockedReason: null,
     restarts: 0, completions: 1, stallRescues: 0, cost: null, tier: null,
     verifiers: null, refuteVerdict: null, refuteTriggeredBy: [], refuteReason: null, evidenceGaps: null, conflicts: [], outcomeStatus: "succeeded",
-    failureCode: null, models: [], ...over,
+    failureCode: null, models: [], completionLog: [], ...over,
   };
 }
 
@@ -180,6 +180,7 @@ const NOT_A_PROSE_SURFACE: Record<string, string> = {
   terminatedRuns: "a filter",
   markerEarnsItsPlace: "a predicate",
   tokens: "formats a token count",
+  PROMPT_KIND: "a lookup table of pause kinds",
   modelName: "strips a release date from a model id",
 
   // Composers: they mount the surfaces above, each of which is asserted directly.

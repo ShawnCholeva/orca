@@ -200,6 +200,26 @@ export const RunProgress = z.object({
 }).strict();
 export type RunProgress = z.infer<typeof RunProgress>;
 
+/**
+ * One completion of a span, with its own model, cost and outcome. `cost` on the
+ * span is the SUM of these and `models` the set; neither can say which attempt
+ * was the $42 failure and which the $3 pass, and that attribution is the whole
+ * question when a step was redone under a second model.
+ *
+ * `superseded` mirrors computeCost's rule: a completion is replaced when a later
+ * completion exists for the same step template anywhere in the run — a crash
+ * relaunch is another span of the same step, and its completion counts.
+ */
+export const SpanCompletion = z.object({
+  at: z.string(),
+  model: z.string().nullable(),
+  usd: z.number().nullable(),
+  outcome: z.string().nullable(),
+  failureCode: z.string().nullable(),
+  superseded: z.boolean(),
+}).strict();
+export type SpanCompletion = z.infer<typeof SpanCompletion>;
+
 export const RunTraceSpan = z.object({
   workflowRunId: z.string(),
   workflowStepRunId: z.string(),
@@ -251,6 +271,8 @@ export const RunTraceSpan = z.object({
    * figure to it. Empty when no completion carried a model.
    */
   models: z.array(z.string()),
+  /** Every completion of this span in time order; empty when it never completed. */
+  completionLog: z.array(SpanCompletion),
 
   tier: VerificationTier.nullable(),
   verifiers: z.object({

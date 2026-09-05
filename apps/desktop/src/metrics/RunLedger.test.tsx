@@ -47,7 +47,7 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     elapsedMs: 1_800_000, workingMs: 600_000, parkedMs: 0,
     status: "passed", blockedReason: null, restarts: 0, completions: 1, stallRescues: 0,
     cost: { usd: 1.52, tokensIn: 10, tokensOut: 20, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" },
-    models: [],
+    models: [], completionLog: [],
     tier: "partially_verified",
     verifiers: { executable: false, grounding: true, independentReview: false },
     refuteVerdict: null, refuteTriggeredBy: [], refuteReason: null, evidenceGaps: null, conflicts: [], outcomeStatus: "succeeded", failureCode: null, ...over,
@@ -625,6 +625,34 @@ describe("the evidence behind the chips", () => {
       spans: [span({ cost: { usd: 1.52, tokensIn: 3_854, tokensOut: 2_534, cacheReadTokens: 183_026, cacheCreationTokens: 15_239, state: "reported" } })],
     })} onBack={() => {}} />);
     expect(document.body.textContent).toContain("3.9k in · 2.5k out · 183.0k cached");
+  });
+});
+
+describe("a step redone under a second model", () => {
+  it("lists each completion with its own model, cost and outcome", () => {
+    // The span's $48 is one figure across three attempts and its model list is a
+    // set; only the log can say that the $42 was haiku and failed.
+    render(<RunDetailPanel detail={detail({
+      spans: [span({
+        completions: 3, models: ["claude-haiku-4-5-20251001", "claude-opus-5"],
+        completionLog: [
+          { at: "2026-09-01T00:10:00.000Z", model: "claude-haiku-4-5-20251001", usd: 42.48, outcome: "failed", failureCode: "evidence_veto", superseded: true },
+          { at: "2026-09-01T00:15:00.000Z", model: "claude-opus-5", usd: 2.64, outcome: "succeeded", failureCode: null, superseded: true },
+          { at: "2026-09-01T00:20:00.000Z", model: "claude-opus-5", usd: 3.23, outcome: "succeeded", failureCode: null, superseded: false },
+        ],
+      })],
+    })} onBack={() => {}} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("1 · claude-haiku-4-5 · $42.48 · failed · replaced");
+    expect(text).toContain("2 · claude-opus-5 · $2.64 · succeeded · replaced");
+    expect(text).toContain("3 · claude-opus-5 · $3.23 · succeeded");
+  });
+
+  it("does not list a single completion — the row already says everything about it", () => {
+    render(<RunDetailPanel detail={detail({
+      spans: [span({ completionLog: [{ at: "2026-09-01T00:10:00.000Z", model: "claude-opus-5", usd: 1.52, outcome: "succeeded", failureCode: null, superseded: false }] })],
+    })} onBack={() => {}} />);
+    expect(document.body.textContent).not.toContain("1 · claude-opus-5");
   });
 });
 

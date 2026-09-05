@@ -58,7 +58,7 @@ const CHANNEL_SENTENCE: Record<ProgressChannel, string> = {
   run_event: "an event with no state change",
 };
 
-const PROMPT_KIND: Record<NonNullable<RunSummary["awaitingYou"]["sourceKind"]>, string> = {
+export const PROMPT_KIND: Record<NonNullable<RunSummary["awaitingYou"]["sourceKind"]>, string> = {
   question_pending: "a question",
   step_confirmation_pending: "a step to confirm",
   gate_decision_pending: "a gate decision",
@@ -591,6 +591,20 @@ function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker:
                 projected to the wire as an array that no view ever read. */}
             {span.conflicts.map((c) => (
               <Chip key={c}>conflict · {c.replace(/_/g, " ")}</Chip>
+            ))}
+          </div>
+        )}
+        {/* The attempts, one line each, only when there was more than one. The
+            span's cost is their sum and its model list their set; this is the one
+            place the $42 failure and the $3 pass are told apart, and the arrow in
+            the model line above is explained. */}
+        {span.completionLog.length > 1 && (
+          <div style={{ display: "grid", gap: 2, fontSize: "var(--fs-1)", color: "var(--text-2)" }} className="mono">
+            {span.completionLog.map((c, i) => (
+              <span key={c.at}>
+                {i + 1} · {c.model ? modelName(c.model) : "model not recorded"} · {c.usd == null ? "cost not recorded" : usd(c.usd)}
+                {c.outcome ? ` · ${c.outcome}` : ""}{c.superseded ? " · replaced" : ""}
+              </span>
             ))}
           </div>
         )}

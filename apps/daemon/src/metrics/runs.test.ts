@@ -393,6 +393,49 @@ describe("buildRunDetail", () => {
     expect(detail.spans[1].models).toEqual([]);
   });
 
+  it("logs every completion of a span with its own model, cost and outcome, marking the ones a later attempt replaced", () => {
+    // Span cost is a sum across completions and the model list is a set; neither
+    // can say that the $42 attempt was haiku and failed while the $3 attempt was
+    // opus and passed. The log is the per-completion record those two are summed
+    // from — the only way to attribute rework to the model that produced it.
+    const detail = buildRunDetail({
+      run: run(),
+      stepRuns: [stepRun({ stepRunId: "sr-1", stepTemplateId: "triage" })],
+      transitions: [
+        complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 42.48, model: "claude-haiku-4-5-20251001", status: "failed" }),
+        complete({ id: "c2", at: "2026-09-01T00:15:00.000Z", usd: 2.64, model: "claude-opus-5" }),
+        complete({ id: "c3", at: "2026-09-01T00:20:00.000Z", usd: 3.23, model: "claude-opus-5" }),
+      ],
+      events: [], runEvents: [], sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
+    });
+    expect(detail.spans[0].completionLog).toEqual([
+      { at: "2026-09-01T00:10:00.000Z", model: "claude-haiku-4-5-20251001", usd: 42.48, outcome: "failed", failureCode: null, superseded: true },
+      { at: "2026-09-01T00:15:00.000Z", model: "claude-opus-5", usd: 2.64, outcome: "succeeded", failureCode: null, superseded: true },
+      { at: "2026-09-01T00:20:00.000Z", model: "claude-opus-5", usd: 3.23, outcome: "succeeded", failureCode: null, superseded: false },
+    ]);
+    // The log and the sum are the same money.
+    expect(detail.spans[0].cost?.usd).toBeCloseTo(48.35);
+  });
+
+  it("marks a completion superseded by a later attempt of the same step in ANOTHER span", () => {
+    // A crash relaunch is a second span of the same step template. Its completion
+    // replaces the first span's, exactly as computeCost already counts it.
+    const detail = buildRunDetail({
+      run: run(),
+      stepRuns: [
+        stepRun({ stepRunId: "sr-1", stepTemplateId: "triage" }),
+        stepRun({ stepRunId: "sr-2", stepTemplateId: "triage", attempt: 2 }),
+      ],
+      transitions: [
+        complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 1, stepRunId: "sr-1" }),
+        complete({ id: "c2", at: "2026-09-01T00:20:00.000Z", usd: 1, stepRunId: "sr-2" }),
+      ],
+      events: [], runEvents: [], sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
+    });
+    expect(detail.spans[0].completionLog[0]!.superseded).toBe(true);
+    expect(detail.spans[1].completionLog[0]!.superseded).toBe(false);
+  });
+
   it("sums cache tokens into the span cost, and keeps them null when no completion carried them", () => {
     // Cache reads outnumber fresh input roughly 300 to 1 on the live data and were
     // priced into `usd` without ever being projected — the largest term in the

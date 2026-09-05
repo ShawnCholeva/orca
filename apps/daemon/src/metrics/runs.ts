@@ -435,6 +435,15 @@ export function buildSpans(input: {
   // two simultaneously-parked step runs from double-counting into one span, and
   // doing it once means every span clips the same interval set.
   const parks = mergeIntervals(parkIntervals(interventions, nowMs));
+  // The last completion per step template across the WHOLE run — the same rule
+  // computeCost uses for `supersededUsd`, so the log and the money agree.
+  const lastCompletionByStep = new Map<string, string>();
+  for (const t of transitions) {
+    if (t.transition.boundary !== "step_complete") continue;
+    const key = t.stepTemplateId ?? t.transition.workflowStepRunId ?? t.transition.id;
+    const prev = lastCompletionByStep.get(key);
+    if (prev === undefined || t.transition.createdAt > prev) lastCompletionByStep.set(key, t.transition.createdAt);
+  }
   const byStepRun = new Map<string, RunTransition[]>();
   for (const t of transitions) {
     const id = t.transition.workflowStepRunId;
@@ -485,6 +494,14 @@ export function buildSpans(input: {
       stallRescues: s.stallRescues,
       cost: spanCost(completes),
       models: [...new Set(completes.map((t) => t.transition.telemetry?.model).filter((m): m is string => m != null))],
+      completionLog: completes.map((t) => ({
+        at: t.transition.createdAt,
+        model: t.transition.telemetry?.model ?? null,
+        usd: t.transition.telemetry?.cost?.usd ?? null,
+        outcome: t.transition.telemetry?.outcome.status ?? null,
+        failureCode: t.transition.telemetry?.outcome.failure_code ?? null,
+        superseded: lastCompletionByStep.get(t.stepTemplateId ?? s.stepRunId) !== t.transition.createdAt,
+      })),
       tier,
       verifiers: sp === null ? null : {
         executable: sp.executable,
