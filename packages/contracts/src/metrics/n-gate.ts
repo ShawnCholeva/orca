@@ -79,7 +79,7 @@ export function labelForMeasurementState(
       return "We haven't established whether this is recorded anywhere.";
     case "uninstrumented":
       return opts?.lossy
-        ? "This is being measured and then thrown away. It needs a fix before it can show up here."
+        ? "This is being measured and then thrown away."
         : "This isn't being recorded yet.";
   }
 }

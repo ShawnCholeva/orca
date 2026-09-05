@@ -303,3 +303,40 @@ describe("labelForMeasurementState", () => {
       .toBe("Needs 5 runs; this has 2.");
   });
 });
+
+describe("the vocabulary speaks to the reader, not about our backlog", () => {
+  // Seven developer instructions reached the founder's screen before anyone noticed
+  // — "Emit step_launch/step_complete on the gate surrogate", "Wire the PostToolUse
+  // hook", "Stamp the pause reason into the event". They were removed from the
+  // visible layer, and then "It needs a fix before it can show up here." survived
+  // here for another day, spoken verbatim in every aria-label on the screen because
+  // MeasurementLabel builds its accessible name from these strings.
+  //
+  // That is the lesson worth guarding, not the instance: we verified the copy fixes
+  // by looking at rendered pixels, which is the one channel that cannot show an
+  // accessible name. The instrument had a blind spot shaped like its own strength.
+  //
+  // A typed absence tells the reader whether to discount a number. The ticket that
+  // closes it is ours to carry.
+  const IMPLEMENTATION_TALK =
+    /\b(emit|wire|stamp|instrument|surrogate|hook|step_launch|step_complete|PostToolUse|payload|schema|endpoint|needs a fix)\b/i;
+
+  it("returns no implementation talk for any state, in any option shape", () => {
+    const opts = [
+      undefined,
+      { needed: 3 },
+      { have: 2, need: 5, unit: "runs" },
+      { checked: 1, of: 4 },
+      { lossy: true },
+      { lossy: false },
+      { reason: "Nothing to check this total against — this run never finished." },
+    ];
+    for (const state of MEASUREMENT_STATES) {
+      for (const o of opts) {
+        const text = labelForMeasurementState(state, o);
+        if (text === null) continue;
+        expect(text, `${state} ${JSON.stringify(o)}`).not.toMatch(IMPLEMENTATION_TALK);
+      }
+    }
+  });
+});
