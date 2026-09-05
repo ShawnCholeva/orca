@@ -217,6 +217,13 @@ export const SpanCompletion = z.object({
   outcome: z.string().nullable(),
   failureCode: z.string().nullable(),
   superseded: z.boolean(),
+  /**
+   * Whether the completion gate judged this completion — it carried an evidence
+   * record. The daemon's verdict distribution counts ONLY these, so a surface that
+   * derives verdicts from the log must skip the rest or it will count completions
+   * the gate never saw as upheld.
+   */
+  gated: z.boolean(),
 }).strict();
 export type SpanCompletion = z.infer<typeof SpanCompletion>;
 

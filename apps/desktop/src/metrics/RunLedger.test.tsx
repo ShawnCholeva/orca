@@ -636,9 +636,9 @@ describe("a step redone under a second model", () => {
       spans: [span({
         completions: 3, models: ["claude-haiku-4-5-20251001", "claude-opus-5"],
         completionLog: [
-          { at: "2026-09-01T00:10:00.000Z", model: "claude-haiku-4-5-20251001", usd: 42.48, outcome: "failed", failureCode: "evidence_veto", superseded: true },
-          { at: "2026-09-01T00:15:00.000Z", model: "claude-opus-5", usd: 2.64, outcome: "succeeded", failureCode: null, superseded: true },
-          { at: "2026-09-01T00:20:00.000Z", model: "claude-opus-5", usd: 3.23, outcome: "succeeded", failureCode: null, superseded: false },
+          { at: "2026-09-01T00:10:00.000Z", model: "claude-haiku-4-5-20251001", usd: 42.48, outcome: "failed", failureCode: "evidence_veto", superseded: true, gated: true },
+          { at: "2026-09-01T00:15:00.000Z", model: "claude-opus-5", usd: 2.64, outcome: "succeeded", failureCode: null, superseded: true, gated: true },
+          { at: "2026-09-01T00:20:00.000Z", model: "claude-opus-5", usd: 3.23, outcome: "succeeded", failureCode: null, superseded: false, gated: true },
         ],
       })],
     })} onBack={() => {}} />);
@@ -650,7 +650,7 @@ describe("a step redone under a second model", () => {
 
   it("does not list a single completion — the row already says everything about it", () => {
     render(<RunDetailPanel detail={detail({
-      spans: [span({ completionLog: [{ at: "2026-09-01T00:10:00.000Z", model: "claude-opus-5", usd: 1.52, outcome: "succeeded", failureCode: null, superseded: false }] })],
+      spans: [span({ completionLog: [{ at: "2026-09-01T00:10:00.000Z", model: "claude-opus-5", usd: 1.52, outcome: "succeeded", failureCode: null, superseded: false, gated: true }] })],
     })} onBack={() => {}} />);
     expect(document.body.textContent).not.toContain("1 · claude-opus-5");
   });

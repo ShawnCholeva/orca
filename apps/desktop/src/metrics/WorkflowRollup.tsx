@@ -205,6 +205,30 @@ export function aggregate({ runs, details, gates = null, gatesCoverEveryVersion 
       };
     });
 
+  // What the completion gate decided, from the same rows as the matrix. The mapping
+  // is the daemon's own (metrics/gate-metrics.ts, buildCompletionGateMetrics),
+  // copied rather than imported because the desktop cannot depend on the daemon:
+  // a reviewer veto is refute_veto; an evidence veto is escalated when the outcome
+  // says so and evidence_veto otherwise; anything else the gate judged is upheld.
+  // Gate spans and completions the gate never saw are not verdicts.
+  //
+  // This replaced the template endpoint's figure, which was scoped by period and
+  // by "latest or all versions" and so never matched the runs on this page — the
+  // two panels agreed on 17 once, from different sets. Derived here, per version
+  // and per workflow, the verdicts and the matrix are one population by
+  // construction.
+  const verdicts = { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 };
+  for (const s of spans) {
+    if (s.kind === "gate") continue;
+    for (const c of s.completionLog) {
+      if (!c.gated) continue;
+      if (c.failureCode === "refute_veto") verdicts.refute_veto += 1;
+      else if (c.failureCode === "evidence_veto") {
+        if (c.outcome === "escalated") verdicts.escalated += 1; else verdicts.evidence_veto += 1;
+      } else verdicts.upheld += 1;
+    }
+  }
+
   // What the policy stopped, by the reason it gave. A decision can carry several
   // reasons and each is counted; allows are not stops and are not here.
   const stopsByReason = new Map<string, { denied: number; approvals: number }>();
@@ -270,7 +294,7 @@ export function aggregate({ runs, details, gates = null, gatesCoverEveryVersion 
   }
 
   return {
-    runs, ended, details, byStep, byModel, parksByKind, tokens: tokenSums, byVersion, stops, stopsByReason, gates, gatesCoverEveryVersion,
+    runs, ended, details, byStep, byModel, parksByKind, tokens: tokenSums, byVersion, verdicts, stops, stopsByReason, gates, gatesCoverEveryVersion,
     usd: sum((r) => r.cost.usd),
     failedUsd: sum((r) => r.cost.failedUsd),
     supersededUsd: sum((r) => r.cost.supersededUsd),
@@ -538,57 +562,47 @@ export function Dashboard({ agg }: { agg: Agg }) {
           return (
             <>
               <Panel title="What the gates decided" span={4}>
-                {agg.gates === null
-                  ? <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>Gate figures aren&apos;t available for this window.</span>
-                  : (
-                    <>
-                      <Donut
-                        caption="completions"
-                        parts={[
-                          { label: "upheld", value: agg.gates.completionGate.verdictDist.upheld, display: String(agg.gates.completionGate.verdictDist.upheld), tone: TONE.working },
-                          { label: "sent back — no evidence", value: agg.gates.completionGate.verdictDist.evidence_veto, display: String(agg.gates.completionGate.verdictDist.evidence_veto), tone: TONE.stopped },
-                          { label: "sent back — reviewer", value: agg.gates.completionGate.verdictDist.refute_veto, display: String(agg.gates.completionGate.verdictDist.refute_veto), tone: "var(--warn)" },
-                          { label: "escalated", value: agg.gates.completionGate.verdictDist.escalated, display: String(agg.gates.completionGate.verdictDist.escalated), tone: TONE.live },
-                        ]}
-                      />
-                      {/* These panels are adjacent and nearly describe the same
-                          population — but not quite, and the totals agreeing is a
-                          coincidence rather than a check. The matrix counts every
-                          completed span in the window the run list returns; this panel
-                          counts verdicts from the template endpoint's own 30-day period.
-                          Three completed spans fall outside that period, so the two 17s
-                          are different sets with the same size. The first draft of this
-                          line claimed they were the same completions — a caption written
-                          to prevent a false inference, which was itself the false one,
-                          and undetectable precisely because the numbers matched. */}
+                {/* From the runs on this page — the same rows as the matrix beside it,
+                    per workflow and per version, so the two panels are one population
+                    by construction and no caption has to apologise for a window. */}
+                <Donut
+                  caption="completions"
+                  parts={[
+                    { label: "upheld", value: agg.verdicts.upheld, display: String(agg.verdicts.upheld), tone: TONE.working },
+                    { label: "sent back — no evidence", value: agg.verdicts.evidence_veto, display: String(agg.verdicts.evidence_veto), tone: TONE.stopped },
+                    { label: "sent back — reviewer", value: agg.verdicts.refute_veto, display: String(agg.verdicts.refute_veto), tone: "var(--warn)" },
+                    { label: "escalated", value: agg.verdicts.escalated, display: String(agg.verdicts.escalated), tone: TONE.live },
+                  ]}
+                />
+                <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+                  Every judged completion of these runs, one verdict each. A step that was sent back and
+                  then passed appears twice — once per completion — where the matrix counts it once.
+                </p>
+                {agg.gates !== null && (agg.gates.gates.length > 0 || agg.gates.splitters.length > 0) && (
+                  <div style={{ paddingTop: "var(--sp-2)", borderTop: "1px solid var(--hairline)", display: "grid", gap: "var(--sp-1)" }}>
+                    {/* The gate NODES and the splitter still come from the template's
+                        own records, which are scoped by period and by latest-or-all
+                        versions — so these two lines say what they cover. A gate node's
+                        performance is the one thing this window cannot show (they recorded
+                        nothing), and a deterministic splitter has no choice to score. */}
+                    {agg.gates.gates.length > 0 && (
                       <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
-                        Every step completion is judged here. Counted over the last 30 days
-                        {agg.gatesCoverEveryVersion ? " and across every version of this workflow" : ""}, so this is a
-                        different window from the matrix beside it — the two totals are not the same set.
+                        {agg.gates.gates.map((g) => g.name).join(" and ")} decided{" "}
+                        {agg.gates.gates.reduce((a, g) => a + g.sampleSize, 0)} times between them and recorded none of it.
                       </p>
-                      <div style={{ paddingTop: "var(--sp-2)", borderTop: "1px solid var(--hairline)", display: "grid", gap: "var(--sp-1)" }}>
-                        {/* The gate NODES and the splitter, as lines rather than panels.
-                            A gate node's performance is the one thing this window cannot
-                            show — they recorded nothing — so a performance panel for them
-                            would be a panel about our own blind spot. And a deterministic
-                            splitter forwards an upstream field: there is no routing choice
-                            to score, which is an absence of a decision rather than a gap
-                            in measurement. */}
-                        {agg.gates.gates.length > 0 && (
-                          <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
-                            {agg.gates.gates.map((g) => g.name).join(" and ")} decided{" "}
-                            {agg.gates.gates.reduce((a, g) => a + g.sampleSize, 0)} times between them and recorded none of it.
-                          </p>
-                        )}
-                        {agg.gates.splitters.map((sp) => (
-                          <p key={sp.nodeId} style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
-                            {sp.name} routes {sp.deterministic ? "from an upstream field, so there is no choice to score" : "by model, unscored"} ·{" "}
-                            {sp.decisions} {sp.decisions === 1 ? "decision" : "decisions"}
-                          </p>
-                        ))}
-                      </div>
-                    </>
-                  )}
+                    )}
+                    {agg.gates.splitters.map((sp) => (
+                      <p key={sp.nodeId} style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+                        {sp.name} routes {sp.deterministic ? "from an upstream field, so there is no choice to score" : "by model, unscored"} ·{" "}
+                        {sp.decisions} {sp.decisions === 1 ? "decision" : "decisions"}
+                      </p>
+                    ))}
+                    <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+                      Those two lines are from the workflow&apos;s own records over the last 30 days
+                      {agg.gatesCoverEveryVersion ? " and across every version" : ""}, not from the runs above.
+                    </p>
+                  </div>
+                )}
               </Panel>
 
               <Panel title="Which checks are wired, by step type" span={5}>

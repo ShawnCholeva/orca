@@ -348,7 +348,7 @@ describe("the harness's own choices reach the surface", () => {
     // with one cost. Summed by span the $45 would have to go to one model or be
     // named as mixed; summed by completion each dollar goes where it was spent.
     const c = (model: string | null, usd: number, outcome = "succeeded", superseded = false) =>
-      ({ at: "2026-09-01T00:10:00.000Z", model, usd, outcome, failureCode: null, superseded });
+      ({ at: "2026-09-01T00:10:00.000Z", model, usd, outcome, failureCode: null, superseded, gated: true });
     const a = aggregate({
       runs: [run({ terminationCause: "completed" })],
       details: [{ run: run(), spans: [
@@ -372,7 +372,7 @@ describe("the harness's own choices reach the surface", () => {
   it("names a completion with no recorded model as such, never as free", () => {
     const a = aggregate({
       runs: [run({ terminationCause: "completed" })],
-      details: [{ run: run(), spans: [span({ completionLog: [{ at: "2026-09-01T00:10:00.000Z", model: null, usd: 7, outcome: "succeeded", failureCode: null, superseded: false }] })], interventions: [], toolDecisions: [] }],
+      details: [{ run: run(), spans: [span({ completionLog: [{ at: "2026-09-01T00:10:00.000Z", model: null, usd: 7, outcome: "succeeded", failureCode: null, superseded: false, gated: true }] })], interventions: [], toolDecisions: [] }],
     });
     expect(a.byModel.get("model not recorded")).toEqual({ usd: 7, attempts: 1, failed: 0, replaced: 0 });
   });
@@ -561,7 +561,7 @@ describe("choosing the version to inspect", () => {
     // Only the fields the panel reads; the rest of the template detail is irrelevant here.
     const gates = {
       completionGate: { verdictDist: { upheld: 1, evidence_veto: 0, refute_veto: 0, escalated: 0 } },
-      gates: [], splitters: [],
+      gates: [{ name: "Critique", sampleSize: 3 }], splitters: [],
     } as unknown as TemplateMetricsDetail;
     const t = render(<Dashboard agg={aggregate({
       runs: [run({ terminationCause: "completed" })], details: [], gates, gatesCoverEveryVersion: true,
@@ -571,5 +571,53 @@ describe("choosing the version to inspect", () => {
       runs: [run({ terminationCause: "completed" })], details: [], gates,
     })} />).container.textContent ?? "";
     expect(without).not.toContain("across every version");
+  });
+});
+
+describe("what the gates decided, from the same rows as everything else", () => {
+  it("maps each gated completion to its verdict exactly as the daemon does, and skips the ungated", () => {
+    // The mapping is copied from the daemon's gate-metrics module: a reviewer veto is
+    // "sent back — reviewer"; an evidence veto is "escalated" when the outcome says so
+    // and "sent back — no evidence" otherwise; anything else the gate saw is upheld.
+    // A completion the gate never judged (no evidence record) is not a verdict.
+    const c = (outcome: string, failureCode: string | null, gated = true) =>
+      ({ at: "2026-09-01T00:10:00.000Z", model: null, usd: 1, outcome, failureCode, superseded: false, gated });
+    const a = aggregate({
+      runs: [run({ terminationCause: "completed" }), run({ runId: "live", terminationCause: "running" })],
+      details: [
+        { run: run(), interventions: [], toolDecisions: [], spans: [
+          span({ workflowStepRunId: "s1", completionLog: [c("succeeded", null), c("failed", "refute_veto")] }),
+          span({ workflowStepRunId: "s2", completionLog: [c("failed", "evidence_veto"), c("escalated", "evidence_veto")] }),
+          span({ workflowStepRunId: "s3", completionLog: [c("succeeded", null, false)] }),
+          span({ workflowStepRunId: "s4", kind: "gate", completionLog: [c("succeeded", null)] }),
+        ] },
+        { run: run({ runId: "live" }), interventions: [], toolDecisions: [], spans: [
+          span({ workflowStepRunId: "s9", completionLog: [c("succeeded", null)] }),
+        ] },
+      ],
+    });
+    expect(a.verdicts).toEqual({ upheld: 1, refute_veto: 1, evidence_veto: 1, escalated: 1 });
+    const t = render(<Dashboard agg={a} />).container.textContent ?? "";
+    expect(t).toContain("What the gates decided");
+    expect(t).toContain("upheld");
+    expect(t).toContain("sent back — reviewer");
+    // No longer a different window from the matrix; the caption must not claim one.
+    expect(t).not.toContain("different window");
+    expect(t).not.toContain("not the same set");
+  });
+
+  it("draws the ring without the template endpoint, and adds the gate-node lines only with it", () => {
+    const base = { runs: [run({ terminationCause: "completed" })], details: [] as RunDetail[] };
+    const without = render(<Dashboard agg={aggregate({ ...base, gates: null })} />).container.textContent ?? "";
+    expect(without).toContain("What the gates decided");
+    expect(without).not.toContain("aren't available");
+    const gates = {
+      completionGate: { verdictDist: { upheld: 99, evidence_veto: 0, refute_veto: 0, escalated: 0 } },
+      gates: [{ name: "Critique", sampleSize: 3 }], splitters: [],
+    } as unknown as TemplateMetricsDetail;
+    const withGates = render(<Dashboard agg={aggregate({ ...base, gates })} />).container.textContent ?? "";
+    expect(withGates).toContain("Critique decided 3 times");
+    // The endpoint's own verdict count is not what the ring shows any more.
+    expect(withGates).not.toContain("99");
   });
 });

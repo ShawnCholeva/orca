@@ -501,6 +501,7 @@ export function buildSpans(input: {
         outcome: t.transition.telemetry?.outcome.status ?? null,
         failureCode: t.transition.telemetry?.outcome.failure_code ?? null,
         superseded: lastCompletionByStep.get(t.stepTemplateId ?? s.stepRunId) !== t.transition.createdAt,
+        gated: t.transition.evidence != null,
       })),
       tier,
       verifiers: sp === null ? null : {

@@ -402,16 +402,18 @@ describe("buildRunDetail", () => {
       run: run(),
       stepRuns: [stepRun({ stepRunId: "sr-1", stepTemplateId: "triage" })],
       transitions: [
-        complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 42.48, model: "claude-haiku-4-5-20251001", status: "failed" }),
+        complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 42.48, model: "claude-haiku-4-5-20251001", status: "failed",
+                   evidence: { sensorsRun: [], verdict: "failed", untestedRegions: [], residualRisk: [], oracleAdequacy: { sufficient: false, gaps: [] } } }),
         complete({ id: "c2", at: "2026-09-01T00:15:00.000Z", usd: 2.64, model: "claude-opus-5" }),
         complete({ id: "c3", at: "2026-09-01T00:20:00.000Z", usd: 3.23, model: "claude-opus-5" }),
       ],
       events: [], runEvents: [], sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
     });
     expect(detail.spans[0].completionLog).toEqual([
-      { at: "2026-09-01T00:10:00.000Z", model: "claude-haiku-4-5-20251001", usd: 42.48, outcome: "failed", failureCode: null, superseded: true },
-      { at: "2026-09-01T00:15:00.000Z", model: "claude-opus-5", usd: 2.64, outcome: "succeeded", failureCode: null, superseded: true },
-      { at: "2026-09-01T00:20:00.000Z", model: "claude-opus-5", usd: 3.23, outcome: "succeeded", failureCode: null, superseded: false },
+      // Only the first carried an evidence record, so only the first was gated.
+      { at: "2026-09-01T00:10:00.000Z", model: "claude-haiku-4-5-20251001", usd: 42.48, outcome: "failed", failureCode: null, superseded: true, gated: true },
+      { at: "2026-09-01T00:15:00.000Z", model: "claude-opus-5", usd: 2.64, outcome: "succeeded", failureCode: null, superseded: true, gated: false },
+      { at: "2026-09-01T00:20:00.000Z", model: "claude-opus-5", usd: 3.23, outcome: "succeeded", failureCode: null, superseded: false, gated: false },
     ]);
     // The log and the sum are the same money.
     expect(detail.spans[0].cost?.usd).toBeCloseTo(48.35);
