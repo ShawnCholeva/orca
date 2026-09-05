@@ -3,6 +3,7 @@ import type { RunDetail, RunSummary, TemplateMetricsDetail } from "@orca/contrac
 import { getRunDetail, getRunSummaries, getTemplateMetricsDetail } from "../api";
 import { formatDuration } from "./interval-bar";
 import { PROMPT_KIND, modelName, terminatedRuns, tokens } from "./RunLedger";
+import { WorkflowDropdown, type WorkflowChoice } from "./StepPerformance";
 import {
   BarList, Big, CountRow, CoverageMatrix, Donut, Panel, SectionHeading, StackedRows, gridStyle,
   type BarItem, type CoverageRow, type StackedRow,
@@ -830,31 +831,69 @@ export function Dashboard({ agg }: { agg: Agg }) {
   );
 }
 
+/**
+ * The workflows that have runs, most recently run first, each with its run count.
+ * The dashboard describes ONE workflow at a time: the gate panel is keyed to a
+ * template, and every other panel pools runs that are only comparable within one.
+ * There is deliberately no "all workflows" choice for that reason.
+ */
+export function workflowsOf(runs: RunSummary[]): WorkflowChoice[] {
+  const byTemplate = new Map<string, { name: string; runs: number; latest: string }>();
+  for (const r of runs) {
+    const e = byTemplate.get(r.templateId) ?? { name: r.templateName, runs: 0, latest: "" };
+    e.runs += 1;
+    if (r.startedAt > e.latest) { e.latest = r.startedAt; e.name = r.templateName; }
+    byTemplate.set(r.templateId, e);
+  }
+  return [...byTemplate.entries()]
+    .sort((a, b) => b[1].latest.localeCompare(a[1].latest))
+    .map(([templateId, e]) => ({ templateId, name: e.name, runs: e.runs }));
+}
+
 export function WorkflowRollup() {
-  const [data, setData] = useState<Loaded | null>(null);
+  const [loaded, setLoaded] = useState<{ runs: RunSummary[]; details: RunDetail[] } | null>(null);
   const [failed, setFailed] = useState(false);
+  const [templateId, setTemplateId] = useState<string | null>(null);
+  const [gates, setGates] = useState<TemplateMetricsDetail | null>(null);
 
   useEffect(() => {
     let live = true;
     getRunSummaries()
       .then(async (runs) => {
         const details = await Promise.all(runs.map((r) => getRunDetail(r.runId).catch(() => null)));
-        // One call per DISTINCT template, and only when the window holds exactly one —
-        // see the note on `Loaded.gates`. Fetching the first of several would silently
-        // caption a cross-run page with one template's gate figures.
-        const templates = [...new Set(runs.map((r) => r.templateId))];
-        const gates = templates.length === 1
-          ? await getTemplateMetricsDetail(templates[0]!, "30d", "all").catch(() => null)
-          : null;
-        if (live) setData({ runs, details: details.filter((d): d is RunDetail => d !== null), gates });
+        if (!live) return;
+        setLoaded({ runs, details: details.filter((d): d is RunDetail => d !== null) });
+        setTemplateId((cur) => cur ?? workflowsOf(runs)[0]?.templateId ?? null);
       })
       .catch(() => { if (live) setFailed(true); });
     return () => { live = false; };
   }, []);
 
-  if (failed) return <p style={{ fontSize: "var(--fs-3)", color: "var(--err)" }}>Couldn&apos;t load runs.</p>;
-  if (data === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>Loading…</p>;
-  if (data.runs.length === 0) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>No workflow has run yet.</p>;
+  // Gate figures are fetched for the CHOSEN template — never the first of several,
+  // which would caption one workflow's page with another's gate verdicts.
+  useEffect(() => {
+    setGates(null);
+    if (templateId === null) return;
+    let live = true;
+    getTemplateMetricsDetail(templateId, "30d", "all")
+      .then((g) => { if (live) setGates(g); })
+      .catch(() => { if (live) setGates(null); });
+    return () => { live = false; };
+  }, [templateId]);
 
-  return <Dashboard agg={aggregate(data)} />;
+  if (failed) return <p style={{ fontSize: "var(--fs-3)", color: "var(--err)" }}>Couldn&apos;t load runs.</p>;
+  if (loaded === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>Loading…</p>;
+  if (loaded.runs.length === 0) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>No workflow has run yet.</p>;
+
+  const choices = workflowsOf(loaded.runs);
+  const chosen = choices.find((c) => c.templateId === templateId) ?? choices[0]!;
+  const runs = loaded.runs.filter((r) => r.templateId === chosen.templateId);
+  const details = loaded.details.filter((d) => d.run.templateId === chosen.templateId);
+
+  return (
+    <div style={{ display: "grid", gap: "var(--sp-4)", alignContent: "start" }}>
+      <WorkflowDropdown summaries={choices} value={chosen.templateId} onChange={setTemplateId} />
+      <Dashboard agg={aggregate({ runs, details, gates })} />
+    </div>
+  );
 }

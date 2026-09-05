@@ -87,7 +87,10 @@ function SamplePeek({ transitionIds, onOpenGoal }: { transitionIds: string[]; on
 
 const GRID = "34px minmax(0,1fr) 88px 64px 22px";
 
-export function WorkflowDropdown({ summaries, value, onChange }: { summaries: TemplateMetricsSummary[]; value: string; onChange: (id: string) => void }) {
+/** The minimum a row needs. TemplateMetricsSummary satisfies it; so does a row built from runs. */
+export interface WorkflowChoice { templateId: string; name: string; runs: number }
+
+export function WorkflowDropdown({ summaries, value, onChange }: { summaries: WorkflowChoice[]; value: string; onChange: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const cur = summaries.find((w) => w.templateId === value) ?? summaries[0];

@@ -1,10 +1,11 @@
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
-import { Dashboard, aggregate } from "./WorkflowRollup";
+import { Dashboard, WorkflowRollup, aggregate, workflowsOf } from "./WorkflowRollup";
+import * as api from "../api";
 import { Donut } from "./dashboard-panels";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const H = 3_600_000;
 
 function run(over: Partial<RunSummary> = {}): RunSummary {
@@ -478,5 +479,39 @@ describe("the harness's own choices reach the surface", () => {
     // The panel's own prose names "a credential file" as a category; the live run's
     // REASON is the specific string, and that is what must stay off the surface.
     expect(t).not.toContain("secret/credential");
+  });
+});
+
+describe("choosing the workflow to inspect", () => {
+  const two = () => [
+    run({ runId: "old-a", templateId: "t-a", templateName: "Adaptive Delivery", startedAt: "2026-08-01T00:00:00.000Z" }),
+    run({ runId: "b1", templateId: "t-b", templateName: "Bug Triage", startedAt: "2026-09-01T00:00:00.000Z" }),
+    run({ runId: "a2", templateId: "t-a", templateName: "Adaptive Delivery", startedAt: "2026-08-15T00:00:00.000Z" }),
+  ];
+
+  it("lists each workflow that has runs, most recently run first, with its run count", () => {
+    expect(workflowsOf(two())).toEqual([
+      { templateId: "t-b", name: "Bug Triage", runs: 1 },
+      { templateId: "t-a", name: "Adaptive Delivery", runs: 2 },
+    ]);
+  });
+
+  it("opens on the most recently run workflow and switches every panel when another is chosen", async () => {
+    vi.spyOn(api, "getRunSummaries").mockResolvedValue(two());
+    vi.spyOn(api, "getRunDetail").mockImplementation(async (id) => ({
+      run: two().find((r) => r.runId === id)!, spans: [], interventions: [], toolDecisions: [],
+    }));
+    const gates = vi.spyOn(api, "getTemplateMetricsDetail").mockRejectedValue(new Error("no template metrics"));
+    render(<WorkflowRollup />);
+    await waitFor(() => expect(document.body.textContent).toContain("spent across 1 run"));
+    // The gate fetch is keyed to the CHOSEN template, never to the first of several.
+    expect(gates).toHaveBeenCalledWith("t-b", "30d", "all");
+
+    fireEvent.click(screen.getByText("Bug Triage"));
+    fireEvent.click(screen.getByText("Adaptive Delivery"));
+    await waitFor(() => expect(document.body.textContent).toContain("spent across 2 runs"));
+    expect(gates).toHaveBeenCalledWith("t-a", "30d", "all");
+    // The other workflow's run is not in any figure once it is deselected.
+    expect(document.body.textContent).not.toContain("spent across 3 runs");
   });
 });

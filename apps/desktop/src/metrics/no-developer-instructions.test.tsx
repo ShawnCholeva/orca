@@ -181,6 +181,7 @@ const NOT_A_PROSE_SURFACE: Record<string, string> = {
   markerEarnsItsPlace: "a predicate",
   tokens: "formats a token count",
   PROMPT_KIND: "a lookup table of pause kinds",
+  workflowsOf: "groups runs by template",
   modelName: "strips a release date from a model id",
 
   // Composers: they mount the surfaces above, each of which is asserted directly.
