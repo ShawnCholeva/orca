@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { RunDetail, RunSummary, TemplateMetricsDetail } from "@orca/contracts";
+import type { MetricPeriod, RunDetail, RunSummary, TemplateMetricsDetail } from "@orca/contracts";
 import { getRunDetail, getRunSummaries, getTemplateMetricsDetail } from "../api";
 import { formatDuration } from "./interval-bar";
 import { PROMPT_KIND, modelName, terminatedRuns, tokens } from "./RunLedger";
@@ -82,6 +82,8 @@ export interface Loaded {
    * all-version gate figures is the two-populations defect in a new place.
    */
   gatesCoverEveryVersion?: boolean;
+  /** The period the gate-node lines were fetched for, so the caption can name it. */
+  gatesPeriod?: MetricPeriod;
 }
 interface StepAgg {
   usd: number; elapsedMs: number; restarts: number; spans: number; runIds: Set<string>;
@@ -112,7 +114,7 @@ interface StepAgg {
   gateSpans: number; gatesUnrecorded: number; lastGateAt: string | null;
 }
 
-export function aggregate({ runs, details, gates = null, gatesCoverEveryVersion = false }: Loaded) {
+export function aggregate({ runs, details, gates = null, gatesCoverEveryVersion = false, gatesPeriod = "30d" }: Loaded) {
   // Sums are computed over runs that ENDED. A live run's elapsed and parked clocks are
   // still accruing, so including it makes a total that changes on reload with no work
   // having happened — and one open run currently carries 62 of the window's 113 hours,
@@ -294,7 +296,7 @@ export function aggregate({ runs, details, gates = null, gatesCoverEveryVersion 
   }
 
   return {
-    runs, ended, details, byStep, byModel, parksByKind, tokens: tokenSums, byVersion, verdicts, stops, stopsByReason, gates, gatesCoverEveryVersion,
+    runs, ended, details, byStep, byModel, parksByKind, tokens: tokenSums, byVersion, verdicts, stops, stopsByReason, gates, gatesCoverEveryVersion, gatesPeriod,
     usd: sum((r) => r.cost.usd),
     failedUsd: sum((r) => r.cost.failedUsd),
     supersededUsd: sum((r) => r.cost.supersededUsd),
@@ -598,7 +600,7 @@ export function Dashboard({ agg }: { agg: Agg }) {
                       </p>
                     ))}
                     <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
-                      Those two lines are from the workflow&apos;s own records over the last 30 days
+                      Those two lines are from the workflow&apos;s own records over the {PERIOD_WORDS[agg.gatesPeriod]}
                       {agg.gatesCoverEveryVersion ? " and across every version" : ""}, not from the runs above.
                     </p>
                   </div>
@@ -872,6 +874,46 @@ export function workflowsOf(runs: RunSummary[]): WorkflowChoice[] {
     .map(([templateId, e]) => ({ templateId, name: e.name, runs: e.runs }));
 }
 
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
+
+/**
+ * The windows the reader can choose. A run is inside a window when it STARTED
+ * inside it — a run that began before the window and is still running belongs to
+ * the earlier window, where its start is a fact; the alternative, "touched the
+ * window", would make a stuck run appear in every window forever.
+ */
+export const RANGES = [
+  { key: "1h", label: "Last 1 hour", ms: HOUR },
+  { key: "8h", label: "Last 8 hours", ms: 8 * HOUR },
+  { key: "12h", label: "Last 12 hours", ms: 12 * HOUR },
+  { key: "24h", label: "Last 24 hours", ms: DAY },
+  { key: "3d", label: "Last 3 days", ms: 3 * DAY },
+  { key: "7d", label: "Last 7 days", ms: 7 * DAY },
+  { key: "14d", label: "Last 14 days", ms: 14 * DAY },
+  { key: "1mo", label: "Last 1 month", ms: 30 * DAY },
+] as const;
+export type RangeKey = (typeof RANGES)[number]["key"];
+const DEFAULT_RANGE: RangeKey = "24h";
+
+export function withinWindow(runs: RunSummary[], key: string, nowMs: number): RunSummary[] {
+  const range = RANGES.find((r) => r.key === key) ?? RANGES[3];
+  const from = nowMs - range.ms;
+  return runs.filter((r) => Date.parse(r.startedAt) >= from);
+}
+
+/**
+ * The template endpoint knows three periods. The smallest that CONTAINS the
+ * chosen window keeps the gate-node lines from describing less than the page;
+ * the caption names the period it actually got.
+ */
+export function gatePeriodFor(key: string): MetricPeriod {
+  const ms = (RANGES.find((r) => r.key === key) ?? RANGES[3]).ms;
+  return ms <= DAY ? "24h" : ms <= 7 * DAY ? "7d" : "30d";
+}
+
+const PERIOD_WORDS: Record<MetricPeriod, string> = { "24h": "last 24 hours", "7d": "last 7 days", "30d": "last 30 days" };
+
 /** The versions of one workflow that have runs, newest version first, with run counts. */
 export function versionsOf(runs: RunSummary[]): { version: number; runs: number }[] {
   const counts = new Map<number, number>();
@@ -893,6 +935,7 @@ export function WorkflowRollup() {
   // A version number as a string, or "all". Null until the runs arrive, and reset
   // to the chosen workflow's most recent run whenever the workflow changes.
   const [version, setVersion] = useState<string | null>(null);
+  const [range, setRange] = useState<RangeKey>(DEFAULT_RANGE);
   const [gates, setGates] = useState<TemplateMetricsDetail | null>(null);
 
   useEffect(() => {
@@ -908,9 +951,12 @@ export function WorkflowRollup() {
     return () => { live = false; };
   }, []);
 
-  const choices = loaded === null ? [] : workflowsOf(loaded.runs);
+  // The window is the OUTERMOST filter: it decides which runs exist, and the
+  // workflow and version choosers list what is inside it, with counts to match.
+  const windowed = loaded === null ? [] : withinWindow(loaded.runs, range, Date.now());
+  const choices = workflowsOf(windowed);
   const chosen = choices.find((c) => c.templateId === templateId) ?? choices[0] ?? null;
-  const workflowRuns = loaded === null || chosen === null ? [] : loaded.runs.filter((r) => r.templateId === chosen.templateId);
+  const workflowRuns = chosen === null ? [] : windowed.filter((r) => r.templateId === chosen.templateId);
   const versions = versionsOf(workflowRuns);
   const newest = versions[0]?.version ?? null;
   const defaultVersion = latestRunVersion(workflowRuns);
@@ -921,6 +967,7 @@ export function WorkflowRollup() {
   // the exact scope; anything else widens to every version and is captioned so.
   const gateScope = chosenVersion !== ALL_VERSIONS && Number(chosenVersion) === newest ? "latest" : "all";
   const gatesCoverEveryVersion = chosenVersion !== ALL_VERSIONS && gateScope === "all";
+  const gatesPeriod = gatePeriodFor(range);
 
   // Gate figures are fetched for the CHOSEN template — never the first of several,
   // which would caption one workflow's page with another's gate verdicts.
@@ -929,15 +976,39 @@ export function WorkflowRollup() {
     setGates(null);
     if (gateTemplate === null) return;
     let live = true;
-    getTemplateMetricsDetail(gateTemplate, "30d", gateScope)
+    getTemplateMetricsDetail(gateTemplate, gatesPeriod, gateScope)
       .then((g) => { if (live) setGates(g); })
       .catch(() => { if (live) setGates(null); });
     return () => { live = false; };
-  }, [gateTemplate, gateScope]);
+  }, [gateTemplate, gateScope, gatesPeriod]);
 
   if (failed) return <p style={{ fontSize: "var(--fs-3)", color: "var(--err)" }}>Couldn&apos;t load runs.</p>;
   if (loaded === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>Loading…</p>;
-  if (loaded.runs.length === 0 || chosen === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>No workflow has run yet.</p>;
+  if (loaded.runs.length === 0) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>No workflow has run yet.</p>;
+
+  // Each range shows how many runs it would hold, so the reader can see where the
+  // runs are before choosing — and an empty window is never a surprise.
+  const rangeChoices: WorkflowChoice[] = RANGES.map((r) => ({
+    templateId: r.key, name: r.label, runs: withinWindow(loaded.runs, r.key, Date.now()).length,
+  }));
+  const rangeDropdown = (
+    <div style={{ marginLeft: "auto" }}>
+      <WorkflowDropdown summaries={rangeChoices} value={range} onChange={(k) => setRange(k as RangeKey)} />
+    </div>
+  );
+
+  // Empty window: say so and keep the chooser, so the reader can widen it. Hiding
+  // the control that caused the emptiness would leave them with no way out.
+  if (chosen === null) {
+    return (
+      <div style={{ display: "grid", gap: "var(--sp-4)", alignContent: "start" }}>
+        <div style={{ display: "flex", gap: "var(--sp-3)", alignItems: "center", flexWrap: "wrap" }}>{rangeDropdown}</div>
+        <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>
+          No runs started in the {RANGES.find((r) => r.key === range)!.label.replace(/^Last /, "last ")}.
+        </p>
+      </div>
+    );
+  }
 
   const runs = chosenVersion === ALL_VERSIONS ? workflowRuns : workflowRuns.filter((r) => String(r.templateVersion) === chosenVersion);
   const runIds = new Set(runs.map((r) => r.runId));
@@ -953,8 +1024,9 @@ export function WorkflowRollup() {
         <WorkflowDropdown summaries={choices} value={chosen.templateId}
           onChange={(id) => { setTemplateId(id); setVersion(null); }} />
         <WorkflowDropdown summaries={versionChoices} value={chosenVersion} onChange={setVersion} />
+        {rangeDropdown}
       </div>
-      <Dashboard agg={aggregate({ runs, details, gates, gatesCoverEveryVersion })} />
+      <Dashboard agg={aggregate({ runs, details, gates, gatesCoverEveryVersion, gatesPeriod })} />
     </div>
   );
 }

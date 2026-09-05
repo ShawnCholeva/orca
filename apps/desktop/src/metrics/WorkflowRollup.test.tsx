@@ -1,11 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Intervention, RunDetail, RunSummary, RunTraceSpan, TemplateMetricsDetail } from "@orca/contracts";
-import { Dashboard, WorkflowRollup, aggregate, versionsOf, workflowsOf } from "./WorkflowRollup";
+import { Dashboard, RANGES, WorkflowRollup, aggregate, gatePeriodFor, versionsOf, withinWindow, workflowsOf } from "./WorkflowRollup";
 import * as api from "../api";
 import { Donut } from "./dashboard-panels";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+// Real timers restored here as well as in the tests: a failing assertion would
+// otherwise leave the next test on a faked clock, and useFakeTimers does not move
+// an already-faked clock, so the leak would be silent.
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 const H = 3_600_000;
 
 function run(over: Partial<RunSummary> = {}): RunSummary {
@@ -483,10 +486,11 @@ describe("the harness's own choices reach the surface", () => {
 });
 
 describe("choosing the workflow to inspect", () => {
+  // All inside the default 24-hour window of the faked clock.
   const two = () => [
-    run({ runId: "old-a", templateId: "t-a", templateName: "Adaptive Delivery", startedAt: "2026-08-01T00:00:00.000Z" }),
-    run({ runId: "b1", templateId: "t-b", templateName: "Bug Triage", startedAt: "2026-09-01T00:00:00.000Z" }),
-    run({ runId: "a2", templateId: "t-a", templateName: "Adaptive Delivery", startedAt: "2026-08-15T00:00:00.000Z" }),
+    run({ runId: "old-a", templateId: "t-a", templateName: "Adaptive Delivery", startedAt: "2026-09-01T00:00:00.000Z" }),
+    run({ runId: "b1", templateId: "t-b", templateName: "Bug Triage", startedAt: "2026-09-01T10:00:00.000Z" }),
+    run({ runId: "a2", templateId: "t-a", templateName: "Adaptive Delivery", startedAt: "2026-09-01T05:00:00.000Z" }),
   ];
 
   it("lists each workflow that has runs, most recently run first, with its run count", () => {
@@ -497,6 +501,7 @@ describe("choosing the workflow to inspect", () => {
   });
 
   it("opens on the most recently run workflow and switches every panel when another is chosen", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.parse("2026-09-01T12:00:00.000Z") });
     vi.spyOn(api, "getRunSummaries").mockResolvedValue(two());
     vi.spyOn(api, "getRunDetail").mockImplementation(async (id) => ({
       run: two().find((r) => r.runId === id)!, spans: [], interventions: [], toolDecisions: [],
@@ -505,24 +510,27 @@ describe("choosing the workflow to inspect", () => {
     render(<WorkflowRollup />);
     await waitFor(() => expect(document.body.textContent).toContain("spent across 1 run"));
     // The gate fetch is keyed to the CHOSEN template, never to the first of several.
-    // Its only version is the latest, so the scope is exact.
-    expect(gates).toHaveBeenCalledWith("t-b", "30d", "latest");
+    // Its only version is the latest, so the scope is exact; the default window
+    // maps to the 24-hour period.
+    expect(gates).toHaveBeenCalledWith("t-b", "24h", "latest");
 
     fireEvent.click(screen.getByText("Bug Triage"));
     fireEvent.click(screen.getByText("Adaptive Delivery"));
     await waitFor(() => expect(document.body.textContent).toContain("spent across 2 runs"));
-    expect(gates).toHaveBeenCalledWith("t-a", "30d", "latest");
+    expect(gates).toHaveBeenCalledWith("t-a", "24h", "latest");
     // The other workflow's run is not in any figure once it is deselected.
     expect(document.body.textContent).not.toContain("spent across 3 runs");
+    vi.useRealTimers();
   });
 });
 
 describe("choosing the version to inspect", () => {
+  // All inside the default 24-hour window of the faked clock.
   const runs = () => [
-    run({ runId: "v14-a", templateVersion: 14, startedAt: "2026-08-01T00:00:00.000Z" }),
-    run({ runId: "v16-a", templateVersion: 16, startedAt: "2026-09-01T00:00:00.000Z" }),
-    run({ runId: "v14-b", templateVersion: 14, startedAt: "2026-08-15T00:00:00.000Z" }),
-    run({ runId: "v13-a", templateVersion: 13, startedAt: "2026-07-28T00:00:00.000Z" }),
+    run({ runId: "v14-a", templateVersion: 14, startedAt: "2026-09-01T00:00:00.000Z" }),
+    run({ runId: "v16-a", templateVersion: 16, startedAt: "2026-09-01T10:00:00.000Z" }),
+    run({ runId: "v14-b", templateVersion: 14, startedAt: "2026-09-01T05:00:00.000Z" }),
+    run({ runId: "v13-a", templateVersion: 13, startedAt: "2026-09-01T02:00:00.000Z" }),
   ];
 
   it("lists the versions with runs, newest version first, with run counts", () => {
@@ -534,6 +542,7 @@ describe("choosing the version to inspect", () => {
   });
 
   it("opens on the version of the most recent run, and switches when another is chosen", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.parse("2026-09-01T12:00:00.000Z") });
     vi.spyOn(api, "getRunSummaries").mockResolvedValue(runs());
     vi.spyOn(api, "getRunDetail").mockImplementation(async (id) => ({
       run: runs().find((r) => r.runId === id)!, spans: [], interventions: [], toolDecisions: [],
@@ -542,19 +551,20 @@ describe("choosing the version to inspect", () => {
     render(<WorkflowRollup />);
     await waitFor(() => expect(document.body.textContent).toContain("spent across 1 run"));
     // The newest version IS the latest, so the gate figures can be scoped to it.
-    expect(gates).toHaveBeenCalledWith("t", "30d", "latest");
+    expect(gates).toHaveBeenCalledWith("t", "24h", "latest");
 
     fireEvent.click(screen.getByText("v16"));
     fireEvent.click(screen.getByText("v14"));
     await waitFor(() => expect(document.body.textContent).toContain("spent across 2 runs"));
     // An older version has no gate scope of its own; the fetch widens to every
     // version and the panel must say so.
-    expect(gates).toHaveBeenCalledWith("t", "30d", "all");
+    expect(gates).toHaveBeenCalledWith("t", "24h", "all");
 
     fireEvent.click(screen.getByText("v14"));
     fireEvent.click(screen.getByText("All versions"));
     await waitFor(() => expect(document.body.textContent).toContain("spent across 4 runs"));
     expect(document.body.textContent).toContain("By template version");
+    vi.useRealTimers();
   });
 
   it("says when the gate figures cover every version while one version is chosen", () => {
@@ -619,5 +629,68 @@ describe("what the gates decided, from the same rows as everything else", () => 
     expect(withGates).toContain("Critique decided 3 times");
     // The endpoint's own verdict count is not what the ring shows any more.
     expect(withGates).not.toContain("99");
+  });
+});
+
+describe("choosing the window to inspect", () => {
+  const NOW = Date.parse("2026-09-05T12:00:00.000Z");
+  const runs = () => [
+    run({ runId: "h1", startedAt: "2026-09-05T11:30:00.000Z" }),            // 30m ago
+    run({ runId: "d1", startedAt: "2026-09-04T13:00:00.000Z" }),            // 23h ago
+    run({ runId: "w1", startedAt: "2026-09-01T12:00:00.000Z" }),            // 4d ago
+    run({ runId: "m1", startedAt: "2026-08-10T12:00:00.000Z" }),            // 26d ago
+    run({ runId: "old", startedAt: "2026-07-28T05:00:00.000Z" }),           // 39d ago
+  ];
+
+  it("offers the eight ranges in order and keeps only runs that STARTED inside the window", () => {
+    expect(RANGES.map((r) => r.label)).toEqual([
+      "Last 1 hour", "Last 8 hours", "Last 12 hours", "Last 24 hours",
+      "Last 3 days", "Last 7 days", "Last 14 days", "Last 1 month",
+    ]);
+    const ids = (key: string) => withinWindow(runs(), key, NOW).map((r) => r.runId);
+    expect(ids("1h")).toEqual(["h1"]);
+    expect(ids("24h")).toEqual(["h1", "d1"]);
+    expect(ids("7d")).toEqual(["h1", "d1", "w1"]);
+    expect(ids("1mo")).toEqual(["h1", "d1", "w1", "m1"]);
+  });
+
+  it("maps a window to the smallest template period that contains it", () => {
+    expect(gatePeriodFor("1h")).toBe("24h");
+    expect(gatePeriodFor("24h")).toBe("24h");
+    expect(gatePeriodFor("3d")).toBe("7d");
+    expect(gatePeriodFor("14d")).toBe("30d");
+    expect(gatePeriodFor("1mo")).toBe("30d");
+  });
+
+  it("opens on the last 24 hours, and leaves the choosers in place when the window is empty", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: NOW });
+    vi.spyOn(api, "getRunSummaries").mockResolvedValue(runs());
+    vi.spyOn(api, "getRunDetail").mockImplementation(async (id) => ({
+      run: runs().find((r) => r.runId === id)!, spans: [], interventions: [], toolDecisions: [],
+    }));
+    const gates = vi.spyOn(api, "getTemplateMetricsDetail").mockRejectedValue(new Error("none"));
+    try {
+      render(<WorkflowRollup />);
+      await waitFor(() => expect(document.body.textContent).toContain("spent across 2 runs"));
+      expect(gates).toHaveBeenCalledWith("t", "24h", "latest");
+
+      // The window is the outermost filter: the workflow chooser counts runs INSIDE it.
+      expect(screen.getByText("Adaptive Delivery").parentElement?.textContent).toContain("2 runs");
+
+      fireEvent.click(screen.getByText("Last 24 hours"));
+      fireEvent.click(screen.getByText("Last 7 days"));
+      await waitFor(() => expect(document.body.textContent).toContain("spent across 3 runs"));
+      expect(gates).toHaveBeenCalledWith("t", "7d", "latest");
+
+      // Empty window: say so, keep every chooser so the reader can widen it.
+      vi.setSystemTime(NOW + 40 * 24 * 3_600_000);
+      fireEvent.click(screen.getByText("Last 7 days"));
+      fireEvent.click(screen.getByText("Last 1 hour"));
+      await waitFor(() => expect(document.body.textContent).toContain("No runs started in the last 1 hour"));
+      expect(screen.getByText("Last 1 hour")).toBeTruthy();
+      expect(document.body.textContent).not.toContain("spent across");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

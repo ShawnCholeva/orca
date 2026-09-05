@@ -183,6 +183,9 @@ const NOT_A_PROSE_SURFACE: Record<string, string> = {
   PROMPT_KIND: "a lookup table of pause kinds",
   workflowsOf: "groups runs by template",
   versionsOf: "groups a workflow's runs by version",
+  RANGES: "the window choices",
+  withinWindow: "a filter",
+  gatePeriodFor: "maps a window to a template period",
   modelName: "strips a release date from a model id",
 
   // Composers: they mount the surfaces above, each of which is asserted directly.
