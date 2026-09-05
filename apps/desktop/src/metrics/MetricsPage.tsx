@@ -80,8 +80,14 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
   const reviewingProposal = proposals.find((p) => p.id === reviewingProposalId) ?? null;
 
   if (view === "runs") {
+    // `gridTemplateRows` is load-bearing. Without it, auto rows split `height: 100%`
+    // evenly between the toggle and the ledger — so on a SHORT run detail the toggle
+    // inflated to a ~210px box with its two buttons stretched down it. It looked
+    // correct on every screenshot we took, because the runs list is always tall enough
+    // to starve the first row: the bug needed SPARSE data to appear, which is the case
+    // nobody photographs.
     return (
-      <div style={{ display: "grid", gap: 14, padding: 12, height: "100%", minHeight: 0, overflowY: "auto" }}>
+      <div style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", gap: 14, padding: 12, height: "100%", minHeight: 0, overflowY: "auto" }}>
         <ViewToggle view={view} onChange={setView} />
         <RunLedger />
       </div>

@@ -243,7 +243,7 @@ describe("RunDetailPanel", () => {
     // All three of the founder's open cards are abandoned. Telling him they are
     // "waiting on you" would send him to answer cards that accomplish nothing.
     render(<RunDetailPanel detail={detail()} onBack={() => {}} />);
-    expect(screen.getAllByText("left open when the run stopped").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("the run stopped without an answer").length).toBeGreaterThan(0);
     expect(screen.queryByText("waiting on you")).toBeNull();
   });
 
@@ -364,5 +364,32 @@ describe("loading failures", () => {
     runs.mockResolvedValue([summary()]);
     fireEvent.click(screen.getByRole("button", { name: /Try again/ }));
     await waitFor(() => expect(screen.getByRole("button", { name: /Adaptive Delivery/ })).toBeInTheDocument());
+  });
+});
+
+describe("a park's age is not a park's duration", () => {
+  it("says which quantity the number is, in the number's own cell", () => {
+    // Both numbers below are correct and the read model is explicit about why: a run
+    // that died after 19 minutes lasted 19 minutes however long its abandoned card has
+    // been sitting open, because duration is a property of the run and age is a
+    // property of the card. `durationMs` on an unexited park is unclamped and still
+    // growing, deliberately.
+    //
+    // Rendered identically they stop being correct: `94h 29m` in a column of pause
+    // lengths, inside a 19-minute run, reads as incoherent enough to make a reader
+    // distrust the screen. The qualifier existed — grey text to the right — and lost
+    // the weight contest to the number, which is the same failure as every other
+    // label-beside-a-figure we've fixed today.
+    render(<RunDetailPanel onBack={() => {}} detail={detail({
+      interventions: [
+        park({ activityId: "open", exitedAt: null, durationMs: 340_140_000, parkState: "abandoned" }),
+        park({ activityId: "done", exitedAt: "2026-09-01T00:31:00.000Z", durationMs: 82_000, parkState: "resolved" }),
+      ],
+    })} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("open 94h 29m");
+    // A park that ended is a plain duration — no prefix, nothing to disambiguate.
+    expect(text).toContain("1m 22s");
+    expect(text).not.toContain("open 1m 22s");
   });
 });

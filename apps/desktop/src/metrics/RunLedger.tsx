@@ -369,7 +369,7 @@ export function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) 
 
 const PARK_SENTENCE: Record<Intervention["parkState"], string> = {
   awaiting_you: "waiting on you",
-  abandoned: "left open when the run stopped",
+  abandoned: "the run stopped without an answer",
   resolved: "resolved",
 };
 
@@ -497,8 +497,20 @@ function InterventionRow({ iv }: { iv: Intervention }) {
   const actionable = iv.parkState === "awaiting_you";
   return (
     <div style={{ display: "flex", gap: "var(--sp-3)", alignItems: "baseline", padding: "var(--sp-1) 0", fontSize: "var(--fs-2)" }}>
+      {/* Two different quantities share this column and only one of them is a
+          duration. A park that ended lasted `durationMs`; a park that never ended has
+          been SITTING for `durationMs`, unclamped and still growing — deliberately, per
+          the read model: a run that died after 19 minutes lasted 19 minutes however
+          long its abandoned card has been open, because duration is a property of the
+          run and age is a property of the card. Both numbers are right.
+          Rendered identically they are not: `94h 29m` in a column of pause lengths,
+          inside a 19-minute run, reads as incoherent and makes the reader distrust the
+          whole screen. The qualifier existed but sat in grey text to the right, losing
+          the weight contest to the number.
+          So the number says what it is, at its own weight. One word, and the cell stops
+          depending on adjacent text to be read correctly. */}
       <span className="mono" style={{ minWidth: 72, color: actionable ? "var(--warn)" : "var(--text)", ...durationWeight(iv.durationMs) }}>
-        {dur(iv.durationMs)}
+        {iv.exitedAt === null ? `open ${dur(iv.durationMs)}` : dur(iv.durationMs)}
       </span>
       {/* The tag REPLACES the reason rather than sitting beside it. "a pause" was a
           placeholder standing in for the missing reason, so rendering it next to a

@@ -70,7 +70,13 @@ export function IntervalBar({
         data-seg="absent"
         style={{
           display: "inline-block",
-          height: 10,
+          // 6px, not 10. The encoding and the hues are unchanged; this is purely ink.
+          // With tone off the tags, these bars became the most saturated thing on both
+          // screens — wider and brighter than the figures they sit beside, while
+          // encoding measurement coverage rather than the run's headline fact. Halving
+          // the height halves the area without touching what the bar says. It stays a
+          // composition rather than a fill, and the hatched ground still reads.
+          height: 6,
           width: "100%",
           minWidth: 48,
           borderRadius: 2,
@@ -103,7 +109,13 @@ export function IntervalBar({
         data-seg="mismatch"
         style={{
           display: "inline-block",
-          height: 10,
+          // 6px, not 10. The encoding and the hues are unchanged; this is purely ink.
+          // With tone off the tags, these bars became the most saturated thing on both
+          // screens — wider and brighter than the figures they sit beside, while
+          // encoding measurement coverage rather than the run's headline fact. Halving
+          // the height halves the area without touching what the bar says. It stays a
+          // composition rather than a fill, and the hatched ground still reads.
+          height: 6,
           width: "100%",
           minWidth: 48,
           borderRadius: 2,
@@ -145,7 +157,13 @@ export function IntervalBar({
       data-material="hatched"
       style={{
         display: "flex",
-        height: 10,
+        // 6px, not 10. The encoding and the hues are unchanged; this is purely ink.
+        // With tone off the tags, these bars became the most saturated thing on both
+        // screens — wider and brighter than the figures they sit beside, while
+        // encoding measurement coverage rather than the run's headline fact. Halving
+        // the height halves the area without touching what the bar says. It stays a
+        // composition rather than a fill, and the hatched ground still reads.
+        height: 6,
         width: "100%",
         minWidth: 48,
         borderRadius: 2,
