@@ -47,6 +47,7 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     elapsedMs: 1_800_000, workingMs: 600_000, parkedMs: 0,
     status: "passed", blockedReason: null, restarts: 0, completions: 1, stallRescues: 0,
     cost: { usd: 1.52, tokensIn: 10, tokensOut: 20, state: "reported" },
+    models: [],
     tier: "partially_verified",
     verifiers: { executable: false, grounding: true, independentReview: false },
     refuteVerdict: null, conflicts: [], outcomeStatus: "succeeded", failureCode: null, ...over,
@@ -422,7 +423,7 @@ describe("the row does not restate what the headline just said", () => {
       terminationEvidence: "crashed 3 times (worker_exited_no_signal)",
     })} />);
     const text = document.body.textContent ?? "";
-    expect(text).toContain("stopped by Orca");
+    expect(text).toContain("stopped by the harness");
     expect(text).toContain("crashed 3 times");
     expect(text).not.toContain("not your workflow");
     // And the engine code still belongs to the detail view, not the scanning list.
@@ -478,5 +479,108 @@ describe("the screen states its dominant gap once", () => {
     const text = document.body.textContent ?? "";
     expect(text).toMatch(/\d+ of the \d+ gaps below are the same gap/);
     expect(text).toContain("not of your workflow");
+  });
+});
+
+const H = 3_600_000;
+
+describe("the fields the server computes reach the row", () => {
+  it("prints when a live run last advanced, and on what evidence", () => {
+    // The contract's own motivating example — "last progress 39h ago" — was
+    // computed on every run and rendered on none. Live runs only: a run that ended
+    // has its ending, and "last advanced" on a dead run restates it.
+    const ago = new Date(Date.now() - 39 * H).toISOString();
+    render(<RunRow onOpen={() => {}} run={summary({
+      terminationCause: "running", status: "active", finishedAt: null,
+      progress: { lastProgressAt: ago, lastProgressChannel: "step_boundary",
+                  lastSignalAt: ago, lastSignalChannel: "step_boundary", silenceConclusive: true },
+    })} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toMatch(/last advanced 39h \d+m ago/);
+    expect(text).toContain("a step started or finished");
+  });
+
+  it("separates moving from advancing when the signal clock outran the progress clock", () => {
+    const progress = new Date(Date.now() - 39 * H).toISOString();
+    const signal = new Date(Date.now() - 2 * 60_000).toISOString();
+    render(<RunRow onOpen={() => {}} run={summary({
+      terminationCause: "running", status: "active", finishedAt: null,
+      progress: { lastProgressAt: progress, lastProgressChannel: "step_boundary",
+                  lastSignalAt: signal, lastSignalChannel: "run_event", silenceConclusive: true },
+    })} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toMatch(/still emitting events .* ago without advancing/);
+  });
+
+  it("says nothing about progress on a run that ended", () => {
+    render(<RunRow onOpen={() => {}} run={summary()} />);
+    expect(document.body.textContent).not.toContain("last advanced");
+  });
+
+  it("names what is waiting on you and for how long, not just that something is", () => {
+    render(<RunRow onOpen={() => {}} run={summary({
+      terminationCause: "running", status: "paused", finishedAt: null, openInterventions: 1,
+      awaitingYou: { count: 1, sinceMs: 64 * H, sourceKind: "provider_recovery_pending" },
+    })} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("1 prompt waiting on you");
+    expect(text).toContain("provider recovery");
+    expect(text).toContain("for 64h 0m");
+  });
+});
+
+describe("the fields the server computes reach the span", () => {
+  it("prints the reviewer's verdict beside the review, so an opinion carries its outcome", () => {
+    render(<RunDetailPanel detail={detail({
+      spans: [span({ verifiers: { executable: false, grounding: true, independentReview: true }, refuteVerdict: "refuted" })],
+    })} onBack={() => {}} />);
+    expect(screen.getByText("a model reviewed it · refuted")).toBeTruthy();
+  });
+
+  it("keeps the bare review chip when no verdict was recorded", () => {
+    render(<RunDetailPanel detail={detail({
+      spans: [span({ verifiers: { executable: false, grounding: true, independentReview: true }, refuteVerdict: null })],
+    })} onBack={() => {}} />);
+    expect(screen.getByText("a model reviewed it")).toBeTruthy();
+  });
+
+  it("surfaces a recorded conflict as words, not as a hidden array", () => {
+    render(<RunDetailPanel detail={detail({ spans: [span({ conflicts: ["belief_divergence"] })] })} onBack={() => {}} />);
+    expect(screen.getByText("conflict · belief divergence")).toBeTruthy();
+  });
+
+  it("names the models that ran the step, and says nothing when none was recorded", () => {
+    render(<RunDetailPanel detail={detail({
+      spans: [
+        span({ models: ["claude-haiku-4-5-20251001", "claude-opus-5"] }),
+        span({ workflowStepRunId: "sr2", name: "Verify", models: [] }),
+      ],
+    })} onBack={() => {}} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("claude-haiku-4-5 → claude-opus-5");
+    expect(text).not.toContain("no model");
+  });
+
+  it("prints the tokens under the cost figure", () => {
+    render(<RunDetailPanel detail={detail({
+      spans: [span({ cost: { usd: 1.52, tokensIn: 12_644, tokensOut: 10_797, state: "reported" } })],
+    })} onBack={() => {}} />);
+    expect(document.body.textContent).toContain("12.6k in · 10.8k out");
+  });
+
+  it("counts stall rescues on the row where they happened", () => {
+    render(<RunDetailPanel detail={detail({ spans: [span({ stallRescues: 2 })] })} onBack={() => {}} />);
+    expect(document.body.textContent).toContain("rescued from a stall 2x");
+  });
+});
+
+describe("the gap statement is current", () => {
+  it("does not claim Orca sees only a step's start and finish", () => {
+    // Phase transitions and tool-permission decisions are recorded inside a step;
+    // the interior gap is the agent's own work between those points.
+    render(<RunLedgerCantTellYou runs={[summary()]} />);
+    const text = document.body.textContent ?? "";
+    expect(text).not.toContain("only sees a step start and finish");
+    expect(text).toContain("between those points");
   });
 });

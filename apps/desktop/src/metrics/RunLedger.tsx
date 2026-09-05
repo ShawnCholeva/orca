@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
-import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
+import type { Intervention, ProgressChannel, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
 import { getRunDetail, getRunSummaries } from "../api";
 import { MeasurementLabel } from "./n-gate-ui";
 import { IntervalBar, formatDuration } from "./interval-bar";
@@ -22,6 +22,34 @@ function usd(v: number): string {
 function day(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
+
+function tokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+/** `claude-haiku-4-5-20251001` → `claude-haiku-4-5`: the date suffix is a release id, not a name. */
+function modelName(id: string): string {
+  return id.replace(/-\d{8}$/, "");
+}
+
+// What kind of record a clock rests on, in the reader's words. The channel is the
+// evidence for the timestamp, and a timestamp without its evidence is a bare instant.
+const CHANNEL_SENTENCE: Record<ProgressChannel, string> = {
+  harness_transition: "an engine boundary",
+  step_boundary: "a step started or finished",
+  activity_transition: "a pause opened or closed",
+  run_event: "an event with no state change",
+};
+
+const PROMPT_KIND: Record<NonNullable<RunSummary["awaitingYou"]["sourceKind"]>, string> = {
+  question_pending: "a question",
+  step_confirmation_pending: "a step to confirm",
+  gate_decision_pending: "a gate decision",
+  mark_done_pending: "marking it done",
+  permission_pending: "a permission",
+  provider_recovery_pending: "provider recovery",
+  unknown: "a prompt whose reason wasn't kept",
+};
 
 /**
  * Type size as a function of magnitude.
@@ -60,7 +88,7 @@ const TERMINATION_SENTENCE: Record<RunSummary["terminationCause"], string> = {
   running: "still running",
   completed: "finished",
   workflow_failed: "the workflow stopped it",
-  infrastructure_killed: "stopped by Orca",
+  infrastructure_killed: "stopped by the harness",
   unknown: "stopped, with nothing recorded about why",
 };
 
@@ -321,6 +349,42 @@ export function CostCaveats({ runs }: { runs: RunSummary[] }) {
   );
 }
 
+// ── progress ─────────────────────────────────────────────────────────────────
+
+/**
+ * Two clocks on a live run, rendered only when they disagree with "fine".
+ *
+ * Live runs only. A run that ended has its ending, and "last advanced" on it
+ * restates the finish. On a live run the magnitude is the alarm: "last advanced
+ * 39h ago" needs no threshold, which is why the contract carries none.
+ *
+ * The second sentence appears only when the signal clock has moved past the
+ * progress clock — the "moving but not advancing" case, a loop rather than a dead
+ * worker. When the two agree there is one fact, and it is stated once.
+ */
+function ProgressLine({ progress }: { progress: RunSummary["progress"] }) {
+  const { lastProgressAt, lastProgressChannel, lastSignalAt, lastSignalChannel } = progress;
+  if (lastProgressAt === null) return null;
+  const now = Date.now();
+  const progressAgo = Math.max(0, now - Date.parse(lastProgressAt));
+  const signalMs = lastSignalAt === null ? null : Date.parse(lastSignalAt);
+  const spinning = signalMs !== null && signalMs > Date.parse(lastProgressAt);
+  return (
+    <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>
+      <span className="mono" style={{ ...durationWeight(progressAgo), color: "var(--text)" }}>
+        last advanced {dur(progressAgo)} ago
+      </span>
+      {lastProgressChannel && <span style={{ color: "var(--text-3)" }}> · {CHANNEL_SENTENCE[lastProgressChannel]}</span>}
+      {spinning && (
+        <span style={{ color: "var(--warn)" }}>
+          {" · "}still emitting events {dur(Math.max(0, now - signalMs))} ago without advancing
+          {lastSignalChannel && ` (${CHANNEL_SENTENCE[lastSignalChannel]})`}
+        </span>
+      )}
+    </span>
+  );
+}
+
 // ── the launcher ─────────────────────────────────────────────────────────────
 
 export function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) => void }) {
@@ -371,6 +435,7 @@ export function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) 
         </div>
         <IntervalBar {...intervalParts(run.durations)} />
         <DurationTerms d={run.durations} />
+        {run.terminationCause === "running" && <ProgressLine progress={run.progress} />}
         <div style={{ display: "flex", gap: "var(--sp-3)", flexWrap: "wrap", fontSize: "var(--fs-2)", color: "var(--text-3)" }}>
           <span>{run.stepsDelivered} delivered</span>
           {run.stepsBlocked > 0 && <span>{run.stepsBlocked} blocked</span>}
@@ -379,6 +444,12 @@ export function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) 
           {run.awaitingYou.count > 0 && (
             <span style={{ color: "var(--warn)", fontWeight: 600 }}>
               {run.awaitingYou.count} prompt{run.awaitingYou.count === 1 ? "" : "s"} waiting on you
+              {/* The kind and the age were both computed server-side and both
+                  dropped here, leaving "waiting on you" — which a reader learns to
+                  ignore — where "needs your OK on provider recovery, for 64h" is
+                  something they act on. The kind is the longest-open one's. */}
+              {run.awaitingYou.sourceKind && ` · ${PROMPT_KIND[run.awaitingYou.sourceKind]}`}
+              {run.awaitingYou.sinceMs != null && ` · for ${dur(run.awaitingYou.sinceMs)}`}
             </span>
           )}
           {run.openInterventions - run.awaitingYou.count > 0 && (
@@ -425,6 +496,17 @@ function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker:
         <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>
           {span.kind === "gate" ? "gate" : "step"} · attempt {span.attempt} · {span.status}
         </span>
+        {/* Which model ran it is the harness's own choice, and the one fact on this
+            row that describes the harness rather than the workflow. An arrow between
+            two names means the step was redone under a different model — and its
+            cost, summed across attempts, belongs to both. Silent when none was
+            recorded: a gate span has no completion to carry one, and "no model" would
+            read as a defect on a row that simply has no channel for it. */}
+        {span.models.length > 0 && (
+          <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+            {span.models.map(modelName).join(" → ")}
+          </span>
+        )}
       </div>
 
       <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
@@ -474,13 +556,28 @@ function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker:
             {span.verifiers.grounding && <Chip>claims checked</Chip>}
             {/* An LLM's opinion, carrying real weight into a graded number. Marked
                 so it is never mistaken for a deterministic check. */}
-            {span.verifiers.independentReview && <Chip>a model reviewed it</Chip>}
+            {span.verifiers.independentReview && (
+              <Chip>
+                a model reviewed it
+                {/* The verdict rides with the review. "A model reviewed it" without
+                    its outcome is an opinion with the conclusion removed — and
+                    `refuted` is the one word on this row that should send the reader
+                    to the step. `unavailable` is an absence, not a verdict. */}
+                {span.refuteVerdict && span.refuteVerdict !== "unavailable" && ` · ${span.refuteVerdict}`}
+              </Chip>
+            )}
             {!span.verifiers.executable && !span.verifiers.grounding && !span.verifiers.independentReview && (
               <Chip>nothing checked this</Chip>
             )}
+            {/* A conflict the engine recorded at completion — the step's claims
+                diverged from the run's shared state. Computed on every span and
+                projected to the wire as an array that no view ever read. */}
+            {span.conflicts.map((c) => (
+              <Chip key={c}>conflict · {c.replace(/_/g, " ")}</Chip>
+            ))}
           </div>
         )}
-        {(span.restarts > 0 || span.completions > 1) && (
+        {(span.restarts > 0 || span.completions > 1 || span.stallRescues > 0) && (
           <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>
             {span.restarts > 0 && `relaunched ${span.restarts}x after a crash`}
             {span.restarts > 0 && span.completions > 1 && " · "}
@@ -491,6 +588,11 @@ function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker:
                 on retries; this says what the extra event actually was. */}
             {span.completions > 1 &&
               `finished ${span.completions}x — sent back ${span.completions - 1 === 1 ? "once" : `${span.completions - 1} times`}`}
+            {span.stallRescues > 0 && (span.restarts > 0 || span.completions > 1) && " · "}
+            {/* A stall rescue is the harness nudging a worker that went quiet — a
+                third kind of intervention, distinct from a crash relaunch and from a
+                revise loop, and counted on the step run since the beginning. */}
+            {span.stallRescues > 0 && `rescued from a stall ${span.stallRescues}x`}
           </span>
         )}
       </div>
@@ -499,7 +601,19 @@ function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker:
         {span.cost === null || span.cost.usd === null ? (
           showCostMarker ? <MeasurementLabel compact state="uninstrumented" lossy={span.kind === "gate"} /> : null
         ) : (
-          <span className="mono" style={{ ...costWeight(span.cost.usd) }}>{usd(span.cost.usd)}</span>
+          <>
+            <span className="mono" style={{ ...costWeight(span.cost.usd) }}>{usd(span.cost.usd)}</span>
+            {/* The tokens behind the dollars. Both were on the wire and neither was
+                shown, so a $48 step and a $2 step differed only in the figure — with
+                the tokens the reader can see whether the money was output volume or
+                context. Cache reads, the largest term on a cache-heavy run, are not
+                in the contract yet, so this is the priced part of the story. */}
+            {span.cost.tokensIn != null && span.cost.tokensOut != null && (
+              <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", whiteSpace: "nowrap" }}>
+                {tokens(span.cost.tokensIn)} in · {tokens(span.cost.tokensOut)} out
+              </span>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -695,7 +809,10 @@ export function CantTellYou({ runs }: { runs: RunSummary[] }) {
     },
     {
       key: "inside", state: "uninstrumented" as const,
-      props: { detail: "What happened inside a step: Orca only sees a step start and finish, so work it did in between leaves no trace." },
+      // Not "only sees a step start and finish": phase changes and tool-permission
+      // decisions are recorded inside a step. The gap is the agent's own work
+      // between those points, which the hook trace was meant to carry and doesn't.
+      props: { detail: "What the agent did inside a step: Orca records when a step starts, finishes, changes phase and asks for a permission, but the work between those points leaves no trace." },
     },
   ].filter((g): g is Exclude<typeof g, false> => g !== false);
 

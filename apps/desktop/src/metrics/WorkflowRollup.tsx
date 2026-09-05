@@ -340,7 +340,7 @@ export function Dashboard({ agg }: { agg: Agg }) {
             caption={n === 1 ? "run" : "runs"}
             parts={[
               { label: "completed", value: agg.completed, display: String(agg.completed), tone: TONE.working },
-              { label: "stopped by harness", value: agg.killed, display: String(agg.killed), tone: TONE.byOrca },
+              { label: "stopped by the harness", value: agg.killed, display: String(agg.killed), tone: TONE.byOrca },
               { label: "the workflow stopped it", value: agg.workflowFailed, display: String(agg.workflowFailed), tone: TONE.stopped },
               { label: "stopped, reason not recorded", value: agg.stoppedUnknown, display: String(agg.stoppedUnknown), tone: TONE.unseen },
               { label: "still running", value: agg.running, display: String(agg.running), tone: TONE.live },

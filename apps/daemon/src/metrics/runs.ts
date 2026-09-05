@@ -473,6 +473,7 @@ export function buildSpans(input: {
       completions: completes.length,
       stallRescues: s.stallRescues,
       cost: spanCost(completes),
+      models: [...new Set(completes.map((t) => t.transition.telemetry?.model).filter((m): m is string => m != null))],
       tier,
       verifiers: sp === null ? null : {
         executable: sp.executable,

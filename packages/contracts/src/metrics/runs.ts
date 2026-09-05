@@ -230,6 +230,18 @@ export const RunTraceSpan = z.object({
   stallRescues: z.number().int().nonnegative(),
 
   cost: SpanCost.nullable(),
+  /**
+   * The distinct models across this span's completions, in order of first use.
+   * Which model ran a step is the harness's own decision (operator selection), and
+   * it was recorded on every completion's telemetry without ever being projected: a
+   * page that names no model describes the workflow and cannot describe the harness.
+   *
+   * A list rather than one name because `cost` is summed across ALL of a span's
+   * completions before it leaves the daemon. A step revised under a different model
+   * has one cost and two models, and naming only the last would attribute the whole
+   * figure to it. Empty when no completion carried a model.
+   */
+  models: z.array(z.string()),
 
   tier: VerificationTier.nullable(),
   verifiers: z.object({

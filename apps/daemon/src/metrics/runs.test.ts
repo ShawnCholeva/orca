@@ -32,6 +32,7 @@ function complete(over: {
   id: string; at: string; stepRunId?: string; stepTemplateId?: string;
   usd?: number | null; latencyMs?: number; status?: "succeeded" | "failed";
   source?: "provider" | "price_map" | null;
+  model?: string | null;
 }): RunTransition {
   const t: HarnessTransition = {
     id: over.id, goalId: GOAL_ID, workflowRunId: RUN_ID,
@@ -44,7 +45,7 @@ function complete(over: {
         cache_creation_tokens: null, usd: over.usd, source: over.source ?? null,
       },
       latency_ms: over.latencyMs ?? null,
-      model: null, provider_id: null, provider_version: null,
+      model: over.model ?? null, provider_id: null, provider_version: null,
       prompt_ref: null, raw_output_ref: null,
       rejected_alternatives: [], human_interventions: [],
       outcome: { status: over.status ?? "succeeded", failure_code: null },
@@ -359,6 +360,33 @@ describe("buildRunDetail", () => {
     expect(detail.run.retriedCompletions).toBe(0);
     expect(detail.spans[0].cost?.state).toBe("unknown");
     expect(detail.run.openInterventions).toBe(0);
+  });
+
+  it("lists the distinct models across a span's completions, and none when none was recorded", () => {
+    // Operator selection is a harness decision, and the model is on every
+    // completion's telemetry — it was simply never projected. A LIST, because the
+    // span's cost is already summed across its completions: a step revised under a
+    // second model has one cost and two models, and naming only the last would
+    // attribute the whole figure to it.
+    const detail = buildRunDetail({
+      run: run(),
+      stepRuns: [
+        stepRun({ stepRunId: "sr-1", stepTemplateId: "triage" }),
+        stepRun({ stepRunId: "sr-2", stepTemplateId: "verify", ordinal: 1 }),
+      ],
+      transitions: [
+        complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 1, model: "claude-haiku-4-5-20251001" }),
+        complete({ id: "c2", at: "2026-09-01T00:15:00.000Z", usd: 1, model: "claude-haiku-4-5-20251001" }),
+        complete({ id: "c3", at: "2026-09-01T00:20:00.000Z", usd: 1, model: "claude-opus-5" }),
+      ],
+      events: [],
+      runEvents: [],
+      sourceKinds: new Map(),
+      stepNames: new Map([["triage", "Triage"], ["verify", "Verify"]]),
+      nowMs: NOW,
+    });
+    expect(detail.spans[0].models).toEqual(["claude-haiku-4-5-20251001", "claude-opus-5"]);
+    expect(detail.spans[1].models).toEqual([]);
   });
 });
 
