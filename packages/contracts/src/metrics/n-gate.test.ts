@@ -1,4 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { FailureCode } from "../harness/index.js";
+import { labelForFailure } from "./failure-labels.js";
+import { labelForGateFailure, GATE_FAILURE_CODES } from "./gate-failure-labels.js";
+import { labelForConfidenceReason, CONFIDENCE_REASON_CODES } from "./confidence-reasons.js";
 import {
   GATED_PATTERNS,
   shortLabelForMeasurementState,
@@ -319,6 +323,24 @@ describe("the vocabulary speaks to the reader, not about our backlog", () => {
   //
   // A typed absence tells the reader whether to discount a number. The ticket that
   // closes it is ours to carry.
+  // Every reader-facing label producer in metrics/, not just this module's. All four
+  // write sentences for the same screen, and a policy that governs one of them is a
+  // policy the next author has no reason to know about. Extending the guard costs
+  // eight more returns and closes the door the seven instructions came through.
+  it("returns no implementation talk from any label producer in metrics/", () => {
+    const labels = [
+      ...FailureCode.options.map(labelForFailure),
+      labelForFailure(null),
+      labelForFailure("some_future_code"),
+      ...GATE_FAILURE_CODES.map(labelForGateFailure),
+      ...CONFIDENCE_REASON_CODES.map((code) => labelForConfidenceReason({ code })),
+      ...CONFIDENCE_REASON_CODES.map((code) => labelForConfidenceReason({ code, nodeName: "Critique" })),
+    ];
+    for (const text of labels) {
+      expect(text, text).not.toMatch(IMPLEMENTATION_VOCABULARY);
+    }
+  });
+
   it("returns no implementation talk for any state, in any option shape", () => {
     const opts = [
       undefined,

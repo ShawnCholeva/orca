@@ -98,7 +98,18 @@ describe("no surface speaks to the reader about our backlog", () => {
 
   for (const [name, mount] of surfaces) {
     it(`${name} carries none, in visible text or in an accessible name`, () => {
-      for (const { where, text } of readerFacingText(mount())) {
+      const strings = readerFacingText(mount());
+      // Assert the COLLECTOR ran before asserting on what it collected. Without this
+      // the loop below is vacuous when `readerFacingText` returns nothing or the
+      // surface renders nothing — four green tests over zero strings, indistinguishable
+      // from four green tests over clean ones. That is the failure this whole file
+      // exists downstream of, and the first version of it had the hole: proving the
+      // detector matches a literal is not proving the harness gathers anything.
+      expect(strings.length, `${name} produced no reader-facing text`).toBeGreaterThan(2);
+      expect(strings.some((s) => s.where.startsWith("aria-label")),
+        `${name} produced no accessible name — the channel the original defect lived in`).toBe(true);
+
+      for (const { where, text } of strings) {
         expect(text, `${name} — ${where}`).not.toMatch(IMPLEMENTATION_VOCABULARY);
       }
     });
