@@ -3,6 +3,7 @@ import {
   GATED_PATTERNS,
   shortLabelForMeasurementState,
   MEASUREMENT_STATES,
+  IMPLEMENTATION_VOCABULARY,
   collapsesToNumber,
   deltaAllowed,
   gateFor,
@@ -318,9 +319,6 @@ describe("the vocabulary speaks to the reader, not about our backlog", () => {
   //
   // A typed absence tells the reader whether to discount a number. The ticket that
   // closes it is ours to carry.
-  const IMPLEMENTATION_TALK =
-    /\b(emit|wire|stamp|instrument|surrogate|hook|step_launch|step_complete|PostToolUse|payload|schema|endpoint|needs a fix)\b/i;
-
   it("returns no implementation talk for any state, in any option shape", () => {
     const opts = [
       undefined,
@@ -335,7 +333,7 @@ describe("the vocabulary speaks to the reader, not about our backlog", () => {
       for (const o of opts) {
         const text = labelForMeasurementState(state, o);
         if (text === null) continue;
-        expect(text, `${state} ${JSON.stringify(o)}`).not.toMatch(IMPLEMENTATION_TALK);
+        expect(text, `${state} ${JSON.stringify(o)}`).not.toMatch(IMPLEMENTATION_VOCABULARY);
       }
     }
   });

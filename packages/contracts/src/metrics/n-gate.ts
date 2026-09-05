@@ -17,6 +17,23 @@
 // situations with different remedies, and neither covered a facet that is simply
 // never emitted. Never re-derive these in the UI — map state to form, nothing else.
 // ---------------------------------------------------------------------------
+/**
+ * Words that mean this string is talking about our backlog rather than to the reader.
+ *
+ * Policy, not scaffolding, and exported because it is checked at TWO layers that see
+ * different halves of the surface: contracts guards what this module RETURNS, and the
+ * desktop guards what callers SUPPLY through the passthrough props (`reason`,
+ * `detail`) — which the module cannot see and which reach the accessible name, the
+ * channel that already carried a developer instruction for a day after we removed it
+ * from the screen.
+ *
+ * One definition on purpose. Two copies of a policy list is the drift this codebase
+ * has spent a week removing. Short on purpose too: a list nobody negotiates with is
+ * worth more than a complete one.
+ */
+export const IMPLEMENTATION_VOCABULARY =
+  /\b(emit|wire|stamp|instrument|surrogate|hook|step_launch|step_complete|PostToolUse|payload|schema|endpoint|needs a fix)\b/i;
+
 export const MEASUREMENT_STATES = [
   "measured",                 // at or above the gate; the value stands
   "insufficient",             // wired and running, not enough yet     -> wait for runs

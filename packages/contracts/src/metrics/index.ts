@@ -9,6 +9,7 @@ export type { ConfidenceReasonCode } from "./confidence-reasons.js";
 export {
   GATED_PATTERNS,
   GATES,
+  IMPLEMENTATION_VOCABULARY,
   MEASUREMENT_STATES,
   PROPORTION_RATE_MIN,
   VERSION_DELTA_MIN_PER_SIDE,
