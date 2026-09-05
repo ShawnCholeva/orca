@@ -4,6 +4,8 @@ import { MetricPeriod, MetricScope } from "@orca/contracts";
 import { getTemplateMetricsDetail, getTemplateMetricsSummaries } from "./usecases.js";
 import { getSampleDetail } from "./sample-detail.js";
 import { getRunDetail, getRunSummaries } from "./runs-usecases.js";
+import { computeTimeseries } from "./timeseries.js";
+import { TimeseriesId } from "@orca/contracts";
 
 export interface MetricsRouteDeps { db: Database.Database }
 
@@ -54,6 +56,40 @@ export function registerMetricsRoutes(server: FastifyInstance, deps: MetricsRout
       return { error: { code: "run_not_found", message: `Run not found: ${runId}` } };
     }
     return { detail };
+  });
+
+  // Curated series only — see the vocabulary note in contracts/metrics/timeseries.
+  // An unknown id is a 400 rather than an empty series: a chart silently missing a
+  // line is the failure mode this endpoint exists to avoid.
+  server.get("/v1/metrics/timeseries", async (request, reply) => {
+    const q = request.query as { series?: string; from?: string; to?: string };
+    const parsed = (q.series ?? "").split(",").filter(Boolean).map((s) => TimeseriesId.safeParse(s));
+    const unknown = (q.series ?? "").split(",").filter(Boolean)
+      .filter((_, i) => !parsed[i]!.success);
+    if (parsed.length === 0 || unknown.length > 0) {
+      reply.status(400);
+      return {
+        error: {
+          code: "invalid_series",
+          message: unknown.length > 0
+            ? `Unknown series: ${unknown.join(", ")}. Known: ${TimeseriesId.options.join(", ")}`
+            : `series is required. Known: ${TimeseriesId.options.join(", ")}`,
+        },
+      };
+    }
+    const to = q.to ?? new Date().toISOString();
+    // Default window: 30d, matching the rest of the metrics surface.
+    const from = q.from ?? new Date(Date.parse(to) - 30 * 86_400_000).toISOString();
+    if (!Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to))) {
+      reply.status(400);
+      return { error: { code: "invalid_window", message: "from/to must be ISO timestamps" } };
+    }
+    return {
+      timeseries: computeTimeseries(db, {
+        ids: parsed.map((p) => p.success ? p.data : "session_started"),
+        fromIso: from, toIso: to,
+      }),
+    };
   });
 
   server.get("/v1/metrics/samples/:transitionId", async (request, reply) => {
