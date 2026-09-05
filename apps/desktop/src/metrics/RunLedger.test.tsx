@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
-import { CostCaveats, RunDetailPanel, RunLedger, RunRow, headline, terminatedRuns, workflowEvidenceRuns } from "./RunLedger";
+import { CantTellYou as RunLedgerCantTellYou, CostCaveats, markerEarnsItsPlace, RunDetailPanel, RunLedger, RunRow, headline, terminatedRuns, workflowEvidenceRuns } from "./RunLedger";
 import * as api from "../api";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -427,5 +427,56 @@ describe("the row does not restate what the headline just said", () => {
     expect(text).not.toContain("not your workflow");
     // And the engine code still belongs to the detail view, not the scanning list.
     expect(text).not.toContain("worker_exited_no_signal");
+  });
+});
+
+describe("markerEarnsItsPlace", () => {
+  const unknown = (k: string) => ({ sourceKind: k });
+
+  it("keeps a marker that distinguishes some rows from others", () => {
+    expect(markerEarnsItsPlace(
+      [unknown("unknown"), unknown("question_pending"), unknown("unknown")],
+      (i) => i.sourceKind === "unknown",
+    )).toBe(true);
+  });
+
+  it("drops a marker carried by every row — that is a section statement in a per-row costume", () => {
+    // `unchecked` on five of six rows, six identical pause tags, the tripled gate
+    // sentence: three fixes made by hand before anyone noticed they were one rule.
+    // A marker on every row distinguishes nothing and becomes wallpaper, which costs
+    // the reader the one case where it would have mattered.
+    expect(markerEarnsItsPlace(
+      [unknown("unknown"), unknown("unknown")],
+      (i) => i.sourceKind === "unknown",
+    )).toBe(false);
+  });
+
+  it("keeps the marker on a single row, because one is not repetition", () => {
+    // The rule is about a column the eye scans. Below two rows there is no column,
+    // so the marker cannot be redundant against anything — and suppressing it would
+    // leave that item's absence untyped, which is the defect the vocabulary exists
+    // to prevent. This case corrected the first implementation.
+    expect(markerEarnsItsPlace([unknown("unknown")], (i) => i.sourceKind === "unknown")).toBe(true);
+  });
+
+  it("is computed from the data, so a column that starts varying self-heals", () => {
+    // Hardcoding the collapse would be the label outliving its evidence: uniform on
+    // this founder's runs is not uniform on someone else's.
+    const uniform = [unknown("unknown"), unknown("unknown")];
+    expect(markerEarnsItsPlace(uniform, (i) => i.sourceKind === "unknown")).toBe(false);
+    expect(markerEarnsItsPlace([...uniform, unknown("question_pending")], (i) => i.sourceKind === "unknown")).toBe(true);
+  });
+});
+
+describe("the screen states its dominant gap once", () => {
+  it("names how many of its gaps share one cause, rather than leaving it to be inferred", () => {
+    // 15 of 24 typed-absence sites in the desktop are `uninstrumented`. As a fact
+    // about the vocabulary that is ambiguous; as a fact about Orca it is the point.
+    // Counted rather than asserted, so it stops appearing on its own as the
+    // instrumentation improves instead of becoming a claim nobody rechecks.
+    render(<RunLedgerCantTellYou runs={[summary(), summary({ runId: "b" })]} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toMatch(/\d+ of the \d+ gaps below are the same gap/);
+    expect(text).toContain("not of your workflow");
   });
 });

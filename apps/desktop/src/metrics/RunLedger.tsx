@@ -178,6 +178,31 @@ function DurationTerms({ d }: { d: RunSummary["durations"] }) {
   );
 }
 
+/**
+ * Does this marker distinguish rows, or is it a section statement wearing a per-row
+ * costume?
+ *
+ * A marker earns its place only when it is on SOME rows and not others. On all of
+ * them it distinguishes nothing and becomes wallpaper — the reader stops seeing it,
+ * which costs them the one case where it would have mattered. That was `unchecked`
+ * on five of six rows, the six identical pause tags, and the tripled gate sentence:
+ * three fixes we each made by hand before noticing they were one rule.
+ *
+ * Computed from the data on every render, never hardcoded. A column that is
+ * single-valued on this founder's runs may vary on someone else's, so the collapse
+ * has to be a function of what is actually there — otherwise it is the label that
+ * outlives its evidence, which is the thing this whole screen exists to remove.
+ */
+export function markerEarnsItsPlace<T>(items: T[], marked: (item: T) => boolean): boolean {
+  // Below two rows there is no column to scan, so the marker cannot be redundant
+  // against anything — and suppressing it would leave the item's absence untyped,
+  // which is the defect this vocabulary exists to prevent. The rule is about
+  // repetition; one is not repetition.
+  if (items.length < 2) return items.some(marked);
+  const n = items.filter(marked).length;
+  return n > 0 && n < items.length;
+}
+
 // ── cost ─────────────────────────────────────────────────────────────────────
 
 function CostCell({ cost }: { cost: RunSummary["cost"] }) {
@@ -383,7 +408,7 @@ const PARK_SENTENCE: Record<Intervention["parkState"], string> = {
   resolved: "resolved",
 };
 
-function SpanRow({ span }: { span: RunTraceSpan }) {
+function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker: boolean }) {
   return (
     <div
       style={{
@@ -465,7 +490,7 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
 
       <div style={{ display: "grid", gap: 2, justifyItems: "end" }}>
         {span.cost === null || span.cost.usd === null ? (
-          <MeasurementLabel compact state="uninstrumented" lossy={span.kind === "gate"} />
+          showCostMarker ? <MeasurementLabel compact state="uninstrumented" lossy={span.kind === "gate"} /> : null
         ) : (
           <span className="mono" style={{ ...costWeight(span.cost.usd) }}>{usd(span.cost.usd)}</span>
         )}
@@ -498,7 +523,7 @@ function Chip({ children }: { children: React.ReactNode }) {
   );
 }
 
-function InterventionRow({ iv }: { iv: Intervention }) {
+function InterventionRow({ iv, showMarker }: { iv: Intervention; showMarker: boolean }) {
   // Amber marks only what the reader can act on RIGHT NOW: an open park on a live
   // run. `abandoned` is open on a dead run — nothing they do helps — so styling it
   // as actionable would send them to answer cards that accomplish nothing. The
@@ -529,7 +554,9 @@ function InterventionRow({ iv }: { iv: Intervention }) {
           thing here is the reason, so the reason slot is where its type belongs.
           Duration and park state are measured and keep their own cells. */}
       {iv.sourceKind === "unknown" ? (
-        <MeasurementLabel compact state="uninstrumented" lossy detail="Orca didn't keep a record of why this one stopped." />
+        showMarker ? (
+          <MeasurementLabel compact state="uninstrumented" lossy detail="Orca didn't keep a record of why this one stopped." />
+        ) : null
       ) : (
         <span style={{ color: "var(--text-2)" }}>
           {iv.sourceKind.replace(/_/g, " ").replace(" pending", "")}
@@ -576,6 +603,13 @@ function ParkCaveat({ interventions }: { interventions: Intervention[] }) {
 export function RunDetailPanel({ detail, onBack }: { detail: RunDetail; onBack: () => void }) {
   const { run, spans, interventions } = detail;
   const actionable = interventions.filter((i) => i.parkState === "awaiting_you");
+  // Hoisted: each is a property of the LIST, not of the row being rendered. Computed
+  // inside the map it read as though it varied per row, which is the opposite of what
+  // the rule says.
+  const unknownReason = (i: Intervention) => i.sourceKind === "unknown";
+  const actionableMarker = markerEarnsItsPlace(actionable, unknownReason);
+  const allParksMarker = markerEarnsItsPlace(interventions, unknownReason);
+  const costMarker = markerEarnsItsPlace(spans, (x) => x.cost === null || x.cost.usd === null);
   return (
     <div style={{ display: "grid", alignContent: "start", gap: "var(--sp-5)" }}>
       <div>
@@ -606,20 +640,26 @@ export function RunDetailPanel({ detail, onBack }: { detail: RunDetail; onBack: 
         <section style={{ display: "grid", gap: "var(--sp-1)" }}>
           <h3 style={{ fontSize: "var(--fs-4)", margin: 0 }}>Waiting on you now</h3>
           <ParkCaveat interventions={actionable} />
-          {actionable.map((iv) => <InterventionRow key={iv.activityId} iv={iv} />)}
+          {actionable.map((iv) => (
+            <InterventionRow key={iv.activityId} iv={iv} showMarker={actionableMarker} />
+          ))}
         </section>
       )}
 
       <section style={{ display: "grid", gap: "var(--sp-1)" }}>
         <h3 style={{ fontSize: "var(--fs-4)", margin: 0 }}>What ran</h3>
-        {spans.map((s) => <SpanRow key={s.workflowStepRunId} span={s} />)}
+        {spans.map((s) => (
+          <SpanRow key={s.workflowStepRunId} span={s} showCostMarker={costMarker} />
+        ))}
       </section>
 
       {interventions.length > 0 && (
         <section style={{ display: "grid", gap: "var(--sp-1)" }}>
           <h3 style={{ fontSize: "var(--fs-4)", margin: 0 }}>Every time it stopped for you</h3>
           <ParkCaveat interventions={interventions} />
-          {interventions.map((iv) => <InterventionRow key={iv.activityId} iv={iv} />)}
+          {interventions.map((iv) => (
+            <InterventionRow key={iv.activityId} iv={iv} showMarker={allParksMarker} />
+          ))}
         </section>
       )}
     </div>
@@ -633,27 +673,44 @@ export function RunDetailPanel({ detail, onBack }: { detail: RunDetail; onBack: 
  * and the one change that would close it, so an absence is something the reader can
  * act on rather than merely notice.
  */
-function CantTellYou({ runs }: { runs: RunSummary[] }) {
-  const gateless = runs.length > 0;
+export function CantTellYou({ runs }: { runs: RunSummary[] }) {
   const workflowN = workflowEvidenceRuns(terminatedRuns(runs)).length;
+
+  // The gaps as data, so the section can measure itself before listing itself.
+  const gaps = [
+    workflowN < 5 && {
+      key: "sample", state: "insufficient" as const,
+      props: { have: workflowN, need: 5, unit: "runs that finished" },
+    },
+    runs.length > 0 && {
+      key: "gates", state: "uninstrumented" as const, lossy: true,
+      props: { detail: "What reviews cost and how long they took isn't being recorded." },
+    },
+    {
+      key: "inside", state: "uninstrumented" as const,
+      props: { detail: "What happened inside a step: Orca only sees a step start and finish, so work it did in between leaves no trace." },
+    },
+  ].filter((g): g is Exclude<typeof g, false> => g !== false);
+
+  // R5. Most of what this screen cannot say has ONE cause, and stating it once is
+  // worth more than the reader inferring it from a list. Counted rather than
+  // asserted: if the instrumentation improves, the sentence stops appearing on its
+  // own instead of becoming a claim nobody rechecks.
+  const unrecorded = gaps.filter((g) => g.state === "uninstrumented").length;
+  const oneCause = gaps.length > 1 && unrecorded > gaps.length / 2;
+
   return (
-    <section style={{ display: "grid", gap: 8 }}>
+    <section style={{ display: "grid", gap: "var(--sp-2)" }}>
       <h3 style={{ fontSize: "var(--fs-3)", margin: 0 }}>What this screen can&apos;t tell you yet</h3>
-      {workflowN < 5 && (
-        <MeasurementLabel
-          state="insufficient"
-          have={workflowN}
-          need={5}
-          unit="runs that finished"
-        />
+      {oneCause && (
+        <p style={{ fontSize: "var(--fs-3)", color: "var(--text-2)", margin: 0, maxWidth: "72ch", lineHeight: 1.5 }}>
+          {unrecorded} of the {gaps.length} gaps below are the same gap: Orca isn&apos;t recording it yet.
+          That is a limit of what Orca measures today, not of your workflow.
+        </p>
       )}
-      {gateless && (
-        <MeasurementLabel state="uninstrumented" lossy detail="What reviews cost and how long they took isn't being recorded." />
-      )}
-      <MeasurementLabel
-        state="uninstrumented"
-        detail="What happened inside a step: Orca only sees a step start and finish, so work it did in between leaves no trace."
-      />
+      {gaps.map((g) => (
+        <MeasurementLabel key={g.key} state={g.state} lossy={"lossy" in g ? g.lossy : undefined} {...g.props} />
+      ))}
     </section>
   );
 }
