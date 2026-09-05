@@ -357,12 +357,13 @@ describe("the harness's own choices reach the surface", () => {
     });
     expect([...a.byModel.entries()]).toEqual([
       ["claude-haiku-4-5-20251001", { usd: 5, attempts: 2, failed: 1 }],
-      ["mixed across attempts", { usd: 40, attempts: 1, failed: 0 }],
+      ["claude-haiku-4-5-20251001 → claude-opus-5", { usd: 40, attempts: 1, failed: 0 }],
     ]);
     const t = render(<Dashboard agg={a} />).container.textContent ?? "";
-    expect(t).toContain("claude-haiku-4-5");
-    expect(t).toContain("mixed across attempts");
-    expect(t).not.toContain("claude-opus-5");
+    expect(t).toContain("claude-haiku-4-5 → claude-opus-5");
+    expect(t).toContain("redone under a second model");
+    // opus appears only in the sequence, never as a bar of its own with $40 on it.
+    expect(t).not.toMatch(/^claude-opus-5|[^→] claude-opus-5/);
   });
 
   it("names a model that was never recorded as such, never as free", () => {
@@ -385,6 +386,16 @@ describe("the harness's own choices reach the surface", () => {
     const t = render(<Dashboard agg={a} />).container.textContent ?? "";
     expect(t).toContain("5.0k");
     expect(t).toContain("1 of 2 attempts recorded no cache figure");
+  });
+
+  it("prints millions of tokens as millions", () => {
+    const a = aggregate({
+      runs: [run({ terminationCause: "completed" })],
+      details: [{ run: run(), spans: [span({ cost: { usd: 1, tokensIn: 100, tokensOut: 200, cacheReadTokens: 88_590_700, cacheCreationTokens: 300, state: "reported" } })], interventions: [], toolDecisions: [] }],
+    });
+    const t = render(<Dashboard agg={a} />).container.textContent ?? "";
+    expect(t).toContain("88.6M");
+    expect(t).not.toContain("88590.7k");
   });
 
   it("splits the window by template version, as counts and sums per version", () => {

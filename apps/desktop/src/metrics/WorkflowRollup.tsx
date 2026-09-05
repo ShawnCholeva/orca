@@ -129,7 +129,10 @@ export function aggregate({ runs, details, gates = null }: Loaded) {
   const tokenSums = { fresh: 0, output: 0, cacheRead: 0, cacheWrite: 0, spansWithoutCache: 0 };
   for (const s of spans) {
     if (s.cost === null || s.cost.usd === null) continue;
-    const key = s.models.length === 1 ? s.models[0]! : s.models.length > 1 ? "mixed across attempts" : "model not recorded";
+    // A step that ran under several models is keyed by the SEQUENCE, so the bar
+    // names both models in the order they were used. What it never does is split
+    // the figure between them.
+    const key = s.models.length === 0 ? "model not recorded" : s.models.join(" → ");
     const m = byModel.get(key) ?? { usd: 0, attempts: 0, failed: 0 };
     m.usd += s.cost.usd;
     m.attempts += 1;
@@ -736,11 +739,18 @@ export function Dashboard({ agg }: { agg: Agg }) {
             items={[...agg.byModel.entries()]
               .sort((a, b) => b[1].usd - a[1].usd)
               .map(([key, m]) => ({
-                key, label: key === "mixed across attempts" || key === "model not recorded" ? key : modelName(key),
+                key,
+                label: key === "model not recorded" ? key : key.split(" → ").map(modelName).join(" → "),
                 value: m.usd,
                 display: `${usd(m.usd)} · ${m.attempts} ${m.attempts === 1 ? "attempt" : "attempts"}${m.failed > 0 ? ` · ${m.failed} failed` : ""}`,
               }))}
           />
+          {[...agg.byModel.keys()].some((k) => k.includes(" → ")) && (
+            <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+              An arrow means the step was redone under a second model. Its cost is one figure across
+              those attempts, so the bar names both models rather than splitting a guess between them.
+            </p>
+          )}
         </Panel>
 
         <Panel title="Tokens, this window" span={6}>
