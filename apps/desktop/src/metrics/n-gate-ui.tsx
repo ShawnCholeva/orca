@@ -177,7 +177,17 @@ function formFor(state: MeasurementState, lossy: boolean): { borderLeftStyle: st
     case "insufficient":
       return { borderLeftStyle: "dashed", borderLeftColor: "var(--accent)" };
     case "unmeasurable_coverage":
-      return { borderLeftStyle: "dotted", borderLeftColor: "var(--warn)" };
+      // Not amber. Across the app amber means exactly one thing — act on this now —
+      // and on the Runs list it is spent on a single instance, `1 prompt waiting on
+      // you`. "Too few of these were checked" is a passive absence: real, worth
+      // knowing, and not something the reader does anything about this minute. Three
+      // amber markers on a new surface would respend the token the day after it was
+      // narrowed to one meaning, and a reader moving between tabs learns one meaning
+      // or none.
+      //
+      // `--info` is unspent apart from `unknown`, which differs on the other channel
+      // (double vs dotted), so the two stay told apart without either shouting.
+      return { borderLeftStyle: "dotted", borderLeftColor: "var(--info)" };
     case "unmeasurable_structural":
       return { borderLeftStyle: "dotted", borderLeftColor: "var(--text-4)" };
     case "uninstrumented":
