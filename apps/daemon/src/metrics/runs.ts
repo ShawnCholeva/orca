@@ -542,6 +542,7 @@ export function buildRunSummary(input: {
   return {
     runId: run.runId,
     goalId: run.goalId,
+    goalTitle: run.goalTitle,
     templateId: run.templateId,
     templateName: run.templateName,
     templateVersion: run.templateVersion,

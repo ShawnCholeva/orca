@@ -9,6 +9,7 @@ import { HARNESS_FACETS, HarnessTransition } from "@orca/contracts";
 export type RunRow = {
   runId: string;
   goalId: string;
+  goalTitle: string;
   templateId: string;
   templateName: string;
   templateVersion: number;
@@ -54,17 +55,25 @@ export type ActivityEvent = {
 const FACET_COLS = HARNESS_FACETS.map((f) => `ht.${f.column}`).join(", ");
 
 const RUN_COLS = `wr.id, wr.goal_id, wr.template_id, wr.template_version, wr.status,
-                  wr.started_at, wr.finished_at, wr.blocked_reason, t.name AS template_name`;
+                  wr.started_at, wr.finished_at, wr.blocked_reason, t.name AS template_name,
+                  g.title AS goal_title`;
+
+// INNER on goals deliberately: a run cannot outlive its goal (the workspace purge
+// deletes FK violators transitively and throws on any survivor), so a LEFT JOIN
+// would imply a state the database cannot hold.
+const RUN_FROM = `FROM workflow_runs wr
+                  JOIN goals g ON g.id = wr.goal_id
+                  LEFT JOIN workflow_templates t ON t.id = wr.template_id`;
 
 interface RawRunRow {
   id: string; goal_id: string; template_id: string; template_version: number;
   status: string; started_at: string; finished_at: string | null;
-  blocked_reason: string | null; template_name: string | null;
+  blocked_reason: string | null; template_name: string | null; goal_title: string;
 }
 
 function toRunRow(r: RawRunRow): RunRow {
   return {
-    runId: r.id, goalId: r.goal_id, templateId: r.template_id,
+    runId: r.id, goalId: r.goal_id, goalTitle: r.goal_title, templateId: r.template_id,
     templateName: r.template_name ?? r.template_id,
     templateVersion: r.template_version, status: r.status,
     startedAt: r.started_at, finishedAt: r.finished_at, blockedReason: r.blocked_reason,
@@ -74,18 +83,14 @@ function toRunRow(r: RawRunRow): RunRow {
 export function listRuns(db: Database.Database, limit = 50): RunRow[] {
   return (
     db.prepare(
-      `SELECT ${RUN_COLS} FROM workflow_runs wr
-       LEFT JOIN workflow_templates t ON t.id = wr.template_id
-       ORDER BY wr.started_at DESC, wr.id ASC LIMIT ?`
+      `SELECT ${RUN_COLS} ${RUN_FROM} ORDER BY wr.started_at DESC, wr.id ASC LIMIT ?`
     ).all(limit) as RawRunRow[]
   ).map(toRunRow);
 }
 
 export function getRun(db: Database.Database, runId: string): RunRow | null {
   const row = db.prepare(
-    `SELECT ${RUN_COLS} FROM workflow_runs wr
-     LEFT JOIN workflow_templates t ON t.id = wr.template_id
-     WHERE wr.id = ?`
+    `SELECT ${RUN_COLS} ${RUN_FROM} WHERE wr.id = ?`
   ).get(runId) as RawRunRow | undefined;
   return row === undefined ? null : toRunRow(row);
 }

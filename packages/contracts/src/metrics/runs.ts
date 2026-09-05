@@ -281,6 +281,18 @@ export type AwaitingYou = z.infer<typeof AwaitingYou>;
 export const RunSummary = z.object({
   runId: z.string(),
   goalId: z.string(),
+  /**
+   * Non-nullable: a run cannot outlive its goal. The only hard delete is the
+   * workspace purge (`workspaces/usecases.ts`), which drops FK enforcement, deletes
+   * the goals, then deletes every FK-violating row transitively and THROWS if any
+   * dangling reference survives — so an orphaned run is not a state the database
+   * can be left in.
+   *
+   * It exists because the goal is the noun the reader thinks in ("the Kelvin one")
+   * and the template is not: with one template, `templateName` is the largest text
+   * on every row and has zero discriminating power.
+   */
+  goalTitle: z.string(),
   templateId: z.string(),
   templateName: z.string(),
   templateVersion: z.number().int(),

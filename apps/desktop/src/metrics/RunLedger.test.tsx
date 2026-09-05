@@ -8,7 +8,8 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 function summary(over: Partial<RunSummary> = {}): RunSummary {
   return {
-    runId: "r1", goalId: "g1", templateId: "t", templateName: "Adaptive Delivery",
+    runId: "r1", goalId: "g1", goalTitle: "Add a Kelvin conversion",
+    templateId: "t", templateName: "Adaptive Delivery",
     templateVersion: 16, status: "completed",
     startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T21:00:00.000Z",
     blockedReason: null, terminationCause: "completed", terminationEvidence: null,

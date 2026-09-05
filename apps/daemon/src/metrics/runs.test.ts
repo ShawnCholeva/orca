@@ -12,7 +12,8 @@ const NOW = Date.parse("2026-09-02T00:00:00.000Z");
 
 function run(over: Partial<RunRow> = {}): RunRow {
   return {
-    runId: RUN_ID, goalId: GOAL_ID, templateId: "tpl", templateName: "Tpl",
+    runId: RUN_ID, goalId: GOAL_ID, goalTitle: "Add a Kelvin conversion",
+    templateId: "tpl", templateName: "Tpl",
     templateVersion: 1, status: "blocked",
     startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T01:00:00.000Z",
     blockedReason: null, ...over,
