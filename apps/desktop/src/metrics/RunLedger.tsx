@@ -60,7 +60,7 @@ const TERMINATION_SENTENCE: Record<RunSummary["terminationCause"], string> = {
   running: "still running",
   completed: "finished",
   workflow_failed: "the workflow stopped it",
-  infrastructure_killed: "stopped by Orca, not your workflow",
+  infrastructure_killed: "stopped by Orca",
   unknown: "stopped, with nothing recorded about why",
 };
 
@@ -76,7 +76,7 @@ const TERMINATION_TONE: Record<RunSummary["terminationCause"], string> = {
   running: "var(--accent)",
   completed: "var(--run)",
   workflow_failed: "var(--warn)",
-  infrastructure_killed: "var(--err)",
+  infrastructure_killed: "var(--text-3)",
   unknown: "var(--text-3)",
 };
 
@@ -222,12 +222,12 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
             by almost every row marks nothing. */}
       </div>
       {cost.failedUsd > 0 && (
-        <span style={{ fontSize: "var(--fs-1)", color: "var(--err)" }} className="mono">
+        <span style={{ fontSize: "var(--fs-1)", color: "var(--text-2)" }} className="mono">
           {usd(cost.failedUsd)} failed
         </span>
       )}
       {cost.supersededUsd > 0 && (
-        <span style={{ fontSize: "var(--fs-1)", color: "var(--warn)" }} className="mono">
+        <span style={{ fontSize: "var(--fs-1)", color: "var(--text-2)" }} className="mono">
           {usd(cost.supersededUsd)} replaced
         </span>
       )}
@@ -235,7 +235,7 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
           broke as "reported a / cost", which reads as two facts. Given the choice
           between a wrapped tag and a wrapped phrase, break the tag. */}
       <div style={{ display: "flex", alignItems: "baseline", gap: "var(--sp-1)", flexWrap: "wrap", justifyContent: "flex-end" }}>
-        <span style={{ fontSize: "var(--fs-1)", color: reported === total ? "var(--text-3)" : "var(--warn)", whiteSpace: "nowrap" }} className="mono">
+        <span style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", whiteSpace: "nowrap" }} className="mono">
           {reported} of {total} nodes reported a cost
         </span>
 

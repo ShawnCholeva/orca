@@ -405,3 +405,27 @@ describe("a park's age is not a park's duration", () => {
     expect(text).not.toContain("open 1m 22s");
   });
 });
+
+describe("the row does not restate what the headline just said", () => {
+  it("keeps the run's own evidence and drops the absolution the panel owns", () => {
+    // The headline states the diagnosis once, calmly: "That's a known Orca bug, not
+    // your workflow failing." Five rows then repeated it — in the loudest tone on the
+    // screen — about the thing the reader had just been told not to worry about.
+    //
+    // Safe to drop unconditionally: a row can only read `infrastructure_killed` when
+    // at least one run was, which is exactly when headline() takes its infra branch,
+    // and both of that branch's wordings attribute the cause. So the clause is covered
+    // whenever a row would have carried it. What the row keeps is what the headline
+    // has not got — which run, and its own evidence.
+    render(<RunRow onOpen={() => {}} run={summary({
+      terminationCause: "infrastructure_killed",
+      terminationEvidence: "crashed 3 times (worker_exited_no_signal)",
+    })} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("stopped by Orca");
+    expect(text).toContain("crashed 3 times");
+    expect(text).not.toContain("not your workflow");
+    // And the engine code still belongs to the detail view, not the scanning list.
+    expect(text).not.toContain("worker_exited_no_signal");
+  });
+});
