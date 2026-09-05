@@ -567,7 +567,7 @@ export function RunDetailPanel({ detail, onBack }: { detail: RunDetail; onBack: 
   const { run, spans, interventions } = detail;
   const actionable = interventions.filter((i) => i.parkState === "awaiting_you");
   return (
-    <div style={{ display: "grid", gap: "var(--sp-5)" }}>
+    <div style={{ display: "grid", alignContent: "start", gap: "var(--sp-5)" }}>
       <div>
         <button type="button" onClick={onBack} style={{ fontSize: "var(--fs-2)", background: "none", border: "none", color: "var(--accent)", cursor: "pointer", padding: 0 }}>
           ← All runs
@@ -714,7 +714,7 @@ export function RunLedger() {
   }
 
   return (
-    <div style={{ display: "grid", gap: "var(--sp-5)" }}>
+    <div style={{ display: "grid", alignContent: "start", gap: "var(--sp-5)" }}>
       {/* The headline is the one sentence that leads the screen, so it takes the
           display step rather than sitting one notch above body text. */}
       <p style={{ fontSize: "var(--fs-4)", margin: 0, lineHeight: 1.5, maxWidth: "78ch" }}>{headline(runs)}</p>
