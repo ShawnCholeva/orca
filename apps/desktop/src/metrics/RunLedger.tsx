@@ -23,6 +23,35 @@ function day(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/**
+ * Type size as a function of magnitude.
+ *
+ * The stops list rendered `17h 57m` and `2s` identically — same size, weight and
+ * colour — so the single fact this screen exists to surface was typographically
+ * indistinguishable from a two-second pause. Product's argument for the ledger was
+ * that the age IS the alarm and needs no styling to be loudest; that only holds if
+ * the number is allowed to be loud.
+ *
+ * Deliberately a step function of the value itself, not of its rank or its share of
+ * a total: a rank would make the longest row loud even when every row is trivial,
+ * and a share would move a row's weight when an unrelated row changed. This says one
+ * thing — hours are bigger than minutes are bigger than seconds — and it says it the
+ * same way on every screen and at every n.
+ */
+function durationWeight(ms: number | null | undefined): CSSProperties {
+  if (ms == null) return { fontSize: "var(--fs-1)" };
+  if (ms >= 3_600_000) return { fontSize: "var(--fs-4)", fontWeight: 600 };
+  if (ms >= 60_000) return { fontSize: "var(--fs-2)" };
+  return { fontSize: "var(--fs-1)" };
+}
+
+/** The same idea for money: $48.35 and $1.15 were the same size on adjacent rows. */
+function costWeight(usd: number): CSSProperties {
+  if (usd >= 10) return { fontSize: "var(--fs-4)", fontWeight: 600 };
+  if (usd >= 1) return { fontSize: "var(--fs-3)" };
+  return { fontSize: "var(--fs-1)" };
+}
+
 // ── termination ──────────────────────────────────────────────────────────────
 
 // Surfaced intact, never collapsed to a boolean. "The daemon killed the worker" is
@@ -31,8 +60,16 @@ const TERMINATION_SENTENCE: Record<RunSummary["terminationCause"], string> = {
   running: "still running",
   completed: "finished",
   workflow_failed: "the workflow stopped it",
-  infrastructure_killed: "stopped by the substrate, not the workflow",
+  infrastructure_killed: "stopped by Orca, not your workflow",
   unknown: "stopped, with nothing recorded about why",
+};
+
+// The engine reason is the string worth quoting in a bug report, so the detail view
+// keeps it verbatim. On the scanning list it is the most-repeated text on screen and
+// names nothing the reader can act on — and one untranslated code makes every other
+// translated sentence look untranslated too.
+function withoutEngineCode(evidence: string): string {
+  return evidence.replace(/\s*\([a-z0-9_]+\)\s*$/i, "");
 };
 
 const TERMINATION_TONE: Record<RunSummary["terminationCause"], string> = {
@@ -142,7 +179,7 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
       <div style={{ display: "grid", gap: 4 }}>
         <MeasurementLabel
           state="uninstrumented"
-          fix={total === 0 ? "Wire cost capture for this provider." : "No node on this run reported a cost."}
+          fix={total === 0 ? "This provider doesn't report cost to Orca yet." : "No node on this run reported a cost."}
         />
       </div>
     );
@@ -162,13 +199,9 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
     <div style={{ display: "grid", gap: "var(--sp-1)", justifyItems: "end", textAlign: "right" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: "var(--sp-2)" }}>
         <span className="mono" style={{ fontSize: "var(--fs-5)", fontWeight: 600, letterSpacing: -0.4 }}>{usd(cost.usd)}</span>
-        {cost.rollupCheck === "not_applicable" && (
-          <MeasurementLabel
-            compact
-            state="unmeasurable_structural"
-            reason="Nothing to check this total against — this run never finished."
-          />
-        )}
+        {/* No per-row tag for `not_applicable`: it was true on five of six rows, and
+            CostCaveats states it once above the list with its count. A marker carried
+            by almost every row marks nothing. */}
       </div>
       {cost.failedUsd > 0 && (
         <span style={{ fontSize: "var(--fs-1)", color: "var(--err)" }} className="mono">
@@ -194,7 +227,7 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
             compact
             state="uninstrumented"
             lossy
-            fix={`${silent} more node${silent === 1 ? "" : "s"} spent money and reported nothing, so this total is low. Emit step_launch/step_complete on the gate surrogate.`}
+            fix={`${silent} more node${silent === 1 ? "" : "s"} spent money and reported nothing, so this total is lower than the run actually cost.`}
           />
         )}
       </div>
@@ -233,7 +266,7 @@ export function CostCaveats({ runs }: { runs: RunSummary[] }) {
           // `reason` only for unmeasurable_structural, so a count passed there would
           // have rendered nothing at all. It belongs beside the action regardless —
           // scale is what makes the fix worth doing.
-          fix={`${silentNodes} node${silentNodes === 1 ? "" : "s"} across these runs spent money and reported nothing, so those totals are low. Emit step_launch/step_complete on the gate surrogate.`}
+          fix={`${silentNodes} node${silentNodes === 1 ? "" : "s"} across these runs spent money and reported nothing, so those totals are lower than the runs actually cost.`}
         />
       )}
       {unchecked > 0 && (
@@ -298,7 +331,7 @@ export function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) 
           <span style={{ fontSize: "var(--fs-3)", color: "var(--text)" }}>
             {TERMINATION_SENTENCE[run.terminationCause]}
             {run.terminationEvidence && run.terminationCause !== "completed" && (
-              <span style={{ color: "var(--text-3)" }}> — {run.terminationEvidence}</span>
+              <span style={{ color: "var(--text-3)" }}> — {withoutEngineCode(run.terminationEvidence)}</span>
             )}
           </span>
         </div>
@@ -309,9 +342,15 @@ export function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) 
           {run.stepsBlocked > 0 && <span>{run.stepsBlocked} blocked</span>}
           {run.retriedCompletions > 0 && <span>{run.retriedCompletions} redone</span>}
           {run.spanRelaunches > 0 && <span>{run.spanRelaunches} relaunched after a crash</span>}
-          {run.openInterventions > 0 && (
-            <span style={{ color: "var(--err)", fontWeight: 600 }}>
-              {run.openInterventions} card{run.openInterventions === 1 ? "" : "s"} still open
+          {run.awaitingYou.count > 0 && (
+            <span style={{ color: "var(--warn)", fontWeight: 600 }}>
+              {run.awaitingYou.count} prompt{run.awaitingYou.count === 1 ? "" : "s"} waiting on you
+            </span>
+          )}
+          {run.openInterventions - run.awaitingYou.count > 0 && (
+            <span>
+              {run.openInterventions - run.awaitingYou.count} prompt
+              {run.openInterventions - run.awaitingYou.count === 1 ? "" : "s"} left unanswered
             </span>
           )}
         </div>
@@ -369,7 +408,7 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
             lossy={span.kind === "gate"}
             fix={
               span.kind === "gate"
-                ? "This gate spawned a real agent; emit step_launch/step_complete on its surrogate."
+                ? "This gate ran a real agent, and its cost and timing weren't recorded."
                 : undefined
             }
           />
@@ -377,17 +416,14 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
           <span className="mono" style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>
             {dur(span.elapsedMs)}
             {span.workingMs == null
-              ? " · none of it observed"
+              ? " · no interior detail recorded"
               : ` · ${dur(span.workingMs)} observed, ${dur(Math.max(0, span.elapsedMs - span.workingMs))} unaccounted`}
           </span>
         )}
-        {span.kind === "gate" && span.workingMs == null && (
-          <MeasurementLabel
-            state="uninstrumented"
-            lossy
-            fix="This gate spawned a real agent; emit step_launch/step_complete on its surrogate."
-          />
-        )}
+        {/* No tag here. The duration line beside it already reads "no interior detail
+            recorded", and the cost column carries the cost absence as its own tag —
+            a second identical `discarded` in the same cell was the tripled sentence
+            returning in tag form. */}
         {span.blockedReason && (
           <span style={{ fontSize: "var(--fs-2)", color: "var(--err)" }}>{span.blockedReason}</span>
         )}
@@ -407,16 +443,21 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
           <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>
             {span.restarts > 0 && `relaunched ${span.restarts}x after a crash`}
             {span.restarts > 0 && span.completions > 1 && " · "}
-            {span.completions > 1 && `redone ${span.completions - 1}x`}
+            {/* NOT "redone Nx". `completions` counts step_complete events, and a
+                veto-then-pass step emits two of them for ONE attempt — so this rendered
+                "attempt 1 · passed" and "redone 1x" on the same row, which cannot both
+                be true. The attempt count is beside the step name and is the authority
+                on retries; this says what the extra event actually was. */}
+            {span.completions > 1 && `finished ${span.completions}x — sent back, then accepted`}
           </span>
         )}
       </div>
 
       <div style={{ display: "grid", gap: 2, justifyItems: "end" }}>
         {span.cost === null || span.cost.usd === null ? (
-          <MeasurementLabel state="uninstrumented" lossy={span.kind === "gate"} />
+          <MeasurementLabel compact state="uninstrumented" lossy={span.kind === "gate"} />
         ) : (
-          <span className="mono" style={{ fontSize: "var(--fs-3)" }}>{usd(span.cost.usd)}</span>
+          <span className="mono" style={{ ...costWeight(span.cost.usd) }}>{usd(span.cost.usd)}</span>
         )}
       </div>
     </div>
@@ -440,7 +481,7 @@ function InterventionRow({ iv }: { iv: Intervention }) {
   const actionable = iv.parkState === "awaiting_you";
   return (
     <div style={{ display: "flex", gap: "var(--sp-3)", alignItems: "baseline", padding: "var(--sp-1) 0", fontSize: "var(--fs-2)" }}>
-      <span className="mono" style={{ minWidth: 64, color: actionable ? "var(--warn)" : "var(--text-2)", fontWeight: actionable ? 600 : 400 }}>
+      <span className="mono" style={{ minWidth: 72, color: actionable ? "var(--warn)" : "var(--text)", ...durationWeight(iv.durationMs) }}>
         {dur(iv.durationMs)}
       </span>
       {/* The tag REPLACES the reason rather than sitting beside it. "a pause" was a
@@ -450,7 +491,7 @@ function InterventionRow({ iv }: { iv: Intervention }) {
           thing here is the reason, so the reason slot is where its type belongs.
           Duration and park state are measured and keep their own cells. */}
       {iv.sourceKind === "unknown" ? (
-        <MeasurementLabel compact state="uninstrumented" lossy fix="Stamp the pause reason into the event." />
+        <MeasurementLabel compact state="uninstrumented" lossy fix="Orca didn't keep a record of why this one stopped." />
       ) : (
         <span style={{ color: "var(--text-2)" }}>
           {iv.sourceKind.replace(/_/g, " ").replace(" pending", "")}
@@ -489,7 +530,7 @@ function ParkCaveat({ interventions }: { interventions: Intervention[] }) {
         (named > 0
           ? `, and the ${named} that show a reason may be showing a later pause's reason instead — we can't tell which.`
           : ".") +
-        ` Read sourceKind from the event, which is immutable, not from the activity row.`
+        ` Orca reuses one record per step as a run continues, so an earlier reason can be written over.`
       }
     />
   );
@@ -570,11 +611,11 @@ function CantTellYou({ runs }: { runs: RunSummary[] }) {
         />
       )}
       {gateless && (
-        <MeasurementLabel state="uninstrumented" lossy fix="Gate cost and timing: emit step_launch/step_complete on the gate surrogate." />
+        <MeasurementLabel state="uninstrumented" lossy fix="What reviews cost and how long they took isn't being recorded." />
       )}
       <MeasurementLabel
         state="uninstrumented"
-        fix="What happened inside a step: only two hooks are wired, so a pre-approved tool call leaves no trace. Wire the PostToolUse hook."
+        fix="What happened inside a step: Orca only sees a step start and finish, so work it did in between leaves no trace."
       />
     </section>
   );

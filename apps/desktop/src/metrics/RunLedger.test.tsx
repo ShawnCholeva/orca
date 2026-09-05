@@ -120,7 +120,11 @@ describe("cost", () => {
     expect(text).toContain("runs that never reached completion have no roll-up");
     // No bare tally of a per-row state: it would collide with the headline's count.
     expect(text).not.toMatch(/\d+ of these runs never/);
-    expect(text).toContain("Emit step_launch/step_complete on the gate surrogate.");
+    // The remedy is named as something that exists, not as the ticket that closes it.
+    // "Emit step_launch/step_complete on the gate surrogate" made the reader a reader
+    // of our backlog; what they need is whether to discount the number.
+    expect(text).toContain("spent money and reported nothing");
+    expect(text).not.toMatch(/step_launch|step_complete|surrogate|PostToolUse/);
   });
 
   it("says nothing when there is no caveat to state", () => {
@@ -250,8 +254,15 @@ describe("RunDetailPanel", () => {
       spans: [span({ kind: "gate", name: "Critique", elapsedMs: 100_000, workingMs: null, cost: null, tier: null, verifiers: null })],
     })} onBack={() => {}} />);
     const text = document.body.textContent ?? "";
-    expect(text).toContain("none of it observed");
-    expect(text).toContain("emit step_launch/step_complete on its surrogate");
+    // Not "none of it observed": this gate reports 1m 40s and `passed`, so the
+    // outcome and the extent WERE observed and only the interior wasn't. The old
+    // wording invited "then how do you know it passed?" about a step we did observe.
+    expect(text).toContain("no interior detail recorded");
+    expect(text).not.toContain("none of it observed");
+    // The absence is typed rather than described as an engineering task. The reader
+    // needs to know whether to discount the number; the ticket that closes it is ours.
+    expect(document.querySelector('[data-compact="true"]')!.textContent).toBe("discarded");
+    expect(text).not.toMatch(/step_launch|step_complete|surrogate/);
     // The guard that catches an unsummable split must NOT fire here.
     expect(document.querySelectorAll('[data-seg="mismatch"]')).toHaveLength(0);
   });
@@ -287,7 +298,10 @@ describe("RunDetailPanel", () => {
     expect(tag!.textContent).toBe("discarded");
     // The tag occupies the reason cell rather than sitting beside a placeholder —
     // the absent thing is the reason, so the reason slot carries its type.
-    expect(document.body.textContent).not.toContain("a pause");
+    // Scoped to the row: the tag occupies the reason cell instead of the "a pause"
+    // placeholder. Asserting over the whole document also matched prose in the
+    // section caveat, which is a different element making a different point.
+    expect(tag!.closest("div")!.textContent).not.toContain("a pause");
   });
 
   it("states the overwrite finding once, including that the UNTAGGED rows may be wrong", () => {
