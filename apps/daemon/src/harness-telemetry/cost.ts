@@ -34,5 +34,7 @@ export function computeCost(model: string, tokensIn: number, tokensOut: number):
     cache_read_tokens: null,
     cache_creation_tokens: null,
     usd,
+    // This function IS the price map. Everything it returns is an estimate.
+    source: "price_map",
   };
 }

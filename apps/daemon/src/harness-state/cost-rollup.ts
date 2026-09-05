@@ -42,6 +42,9 @@ export function buildGoalCostRollup(
   let anyCacheRead = false;
   let cache_creation = 0;
   let anyCacheCreation = false;
+  // Null once the summed entries disagree, or once any of them predates the field.
+  let source: "provider" | "price_map" | null = null;
+  let sourceSeen = false;
 
   for (const t of listTransitionsByGoal(db, goalId, 10_000)) {
     if (t.boundary !== "step_complete" || t.workflowRunId !== workflowRunId) continue;
@@ -60,6 +63,12 @@ export function buildGoalCostRollup(
       anyCacheCreation = true;
       cache_creation += c.cache_creation_tokens;
     }
+    if (!sourceSeen) {
+      source = c.source;
+      sourceSeen = true;
+    } else if (source !== c.source) {
+      source = null;
+    }
   }
 
   if (!any) return null;
@@ -68,6 +77,7 @@ export function buildGoalCostRollup(
     tokens_out,
     cache_read_tokens: anyCacheRead ? cache_read : null,
     cache_creation_tokens: anyCacheCreation ? cache_creation : null,
+    source,
     usd,
   };
 }
@@ -102,6 +112,9 @@ export function buildGoalCostRollupAcross(
           ? null
           : (acc.cache_creation_tokens ?? 0) + (entry.cache_creation_tokens ?? 0),
       usd: acc.usd + entry.usd,
+      // A total mixing an authoritative figure with an estimate has NEITHER
+      // provenance; claiming either would be worse than claiming none.
+      source: acc.source === entry.source ? acc.source : null,
     };
   }
   return acc;

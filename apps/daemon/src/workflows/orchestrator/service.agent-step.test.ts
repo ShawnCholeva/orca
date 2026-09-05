@@ -465,7 +465,7 @@ function seedRunSpend(db: Database.Database, usd: number, id = "sc-budget") {
     telemetry: {
       cost: {
         tokens_in: 1000, tokens_out: 300,
-        cache_read_tokens: null, cache_creation_tokens: null, usd,
+        cache_read_tokens: null, cache_creation_tokens: null, usd, source: null,
       },
       latency_ms: null, model: "claude", provider_id: null, provider_version: null,
       prompt_ref: null, raw_output_ref: null, rejected_alternatives: [],

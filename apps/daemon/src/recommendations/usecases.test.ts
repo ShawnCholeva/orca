@@ -454,7 +454,7 @@ describe('acceptRecommendation', () => {
     seedWorkflow(db, 'g1', { finalStep: true, outstanding: [] });
     const stepCost = {
       tokens_in: 1000, tokens_out: 300,
-      cache_read_tokens: null, cache_creation_tokens: null, usd: 0.05,
+      cache_read_tokens: null, cache_creation_tokens: null, usd: 0.05, source: null
     };
     insertTransition(db, {
       id: 'sc-cost-1', goalId: 'g1', workflowRunId: 'run-1', workflowStepRunId: 'step-1',

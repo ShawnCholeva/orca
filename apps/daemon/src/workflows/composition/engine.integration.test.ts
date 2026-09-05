@@ -122,7 +122,7 @@ function insertStepOutput(goalId: string, runId: string, stepRunId: string, body
 
 function costTelemetry(usd: number): TelemetryFacet {
   return {
-    cost: { tokens_in: 10, tokens_out: 5, cache_read_tokens: null, cache_creation_tokens: null, usd },
+    cost: { tokens_in: 10, tokens_out: 5, cache_read_tokens: null, cache_creation_tokens: null, usd, source: null },
     latency_ms: null, model: null, provider_id: null, provider_version: null,
     prompt_ref: null, raw_output_ref: null, rejected_alternatives: [], human_interventions: [],
     outcome: { status: "succeeded", failure_code: null },

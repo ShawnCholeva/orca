@@ -380,13 +380,20 @@ export function computeCost(transitions: RunTransition[], stepRuns: RunStepRunRo
 }
 
 /**
- * Cost provenance. Today the daemon collapses provider-authoritative and price-map
- * estimates into one `usd` (`buildTelemetry`), so `measured` vs `estimated` is not
- * recoverable — `reported` is the honest interim and splits once `cost.source`
- * lands. Absent cost is `unknown`, NOT `unreported`: distinguishing "no channel
- * exists" from "the channel sent nothing" requires the adapter's declared
- * hookContract, and inferring it from a missing row would reclassify defects as
- * limits. Absence is never zero.
+ * Cost provenance. `cost.source` now records whether `usd` came from the provider
+ * or from our own price map, so `measured` and `estimated` are distinguishable —
+ * an estimate rendered as a measurement is the "absence is never zero" defect one
+ * level in, and the price map does not price cache, so it is systematically low on
+ * a cache-heavy run.
+ *
+ * `reported` survives for two honest cases: a completion written before the field
+ * existed, and a span whose completions DISAGREE — a total mixing an authoritative
+ * figure with an estimate has neither provenance, and claiming either would be
+ * worse than claiming none. It expires on its own as pre-field rows age out.
+ *
+ * Absent cost is `unknown`, NOT `unreported`: distinguishing "no channel exists"
+ * from "the channel sent nothing" requires the adapter's declared hookContract, and
+ * inferring it from a missing row would reclassify defects as limits.
  */
 function spanCost(completes: RunTransition[]): SpanCost | null {
   if (completes.length === 0) return null;
@@ -394,11 +401,13 @@ function spanCost(completes: RunTransition[]): SpanCost | null {
   if (withCost.length === 0) return { usd: null, tokensIn: null, tokensOut: null, state: "unknown" };
   const sum = (pick: (c: NonNullable<NonNullable<RunTransition["transition"]["telemetry"]>["cost"]>) => number) =>
     withCost.reduce((acc, t) => acc + pick(t.transition.telemetry!.cost!), 0);
+  const sources = new Set(withCost.map((t) => t.transition.telemetry!.cost!.source));
+  const only = sources.size === 1 ? [...sources][0] : null;
   return {
     usd: sum((c) => c.usd),
     tokensIn: sum((c) => c.tokens_in),
     tokensOut: sum((c) => c.tokens_out),
-    state: "reported",
+    state: only === "provider" ? "measured" : only === "price_map" ? "estimated" : "reported",
   };
 }
 

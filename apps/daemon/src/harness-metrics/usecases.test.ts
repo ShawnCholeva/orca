@@ -115,7 +115,7 @@ describe("computeHarnessMetrics", () => {
           tokens_out: 50,
           cache_read_tokens: null,
           cache_creation_tokens: null,
-          usd: 0.01,
+          usd: 0.01, source: null
         },
         latency_ms: 1200,
         model: "claude",

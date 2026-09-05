@@ -90,6 +90,7 @@ function cost(partial: Partial<CostEntry>): CostEntry {
     cache_read_tokens: null,
     cache_creation_tokens: null,
     usd: 0,
+    source: null,
     ...partial,
   };
 }

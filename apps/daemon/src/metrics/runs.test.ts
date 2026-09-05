@@ -30,6 +30,7 @@ function stepRun(over: Partial<RunStepRunRow> = {}): RunStepRunRow {
 function complete(over: {
   id: string; at: string; stepRunId?: string; stepTemplateId?: string;
   usd?: number | null; latencyMs?: number; status?: "succeeded" | "failed";
+  source?: "provider" | "price_map" | null;
 }): RunTransition {
   const t: HarnessTransition = {
     id: over.id, goalId: GOAL_ID, workflowRunId: RUN_ID,
@@ -39,7 +40,7 @@ function complete(over: {
     telemetry: {
       cost: over.usd == null ? null : {
         tokens_in: 10, tokens_out: 20, cache_read_tokens: null,
-        cache_creation_tokens: null, usd: over.usd,
+        cache_creation_tokens: null, usd: over.usd, source: over.source ?? null,
       },
       latency_ms: over.latencyMs ?? null,
       model: null, provider_id: null, provider_version: null,
@@ -57,7 +58,7 @@ function markDone(usd: number): RunTransition {
     id: "md-1", goalId: GOAL_ID, workflowRunId: RUN_ID, workflowStepRunId: null,
     boundary: "mark_done", risk: null, evidence: null, stateDeps: null,
     telemetry: {
-      cost: { tokens_in: 0, tokens_out: 0, cache_read_tokens: null, cache_creation_tokens: null, usd },
+      cost: { tokens_in: 0, tokens_out: 0, cache_read_tokens: null, cache_creation_tokens: null, usd, source: null },
       latency_ms: null, model: null, provider_id: null, provider_version: null,
       prompt_ref: null, raw_output_ref: null, rejected_alternatives: [],
       human_interventions: [], outcome: { status: "succeeded", failure_code: null },
@@ -530,5 +531,35 @@ describe("computeAwaitingYou", () => {
       park({ activityId: "a2", durationMs: 90_000, sourceKind: "permission_pending" }),
     ]);
     expect(out).toEqual({ count: 2, sinceMs: 90_000, sourceKind: "permission_pending" });
+  });
+});
+
+describe("cost provenance", () => {
+  const span = (sources: Array<"provider" | "price_map" | null>) =>
+    buildRunDetail({
+      run: run(), stepRuns: [stepRun({ stepRunId: "sr-1" })],
+      transitions: sources.map((source, i) =>
+        complete({ id: `c${i}`, at: `2026-09-01T00:0${i}:00.000Z`, stepRunId: "sr-1", usd: 1, source })),
+      events: [], runEvents: [], sourceKinds: new Map(),
+      stepNames: new Map(), nowMs: NOW,
+    }).spans[0].cost?.state;
+
+  it("distinguishes a provider figure from our own estimate", () => {
+    // The price map does not price cache, so an estimate is systematically low on
+    // a cache-heavy run. Rendering the two identically is "absence is never zero"
+    // one level in: not a missing number shown as zero, but an ESTIMATE shown as
+    // a measurement.
+    expect(span(["provider"])).toBe("measured");
+    expect(span(["price_map"])).toBe("estimated");
+  });
+
+  it("claims neither provenance when a span's completions disagree", () => {
+    // A total mixing an authoritative figure with an estimate has neither, and
+    // claiming either would be worse than claiming none.
+    expect(span(["provider", "price_map"])).toBe("reported");
+  });
+
+  it("reports a pre-field completion as reported rather than guessing", () => {
+    expect(span([null])).toBe("reported");
   });
 });

@@ -178,6 +178,10 @@ export function buildTelemetry(
         ? drained.usd
         : computeCost(drained.model!, drained.tokensIn, drained.tokensOut).usd;
     cost = {
+      // The discriminant was already here, deciding `usd` two lines up; it was
+      // simply not recorded, so a reader could not tell an authoritative figure
+      // from our estimate.
+      source: drained.usd != null ? "provider" : "price_map",
       tokens_in: drained.tokensIn,
       tokens_out: drained.tokensOut,
       cache_read_tokens: drained.cacheReadTokens,

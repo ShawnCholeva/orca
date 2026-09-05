@@ -152,6 +152,23 @@ export const CostEntry = z
     cache_read_tokens: z.number().int().nonnegative().nullable().default(null),
     cache_creation_tokens: z.number().int().nonnegative().nullable().default(null),
     usd: z.number().nonnegative(),
+    /**
+     * Where `usd` came from. `provider` is authoritative — the provider reported
+     * the cost and it already prices cache. `price_map` is our own estimate over
+     * input+output tokens and does NOT price cache, so it is systematically low
+     * for a cache-heavy run.
+     *
+     * Rendering these identically is the "absence is never zero" defect one level
+     * in: not a missing number presented as zero, but an ESTIMATE presented as a
+     * measurement. Additive and nullable-defaulted, so facets serialized before
+     * this field still parse; null means "written before we recorded provenance",
+     * and the projection reports that as `reported` rather than guessing.
+     *
+     * A roll-up over entries of differing provenance carries null: a total that
+     * mixes an authoritative figure with an estimate has neither provenance, and
+     * claiming either would be worse than claiming none.
+     */
+    source: z.enum(["provider", "price_map"]).nullable().default(null),
   })
   .strict();
 export type CostEntry = z.infer<typeof CostEntry>;
