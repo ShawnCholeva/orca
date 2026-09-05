@@ -186,6 +186,8 @@ const NOT_A_PROSE_SURFACE: Record<string, string> = {
   RANGES: "the window choices",
   withinWindow: "a filter",
   gatePeriodFor: "maps a window to a template period",
+  intervalsFor: "the steps that divide a window",
+  defaultIntervalFor: "picks a step",
   modelName: "strips a release date from a model id",
 
   // Composers: they mount the surfaces above, each of which is asserted directly.

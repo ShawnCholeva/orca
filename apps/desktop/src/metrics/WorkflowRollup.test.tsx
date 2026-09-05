@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Intervention, RunDetail, RunSummary, RunTraceSpan, TemplateMetricsDetail } from "@orca/contracts";
-import { Dashboard, RANGES, WorkflowRollup, aggregate, gatePeriodFor, versionsOf, withinWindow, workflowsOf } from "./WorkflowRollup";
+import { Dashboard, RANGES, WorkflowRollup, aggregate, defaultIntervalFor, gatePeriodFor, intervalsFor, versionsOf, withinWindow, workflowsOf } from "./WorkflowRollup";
 import * as api from "../api";
 import { Donut } from "./dashboard-panels";
 
@@ -642,16 +642,25 @@ describe("choosing the window to inspect", () => {
     run({ runId: "old", startedAt: "2026-07-28T05:00:00.000Z" }),           // 39d ago
   ];
 
-  it("offers the eight ranges in order and keeps only runs that STARTED inside the window", () => {
+  it("offers the eight ranges in order and keeps the runs that were ACTIVE inside the window", () => {
     expect(RANGES.map((r) => r.label)).toEqual([
       "Last 1 hour", "Last 8 hours", "Last 12 hours", "Last 24 hours",
       "Last 3 days", "Last 7 days", "Last 14 days", "Last 1 month",
     ]);
+    // Every fixture run lasted 10 hours (the fixture's elapsed) and ended.
     const ids = (key: string) => withinWindow(runs(), key, NOW).map((r) => r.runId);
     expect(ids("1h")).toEqual(["h1"]);
     expect(ids("24h")).toEqual(["h1", "d1"]);
     expect(ids("7d")).toEqual(["h1", "d1", "w1"]);
     expect(ids("1mo")).toEqual(["h1", "d1", "w1", "m1"]);
+    // A run that ended INSIDE the window belongs to it even though it started before.
+    const spans = run({ runId: "spans", startedAt: "2026-09-04T00:00:00.000Z",
+      durations: { elapsedMs: 36 * 3_600_000, workingMs: 0, parkedMs: 0, unaccountedMs: 36 * 3_600_000, spanActiveMs: 0, accruing: false, integrityFlag: null } });
+    expect(withinWindow([spans], "1h", NOW).map((r) => r.runId)).toEqual(["spans"]);
+    // A run still running is active in every window, however long ago it began —
+    // the stuck run IS stuck in every window.
+    const live = run({ runId: "live", startedAt: "2026-07-01T00:00:00.000Z", terminationCause: "running" });
+    expect(withinWindow([live], "1h", NOW).map((r) => r.runId)).toEqual(["live"]);
   });
 
   it("maps a window to the smallest template period that contains it", () => {
@@ -682,15 +691,71 @@ describe("choosing the window to inspect", () => {
       await waitFor(() => expect(document.body.textContent).toContain("spent across 3 runs"));
       expect(gates).toHaveBeenCalledWith("t", "7d", "latest");
 
-      // Empty window: say so, keep every chooser so the reader can widen it.
+      // Empty window: say exactly what is empty and keep EVERY chooser — the
+      // workflow and version pickers were the first casualties of an empty
+      // window, and a range picker beside nothing says nothing about what it
+      // filters.
       vi.setSystemTime(NOW + 40 * 24 * 3_600_000);
       fireEvent.click(screen.getByText("Last 7 days"));
       fireEvent.click(screen.getByText("Last 1 hour"));
-      await waitFor(() => expect(document.body.textContent).toContain("No runs started in the last 1 hour"));
+      await waitFor(() => expect(document.body.textContent).toContain("No Adaptive Delivery v16 runs were active in the last 1 hour"));
       expect(screen.getByText("Last 1 hour")).toBeTruthy();
+      expect(screen.getByText("Adaptive Delivery")).toBeTruthy();
+      expect(screen.getByText("v16").parentElement?.textContent).toContain("0 runs");
       expect(document.body.textContent).not.toContain("spent across");
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("choosing the step the window is divided into", () => {
+  it("offers every step that divides the window evenly into 2 to 168 points", () => {
+    // One rule, not eight lists; it reproduces the founder's two examples exactly.
+    const labels = (range: string) => intervalsFor(range).map((i) => i.label);
+    expect(labels("1h")).toEqual(["1 minute", "5 minutes", "10 minutes", "15 minutes", "30 minutes"]);
+    expect(labels("7d")).toEqual(["1 hour", "2 hours", "4 hours", "8 hours", "12 hours", "1 day"]);
+    expect(labels("1mo")).toEqual(["8 hours", "12 hours", "1 day", "2 days"]);
+    // Every offered step divides the window with nothing left over.
+    for (const r of RANGES) for (const i of intervalsFor(r.key)) expect(r.ms % i.ms).toBe(0);
+  });
+
+  it("reports how many points each step yields", () => {
+    expect(intervalsFor("24h").map((i) => [i.label, i.points])).toEqual([
+      ["10 minutes", 144], ["15 minutes", 96], ["30 minutes", 48], ["1 hour", 24],
+      ["2 hours", 12], ["4 hours", 6], ["8 hours", 3], ["12 hours", 2],
+    ]);
+  });
+
+  it("defaults to the step closest to 24 points", () => {
+    expect(defaultIntervalFor("1h")).toBe("5m");
+    expect(defaultIntervalFor("24h")).toBe("1h");
+    expect(defaultIntervalFor("7d")).toBe("8h");
+    expect(defaultIntervalFor("1mo")).toBe("1d");
+  });
+
+  it("keeps the chosen step across a range change when it still fits, else falls back", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.parse("2026-09-05T12:00:00.000Z") });
+    vi.spyOn(api, "getRunSummaries").mockResolvedValue([run({ startedAt: "2026-09-05T11:00:00.000Z" })]);
+    vi.spyOn(api, "getRunDetail").mockResolvedValue({ run: run(), spans: [], interventions: [], toolDecisions: [] });
+    vi.spyOn(api, "getTemplateMetricsDetail").mockRejectedValue(new Error("none"));
+    render(<WorkflowRollup />);
+    await waitFor(() => expect(document.body.textContent).toContain("spent across"));
+    expect(screen.getByText("1 hour").parentElement?.textContent).toContain("24 points");
+
+    // Chosen explicitly. An unchosen step is "the default for this window", and
+    // follows the window; only a chosen one is worth carrying across.
+    fireEvent.click(screen.getByText("1 hour"));
+    fireEvent.click(screen.getAllByText("1 hour")[1]!);
+
+    // 1 hour fits a 7-day window, so it survives the change.
+    fireEvent.click(screen.getByText("Last 24 hours"));
+    fireEvent.click(screen.getByText("Last 7 days"));
+    expect(screen.getByText("1 hour").parentElement?.textContent).toContain("168 points");
+
+    // It does not fit a 1-hour window; the default for that window takes over.
+    fireEvent.click(screen.getByText("Last 7 days"));
+    fireEvent.click(screen.getByText("Last 1 hour"));
+    expect(screen.getByText("5 minutes").parentElement?.textContent).toContain("12 points");
   });
 });

@@ -90,7 +90,11 @@ const GRID = "34px minmax(0,1fr) 88px 64px 22px";
 /** The minimum a row needs. TemplateMetricsSummary satisfies it; so does a row built from runs. */
 export interface WorkflowChoice { templateId: string; name: string; runs: number }
 
-export function WorkflowDropdown({ summaries, value, onChange }: { summaries: WorkflowChoice[]; value: string; onChange: (id: string) => void }) {
+export function WorkflowDropdown({ summaries, value, onChange, unit = { one: "run", many: "runs" } }: {
+  summaries: WorkflowChoice[]; value: string; onChange: (id: string) => void;
+  /** What `runs` counts. The chooser was built for runs; a window or a step counts something else. */
+  unit?: { one: string; many: string };
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const cur = summaries.find((w) => w.templateId === value) ?? summaries[0];
@@ -107,7 +111,7 @@ export function WorkflowDropdown({ summaries, value, onChange }: { summaries: Wo
       <button type="button" onClick={() => setOpen((o) => !o)}
         style={{ display: "inline-flex", alignItems: "center", gap: 8, background: open ? "var(--accent-soft)" : "rgba(255,255,255,0.03)", border: `1px solid ${open ? "var(--accent-line)" : "var(--hairline)"}`, color: "var(--text)", borderRadius: 8, padding: "5px 9px 5px 11px", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 500, minWidth: 200 }}>
         <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cur.name}</span>
-        <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }}>{cur.runs} {cur.runs === 1 ? "run" : "runs"}</span>
+        <span className="mono" style={{ fontSize: 10, color: "var(--text-4)" }}>{cur.runs} {cur.runs === 1 ? unit.one : unit.many}</span>
         <ChevronDown size={13} color="var(--text-3)" style={{ transform: open ? "rotate(180deg)" : "none" }} />
       </button>
       {open && (

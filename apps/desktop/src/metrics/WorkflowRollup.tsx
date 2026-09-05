@@ -878,10 +878,12 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
 /**
- * The windows the reader can choose. A run is inside a window when it STARTED
- * inside it — a run that began before the window and is still running belongs to
- * the earlier window, where its start is a fact; the alternative, "touched the
- * window", would make a stuck run appear in every window forever.
+ * The windows the reader can choose. A run is inside a window when it was ACTIVE
+ * during it: still running, or ended at or after the window opened. The first
+ * rule was "started inside it", which hid a run that had been waiting on the
+ * reader for the whole of the last 24 hours because it began the day before —
+ * and the founder's first look at the page was "no data". A stuck run does then
+ * appear in every window, which is not a defect: it is stuck in every window.
  */
 export const RANGES = [
   { key: "1h", label: "Last 1 hour", ms: HOUR },
@@ -896,10 +898,60 @@ export const RANGES = [
 export type RangeKey = (typeof RANGES)[number]["key"];
 const DEFAULT_RANGE: RangeKey = "24h";
 
+const MINUTE = 60_000;
+
+/**
+ * The steps a window can be divided into. One rule rather than a list per range:
+ * every step from a minute to a week that divides the window EVENLY into between
+ * 2 and 168 points. It reproduces the founder's two examples exactly — an hour in
+ * 1, 5, 10, 15 or 30 minutes; a week in 1, 2, 4, 8 or 12 hours or a day — and
+ * gives every other window the same shape without a table to keep in step.
+ *
+ * Chosen for the time panels to come; nothing on this page reads it yet.
+ */
+const STEPS = [
+  { key: "1m", label: "1 minute", ms: MINUTE },
+  { key: "5m", label: "5 minutes", ms: 5 * MINUTE },
+  { key: "10m", label: "10 minutes", ms: 10 * MINUTE },
+  { key: "15m", label: "15 minutes", ms: 15 * MINUTE },
+  { key: "30m", label: "30 minutes", ms: 30 * MINUTE },
+  { key: "1h", label: "1 hour", ms: HOUR },
+  { key: "2h", label: "2 hours", ms: 2 * HOUR },
+  { key: "4h", label: "4 hours", ms: 4 * HOUR },
+  { key: "8h", label: "8 hours", ms: 8 * HOUR },
+  { key: "12h", label: "12 hours", ms: 12 * HOUR },
+  { key: "1d", label: "1 day", ms: DAY },
+  { key: "2d", label: "2 days", ms: 2 * DAY },
+  { key: "7d", label: "7 days", ms: 7 * DAY },
+] as const;
+const MIN_POINTS = 2;
+const MAX_POINTS = 168;
+
+export function intervalsFor(rangeKey: string): { key: string; label: string; ms: number; points: number }[] {
+  const range = RANGES.find((r) => r.key === rangeKey) ?? RANGES[3];
+  return STEPS
+    .filter((s) => range.ms % s.ms === 0)
+    .map((s) => ({ key: s.key, label: s.label, ms: s.ms, points: range.ms / s.ms }))
+    .filter((s) => s.points >= MIN_POINTS && s.points <= MAX_POINTS);
+}
+
+/** The step closest to 24 points — a chart that is neither a wall nor a stub. Ties go to the coarser step. */
+export function defaultIntervalFor(rangeKey: string): string {
+  const options = intervalsFor(rangeKey);
+  let best = options[0]!;
+  for (const o of options) {
+    const d = Math.abs(o.points - 24), bd = Math.abs(best.points - 24);
+    if (d < bd || (d === bd && o.ms > best.ms)) best = o;
+  }
+  return best.key;
+}
+
 export function withinWindow(runs: RunSummary[], key: string, nowMs: number): RunSummary[] {
   const range = RANGES.find((r) => r.key === key) ?? RANGES[3];
   const from = nowMs - range.ms;
-  return runs.filter((r) => Date.parse(r.startedAt) >= from);
+  // The run's terminal moment is its start plus its elapsed — `finishedAt` is null
+  // on a run the substrate killed, and elapsed is defined as start → terminal.
+  return runs.filter((r) => r.terminationCause === "running" || Date.parse(r.startedAt) + r.durations.elapsedMs >= from);
 }
 
 /**
@@ -936,6 +988,9 @@ export function WorkflowRollup() {
   // to the chosen workflow's most recent run whenever the workflow changes.
   const [version, setVersion] = useState<string | null>(null);
   const [range, setRange] = useState<RangeKey>(DEFAULT_RANGE);
+  // Null means "the default for this window". A chosen step survives a range change
+  // while it still divides the new window; otherwise the default takes over.
+  const [interval, setInterval] = useState<string | null>(null);
   const [gates, setGates] = useState<TemplateMetricsDetail | null>(null);
 
   useEffect(() => {
@@ -951,15 +1006,22 @@ export function WorkflowRollup() {
     return () => { live = false; };
   }, []);
 
-  // The window is the OUTERMOST filter: it decides which runs exist, and the
-  // workflow and version choosers list what is inside it, with counts to match.
+  // The choosers list EVERY workflow and version that has runs, and count the
+  // runs inside the window. They were first built from the windowed runs alone,
+  // and an empty window then took the workflow and version choosers with it — the
+  // founder's screen showed a range picker and nothing to say what it filtered.
+  // The choosers stay put across window changes; only their counts move.
   const windowed = loaded === null ? [] : withinWindow(loaded.runs, range, Date.now());
-  const choices = workflowsOf(windowed);
+  const windowedIds = new Set(windowed.map((r) => r.runId));
+  const choices = (loaded === null ? [] : workflowsOf(loaded.runs))
+    .map((c) => ({ ...c, runs: windowed.filter((r) => r.templateId === c.templateId).length }));
   const chosen = choices.find((c) => c.templateId === templateId) ?? choices[0] ?? null;
-  const workflowRuns = chosen === null ? [] : windowed.filter((r) => r.templateId === chosen.templateId);
-  const versions = versionsOf(workflowRuns);
+  const workflowRunsAllTime = chosen === null || loaded === null ? [] : loaded.runs.filter((r) => r.templateId === chosen.templateId);
+  const workflowRuns = workflowRunsAllTime.filter((r) => windowedIds.has(r.runId));
+  const versions = versionsOf(workflowRunsAllTime)
+    .map((v) => ({ ...v, runs: workflowRuns.filter((r) => r.templateVersion === v.version).length }));
   const newest = versions[0]?.version ?? null;
-  const defaultVersion = latestRunVersion(workflowRuns);
+  const defaultVersion = latestRunVersion(workflowRunsAllTime);
   const chosenVersion = version !== null && (version === ALL_VERSIONS || versions.some((v) => String(v.version) === version))
     ? version
     : defaultVersion === null ? ALL_VERSIONS : String(defaultVersion);
@@ -984,31 +1046,22 @@ export function WorkflowRollup() {
 
   if (failed) return <p style={{ fontSize: "var(--fs-3)", color: "var(--err)" }}>Couldn&apos;t load runs.</p>;
   if (loaded === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>Loading…</p>;
-  if (loaded.runs.length === 0) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>No workflow has run yet.</p>;
+  if (loaded.runs.length === 0 || chosen === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>No workflow has run yet.</p>;
 
   // Each range shows how many runs it would hold, so the reader can see where the
   // runs are before choosing — and an empty window is never a surprise.
   const rangeChoices: WorkflowChoice[] = RANGES.map((r) => ({
     templateId: r.key, name: r.label, runs: withinWindow(loaded.runs, r.key, Date.now()).length,
   }));
+  const intervals = intervalsFor(range);
+  const chosenInterval = interval !== null && intervals.some((i) => i.key === interval) ? interval : defaultIntervalFor(range);
+  const intervalChoices: WorkflowChoice[] = intervals.map((i) => ({ templateId: i.key, name: i.label, runs: i.points }));
   const rangeDropdown = (
-    <div style={{ marginLeft: "auto" }}>
+    <div style={{ marginLeft: "auto", display: "flex", gap: "var(--sp-3)", alignItems: "center" }}>
       <WorkflowDropdown summaries={rangeChoices} value={range} onChange={(k) => setRange(k as RangeKey)} />
+      <WorkflowDropdown summaries={intervalChoices} value={chosenInterval} onChange={setInterval} unit={{ one: "point", many: "points" }} />
     </div>
   );
-
-  // Empty window: say so and keep the chooser, so the reader can widen it. Hiding
-  // the control that caused the emptiness would leave them with no way out.
-  if (chosen === null) {
-    return (
-      <div style={{ display: "grid", gap: "var(--sp-4)", alignContent: "start" }}>
-        <div style={{ display: "flex", gap: "var(--sp-3)", alignItems: "center", flexWrap: "wrap" }}>{rangeDropdown}</div>
-        <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>
-          No runs started in the {RANGES.find((r) => r.key === range)!.label.replace(/^Last /, "last ")}.
-        </p>
-      </div>
-    );
-  }
 
   const runs = chosenVersion === ALL_VERSIONS ? workflowRuns : workflowRuns.filter((r) => String(r.templateVersion) === chosenVersion);
   const runIds = new Set(runs.map((r) => r.runId));
@@ -1017,6 +1070,7 @@ export function WorkflowRollup() {
     ...versions.map((v) => ({ templateId: String(v.version), name: `v${v.version}`, runs: v.runs })),
     { templateId: ALL_VERSIONS, name: "All versions", runs: workflowRuns.length },
   ];
+  const windowWords = RANGES.find((r) => r.key === range)!.label.replace(/^Last /, "last ");
 
   return (
     <div style={{ display: "grid", gap: "var(--sp-4)", alignContent: "start" }}>
@@ -1026,7 +1080,16 @@ export function WorkflowRollup() {
         <WorkflowDropdown summaries={versionChoices} value={chosenVersion} onChange={setVersion} />
         {rangeDropdown}
       </div>
-      <Dashboard agg={aggregate({ runs, details, gates, gatesCoverEveryVersion, gatesPeriod })} />
+      {/* Empty window: say exactly what is empty and keep every chooser, so the
+          reader can widen the window or change the workflow. Hiding the controls
+          that caused the emptiness would leave them with no way out. */}
+      {runs.length === 0 ? (
+        <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>
+          No {chosen.name}{chosenVersion === ALL_VERSIONS ? "" : ` v${chosenVersion}`} runs were active in the {windowWords}.
+        </p>
+      ) : (
+        <Dashboard agg={aggregate({ runs, details, gates, gatesCoverEveryVersion, gatesPeriod })} />
+      )}
     </div>
   );
 }
