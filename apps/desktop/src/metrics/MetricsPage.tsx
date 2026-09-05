@@ -9,7 +9,14 @@ import { SelfImprovementRail } from "./SelfImprovement";
 import { ProposalReviewModal } from "./ProposalReviewModal";
 import { Workflow, Refresh } from "./metrics-icons";
 import { RunLedger } from "./RunLedger";
+import { PipelineHealth } from "./PipelineHealth";
 import { MeasurementLabel } from "./n-gate-ui";
+
+// Three views. `workflow` is the original tab and is deliberately unchanged: a
+// score and a letter grade render there at any sample size, which is the defect
+// `pipeline` exists to not repeat — but the founder's instruction was to leave the
+// old one intact, so it stays exactly as it was.
+type MetricsView = "runs" | "pipeline" | "workflow";
 
 const PERIODS = ["24h", "7d", "30d"] as const;
 type Period = (typeof PERIODS)[number];
@@ -32,7 +39,7 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
   // The run ledger leads. The aggregate view below cannot answer "how did THIS run
   // behave", and it still opens on a grade computed over runs the daemon killed —
   // so it is reachable behind the toggle rather than being what the tab shows first.
-  const [view, setView] = useState<"runs" | "workflow">("runs");
+  const [view, setView] = useState<MetricsView>("runs");
   const [reloadKey, setReloadKey] = useState(0);
   const [proposals, setProposals] = useState<TemplateInstructionProposal[]>([]);
   const [reviewingProposalId, setReviewingProposalId] = useState<string | null>(null);
@@ -90,6 +97,15 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
       <div style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", gap: 14, padding: 12, height: "100%", minHeight: 0, overflowY: "auto" }}>
         <ViewToggle view={view} onChange={setView} />
         <RunLedger />
+      </div>
+    );
+  }
+
+  if (view === "pipeline") {
+    return (
+      <div style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", gap: 14, padding: 12, height: "100%", minHeight: 0, overflowY: "auto" }}>
+        <ViewToggle view={view} onChange={setView} />
+        <PipelineHealth detail={detail} />
       </div>
     );
   }
@@ -212,8 +228,8 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
 
 const linkBtn: React.CSSProperties = { background: "transparent", color: "var(--accent)", border: "none", cursor: "pointer", fontSize: 11, padding: "4px 6px" };
 const iconBtn: React.CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", background: "transparent", border: "1px solid var(--hairline)", borderRadius: 8, cursor: "pointer", padding: 5, color: "var(--text-3)" };
-function ViewToggle({ view, onChange }: { view: "runs" | "workflow"; onChange: (v: "runs" | "workflow") => void }) {
-  const tab = (id: "runs" | "workflow", label: string) => (
+function ViewToggle({ view, onChange }: { view: MetricsView; onChange: (v: MetricsView) => void }) {
+  const tab = (id: MetricsView, label: string) => (
     <button key={id} type="button" onClick={() => onChange(id)} aria-pressed={view === id}
       style={{ background: view === id ? "var(--accent-soft)" : "transparent", color: view === id ? "var(--accent)" : "var(--text-3)",
                border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: "var(--fs-2)" }}>
@@ -223,6 +239,7 @@ function ViewToggle({ view, onChange }: { view: "runs" | "workflow"; onChange: (
   return (
     <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.03)", border: "1px solid var(--hairline)", borderRadius: 8, padding: 2, width: "fit-content", flexShrink: 0 }}>
       {tab("runs", "Runs")}
+      {tab("pipeline", "Steps")}
       {tab("workflow", "Workflow averages")}
     </div>
   );

@@ -2,7 +2,11 @@ import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { IMPLEMENTATION_VOCABULARY } from "@orca/contracts";
 import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { CantTellYou, CostCaveats, RunDetailPanel, RunRow } from "./RunLedger";
+import { PipelineHealth } from "./PipelineHealth";
+import { IntervalBar } from "./interval-bar";
 
 afterEach(cleanup);
 
@@ -69,6 +73,35 @@ function park(over: Partial<Intervention> = {}): Intervention {
   };
 }
 
+const pipelineStep = () => ({
+  stepTemplateId: "proposal", name: "Proposal", ordinal: 1, score: 87, sampleSize: 1,
+  confidence: "low" as const, runs: 1, passedFirstTry: 1, recovered: 0, failed: 0,
+  quality: { verdictPassRate: 1, verifiedSampleSize: 1, scoredSampleSize: 1, sensorPassRate: 1,
+             oracleSufficientRate: 1, untestedRegions: [], residualRisk: [], oracleGaps: [], limitingDimension: null },
+  cost: { p50LatencyMs: 1, meanTokens: 1, meanUsd: 0.01, meanRetries: 1 },
+  risk: { riskClassDist: {}, gateDecisionDist: {}, hardConstraintViolations: 0, approvals: { count: 0, sampleTransitionIds: [] } },
+  failureClusters: [],
+  verification: { tier: "ai_reviewed" as const, tierLabel: "Reviewed, not proven", confidence: 0.7,
+                  falseAcceptanceRate: 0.1, artifacts: [], recentRefuteReasons: [],
+                  band: { level: "weak" as const, label: "Weakly verified" } },
+  failureModes: [], reconciliation: null, trend: [], versionBoundaries: [],
+  versionScoreDelta: null, versionInvalidOutputRateDelta: null, insights: [], recentReasons: [],
+});
+
+const pipelineDetail = () => ({
+  summary: {} as never,
+  steps: [
+    { ...pipelineStep(), runs: 6, quality: { ...pipelineStep().quality, verifiedSampleSize: 4 } },
+    { ...pipelineStep(), stepTemplateId: "x", name: "Verify", runs: 6,
+      quality: { ...pipelineStep().quality, verifiedSampleSize: 0 } },
+  ],
+  gates: [], splitters: [],
+  policyGateway: { decisionDist: { allow: 0, require_approval: 0, deny: 0 },
+                   overPermissive: { count: 0, sampleTransitionIds: [] }, boundaryViolations: [] },
+  completionGate: { verdictDist: { upheld: 0, escalated: 0, evidence_veto: 0, refute_veto: 0 },
+                    vetoed: { count: 0, sampleTransitionIds: [] } },
+});
+
 const detail = (): RunDetail => ({
   run: summary(),
   spans: [span(), span({ workflowStepRunId: "sr2", name: "Verify" })],
@@ -88,12 +121,95 @@ function readerFacingText(root: HTMLElement): { where: string; text: string }[] 
   return out;
 }
 
+/** The surfaces asserted below. Shared with the coverage check so there is one list. */
+const SURFACE_NAMES = ["RunRow", "RunDetailPanel", "CostCaveats", "CantTellYou", "PipelineHealth", "IntervalBar"] as const;
+
+/**
+ * Components that render no reader-facing prose of their own, with the reason.
+ *
+ * This exists so the surface list cannot silently fall behind the directory. Together
+ * the two lists must account for every exported component in `metrics/` — adding one
+ * without classifying it fails, and the failure names the file. The list stays a
+ * literal, but it is checked against the filesystem rather than trusted, which is the
+ * difference between a copy that can drift and one that cannot.
+ */
+const NOT_A_PROSE_SURFACE: Record<string, string> = {
+  // Primitives: a number, a shape, a count. Their absence cases route through
+  // MeasurementLabel, which the surfaces above exercise.
+  CoverageReadout: "a count, rendered through RateInterval; exercised via PipelineHealth",
+  Sample: "a count and its noun",
+  StatTile: "a label and a figure; its absence renders via MeasurementLabel",
+  Panel: "chrome — a border and a title supplied by the caller",
+  SectionLabel: "chrome — renders its children",
+  Sparkline: "an svg path, no text",
+  Delta: "an arrow and a number",
+  OutcomeBar: "three widths, no text",
+  VersionMarkerChips: "short lineage markers, no prose",
+  VersionHistoryStrip: "version numbers and run counts",
+  RateInterval: "a rate and an interval; the n=0 case renders MeasurementLabel",
+  MeasurementLabel: "the source of the vocabulary — guarded at the contracts layer",
+  WorkflowDropdown: "renders template names supplied by the daemon",
+
+  // Pure functions. Exercised by their own tests; they render nothing themselves.
+  coverageHeadline: "returns a string, asserted in PipelineHealth.test",
+  headline: "returns a string, asserted in RunLedger.test",
+  formatDuration: "returns a duration string",
+  workflowEvidenceRuns: "a filter",
+  terminatedRuns: "a filter",
+  markerEarnsItsPlace: "a predicate",
+
+  // Composers: they mount the surfaces above, each of which is asserted directly.
+  MetricsPage: "composes tabs",
+  RunLedger: "composes the run surfaces",
+
+  // ── The known hole, named rather than closed ──────────────────────────────
+  // These render prose on the LEGACY "Workflow averages" tab. The founder's
+  // instruction on this work was to leave that tab intact, so they are neither
+  // guarded nor fixable here. orca-d0 swept their call sites and found no live
+  // violations, which is why this is a gap rather than a defect — but a swept-once
+  // surface is not a guarded one, and whoever next owns that tab should mount them.
+  GateRow: "LEGACY TAB — unguarded, out of scope, swept clean once by hand",
+  GatePerformancePanel: "LEGACY TAB — unguarded, out of scope",
+  FusedPipelinePanel: "LEGACY TAB — unguarded, out of scope",
+  StepRow: "LEGACY TAB — unguarded, out of scope",
+  StepPerformancePanel: "LEGACY TAB — unguarded, out of scope",
+  SelfImprovementRail: "LEGACY TAB — unguarded, out of scope",
+  ProposalReviewModal: "LEGACY TAB — unguarded, out of scope",
+};
+
+describe("the surface list cannot fall behind the directory", () => {
+  it("accounts for every exported component in metrics/", () => {
+    const dir = __dirname;
+    const exported = new Set<string>();
+    for (const file of readdirSync(dir)) {
+      if (!file.endsWith(".tsx") || file.includes(".test.")) continue;
+      const src = readFileSync(join(dir, file), "utf8");
+      for (const m of src.matchAll(/^export function ([A-Za-z0-9_]+)/gm)) exported.add(m[1]!);
+    }
+    const listed = new Set([...SURFACE_NAMES, ...Object.keys(NOT_A_PROSE_SURFACE)]);
+    const unclassified = [...exported].filter((n) => !listed.has(n)).sort();
+    expect(
+      unclassified,
+      "New exported component(s) in metrics/ are in neither the surface list nor the\n" +
+        "exemption list. Add each to one: a surface if it renders prose to the reader,\n" +
+        "an exemption with a reason if it does not. A guard holding its own copy of a\n" +
+        "list is another place the list can diverge — this is what stops that."
+    ).toEqual([]);
+  });
+});
+
 describe("no surface speaks to the reader about our backlog", () => {
-  const surfaces: [string, () => HTMLElement][] = [
+  const surfaces: [(typeof SURFACE_NAMES)[number], () => HTMLElement][] = [
     ["RunRow", () => render(<RunRow run={summary()} onOpen={() => {}} />).container],
     ["RunDetailPanel", () => render(<RunDetailPanel detail={detail()} onBack={() => {}} />).container],
     ["CostCaveats", () => render(<CostCaveats runs={[summary(), summary({ runId: "b" })]} />).container],
     ["CantTellYou", () => render(<CantTellYou runs={[summary(), summary({ runId: "b" })]} />).container],
+    ["PipelineHealth", () => render(<PipelineHealth detail={pipelineDetail()} />).container],
+    // Found by the coverage check above: IntervalBar builds a full sentence into its
+    // accessible name and nothing was asserting it.
+    ["IntervalBar", () => render(
+      <IntervalBar elapsedMs={H} workingMs={600_000} parkedMs={2_400_000} unaccountedMs={600_000} />
+    ).container],
   ];
 
   for (const [name, mount] of surfaces) {
@@ -105,7 +221,13 @@ describe("no surface speaks to the reader about our backlog", () => {
       // from four green tests over clean ones. That is the failure this whole file
       // exists downstream of, and the first version of it had the hole: proving the
       // detector matches a literal is not proving the harness gathers anything.
-      expect(strings.length, `${name} produced no reader-facing text`).toBeGreaterThan(2);
+      // The precondition, stated as what it actually requires rather than as a count.
+      // A threshold of "more than 2" was a number I chose, and a single-element
+      // surface legitimately produces exactly two strings — so it would have failed
+      // an honest surface while looking principled. What the loop below needs is that
+      // SOMETHING was gathered, and that the accessible channel was among it.
+      expect(strings.some((s) => s.text.trim().length > 0),
+        `${name} produced no reader-facing text at all`).toBe(true);
       expect(strings.some((s) => s.where.startsWith("aria-label")),
         `${name} produced no accessible name — the channel the original defect lived in`).toBe(true);
 
