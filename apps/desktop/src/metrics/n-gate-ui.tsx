@@ -254,7 +254,21 @@ export function MeasurementLabel({
           borderRadius: 2,
           borderWidth: 1,
           borderStyle: form.borderLeftStyle as CSSProperties["borderStyle"],
-          borderColor: form.borderLeftColor,
+          // One quiet border for every compact tag, whatever the state.
+          //
+          // A tag is a POINTER to a claim, not the claim itself — the sentence it
+          // stands for is stated once per section, and tone belongs where the claim
+          // is. Left error-toned, `discarded` was the loudest thing on the run
+          // detail: three red boxes pulled the eye before `17h 57m`, so colour said
+          // "these three matter" while size said "this one does", and colour won.
+          // The red was spent on a metadata gap — a pause whose reason wasn't
+          // recorded — while the 18-hour wait is the entire finding of the screen.
+          //
+          // The states stay told apart on two channels that don't shout: a distinct
+          // WORD (guarded by the test asserting all six differ) and the border STYLE
+          // from formFor. Nothing is dimmed; the alarm moved up a level, which is
+          // where its explanation already lives.
+          borderColor: "var(--hairline-strong)",
           // `lossy` stays distinguishable from every other tag — its border keeps the
           // error tone — but it is no longer loud in itself. A per-row fact does not
           // get to be alarming eight times: a tag repeated down a column is the

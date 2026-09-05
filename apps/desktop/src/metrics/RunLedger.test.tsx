@@ -324,8 +324,8 @@ describe("RunDetailPanel", () => {
       park({ activityId: "a3", sourceKind: "question_pending" }),
     ] })} onBack={() => {}} />);
     const text = document.body.textContent ?? "";
-    expect(text).toContain("1 is missing outright");
-    expect(text).toContain("the 2 that show a reason may be showing a later pause's reason instead");
+    expect(text).toContain("1 of these reasons is missing");
+    expect(text).toContain("the 2 that show one may be showing a later pause's reason");
   });
 
   it("never dims anything", () => {

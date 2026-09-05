@@ -428,13 +428,13 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
         )}
         {span.verifiers && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: "var(--fs-2)" }}>
-            {span.verifiers.executable && <Chip tone="var(--run)">tests ran</Chip>}
-            {span.verifiers.grounding && <Chip tone="var(--run)">claims checked</Chip>}
+            {span.verifiers.executable && <Chip>tests ran</Chip>}
+            {span.verifiers.grounding && <Chip>claims checked</Chip>}
             {/* An LLM's opinion, carrying real weight into a graded number. Marked
                 so it is never mistaken for a deterministic check. */}
-            {span.verifiers.independentReview && <Chip tone="var(--warn)">a model reviewed it</Chip>}
+            {span.verifiers.independentReview && <Chip>a model reviewed it</Chip>}
             {!span.verifiers.executable && !span.verifiers.grounding && !span.verifiers.independentReview && (
-              <Chip tone="var(--text-3)">nothing checked this</Chip>
+              <Chip>nothing checked this</Chip>
             )}
           </div>
         )}
@@ -464,9 +464,25 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
   );
 }
 
-function Chip({ children, tone }: { children: React.ReactNode; tone: string }) {
+/**
+ * One tag treatment, shared with the compact MeasurementLabel: quiet border, quiet
+ * text, meaning carried by the word.
+ *
+ * These were a second vocabulary — green for a passing check, grey for none, amber
+ * for a model's opinion — sitting beside the measurement tags and competing both
+ * with them and with the magnitudes. None of them is something the reader must act
+ * on, so none earns tone. "a model reviewed it" still cannot be mistaken for a
+ * deterministic check, because that is what the words say.
+ */
+function Chip({ children }: { children: React.ReactNode }) {
   return (
-    <span style={{ border: `1px solid ${tone}`, color: tone, borderRadius: 4, padding: "1px 6px", fontSize: "var(--fs-1)" }}>
+    <span
+      className="mono"
+      style={{
+        border: "1px solid var(--hairline-strong)", color: "var(--text-3)",
+        borderRadius: 2, padding: "0 4px", fontSize: "var(--fs-1)", lineHeight: 1.5,
+      }}
+    >
       {children}
     </span>
   );
@@ -525,12 +541,11 @@ function ParkCaveat({ interventions }: { interventions: Intervention[] }) {
       state="uninstrumented"
       lossy
       fix={
-        `These reasons are read from a record that gets overwritten as the run continues. ` +
-        `${unlabelled} ${unlabelled === 1 ? "is" : "are"} missing outright` +
+        `${unlabelled} of these reasons ${unlabelled === 1 ? "is" : "are"} missing` +
         (named > 0
-          ? `, and the ${named} that show a reason may be showing a later pause's reason instead — we can't tell which.`
-          : ".") +
-        ` Orca reuses one record per step as a run continues, so an earlier reason can be written over.`
+          ? `, and the ${named} that show one may be showing a later pause's reason: `
+          : ": ") +
+        `Orca reuses a single record per step as a run continues, so an earlier reason can be written over.`
       }
     />
   );
