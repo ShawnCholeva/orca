@@ -76,7 +76,13 @@ describe("cost", () => {
               coverage: { reported: 0, total: 0, silent: 0 }, rollupCheck: "not_applicable" },
     })} />);
     expect(document.body.textContent).not.toContain("$0.00");
-    expect(document.body.textContent).toContain("isn't being recorded yet");
+    // The visible line is the SPECIFIC one. The state's own sentence used to lead and
+    // was generated from an enum — content-free, and identical across two sections
+    // that meant different things. It still reaches a screen reader via the accessible
+    // name, and the left border still carries the state's form, so nothing collapses.
+    expect(document.body.textContent).toContain("This provider doesn't report cost to Orca yet.");
+    expect(document.querySelector('[role="note"]')!.getAttribute("aria-label"))
+      .toContain("isn't being recorded yet");
   });
 
   it("marks the total as understated, attached to the figure, when a node spent money and reported nothing", () => {
@@ -205,7 +211,13 @@ describe("headline", () => {
     // untranslated code makes every other translated sentence look untranslated too.
     expect(h).toContain("crashed 3 times");
     expect(h).not.toContain("worker_exited_no_signal");
-    expect(h).toContain("root-caused");
+    // The diagnosis stays — a shared outcome is not a shared cause, and saying which
+    // it is matters — but in the product's voice rather than its engineers'.
+    expect(h).toContain("a known Orca bug");
+    expect(h).not.toContain("root-caused");
+    // `terminationEvidence` is per-run: without "each" the count reads as the group
+    // total, i.e. three crashes across the runs rather than three in every one.
+    expect(h).toContain("each crashed 3 times");
     expect(h).not.toContain("were killed by the daemon");
     // The whole point: it says how much workflow evidence is actually left — and
     // names the quantity, so "6 runs minus 4 killed" doesn't invite the reader to
@@ -220,7 +232,7 @@ describe("headline", () => {
     ];
     const h = headline(runs);
     expect(h).not.toContain("the same way");
-    expect(h).toContain("reasons in the substrate");
+    expect(h).toContain("reasons inside Orca");
   });
 
   it("reports the waiting share when nothing was killed", () => {

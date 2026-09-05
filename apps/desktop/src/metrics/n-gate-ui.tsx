@@ -210,7 +210,7 @@ export function MeasurementLabel({
   of,
   reason,
   lossy = false,
-  fix,
+  detail,
   compact = false,
   style,
 }: {
@@ -225,9 +225,11 @@ export function MeasurementLabel({
    *  unmeasurable_structural, which covers several situations sharing a remedy. */
   reason?: string;
   lossy?: boolean;
-  /** The one change that would make this answerable. An absence the reader can act
-   *  on beats an absence they can only notice. */
-  fix?: string;
+  /** What is specifically missing, in the reader's language — the line that says
+   *  something about THIS value rather than about its state. Named `detail` rather
+   *  than `fix` because none of the callers pass a remedy: they describe the gap,
+   *  and a prop whose name argues with every one of its uses is a comment that lies. */
+  detail?: string;
   /** Tag-length rendering for a state that repeats down a column. The full sentence
    *  still reaches a screen reader, and the caller is expected to state it once per
    *  screen — a tag alone is a caveat nobody can resolve. */
@@ -243,7 +245,7 @@ export function MeasurementLabel({
     return (
       <span
         role="note"
-        aria-label={fix ? `${text} ${fix}` : text}
+        aria-label={detail ? `${detail} ${text}` : text}
         data-compact="true"
         className="mono"
         style={{
@@ -288,6 +290,8 @@ export function MeasurementLabel({
 
   return (
     <div
+      role="note"
+      aria-label={detail ? `${detail} ${text}` : text}
       style={{
         borderLeftWidth: 3,
         borderLeftStyle: form.borderLeftStyle as CSSProperties["borderLeftStyle"],
@@ -299,10 +303,18 @@ export function MeasurementLabel({
         ...style,
       }}
     >
-      <div>{text}</div>
-      {fix && (
-        <div className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", marginTop: 2 }}>{fix}</div>
-      )}
+      {/* The SPECIFIC line leads.
+          It used to render the state's boilerplate as the headline and the only
+          sentence with content as a small mono subtitle — so the abstraction won the
+          weight contest against the noun, and the founder's words were "I am not sure
+          what these are saying". He was reading a first line generated from an enum.
+          Worse, the same boilerplate headed two different sections meaning two
+          different things, which teaches a reader that the heading is noise.
+          When a detail exists it is the whole visible label; the state is still
+          carried, by the left border's form and colour and by the accessible name, so
+          nothing is lost and no state collapses into another. When there is no detail
+          the state sentence IS the content and leads on its own. */}
+      <div>{detail ?? text}</div>
     </div>
   );
 }

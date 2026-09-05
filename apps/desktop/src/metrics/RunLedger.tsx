@@ -129,13 +129,23 @@ export function headline(runs: RunSummary[]): string {
     const reasons = new Set(infra.map((r) => r.terminationEvidence).filter((e): e is string => e != null));
     const observed =
       reasons.size === 1
-        ? `${infra.length} of your ${ended.length} runs that ended stopped the same way — ${withoutEngineCode([...reasons][0]!)}.`
-        : `${infra.length} of your ${ended.length} runs that ended stopped for reasons in the substrate rather than the workflow.`;
+        // "each" is load-bearing. `terminationEvidence` is a PER-RUN string, and when
+        // every run carries the identical one, quoting it bare against a population
+        // count reads as the group total: "5 of your 6 runs stopped the same way —
+        // crashed 3 times" says three crashes across five runs. It was three crashes
+        // EACH, fifteen in total. Same defect as `redone 1x` and the 57-card count —
+        // a per-unit figure promoted to a population without its quantifier.
+        ? `${infra.length} of your ${ended.length} runs that ended stopped the same way: each ${withoutEngineCode([...reasons][0]!)}.`
+        : `${infra.length} of your ${ended.length} runs that ended stopped for reasons inside Orca rather than in your workflow.`;
     const left = `That leaves ${finished.length} completed run${finished.length === 1 ? "" : "s"} that can tell you anything about the workflow itself.`;
     // The mechanism is a diagnosis, not an observation — say which it is. Runs that
     // share an outcome need not share a cause, and attributing all of them to one
     // bug claims more than the session history supports.
-    return `${observed} We've root-caused that to a daemon bug; it isn't your workflow failing. ${left}`;
+    //
+    // Stated as a property of the product, not as news from its engineers. "We've
+    // root-caused that" is Orca's developers talking to the reader about their own
+    // process; what he needs is that the cause is known and it isn't his.
+    return `${observed} That's a known Orca bug, not your workflow failing. ${left}`;
   }
   const parked = ended.reduce((a, r) => a + r.durations.parkedMs, 0);
   const elapsed = ended.reduce((a, r) => a + r.durations.elapsedMs, 0);
@@ -179,7 +189,7 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
       <div style={{ display: "grid", gap: 4 }}>
         <MeasurementLabel
           state="uninstrumented"
-          fix={total === 0 ? "This provider doesn't report cost to Orca yet." : "No node on this run reported a cost."}
+          detail={total === 0 ? "This provider doesn't report cost to Orca yet." : "No node on this run reported a cost."}
         />
       </div>
     );
@@ -204,7 +214,7 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
             compact
             state="uninstrumented"
             lossy
-            fix={`${silent} more node${silent === 1 ? "" : "s"} spent money and reported nothing, so this total is lower than the run actually cost.`}
+            detail={`${silent} more node${silent === 1 ? "" : "s"} spent money and reported nothing, so this total is lower than the run actually cost.`}
           />
         )}
         {/* No per-row tag for `not_applicable`: it was true on five of six rows, and
@@ -265,7 +275,7 @@ export function CostCaveats({ runs }: { runs: RunSummary[] }) {
           // `reason` only for unmeasurable_structural, so a count passed there would
           // have rendered nothing at all. It belongs beside the action regardless —
           // scale is what makes the fix worth doing.
-          fix={`${silentNodes} node${silentNodes === 1 ? "" : "s"} across these runs spent money and reported nothing, so those totals are lower than the runs actually cost.`}
+          detail={`${silentNodes} node${silentNodes === 1 ? "" : "s"} across these runs spent money and reported nothing, so those totals are lower than the runs actually cost.`}
         />
       )}
       {unchecked > 0 && (
@@ -405,7 +415,7 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
           <MeasurementLabel
             state="uninstrumented"
             lossy={span.kind === "gate"}
-            fix={
+            detail={
               span.kind === "gate"
                 ? "This gate ran a real agent, and its cost and timing weren't recorded."
                 : undefined
@@ -519,7 +529,7 @@ function InterventionRow({ iv }: { iv: Intervention }) {
           thing here is the reason, so the reason slot is where its type belongs.
           Duration and park state are measured and keep their own cells. */}
       {iv.sourceKind === "unknown" ? (
-        <MeasurementLabel compact state="uninstrumented" lossy fix="Orca didn't keep a record of why this one stopped." />
+        <MeasurementLabel compact state="uninstrumented" lossy detail="Orca didn't keep a record of why this one stopped." />
       ) : (
         <span style={{ color: "var(--text-2)" }}>
           {iv.sourceKind.replace(/_/g, " ").replace(" pending", "")}
@@ -552,7 +562,7 @@ function ParkCaveat({ interventions }: { interventions: Intervention[] }) {
     <MeasurementLabel
       state="uninstrumented"
       lossy
-      fix={
+      detail={
         `${unlabelled} of these reasons ${unlabelled === 1 ? "is" : "are"} missing` +
         (named > 0
           ? `, and the ${named} that show one may be showing a later pause's reason: `
@@ -638,11 +648,11 @@ function CantTellYou({ runs }: { runs: RunSummary[] }) {
         />
       )}
       {gateless && (
-        <MeasurementLabel state="uninstrumented" lossy fix="What reviews cost and how long they took isn't being recorded." />
+        <MeasurementLabel state="uninstrumented" lossy detail="What reviews cost and how long they took isn't being recorded." />
       )}
       <MeasurementLabel
         state="uninstrumented"
-        fix="What happened inside a step: Orca only sees a step start and finish, so work it did in between leaves no trace."
+        detail="What happened inside a step: Orca only sees a step start and finish, so work it did in between leaves no trace."
       />
     </section>
   );
@@ -715,10 +725,24 @@ export function RunLedger() {
 
   return (
     <div style={{ display: "grid", alignContent: "start", gap: "var(--sp-5)" }}>
-      {/* The headline is the one sentence that leads the screen, so it takes the
-          display step rather than sitting one notch above body text. */}
-      <p style={{ fontSize: "var(--fs-4)", margin: 0, lineHeight: 1.5, maxWidth: "78ch" }}>{headline(runs)}</p>
-      <CostCaveats runs={runs} />
+      {/* Headline and caveats are ONE object, on a surface, above the list.
+          Separately they were three unbordered text blocks stacked above a column of
+          cards — nothing else on the screen at that weight and nothing holding them —
+          so the most important sentence read as a note left on the dashboard rather
+          than part of it. The founder's words were "looks out of place", and being out
+          of place is literally what it was: it had no place, only a position.
+          Recessed rather than carded, and at a larger radius, so it reads as the
+          surface the list sits on top of instead of another run row. */}
+      <div
+        style={{
+          display: "grid", gap: "var(--sp-3)",
+          background: "var(--panel-2)", borderRadius: "var(--r-lg)",
+          padding: "var(--sp-4)",
+        }}
+      >
+        <p style={{ fontSize: "var(--fs-4)", margin: 0, lineHeight: 1.5, maxWidth: "72ch" }}>{headline(runs)}</p>
+        <CostCaveats runs={runs} />
+      </div>
       <div style={{ display: "grid", gap: "var(--sp-2)" }}>
         {runs.map((r) => <RunRow key={r.runId} run={r} onOpen={setOpenRunId} />)}
       </div>

@@ -170,7 +170,7 @@ export function StatTile({
   /** Why `value` is null, when the caller knows. Omitted means we have not
    *  established why — which is a different claim from "not enough runs yet", and
    *  the two have opposite remedies. */
-  absence?: { state: MeasurementState; reason?: string; fix?: string; lossy?: boolean };
+  absence?: { state: MeasurementState; reason?: string; detail?: string; lossy?: boolean };
 }) {
   return (
     <div style={{ flex: 1, minWidth: 0, background: "var(--panel)", border: "1px solid var(--hairline)", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>

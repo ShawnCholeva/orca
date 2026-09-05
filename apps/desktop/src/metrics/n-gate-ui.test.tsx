@@ -135,7 +135,7 @@ describe("MeasurementLabel", () => {
       <MeasurementLabel
         state="uninstrumented"
         lossy
-        fix="Stamp the pause reason into the event."
+        detail="Stamp the pause reason into the event."
       />
     );
     expect(screen.getByText("Stamp the pause reason into the event.")).toBeInTheDocument();
@@ -161,7 +161,7 @@ describe("MeasurementLabel", () => {
   });
 
   it("carries the fix into the compact tag's accessible text rather than dropping it", () => {
-    render(<MeasurementLabel state="uninstrumented" compact lossy fix="Stamp the pause reason into the event." />);
+    render(<MeasurementLabel state="uninstrumented" compact lossy detail="Stamp the pause reason into the event." />);
     expect(screen.getByRole("note").getAttribute("aria-label")).toMatch(/Stamp the pause reason/);
   });
 
