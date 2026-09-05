@@ -60,7 +60,7 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T00:02:00.000Z",
     elapsedMs: 120_000, workingMs: null, parkedMs: 0, status: "passed", blockedReason: null,
     restarts: 0, completions: 1, stallRescues: 0, cost: null, tier: null,
-    verifiers: null, refuteVerdict: null, conflicts: [], outcomeStatus: "succeeded",
+    verifiers: null, refuteVerdict: null, refuteTriggeredBy: [], refuteReason: null, evidenceGaps: null, conflicts: [], outcomeStatus: "succeeded",
     failureCode: null, models: [], ...over,
   };
 }
@@ -106,6 +106,7 @@ const detail = (): RunDetail => ({
   run: summary(),
   spans: [span(), span({ workflowStepRunId: "sr2", name: "Verify" })],
   interventions: [park(), park({ activityId: "a2", sourceKind: "step_confirmation_pending" })],
+  toolDecisions: [],
 });
 
 /** Every string this surface puts in front of a reader, spoken or seen. */
@@ -178,6 +179,8 @@ const NOT_A_PROSE_SURFACE: Record<string, string> = {
   workflowEvidenceRuns: "a filter",
   terminatedRuns: "a filter",
   markerEarnsItsPlace: "a predicate",
+  tokens: "formats a token count",
+  modelName: "strips a release date from a model id",
 
   // Composers: they mount the surfaces above, each of which is asserted directly.
   MetricsPage: "composes tabs",
@@ -231,7 +234,7 @@ describe("no surface speaks to the reader about our backlog", () => {
     ["Dashboard", () => render(
       <Dashboard agg={aggregate({
         runs: [summary(), summary({ runId: "b" })],
-        details: [{ run: summary(), spans: [span()], interventions: [park()] }],
+        details: [{ run: summary(), spans: [span()], interventions: [park()], toolDecisions: [] }],
       })} />
     ).container],
   ];

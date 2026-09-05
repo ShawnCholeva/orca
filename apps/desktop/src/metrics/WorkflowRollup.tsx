@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { RunDetail, RunSummary, TemplateMetricsDetail } from "@orca/contracts";
 import { getRunDetail, getRunSummaries, getTemplateMetricsDetail } from "../api";
 import { formatDuration } from "./interval-bar";
-import { terminatedRuns } from "./RunLedger";
+import { modelName, terminatedRuns, tokens } from "./RunLedger";
 import {
   BarList, Big, CountRow, CoverageMatrix, Donut, Panel, SectionHeading, StackedRows, gridStyle,
   type BarItem, type CoverageRow, type StackedRow,
@@ -116,6 +116,72 @@ export function aggregate({ runs, details, gates = null }: Loaded) {
   const sum = (f: (r: RunSummary) => number) => ended.reduce((a, r) => a + f(r), 0);
   const spans = details.filter((d) => endedIds.has(d.run.runId)).flatMap((d) => d.spans);
 
+  // Spend by the model that produced it. Span cost is ONE figure across every
+  // attempt of the step, so a step that ran under two models — Triage, Research and
+  // Execution each ran haiku and then opus in the revise loop on the live data —
+  // cannot have its figure assigned to either. It is named as mixed rather than
+  // split by a guess, and a span with a cost and no recorded model is named as
+  // that, never folded into a model or dropped as if free.
+  const byModel = new Map<string, { usd: number; attempts: number; failed: number }>();
+  // Token traffic, with cache as its own term. The price map does not price cache,
+  // so cache reads — the largest term by two orders of magnitude on a cache-heavy
+  // run — are the part of the cost story a dollar figure cannot carry.
+  const tokenSums = { fresh: 0, output: 0, cacheRead: 0, cacheWrite: 0, spansWithoutCache: 0 };
+  for (const s of spans) {
+    if (s.cost === null || s.cost.usd === null) continue;
+    const key = s.models.length === 1 ? s.models[0]! : s.models.length > 1 ? "mixed across attempts" : "model not recorded";
+    const m = byModel.get(key) ?? { usd: 0, attempts: 0, failed: 0 };
+    m.usd += s.cost.usd;
+    m.attempts += 1;
+    if (s.outcomeStatus === "failed") m.failed += 1;
+    byModel.set(key, m);
+    tokenSums.fresh += s.cost.tokensIn ?? 0;
+    tokenSums.output += s.cost.tokensOut ?? 0;
+    if (s.cost.cacheReadTokens === null) tokenSums.spansWithoutCache += 1;
+    tokenSums.cacheRead += s.cost.cacheReadTokens ?? 0;
+    tokenSums.cacheWrite += s.cost.cacheCreationTokens ?? 0;
+  }
+
+  // Harness revisions are the comparison this page exists for. One row per template
+  // version, newest first; state counts over every run of that version, sums over
+  // the ones that ended — the same rule as the headline, applied per row.
+  const byVersion = [...new Set(runs.map((r) => r.templateVersion))]
+    .sort((a, b) => b - a)
+    .map((version) => {
+      const all = runs.filter((r) => r.templateVersion === version);
+      const done = all.filter((r) => endedIds.has(r.runId));
+      const vsum = (f: (r: RunSummary) => number) => done.reduce((a, r) => a + f(r), 0);
+      return {
+        version,
+        runs: all.length,
+        ended: done.length,
+        completed: all.filter((r) => r.terminationCause === "completed").length,
+        killed: all.filter((r) => r.terminationCause === "infrastructure_killed").length,
+        workflowFailed: all.filter((r) => r.terminationCause === "workflow_failed").length,
+        stoppedUnknown: all.filter((r) => r.terminationCause === "unknown").length,
+        running: all.filter((r) => r.terminationCause === "running").length,
+        delivered: vsum((r) => r.stepsDelivered),
+        blocked: vsum((r) => r.stepsBlocked),
+        relaunches: vsum((r) => r.spanRelaunches),
+        usd: vsum((r) => r.cost.usd),
+        elapsedMs: vsum((r) => r.durations.elapsedMs),
+        parkedMs: vsum((r) => r.durations.parkedMs),
+        workingMs: vsum((r) => r.durations.workingMs),
+      };
+    });
+
+  // What the policy stopped, by the reason it gave. A decision can carry several
+  // reasons and each is counted; allows are not stops and are not here.
+  const stopsByReason = new Map<string, { denied: number; approvals: number }>();
+  for (const d of details.filter((x) => endedIds.has(x.run.runId)).flatMap((x) => x.toolDecisions)) {
+    if (d.decision === "allow") continue;
+    for (const reason of d.reasons) {
+      const e = stopsByReason.get(reason) ?? { denied: 0, approvals: 0 };
+      if (d.decision === "deny") e.denied += 1; else e.approvals += 1;
+      stopsByReason.set(reason, e);
+    }
+  }
+
   const byStep = new Map<string, StepAgg>();
   for (const s of spans) {
     const e = byStep.get(s.name) ?? {
@@ -162,7 +228,7 @@ export function aggregate({ runs, details, gates = null }: Loaded) {
   }
 
   return {
-    runs, ended, details, byStep, gates,
+    runs, ended, details, byStep, byModel, tokens: tokenSums, byVersion, stopsByReason, gates,
     usd: sum((r) => r.cost.usd),
     failedUsd: sum((r) => r.cost.failedUsd),
     supersededUsd: sum((r) => r.cost.supersededUsd),
@@ -303,6 +369,51 @@ function stepBars(
     .sort((a, b) => b.value - a.value);
 }
 
+type VersionRow = Agg["byVersion"][number];
+
+/**
+ * Counts and sums per template version, newest first. A plain grid rather than a
+ * chart: the reader is comparing rows, and the numbers are the comparison.
+ */
+function VersionTable({ rows }: { rows: VersionRow[] }) {
+  const head = ["version", "runs", "completed", "stopped by the harness", "still running", "delivered", "blocked", "relaunches", "spent", "wall clock", "waiting on you"];
+  const cell = (v: string, i: number, bold = false) => (
+    <span key={i} className="mono" style={{ fontSize: "var(--fs-2)", color: bold ? "var(--text)" : "var(--text-2)", fontWeight: bold ? 600 : 400, textAlign: i === 0 ? "left" : "right", whiteSpace: "nowrap" }}>
+      {v}
+    </span>
+  );
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: `auto repeat(${head.length - 1}, minmax(0, auto))`, columnGap: "var(--sp-4)", rowGap: "var(--sp-2)", alignItems: "baseline" }}>
+        {head.map((h, i) => (
+          <span key={h} className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.6, textAlign: i === 0 ? "left" : "right", whiteSpace: "nowrap" }}>
+            {h}
+          </span>
+        ))}
+        {rows.map((r) => [
+          cell(`v${r.version}`, 0, true),
+          cell(String(r.runs), 1),
+          cell(String(r.completed), 2),
+          cell(String(r.killed), 3),
+          cell(String(r.running), 4),
+          cell(String(r.delivered), 5),
+          cell(String(r.blocked), 6),
+          cell(String(r.relaunches), 7),
+          cell(usd(r.usd), 8),
+          cell(dur(r.elapsedMs), 9),
+          // The share is a ratio of a closed set — this version's own ended runs.
+          cell(r.elapsedMs > 0 ? `${Math.round((r.parkedMs / r.elapsedMs) * 100)}%` : "—", 10),
+        ])}
+      </div>
+      {rows.some((r) => r.running > 0) && (
+        <p style={{ margin: "var(--sp-2) 0 0", fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+          Sums are over the runs of that version that ended; a run still running is counted but not summed.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function Dashboard({ agg }: { agg: Agg }) {
   const n = agg.runs.length;
   const live = n - agg.ended.length;
@@ -366,6 +477,17 @@ export function Dashboard({ agg }: { agg: Agg }) {
             <CountRow items={[{ label: "relaunches after a crash — events, not steps", value: String(agg.relaunches) }]} />
           </div>
         </Panel>
+
+        {/* One row per harness revision. Pooling v13 with v16 hides the one
+            comparison the page exists to support — whether the revision changed
+            anything — and it is only shown when there is more than one version to
+            compare, because a one-row table restates the headline. Every cell is a
+            count over that version's runs or a sum over the ones that ended. */}
+        {agg.byVersion.length > 1 && (
+          <Panel title="By template version" span={12}>
+            <VersionTable rows={agg.byVersion} />
+          </Panel>
+        )}
 
         <SectionHeading>How well we know it worked</SectionHeading>
 
@@ -494,6 +616,23 @@ export function Dashboard({ agg }: { agg: Agg }) {
                       </p>
                     </>
                   )}
+                {/* The reasons themselves, from the runs that ended. The counts above
+                    say the floor held; these say what it held against, which is the
+                    only record of what the agent reached for. */}
+                {agg.stopsByReason.size > 0 && (
+                  <div style={{ paddingTop: "var(--sp-2)", borderTop: "1px solid var(--hairline)", display: "grid", gap: "var(--sp-1)" }}>
+                    {[...agg.stopsByReason.entries()].map(([reason, c]) => (
+                      <div key={reason} style={{ display: "flex", gap: "var(--sp-2)", alignItems: "baseline", fontSize: "var(--fs-1)" }}>
+                        <span style={{ color: "var(--text-2)", minWidth: 0, flex: 1 }}>{reason}</span>
+                        <span className="mono" style={{ color: "var(--text-3)", whiteSpace: "nowrap" }}>
+                          {c.denied > 0 && `${c.denied} denied`}
+                          {c.denied > 0 && c.approvals > 0 && " · "}
+                          {c.approvals > 0 && `${c.approvals} sent to you`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </Panel>
             </>
           );
@@ -580,6 +719,44 @@ export function Dashboard({ agg }: { agg: Agg }) {
 
         <Panel title="Spend by step, this window" span={7}>
           <BarList items={stepBars(agg, (v) => v.usd, usd)} />
+        </Panel>
+
+        <Panel title="Spend by model" span={6}>
+          {/* The harness's own choice, and the one axis on this page that describes
+              the harness rather than the workflow. A step that ran under two models
+              in its revise loop is one bar named as mixed: its cost is one figure
+              across both attempts and assigning it to either would be a guess that
+              looks like a measurement. */}
+          <BarList
+            items={[...agg.byModel.entries()]
+              .sort((a, b) => b[1].usd - a[1].usd)
+              .map(([key, m]) => ({
+                key, label: key === "mixed across attempts" || key === "model not recorded" ? key : modelName(key),
+                value: m.usd,
+                display: `${usd(m.usd)} · ${m.attempts} ${m.attempts === 1 ? "attempt" : "attempts"}${m.failed > 0 ? ` · ${m.failed} failed` : ""}`,
+              }))}
+          />
+        </Panel>
+
+        <Panel title="Tokens, this window" span={6}>
+          {/* Cache as its own term. Dollars alone cannot say whether a run was
+              expensive because it produced a lot or because it re-read a lot, and
+              the price map does not price cache at all. Bars are scaled to the
+              largest term, which on a cache-heavy run is the point. */}
+          <BarList
+            items={[
+              { label: "fresh input", value: agg.tokens.fresh, display: tokens(agg.tokens.fresh) },
+              { label: "output", value: agg.tokens.output, display: tokens(agg.tokens.output) },
+              { label: "read from cache", value: agg.tokens.cacheRead, display: tokens(agg.tokens.cacheRead), tone: TONE.waiting },
+              { label: "written to cache", value: agg.tokens.cacheWrite, display: tokens(agg.tokens.cacheWrite), tone: TONE.waiting },
+            ]}
+          />
+          {agg.tokens.spansWithoutCache > 0 && (
+            <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+              {agg.tokens.spansWithoutCache} of {[...agg.byModel.values()].reduce((a, m) => a + m.attempts, 0)} attempts
+              recorded no cache figure, so the two cache terms are lower than the truth.
+            </p>
+          )}
         </Panel>
       </div>
     </div>

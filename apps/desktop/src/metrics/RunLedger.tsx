@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
-import type { Intervention, ProgressChannel, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
+import type { Intervention, ProgressChannel, RunDetail, RunSummary, RunTraceSpan, ToolDecision } from "@orca/contracts";
 import { getRunDetail, getRunSummaries } from "../api";
 import { MeasurementLabel } from "./n-gate-ui";
 import { IntervalBar, formatDuration } from "./interval-bar";
@@ -23,14 +23,30 @@ function day(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function tokens(n: number): string {
+export function tokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
 /** `claude-haiku-4-5-20251001` → `claude-haiku-4-5`: the date suffix is a release id, not a name. */
-function modelName(id: string): string {
+export function modelName(id: string): string {
   return id.replace(/-\d{8}$/, "");
 }
+
+// Why the reviewer was called, in the reader's words. The trigger is the harness's
+// own reasoning about when an opinion is worth paying for, and it is the context the
+// verdict has to be read in: "upheld" after "nothing else could check it" is the
+// only check the step got.
+const REVIEW_TRIGGER: Record<RunTraceSpan["refuteTriggeredBy"][number], string> = {
+  no_oracle: "nothing else could check it",
+  weak_oracle: "the check that ran was weak",
+  high_risk: "the step was high risk",
+};
+
+const DECISION_WORD: Record<ToolDecision["decision"], string> = {
+  deny: "denied",
+  require_approval: "sent to you",
+  allow: "allowed",
+};
 
 // What kind of record a clock rests on, in the reader's words. The channel is the
 // evidence for the timestamp, and a timestamp without its evidence is a bare instant.
@@ -577,6 +593,31 @@ function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker:
             ))}
           </div>
         )}
+        {/* The reason beside the zero. A chip saying nothing checked this is a
+            finding; the evidence record's own account of WHY — what was left
+            untested, why nothing could judge it — is what decides whether the fix is
+            a test or a check. Silent when the record lists nothing. */}
+        {span.evidenceGaps && (span.evidenceGaps.oracleGaps.length > 0 || span.evidenceGaps.untestedRegions.length > 0) && (
+          <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>
+            {span.evidenceGaps.oracleGaps.join("; ")}
+            {span.evidenceGaps.oracleGaps.length > 0 && span.evidenceGaps.untestedRegions.length > 0 && " · "}
+            {span.evidenceGaps.untestedRegions.length > 0 && `untested: ${span.evidenceGaps.untestedRegions.join(", ")}`}
+          </span>
+        )}
+        {/* The reviewer's argument, under its verdict. The verdict alone is an
+            opinion with the reasoning removed; the reason is what the model wrote
+            down, and the trigger is why it was asked at all. */}
+        {(span.refuteReason || span.refuteTriggeredBy.length > 0) && (
+          <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>
+            {span.refuteTriggeredBy.length > 0 && (
+              <span style={{ color: "var(--text-3)" }}>
+                reviewed because {span.refuteTriggeredBy.map((t) => REVIEW_TRIGGER[t]).join(" and ")}
+                {span.refuteReason ? " — " : ""}
+              </span>
+            )}
+            {span.refuteReason}
+          </span>
+        )}
         {(span.restarts > 0 || span.completions > 1 || span.stallRescues > 0) && (
           <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>
             {span.restarts > 0 && `relaunched ${span.restarts}x after a crash`}
@@ -611,6 +652,7 @@ function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker:
             {span.cost.tokensIn != null && span.cost.tokensOut != null && (
               <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", whiteSpace: "nowrap" }}>
                 {tokens(span.cost.tokensIn)} in · {tokens(span.cost.tokensOut)} out
+                {span.cost.cacheReadTokens != null && ` · ${tokens(span.cost.cacheReadTokens)} cached`}
               </span>
             )}
           </>
@@ -721,8 +763,36 @@ function ParkCaveat({ interventions }: { interventions: Intervention[] }) {
   );
 }
 
+/**
+ * What the policy stopped, with the reason it gave. Allows are counted rather than
+ * listed: the floor did nothing to them, and a list of everything permitted would
+ * bury the two lines that matter. Absent, not empty, when nothing needed a decision.
+ */
+function SafetyFloor({ decisions }: { decisions: ToolDecision[] }) {
+  const stopped = decisions.filter((d) => d.decision !== "allow");
+  const allowed = decisions.length - stopped.length;
+  if (decisions.length === 0) return null;
+  return (
+    <section style={{ display: "grid", gap: "var(--sp-1)" }}>
+      <h3 style={{ fontSize: "var(--fs-4)", margin: 0 }}>What the safety floor stopped</h3>
+      {stopped.map((d) => (
+        <div key={`${d.at}-${d.workflowStepRunId ?? ""}`} style={{ display: "flex", gap: "var(--sp-3)", alignItems: "baseline", padding: "var(--sp-1) 0", fontSize: "var(--fs-2)" }}>
+          <span className="mono" style={{ minWidth: 72, color: d.decision === "deny" ? "var(--err)" : "var(--warn)", fontWeight: 600 }}>
+            {DECISION_WORD[d.decision]}
+          </span>
+          {d.stepName && <span style={{ color: "var(--text-3)" }}>{d.stepName}</span>}
+          <span style={{ color: "var(--text-2)" }}>{d.reasons.join("; ") || d.riskClass}</span>
+        </div>
+      ))}
+      <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>
+        {stopped.length === 0 ? "Nothing was stopped. " : ""}{allowed} allowed
+      </span>
+    </section>
+  );
+}
+
 export function RunDetailPanel({ detail, onBack }: { detail: RunDetail; onBack: () => void }) {
-  const { run, spans, interventions } = detail;
+  const { run, spans, interventions, toolDecisions } = detail;
   const actionable = interventions.filter((i) => i.parkState === "awaiting_you");
   // Hoisted: each is a property of the LIST, not of the row being rendered. Computed
   // inside the map it read as though it varied per row, which is the opposite of what
@@ -773,6 +843,8 @@ export function RunDetailPanel({ detail, onBack }: { detail: RunDetail; onBack: 
           <SpanRow key={s.workflowStepRunId} span={s} showCostMarker={costMarker} />
         ))}
       </section>
+
+      <SafetyFloor decisions={toolDecisions} />
 
       {interventions.length > 0 && (
         <section style={{ display: "grid", gap: "var(--sp-1)" }}>

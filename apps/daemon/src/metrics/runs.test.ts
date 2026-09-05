@@ -33,16 +33,20 @@ function complete(over: {
   usd?: number | null; latencyMs?: number; status?: "succeeded" | "failed";
   source?: "provider" | "price_map" | null;
   model?: string | null;
+  cacheRead?: number | null; cacheWrite?: number | null;
+  evidence?: HarnessTransition["evidence"];
+  refute?: HarnessTransition["refute"];
 }): RunTransition {
   const t: HarnessTransition = {
     id: over.id, goalId: GOAL_ID, workflowRunId: RUN_ID,
     workflowStepRunId: over.stepRunId ?? "sr-1",
     boundary: "step_complete",
-    risk: null, evidence: null, stateDeps: null,
+    risk: null, evidence: over.evidence ?? null, stateDeps: null,
+    refute: over.refute ?? null,
     telemetry: {
       cost: over.usd == null ? null : {
-        tokens_in: 10, tokens_out: 20, cache_read_tokens: null,
-        cache_creation_tokens: null, usd: over.usd, source: over.source ?? null,
+        tokens_in: 10, tokens_out: 20, cache_read_tokens: over.cacheRead ?? null,
+        cache_creation_tokens: over.cacheWrite ?? null, usd: over.usd, source: over.source ?? null,
       },
       latency_ms: over.latencyMs ?? null,
       model: over.model ?? null, provider_id: null, provider_version: null,
@@ -387,6 +391,95 @@ describe("buildRunDetail", () => {
     });
     expect(detail.spans[0].models).toEqual(["claude-haiku-4-5-20251001", "claude-opus-5"]);
     expect(detail.spans[1].models).toEqual([]);
+  });
+
+  it("sums cache tokens into the span cost, and keeps them null when no completion carried them", () => {
+    // Cache reads outnumber fresh input roughly 300 to 1 on the live data and were
+    // priced into `usd` without ever being projected — the largest term in the
+    // cost story was invisible. Null, not zero, when absent: a completion written
+    // before the field existed did not have zero cache traffic.
+    const build = (transitions: RunTransition[]) => buildRunDetail({
+      run: run(), stepRuns: [stepRun({ stepRunId: "sr-1" })], transitions,
+      events: [], runEvents: [], sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
+    });
+    const withCache = build([
+      complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 1, cacheRead: 1000, cacheWrite: 50 }),
+      complete({ id: "c2", at: "2026-09-01T00:20:00.000Z", usd: 1, cacheRead: 500, cacheWrite: null }),
+    ]);
+    expect(withCache.spans[0].cost?.cacheReadTokens).toBe(1500);
+    expect(withCache.spans[0].cost?.cacheCreationTokens).toBe(50);
+    const without = build([complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 1 })]);
+    expect(without.spans[0].cost?.cacheReadTokens).toBeNull();
+    expect(without.spans[0].cost?.cacheCreationTokens).toBeNull();
+  });
+
+  it("carries why the evidence fell short, from the final completion's evidence record", () => {
+    // The matrix shows a zero; the evidence record says WHY — "nothing was executed
+    // to check this" and the regions left untested. The reason beside the zero is
+    // what tells the reader whether to add a sensor or a test.
+    const detail = buildRunDetail({
+      run: run(), stepRuns: [stepRun({ stepRunId: "sr-1" })],
+      transitions: [complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 1, evidence: {
+        sensorsRun: [], verdict: "passed",
+        untestedRegions: ["semantic correctness", "runtime behavior"], residualRisk: [],
+        oracleAdequacy: { sufficient: false, gaps: ["nothing was executed to check this"] },
+      } })],
+      events: [], runEvents: [], sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
+    });
+    expect(detail.spans[0].evidenceGaps).toEqual({
+      untestedRegions: ["semantic correctness", "runtime behavior"],
+      oracleGaps: ["nothing was executed to check this"],
+    });
+    const none = buildRunDetail({
+      run: run(), stepRuns: [stepRun({ stepRunId: "sr-1" })],
+      transitions: [complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 1 })],
+      events: [], runEvents: [], sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
+    });
+    expect(none.spans[0].evidenceGaps).toBeNull();
+  });
+
+  it("carries the reviewer's reason and what triggered the review, beside its verdict", () => {
+    const detail = buildRunDetail({
+      run: run(), stepRuns: [stepRun({ stepRunId: "sr-1" })],
+      transitions: [complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 1, refute: {
+        verdict: "upheld", triggered_by: ["no_oracle"], risk_class: "low",
+        reason: "Codebase is genuinely pre-existing and the constant is correct.", issue_refs: [],
+      } })],
+      events: [], runEvents: [], sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
+    });
+    expect(detail.spans[0].refuteVerdict).toBe("upheld");
+    expect(detail.spans[0].refuteTriggeredBy).toEqual(["no_oracle"]);
+    expect(detail.spans[0].refuteReason).toBe("Codebase is genuinely pre-existing and the constant is correct.");
+  });
+
+  it("lists every tool-gate decision on the run, with the reasons the policy gave", () => {
+    // The Workflows panel counts denials; the reasons — "rm -rf", "a credential
+    // file" — are on the risk facet of the tool_gate transition and never left the
+    // daemon. A denial with its reason is a fact about what the agent reached for.
+    const gate = (id: string, at: string, decision: "deny" | "allow" | "require_approval", reasons: string[], hard: string[]): RunTransition => ({
+      stepTemplateId: "triage",
+      transition: {
+        id, goalId: GOAL_ID, workflowRunId: RUN_ID, workflowStepRunId: "sr-1", boundary: "tool_gate",
+        risk: { risk_class: decision === "deny" ? "critical" : "medium", permission_tier: "full_access",
+                classification_reasons: reasons, gate_decision: decision, hard_constraint_violations: hard },
+        evidence: null, stateDeps: null, telemetry: null, createdAt: at,
+      },
+    });
+    const detail = buildRunDetail({
+      run: run(), stepRuns: [stepRun({ stepRunId: "sr-1" })],
+      transitions: [
+        gate("g1", "2026-09-01T00:05:00.000Z", "deny", ["bash: destructive recursive delete (rm -rf)"], ["bash: destructive recursive delete (rm -rf)"]),
+        gate("g2", "2026-09-01T00:06:00.000Z", "require_approval", ["bash: writes outside the workspace"], []),
+        complete({ id: "c1", at: "2026-09-01T00:10:00.000Z", usd: 1 }),
+      ],
+      events: [], runEvents: [], sourceKinds: new Map(), stepNames: new Map([["triage", "Triage"]]), nowMs: NOW,
+    });
+    expect(detail.toolDecisions).toEqual([
+      { workflowStepRunId: "sr-1", stepName: "Triage", at: "2026-09-01T00:05:00.000Z", decision: "deny",
+        riskClass: "critical", reasons: ["bash: destructive recursive delete (rm -rf)"] },
+      { workflowStepRunId: "sr-1", stepName: "Triage", at: "2026-09-01T00:06:00.000Z", decision: "require_approval",
+        riskClass: "medium", reasons: ["bash: writes outside the workspace"] },
+    ]);
   });
 });
 

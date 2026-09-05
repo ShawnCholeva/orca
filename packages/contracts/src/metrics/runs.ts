@@ -35,6 +35,15 @@ export const SpanCost = z.object({
   usd: z.number().nullable(),
   tokensIn: z.number().int().nonnegative().nullable(),
   tokensOut: z.number().int().nonnegative().nullable(),
+  /**
+   * Summed over the completions that carried them; null when none did. On the live
+   * data cache reads outnumber fresh input roughly 300 to 1, and the price map does
+   * not price cache — so a span's `usd` cannot be read without knowing how much of
+   * its traffic was cache. Null rather than zero: a completion written before the
+   * field existed did not have zero cache traffic, it had unrecorded cache traffic.
+   */
+  cacheReadTokens: z.number().int().nonnegative().nullable(),
+  cacheCreationTokens: z.number().int().nonnegative().nullable(),
   state: CostState,
 }).strict();
 export type SpanCost = z.infer<typeof SpanCost>;
@@ -251,6 +260,23 @@ export const RunTraceSpan = z.object({
   }).strict().nullable(),
   /** O — the independent reviewer's verdict, not ground truth. */
   refuteVerdict: z.enum(["upheld", "refuted", "uncertain", "unavailable"]).nullable(),
+  /**
+   * Why the reviewer was called and what it concluded, in its own words. The verdict
+   * alone is an opinion with its argument removed; "refuted" without the reason
+   * sends the reader to re-derive what the model already wrote down.
+   */
+  refuteTriggeredBy: z.array(z.enum(["high_risk", "no_oracle", "weak_oracle"])),
+  refuteReason: z.string().nullable(),
+  /**
+   * Why the evidence fell short, from the FINAL completion's evidence record. The
+   * coverage matrix shows that nothing executed; this says what was left untested
+   * and why the oracle was judged insufficient, which is what decides whether the
+   * fix is a sensor or a test. Null when the span never completed.
+   */
+  evidenceGaps: z.object({
+    untestedRegions: z.array(z.string()),
+    oracleGaps: z.array(z.string()),
+  }).strict().nullable(),
   conflicts: z.array(z.string()),
   outcomeStatus: z.string().nullable(),
   failureCode: z.string().nullable(),
@@ -349,9 +375,28 @@ export const RunSummary = z.object({
 }).strict();
 export type RunSummary = z.infer<typeof RunSummary>;
 
+/**
+ * One tool-gate decision. The Workflows tab counts these; the reasons the policy
+ * gave — "destructive recursive delete", "access to a secret/credential file" —
+ * were on the risk facet and never left the daemon. A denial with its reason is a
+ * fact about what the agent reached for, and the only such fact the run records.
+ */
+export const ToolDecision = z.object({
+  workflowStepRunId: z.string().nullable(),
+  stepName: z.string().nullable(),
+  at: z.string(),
+  decision: z.enum(["allow", "require_approval", "deny"]),
+  riskClass: z.enum(["low", "medium", "high", "critical"]),
+  /** The policy's classification reasons, verbatim. */
+  reasons: z.array(z.string()),
+}).strict();
+export type ToolDecision = z.infer<typeof ToolDecision>;
+
 export const RunDetail = z.object({
   run: RunSummary,
   spans: z.array(RunTraceSpan),
   interventions: z.array(Intervention),
+  /** Every tool-gate decision on the run, in time order. */
+  toolDecisions: z.array(ToolDecision),
 }).strict();
 export type RunDetail = z.infer<typeof RunDetail>;

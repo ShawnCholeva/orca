@@ -1,6 +1,6 @@
 import type {
   Intervention, InterventionSourceKind, ParkState, ProgressChannel as RunProgressChannel,
-  RunCost, RunDetail, RunDurations, RunSummary, RunTraceSpan, SpanCost, VerificationTier,
+  RunCost, RunDetail, RunDurations, RunSummary, RunTraceSpan, SpanCost, ToolDecision, VerificationTier,
 } from "@orca/contracts";
 import { classifyTier } from "./verification.js";
 import { sourcesPassed } from "./source-signals.js";
@@ -398,15 +398,26 @@ export function computeCost(transitions: RunTransition[], stepRuns: RunStepRunRo
 function spanCost(completes: RunTransition[]): SpanCost | null {
   if (completes.length === 0) return null;
   const withCost = completes.filter((t) => t.transition.telemetry?.cost != null);
-  if (withCost.length === 0) return { usd: null, tokensIn: null, tokensOut: null, state: "unknown" };
+  if (withCost.length === 0) {
+    return { usd: null, tokensIn: null, tokensOut: null, cacheReadTokens: null, cacheCreationTokens: null, state: "unknown" };
+  }
   const sum = (pick: (c: NonNullable<NonNullable<RunTransition["transition"]["telemetry"]>["cost"]>) => number) =>
     withCost.reduce((acc, t) => acc + pick(t.transition.telemetry!.cost!), 0);
   const sources = new Set(withCost.map((t) => t.transition.telemetry!.cost!.source));
   const only = sources.size === 1 ? [...sources][0] : null;
+  // Cache terms are nullable on the entry, so the sum is over the entries that
+  // carried one and null when none did — a completion from before the field
+  // existed had unrecorded cache traffic, not zero.
+  const nullableSum = (pick: (c: NonNullable<NonNullable<RunTransition["transition"]["telemetry"]>["cost"]>) => number | null) => {
+    const vals = withCost.map((t) => pick(t.transition.telemetry!.cost!)).filter((v): v is number => v != null);
+    return vals.length === 0 ? null : vals.reduce((a, b) => a + b, 0);
+  };
   return {
     usd: sum((c) => c.usd),
     tokensIn: sum((c) => c.tokens_in),
     tokensOut: sum((c) => c.tokens_out),
+    cacheReadTokens: nullableSum((c) => c.cache_read_tokens),
+    cacheCreationTokens: nullableSum((c) => c.cache_creation_tokens),
     state: only === "provider" ? "measured" : only === "price_map" ? "estimated" : "reported",
   };
 }
@@ -481,6 +492,12 @@ export function buildSpans(input: {
         independentReview: sp.independentReview,
       },
       refuteVerdict: rf?.verdict ?? null,
+      refuteTriggeredBy: rf?.triggered_by ?? [],
+      refuteReason: rf?.reason ?? null,
+      evidenceGaps: ev === null ? null : {
+        untestedRegions: ev.untestedRegions,
+        oracleGaps: ev.oracleAdequacy.gaps,
+      },
       conflicts: (final?.transition.stateDeps?.conflicts ?? []).map((c) => c.kind),
       outcomeStatus: final?.transition.telemetry?.outcome.status ?? null,
       failureCode: final?.transition.telemetry?.outcome.failure_code ?? null,
@@ -609,5 +626,32 @@ export function buildRunDetail(input: {
     }),
     spans,
     interventions,
+    toolDecisions: buildToolDecisions(transitions, stepNames),
   };
+}
+
+/**
+ * The run's tool-gate decisions, in time order, each with the reasons the policy
+ * gave. Transitions are already time-ordered by the fetch; a gate transition with
+ * no risk facet has nothing to say and is skipped rather than guessed at.
+ */
+export function buildToolDecisions(
+  transitions: RunTransition[],
+  stepNames: Map<string, string>
+): ToolDecision[] {
+  const out: ToolDecision[] = [];
+  for (const t of transitions) {
+    if (t.transition.boundary !== "tool_gate") continue;
+    const risk = t.transition.risk;
+    if (risk == null) continue;
+    out.push({
+      workflowStepRunId: t.transition.workflowStepRunId,
+      stepName: t.stepTemplateId === null ? null : (stepNames.get(t.stepTemplateId) ?? t.stepTemplateId),
+      at: t.transition.createdAt,
+      decision: risk.gate_decision,
+      riskClass: risk.risk_class,
+      reasons: risk.classification_reasons,
+    });
+  }
+  return out;
 }

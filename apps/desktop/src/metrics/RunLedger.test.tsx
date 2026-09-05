@@ -46,11 +46,11 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T00:30:00.000Z",
     elapsedMs: 1_800_000, workingMs: 600_000, parkedMs: 0,
     status: "passed", blockedReason: null, restarts: 0, completions: 1, stallRescues: 0,
-    cost: { usd: 1.52, tokensIn: 10, tokensOut: 20, state: "reported" },
+    cost: { usd: 1.52, tokensIn: 10, tokensOut: 20, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" },
     models: [],
     tier: "partially_verified",
     verifiers: { executable: false, grounding: true, independentReview: false },
-    refuteVerdict: null, conflicts: [], outcomeStatus: "succeeded", failureCode: null, ...over,
+    refuteVerdict: null, refuteTriggeredBy: [], refuteReason: null, evidenceGaps: null, conflicts: [], outcomeStatus: "succeeded", failureCode: null, ...over,
   };
 }
 
@@ -64,7 +64,7 @@ function park(over: Partial<Intervention> = {}): Intervention {
 }
 
 function detail(over: Partial<RunDetail> = {}): RunDetail {
-  return { run: summary(), spans: [span()], interventions: [park()], ...over };
+  return { run: summary(), spans: [span()], interventions: [park()], toolDecisions: [], ...over };
 }
 
 describe("cost", () => {
@@ -261,7 +261,7 @@ describe("RunDetailPanel", () => {
   });
 
   it("says waiting on you when the run is genuinely still live", () => {
-    render(<RunDetailPanel detail={detail({ interventions: [park({ parkState: "awaiting_you" })] })} onBack={() => {}} />);
+    render(<RunDetailPanel detail={detail({ interventions: [park({ parkState: "awaiting_you" })], toolDecisions: [] })} onBack={() => {}} />);
     expect(screen.getAllByText("waiting on you").length).toBeGreaterThan(0);
   });
 
@@ -312,7 +312,7 @@ describe("RunDetailPanel", () => {
   });
 
   it("flags a pause whose reason was destroyed as lossy rather than guessing", () => {
-    render(<RunDetailPanel detail={detail({ interventions: [park({ sourceKind: "unknown" })] })} onBack={() => {}} />);
+    render(<RunDetailPanel detail={detail({ interventions: [park({ sourceKind: "unknown" })], toolDecisions: [] })} onBack={() => {}} />);
     const tag = document.querySelector('[data-compact="true"]');
     expect(tag!.textContent).toBe("discarded");
     // The tag occupies the reason cell rather than sitting beside a placeholder —
@@ -563,7 +563,7 @@ describe("the fields the server computes reach the span", () => {
 
   it("prints the tokens under the cost figure", () => {
     render(<RunDetailPanel detail={detail({
-      spans: [span({ cost: { usd: 1.52, tokensIn: 12_644, tokensOut: 10_797, state: "reported" } })],
+      spans: [span({ cost: { usd: 1.52, tokensIn: 12_644, tokensOut: 10_797, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" } })],
     })} onBack={() => {}} />);
     expect(document.body.textContent).toContain("12.6k in · 10.8k out");
   });
@@ -582,5 +582,73 @@ describe("the gap statement is current", () => {
     const text = document.body.textContent ?? "";
     expect(text).not.toContain("only sees a step start and finish");
     expect(text).toContain("between those points");
+  });
+});
+
+describe("the evidence behind the chips", () => {
+  it("says why a check did not fire, beside the chip that says nothing checked it", () => {
+    // The matrix shows a zero; the evidence record says WHY, and the why decides
+    // whether the fix is a sensor or a test.
+    render(<RunDetailPanel detail={detail({
+      spans: [span({
+        verifiers: { executable: false, grounding: false, independentReview: false },
+        evidenceGaps: { untestedRegions: ["semantic correctness", "runtime behavior"], oracleGaps: ["nothing was executed to check this"] },
+      })],
+    })} onBack={() => {}} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("nothing was executed to check this");
+    expect(text).toContain("untested: semantic correctness, runtime behavior");
+  });
+
+  it("stays silent about gaps when the evidence record has none", () => {
+    render(<RunDetailPanel detail={detail({
+      spans: [span({ evidenceGaps: { untestedRegions: [], oracleGaps: [] } })],
+    })} onBack={() => {}} />);
+    expect(document.body.textContent).not.toContain("untested:");
+  });
+
+  it("prints the reviewer's reason and what called it, under its verdict", () => {
+    render(<RunDetailPanel detail={detail({
+      spans: [span({
+        verifiers: { executable: false, grounding: true, independentReview: true },
+        refuteVerdict: "refuted", refuteTriggeredBy: ["no_oracle"],
+        refuteReason: "The constant is off by a factor of ten.",
+      })],
+    })} onBack={() => {}} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("reviewed because nothing else could check it");
+    expect(text).toContain("The constant is off by a factor of ten.");
+  });
+
+  it("shows the cache traffic with the tokens when it was recorded", () => {
+    render(<RunDetailPanel detail={detail({
+      spans: [span({ cost: { usd: 1.52, tokensIn: 3_854, tokensOut: 2_534, cacheReadTokens: 183_026, cacheCreationTokens: 15_239, state: "reported" } })],
+    })} onBack={() => {}} />);
+    expect(document.body.textContent).toContain("3.9k in · 2.5k out · 183.0k cached");
+  });
+});
+
+describe("what the safety floor stopped", () => {
+  it("lists each denial with the reason the policy gave, and the step it happened in", () => {
+    render(<RunDetailPanel detail={detail({
+      toolDecisions: [
+        { workflowStepRunId: "sr1", stepName: "Execution", at: "2026-09-01T00:05:00.000Z", decision: "deny", riskClass: "critical", reasons: ["bash: destructive recursive delete (rm -rf)"] },
+        { workflowStepRunId: "sr1", stepName: "Execution", at: "2026-09-01T00:06:00.000Z", decision: "require_approval", riskClass: "medium", reasons: ["bash: writes outside the workspace"] },
+        { workflowStepRunId: "sr1", stepName: "Execution", at: "2026-09-01T00:07:00.000Z", decision: "allow", riskClass: "low", reasons: [] },
+      ],
+    })} onBack={() => {}} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("What the safety floor stopped");
+    expect(text).toContain("denied");
+    expect(text).toContain("bash: destructive recursive delete (rm -rf)");
+    expect(text).toContain("sent to you");
+    expect(text).toContain("bash: writes outside the workspace");
+    // An allow is not something the floor stopped; it is counted, not listed.
+    expect(text).toContain("1 allowed");
+  });
+
+  it("omits the section when nothing needed a decision", () => {
+    render(<RunDetailPanel detail={detail({ toolDecisions: [] })} onBack={() => {}} />);
+    expect(document.body.textContent).not.toContain("safety floor");
   });
 });

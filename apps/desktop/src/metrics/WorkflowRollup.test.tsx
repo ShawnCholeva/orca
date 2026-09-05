@@ -32,8 +32,8 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T00:30:00.000Z",
     elapsedMs: 30 * 60_000, workingMs: 60_000, parkedMs: 0, status: "passed", blockedReason: null,
     restarts: 2, completions: 1, stallRescues: 0,
-    cost: { usd: 5, tokensIn: 1, tokensOut: 1, state: "reported" },
-    tier: null, verifiers: null, refuteVerdict: null, conflicts: [],
+    cost: { usd: 5, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" },
+    tier: null, verifiers: null, refuteVerdict: null, refuteTriggeredBy: [], refuteReason: null, evidenceGaps: null, conflicts: [],
     outcomeStatus: "succeeded", failureCode: null, models: [], ...over,
   };
 }
@@ -50,8 +50,8 @@ function park(over: Partial<Intervention> = {}): Intervention {
 const loaded = (over: Partial<RunDetail> = {}) => ({
   runs: [run(), run({ runId: "b", terminationCause: "completed" })],
   details: [
-    { run: run(), spans: [span()], interventions: [park()], ...over },
-    { run: run({ runId: "b" }), spans: [span({ workflowStepRunId: "s2", name: "Execution", cost: { usd: 40, tokensIn: 1, tokensOut: 1, state: "reported" } })], interventions: [park({ activityId: "a2", sourceKind: "question_pending" })] },
+    { run: run(), spans: [span()], interventions: [park()], toolDecisions: [], ...over },
+    { run: run({ runId: "b" }), spans: [span({ workflowStepRunId: "s2", name: "Execution", cost: { usd: 40, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" } })], interventions: [park({ activityId: "a2", sourceKind: "question_pending" })], toolDecisions: [] },
   ],
 });
 
@@ -129,8 +129,8 @@ describe("a denominator says what it counts", () => {
     const a = aggregate({
       runs: [run(), run({ runId: "b" })],
       details: [
-        { run: run(), spans: [span({ workflowStepRunId: "s1" }), span({ workflowStepRunId: "s2", attempt: 2 })], interventions: [] },
-        { run: run({ runId: "b" }), spans: [span({ workflowRunId: "b", workflowStepRunId: "s3" })], interventions: [] },
+        { run: run(), spans: [span({ workflowStepRunId: "s1" }), span({ workflowStepRunId: "s2", attempt: 2 })], interventions: [], toolDecisions: [] },
+        { run: run({ runId: "b" }), spans: [span({ workflowRunId: "b", workflowStepRunId: "s3" })], interventions: [], toolDecisions: [] },
       ],
     });
     const { container } = render(<Dashboard agg={a} />);
@@ -144,7 +144,7 @@ describe("a denominator says what it counts", () => {
     // "2 attempts across 2 runs" everywhere would be noise that stops being read.
     const a = aggregate({
       runs: [run()],
-      details: [{ run: run(), spans: [span()], interventions: [] }],
+      details: [{ run: run(), spans: [span()], interventions: [], toolDecisions: [] }],
     });
     const { container } = render(<Dashboard agg={a} />);
     expect(container.textContent).toContain("1 run");
@@ -200,7 +200,7 @@ describe("unmeasured time is not idle time", () => {
         run: run(),
         spans: [span({ workflowStepRunId: "s1", name: "Verify", workingMs: null,
                        elapsedMs: 100_000, parkedMs: 30_000 })],
-        interventions: [],
+        interventions: [], toolDecisions: [],
       }],
     });
     const v = a.byStep.get("Verify")!;
@@ -223,7 +223,7 @@ describe("unmeasured time is not idle time", () => {
     // pass this while proving nothing.
     const over = span({ elapsedMs: 100_000, workingMs: 90_000, parkedMs: 50_000 });
     expect((over.workingMs ?? 0) + (over.parkedMs ?? 0)).toBeGreaterThan(over.elapsedMs!);
-    const a = aggregate({ runs: [run()], details: [{ run: run(), spans: [over], interventions: [] }] });
+    const a = aggregate({ runs: [run()], details: [{ run: run(), spans: [over], interventions: [], toolDecisions: [] }] });
     const t = a.byStep.get("Triage")!;
     expect(t.unaccountedMs).toBeGreaterThanOrEqual(0);
     expect(t.workingMs + t.parkedMs + t.unaccountedMs + t.unmeasuredMs).toBe(t.elapsedMs);
@@ -281,7 +281,7 @@ describe("the coverage matrix separates a missing sensor from a missing recordin
           span({ workflowStepRunId: "s2", name: "Verify", stepTemplateId: "__gate__:verify", kind: "gate",
                  status: "passed", completions: 0, workingMs: null, verifiers: null }),
         ],
-        interventions: [],
+        interventions: [], toolDecisions: [],
       }],
     });
     expect(a.byStep.get("Clarify")!.completed).toBe(1);
@@ -340,3 +340,94 @@ describe("a still-running run cannot move a total", () => {
   });
 });
 
+
+describe("the harness's own choices reach the surface", () => {
+  it("sums spend by model, and refuses to split a step that ran under two", () => {
+    // Span cost is one figure across every attempt of a step. When a step ran haiku
+    // and then opus in the revise loop, the figure belongs to both and can be
+    // attributed to neither — so it is named as mixed rather than assigned.
+    const a = aggregate({
+      runs: [run({ terminationCause: "completed" })],
+      details: [{ run: run(), spans: [
+        span({ workflowStepRunId: "s1", name: "Triage", models: ["claude-haiku-4-5-20251001"], cost: { usd: 3, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" }, outcomeStatus: "failed" }),
+        span({ workflowStepRunId: "s2", name: "Proposal", models: ["claude-haiku-4-5-20251001"], cost: { usd: 2, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" } }),
+        span({ workflowStepRunId: "s3", name: "Execution", models: ["claude-haiku-4-5-20251001", "claude-opus-5"], cost: { usd: 40, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" } }),
+        span({ workflowStepRunId: "s4", name: "Verify", kind: "gate", models: [], cost: null }),
+      ], interventions: [], toolDecisions: [] }],
+    });
+    expect([...a.byModel.entries()]).toEqual([
+      ["claude-haiku-4-5-20251001", { usd: 5, attempts: 2, failed: 1 }],
+      ["mixed across attempts", { usd: 40, attempts: 1, failed: 0 }],
+    ]);
+    const t = render(<Dashboard agg={a} />).container.textContent ?? "";
+    expect(t).toContain("claude-haiku-4-5");
+    expect(t).toContain("mixed across attempts");
+    expect(t).not.toContain("claude-opus-5");
+  });
+
+  it("names a model that was never recorded as such, never as free", () => {
+    const a = aggregate({
+      runs: [run({ terminationCause: "completed" })],
+      details: [{ run: run(), spans: [span({ models: [], cost: { usd: 7, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" } })], interventions: [], toolDecisions: [] }],
+    });
+    expect(a.byModel.get("model not recorded")).toEqual({ usd: 7, attempts: 1, failed: 0 });
+  });
+
+  it("sums the four token kinds across ended runs, with cache as its own term", () => {
+    const a = aggregate({
+      runs: [run({ terminationCause: "completed" })],
+      details: [{ run: run(), spans: [
+        span({ workflowStepRunId: "s1", cost: { usd: 1, tokensIn: 100, tokensOut: 200, cacheReadTokens: 5000, cacheCreationTokens: 300, state: "reported" } }),
+        span({ workflowStepRunId: "s2", cost: { usd: 1, tokensIn: 50, tokensOut: 50, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" } }),
+      ], interventions: [], toolDecisions: [] }],
+    });
+    expect(a.tokens).toEqual({ fresh: 150, output: 250, cacheRead: 5000, cacheWrite: 300, spansWithoutCache: 1 });
+    const t = render(<Dashboard agg={a} />).container.textContent ?? "";
+    expect(t).toContain("5.0k");
+    expect(t).toContain("1 of 2 attempts recorded no cache figure");
+  });
+
+  it("splits the window by template version, as counts and sums per version", () => {
+    // Harness revisions are the comparison this page exists for, and pooling
+    // v13 with v16 hides whether v16 fixed anything. One row per version; every
+    // cell is a count or a sum over that version's ended runs.
+    const a = aggregate({
+      runs: [
+        run({ runId: "a", templateVersion: 14, terminationCause: "completed", stepsDelivered: 8 }),
+        run({ runId: "b", templateVersion: 16, terminationCause: "infrastructure_killed", stepsDelivered: 0 }),
+        run({ runId: "c", templateVersion: 16, terminationCause: "running", stepsDelivered: 5 }),
+      ],
+      details: [],
+    });
+    expect(a.byVersion.map((v) => [v.version, v.runs, v.ended, v.completed, v.killed, v.delivered])).toEqual([
+      [16, 2, 1, 0, 1, 0],
+      [14, 1, 1, 1, 0, 8],
+    ]);
+    const t = render(<Dashboard agg={a} />).container.textContent ?? "";
+    expect(t).toContain("v16");
+    expect(t).toContain("v14");
+  });
+
+  it("lists what the safety floor stopped, by reason, across ended runs", () => {
+    const a = aggregate({
+      runs: [run({ runId: "a", terminationCause: "completed" }), run({ runId: "live", terminationCause: "running" })],
+      details: [
+        { run: run({ runId: "a" }), spans: [], interventions: [], toolDecisions: [
+          { workflowStepRunId: "s1", stepName: "Execution", at: "2026-09-01T00:05:00.000Z", decision: "deny", riskClass: "critical", reasons: ["bash: destructive recursive delete (rm -rf)"] },
+          { workflowStepRunId: "s1", stepName: "Execution", at: "2026-09-01T00:06:00.000Z", decision: "deny", riskClass: "critical", reasons: ["bash: destructive recursive delete (rm -rf)"] },
+          { workflowStepRunId: "s1", stepName: "Execution", at: "2026-09-01T00:07:00.000Z", decision: "require_approval", riskClass: "medium", reasons: ["bash: writes outside the workspace"] },
+        ] },
+        { run: run({ runId: "live" }), spans: [], interventions: [], toolDecisions: [
+          { workflowStepRunId: "s9", stepName: "Execution", at: "2026-09-02T00:05:00.000Z", decision: "deny", riskClass: "critical", reasons: ["bash: access to a secret/credential file"] },
+        ] },
+      ],
+    });
+    expect([...a.stopsByReason.entries()]).toEqual([
+      ["bash: destructive recursive delete (rm -rf)", { denied: 2, approvals: 0 }],
+      ["bash: writes outside the workspace", { denied: 0, approvals: 1 }],
+    ]);
+    const t = render(<Dashboard agg={a} />).container.textContent ?? "";
+    expect(t).toContain("rm -rf");
+    expect(t).not.toContain("credential");
+  });
+});
