@@ -239,7 +239,15 @@ export function CostCaveats({ runs }: { runs: RunSummary[] }) {
       {unchecked > 0 && (
         <MeasurementLabel
           state="unmeasurable_structural"
-          reason={`${unchecked} of these runs never finished, so their cost totals have nothing to check against.`}
+          // Deliberately no count. This tallies a per-row state that every affected
+          // row already carries, so the numeral earns nothing the rows don't show —
+          // and it collided: with seven runs, "6 ended" (the headline) and "6 never
+          // completed" are DIFFERENT sets that happen to share a number, and a
+          // reader seeing 6, 6 and "1 completed" four lines apart cannot reconcile
+          // them. Same numeral, two populations, difference unnamed: the count rule
+          // at the copy level. Naming the population and pointing at the rows keeps
+          // the distinction and removes the coincidence.
+          reason="Cost totals on runs that never reached completion have no roll-up to check them against — the affected rows are marked below."
         />
       )}
     </div>

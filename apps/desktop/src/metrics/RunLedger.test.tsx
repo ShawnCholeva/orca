@@ -98,11 +98,17 @@ describe("cost", () => {
     expect(document.body.textContent).not.toContain("—");
   });
 
-  it("states the compacted caveats once, with their counts, above the rows", () => {
+  it("states the compacted caveats once above the rows", () => {
     // The other half of the row-tag contract. A tag alone is a caveat the reader
-    // cannot resolve, so the sentence has to be somewhere — and it has to name the
-    // scale, because a tag repeated six times conveys scale only to someone who
-    // counts tags. The `fix` stays at full size: it is the entire actionable content.
+    // cannot resolve, so the sentence has to be somewhere. The `fix` stays at full
+    // size: it is the entire actionable content.
+    //
+    // The SILENT-NODE caveat keeps its count — it tallies nodes, the scale is what
+    // makes the fix worth doing, and no other number on the screen counts nodes.
+    // The NEVER-COMPLETED caveat drops its count deliberately: it tallied a per-row
+    // state each affected row already carries, and with seven runs "6 ended" and
+    // "6 never completed" are different sets sharing a number. Same numeral, two
+    // populations, difference unnamed — the count rule at the copy level.
     render(<CostCaveats runs={[
       summary({ runId: "a", cost: { usd: 5, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
         coverage: { reported: 3, total: 3, silent: 2 }, rollupCheck: "not_applicable" } }),
@@ -111,7 +117,9 @@ describe("cost", () => {
     ]} />);
     const text = document.body.textContent ?? "";
     expect(text).toContain("3 nodes across these runs spent money and reported nothing");
-    expect(text).toContain("2 of these runs never finished");
+    expect(text).toContain("runs that never reached completion have no roll-up");
+    // No bare tally of a per-row state: it would collide with the headline's count.
+    expect(text).not.toMatch(/\d+ of these runs never/);
     expect(text).toContain("Emit step_launch/step_complete on the gate surrogate.");
   });
 

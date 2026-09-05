@@ -485,6 +485,20 @@ This is **not** the duplicate-taxonomy family (`'starting'`, two marker lists, f
 
 And note why it survived review: **a healthy run hides it completely.** A run that parks once and resolves has events and parks in one-to-one correspondence, so the two readings agree on every well-behaved case. It took a pathological run — one the two clocks had just made visible — to separate them.
 
+### 13.10 Findings from the rendered screen
+
+Three decisions that came only from driving the surface, and that a reader of the payload alone would re-derive wrongly.
+
+**`span.completions - 1` is NOT a retry count.** It renders as "redone Nx", and it appeared on rows whose own attempt counter said `attempt 1 · passed`. A veto-then-pass step emits **two** `step_complete`s within one attempt, so completions and attempts are different quantities — which is the same distinction `spanRelaunches` (re-launches, the crash signal) already draws against `retriedCompletions`. Three counters, three questions: *how many times was it launched*, *how many times did it complete*, *how many times was it attempted*. Any copy that says "redone" must key off attempts, not completions.
+
+**A gate is not unobserved; its INTERIOR is.** "none of it observed" rendered on a gate reporting `1m 40s · passed`. The outcome and the extent *were* observed — only what happened inside was not. This is the name-the-channel rule violated by copy written to satisfy it: the honest phrasing is *"no interior detail recorded"*, and the general form is that **"we did not observe X" must name which X**, or it denies observations the record actually holds.
+
+**Do not tally a per-row state at screen level.** A caveat counting runs whose cost total has no roll-up to check collided with the headline: with seven runs, *"6 ended"* and *"6 never completed"* are different sets that happen to share a number, four lines apart, with *"1 completed"* between them. Both sentences are true and together they read as broken.
+
+> The count rule (§0) applies to **prose**, not only to fields: **the same numeral for two populations, with the difference unnamed, is the defect** — and it is worse in copy than in a field, because a reader cannot inspect a sentence's denominator.
+
+The fix is not a better number. That caveat tallied a state **every affected row already carries**, so the numeral earned nothing the rows don't show, and at ledger n the reader can see them. Name the population, point at the rows, drop the count. Where a count *does* earn its place — the silent-node caveat tallies nodes, and the scale is what makes its fix worth doing — keep it, and check that nothing else on the screen counts the same unit.
+
 ---
 
 ## 14. Not built — do not read this document as describing the system
