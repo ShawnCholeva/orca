@@ -286,3 +286,78 @@ export function Scatter({ points, w = 240, h = 90, tone = "var(--accent-2)" }: {
     </svg>
   );
 }
+
+// ── Time series ──────────────────────────────────────────────────────────────
+
+/**
+ * Daily counts where one series is a SUBSET of the other, drawn as nesting.
+ *
+ * Every failed session was also a started one, so a stacked chart would render
+ * 56 + 30 = 86 and imply the two partition a total. They are nested, not additive.
+ * Drawing the failures INSIDE the started bar makes the subset relationship the
+ * visual grammar rather than something the reader has to be told — "on Sep 1, 14
+ * started and 12 of them failed" reads straight off one bar.
+ *
+ * Bars rather than a line, deliberately: these are discrete bucket counts, and a
+ * line interpolates between buckets, implying a continuity that a daily count does
+ * not have. A zero-height bar is still a bucket — empty buckets arrive from the
+ * server on purpose, because the difference between "nothing happened that day" and
+ * "no bucket" is exactly what the renderer must not be left to invent.
+ */
+export function NestedBars({
+  buckets, h = 120, outerTone = "var(--accent-2)", innerTone = "var(--err)",
+}: {
+  buckets: { at: number; total: number; subset: number; title: string }[];
+  h?: number;
+  outerTone?: string;
+  innerTone?: string;
+}) {
+  const max = Math.max(...buckets.map((b) => b.total), 1);
+  return (
+    <div style={{ display: "flex", gap: "var(--sp-2)", width: "100%" }}>
+      {/* A y-axis, because shape without magnitude is unreadable: the tallest bar
+          could be 6 or 16, and the day with the crash spike is the one where the
+          number matters most. Two ticks is enough for counts this small. */}
+      <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", height: h, flexShrink: 0 }}>
+        <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", lineHeight: 1 }}>{max}</span>
+        <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", lineHeight: 1 }}>0</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: h, width: "100%", borderTop: "1px solid var(--hairline)", borderBottom: "1px solid var(--hairline)" }}>
+      {buckets.map((b) => (
+        <div
+          key={b.at}
+          title={b.title}
+          style={{
+            flex: 1, minWidth: 2, height: "100%",
+            display: "flex", flexDirection: "column", justifyContent: "flex-end",
+          }}
+        >
+          <div style={{ height: `${(b.total / max) * 100}%`, background: outerTone, borderRadius: "2px 2px 0 0", position: "relative", minHeight: b.total > 0 ? 2 : 0 }}>
+            {/* The subset, drawn inside its superset rather than beside or above it. */}
+            {b.subset > 0 && (
+              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: `${(b.subset / b.total) * 100}%`, background: innerTone, borderRadius: "0 0 2px 2px" }} />
+            )}
+          </div>
+        </div>
+      ))}
+      </div>
+    </div>
+  );
+}
+
+/** Axis ticks chosen by d3-time, so the labels stay sane whichever bucket the server picked. */
+export function TimeAxis({ ticks }: { ticks: { at: number; label: string; offsetPct: number }[] }) {
+  return (
+    <div style={{ position: "relative", height: 14 }}>
+      {ticks.map((t) => (
+        <span
+          key={t.at}
+          className="mono"
+          style={{ position: "absolute", left: `${t.offsetPct}%`, transform: "translateX(-50%)", fontSize: "var(--fs-1)", color: "var(--text-3)", whiteSpace: "nowrap" }}
+        >
+          {t.label}
+        </span>
+      ))}
+    </div>
+  );
+}

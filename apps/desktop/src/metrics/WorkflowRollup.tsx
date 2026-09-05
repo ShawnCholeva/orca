@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { RunDetail, RunSummary } from "@orca/contracts";
 import { getRunDetail, getRunSummaries } from "../api";
+import { SessionFailures } from "./SessionFailures";
 import { formatDuration } from "./interval-bar";
 import {
   BarList, Big, CountRow, CumulativeLine, Matrix, Panel, Scatter, SectionHeading, SplitBar, gridStyle,
@@ -48,7 +49,7 @@ const TONE = {
 } as const;
 
 export interface Loaded { runs: RunSummary[]; details: RunDetail[] }
-interface StepAgg { usd: number; elapsedMs: number; restarts: number; spans: number }
+interface StepAgg { usd: number; elapsedMs: number; restarts: number; spans: number; runIds: Set<string> }
 
 export function aggregate({ runs, details }: Loaded) {
   const sum = (f: (r: RunSummary) => number) => runs.reduce((a, r) => a + f(r), 0);
@@ -56,8 +57,9 @@ export function aggregate({ runs, details }: Loaded) {
 
   const byStep = new Map<string, StepAgg>();
   for (const s of spans) {
-    const e = byStep.get(s.name) ?? { usd: 0, elapsedMs: 0, restarts: 0, spans: 0 };
+    const e = byStep.get(s.name) ?? { usd: 0, elapsedMs: 0, restarts: 0, spans: 0, runIds: new Set<string>() };
     e.spans += 1;
+    e.runIds.add(s.workflowRunId);
     e.usd += s.cost?.usd ?? 0;
     e.elapsedMs += s.elapsedMs ?? 0;
     e.restarts += s.restarts;
@@ -170,7 +172,15 @@ function stepBars(
   return [...agg.byStep.entries()]
     .map(([label, v]) => ({
       key: label, label, value: pick(v),
-      display: `${fmt(pick(v))} · ${v.spans} ${v.spans === 1 ? "run" : "runs"}`,
+      // `spans` counts ATTEMPTS, not runs: Triage retried, so nine span rows sit
+      // across seven runs. Labelling that "9 runs" against a seven-run total is the
+      // population defect this denominator was added to fix, reappearing inside the
+      // fix — and it looked right on every other step only because those never
+      // retried. Both numbers are stated when they differ, since the gap between them
+      // is the retry count and that is the interesting part.
+      display: v.spans === v.runIds.size
+        ? `${fmt(pick(v))} · ${v.spans} ${v.spans === 1 ? "run" : "runs"}`
+        : `${fmt(pick(v))} · ${v.spans} attempts across ${v.runIds.size} runs`,
       tone,
     }))
     .filter((b) => b.value > 0)
@@ -285,6 +295,8 @@ export function Dashboard({ agg }: { agg: Agg }) {
         <Panel title="Time by step, this window" span={4}>
           <BarList items={stepBars(agg, (v) => v.elapsedMs, dur, TONE.waiting)} />
         </Panel>
+
+        <SessionFailures />
 
         <SectionHeading>Where the money went</SectionHeading>
 

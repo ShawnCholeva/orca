@@ -433,3 +433,8 @@ export const TemplateMetricsDetail = z.object({
   pipeline: z.array(PipelineNode).optional(),
 }).strict();
 export type TemplateMetricsDetail = z.infer<typeof TemplateMetricsDetail>;
+
+export {
+  TimeseriesId, TimeseriesSpec, TimeseriesBucket, TimeseriesPoint,
+  TimeseriesSeries, TimeseriesResponse,
+} from "./timeseries.js";

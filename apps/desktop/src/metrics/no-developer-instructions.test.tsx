@@ -138,6 +138,9 @@ const NOT_A_PROSE_SURFACE: Record<string, string> = {
   // MeasurementLabel, which the surfaces above exercise.
   aggregate: "a summing function, no output of its own",
   Scatter: "circles with tooltips, supplied by the caller",
+  NestedBars: "bars with tooltips, supplied by the caller",
+  TimeAxis: "date labels from d3-time-format",
+  SessionFailures: "fetches its own series; renders only server-supplied label, placedBy and caveat text",
   WorkflowRollup: "loads and delegates to Dashboard, which is asserted directly",
   // Dashboard panel primitives: each renders a number, a bar or a cell. The prose on
   // that surface is in Dashboard itself, which is asserted above.

@@ -115,3 +115,35 @@ describe("what the dashboard refuses to render", () => {
     expect(t).not.toMatch(/\bretries\b|\bredone\b/i);
   });
 });
+
+describe("a denominator says what it counts", () => {
+  it("distinguishes attempts from runs when a step retried", () => {
+    // `spans` counts attempts. Triage retried, so nine span rows sit across seven
+    // runs — and labelling that "9 runs" beside a seven-run total is the population
+    // defect this denominator was ADDED to fix, reappearing inside the fix. It looked
+    // correct on every other step only because those steps never retried.
+    const a = aggregate({
+      runs: [run(), run({ runId: "b" })],
+      details: [
+        { run: run(), spans: [span({ workflowStepRunId: "s1" }), span({ workflowStepRunId: "s2", attempt: 2 })], interventions: [] },
+        { run: run({ runId: "b" }), spans: [span({ workflowRunId: "b", workflowStepRunId: "s3" })], interventions: [] },
+      ],
+    });
+    const { container } = render(<Dashboard agg={a} />);
+    const text = container.textContent ?? "";
+    expect(text).toContain("3 attempts across 2 runs");
+    expect(text).not.toContain("3 runs");
+  });
+
+  it("says just the run count when every run made one attempt", () => {
+    // The longer phrasing earns its place only where the two numbers differ; saying
+    // "2 attempts across 2 runs" everywhere would be noise that stops being read.
+    const a = aggregate({
+      runs: [run()],
+      details: [{ run: run(), spans: [span()], interventions: [] }],
+    });
+    const { container } = render(<Dashboard agg={a} />);
+    expect(container.textContent).toContain("1 run");
+    expect(container.textContent).not.toContain("attempts across");
+  });
+});

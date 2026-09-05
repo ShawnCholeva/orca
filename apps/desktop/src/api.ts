@@ -152,7 +152,9 @@ import {
   TemplateInstructionProposal,
   LearningEvent,
   SampleDetail,
+  TimeseriesResponse,
 } from "@orca/contracts";
+import type { TimeseriesId } from "@orca/contracts";
 
 export type {
   AcceptRecommendationResponse,
@@ -2259,6 +2261,18 @@ export function openArtifact(reference: string): Promise<void> {
 // ── Run ledger ───────────────────────────────────────────────────────────────
 // The run-shaped read model. Distinct from the per-template aggregate above,
 // which cannot answer "how did THIS run behave".
+
+export async function getTimeseries(
+  series: TimeseriesId[],
+  from: string,
+  to: string,
+): Promise<TimeseriesResponse> {
+  const { baseUrl, token } = await loadConfig();
+  const q = new URLSearchParams({ series: series.join(","), from, to });
+  const res = await fetch(`${baseUrl}/v1/metrics/timeseries?${q}`, { headers: authHeaders(token) });
+  const body = await parseResponse(res, z.object({ timeseries: TimeseriesResponse }));
+  return body.timeseries;
+}
 
 export async function getRunSummaries(limit = 50): Promise<RunSummary[]> {
   const { baseUrl, token } = await loadConfig();
